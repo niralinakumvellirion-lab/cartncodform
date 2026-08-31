@@ -16,9 +16,10 @@ const oAuthStateSchema = new mongoose.Schema({
   createdAt: {
     type: Date,
     default: Date.now,
-    // TTL index: Mongo automatically removes the document 600 seconds
-    // (10 minutes) after createdAt, so stale OAuth nonces clean themselves up.
-    expires: 600,
+    // TTL index: Mongo automatically removes the document 3600 seconds
+    // (1 hour) after createdAt, giving the OAuth flow more time to complete
+    // before the nonce is considered stale.
+    expires: 3600,
   },
 });
 
