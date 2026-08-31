@@ -72,28 +72,48 @@ async function sendPushToCustomers(shopDomain, title, body, url) {
   try {
     if (!firebaseReady) {
       console.log('[push] Skipped (customers) — Firebase Admin not configured');
-      return { success: false, error: 'Firebase Admin not configured' };
+      return { success: false, error: 'Firebase Admin not configured', tokensFound: 0 };
     }
 
-    const subs = await CustomerPushSubscription.find({ shopDomain });
+    // Docs are stored with a lowercased shopDomain — normalise the lookup key
+    // so a mixed-case caller still matches.
+    const shop = String(shopDomain || '').trim().toLowerCase();
+    console.log(`[push-customer] querying subscriptions for shopDomain: ${shop}`);
+
+    const subs = await CustomerPushSubscription.find({ shopDomain: shop });
     if (!subs.length) {
-      console.log(`[push] No customer subscribers for ${shopDomain}`);
-      return { success: true, sent: 0 };
+      console.log(`[push] No customer subscribers for ${shop}`);
+      return { success: true, sent: 0, tokensFound: 0 };
     }
     const tokens = subs.map((s) => s.token);
+    tokens.forEach((t, i) => {
+      console.log(`[push-customer] token ${i + 1}/${tokens.length}: ${t}`);
+    });
+
     const message = {
       notification: { title, body },
       data: url ? { url: String(url) } : {},
       tokens,
     };
     const response = await getMessaging().sendEachForMulticast(message);
+
+    console.log('[push-customer] FCM responses:', JSON.stringify(response.responses, null, 2));
+    response.responses.forEach((r, i) => {
+      if (!r.success) {
+        const e = r.error || {};
+        console.error(
+          `[push-customer] token ${i + 1} FAILED: ${e.code || e.message || 'unknown error'}`
+        );
+      }
+    });
+
     console.log(
-      `[push] Sent ${response.successCount}/${tokens.length} to customers of ${shopDomain}`
+      `[push] Sent ${response.successCount}/${tokens.length} to customers of ${shop}`
     );
-    return { success: true, sent: response.successCount };
+    return { success: true, sent: response.successCount, tokensFound: tokens.length };
   } catch (err) {
     console.error('[push] Error (customers):', err.message);
-    return { success: false, error: err.message };
+    return { success: false, error: err.message, tokensFound: 0 };
   }
 }
 

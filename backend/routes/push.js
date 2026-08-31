@@ -71,13 +71,18 @@ router.post('/subscribe-customer', async (req, res) => {
       return res.status(400).json({ error: 'shopDomain and token are required' });
     }
 
-    await CustomerPushSubscription.findOneAndUpdate(
+    const saved = await CustomerPushSubscription.findOneAndUpdate(
       { token },
       { shopDomain: shopDomain.trim().toLowerCase(), token, page: page || undefined },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, new: true, setDefaultsOnInsert: true, rawResult: true }
     );
 
-    console.log(`[push] Customer subscribed for ${shopDomain}`);
+    const updatedExisting =
+      saved.lastErrorObject && saved.lastErrorObject.updatedExisting;
+    console.log(
+      `[subscribe-customer] Token saved for: ${shopDomain} ` +
+        `(${updatedExisting ? 'updated existing token' : 'new token'})`
+    );
     return res.status(200).json({ success: true });
   } catch (err) {
     console.error('[push] POST /subscribe-customer error:', err.message);
@@ -94,11 +99,16 @@ router.post('/send-customer', async (req, res) => {
   try {
     const { shopDomain, title, body, url } = req.body;
 
+    console.log(`[send-customer] shopDomain received: ${shopDomain}`);
+
     if (!shopDomain || !title || !body) {
       return res.status(400).json({ error: 'shopDomain, title and body are required' });
     }
 
     const result = await sendPushToCustomers(shopDomain, title, body, url);
+
+    console.log(`[send-customer] tokens found: ${result.tokensFound ?? 0}`);
+    console.log(`[send-customer] FCM result: ${JSON.stringify(result)}`);
 
     if (!result.success) {
       return res.status(500).json({ success: false, error: result.error });
