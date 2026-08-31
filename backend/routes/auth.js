@@ -12,8 +12,14 @@ const {
 
 const router = express.Router();
 
+// Build the public base URL of THIS backend. In production BACKEND_URL must be
+// set (e.g. https://cartncodform-backend.onrender.com) so the OAuth redirect_uri
+// exactly matches the one registered in the Shopify app. Only when it is unset
+// do we fall back to the incoming request's protocol + host.
 function getBackendUrl(req) {
-  return process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
+  return (
+    process.env.BACKEND_URL || `${req.protocol}://${req.headers.host}`
+  );
 }
 
 /**
@@ -39,6 +45,7 @@ router.get('/install', async (req, res) => {
     const authUrl = buildAuthUrl(shop, redirectUri, state);
 
     console.log(`[auth] Starting OAuth for ${shop}`);
+    console.log(`[auth] redirect_uri: ${redirectUri}`);
     return res.redirect(authUrl);
   } catch (err) {
     console.error('[auth] /install error:', err.message);
