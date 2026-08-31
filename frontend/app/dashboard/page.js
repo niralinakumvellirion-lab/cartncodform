@@ -1,26 +1,53 @@
+'use client';
+
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import { BACKEND_URL } from '../../lib/api';
 
-async function getStores() {
-  try {
-    const res = await fetch(`${BACKEND_URL}/api/stores`, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`status ${res.status}`);
-    return { stores: await res.json(), error: null };
-  } catch (err) {
-    return { stores: [], error: err.message };
-  }
-}
+export default function DashboardOverview() {
+  const { data: session } = useSession();
+  const email = session?.user?.email || '';
 
-export default async function DashboardOverview() {
-  const { stores, error } = await getStores();
+  const [stores, setStores] = useState([]);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!email) return;
+    let cancelled = false;
+    setLoading(true);
+    fetch(`${BACKEND_URL}/api/stores?email=${encodeURIComponent(email)}`, {
+      cache: 'no-store',
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(`status ${r.status}`);
+        return r.json();
+      })
+      .then((d) => {
+        if (!cancelled) {
+          setStores(Array.isArray(d) ? d : []);
+          setError(null);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [email]);
 
   return (
     <div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">All Stores</h1>
+          <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">Your Stores</h1>
           <p className="mt-1 text-sm text-gray-500">
-            Overview of every connected Shopify store.
+            {email ? `Stores connected to ${email}` : 'Stores connected to your account.'}
           </p>
         </div>
         <Link
@@ -31,15 +58,19 @@ export default async function DashboardOverview() {
         </Link>
       </div>
 
-      {error && (
+      {loading && (
+        <p className="mt-8 text-sm text-gray-500">Loading your stores…</p>
+      )}
+
+      {error && !loading && (
         <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           Could not reach the backend at <span className="font-mono">{BACKEND_URL}</span>. ({error})
         </div>
       )}
 
-      {stores.length === 0 && !error && (
+      {!loading && !error && stores.length === 0 && (
         <div className="mt-10 rounded-2xl border border-dashed border-gray-300 p-12 text-center">
-          <p className="text-gray-500">No stores connected yet.</p>
+          <p className="text-gray-500">No stores connected to this account yet.</p>
           <Link
             href="/install"
             className="mt-4 inline-block rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
@@ -49,7 +80,7 @@ export default async function DashboardOverview() {
         </div>
       )}
 
-      {stores.length > 0 && (
+      {!loading && stores.length > 0 && (
         <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
           {stores.map((store) => (
             <Link

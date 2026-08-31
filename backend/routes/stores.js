@@ -6,12 +6,33 @@ const CodOrder = require('../models/CodOrder');
 const router = express.Router();
 
 /**
+ * If ?email= is supplied, make sure this store belongs to that owner.
+ * Returns true when access is allowed. Verification is soft: a store with no
+ * ownerEmail on record is allowed through (optional for now).
+ */
+async function ownerAllowed(shopDomain, email) {
+  if (!email) return true;
+  const store = await Store.findOne({ shopDomain }).select('ownerEmail').lean();
+  if (!store || !store.ownerEmail) return true;
+  return store.ownerEmail === String(email).trim().toLowerCase();
+}
+
+/**
  * GET /api/stores
- * List all connected stores (access tokens are never returned).
+ * List connected stores (access tokens are never returned).
+ * ?email=<owner> -> only stores owned by that email. No email -> all stores.
  */
 router.get('/', async (req, res) => {
   try {
-    const stores = await Store.find().sort({ installedAt: -1 }).select('-accessToken -__v').lean();
+    const { email } = req.query;
+    const query = email
+      ? { ownerEmail: String(email).trim().toLowerCase() }
+      : {};
+
+    const stores = await Store.find(query)
+      .sort({ installedAt: -1 })
+      .select('-accessToken -__v')
+      .lean();
 
     // Attach lightweight counts for the dashboard overview.
     const withCounts = await Promise.all(
@@ -38,7 +59,11 @@ router.get('/', async (req, res) => {
 router.get('/:shopDomain/customers', async (req, res) => {
   try {
     const shopDomain = req.params.shopDomain.trim().toLowerCase();
-    const { status } = req.query;
+    const { status, email } = req.query;
+
+    if (!(await ownerAllowed(shopDomain, email))) {
+      return res.status(403).json({ error: 'Not authorized for this store' });
+    }
 
     const filter = { shopDomain };
     if (status) filter.status = status;
@@ -58,7 +83,11 @@ router.get('/:shopDomain/customers', async (req, res) => {
 router.get('/:shopDomain/orders', async (req, res) => {
   try {
     const shopDomain = req.params.shopDomain.trim().toLowerCase();
-    const { status } = req.query;
+    const { status, email } = req.query;
+
+    if (!(await ownerAllowed(shopDomain, email))) {
+      return res.status(403).json({ error: 'Not authorized for this store' });
+    }
 
     const filter = { shopDomain };
     if (status) filter.status = status;

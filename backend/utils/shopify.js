@@ -76,6 +76,24 @@ async function exchangeCodeForToken(shop, code) {
 }
 
 /**
+ * Fetch the shop record from the Admin API and return its contact email.
+ * Used to link a connected store to an owner when no owner_email was supplied.
+ */
+async function fetchShopEmail(shop, accessToken) {
+  try {
+    const url = `https://${shop}/admin/api/${API_VERSION}/shop.json`;
+    const { data } = await axios.get(url, {
+      headers: { 'X-Shopify-Access-Token': accessToken },
+    });
+    return (data && data.shop && data.shop.email) || null;
+  } catch (err) {
+    const detail = err.response ? JSON.stringify(err.response.data) : err.message;
+    console.error(`[shopify] Failed to fetch shop email for ${shop}: ${detail}`);
+    return null;
+  }
+}
+
+/**
  * Register a single webhook topic pointing at our backend.
  */
 async function registerWebhook(shop, accessToken, topic, address) {
@@ -120,6 +138,7 @@ module.exports = {
   verifyHmac,
   verifyWebhookHmac,
   exchangeCodeForToken,
+  fetchShopEmail,
   registerWebhook,
   registerAllWebhooks,
 };

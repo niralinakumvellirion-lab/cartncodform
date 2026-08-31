@@ -12,6 +12,11 @@ const storeSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  ownerEmail: {
+    type: String,
+    lowercase: true,
+    trim: true,
+  },
   installedAt: {
     type: Date,
     default: Date.now,

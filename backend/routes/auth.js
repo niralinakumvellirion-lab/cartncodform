@@ -7,6 +7,7 @@ const {
   buildAuthUrl,
   verifyHmac,
   exchangeCodeForToken,
+  fetchShopEmail,
   registerAllWebhooks,
 } = require('../utils/shopify');
 
@@ -38,8 +39,12 @@ router.get('/install', async (req, res) => {
       return res.status(500).json({ error: 'SHOPIFY_API_KEY is not configured on the backend' });
     }
 
+    // Optional: link the store to the dashboard account that started the install.
+    const ownerEmail =
+      (req.query.owner_email || '').toString().trim().toLowerCase() || undefined;
+
     const state = crypto.randomBytes(16).toString('hex');
-    await OAuthState.create({ nonce: state });
+    await OAuthState.create({ nonce: state, ownerEmail });
 
     const redirectUri = `${getBackendUrl(req)}/api/auth/callback`;
     const authUrl = buildAuthUrl(shop, redirectUri, state);
@@ -80,13 +85,25 @@ router.get('/callback', async (req, res) => {
     const shopDomain = shop.toString().trim().toLowerCase();
     const accessToken = await exchangeCodeForToken(shopDomain, code);
 
+    // Owner email: prefer the one passed at install time, otherwise pull the
+    // shop's contact email from the Shopify Admin API (GET /admin/api/<v>/shop.json).
+    let ownerEmail = savedState.ownerEmail || null;
+    if (!ownerEmail) {
+      ownerEmail = await fetchShopEmail(shopDomain, accessToken);
+    }
+
+    const update = { shopDomain, accessToken, installedAt: new Date() };
+    if (ownerEmail) update.ownerEmail = ownerEmail;
+
     const store = await Store.findOneAndUpdate(
       { shopDomain },
-      { shopDomain, accessToken, installedAt: new Date() },
+      update,
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    console.log(`[auth] Store connected: ${shopDomain}`);
+    console.log(
+      `[auth] Store connected: ${shopDomain}${ownerEmail ? ` (owner: ${ownerEmail})` : ''}`
+    );
 
     // Register webhooks (best-effort, non-blocking failures are logged).
     await registerAllWebhooks(shopDomain, accessToken, getBackendUrl(req));

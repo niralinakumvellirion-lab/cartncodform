@@ -1,19 +1,25 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import Sidebar from '../../components/Sidebar';
 import AuthGuard from '../../components/AuthGuard';
 import { BACKEND_URL } from '../../lib/api';
 
 export default function DashboardLayout({ children }) {
+  const { data: session } = useSession();
+  const email = session?.user?.email || '';
+
   const [stores, setStores] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  // Load the store list for the sidebar (was a server fetch; now client-side
-  // so the layout can hold the mobile-drawer state).
+  // Load the store list for the sidebar — scoped to the signed-in owner.
   useEffect(() => {
+    if (!email) return;
     let cancelled = false;
-    fetch(`${BACKEND_URL}/api/stores`, { cache: 'no-store' })
+    fetch(`${BACKEND_URL}/api/stores?email=${encodeURIComponent(email)}`, {
+      cache: 'no-store',
+    })
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => {
         if (!cancelled) setStores(Array.isArray(d) ? d : []);
@@ -24,7 +30,7 @@ export default function DashboardLayout({ children }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [email]);
 
   return (
     <div className="flex min-h-screen bg-white">

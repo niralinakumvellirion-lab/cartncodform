@@ -1,32 +1,24 @@
 'use client';
-
-import { useEffect, useState } from 'react';
+import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
-import { isAuthed } from '../lib/auth';
+import { useEffect } from 'react';
 
-/**
- * Wraps dashboard content. If the visitor has not entered the PIN
- * (localStorage "cartncodform_auth" !== "true"), redirect them to /login.
- */
 export default function AuthGuard({ children }) {
+  const { data: session, status } = useSession();
   const router = useRouter();
-  const [status, setStatus] = useState('checking'); // checking | allowed
 
   useEffect(() => {
-    if (isAuthed()) {
-      setStatus('allowed');
-    } else {
+    if (status === 'unauthenticated') {
       router.replace('/login');
     }
-  }, [router]);
+  }, [status]);
 
-  if (status !== 'allowed') {
-    return (
-      <div className="flex flex-1 items-center justify-center py-24">
-        <p className="text-sm text-gray-500">Checking access…</p>
-      </div>
-    );
-  }
+  if (status === 'loading') return (
+    <div className="min-h-screen flex items-center justify-center">
+      <p className="text-gray-500">Loading...</p>
+    </div>
+  );
 
+  if (!session) return null;
   return children;
 }
