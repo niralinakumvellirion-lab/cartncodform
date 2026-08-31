@@ -1,96 +1,324 @@
 {% if block.settings.enable_push %}
+
+<style>
+  #ccf-popup-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 999999;
+    align-items: center;
+    justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  #ccf-popup-overlay.ccf-show {
+    display: flex;
+    animation: ccf-fade 0.3s ease;
+  }
+  @keyframes ccf-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  #ccf-popup {
+    background: white;
+    border-radius: 20px;
+    padding: 32px 28px;
+    max-width: 360px;
+    width: 90%;
+    text-align: center;
+    position: relative;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    animation: ccf-slide 0.3s ease;
+  }
+  @keyframes ccf-slide {
+    from { transform: translateY(30px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  #ccf-popup-close {
+    position: absolute;
+    top: 12px;
+    right: 16px;
+    background: none;
+    border: none;
+    font-size: 20px;
+    cursor: pointer;
+    color: #999;
+    line-height: 1;
+  }
+  #ccf-popup-emoji {
+    font-size: 56px;
+    margin-bottom: 12px;
+    display: block;
+    animation: ccf-bounce 0.6s ease 0.3s both;
+  }
+  @keyframes ccf-bounce {
+    0% { transform: scale(0); }
+    60% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+  }
+  #ccf-popup-badge {
+    background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 4px 12px;
+    border-radius: 20px;
+    display: inline-block;
+    margin-bottom: 14px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  #ccf-popup h2 {
+    font-size: 22px;
+    font-weight: 800;
+    color: #1a1a2e;
+    margin: 0 0 10px;
+    line-height: 1.3;
+  }
+  #ccf-popup p {
+    font-size: 14px;
+    color: #666;
+    margin: 0 0 20px;
+    line-height: 1.6;
+  }
+  #ccf-popup-benefits {
+    background: #f8f9ff;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 20px;
+    text-align: left;
+  }
+  #ccf-popup-benefits div {
+    font-size: 13px;
+    color: #444;
+    padding: 4px 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #ccf-allow-btn {
+    width: 100%;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    padding: 16px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-bottom: 10px;
+    transition: transform 0.2s, box-shadow 0.2s;
+    box-shadow: 0 4px 20px rgba(102,126,234,0.4);
+  }
+  #ccf-allow-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 25px rgba(102,126,234,0.5);
+  }
+  #ccf-allow-btn:active {
+    transform: translateY(0);
+  }
+  #ccf-deny-btn {
+    background: none;
+    border: none;
+    color: #aaa;
+    font-size: 13px;
+    cursor: pointer;
+    text-decoration: underline;
+    padding: 4px;
+  }
+  #ccf-deny-btn:hover { color: #666; }
+
+  /* Countdown timer */
+  #ccf-timer {
+    position: absolute;
+    top: 12px;
+    left: 16px;
+    background: #f0f0f0;
+    border-radius: 20px;
+    padding: 3px 10px;
+    font-size: 12px;
+    color: #666;
+    font-weight: 600;
+  }
+  #ccf-discount-badge {
+    background: linear-gradient(135deg, #11998e, #38ef7d);
+    color: white;
+    border-radius: 10px;
+    padding: 10px;
+    margin-bottom: 16px;
+    font-weight: 700;
+    font-size: 15px;
+  }
+</style>
+
+<!-- Custom Popup HTML -->
+<div id="ccf-popup-overlay" role="dialog" aria-modal="true">
+  <div id="ccf-popup">
+    <button id="ccf-popup-close" aria-label="Close">×</button>
+    <div id="ccf-timer">⏱ <span id="ccf-countdown">15</span>s</div>
+
+    <span id="ccf-popup-emoji">{{ block.settings.popup_emoji }}</span>
+    <div id="ccf-popup-badge">{{ block.settings.popup_badge }}</div>
+
+    {% if block.settings.show_discount %}
+    <div id="ccf-discount-badge">
+      🎁 {{ block.settings.discount_text }}
+    </div>
+    {% endif %}
+
+    <h2>{{ block.settings.popup_title }}</h2>
+    <p>{{ block.settings.popup_description }}</p>
+
+    <div id="ccf-popup-benefits">
+      {% if block.settings.benefit_1 != blank %}
+      <div>✅ {{ block.settings.benefit_1 }}</div>
+      {% endif %}
+      {% if block.settings.benefit_2 != blank %}
+      <div>✅ {{ block.settings.benefit_2 }}</div>
+      {% endif %}
+      {% if block.settings.benefit_3 != blank %}
+      <div>✅ {{ block.settings.benefit_3 }}</div>
+      {% endif %}
+    </div>
+
+    <button id="ccf-allow-btn">
+      {{ block.settings.allow_button_text }}
+    </button>
+    <br>
+    <button id="ccf-deny-btn">{{ block.settings.deny_button_text }}</button>
+  </div>
+</div>
+
 <script>
-  // CartnCodForm Push Notification
-  (function() {
-    const BACKEND_URL = 'https://cartncodform-backend.onrender.com';
-    const SHOP_DOMAIN = '{{ shop.permanent_domain }}';
-    const VAPID_KEY = 'BMPrLf4eInbFu1IpI_ZqyblmkbSYIm0JyukselN80lglfwuBfyaU7kOQZ6FFxo1PjUqh1xnGzd2uVPdJrYEh0Jo';
+(function() {
+  const BACKEND_URL = 'https://cartncodform-backend.onrender.com';
+  const SHOP_DOMAIN = '{{ shop.permanent_domain }}';
+  const VAPID_KEY = 'BMPrLf4eInbFu1IpI_ZqyblmkbSYIm0JyukselN80lglfwuBfyaU7kOQZ6FFxo1PjUqh1xnGzd2uVPdJrYEh0Jo';
 
-    const firebaseConfig = {
-      apiKey: "AIzaSyASPGdEC4K_acNQYY7AeQvskDQ5Xq4-ecU",
-      projectId: "cartncodform",
-      messagingSenderId: "133172185047",
-      appId: "1:133172185047:web:23be3ca1f3ccf357a62d92",
-      authDomain: "cartncodform.firebaseapp.com",
-      storageBucket: "cartncodform.appspot.com",
-    };
+  const firebaseConfig = {
+    apiKey: "AIzaSyASPGdEC4K_acNQYY7AeQvskDQ5Xq4-ecU",
+    projectId: "cartncodform",
+    messagingSenderId: "133172185047",
+    appId: "1:133172185047:web:23be3ca1f3ccf357a62d92",
+    authDomain: "cartncodform.firebaseapp.com",
+    storageBucket: "cartncodform.appspot.com",
+  };
 
-    async function registerSW() {
-      if (!('serviceWorker' in navigator) || !('Notification' in window)) return null;
-      try {
-        const reg = await navigator.serviceWorker.register(
-          BACKEND_URL + '/cartncodform-sw.js'
-        );
-        await navigator.serviceWorker.ready;
-        return reg;
-      } catch (err) {
-        console.log('[CartnCodForm] SW failed:', err);
-        return null;
+  const overlay = document.getElementById('ccf-popup-overlay');
+  const allowBtn = document.getElementById('ccf-allow-btn');
+  const denyBtn = document.getElementById('ccf-deny-btn');
+  const closeBtn = document.getElementById('ccf-popup-close');
+  const countdownEl = document.getElementById('ccf-countdown');
+
+  // Countdown timer
+  let timeLeft = 15;
+  let timer;
+
+  function startCountdown() {
+    timer = setInterval(() => {
+      timeLeft--;
+      if (countdownEl) countdownEl.textContent = timeLeft;
+      if (timeLeft <= 0) {
+        clearInterval(timer);
+        hidePopup();
       }
-    }
+    }, 1000);
+  }
 
-    async function subscribePush(swReg) {
-      try {
-        const { initializeApp, getApps } = await import(
-          'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'
-        );
-        const { getMessaging, getToken } = await import(
-          'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js'
-        );
+  function showPopup() {
+    overlay.classList.add('ccf-show');
+    startCountdown();
+  }
 
-        const app = getApps().length === 0
-          ? initializeApp(firebaseConfig)
-          : getApps()[0];
-        const messaging = getMessaging(app);
+  function hidePopup() {
+    overlay.classList.remove('ccf-show');
+    clearInterval(timer);
+  }
 
-        const token = await getToken(messaging, {
-          vapidKey: VAPID_KEY,
-          serviceWorkerRegistration: swReg,
+  async function registerSW() {
+    if (!('serviceWorker' in navigator)) return null;
+    try {
+      const reg = await navigator.serviceWorker.register(
+        BACKEND_URL + '/cartncodform-sw.js'
+      );
+      await navigator.serviceWorker.ready;
+      return reg;
+    } catch(e) { return null; }
+  }
+
+  async function subscribePush(swReg) {
+    try {
+      const { initializeApp, getApps } = await import(
+        'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'
+      );
+      const { getMessaging, getToken } = await import(
+        'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js'
+      );
+      const app = getApps().length === 0
+        ? initializeApp(firebaseConfig)
+        : getApps()[0];
+      const messaging = getMessaging(app);
+      const token = await getToken(messaging, {
+        vapidKey: VAPID_KEY,
+        serviceWorkerRegistration: swReg,
+      });
+      if (token) {
+        await fetch(BACKEND_URL + '/api/push/subscribe-customer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ shopDomain: SHOP_DOMAIN, token, page: window.location.pathname }),
         });
-
-        if (token) {
-          await fetch(BACKEND_URL + '/api/push/subscribe-customer', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              shopDomain: SHOP_DOMAIN,
-              token,
-              page: window.location.pathname
-            }),
-          });
-          console.log('[CartnCodForm] Subscribed successfully');
-        }
-      } catch (err) {
-        console.log('[CartnCodForm] Subscribe failed:', err);
       }
+    } catch(e) { console.log('[CCF]', e); }
+  }
+
+  // Allow button clicked
+  allowBtn.addEventListener('click', async () => {
+    hidePopup();
+    allowBtn.textContent = 'Enabling...';
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      const swReg = await registerSW();
+      if (swReg) await subscribePush(swReg);
+      localStorage.setItem('ccf_push_subscribed', '1');
     }
+    localStorage.setItem('ccf_push_asked', '1');
+  });
 
-    async function init() {
-      if (Notification.permission === 'denied') return;
+  // Deny / Close
+  denyBtn.addEventListener('click', () => {
+    hidePopup();
+    localStorage.setItem('ccf_push_asked', '1');
+  });
+  closeBtn.addEventListener('click', () => {
+    hidePopup();
+  });
 
-      if (Notification.permission === 'granted') {
-        const swReg = await registerSW();
-        if (swReg) await subscribePush(swReg);
-        return;
-      }
-
-      // Ask after 3 seconds
-      setTimeout(async () => {
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          const swReg = await registerSW();
-          if (swReg) await subscribePush(swReg);
-        }
-      }, 3000);
+  // Init
+  async function init() {
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'granted') {
+      // Already subscribed — re-subscribe silently
+      const swReg = await registerSW();
+      if (swReg) await subscribePush(swReg);
+      return;
     }
+    if (Notification.permission === 'denied') return;
+    if (localStorage.getItem('ccf_push_asked')) return;
 
-    if (document.readyState === 'complete') {
-      init();
-    } else {
-      window.addEventListener('load', init);
-    }
-  })();
+    // Show popup after delay
+    const delay = {{ block.settings.popup_delay }} * 1000;
+    setTimeout(showPopup, delay);
+  }
+
+  if (document.readyState === 'complete') {
+    init();
+  } else {
+    window.addEventListener('load', init);
+  }
+})();
 </script>
+
 {% endif %}
 
 {% schema %}
@@ -99,14 +327,109 @@
   "target": "body",
   "settings": [
     {
+      "type": "header",
+      "content": "Popup Content"
+    },
+    {
+      "type": "text",
+      "id": "popup_emoji",
+      "label": "Popup Emoji",
+      "default": "🔔"
+    },
+    {
+      "type": "text",
+      "id": "popup_badge",
+      "label": "Badge Text",
+      "default": "Exclusive Members Only"
+    },
+    {
+      "type": "text",
+      "id": "popup_title",
+      "label": "Popup Title",
+      "default": "Never Miss a Deal Again!"
+    },
+    {
+      "type": "textarea",
+      "id": "popup_description",
+      "label": "Popup Description",
+      "default": "Get instant alerts for flash sales, restocks, and exclusive offers — before anyone else!"
+    },
+    {
+      "type": "header",
+      "content": "Benefits"
+    },
+    {
+      "type": "text",
+      "id": "benefit_1",
+      "label": "Benefit 1",
+      "default": "Flash sale alerts — first access"
+    },
+    {
+      "type": "text",
+      "id": "benefit_2",
+      "label": "Benefit 2",
+      "default": "Back in stock notifications"
+    },
+    {
+      "type": "text",
+      "id": "benefit_3",
+      "label": "Benefit 3",
+      "default": "Exclusive discount codes"
+    },
+    {
+      "type": "header",
+      "content": "Discount Offer"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_discount",
+      "label": "Show Discount Badge",
+      "default": true
+    },
+    {
+      "type": "text",
+      "id": "discount_text",
+      "label": "Discount Text",
+      "default": "Subscribe & get 10% OFF your next order!"
+    },
+    {
+      "type": "header",
+      "content": "Buttons"
+    },
+    {
+      "type": "text",
+      "id": "allow_button_text",
+      "label": "Allow Button Text",
+      "default": "🔔 Yes! Notify Me"
+    },
+    {
+      "type": "text",
+      "id": "deny_button_text",
+      "label": "Deny Button Text",
+      "default": "No thanks, I hate deals"
+    },
+    {
+      "type": "header",
+      "content": "Timing"
+    },
+    {
+      "type": "range",
+      "id": "popup_delay",
+      "label": "Show popup after (seconds)",
+      "min": 2,
+      "max": 30,
+      "step": 1,
+      "default": 5
+    },
+    {
+      "type": "header",
+      "content": "Enable"
+    },
+    {
       "type": "checkbox",
       "id": "enable_push",
       "label": "Enable Push Notifications",
       "default": true
-    },
-    {
-      "type": "paragraph",
-      "content": "Sends push notifications to customers who abandon their cart. No code editing required!"
     }
   ]
 }

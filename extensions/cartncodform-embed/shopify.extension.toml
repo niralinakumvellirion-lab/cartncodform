@@ -4,6 +4,7 @@ api_version = "2025-01"
 type = "theme"
 name = "CartnCodForm Push Notifications"
 handle = "cartncodform-push"
+uid = "e2630ac7-9265-b3d5-71ef-d64f962abc628015aec1"
 
   [[extensions.settings.fields]]
   key = "enable_push"
