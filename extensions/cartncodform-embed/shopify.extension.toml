@@ -1,0 +1,11 @@
+api_version = "2025-01"
+
+[[extensions]]
+type = "theme"
+name = "CartnCodForm Push Notifications"
+handle = "cartncodform-push"
+
+  [[extensions.settings.fields]]
+  key = "enable_push"
+  type = "checkbox"
+  label = "Enable Push Notifications"

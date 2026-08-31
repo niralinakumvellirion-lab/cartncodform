@@ -1,17 +1,13 @@
-# Add CartnCodForm to Your Shopify Store
+# CartnCodForm — Store Setup Guide
 
-## Step 1: Add Script to Theme
+## Option 1: Theme Editor (Recommended — No Code!)
 1. Shopify Admin → Online Store → Themes
-2. Current theme → ••• → Edit code
-3. Find: theme.liquid
-4. Before `</body>` tag, add:
+2. Current theme → Customize
+3. Left sidebar → App Embeds
+4. Find "CartnCodForm Push Notifications"
+5. Toggle ON ✅
+6. Save
 
-```html
+## Option 2: Manual Script (Advanced)
+Add before </body> in theme.liquid:
 <script src="https://cartncodform-backend.onrender.com/cartncodform-push.js"></script>
-```
-
-## Step 2: Save the file
-
-## Step 3: Test
-Visit your store → Allow notifications when prompted
-→ Add to cart → Leave → Receive push notification!
