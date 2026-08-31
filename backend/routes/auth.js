@@ -82,7 +82,8 @@ router.get('/callback', async (req, res) => {
       console.warn(`[auth] HMAC verification failed for ${shop} — continuing in dev mode`);
     }
 
-    const shopDomain = shop.toString().trim().toLowerCase();
+    // Normalise: lowercase, no surrounding whitespace, no trailing slash.
+    const shopDomain = shop.toString().trim().toLowerCase().replace(/\/+$/, '');
     const accessToken = await exchangeCodeForToken(shopDomain, code);
 
     // Owner email: prefer the one passed at install time, otherwise pull the
@@ -108,8 +109,10 @@ router.get('/callback', async (req, res) => {
     // Register webhooks (best-effort, non-blocking failures are logged).
     await registerAllWebhooks(shopDomain, accessToken, getBackendUrl(req));
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-    return res.redirect(`${frontendUrl}/dashboard/${encodeURIComponent(shopDomain)}`);
+    // Strip any trailing slash on FRONTEND_URL so we never emit "//dashboard".
+    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+    console.log(`[auth] Redirecting to dashboard for ${shopDomain}`);
+    return res.redirect(`${frontendUrl}/dashboard/${shopDomain}`);
   } catch (err) {
     const detail = err.response ? JSON.stringify(err.response.data) : err.message;
     console.error('[auth] /callback error:', detail);
