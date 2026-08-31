@@ -25,8 +25,9 @@ try {
 
     self.registration.showNotification(title, {
       body,
-      icon,
+      icon: icon || '/favicon.ico',
       badge: '/favicon.ico',
+      data: { url: 'https://cartncodform-beryl.vercel.app/dashboard' },
     });
   });
 
@@ -34,3 +35,27 @@ try {
 } catch (error) {
   console.error('[SW] Firebase initialization error:', error);
 }
+
+self.addEventListener('notificationclick', function(event) {
+  console.log('[SW] Notification clicked:', event.notification);
+  event.notification.close();
+
+  const urlToOpen = event.notification.data?.url
+    || 'https://cartncodform-beryl.vercel.app/dashboard';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true })
+      .then(function(clientList) {
+        // If dashboard already open, focus it
+        for (const client of clientList) {
+          if (client.url.includes('cartncodform-beryl.vercel.app') && 'focus' in client) {
+            return client.focus();
+          }
+        }
+        // Otherwise open new window
+        if (clients.openWindow) {
+          return clients.openWindow(urlToOpen);
+        }
+      })
+  );
+});
