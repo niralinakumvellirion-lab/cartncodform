@@ -14,10 +14,22 @@ const app = express();
 const PORT = process.env.PORT || 4000;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  'https://cartncodform-beryl.vercel.app',
+  'http://localhost:3000',
+].filter(Boolean);
+
 // --- Middleware ------------------------------------------------------------
 app.use(
   cors({
-    origin: FRONTEND_URL,
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
   })
 );
@@ -68,8 +80,8 @@ app.use((err, _req, res, _next) => {
 async function start() {
   await connectDB();
   app.listen(PORT, () => {
-    console.log(`[server] CartnCodForm API listening on http://localhost:${PORT}`);
-    console.log(`[server] CORS allowed origin: ${FRONTEND_URL}`);
+    console.log(`[server] CartnCodForm API listening on port ${PORT}`);
+    console.log(`[server] CORS allowed origins: ${allowedOrigins.join(', ')}`);
   });
 }
 

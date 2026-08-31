@@ -1,11 +1,11 @@
 name = "CartnCodForm"
-client_id = b2cafd271c21b90a630528234402b0a1
-application_url = "https://subsonic-regain-bounce.ngrok-free.dev"
+client_id = "b2cafd271c21b90a630528234402b0a1"
+application_url = "https://cartncodform-backend.onrender.com"
 embedded = false
 
 [auth]
 redirect_urls = [
-  "https://subsonic-regain-bounce.ngrok-free.dev/api/auth/callback"
+  "https://cartncodform-backend.onrender.com/api/auth/callback"
 ]
 
 [webhooks]
