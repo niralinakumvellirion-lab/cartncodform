@@ -1,8 +1,8 @@
-// Version: 2 — updated 2026-08-31
-// If push still fails, clear this SW in DevTools -> Application -> Service Workers -> Unregister
-
+// Version: 3 — updated 2026-08-31 — notification click handler added
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
+
+const DASHBOARD_URL = 'https://cartncodform-beryl.vercel.app/dashboard';
 
 const firebaseConfig = {
   apiKey: "AIzaSyASPGdEC4K_acNQYY7AeQvskDQ5Xq4-ecU",
@@ -25,9 +25,9 @@ try {
 
     self.registration.showNotification(title, {
       body,
-      icon: icon || '/favicon.ico',
+      icon,
       badge: '/favicon.ico',
-      data: { url: 'https://cartncodform-beryl.vercel.app/dashboard' },
+      data: { url: DASHBOARD_URL },
     });
   });
 
@@ -36,23 +36,21 @@ try {
   console.error('[SW] Firebase initialization error:', error);
 }
 
+// Notification click handler
 self.addEventListener('notificationclick', function(event) {
-  console.log('[SW] Notification clicked:', event.notification);
+  console.log('[SW] Notification clicked');
   event.notification.close();
 
-  const urlToOpen = event.notification.data?.url
-    || 'https://cartncodform-beryl.vercel.app/dashboard';
+  const urlToOpen = event.notification.data?.url || DASHBOARD_URL;
 
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then(function(clientList) {
-        // If dashboard already open, focus it
         for (const client of clientList) {
           if (client.url.includes('cartncodform-beryl.vercel.app') && 'focus' in client) {
             return client.focus();
           }
         }
-        // Otherwise open new window
         if (clients.openWindow) {
           return clients.openWindow(urlToOpen);
         }
