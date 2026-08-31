@@ -2,6 +2,7 @@ const express = require('express');
 const Store = require('../models/Store');
 const AbandonedCustomer = require('../models/AbandonedCustomer');
 const CodOrder = require('../models/CodOrder');
+const PushSubscription = require('../models/PushSubscription');
 
 const router = express.Router();
 
@@ -97,6 +98,39 @@ router.get('/:shopDomain/orders', async (req, res) => {
   } catch (err) {
     console.error('[stores] GET /:shopDomain/orders error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch COD orders' });
+  }
+});
+
+/**
+ * DELETE /api/stores/:shopDomain
+ * Disconnect a store: remove the Store plus every record tied to that shop
+ * (abandoned customers, COD orders, push subscriptions).
+ */
+router.delete('/:shopDomain', async (req, res) => {
+  try {
+    const shopDomain = req.params.shopDomain.trim().toLowerCase();
+
+    const store = await Store.findOneAndDelete({ shopDomain });
+    if (!store) {
+      return res.status(404).json({ error: 'Store not found' });
+    }
+
+    const [abandoned, cod, push] = await Promise.all([
+      AbandonedCustomer.deleteMany({ shopDomain }),
+      CodOrder.deleteMany({ shopDomain }),
+      PushSubscription.deleteMany({ shopDomain }),
+    ]);
+
+    console.log(
+      `[stores] Disconnected store: ${shopDomain} ` +
+        `(removed ${abandoned.deletedCount} abandoned, ${cod.deletedCount} COD, ` +
+        `${push.deletedCount} push)`
+    );
+
+    return res.json({ success: true, message: 'Store disconnected' });
+  } catch (err) {
+    console.error('[stores] DELETE /:shopDomain error:', err.message);
+    return res.status(500).json({ error: 'Failed to disconnect store' });
   }
 });
 

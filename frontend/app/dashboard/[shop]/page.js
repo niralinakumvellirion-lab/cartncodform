@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import { onForegroundMessage } from '../../../lib/firebase';
 import PushNotificationSetup from '../../../components/PushNotificationSetup';
@@ -53,6 +53,7 @@ function StatusBadge({ status }) {
 
 export default function StoreView() {
   const params = useParams();
+  const router = useRouter();
   const shop = decodeURIComponent(params.shop || '');
 
   const [tab, setTab] = useState('abandoned');
@@ -60,6 +61,7 @@ export default function StoreView() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [disconnecting, setDisconnecting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,6 +101,23 @@ export default function StoreView() {
     return () => unsubscribe && unsubscribe();
   }, []);
 
+  async function handleDisconnect() {
+    const ok = window.confirm(
+      'Are you sure you want to disconnect this store? All data will be deleted.'
+    );
+    if (!ok) return;
+
+    setDisconnecting(true);
+    setError('');
+    try {
+      await apiSend(`/api/stores/${encodeURIComponent(shop)}`, 'DELETE');
+      router.push('/dashboard');
+    } catch (err) {
+      setError(err.message);
+      setDisconnecting(false);
+    }
+  }
+
   async function updateOrderStatus(id, status) {
     // optimistic update
     setOrders((prev) => prev.map((o) => (o._id === id ? { ...o, status } : o)));
@@ -130,12 +149,21 @@ export default function StoreView() {
           <h1 className="text-xl font-bold text-gray-900 sm:text-2xl break-all">{shop}</h1>
           <p className="mt-1 text-sm text-gray-500">Abandoned carts &amp; COD orders</p>
         </div>
-        <button
-          onClick={load}
-          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 sm:w-auto sm:py-1.5"
-        >
-          Refresh
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={load}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 sm:w-auto sm:py-1.5"
+          >
+            Refresh
+          </button>
+          <button
+            onClick={handleDisconnect}
+            disabled={disconnecting}
+            className="w-full rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 sm:w-auto sm:py-1.5"
+          >
+            {disconnecting ? 'Disconnecting…' : 'Disconnect Store'}
+          </button>
+        </div>
       </div>
 
       <div className="mt-4">

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { BACKEND_URL } from '../../lib/api';
 
@@ -12,34 +12,57 @@ export default function DashboardOverview() {
   const [stores, setStores] = useState([]);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState('');
+
+  const loadStores = useCallback(async () => {
+    if (!email) return;
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `${BACKEND_URL}/api/stores?email=${encodeURIComponent(email)}`,
+        { cache: 'no-store' }
+      );
+      if (!res.ok) throw new Error(`status ${res.status}`);
+      const d = await res.json();
+      setStores(Array.isArray(d) ? d : []);
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [email]);
 
   useEffect(() => {
-    if (!email) return;
-    let cancelled = false;
-    setLoading(true);
-    fetch(`${BACKEND_URL}/api/stores?email=${encodeURIComponent(email)}`, {
-      cache: 'no-store',
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error(`status ${r.status}`);
-        return r.json();
-      })
-      .then((d) => {
-        if (!cancelled) {
-          setStores(Array.isArray(d) ? d : []);
-          setError(null);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [email]);
+    loadStores();
+  }, [loadStores]);
+
+  async function handleDisconnect(shopDomain) {
+    const ok = window.confirm(
+      'Are you sure you want to disconnect this store? All data will be deleted.'
+    );
+    if (!ok) return;
+
+    setBusy(shopDomain);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${BACKEND_URL}/api/stores/${encodeURIComponent(shopDomain)}`,
+        { method: 'DELETE' }
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `status ${res.status}`);
+      }
+      // Remove from the list, then re-fetch to stay in sync with the backend.
+      setStores((prev) => prev.filter((s) => s.shopDomain !== shopDomain));
+      loadStores();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy('');
+    }
+  }
 
   return (
     <div>
@@ -64,7 +87,7 @@ export default function DashboardOverview() {
 
       {error && !loading && (
         <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          Could not reach the backend at <span className="font-mono">{BACKEND_URL}</span>. ({error})
+          {error}
         </div>
       )}
 
@@ -83,31 +106,46 @@ export default function DashboardOverview() {
       {!loading && stores.length > 0 && (
         <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
           {stores.map((store) => (
-            <Link
+            <div
               key={store.shopDomain}
-              href={`/dashboard/${encodeURIComponent(store.shopDomain)}`}
-              className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition hover:border-brand hover:shadow"
+              className="relative rounded-2xl border border-gray-200 bg-white p-6 shadow-sm transition hover:border-brand hover:shadow"
             >
-              <p className="truncate text-sm font-semibold text-gray-900">{store.shopDomain}</p>
-              <p className="mt-1 text-xs text-gray-400">
-                Installed{' '}
-                {store.installedAt
-                  ? new Date(store.installedAt).toLocaleDateString()
-                  : '—'}
-              </p>
-              <div className="mt-4 flex gap-4">
-                <div>
-                  <p className="text-2xl font-bold text-gray-900">
-                    {store.abandonedCount ?? 0}
-                  </p>
-                  <p className="text-xs text-gray-500">Abandoned</p>
+              <button
+                onClick={() => handleDisconnect(store.shopDomain)}
+                disabled={busy === store.shopDomain}
+                title="Disconnect store — deletes all its data"
+                className="absolute right-3 top-3 rounded-md bg-red-600 px-2 py-0.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {busy === store.shopDomain ? '…' : 'Disconnect'}
+              </button>
+
+              <Link
+                href={`/dashboard/${encodeURIComponent(store.shopDomain)}`}
+                className="block"
+              >
+                <p className="truncate pr-24 text-sm font-semibold text-gray-900">
+                  {store.shopDomain}
+                </p>
+                <p className="mt-1 text-xs text-gray-400">
+                  Installed{' '}
+                  {store.installedAt
+                    ? new Date(store.installedAt).toLocaleDateString()
+                    : '—'}
+                </p>
+                <div className="mt-4 flex gap-4">
+                  <div>
+                    <p className="text-2xl font-bold text-gray-900">
+                      {store.abandonedCount ?? 0}
+                    </p>
+                    <p className="text-xs text-gray-500">Abandoned</p>
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-gray-900">{store.codCount ?? 0}</p>
+                    <p className="text-xs text-gray-500">COD orders</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-2xl font-bold text-gray-900">{store.codCount ?? 0}</p>
-                  <p className="text-xs text-gray-500">COD orders</p>
-                </div>
-              </div>
-            </Link>
+              </Link>
+            </div>
           ))}
         </div>
       )}
