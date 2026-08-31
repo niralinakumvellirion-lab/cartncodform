@@ -63,4 +63,38 @@ async function sendPushToStore(shopDomain, title, body) {
   }
 }
 
-module.exports = { sendPushToStore };
+/**
+ * Send a push notification to every STOREFRONT CUSTOMER who subscribed via the
+ * Shopify theme script (CustomerPushSubscription), for one shop.
+ */
+async function sendPushToCustomers(shopDomain, title, body, url) {
+  const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+  try {
+    if (!firebaseReady) {
+      console.log('[push] Skipped (customers) — Firebase Admin not configured');
+      return { success: false, error: 'Firebase Admin not configured' };
+    }
+
+    const subs = await CustomerPushSubscription.find({ shopDomain });
+    if (!subs.length) {
+      console.log(`[push] No customer subscribers for ${shopDomain}`);
+      return { success: true, sent: 0 };
+    }
+    const tokens = subs.map((s) => s.token);
+    const message = {
+      notification: { title, body },
+      data: url ? { url: String(url) } : {},
+      tokens,
+    };
+    const response = await getMessaging().sendEachForMulticast(message);
+    console.log(
+      `[push] Sent ${response.successCount}/${tokens.length} to customers of ${shopDomain}`
+    );
+    return { success: true, sent: response.successCount };
+  } catch (err) {
+    console.error('[push] Error (customers):', err.message);
+    return { success: false, error: err.message };
+  }
+}
+
+module.exports = { sendPushToStore, sendPushToCustomers };

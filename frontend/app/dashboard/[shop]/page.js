@@ -36,6 +36,46 @@ function WhatsAppButton({ phone, message }) {
   );
 }
 
+function SendPushButton({ shop, cartValue }) {
+  const [state, setState] = useState('idle'); // idle | sending | sent | error
+
+  async function send() {
+    setState('sending');
+    try {
+      await apiSend('/api/push/send-customer', 'POST', {
+        shopDomain: shop,
+        title: 'You left items in your cart!',
+        body: `Your cart has items worth ₹${cartValue}. Complete your order now!`,
+        url: `https://${shop}`,
+      });
+      setState('sent');
+    } catch (err) {
+      console.error('[push] send-customer failed:', err);
+      setState('error');
+    }
+  }
+
+  const label =
+    state === 'sending'
+      ? 'Sending…'
+      : state === 'sent'
+      ? 'Push sent!'
+      : state === 'error'
+      ? 'Failed'
+      : '🔔 Push';
+
+  return (
+    <button
+      onClick={send}
+      disabled={state === 'sending'}
+      style={{ backgroundColor: '#7c3aed' }}
+      className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+    >
+      {label}
+    </button>
+  );
+}
+
 function StatusBadge({ status }) {
   const map = {
     abandoned: 'bg-red-100 text-red-700',
@@ -248,25 +288,26 @@ export default function StoreView() {
                       <StatusBadge status={c.status} />
                     </td>
                     <td className="px-4 py-3">
-                      {c.phone ? (
-                        <WhatsAppButton
-                          phone={c.phone}
-                          message={
-                            `Hi! We noticed you left some items in your cart.\n` +
-                            `Items: ${
-                              Array.isArray(c.cartItems) && c.cartItems.length > 0
-                                ? c.cartItems
-                                    .map((i) => `${i.title} x${i.quantity || 1}`)
-                                    .join(', ')
-                                : '-'
-                            }\n` +
-                            `Cart Value: ${formatMoney(c.cartValue)}\n` +
-                            `Please complete your order. We'd love to help!`
-                          }
-                        />
-                      ) : (
-                        <span className="text-gray-400">—</span>
-                      )}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <SendPushButton shop={shop} cartValue={c.cartValue} />
+                        {c.phone && (
+                          <WhatsAppButton
+                            phone={c.phone}
+                            message={
+                              `Hi! We noticed you left some items in your cart.\n` +
+                              `Items: ${
+                                Array.isArray(c.cartItems) && c.cartItems.length > 0
+                                  ? c.cartItems
+                                      .map((i) => `${i.title} x${i.quantity || 1}`)
+                                      .join(', ')
+                                  : '-'
+                              }\n` +
+                              `Cart Value: ${formatMoney(c.cartValue)}\n` +
+                              `Please complete your order. We'd love to help!`
+                            }
+                          />
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );

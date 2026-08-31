@@ -1,5 +1,6 @@
 require('dotenv').config();
 
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 
@@ -50,6 +51,20 @@ app.use((req, _res, next) => {
   console.log(`[http] ${req.method} ${req.originalUrl}`);
   next();
 });
+
+// --- Static (Shopify theme script + its service worker) ------------------
+// Wide-open CORS on the theme script so any storefront can load it, and the
+// Service-Worker-Allowed header so the SW may claim the root scope.
+app.use('/cartncodform-push.js', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  next();
+});
+app.use('/cartncodform-sw.js', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Service-Worker-Allowed', '/');
+  next();
+});
+app.use(express.static(path.join(__dirname, 'public')));
 
 // --- Routes --------------------------------------------------------------
 app.get('/', (_req, res) => {

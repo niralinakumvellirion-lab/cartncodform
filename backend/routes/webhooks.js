@@ -2,7 +2,7 @@ const express = require('express');
 const AbandonedCustomer = require('../models/AbandonedCustomer');
 const { verifyWebhookHmac } = require('../utils/shopify');
 const { sendAbandonedCartEmail } = require('../utils/email');
-const { sendPushToStore } = require('../utils/pushNotification');
+const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
 
 const router = express.Router();
 
@@ -92,6 +92,14 @@ async function handleWebhook(source, req, res) {
       shopDomain,
       '🛒 New Abandoned Cart',
       `A customer left items worth ₹${doc.cartValue} in their cart`
+    );
+
+    // Push-notify storefront customers (theme-script subscribers) for this shop.
+    sendPushToCustomers(
+      shopDomain,
+      'You left items in your cart! 🛒',
+      `Complete your order - items worth ₹${doc.cartValue} are waiting`,
+      `https://${shopDomain}`
     );
 
     return res.status(200).json({ received: true });
