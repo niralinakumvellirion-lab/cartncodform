@@ -1,0 +1,320 @@
+'use client';
+
+import { useCallback, useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import { apiGet, apiSend } from '../../../lib/api';
+import { onForegroundMessage } from '../../../lib/firebase';
+import PushNotificationSetup from '../../../components/PushNotificationSetup';
+
+function formatMoney(n) {
+  const num = Number(n) || 0;
+  return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatDate(d) {
+  if (!d) return '—';
+  return new Date(d).toLocaleString();
+}
+
+// Strip spaces, plus signs and dashes so the number is wa.me-friendly.
+function cleanPhone(phone) {
+  return String(phone || '').replace(/[\s+\-]/g, '');
+}
+
+function WhatsAppButton({ phone, message }) {
+  const href = `https://wa.me/${cleanPhone(phone)}?text=${encodeURIComponent(message)}`;
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      style={{ backgroundColor: '#25D366' }}
+      className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+    >
+      💬 WhatsApp
+    </a>
+  );
+}
+
+function StatusBadge({ status }) {
+  const map = {
+    abandoned: 'bg-red-100 text-red-700',
+    recovered: 'bg-green-100 text-green-700',
+    pending: 'bg-amber-100 text-amber-700',
+    confirmed: 'bg-green-100 text-green-700',
+    cancelled: 'bg-gray-200 text-gray-600',
+  };
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${map[status] || 'bg-gray-100 text-gray-600'}`}>
+      {status}
+    </span>
+  );
+}
+
+export default function StoreView() {
+  const params = useParams();
+  const shop = decodeURIComponent(params.shop || '');
+
+  const [tab, setTab] = useState('abandoned');
+  const [customers, setCustomers] = useState([]);
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const [c, o] = await Promise.all([
+        apiGet(`/api/stores/${encodeURIComponent(shop)}/customers`),
+        apiGet(`/api/stores/${encodeURIComponent(shop)}/orders`),
+      ]);
+      setCustomers(c);
+      setOrders(o);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [shop]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    const unsubscribe = onForegroundMessage((payload) => {
+      console.log('[push] Foreground message:', payload);
+      const title = payload.notification?.title || 'CartnCodForm';
+      const body = payload.notification?.body || 'New notification';
+
+      // Show browser notification even when tab is focused
+      if (Notification.permission === 'granted') {
+        new Notification(title, {
+          body,
+          icon: '/favicon.ico',
+        });
+      }
+    });
+    return () => unsubscribe && unsubscribe();
+  }, []);
+
+  async function updateOrderStatus(id, status) {
+    // optimistic update
+    setOrders((prev) => prev.map((o) => (o._id === id ? { ...o, status } : o)));
+    try {
+      await apiSend(`/api/cod/order/${id}`, 'PATCH', { status });
+    } catch (err) {
+      setError(err.message);
+      load();
+    }
+  }
+
+  const tabButton = (key, label, count) => (
+    <button
+      onClick={() => setTab(key)}
+      className={`border-b-2 px-1 pb-3 text-sm font-medium transition ${
+        tab === key
+          ? 'border-brand text-brand'
+          : 'border-transparent text-gray-500 hover:text-gray-800'
+      }`}
+    >
+      {label} <span className="ml-1 text-xs text-gray-400">({count})</span>
+    </button>
+  );
+
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">{shop}</h1>
+          <p className="mt-1 text-sm text-gray-500">Abandoned carts &amp; COD orders</p>
+        </div>
+        <button
+          onClick={load}
+          className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          Refresh
+        </button>
+      </div>
+
+      <div className="mt-4">
+        <PushNotificationSetup shopDomain={shop} />
+      </div>
+
+      <div className="mt-6 flex gap-6 border-b border-gray-200">
+        {tabButton('abandoned', 'Abandoned Carts', customers.length)}
+        {tabButton('cod', 'COD Orders', orders.length)}
+      </div>
+
+      {error && (
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          <p className="font-medium">Couldn’t load store data</p>
+          <p className="mt-1 break-words">{error}</p>
+          <button
+            onClick={load}
+            className="mt-2 rounded-md border border-red-300 bg-white px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
+      {loading && (
+        <div className="mt-8 flex items-center gap-2 text-sm text-gray-500">
+          <span className="h-3 w-3 animate-pulse rounded-full bg-gray-400" />
+          Loading store data…
+        </div>
+      )}
+
+      {!loading && tab === 'abandoned' && (
+        <div className="mt-6 overflow-x-auto rounded-xl border border-gray-200">
+          <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+              <tr>
+                <th className="px-4 py-3">Customer Email</th>
+                <th className="px-4 py-3">Phone</th>
+                <th className="px-4 py-3">Cart Items</th>
+                <th className="px-4 py-3">Cart Value</th>
+                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 bg-white">
+              {customers.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
+                    No abandoned carts yet.
+                  </td>
+                </tr>
+              )}
+              {customers.map((c) => {
+                const anon = !c.email && !c.phone;
+                const itemCount = Array.isArray(c.cartItems)
+                  ? c.cartItems.reduce((s, i) => s + (i.quantity || 1), 0)
+                  : 0;
+                return (
+                  <tr key={c._id}>
+                    <td className="px-4 py-3">
+                      {anon ? (
+                        <span className="italic text-gray-400">Anonymous</span>
+                      ) : (
+                        c.email || <span className="italic text-gray-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {c.phone || <span className="text-gray-400">—</span>}
+                    </td>
+                    <td className="px-4 py-3">
+                      {itemCount} item{itemCount === 1 ? '' : 's'}
+                      {Array.isArray(c.cartItems) && c.cartItems.length > 0 && (
+                        <span className="ml-1 text-gray-400">
+                          ({c.cartItems.map((i) => i.title).filter(Boolean).join(', ')})
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">{formatMoney(c.cartValue)}</td>
+                    <td className="px-4 py-3 text-gray-500">{formatDate(c.createdAt)}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={c.status} />
+                    </td>
+                    <td className="px-4 py-3">
+                      {c.phone ? (
+                        <WhatsAppButton
+                          phone={c.phone}
+                          message={
+                            `Hi! We noticed you left some items in your cart.\n` +
+                            `Items: ${
+                              Array.isArray(c.cartItems) && c.cartItems.length > 0
+                                ? c.cartItems
+                                    .map((i) => `${i.title} x${i.quantity || 1}`)
+                                    .join(', ')
+                                : '-'
+                            }\n` +
+                            `Cart Value: ${formatMoney(c.cartValue)}\n` +
+                            `Please complete your order. We'd love to help!`
+                          }
+                        />
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {!loading && tab === 'cod' && (
+        <div className="mt-6 overflow-x-auto rounded-xl border border-gray-200">
+          <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-50 text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+              <tr>
+                <th className="px-4 py-3">Name</th>
+                <th className="px-4 py-3">Phone</th>
+                <th className="px-4 py-3">Address</th>
+                <th className="px-4 py-3">Product</th>
+                <th className="px-4 py-3">Price</th>
+                <th className="px-4 py-3">Qty</th>
+                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100 bg-white">
+              {orders.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
+                    No COD orders yet.
+                  </td>
+                </tr>
+              )}
+              {orders.map((o) => (
+                <tr key={o._id}>
+                  <td className="px-4 py-3 font-medium text-gray-900">{o.name}</td>
+                  <td className="px-4 py-3">{o.phone}</td>
+                  <td className="px-4 py-3 max-w-xs">
+                    <span className="block truncate" title={`${o.address}, ${o.city} ${o.pincode}`}>
+                      {o.address}
+                      {o.city ? `, ${o.city}` : ''} {o.pincode}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">{o.productName || '—'}</td>
+                  <td className="px-4 py-3">{formatMoney(o.productPrice)}</td>
+                  <td className="px-4 py-3">{o.quantity}</td>
+                  <td className="px-4 py-3">
+                    <select
+                      value={o.status}
+                      onChange={(e) => updateOrderStatus(o._id, e.target.value)}
+                      className="rounded-md border border-gray-300 px-2 py-1 text-xs focus:border-brand focus:outline-none"
+                    >
+                      <option value="pending">pending</option>
+                      <option value="confirmed">confirmed</option>
+                      <option value="cancelled">cancelled</option>
+                    </select>
+                  </td>
+                  <td className="px-4 py-3 text-gray-500">{formatDate(o.createdAt)}</td>
+                  <td className="px-4 py-3">
+                    <WhatsAppButton
+                      phone={o.phone}
+                      message={
+                        `Hi ${o.name}! Your COD order has been received.\n` +
+                        `Product: ${o.productName || '-'}\n` +
+                        `Amount: ₹${formatMoney(o.productPrice)}\n` +
+                        `Quantity: ${o.quantity}\n` +
+                        `We will process your order soon!`
+                      }
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}

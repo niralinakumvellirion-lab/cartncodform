@@ -1,0 +1,52 @@
+// Central place for the backend base URL + a small fetch helper.
+export const BACKEND_URL =
+  process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
+
+// fetch() rejects with a bare "TypeError: Failed to fetch" for any network-level
+// failure (backend down, wrong port, CORS blocked, DNS). Turn that into a
+// message that actually says what to check.
+function describeNetworkError(err, method, url) {
+  const raw = err && err.message ? err.message : String(err);
+  if (err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(raw)) {
+    return (
+      `Cannot reach the backend (${method} ${url}). ` +
+      `Is it running at ${BACKEND_URL} and is CORS allowing this origin? ` +
+      `[${raw}]`
+    );
+  }
+  return raw;
+}
+
+export async function apiGet(path) {
+  const url = `${BACKEND_URL}${path}`;
+  let res;
+  try {
+    res = await fetch(url, { cache: 'no-store' });
+  } catch (err) {
+    throw new Error(describeNetworkError(err, 'GET', url));
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`GET ${path} failed (${res.status}): ${body}`);
+  }
+  return res.json();
+}
+
+export async function apiSend(path, method, body) {
+  const url = `${BACKEND_URL}${path}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    throw new Error(describeNetworkError(err, method, url));
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || `${method} ${path} failed (${res.status})`);
+  }
+  return data;
+}
