@@ -113,7 +113,7 @@ export default function StoreView() {
   const tabButton = (key, label, count) => (
     <button
       onClick={() => setTab(key)}
-      className={`border-b-2 px-1 pb-3 text-sm font-medium transition ${
+      className={`flex-1 border-b-2 px-1 pb-3 text-center text-sm font-medium transition sm:flex-none sm:text-left ${
         tab === key
           ? 'border-brand text-brand'
           : 'border-transparent text-gray-500 hover:text-gray-800'
@@ -125,14 +125,14 @@ export default function StoreView() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">{shop}</h1>
+          <h1 className="text-xl font-bold text-gray-900 sm:text-2xl break-all">{shop}</h1>
           <p className="mt-1 text-sm text-gray-500">Abandoned carts &amp; COD orders</p>
         </div>
         <button
           onClick={load}
-          className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 sm:w-auto sm:py-1.5"
         >
           Refresh
         </button>
@@ -142,7 +142,7 @@ export default function StoreView() {
         <PushNotificationSetup shopDomain={shop} />
       </div>
 
-      <div className="mt-6 flex gap-6 border-b border-gray-200">
+      <div className="mt-6 flex flex-wrap gap-2 border-b border-gray-200 sm:gap-6">
         {tabButton('abandoned', 'Abandoned Carts', customers.length)}
         {tabButton('cod', 'COD Orders', orders.length)}
       </div>

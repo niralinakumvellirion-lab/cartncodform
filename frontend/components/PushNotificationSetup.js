@@ -69,11 +69,11 @@ export default function PushNotificationSetup({ shopDomain }) {
 
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
         <button
           onClick={handleEnable}
           disabled={status === 'loading'}
-          className="bg-indigo-600 text-white text-sm px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+          className="w-full rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white hover:bg-indigo-700 disabled:opacity-50 sm:w-auto"
         >
           {status === 'loading' ? 'Enabling...' : '🔔 Enable Push Notifications'}
         </button>

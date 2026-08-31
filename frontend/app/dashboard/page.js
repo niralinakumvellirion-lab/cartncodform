@@ -16,16 +16,16 @@ export default async function DashboardOverview() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">All Stores</h1>
+          <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">All Stores</h1>
           <p className="mt-1 text-sm text-gray-500">
             Overview of every connected Shopify store.
           </p>
         </div>
         <Link
           href="/install"
-          className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
+          className="w-full rounded-lg bg-brand px-4 py-2 text-center text-sm font-semibold text-white hover:bg-brand-dark sm:w-auto"
         >
           Connect Store
         </Link>
@@ -50,7 +50,7 @@ export default async function DashboardOverview() {
       )}
 
       {stores.length > 0 && (
-        <div className="mt-8 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3">
           {stores.map((store) => (
             <Link
               key={store.shopDomain}
