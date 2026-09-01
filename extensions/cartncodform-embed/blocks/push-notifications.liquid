@@ -1,201 +1,16 @@
 {% if block.settings.enable_push %}
-
-<style>
-  #ccf-popup-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.6);
-    z-index: 999999;
-    align-items: center;
-    justify-content: center;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  }
-  #ccf-popup-overlay.ccf-show {
-    display: flex;
-    animation: ccf-fade 0.3s ease;
-  }
-  @keyframes ccf-fade {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
-  #ccf-popup {
-    background: white;
-    border-radius: 20px;
-    padding: 32px 28px;
-    max-width: 360px;
-    width: 90%;
-    text-align: center;
-    position: relative;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-    animation: ccf-slide 0.3s ease;
-  }
-  @keyframes ccf-slide {
-    from { transform: translateY(30px); opacity: 0; }
-    to { transform: translateY(0); opacity: 1; }
-  }
-  #ccf-popup-close {
-    position: absolute;
-    top: 12px;
-    right: 16px;
-    background: none;
-    border: none;
-    font-size: 20px;
-    cursor: pointer;
-    color: #999;
-    line-height: 1;
-  }
-  #ccf-popup-emoji {
-    font-size: 56px;
-    margin-bottom: 12px;
-    display: block;
-    animation: ccf-bounce 0.6s ease 0.3s both;
-  }
-  @keyframes ccf-bounce {
-    0% { transform: scale(0); }
-    60% { transform: scale(1.2); }
-    100% { transform: scale(1); }
-  }
-  #ccf-popup-badge {
-    background: linear-gradient(135deg, #ff6b6b, #ee5a24);
-    color: white;
-    font-size: 11px;
-    font-weight: 700;
-    padding: 4px 12px;
-    border-radius: 20px;
-    display: inline-block;
-    margin-bottom: 14px;
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-  }
-  #ccf-popup h2 {
-    font-size: 22px;
-    font-weight: 800;
-    color: #1a1a2e;
-    margin: 0 0 10px;
-    line-height: 1.3;
-  }
-  #ccf-popup p {
-    font-size: 14px;
-    color: #666;
-    margin: 0 0 20px;
-    line-height: 1.6;
-  }
-  #ccf-popup-benefits {
-    background: #f8f9ff;
-    border-radius: 12px;
-    padding: 14px;
-    margin-bottom: 20px;
-    text-align: left;
-  }
-  #ccf-popup-benefits div {
-    font-size: 13px;
-    color: #444;
-    padding: 4px 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  #ccf-allow-btn {
-    width: 100%;
-    background: linear-gradient(135deg, #667eea, #764ba2);
-    color: white;
-    border: none;
-    border-radius: 12px;
-    padding: 16px;
-    font-size: 16px;
-    font-weight: 700;
-    cursor: pointer;
-    margin-bottom: 10px;
-    transition: transform 0.2s, box-shadow 0.2s;
-    box-shadow: 0 4px 20px rgba(102,126,234,0.4);
-  }
-  #ccf-allow-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 25px rgba(102,126,234,0.5);
-  }
-  #ccf-allow-btn:active {
-    transform: translateY(0);
-  }
-  #ccf-deny-btn {
-    background: none;
-    border: none;
-    color: #aaa;
-    font-size: 13px;
-    cursor: pointer;
-    text-decoration: underline;
-    padding: 4px;
-  }
-  #ccf-deny-btn:hover { color: #666; }
-
-  /* Countdown timer */
-  #ccf-timer {
-    position: absolute;
-    top: 12px;
-    left: 16px;
-    background: #f0f0f0;
-    border-radius: 20px;
-    padding: 3px 10px;
-    font-size: 12px;
-    color: #666;
-    font-weight: 600;
-  }
-  #ccf-discount-badge {
-    background: linear-gradient(135deg, #11998e, #38ef7d);
-    color: white;
-    border-radius: 10px;
-    padding: 10px;
-    margin-bottom: 16px;
-    font-weight: 700;
-    font-size: 15px;
-  }
-</style>
-
-<!-- Custom Popup HTML -->
-<div id="ccf-popup-overlay" role="dialog" aria-modal="true">
-  <div id="ccf-popup">
-    <button id="ccf-popup-close" aria-label="Close">×</button>
-    <div id="ccf-timer">⏱ <span id="ccf-countdown">15</span>s</div>
-
-    <span id="ccf-popup-emoji">{{ block.settings.popup_emoji }}</span>
-    <div id="ccf-popup-badge">{{ block.settings.popup_badge }}</div>
-
-    {% if block.settings.show_discount %}
-    <div id="ccf-discount-badge">
-      🎁 {{ block.settings.discount_text }}
-    </div>
-    {% endif %}
-
-    <h2>{{ block.settings.popup_title }}</h2>
-    <p>{{ block.settings.popup_description }}</p>
-
-    <div id="ccf-popup-benefits">
-      {% if block.settings.benefit_1 != blank %}
-      <div>✅ {{ block.settings.benefit_1 }}</div>
-      {% endif %}
-      {% if block.settings.benefit_2 != blank %}
-      <div>✅ {{ block.settings.benefit_2 }}</div>
-      {% endif %}
-      {% if block.settings.benefit_3 != blank %}
-      <div>✅ {{ block.settings.benefit_3 }}</div>
-      {% endif %}
-    </div>
-
-    <button id="ccf-allow-btn">
-      {{ block.settings.allow_button_text }}
-    </button>
-    <br>
-    <button id="ccf-deny-btn">{{ block.settings.deny_button_text }}</button>
-  </div>
-</div>
-
 <script>
 (function() {
-  const BACKEND_URL = 'https://cartncodform-backend.onrender.com';
-  const SHOP_DOMAIN = '{{ shop.permanent_domain }}';
-  const VAPID_KEY = 'BMPrLf4eInbFu1IpI_ZqyblmkbSYIm0JyukselN80lglfwuBfyaU7kOQZ6FFxo1PjUqh1xnGzd2uVPdJrYEh0Jo';
+  'use strict';
 
-  const firebaseConfig = {
+  var BACKEND_URL = 'https://cartncodform-backend.onrender.com';
+
+  // App Proxy URL - serves SW from same origin as store
+  var PROXY_SW_URL = window.location.origin + '/apps/cartncodform/sw.js';
+
+  var VAPID_KEY = 'BMPrLf4eInbFu1IpI_ZqyblmkbSYIm0JyukselN80lglfwuBfyaU7kOQZ6FFxo1PjUqh1xnGzd2uVPdJrYEh0Jo';
+
+  var firebaseConfig = {
     apiKey: "AIzaSyASPGdEC4K_acNQYY7AeQvskDQ5Xq4-ecU",
     projectId: "cartncodform",
     messagingSenderId: "133172185047",
@@ -204,304 +19,367 @@
     storageBucket: "cartncodform.appspot.com",
   };
 
-  const overlay = document.getElementById('ccf-popup-overlay');
-  const allowBtn = document.getElementById('ccf-allow-btn');
-  const denyBtn = document.getElementById('ccf-deny-btn');
-  const closeBtn = document.getElementById('ccf-popup-close');
-  const countdownEl = document.getElementById('ccf-countdown');
+  var SHOP_DOMAIN = window.Shopify && window.Shopify.shop
+    ? window.Shopify.shop
+    : window.location.hostname;
 
-  // Countdown timer
-  let timeLeft = 15;
-  let timer;
+  var TOKEN_KEY = 'ccf_fcm_token_' + SHOP_DOMAIN;
+  var SUBSCRIBED_KEY = 'ccf_subscribed_' + SHOP_DOMAIN;
+
+  console.log('[CCF] Shop:', SHOP_DOMAIN);
+  console.log('[CCF] SW URL:', PROXY_SW_URL);
+
+  // ============================================
+  // POPUP HTML + CSS (injected dynamically)
+  // ============================================
+
+  function injectStyles() {
+    if (document.getElementById('ccf-styles')) return;
+    var style = document.createElement('style');
+    style.id = 'ccf-styles';
+    style.textContent = [
+      '#ccf-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;',
+      'background:rgba(0,0,0,0.65);z-index:2147483647;',
+      'align-items:center;justify-content:center;font-family:-apple-system,sans-serif;}',
+      '#ccf-card{background:#fff;border-radius:20px;padding:28px 24px;',
+      'max-width:340px;width:90%;text-align:center;position:relative;}',
+      '#ccf-close{position:absolute;top:12px;right:14px;background:none;',
+      'border:none;font-size:20px;cursor:pointer;color:#999;line-height:1;}',
+      '#ccf-timer-badge{position:absolute;top:12px;left:14px;background:#f0f0f0;',
+      'border-radius:20px;padding:2px 10px;font-size:11px;color:#666;font-weight:600;}',
+      '#ccf-emoji{font-size:48px;display:block;margin:16px 0 10px;}',
+      '#ccf-badge{background:#fee2e2;color:#dc2626;font-size:10px;font-weight:700;',
+      'padding:3px 12px;border-radius:20px;display:inline-block;margin-bottom:12px;',
+      'text-transform:uppercase;letter-spacing:0.5px;}',
+      '#ccf-discount{background:#dcfce7;color:#166534;border-radius:10px;',
+      'padding:10px;margin-bottom:14px;font-size:14px;font-weight:600;}',
+      '#ccf-title{font-size:20px;font-weight:700;color:#111;margin:0 0 8px;line-height:1.3;}',
+      '#ccf-desc{font-size:13px;color:#666;margin:0 0 14px;line-height:1.6;}',
+      '#ccf-benefits{background:#f8f9ff;border-radius:10px;padding:12px;',
+      'margin-bottom:16px;text-align:left;}',
+      '#ccf-benefits div{font-size:12px;color:#444;padding:3px 0;}',
+      '#ccf-yes{width:100%;background:linear-gradient(135deg,#667eea,#764ba2);',
+      'color:#fff;border:none;border-radius:12px;padding:15px;font-size:15px;',
+      'font-weight:700;cursor:pointer;margin-bottom:8px;display:block;}',
+      '#ccf-no{background:none;border:none;color:#aaa;font-size:12px;',
+      'cursor:pointer;text-decoration:underline;padding:4px;}'
+    ].join('');
+    (document.head || document.documentElement).appendChild(style);
+  }
+
+  function injectHTML() {
+    if (document.getElementById('ccf-overlay')) return;
+    var div = document.createElement('div');
+    div.id = 'ccf-overlay';
+    div.setAttribute('role', 'dialog');
+    div.innerHTML = [
+      '<div id="ccf-card">',
+        '<button id="ccf-close">&times;</button>',
+        '<div id="ccf-timer-badge">&#9201; <span id="ccf-count">15</span>s</div>',
+        '<span id="ccf-emoji">&#128276;</span>',
+        '<div id="ccf-badge">{{ block.settings.popup_badge }}</div>',
+        '<div id="ccf-discount">&#127873; {{ block.settings.discount_text }}</div>',
+        '<h2 id="ccf-title">{{ block.settings.popup_title }}</h2>',
+        '<p id="ccf-desc">{{ block.settings.popup_description }}</p>',
+        '<div id="ccf-benefits">',
+          '<div>&#9989; {{ block.settings.benefit_1 }}</div>',
+          '<div>&#9989; {{ block.settings.benefit_2 }}</div>',
+          '<div>&#9989; {{ block.settings.benefit_3 }}</div>',
+        '</div>',
+        '<button id="ccf-yes">&#128276; {{ block.settings.allow_button_text }}</button>',
+        '<br>',
+        '<button id="ccf-no">{{ block.settings.deny_button_text }}</button>',
+      '</div>'
+    ].join('');
+    document.body.appendChild(div);
+  }
+
+  // ============================================
+  // POPUP CONTROLS
+  // ============================================
+
+  var countdownTimer = null;
+
+  function showPopup() {
+    var o = document.getElementById('ccf-overlay');
+    if (!o) return;
+    o.style.display = 'flex';
+    o.style.alignItems = 'center';
+    o.style.justifyContent = 'center';
+    console.log('[CCF] Popup shown');
+    startCountdown();
+  }
+
+  function hidePopup() {
+    var o = document.getElementById('ccf-overlay');
+    if (o) o.style.display = 'none';
+    if (countdownTimer) clearInterval(countdownTimer);
+  }
 
   function startCountdown() {
-    timer = setInterval(() => {
-      timeLeft--;
-      if (countdownEl) countdownEl.textContent = timeLeft;
-      if (timeLeft <= 0) {
-        clearInterval(timer);
+    var count = 15;
+    var el = document.getElementById('ccf-count');
+    if (countdownTimer) clearInterval(countdownTimer);
+    countdownTimer = setInterval(function() {
+      count--;
+      if (el) el.textContent = count;
+      if (count <= 0) {
+        clearInterval(countdownTimer);
         hidePopup();
       }
     }, 1000);
   }
 
-  function showPopup() {
-    overlay.style.display = 'flex';
-    overlay.style.alignItems = 'center';
-    overlay.style.justifyContent = 'center';
-    startCountdown();
+  function wireButtons() {
+    var yes = document.getElementById('ccf-yes');
+    var no = document.getElementById('ccf-no');
+    var close = document.getElementById('ccf-close');
+
+    if (yes) yes.addEventListener('click', function() {
+      hidePopup();
+      handleAllow();
+    });
+
+    if (no) no.addEventListener('click', function() {
+      hidePopup();
+      sessionStorage.setItem('ccf_denied_session', '1');
+    });
+
+    if (close) close.addEventListener('click', function() {
+      hidePopup();
+    });
   }
 
-  function hidePopup() {
-    overlay.style.display = 'none';
-    clearInterval(timer);
-  }
+  // ============================================
+  // SERVICE WORKER via APP PROXY
+  // ============================================
 
-  async function registerSW() {
-    if (!('serviceWorker' in navigator)) {
-      console.log('[CCF] Service Worker not supported');
-      return null;
-    }
-    try {
-      // Unregister any stale service workers first
-      const registrations = await navigator.serviceWorker.getRegistrations();
-      for (const reg of registrations) {
-        if (reg.active && reg.active.scriptURL.includes('cartncodform-sw')) {
-          console.log('[CCF] Found existing SW, reusing');
-          await navigator.serviceWorker.ready;
-          return reg;
-        }
+  function registerSW() {
+    return new Promise(function(resolve, reject) {
+      if (!('serviceWorker' in navigator)) {
+        return reject(new Error('SW not supported'));
       }
 
-      // Register fresh SW
-      console.log('[CCF] Registering new Service Worker...');
-      const reg = await navigator.serviceWorker.register(
-        BACKEND_URL + '/cartncodform-sw.js',
-        { updateViaCache: 'none' }
-      );
-      console.log('[CCF] SW registered:', reg.scope);
+      console.log('[CCF] Registering SW via App Proxy:', PROXY_SW_URL);
 
-      // Wait for SW to be active
-      if (reg.installing) {
-        console.log('[CCF] SW installing, waiting...');
-        await new Promise((resolve, reject) => {
-          reg.installing.addEventListener('statechange', (e) => {
+      navigator.serviceWorker.register(PROXY_SW_URL, {
+        scope: '/',
+        updateViaCache: 'none'
+      }).then(function(reg) {
+        console.log('[CCF] SW registered, scope:', reg.scope);
+
+        if (reg.installing) {
+          reg.installing.addEventListener('statechange', function(e) {
             if (e.target.state === 'activated') {
               console.log('[CCF] SW activated');
-              resolve();
+              resolve(reg);
             }
-            if (e.target.state === 'redundant') reject(new Error('SW became redundant'));
           });
-          setTimeout(reject, 30000, new Error('SW activation timeout'));
-        });
-      }
-
-      await navigator.serviceWorker.ready;
-      console.log('[CCF] SW ready');
-      return reg;
-    } catch (err) {
-      console.error('[CCF] SW registration failed:', err);
-      return null;
-    }
+          setTimeout(function() { resolve(reg); }, 5000);
+        } else {
+          resolve(reg);
+        }
+      }).catch(function(err) {
+        console.error('[CCF] SW registration failed:', err.message);
+        reject(err);
+      });
+    });
   }
 
-  async function subscribePush(swReg) {
-    try {
-      console.log('[CCF] Starting push subscription for shop:', SHOP_DOMAIN);
+  // ============================================
+  // FCM TOKEN GENERATION
+  // ============================================
 
-      if (!swReg) {
-        console.error('[CCF] No service worker registration');
-        return;
-      }
+  function getToken(swReg) {
+    return new Promise(function(resolve, reject) {
+      Promise.all([
+        import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
+        import('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js')
+      ]).then(function(modules) {
+        var initializeApp = modules[0].initializeApp;
+        var getApps = modules[0].getApps;
+        var getMessaging = modules[1].getMessaging;
+        var getTokenFn = modules[1].getToken;
 
-      // Dynamically import Firebase
-      console.log('[CCF] Loading Firebase...');
-      let initializeApp, getApps, getMessaging, getToken;
-      try {
-        const appModule = await import(
-          'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'
-        );
-        initializeApp = appModule.initializeApp;
-        getApps = appModule.getApps;
+        var app = getApps().length === 0
+          ? initializeApp(firebaseConfig)
+          : getApps()[0];
 
-        const msgModule = await import(
-          'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js'
-        );
-        getMessaging = msgModule.getMessaging;
-        getToken = msgModule.getToken;
-      } catch(importErr) {
-        console.error('[CCF] Firebase import failed:', importErr);
-        return;
-      }
+        var messaging = getMessaging(app);
 
-      console.log('[CCF] Firebase loaded, initializing app...');
-      const app = getApps().length === 0
-        ? initializeApp(firebaseConfig)
-        : getApps()[0];
-
-      const messaging = getMessaging(app);
-      console.log('[CCF] Getting FCM token...');
-
-      let token;
-      try {
-        token = await getToken(messaging, {
+        return getTokenFn(messaging, {
           vapidKey: VAPID_KEY,
-          serviceWorkerRegistration: swReg,
+          serviceWorkerRegistration: swReg
         });
-      } catch(tokenErr) {
-        console.error('[CCF] Token generation failed:', tokenErr.code, tokenErr.message);
-        // Retry once after 2 seconds
-        console.log('[CCF] Retrying token generation...');
-        await new Promise(r => setTimeout(r, 2000));
-        try {
-          token = await getToken(messaging, {
-            vapidKey: VAPID_KEY,
-            serviceWorkerRegistration: swReg,
-          });
-        } catch(retryErr) {
-          console.error('[CCF] Retry also failed:', retryErr.message);
-          return;
+      }).then(function(token) {
+        if (token) {
+          console.log('[CCF] Token:', token.substring(0, 20) + '...');
+          resolve(token);
+        } else {
+          reject(new Error('No token returned'));
         }
-      }
+      }).catch(reject);
+    });
+  }
 
-      if (!token) {
-        console.error('[CCF] No FCM token received');
+  function saveToken(token) {
+    return fetch(BACKEND_URL + '/api/push/subscribe-customer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        shopDomain: SHOP_DOMAIN,
+        token: token,
+        page: window.location.pathname
+      })
+    }).then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.success) {
+        localStorage.setItem(TOKEN_KEY, token);
+        localStorage.setItem(SUBSCRIBED_KEY, '1');
+        console.log('[CCF] Token saved to backend');
+      }
+    });
+  }
+
+  // ============================================
+  // HANDLE ALLOW BUTTON
+  // ============================================
+
+  function handleAllow() {
+    Notification.requestPermission().then(function(permission) {
+      console.log('[CCF] Permission:', permission);
+
+      if (permission !== 'granted') {
+        sessionStorage.setItem('ccf_denied_session', '1');
         return;
       }
 
-      console.log('[CCF] FCM token obtained:', token.substring(0, 20) + '...');
-      localStorage.setItem('ccf_fcm_token', token);
-
-      // Save to backend
-      try {
-        const response = await fetch(BACKEND_URL + '/api/push/subscribe-customer', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            shopDomain: SHOP_DOMAIN,
-            token,
-            page: window.location.pathname
-          }),
+      registerSW().then(function(swReg) {
+        return navigator.serviceWorker.ready.then(function() {
+          return getToken(swReg);
         });
-        const data = await response.json();
-        console.log('[CCF] Subscription response:', data);
-        if (data.success) {
-          console.log('[CCF] Successfully subscribed!');
-          localStorage.setItem('ccf_push_subscribed', '1');
-        }
-      } catch(fetchErr) {
-        console.error('[CCF] Backend subscription failed:', fetchErr);
-      }
-
-    } catch (err) {
-      console.error('[CCF] Subscribe error:', err);
-    }
+      }).then(function(token) {
+        return saveToken(token);
+      }).then(function() {
+        console.log('[CCF] Fully subscribed!');
+      }).catch(function(err) {
+        console.error('[CCF] Subscribe failed:', err.message);
+      });
+    });
   }
 
-  // Allow button clicked
-  allowBtn.addEventListener('click', async () => {
-    hidePopup();
-    allowBtn.textContent = 'Enabling...';
-    try {
-      const permission = await Notification.requestPermission();
-      if (permission === 'granted') {
-        const swReg = await registerSW();
-        if (swReg) {
-          await subscribePush(swReg);
-          localStorage.setItem('ccf_push_subscribed', '1');
-        }
-      } else {
-        // Permission denied — don't show again this session
-        sessionStorage.setItem('ccf_push_denied_session', '1');
-      }
-    } catch(e) {
-      console.log('[CCF] Permission error:', e);
-    }
-  });
+  // ============================================
+  // CHECK TOKEN + INIT
+  // ============================================
 
-  // Deny / Close
-  denyBtn.addEventListener('click', () => {
-    hidePopup();
-    localStorage.setItem('ccf_push_asked', '1');
-  });
-  closeBtn.addEventListener('click', () => {
-    hidePopup();
-  });
-
-  // Init
-  async function init() {
+  function checkAndInit() {
     if (!('Notification' in window)) {
       console.log('[CCF] Notifications not supported');
       return;
     }
 
-    console.log('[CCF] Permission status:', Notification.permission);
+    console.log('[CCF] Permission:', Notification.permission);
 
-    // Already granted — re-subscribe silently
-    if (Notification.permission === 'granted') {
-      console.log('[CCF] Permission already granted, re-subscribing silently...');
-      const swReg = await registerSW();
-      if (swReg) await subscribePush(swReg);
-      return;
-    }
-
-    // Blocked
-    if (Notification.permission === 'denied') {
-      console.log('[CCF] Permission denied by user');
-      return;
-    }
+    // Already denied by browser
+    if (Notification.permission === 'denied') return;
 
     // Denied this session
-    if (sessionStorage.getItem('ccf_push_denied_session')) return;
+    if (sessionStorage.getItem('ccf_denied_session')) return;
 
-    // Already subscribed
-    if (localStorage.getItem('ccf_push_subscribed') === '1') {
-      console.log('[CCF] Already subscribed, re-subscribing silently...');
-      const swReg = await registerSW();
-      if (swReg) await subscribePush(swReg);
+    // Check existing token
+    var existingToken = localStorage.getItem(TOKEN_KEY);
+
+    if (existingToken && Notification.permission === 'granted') {
+      // Token exists - silently re-subscribe to refresh
+      console.log('[CCF] Token exists, refreshing silently...');
+      registerSW().then(function(swReg) {
+        return navigator.serviceWorker.ready.then(function() {
+          return getToken(swReg);
+        });
+      }).then(function(token) {
+        if (token !== existingToken) {
+          return saveToken(token);
+        }
+      }).catch(function(err) {
+        console.log('[CCF] Silent refresh error:', err.message);
+      });
       return;
     }
 
-    // Show popup after delay
-    const delay = {{ block.settings.popup_delay }} * 1000;
-    console.log('[CCF] Will show popup in', delay/1000, 'seconds');
-    setTimeout(showPopup, delay);
+    // No token - show popup after delay
+    var delay = {{ block.settings.popup_delay }} * 1000;
+    console.log('[CCF] No token, showing popup in', delay/1000, 's');
+
+    setTimeout(function() {
+      showPopup();
+    }, delay);
   }
 
-  // Track add to cart events
-  function trackCartAdd() {
-    document.addEventListener('click', async function(e) {
-      const btn = e.target.closest('[name="add"], .product-form__submit, button[type="submit"][form], [data-testid="add-to-cart"]');
+  // ============================================
+  // CART TRACKING
+  // ============================================
+
+  function trackCart() {
+    document.addEventListener('click', function(e) {
+      var btn = e.target.closest('[name="add"], .product-form__submit, [data-testid="add-to-cart"]');
       if (!btn) return;
-      const form = btn.closest('form[action*="/cart/add"]') || btn.closest('form[action="/cart/add"]');
+      var form = btn.closest('form[action*="/cart"]');
       if (!form) return;
 
-      console.log('[CCF] Add to cart detected');
+      console.log('[CCF] Cart add detected');
 
-      // If not yet subscribed, try to subscribe now
-      if (!localStorage.getItem('ccf_push_subscribed')) {
-        console.log('[CCF] Not yet subscribed, attempting subscription on cart add...');
-        if (Notification.permission === 'granted') {
-          const swReg = await registerSW();
-          if (swReg) await subscribePush(swReg);
-        } else if (Notification.permission === 'default') {
-          // Show popup again
-          showPopup();
-        }
-      }
-
-      // Notify backend about cart activity
-      const token = localStorage.getItem('ccf_fcm_token');
+      var token = localStorage.getItem(TOKEN_KEY);
       if (token) {
         fetch(BACKEND_URL + '/api/push/cart-activity', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             shopDomain: SHOP_DOMAIN,
-            token,
+            token: token,
             event: 'add_to_cart',
             url: window.location.href
-          }),
-        }).then(r => r.json())
-          .then(d => console.log('[CCF] Cart activity tracked:', d))
-          .catch(e => console.log('[CCF] Cart track error:', e));
-      } else {
-        console.log('[CCF] No token yet for cart tracking');
+          })
+        }).catch(function(e) {
+          console.log('[CCF] Cart track error:', e.message);
+        });
+      }
+
+      // Show popup if not subscribed
+      if (!localStorage.getItem(SUBSCRIBED_KEY) && Notification.permission === 'default') {
+        showPopup();
       }
     });
   }
 
-  trackCartAdd();
+  // ============================================
+  // START
+  // ============================================
 
-  if (document.readyState === 'complete') {
-    init();
-  } else {
-    window.addEventListener('load', init);
+  function start() {
+    console.log('[CCF] Starting...');
+    injectStyles();
+    injectHTML();
+    wireButtons();
+    trackCart();
+    checkAndInit();
   }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+
+  window.addEventListener('load', function() {
+    if (!document.getElementById('ccf-overlay')) start();
+  });
+
+  // Expose for testing
+  window.ccfShow = showPopup;
+  window.ccfHide = hidePopup;
+
 })();
 </script>
-
-{% endif %}
 
 {% schema %}
 {
@@ -509,14 +387,10 @@
   "target": "body",
   "settings": [
     {
-      "type": "header",
-      "content": "Popup Content"
-    },
-    {
-      "type": "text",
-      "id": "popup_emoji",
-      "label": "Popup Emoji",
-      "default": "🔔"
+      "type": "checkbox",
+      "id": "enable_push",
+      "label": "Enable Push Notifications",
+      "default": true
     },
     {
       "type": "text",
@@ -533,18 +407,20 @@
     {
       "type": "textarea",
       "id": "popup_description",
-      "label": "Popup Description",
-      "default": "Get instant alerts for flash sales, restocks, and exclusive offers — before anyone else!"
+      "label": "Description",
+      "default": "Get instant alerts for flash sales, restocks, and exclusive offers!"
     },
     {
-      "type": "header",
-      "content": "Benefits"
+      "type": "text",
+      "id": "discount_text",
+      "label": "Discount Text",
+      "default": "Subscribe and get 10% OFF your next order!"
     },
     {
       "type": "text",
       "id": "benefit_1",
       "label": "Benefit 1",
-      "default": "Flash sale alerts — first access"
+      "default": "Flash sale alerts - first access"
     },
     {
       "type": "text",
@@ -559,40 +435,16 @@
       "default": "Exclusive discount codes"
     },
     {
-      "type": "header",
-      "content": "Discount Offer"
-    },
-    {
-      "type": "checkbox",
-      "id": "show_discount",
-      "label": "Show Discount Badge",
-      "default": true
-    },
-    {
-      "type": "text",
-      "id": "discount_text",
-      "label": "Discount Text",
-      "default": "Subscribe & get 10% OFF your next order!"
-    },
-    {
-      "type": "header",
-      "content": "Buttons"
-    },
-    {
       "type": "text",
       "id": "allow_button_text",
-      "label": "Allow Button Text",
-      "default": "🔔 Yes! Notify Me"
+      "label": "Allow Button",
+      "default": "Yes! Notify Me"
     },
     {
       "type": "text",
       "id": "deny_button_text",
-      "label": "Deny Button Text",
+      "label": "Deny Button",
       "default": "No thanks, I hate deals"
-    },
-    {
-      "type": "header",
-      "content": "Timing"
     },
     {
       "type": "range",
@@ -602,17 +454,8 @@
       "max": 30,
       "step": 1,
       "default": 5
-    },
-    {
-      "type": "header",
-      "content": "Enable"
-    },
-    {
-      "type": "checkbox",
-      "id": "enable_push",
-      "label": "Enable Push Notifications",
-      "default": true
     }
   ]
 }
 {% endschema %}
+{% endif %}

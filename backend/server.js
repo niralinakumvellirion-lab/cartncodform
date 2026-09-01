@@ -10,6 +10,7 @@ const webhookRoutes = require('./routes/webhooks');
 const storeRoutes = require('./routes/stores');
 const codRoutes = require('./routes/cod');
 const pushRouter = require('./routes/push');
+const proxyRouter = require('./routes/proxy');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -80,6 +81,7 @@ app.use('/api/webhooks', webhookRoutes);
 app.use('/api/stores', storeRoutes);
 app.use('/api/cod', codRoutes);
 app.use('/api/push', pushRouter);
+app.use('/apps/cartncodform', proxyRouter);
 
 // --- 404 + error handlers ---------------------------------------------------
 app.use((req, res) => {
