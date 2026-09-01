@@ -299,12 +299,16 @@
   }
 
   function saveToken(token) {
+    // Save old token to clean up
+    var oldToken = localStorage.getItem(TOKEN_KEY);
+
     return fetch(BACKEND_URL + '/api/push/subscribe-customer', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         shopDomain: SHOP_DOMAIN,
         token: token,
+        oldToken: oldToken,
         page: window.location.pathname
       })
     }).then(function(r) { return r.json(); })
@@ -312,8 +316,9 @@
       if (data.success) {
         localStorage.setItem(TOKEN_KEY, token);
         localStorage.setItem(SUBSCRIBED_KEY, '1');
-        console.log('[CCF] Token saved to backend');
+        console.log('[CCF] Token saved successfully!');
       }
+      return data;
     });
   }
 

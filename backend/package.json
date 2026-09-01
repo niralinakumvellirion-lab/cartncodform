@@ -12,7 +12,8 @@
     "check:subs": "node scripts/checkCustomerSubs.js",
     "add:scripttags": "node scripts/addScriptTags.js",
     "remove:scripttags": "node scripts/removeScriptTags.js",
-    "test:customer:push": "node scripts/testCustomerPush.js"
+    "test:customer:push": "node scripts/testCustomerPush.js",
+    "clean:tokens": "node scripts/cleanDuplicateTokens.js"
   },
   "dependencies": {
     "axios": "^1.7.2",

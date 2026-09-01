@@ -60,33 +60,44 @@ router.post('/send', async (req, res) => {
 
 /**
  * POST /api/push/subscribe-customer
- * Body: { shopDomain, token, page }
- * Upserts a storefront-customer FCM token (from the Shopify theme script).
+ * Body: { shopDomain, token, oldToken, page }
+ * Upserts a storefront-customer FCM token (from the Shopify theme script) and
+ * cleans up a superseded token if one was supplied.
  */
 router.post('/subscribe-customer', async (req, res) => {
   try {
-    const { shopDomain, token, page } = req.body;
+    const { shopDomain, token, oldToken, page } = req.body;
 
     if (!shopDomain || !token) {
-      return res.status(400).json({ error: 'shopDomain and token are required' });
+      return res.status(400).json({ error: 'shopDomain and token required' });
     }
 
-    const saved = await CustomerPushSubscription.findOneAndUpdate(
+    const shop = shopDomain.trim().toLowerCase();
+
+    // Remove old token if different from new token
+    if (oldToken && oldToken !== token) {
+      await CustomerPushSubscription.deleteOne({ token: oldToken });
+      console.log(`[subscribe-customer] Removed old token for: ${shop}`);
+    }
+
+    // Upsert new token
+    const result = await CustomerPushSubscription.findOneAndUpdate(
       { token },
-      { shopDomain: shopDomain.trim().toLowerCase(), token, page: page || undefined },
-      { upsert: true, new: true, setDefaultsOnInsert: true, rawResult: true }
+      {
+        shopDomain: shop,
+        token,
+        page: page || undefined,
+        lastActivityAt: new Date()
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    const updatedExisting =
-      saved.lastErrorObject && saved.lastErrorObject.updatedExisting;
-    console.log(
-      `[subscribe-customer] Token saved for: ${shopDomain} ` +
-        `(${updatedExisting ? 'updated existing token' : 'new token'})`
-    );
+    console.log(`[subscribe-customer] Token saved for: ${shop}`);
     return res.status(200).json({ success: true });
+
   } catch (err) {
-    console.error('[push] POST /subscribe-customer error:', err.message);
-    return res.status(500).json({ error: 'Failed to save customer push subscription' });
+    console.error('[subscribe-customer] Error:', err.message);
+    return res.status(500).json({ error: 'Failed to save subscription' });
   }
 });
 
