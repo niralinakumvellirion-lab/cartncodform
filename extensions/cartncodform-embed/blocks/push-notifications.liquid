@@ -222,6 +222,7 @@
         var getMessaging = modules[1].getMessaging;
         var getTokenFn = modules[1].getToken;
         console.log('[CCF] Firebase loaded, getting token...');
+        console.log('[CCF] Firebase modules loaded, creating messaging...');
 
         var app = getApps().length === 0
           ? initializeApp(firebaseConfig)
@@ -229,6 +230,7 @@
 
         var messaging = getMessaging(app);
 
+        console.log('[CCF] getToken() called with vapidKey and swReg');
         return getTokenFn(messaging, {
           vapidKey: VAPID_KEY,
           serviceWorkerRegistration: swReg
@@ -269,22 +271,24 @@
   // ============================================
 
   function handleAllow() {
+    console.log('[CCF] handleAllow called');
     Notification.requestPermission().then(function(permission) {
-      console.log('[CCF] Permission:', permission);
+      console.log('[CCF] Permission result:', permission);
 
       if (permission !== 'granted') {
         sessionStorage.setItem('ccf_denied_session', '1');
         return;
       }
 
-      registerSW().then(function(swReg) {
-        return navigator.serviceWorker.ready.then(function() {
-          return getToken(swReg);
-        });
+      console.log('[CCF] Starting SW registration for token...');
+      registerSW().then(function(reg) {
+        console.log('[CCF] SW ready for token, getting FCM token...');
+        return getToken(reg);
       }).then(function(token) {
+        console.log('[CCF] Token received:', token ? token.substring(0,20)+'...' : 'null');
         return saveToken(token);
       }).then(function() {
-        console.log('[CCF] Fully subscribed!');
+        console.log('[CCF] Token saved successfully!');
       }).catch(function(err) {
         console.error('[CCF] Subscribe failed:', err.message);
       });
@@ -312,20 +316,8 @@
     // Check existing token
     var existingToken = localStorage.getItem(TOKEN_KEY);
 
-    if (existingToken && Notification.permission === 'granted') {
-      // Token exists - silently re-subscribe to refresh
-      console.log('[CCF] Token exists, refreshing silently...');
-      registerSW().then(function(swReg) {
-        return navigator.serviceWorker.ready.then(function() {
-          return getToken(swReg);
-        });
-      }).then(function(token) {
-        if (token !== existingToken) {
-          return saveToken(token);
-        }
-      }).catch(function(err) {
-        console.log('[CCF] Silent refresh error:', err.message);
-      });
+    if (Notification.permission === 'granted' && localStorage.getItem(SUBSCRIBED_KEY) === '1') {
+      console.log('[CCF] Already subscribed, skipping popup');
       return;
     }
 
