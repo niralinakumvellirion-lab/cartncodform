@@ -226,12 +226,14 @@
   }
 
   function showPopup() {
-    overlay.classList.add('ccf-show');
+    overlay.style.display = 'flex';
+    overlay.style.alignItems = 'center';
+    overlay.style.justifyContent = 'center';
     startCountdown();
   }
 
   function hidePopup() {
-    overlay.classList.remove('ccf-show');
+    overlay.style.display = 'none';
     clearInterval(timer);
   }
 
