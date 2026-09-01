@@ -12,7 +12,7 @@ redirect_urls = [
 api_version = "2025-01"
 
 [access_scopes]
-scopes = "read_orders,read_customers,write_customers,write_script_tags,read_script_tags"
+scopes = "read_orders,read_customers,write_customers,write_script_tags,read_script_tags,read_products"
 
 [app_proxy]
 url = "https://cartncodform-backend.onrender.com/apps/cartncodform"
