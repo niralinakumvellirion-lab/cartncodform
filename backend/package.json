@@ -11,7 +11,8 @@
     "test:push": "node scripts/testPush.js",
     "check:subs": "node scripts/checkCustomerSubs.js",
     "add:scripttags": "node scripts/addScriptTags.js",
-    "remove:scripttags": "node scripts/removeScriptTags.js"
+    "remove:scripttags": "node scripts/removeScriptTags.js",
+    "test:customer:push": "node scripts/testCustomerPush.js"
   },
   "dependencies": {
     "axios": "^1.7.2",
