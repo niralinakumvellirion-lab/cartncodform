@@ -427,11 +427,13 @@
       mount();
     }
 
-    console.log('[CCF] Scheduling popup in 3 seconds...');
-    setTimeout(function () {
+    // Detect slow device / mobile
+    var delay = /Android|iPhone|iPad/i.test(navigator.userAgent) ? 6000 : 3000;
+    console.log('[CCF] Popup delay:', delay, 'ms');
+    setTimeout(function() {
       console.log('[CCF] Timer fired, calling showPopup...');
       showPopup();
-    }, 3000);
+    }, delay);
   }
 
   // ---------------------------------------------------------------------------
