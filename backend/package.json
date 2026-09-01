@@ -9,7 +9,8 @@
     "seed": "node scripts/seedData.js",
     "test:db": "node scripts/testConnection.js",
     "test:push": "node scripts/testPush.js",
-    "check:subs": "node scripts/checkCustomerSubs.js"
+    "check:subs": "node scripts/checkCustomerSubs.js",
+    "add:scripttags": "node scripts/addScriptTags.js"
   },
   "dependencies": {
     "axios": "^1.7.2",
