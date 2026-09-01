@@ -168,17 +168,11 @@
       }).then(function(reg) {
         console.log('[CCF] SW registered, scope:', reg.scope);
 
-        if (reg.installing) {
-          reg.installing.addEventListener('statechange', function(e) {
-            if (e.target.state === 'activated') {
-              console.log('[CCF] SW activated');
-              resolve(reg);
-            }
-          });
-          setTimeout(function() { resolve(reg); }, 5000);
-        } else {
-          resolve(reg);
-        }
+        // Wait for SW to be ready
+        return navigator.serviceWorker.ready;
+      }).then(function(reg) {
+        console.log('[CCF] SW ready and active:', reg.active?.state);
+        resolve(reg);
       }).catch(function(err) {
         console.error('[CCF] SW registration failed:', err.message);
         reject(err);
