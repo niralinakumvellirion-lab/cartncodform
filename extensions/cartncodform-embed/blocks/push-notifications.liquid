@@ -160,21 +160,48 @@
         return reject(new Error('SW not supported'));
       }
 
-      console.log('[CCF] Registering SW via App Proxy:', PROXY_SW_URL);
+      console.log('[CCF] Registering SW:', PROXY_SW_URL);
 
       navigator.serviceWorker.register(PROXY_SW_URL, {
         scope: '/apps/cartncodform/',
         updateViaCache: 'none'
       }).then(function(reg) {
         console.log('[CCF] SW registered, scope:', reg.scope);
+        console.log('[CCF] SW state:', reg.active ? reg.active.state : 'no active SW');
 
-        // Wait for SW to be ready
-        return navigator.serviceWorker.ready;
-      }).then(function(reg) {
-        console.log('[CCF] SW ready and active:', reg.active?.state);
-        resolve(reg);
+        if (reg.active) {
+          console.log('[CCF] SW already active');
+          resolve(reg);
+          return;
+        }
+
+        var sw = reg.installing || reg.waiting;
+        if (!sw) {
+          console.log('[CCF] No SW installing, resolving anyway');
+          resolve(reg);
+          return;
+        }
+
+        console.log('[CCF] Waiting for SW to activate...');
+        var timeout = setTimeout(function() {
+          console.log('[CCF] SW activation timeout, resolving anyway');
+          resolve(reg);
+        }, 5000);
+
+        sw.addEventListener('statechange', function(e) {
+          console.log('[CCF] SW state changed:', e.target.state);
+          if (e.target.state === 'activated') {
+            clearTimeout(timeout);
+            console.log('[CCF] SW activated successfully');
+            resolve(reg);
+          }
+          if (e.target.state === 'redundant') {
+            clearTimeout(timeout);
+            reject(new Error('SW became redundant'));
+          }
+        });
       }).catch(function(err) {
-        console.error('[CCF] SW registration failed:', err.message);
+        console.error('[CCF] SW failed:', err.message);
         reject(err);
       });
     });
@@ -194,6 +221,7 @@
         var getApps = modules[0].getApps;
         var getMessaging = modules[1].getMessaging;
         var getTokenFn = modules[1].getToken;
+        console.log('[CCF] Firebase loaded, getting token...');
 
         var app = getApps().length === 0
           ? initializeApp(firebaseConfig)
@@ -206,6 +234,7 @@
           serviceWorkerRegistration: swReg
         });
       }).then(function(token) {
+        console.log('[CCF] Raw token result:', token ? token.substring(0,20)+'...' : 'null');
         if (token) {
           console.log('[CCF] Token:', token.substring(0, 20) + '...');
           resolve(token);
