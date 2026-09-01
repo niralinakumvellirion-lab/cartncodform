@@ -1,5 +1,6 @@
 const express = require('express');
 const AbandonedCustomer = require('../models/AbandonedCustomer');
+const Store = require('../models/Store');
 const { verifyWebhookHmac } = require('../utils/shopify');
 const { sendAbandonedCartEmail } = require('../utils/email');
 const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
@@ -21,7 +22,7 @@ function mapPayloadToCustomer(shopDomain, payload) {
       (Array.isArray(item.images) && item.images[0] && item.images[0].src) ||
       (item.featured_image && item.featured_image.url) ||
       null,
-    productId: item.product_id || null,
+    productId: item.product_id || (item.variant && item.variant.product_id) || null,
     variantId: item.variant_id || null,
   }));
 
@@ -46,6 +47,34 @@ function mapPayloadToCustomer(shopDomain, payload) {
     sessionId: (payload.token || payload.cart_token || payload.id || '').toString(),
     status: 'abandoned',
   };
+}
+
+/**
+ * carts/* webhooks don't include product images in line_items. Fall back to the
+ * Shopify Admin API to fetch the product's primary image.
+ */
+async function fetchProductImage(shop, accessToken, productId) {
+  try {
+    if (!productId || !accessToken) return null;
+    const res = await fetch(
+      `https://${shop}/admin/api/2025-01/products/${productId}.json`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    const data = await res.json();
+    const imageUrl = data.product?.image?.src ||
+                     data.product?.images?.[0]?.src ||
+                     null;
+    console.log(`[webhook] Product image for ${productId}:`, imageUrl ? 'found' : 'not found');
+    return imageUrl;
+  } catch(err) {
+    console.log('[webhook] Image fetch error:', err.message);
+    return null;
+  }
 }
 
 /**
@@ -103,13 +132,32 @@ async function handleWebhook(source, req, res) {
       `A customer left items worth ₹${doc.cartValue} in their cart`
     );
 
+    // Resolve a product image for the customer notification. carts/* line_items
+    // have no image, so fall back to the Admin API using the first productId.
+    const store = await Store.findOne({ shopDomain });
+    const firstItem = savedCustomer.cartItems && savedCustomer.cartItems[0];
+    const productId = (firstItem && firstItem.productId) || null;
+
+    let productImageUrl = savedCustomer.productImageUrl;
+    if (!productImageUrl && store && productId) {
+      productImageUrl = await fetchProductImage(
+        shopDomain,
+        store.accessToken,
+        productId
+      );
+      // Update DB with image
+      if (productImageUrl) {
+        await AbandonedCustomer.findByIdAndUpdate(savedCustomer._id, { productImageUrl });
+      }
+    }
+
     // Push-notify storefront customers (theme-script subscribers) for this shop.
     sendPushToCustomers(
       shopDomain,
       'You left items in your cart! 🛒',
       `Complete your order - items worth ₹${doc.cartValue} are waiting`,
       `https://${shopDomain}`,
-      savedCustomer.productImageUrl || null
+      productImageUrl || null
     );
 
     return res.status(200).json({ received: true });
