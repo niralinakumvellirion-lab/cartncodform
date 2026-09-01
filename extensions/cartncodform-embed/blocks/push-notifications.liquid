@@ -236,42 +236,122 @@
   }
 
   async function registerSW() {
-    if (!('serviceWorker' in navigator)) return null;
+    if (!('serviceWorker' in navigator)) {
+      console.log('[CCF] Service Worker not supported');
+      return null;
+    }
     try {
+      // Unregister any stale service workers first
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const reg of registrations) {
+        if (reg.active && reg.active.scriptURL.includes('cartncodform-sw')) {
+          console.log('[CCF] Found existing SW, reusing');
+          await navigator.serviceWorker.ready;
+          return reg;
+        }
+      }
+
+      // Register fresh SW
+      console.log('[CCF] Registering new Service Worker...');
       const reg = await navigator.serviceWorker.register(
-        BACKEND_URL + '/cartncodform-sw.js'
+        BACKEND_URL + '/cartncodform-sw.js',
+        { updateViaCache: 'none' }
       );
+      console.log('[CCF] SW registered:', reg.scope);
+
+      // Wait for SW to be active
+      if (reg.installing) {
+        console.log('[CCF] SW installing, waiting...');
+        await new Promise((resolve, reject) => {
+          reg.installing.addEventListener('statechange', (e) => {
+            if (e.target.state === 'activated') {
+              console.log('[CCF] SW activated');
+              resolve();
+            }
+            if (e.target.state === 'redundant') reject(new Error('SW became redundant'));
+          });
+          setTimeout(reject, 30000, new Error('SW activation timeout'));
+        });
+      }
+
       await navigator.serviceWorker.ready;
+      console.log('[CCF] SW ready');
       return reg;
-    } catch(e) { return null; }
+    } catch (err) {
+      console.error('[CCF] SW registration failed:', err);
+      return null;
+    }
   }
 
   async function subscribePush(swReg) {
     try {
       console.log('[CCF] Starting push subscription for shop:', SHOP_DOMAIN);
 
-      const { initializeApp, getApps } = await import(
-        'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'
-      );
-      const { getMessaging, getToken } = await import(
-        'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js'
-      );
+      if (!swReg) {
+        console.error('[CCF] No service worker registration');
+        return;
+      }
 
+      // Dynamically import Firebase
+      console.log('[CCF] Loading Firebase...');
+      let initializeApp, getApps, getMessaging, getToken;
+      try {
+        const appModule = await import(
+          'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'
+        );
+        initializeApp = appModule.initializeApp;
+        getApps = appModule.getApps;
+
+        const msgModule = await import(
+          'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js'
+        );
+        getMessaging = msgModule.getMessaging;
+        getToken = msgModule.getToken;
+      } catch(importErr) {
+        console.error('[CCF] Firebase import failed:', importErr);
+        return;
+      }
+
+      console.log('[CCF] Firebase loaded, initializing app...');
       const app = getApps().length === 0
         ? initializeApp(firebaseConfig)
         : getApps()[0];
+
       const messaging = getMessaging(app);
-
       console.log('[CCF] Getting FCM token...');
-      const token = await getToken(messaging, {
-        vapidKey: VAPID_KEY,
-        serviceWorkerRegistration: swReg,
-      });
 
-      if (token) {
-        console.log('[CCF] FCM token obtained:', token.substring(0, 20) + '...');
-        localStorage.setItem('ccf_fcm_token', token);
+      let token;
+      try {
+        token = await getToken(messaging, {
+          vapidKey: VAPID_KEY,
+          serviceWorkerRegistration: swReg,
+        });
+      } catch(tokenErr) {
+        console.error('[CCF] Token generation failed:', tokenErr.code, tokenErr.message);
+        // Retry once after 2 seconds
+        console.log('[CCF] Retrying token generation...');
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+          token = await getToken(messaging, {
+            vapidKey: VAPID_KEY,
+            serviceWorkerRegistration: swReg,
+          });
+        } catch(retryErr) {
+          console.error('[CCF] Retry also failed:', retryErr.message);
+          return;
+        }
+      }
 
+      if (!token) {
+        console.error('[CCF] No FCM token received');
+        return;
+      }
+
+      console.log('[CCF] FCM token obtained:', token.substring(0, 20) + '...');
+      localStorage.setItem('ccf_fcm_token', token);
+
+      // Save to backend
+      try {
         const response = await fetch(BACKEND_URL + '/api/push/subscribe-customer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -281,18 +361,16 @@
             page: window.location.pathname
           }),
         });
-
         const data = await response.json();
         console.log('[CCF] Subscription response:', data);
-
         if (data.success) {
-          console.log('[CCF] Successfully subscribed for shop:', SHOP_DOMAIN);
-        } else {
-          console.error('[CCF] Subscription failed:', data);
+          console.log('[CCF] Successfully subscribed!');
+          localStorage.setItem('ccf_push_subscribed', '1');
         }
-      } else {
-        console.error('[CCF] No FCM token received');
+      } catch(fetchErr) {
+        console.error('[CCF] Backend subscription failed:', fetchErr);
       }
+
     } catch (err) {
       console.error('[CCF] Subscribe error:', err);
     }
@@ -330,43 +408,67 @@
 
   // Init
   async function init() {
-    if (!('Notification' in window)) return;
-
-    // If already granted and subscribed — re-subscribe silently
-    if (Notification.permission === 'granted') {
-      const swReg = await registerSW();
-      if (swReg) await subscribePush(swReg);
-      localStorage.setItem('ccf_push_subscribed', '1');
+    if (!('Notification' in window)) {
+      console.log('[CCF] Notifications not supported');
       return;
     }
 
-    // If denied — don't show popup
-    if (Notification.permission === 'denied') return;
+    console.log('[CCF] Permission status:', Notification.permission);
 
-    // Also skip if denied in this session
+    // Already granted — re-subscribe silently
+    if (Notification.permission === 'granted') {
+      console.log('[CCF] Permission already granted, re-subscribing silently...');
+      const swReg = await registerSW();
+      if (swReg) await subscribePush(swReg);
+      return;
+    }
+
+    // Blocked
+    if (Notification.permission === 'denied') {
+      console.log('[CCF] Permission denied by user');
+      return;
+    }
+
+    // Denied this session
     if (sessionStorage.getItem('ccf_push_denied_session')) return;
 
-    // Show popup every time until subscribed
-    // Only skip if already successfully subscribed
-    if (localStorage.getItem('ccf_push_subscribed') === '1') return;
+    // Already subscribed
+    if (localStorage.getItem('ccf_push_subscribed') === '1') {
+      console.log('[CCF] Already subscribed, re-subscribing silently...');
+      const swReg = await registerSW();
+      if (swReg) await subscribePush(swReg);
+      return;
+    }
 
     // Show popup after delay
     const delay = {{ block.settings.popup_delay }} * 1000;
+    console.log('[CCF] Will show popup in', delay/1000, 'seconds');
     setTimeout(showPopup, delay);
   }
 
   // Track add to cart events
   function trackCartAdd() {
-    document.addEventListener('click', function(e) {
-      const btn = e.target.closest('[data-testid="add-to-cart"], [name="add"], .product-form__submit, button[type="submit"]');
+    document.addEventListener('click', async function(e) {
+      const btn = e.target.closest('[name="add"], .product-form__submit, button[type="submit"][form], [data-testid="add-to-cart"]');
       if (!btn) return;
-
-      const form = btn.closest('form[action*="/cart/add"]');
+      const form = btn.closest('form[action*="/cart/add"]') || btn.closest('form[action="/cart/add"]');
       if (!form) return;
 
       console.log('[CCF] Add to cart detected');
 
-      // Notify backend about cart add
+      // If not yet subscribed, try to subscribe now
+      if (!localStorage.getItem('ccf_push_subscribed')) {
+        console.log('[CCF] Not yet subscribed, attempting subscription on cart add...');
+        if (Notification.permission === 'granted') {
+          const swReg = await registerSW();
+          if (swReg) await subscribePush(swReg);
+        } else if (Notification.permission === 'default') {
+          // Show popup again
+          showPopup();
+        }
+      }
+
+      // Notify backend about cart activity
       const token = localStorage.getItem('ccf_fcm_token');
       if (token) {
         fetch(BACKEND_URL + '/api/push/cart-activity', {
@@ -378,7 +480,11 @@
             event: 'add_to_cart',
             url: window.location.href
           }),
-        }).catch(e => console.log('[CCF] Cart track error:', e));
+        }).then(r => r.json())
+          .then(d => console.log('[CCF] Cart activity tracked:', d))
+          .catch(e => console.log('[CCF] Cart track error:', e));
+      } else {
+        console.log('[CCF] No token yet for cart tracking');
       }
     });
   }
