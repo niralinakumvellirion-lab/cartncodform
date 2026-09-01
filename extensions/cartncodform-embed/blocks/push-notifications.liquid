@@ -163,7 +163,7 @@
       console.log('[CCF] Registering SW via App Proxy:', PROXY_SW_URL);
 
       navigator.serviceWorker.register(PROXY_SW_URL, {
-        scope: '/',
+        scope: '/apps/cartncodform/',
         updateViaCache: 'none'
       }).then(function(reg) {
         console.log('[CCF] SW registered, scope:', reg.scope);
