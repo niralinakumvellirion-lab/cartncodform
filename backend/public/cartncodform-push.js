@@ -419,9 +419,17 @@
     }
 
     // Show popup - permission is 'default' and not subscribed
-    console.log('[CCF] Will show popup in 3 seconds');
+
+    // Double check overlay exists
+    var testOverlay = document.getElementById('ccf-overlay');
+    console.log('[CCF] Overlay exists before popup:', !!testOverlay);
+    if (!testOverlay) {
+      mount();
+    }
+
+    console.log('[CCF] Scheduling popup in 3 seconds...');
     setTimeout(function () {
-      console.log('[CCF] Showing popup now...');
+      console.log('[CCF] Timer fired, calling showPopup...');
       showPopup();
     }, 3000);
   }
@@ -474,23 +482,49 @@
   function startCCF() {
     if (window.__ccfPushLoaded) return;
     window.__ccfPushLoaded = true;
-    console.log('[CCF] Starting CartnCodForm...');
-    mount();
-    trackCartAdd();
-    // Small delay to ensure DOM is fully ready
-    setTimeout(function () {
-      init();
-    }, 500);
+    console.log('[CCF] CartnCodForm starting...');
+
+    // Wait for body to exist
+    function waitForBody(cb) {
+      if (document.body) {
+        cb();
+      } else {
+        document.addEventListener('DOMContentLoaded', cb);
+      }
+    }
+
+    waitForBody(function () {
+      console.log('[CCF] Body ready, mounting...');
+      mount();
+      trackCartAdd();
+
+      // Wait for mount to complete then init
+      requestAnimationFrame(function () {
+        console.log('[CCF] Running init...');
+        init().catch(function (e) {
+          console.log('[CCF] Init error:', e.message);
+        });
+      });
+    });
   }
 
+  // Start immediately or on DOM ready
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startCCF);
+  } else if (document.readyState === 'interactive') {
+    setTimeout(startCCF, 100);
   } else {
+    // complete
     startCCF();
   }
 
-  // Also try on load as fallback
+  // Fallback
   window.addEventListener('load', function () {
-    if (!window.__ccfPushLoaded) startCCF();
+    setTimeout(function () {
+      if (!window.__ccfPushLoaded) {
+        console.log('[CCF] Load event fallback triggered');
+        startCCF();
+      }
+    }, 500);
   });
 })();
