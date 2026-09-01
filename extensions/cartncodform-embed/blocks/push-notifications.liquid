@@ -248,41 +248,75 @@
 
   async function subscribePush(swReg) {
     try {
+      console.log('[CCF] Starting push subscription for shop:', SHOP_DOMAIN);
+
       const { initializeApp, getApps } = await import(
         'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'
       );
       const { getMessaging, getToken } = await import(
         'https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js'
       );
+
       const app = getApps().length === 0
         ? initializeApp(firebaseConfig)
         : getApps()[0];
       const messaging = getMessaging(app);
+
+      console.log('[CCF] Getting FCM token...');
       const token = await getToken(messaging, {
         vapidKey: VAPID_KEY,
         serviceWorkerRegistration: swReg,
       });
+
       if (token) {
-        await fetch(BACKEND_URL + '/api/push/subscribe-customer', {
+        console.log('[CCF] FCM token obtained:', token.substring(0, 20) + '...');
+        localStorage.setItem('ccf_fcm_token', token);
+
+        const response = await fetch(BACKEND_URL + '/api/push/subscribe-customer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ shopDomain: SHOP_DOMAIN, token, page: window.location.pathname }),
+          body: JSON.stringify({
+            shopDomain: SHOP_DOMAIN,
+            token,
+            page: window.location.pathname
+          }),
         });
+
+        const data = await response.json();
+        console.log('[CCF] Subscription response:', data);
+
+        if (data.success) {
+          console.log('[CCF] Successfully subscribed for shop:', SHOP_DOMAIN);
+        } else {
+          console.error('[CCF] Subscription failed:', data);
+        }
+      } else {
+        console.error('[CCF] No FCM token received');
       }
-    } catch(e) { console.log('[CCF]', e); }
+    } catch (err) {
+      console.error('[CCF] Subscribe error:', err);
+    }
   }
 
   // Allow button clicked
   allowBtn.addEventListener('click', async () => {
     hidePopup();
     allowBtn.textContent = 'Enabling...';
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      const swReg = await registerSW();
-      if (swReg) await subscribePush(swReg);
-      localStorage.setItem('ccf_push_subscribed', '1');
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+        const swReg = await registerSW();
+        if (swReg) {
+          await subscribePush(swReg);
+          localStorage.setItem('ccf_push_subscribed', '1');
+        }
+      } else {
+        // Permission denied — don't show again this session
+        sessionStorage.setItem('ccf_push_denied_session', '1');
+      }
+    } catch(e) {
+      console.log('[CCF] Permission error:', e);
     }
-    localStorage.setItem('ccf_push_asked', '1');
   });
 
   // Deny / Close
@@ -297,19 +331,59 @@
   // Init
   async function init() {
     if (!('Notification' in window)) return;
+
+    // If already granted and subscribed — re-subscribe silently
     if (Notification.permission === 'granted') {
-      // Already subscribed — re-subscribe silently
       const swReg = await registerSW();
       if (swReg) await subscribePush(swReg);
+      localStorage.setItem('ccf_push_subscribed', '1');
       return;
     }
+
+    // If denied — don't show popup
     if (Notification.permission === 'denied') return;
-    if (localStorage.getItem('ccf_push_asked')) return;
+
+    // Also skip if denied in this session
+    if (sessionStorage.getItem('ccf_push_denied_session')) return;
+
+    // Show popup every time until subscribed
+    // Only skip if already successfully subscribed
+    if (localStorage.getItem('ccf_push_subscribed') === '1') return;
 
     // Show popup after delay
     const delay = {{ block.settings.popup_delay }} * 1000;
     setTimeout(showPopup, delay);
   }
+
+  // Track add to cart events
+  function trackCartAdd() {
+    document.addEventListener('click', function(e) {
+      const btn = e.target.closest('[data-testid="add-to-cart"], [name="add"], .product-form__submit, button[type="submit"]');
+      if (!btn) return;
+
+      const form = btn.closest('form[action*="/cart/add"]');
+      if (!form) return;
+
+      console.log('[CCF] Add to cart detected');
+
+      // Notify backend about cart add
+      const token = localStorage.getItem('ccf_fcm_token');
+      if (token) {
+        fetch(BACKEND_URL + '/api/push/cart-activity', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            shopDomain: SHOP_DOMAIN,
+            token,
+            event: 'add_to_cart',
+            url: window.location.href
+          }),
+        }).catch(e => console.log('[CCF] Cart track error:', e));
+      }
+    });
+  }
+
+  trackCartAdd();
 
   if (document.readyState === 'complete') {
     init();

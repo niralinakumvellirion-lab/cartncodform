@@ -121,4 +121,49 @@ router.post('/send-customer', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/push/cart-activity
+ * Body: { shopDomain, token, event, url }
+ * Records storefront cart activity on the customer subscription and pings the
+ * store owner.
+ */
+router.post('/cart-activity', async (req, res) => {
+  try {
+    const { shopDomain, token, event, url } = req.body;
+
+    console.log(`[cart-activity] shopDomain: ${shopDomain}, event: ${event}`);
+
+    if (!shopDomain || !token) {
+      return res.status(400).json({ error: 'shopDomain and token are required' });
+    }
+
+    // Find the subscription by token and stamp its last activity.
+    const sub = await CustomerPushSubscription.findOneAndUpdate(
+      { token },
+      {
+        lastEvent: event || 'unknown',
+        lastActivityUrl: url || undefined,
+        lastActivityAt: new Date(),
+      },
+      { new: true }
+    );
+    if (!sub) {
+      console.log('[cart-activity] no CustomerPushSubscription matched this token');
+    }
+
+    // Auto-notify the store owner about the cart activity.
+    sendPushToStore(
+      shopDomain,
+      '🛒 Customer added to cart!',
+      `A customer just added items to cart on ${shopDomain}`
+    );
+    console.log(`[cart-activity] Owner notified for: ${shopDomain}`);
+
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('[push] POST /cart-activity error:', err.message);
+    return res.status(500).json({ error: 'Failed to record cart activity' });
+  }
+});
+
 module.exports = router;

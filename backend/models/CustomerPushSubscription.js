@@ -5,6 +5,10 @@ const CustomerPushSubscriptionSchema = new mongoose.Schema({
   token: { type: String, required: true, unique: true },
   page: { type: String },
   createdAt: { type: Date, default: Date.now },
+  // Last storefront activity recorded for this subscriber (POST /api/push/cart-activity).
+  lastEvent: { type: String },
+  lastActivityUrl: { type: String },
+  lastActivityAt: { type: Date },
 });
 
 module.exports = mongoose.model('CustomerPushSubscription', CustomerPushSubscriptionSchema);
