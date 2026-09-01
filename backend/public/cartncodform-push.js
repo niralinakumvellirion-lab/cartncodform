@@ -378,34 +378,39 @@
   // init() — shows the popup; never asks permission directly
   // ---------------------------------------------------------------------------
   async function init() {
-    // Mount HTML first
     if (!document.getElementById('ccf-overlay')) mount();
 
     if (!('Notification' in window)) {
-      console.log('[CCF] Notifications not supported on this browser');
+      console.log('[CCF] Notifications not supported');
       return;
     }
 
     var perm = Notification.permission;
-    console.log('[CCF] Permission:', perm);
+    console.log('[CCF] Permission status:', perm);
 
     if (perm === 'granted') {
+      console.log('[CCF] Already granted, re-subscribing silently');
       try {
         var sw = await registerSW();
         if (sw) await subscribePush(sw);
       } catch (e) {
-        console.log('[CCF] Re-subscribe error:', e.message);
+        console.log('[CCF] Silent re-subscribe error:', e.message);
       }
       return;
     }
 
     if (perm === 'denied') {
-      console.log('[CCF] Permission denied');
+      console.log('[CCF] Permission denied by browser');
       return;
     }
 
-    if (sessionStorage.getItem('ccf_push_denied_session')) return;
+    if (sessionStorage.getItem('ccf_push_denied_session')) {
+      console.log('[CCF] Denied this session, skipping');
+      return;
+    }
+
     if (localStorage.getItem('ccf_push_subscribed') === '1') {
+      console.log('[CCF] Already subscribed, re-subscribing silently');
       try {
         var sw2 = await registerSW();
         if (sw2) await subscribePush(sw2);
@@ -413,10 +418,10 @@
       return;
     }
 
-    // Show popup after delay
-    console.log('[CCF] Scheduling popup...');
+    // Show popup - permission is 'default' and not subscribed
+    console.log('[CCF] Will show popup in 3 seconds');
     setTimeout(function () {
-      console.log('[CCF] Showing popup now');
+      console.log('[CCF] Showing popup now...');
       showPopup();
     }, 3000);
   }
@@ -469,9 +474,13 @@
   function startCCF() {
     if (window.__ccfPushLoaded) return;
     window.__ccfPushLoaded = true;
+    console.log('[CCF] Starting CartnCodForm...');
     mount();
     trackCartAdd();
-    init();
+    // Small delay to ensure DOM is fully ready
+    setTimeout(function () {
+      init();
+    }, 500);
   }
 
   if (document.readyState === 'loading') {
