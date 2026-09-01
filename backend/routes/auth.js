@@ -165,7 +165,8 @@ router.get('/callback', async (req, res) => {
     await registerAllWebhooks(shopDomain, accessToken, getBackendUrl(req));
 
     // Inject the storefront push script via the ScriptTag API (best-effort).
-    await registerScriptTag(shopDomain, accessToken, getBackendUrl(req));
+    // await registerScriptTag(shopDomain, accessToken, getBackendUrl(req));
+    // Script injection now handled by App Embed block
 
     // Strip any trailing slash on FRONTEND_URL so we never emit "//dashboard".
     const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
