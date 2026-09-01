@@ -10,7 +10,8 @@
     "test:db": "node scripts/testConnection.js",
     "test:push": "node scripts/testPush.js",
     "check:subs": "node scripts/checkCustomerSubs.js",
-    "add:scripttags": "node scripts/addScriptTags.js"
+    "add:scripttags": "node scripts/addScriptTags.js",
+    "remove:scripttags": "node scripts/removeScriptTags.js"
   },
   "dependencies": {
     "axios": "^1.7.2",
