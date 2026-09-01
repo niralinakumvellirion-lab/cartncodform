@@ -16,9 +16,17 @@ function mapPayloadToCustomer(shopDomain, payload) {
     title: item.title || item.name || 'Unknown item',
     quantity: item.quantity || 1,
     price: Number(item.price) || 0,
+    imageUrl:
+      (item.image && item.image.src) ||
+      (Array.isArray(item.images) && item.images[0] && item.images[0].src) ||
+      (item.featured_image && item.featured_image.url) ||
+      null,
     productId: item.product_id || null,
     variantId: item.variant_id || null,
   }));
+
+  // First cart item that has an image — used as the notification image.
+  const firstImageUrl = (cartItems.find((i) => i.imageUrl) || {}).imageUrl || null;
 
   const cartValue =
     Number(payload.total_price) ||
@@ -33,6 +41,7 @@ function mapPayloadToCustomer(shopDomain, payload) {
     email: email || undefined,
     phone: phone || undefined,
     cartItems,
+    productImageUrl: firstImageUrl || undefined,
     cartValue,
     sessionId: (payload.token || payload.cart_token || payload.id || '').toString(),
     status: 'abandoned',
@@ -99,7 +108,8 @@ async function handleWebhook(source, req, res) {
       shopDomain,
       'You left items in your cart! 🛒',
       `Complete your order - items worth ₹${doc.cartValue} are waiting`,
-      `https://${shopDomain}`
+      `https://${shopDomain}`,
+      savedCustomer.productImageUrl || null
     );
 
     return res.status(200).json({ received: true });

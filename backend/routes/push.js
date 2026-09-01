@@ -103,12 +103,12 @@ router.post('/subscribe-customer', async (req, res) => {
 
 /**
  * POST /api/push/send-customer
- * Body: { shopDomain, title, body, url }
+ * Body: { shopDomain, title, body, url, imageUrl }
  * Sends a notification to every storefront customer subscribed for the shop.
  */
 router.post('/send-customer', async (req, res) => {
   try {
-    const { shopDomain, title, body, url } = req.body;
+    const { shopDomain, title, body, url, imageUrl } = req.body;
 
     console.log(`[send-customer] shopDomain received: ${shopDomain}`);
 
@@ -116,7 +116,7 @@ router.post('/send-customer', async (req, res) => {
       return res.status(400).json({ error: 'shopDomain, title and body are required' });
     }
 
-    const result = await sendPushToCustomers(shopDomain, title, body, url);
+    const result = await sendPushToCustomers(shopDomain, title, body, url, imageUrl);
 
     console.log(`[send-customer] tokens found: ${result.tokensFound ?? 0}`);
     console.log(`[send-customer] FCM result: ${JSON.stringify(result)}`);

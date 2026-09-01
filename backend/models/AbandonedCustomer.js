@@ -17,9 +17,20 @@ const abandonedCustomerSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
-  cartItems: {
-    type: Array,
-    default: [],
+  cartItems: [
+    {
+      title: String,
+      quantity: Number,
+      price: Number,
+      imageUrl: String,
+      productId: mongoose.Schema.Types.Mixed,
+      variantId: mongoose.Schema.Types.Mixed,
+    },
+  ],
+  // First available cart-item image, used as the push notification image.
+  productImageUrl: {
+    type: String,
+    trim: true,
   },
   cartValue: {
     type: Number,
