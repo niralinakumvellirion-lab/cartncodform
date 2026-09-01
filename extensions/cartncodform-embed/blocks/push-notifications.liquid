@@ -150,6 +150,57 @@
     });
   }
 
+  function setupForegroundMessages() {
+    Promise.all([
+      import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
+      import('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js')
+    ]).then(function(modules) {
+      var initializeApp = modules[0].initializeApp;
+      var getApps = modules[0].getApps;
+      var getMessaging = modules[1].getMessaging;
+      var onMessage = modules[1].onMessage;
+
+      var app = getApps().length === 0
+        ? initializeApp(firebaseConfig)
+        : getApps()[0];
+      var messaging = getMessaging(app);
+
+      onMessage(messaging, function(payload) {
+        console.log('[CCF] Foreground message received:', payload);
+
+        var title = payload.notification && payload.notification.title
+          ? payload.notification.title
+          : 'CartnCodForm';
+        var body = payload.notification && payload.notification.body
+          ? payload.notification.body
+          : 'New notification';
+        var url = payload.data && payload.data.url
+          ? payload.data.url
+          : window.location.href;
+
+        // Show notification even when tab is focused
+        if (Notification.permission === 'granted') {
+          var notification = new Notification(title, {
+            body: body,
+            icon: '/favicon.ico',
+            data: { url: url }
+          });
+
+          notification.onclick = function() {
+            window.focus();
+            notification.close();
+          };
+
+          console.log('[CCF] Foreground notification shown');
+        }
+      });
+
+      console.log('[CCF] Foreground message handler setup');
+    }).catch(function(err) {
+      console.log('[CCF] Foreground handler error:', err.message);
+    });
+  }
+
   // ============================================
   // SERVICE WORKER via APP PROXY
   // ============================================
@@ -289,6 +340,7 @@
         return saveToken(token);
       }).then(function() {
         console.log('[CCF] Token saved successfully!');
+        setupForegroundMessages();
       }).catch(function(err) {
         console.error('[CCF] Subscribe failed:', err.message);
       });
@@ -377,6 +429,11 @@
     wireButtons();
     trackCart();
     checkAndInit();
+
+    // Setup foreground message handler
+    if (Notification.permission === 'granted') {
+      setupForegroundMessages();
+    }
   }
 
   if (document.readyState === 'loading') {
