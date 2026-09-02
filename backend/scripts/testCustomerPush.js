@@ -9,10 +9,14 @@ async function main() {
 
   const { sendPushToCustomers } = require('../utils/pushNotification');
 
+  const testImageUrl = 'https://cdn.shopify.com/s/files/1/0831/4824/3181/files/WhatsApp-Image-2024-09-03-at-6.27.44-PM.jpg?v=1788175662';
+
   const result = await sendPushToCustomers(
     'cartncod-form.myshopify.com',
     '🛒 Test Notification',
-    'CartnCodForm push working on real store!'
+    'CartnCodForm push working on real store!',
+    'https://cartncod-form.myshopify.com',
+    testImageUrl
   );
 
   console.log('Result:', JSON.stringify(result, null, 2));
