@@ -1,4 +1,6 @@
 {% if block.settings.enable_push %}
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js"></script>
 <script>
 (function() {
   'use strict';
@@ -151,54 +153,25 @@
   }
 
   function setupForegroundMessages() {
-    Promise.all([
-      import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
-      import('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js')
-    ]).then(function(modules) {
-      var initializeApp = modules[0].initializeApp;
-      var getApps = modules[0].getApps;
-      var getMessaging = modules[1].getMessaging;
-      var onMessage = modules[1].onMessage;
-
-      var app = getApps().length === 0
-        ? initializeApp(firebaseConfig)
-        : getApps()[0];
-      var messaging = getMessaging(app);
-
-      onMessage(messaging, function(payload) {
-        console.log('[CCF] Foreground message received:', payload);
-
+    try {
+      var app = firebase.apps && firebase.apps.length > 0
+        ? firebase.apps[0]
+        : firebase.initializeApp(firebaseConfig);
+      var messaging = firebase.messaging(app);
+      messaging.onMessage(function(payload) {
+        console.log('[CCF] Foreground message:', payload);
         var title = payload.notification && payload.notification.title
-          ? payload.notification.title
-          : 'CartnCodForm';
+          ? payload.notification.title : 'CartnCodForm';
         var body = payload.notification && payload.notification.body
-          ? payload.notification.body
-          : 'New notification';
-        var url = payload.data && payload.data.url
-          ? payload.data.url
-          : window.location.href;
-
-        // Show notification even when tab is focused
+          ? payload.notification.body : 'New notification';
         if (Notification.permission === 'granted') {
-          var notification = new Notification(title, {
-            body: body,
-            icon: '/favicon.ico',
-            data: { url: url }
-          });
-
-          notification.onclick = function() {
-            window.focus();
-            notification.close();
-          };
-
-          console.log('[CCF] Foreground notification shown');
+          new Notification(title, { body: body, icon: '/favicon.ico' });
         }
       });
-
-      console.log('[CCF] Foreground message handler setup');
-    }).catch(function(err) {
+      console.log('[CCF] Foreground handler set up');
+    } catch(err) {
       console.log('[CCF] Foreground handler error:', err.message);
-    });
+    }
   }
 
   // ============================================
@@ -294,37 +267,38 @@
 
   function getToken(swReg) {
     return new Promise(function(resolve, reject) {
-      Promise.all([
-        import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
-        import('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging.js')
-      ]).then(function(modules) {
-        var initializeApp = modules[0].initializeApp;
-        var getApps = modules[0].getApps;
-        var getMessaging = modules[1].getMessaging;
-        var getTokenFn = modules[1].getToken;
-        console.log('[CCF] Firebase loaded, getting token...');
-        console.log('[CCF] Firebase modules loaded, creating messaging...');
+      try {
+        console.log('[CCF] getToken() using compat SDK');
 
-        var app = getApps().length === 0
-          ? initializeApp(firebaseConfig)
-          : getApps()[0];
+        var app;
+        if (firebase.apps && firebase.apps.length > 0) {
+          app = firebase.apps[0];
+        } else {
+          app = firebase.initializeApp(firebaseConfig);
+        }
 
-        var messaging = getMessaging(app);
+        var messaging = firebase.messaging(app);
 
         console.log('[CCF] getToken() called with vapidKey and swReg');
-        return getTokenFn(messaging, {
+        messaging.getToken({
           vapidKey: VAPID_KEY,
           serviceWorkerRegistration: swReg
+        }).then(function(token) {
+          console.log('[CCF] Raw token result:', token ? token.substring(0,20)+'...' : 'null');
+          if (token) {
+            console.log('[CCF] Token:', token.substring(0, 20) + '...');
+            resolve(token);
+          } else {
+            reject(new Error('No token returned'));
+          }
+        }).catch(function(err) {
+          console.error('[CCF] getToken error:', err.code, err.message);
+          reject(err);
         });
-      }).then(function(token) {
-        console.log('[CCF] Raw token result:', token ? token.substring(0,20)+'...' : 'null');
-        if (token) {
-          console.log('[CCF] Token:', token.substring(0, 20) + '...');
-          resolve(token);
-        } else {
-          reject(new Error('No token returned'));
-        }
-      }).catch(reject);
+      } catch(err) {
+        console.error('[CCF] getToken setup error:', err.message);
+        reject(err);
+      }
     });
   }
 
