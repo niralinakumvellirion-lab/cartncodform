@@ -15,7 +15,7 @@ router.get('/sw.js', (req, res) => {
   const swContent = fs.readFileSync(swPath, 'utf8');
 
   res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
-  res.setHeader('Service-Worker-Allowed', '/');
+  res.setHeader('Service-Worker-Allowed', '/apps/cartncodform/');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
