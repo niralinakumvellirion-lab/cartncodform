@@ -287,6 +287,9 @@
     // Save old token to clean up
     var oldToken = localStorage.getItem(TOKEN_KEY);
 
+    var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    var deviceType = isMobile ? 'mobile' : 'desktop';
+
     return fetch(BACKEND_URL + '/api/push/subscribe-customer', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -294,7 +297,8 @@
         shopDomain: SHOP_DOMAIN,
         token: token,
         oldToken: oldToken,
-        page: window.location.pathname
+        page: window.location.pathname,
+        deviceType: deviceType
       })
     }).then(function(r) { return r.json(); })
     .then(function(data) {

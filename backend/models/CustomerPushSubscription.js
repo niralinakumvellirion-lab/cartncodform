@@ -4,6 +4,7 @@ const CustomerPushSubscriptionSchema = new mongoose.Schema({
   shopDomain: { type: String, required: true, lowercase: true },
   token: { type: String, required: true, unique: true },
   page: { type: String },
+  deviceType: { type: String, enum: ['mobile', 'desktop', 'unknown'], default: 'unknown' },
   createdAt: { type: Date, default: Date.now },
   // Last storefront activity recorded for this subscriber (POST /api/push/cart-activity).
   lastEvent: { type: String },
