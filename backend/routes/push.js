@@ -66,7 +66,7 @@ router.post('/send', async (req, res) => {
  */
 router.post('/subscribe-customer', async (req, res) => {
   try {
-    const { shopDomain, token, oldToken, page, deviceType } = req.body;
+    const { shopDomain, token, oldToken, page, deviceType, cartToken } = req.body;
 
     if (!shopDomain || !token) {
       return res.status(400).json({ error: 'shopDomain and token required' });
@@ -88,6 +88,7 @@ router.post('/subscribe-customer', async (req, res) => {
         token,
         page: page || undefined,
         deviceType: deviceType || 'unknown',
+        cartToken: cartToken || undefined,
         lastActivityAt: new Date()
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }

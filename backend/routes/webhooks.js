@@ -224,7 +224,9 @@ async function handleWebhook(source, req, res) {
           'You left items in your cart! 🛒',
           `Complete your order - items worth ₹${doc.cartValue} are waiting`,
           `https://${shopDomain}`,
-          productImageUrl || null
+          productImageUrl || null,
+          true,
+          sessionId || null
         );
       });
     } else if (source === 'checkout') {

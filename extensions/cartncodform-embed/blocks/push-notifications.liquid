@@ -304,31 +304,45 @@
   }
 
   function saveToken(token) {
-    // Save old token to clean up
     var oldToken = localStorage.getItem(TOKEN_KEY);
-
     var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
     var deviceType = isMobile ? 'mobile' : 'desktop';
 
-    return fetch(BACKEND_URL + '/api/push/subscribe-customer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        shopDomain: SHOP_DOMAIN,
-        token: token,
-        oldToken: oldToken,
-        page: window.location.pathname,
-        deviceType: deviceType
+    // Fetch Shopify cart token to link this subscription to the cart.
+    fetch('/cart.js')
+      .then(function(r) { return r.json(); })
+      .then(function(cart) {
+        var cartToken = cart.token || null;
+        console.log('[CCF] Cart token:', cartToken ? cartToken.substring(0,10)+'...' : 'none');
+
+        return fetch(BACKEND_URL + '/api/push/subscribe-customer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            shopDomain: SHOP_DOMAIN,
+            token: token,
+            oldToken: oldToken,
+            page: window.location.pathname,
+            deviceType: deviceType,
+            cartToken: cartToken
+          })
+        });
       })
-    }).then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (data.success) {
-        localStorage.setItem(TOKEN_KEY, token);
-        localStorage.setItem(SUBSCRIBED_KEY, '1');
-        console.log('[CCF] Token saved successfully!');
-      }
-      return data;
-    });
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data.success) {
+          localStorage.setItem(TOKEN_KEY, token);
+          localStorage.setItem(SUBSCRIBED_KEY, '1');
+          console.log('[CCF] Token saved successfully!');
+        }
+        return data;
+      })
+      .catch(function(err) {
+        console.error('[CCF] saveToken error:', err.message);
+      });
+
+    // Return a resolved promise so the caller chain doesn't break.
+    return Promise.resolve({ success: true });
   }
 
   // ============================================
@@ -385,6 +399,11 @@
     if (Notification.permission === 'granted') {
       if (localStorage.getItem(SUBSCRIBED_KEY) === '1') {
         console.log('[CCF] Already subscribed, skipping popup');
+        // Refresh cartToken silently on each visit so it stays current.
+        var existingFcmToken = localStorage.getItem(TOKEN_KEY);
+        if (existingFcmToken) {
+          saveToken(existingFcmToken);
+        }
       } else {
         console.log('[CCF] Permission granted but not subscribed — re-subscribing');
         registerSW().then(function(reg) {
