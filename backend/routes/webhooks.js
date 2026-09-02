@@ -55,6 +55,9 @@ function mapPayloadToCustomer(shopDomain, payload) {
  */
 async function fetchProductImage(shop, accessToken, productId) {
   try {
+    console.log('[webhook] Fetching image for productId:', productId,
+      'shop:', shop,
+      'hasToken:', !!accessToken);
     if (!productId || !accessToken) return null;
     const res = await fetch(
       `https://${shop}/admin/api/2025-01/products/${productId}.json`,
@@ -101,12 +104,22 @@ async function handleWebhook(source, req, res) {
     console.log(`\n[webhook:${source}] Received "${topic}" from ${shopDomain || 'unknown shop'}`);
     console.log(JSON.stringify(req.body, null, 2));
 
+    const payload = req.body;
+    console.log('[webhook] Payload line_items sample:',
+      JSON.stringify(payload.line_items?.[0] || payload.line_items, null, 2)
+    );
+
     if (!shopDomain) {
       // Still acknowledge so Shopify doesn't retry forever.
       return res.status(200).json({ received: true, warning: 'no shop domain' });
     }
 
     const doc = mapPayloadToCustomer(shopDomain, req.body);
+
+    console.log('[webhook] Mapped customer productImageUrl:', doc.productImageUrl);
+    console.log('[webhook] Mapped customer cartItems[0]:',
+      JSON.stringify(doc.cartItems?.[0], null, 2)
+    );
 
     let savedCustomer;
     if (doc.sessionId) {
@@ -150,6 +163,8 @@ async function handleWebhook(source, req, res) {
         await AbandonedCustomer.findByIdAndUpdate(savedCustomer._id, { productImageUrl });
       }
     }
+
+    console.log('[webhook] Final productImageUrl before push:', productImageUrl);
 
     // Push-notify storefront customers (theme-script subscribers) for this shop.
     sendPushToCustomers(
