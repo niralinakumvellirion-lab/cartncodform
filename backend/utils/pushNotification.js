@@ -95,12 +95,17 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl) {
       imageUrl ? imageUrl.substring(0, 50) + '...' : 'NOT SET');
 
     const message = {
-      notification: {
-        title,
-        body,
-        imageUrl: imageUrl || undefined,
+      data: {
+        url: url || `https://${shopDomain}`,
+        imageUrl: imageUrl || '',
+        title: title,
+        body: body,
+        icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
       },
       webpush: {
+        headers: {
+          Urgency: 'high',
+        },
         notification: {
           title,
           body,
@@ -113,12 +118,6 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl) {
         fcm_options: {
           link: url || `https://${shopDomain}`,
         },
-      },
-      data: {
-        url: url || `https://${shopDomain}`,
-        imageUrl: imageUrl || '',
-        title: title,
-        body: body,
       },
       tokens,
     };

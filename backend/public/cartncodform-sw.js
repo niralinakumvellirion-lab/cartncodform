@@ -21,13 +21,15 @@ messaging.onBackgroundMessage(function(payload) {
   var body = payload.notification?.body ||
              payload.data?.body ||
              'Complete your order now';
+  var image = payload.notification?.image ||
+              payload.data?.imageUrl ||
+              payload.data?.image ||
+              null;
+
   var icon = payload.notification?.icon ||
              payload.data?.icon ||
+             payload.data?.imageUrl ||
              'https://img.icons8.com/color/96/shopping-cart--v1.png';
-  var image = payload.notification?.image ||
-              payload.data?.image ||
-              payload.data?.imageUrl ||
-              null;
   var url = payload.data?.url || '/';
 
   var options = {
