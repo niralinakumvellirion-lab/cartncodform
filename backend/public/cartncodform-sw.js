@@ -13,13 +13,38 @@ firebase.initializeApp({
 const messaging = firebase.messaging();
 
 messaging.onBackgroundMessage(function(payload) {
-  const title = payload.notification?.title || 'You left something behind!';
-  const body = payload.notification?.body || 'Complete your order now';
-  self.registration.showNotification(title, {
-    body,
-    icon: '/favicon.ico',
-    data: { url: payload.data?.url || self.location.origin },
-  });
+  console.log('[SW] Background message:', payload);
+
+  var title = payload.notification?.title ||
+              payload.data?.title ||
+              'You left items in your cart!';
+  var body = payload.notification?.body ||
+             payload.data?.body ||
+             'Complete your order now';
+  var icon = payload.notification?.icon ||
+             payload.data?.icon ||
+             'https://img.icons8.com/color/96/shopping-cart--v1.png';
+  var image = payload.notification?.image ||
+              payload.data?.image ||
+              payload.data?.imageUrl ||
+              null;
+  var url = payload.data?.url || '/';
+
+  var options = {
+    body: body,
+    icon: icon,
+    badge: 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+    data: { url: url },
+    requireInteraction: false,
+    vibrate: [200, 100, 200],
+  };
+
+  // Add image if available
+  if (image) {
+    options.image = image;
+  }
+
+  self.registration.showNotification(title, options);
 });
 
 self.addEventListener('notificationclick', function(event) {

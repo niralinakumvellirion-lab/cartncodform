@@ -96,21 +96,26 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl) {
         body,
         imageUrl: imageUrl || undefined,
       },
-      webpush: imageUrl
-        ? {
-            notification: {
-              title,
-              body,
-              icon: imageUrl,
-              image: imageUrl,
-              badge: imageUrl,
-            },
-            fcm_options: {
-              link: url || `https://${shop}`,
-            },
-          }
-        : undefined,
-      data: url ? { url: String(url) } : {},
+      webpush: {
+        notification: {
+          title,
+          body,
+          icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+          image: imageUrl || undefined,
+          badge: 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+          requireInteraction: false,
+          vibrate: [200, 100, 200],
+        },
+        fcm_options: {
+          link: url || `https://${shopDomain}`,
+        },
+      },
+      data: {
+        url: url || `https://${shopDomain}`,
+        imageUrl: imageUrl || '',
+        title: title,
+        body: body,
+      },
       tokens,
     };
     const response = await getMessaging().sendEachForMulticast(message);
