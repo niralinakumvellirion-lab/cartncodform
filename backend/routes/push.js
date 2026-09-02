@@ -111,6 +111,7 @@ router.post('/send-customer', async (req, res) => {
     const { shopDomain, title, body, url, imageUrl } = req.body;
 
     console.log(`[send-customer] shopDomain received: ${shopDomain}`);
+    console.log('[send-customer] imageUrl from request:', req.body.imageUrl || 'NONE');
 
     if (!shopDomain || !title || !body) {
       return res.status(400).json({ error: 'shopDomain, title and body are required' });

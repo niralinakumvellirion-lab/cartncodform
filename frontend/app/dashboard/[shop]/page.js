@@ -36,7 +36,7 @@ function WhatsAppButton({ phone, message }) {
   );
 }
 
-function SendPushButton({ shop, cartValue, cartItems }) {
+function SendPushButton({ shop, cartValue, cartItems, productImageUrl }) {
   const [state, setState] = useState('idle'); // idle | sending | sent | error
 
   async function send() {
@@ -47,7 +47,7 @@ function SendPushButton({ shop, cartValue, cartItems }) {
         title: 'You left items in your cart! 🛒',
         body: `Your cart has items worth ₹${cartValue}. Complete your order now!`,
         url: `https://${shop}`,
-        imageUrl: cartItems?.[0]?.imageUrl || null,
+        imageUrl: productImageUrl || cartItems?.[0]?.imageUrl || null,
       });
       setState('sent');
     } catch (err) {
@@ -290,7 +290,12 @@ export default function StoreView() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <SendPushButton shop={shop} cartValue={c.cartValue} cartItems={c.cartItems} />
+                        <SendPushButton
+                          shop={shop}
+                          cartValue={c.cartValue}
+                          cartItems={c.cartItems}
+                          productImageUrl={c.productImageUrl}
+                        />
                         {c.phone && (
                           <WhatsAppButton
                             phone={c.phone}

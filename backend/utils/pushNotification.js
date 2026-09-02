@@ -90,6 +90,10 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl) {
       console.log(`[push-customer] token ${i + 1}/${tokens.length}: ${t}`);
     });
 
+    console.log('[push-customer] imageUrl received:', imageUrl || 'NONE');
+    console.log('[push-customer] webpush notification image:',
+      imageUrl ? imageUrl.substring(0, 50) + '...' : 'NOT SET');
+
     const message = {
       notification: {
         title,
