@@ -212,32 +212,77 @@
       }
 
       var swUrl = window.location.origin + '/apps/cartncodform/sw.js';
-      console.log('[CCF] Registering SW directly from:', swUrl);
+      console.log('[CCF] Registering SW from:', swUrl);
 
-      navigator.serviceWorker.register(swUrl, {
-        scope: '/',
-        updateViaCache: 'none'
-      }).then(function(reg) {
-        console.log('[CCF] SW registered, scope:', reg.scope);
+      // Unregister any stale SWs (blob URLs, wrong scope) before registering
+      navigator.serviceWorker.getRegistrations().then(function(regs) {
+        var unregisterPromises = regs.map(function(reg) {
+          var isCorrect = reg.scope === window.location.origin + '/' &&
+            reg.active &&
+            reg.active.scriptURL.indexOf('/apps/cartncodform/sw.js') !== -1;
+          if (!isCorrect) {
+            console.log('[CCF] Unregistering stale SW:', reg.scope, reg.active && reg.active.scriptURL);
+            return reg.unregister();
+          }
+          return Promise.resolve(false);
+        });
 
-        if (reg.active) {
-          resolve(reg);
-          return;
+        return Promise.all(unregisterPromises);
+      }).then(function() {
+        // Check if correct SW already active
+        return navigator.serviceWorker.getRegistrations();
+      }).then(function(regs) {
+        for (var i = 0; i < regs.length; i++) {
+          var reg = regs[i];
+          if (
+            reg.active &&
+            reg.active.scriptURL.indexOf('/apps/cartncodform/sw.js') !== -1 &&
+            reg.scope === window.location.origin + '/'
+          ) {
+            console.log('[CCF] Reusing existing correct SW');
+            resolve(reg);
+            return;
+          }
         }
 
-        var sw = reg.installing || reg.waiting;
-        if (!sw) { resolve(reg); return; }
+        // Register fresh
+        navigator.serviceWorker.register(swUrl, {
+          scope: '/',
+          updateViaCache: 'none'
+        }).then(function(reg) {
+          console.log('[CCF] SW registered, scope:', reg.scope);
 
-        var timeout = setTimeout(function() { resolve(reg); }, 5000);
-        sw.addEventListener('statechange', function(e) {
-          console.log('[CCF] SW state:', e.target.state);
-          if (e.target.state === 'activated') {
-            clearTimeout(timeout);
+          if (reg.active) {
             resolve(reg);
+            return;
           }
+
+          var sw = reg.installing || reg.waiting;
+          if (!sw) {
+            // Wait for active
+            navigator.serviceWorker.ready.then(function(readyReg) {
+              resolve(readyReg);
+            });
+            return;
+          }
+
+          var timeout = setTimeout(function() {
+            navigator.serviceWorker.ready.then(resolve);
+          }, 8000);
+
+          sw.addEventListener('statechange', function(e) {
+            console.log('[CCF] SW state:', e.target.state);
+            if (e.target.state === 'activated') {
+              clearTimeout(timeout);
+              resolve(reg);
+            }
+          });
+        }).catch(function(err) {
+          console.error('[CCF] SW registration failed:', err.message);
+          reject(err);
         });
       }).catch(function(err) {
-        console.error('[CCF] SW registration failed:', err.message);
+        console.error('[CCF] SW setup error:', err.message);
         reject(err);
       });
     });
@@ -362,8 +407,21 @@
     // Check existing token
     var existingToken = localStorage.getItem(TOKEN_KEY);
 
-    if (Notification.permission === 'granted' && localStorage.getItem(SUBSCRIBED_KEY) === '1') {
-      console.log('[CCF] Already subscribed, skipping popup');
+    if (Notification.permission === 'granted') {
+      if (localStorage.getItem(SUBSCRIBED_KEY) === '1') {
+        console.log('[CCF] Already subscribed, skipping popup');
+      } else {
+        console.log('[CCF] Permission granted but not subscribed — re-subscribing');
+        registerSW().then(function(reg) {
+          return getToken(reg);
+        }).then(function(token) {
+          return saveToken(token);
+        }).then(function() {
+          setupForegroundMessages();
+        }).catch(function(err) {
+          console.error('[CCF] Silent re-subscribe failed:', err.message);
+        });
+      }
       return;
     }
 
