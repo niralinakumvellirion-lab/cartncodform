@@ -312,7 +312,9 @@
     fetch('/cart.js')
       .then(function(r) { return r.json(); })
       .then(function(cart) {
-        var cartToken = cart.token || null;
+        // Normalize: strip ?key=... suffix so it matches the webhook token.
+        var rawCartToken = cart.token || null;
+        var cartToken = rawCartToken ? rawCartToken.split('?')[0].trim() || null : null;
         console.log('[CCF] Cart token:', cartToken ? cartToken.substring(0,10)+'...' : 'none');
 
         return fetch(BACKEND_URL + '/api/push/subscribe-customer', {

@@ -68,6 +68,11 @@ router.post('/subscribe-customer', async (req, res) => {
   try {
     const { shopDomain, token, oldToken, page, deviceType, cartToken } = req.body;
 
+    // Normalize cartToken — strip ?key=... suffix that /cart.js appends.
+    const normalizedCartToken = cartToken
+      ? cartToken.split('?')[0].trim() || null
+      : null;
+
     if (!shopDomain || !token) {
       return res.status(400).json({ error: 'shopDomain and token required' });
     }
@@ -88,7 +93,7 @@ router.post('/subscribe-customer', async (req, res) => {
         token,
         page: page || undefined,
         deviceType: deviceType || 'unknown',
-        cartToken: cartToken || undefined,
+        cartToken: normalizedCartToken || undefined,
         lastActivityAt: new Date()
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }

@@ -217,8 +217,12 @@ async function handleWebhook(source, req, res) {
     // Schedule push after abandonment delay. Cancel+reschedule on each
     // cart update so only a truly abandoned cart triggers the push.
     const sessionId = savedCustomer.sessionId || doc.sessionId;
+    // Normalize sessionId — strip ?key=... suffix to match stored cartToken.
+    const normalizedSessionId = sessionId
+      ? sessionId.split('?')[0].trim() || sessionId
+      : sessionId;
     if (source === 'cart') {
-      schedulePush(sessionId, function() {
+      schedulePush(normalizedSessionId, function() {
         sendPushToCustomers(
           shopDomain,
           'You left items in your cart! 🛒',
@@ -226,12 +230,12 @@ async function handleWebhook(source, req, res) {
           `https://${shopDomain}`,
           productImageUrl || null,
           true,
-          sessionId || null
+          normalizedSessionId || null
         );
       });
     } else if (source === 'checkout') {
       // Customer proceeded to checkout — cancel any pending cart push.
-      cancelPush(sessionId);
+      cancelPush(normalizedSessionId);
       // Send push only after checkout abandonment (not create/update).
       // For now do not push on checkout events.
     }
