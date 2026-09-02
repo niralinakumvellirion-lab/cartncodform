@@ -14,14 +14,16 @@ router.get('/sw.js', (req, res) => {
 
   const swContent = fs.readFileSync(swPath, 'utf8');
 
-  // CRITICAL: Must return JS with these headers
-  res.setHeader('Content-Type', 'application/javascript');
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
   res.setHeader('Service-Worker-Allowed', '/');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.send(swContent);
+  res.setHeader('X-Content-Type-Options', 'nosniff');
 
-  console.log('[proxy] Served SW to:', req.headers['x-shopify-shop-domain'] || 'unknown');
+  console.log('[proxy] Served SW, headers set for root scope');
+  res.send(swContent);
 });
 
 // Health check
