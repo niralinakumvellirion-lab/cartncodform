@@ -55,6 +55,24 @@ async function sendPushToStore(shopDomain, title, body) {
       tokens,
     };
     const response = await getMessaging().sendEachForMulticast(message);
+
+    const staleTokens = [];
+    response.responses?.forEach((r, i) => {
+      if (!r.success) {
+        const code = r.error?.code || '';
+        if (
+          code === 'messaging/registration-token-not-registered' ||
+          code === 'messaging/invalid-registration-token'
+        ) {
+          staleTokens.push(tokens[i]);
+        }
+      }
+    });
+    if (staleTokens.length > 0) {
+      await PushSubscription.deleteMany({ token: { $in: staleTokens } });
+      console.log(`[push] Deleted ${staleTokens.length} stale owner token(s)`);
+    }
+
     console.log(`[push] Sent ${response.successCount}/${tokens.length} for ${shopDomain}`);
     return { success: true, sent: response.successCount };
   } catch (err) {
@@ -124,14 +142,26 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl) {
     const response = await getMessaging().sendEachForMulticast(message);
 
     console.log('[push-customer] FCM responses:', JSON.stringify(response.responses, null, 2));
+
+    const staleTokens = [];
     response.responses.forEach((r, i) => {
       if (!r.success) {
-        const e = r.error || {};
-        console.error(
-          `[push-customer] token ${i + 1} FAILED: ${e.code || e.message || 'unknown error'}`
-        );
+        const code = r.error?.code || '';
+        const msg = r.error?.message || 'unknown error';
+        console.error(`[push-customer] token ${i + 1} FAILED: ${code || msg}`);
+        if (
+          code === 'messaging/registration-token-not-registered' ||
+          code === 'messaging/invalid-registration-token'
+        ) {
+          staleTokens.push(tokens[i]);
+        }
       }
     });
+
+    if (staleTokens.length > 0) {
+      await CustomerPushSubscription.deleteMany({ token: { $in: staleTokens } });
+      console.log(`[push-customer] Deleted ${staleTokens.length} stale token(s)`);
+    }
 
     console.log(
       `[push] Sent ${response.successCount}/${tokens.length} to customers of ${shop}`
