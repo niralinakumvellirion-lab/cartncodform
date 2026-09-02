@@ -149,19 +149,33 @@ async function handleWebhook(source, req, res) {
     // have no image, so fall back to the Admin API using the first productId.
     const store = await Store.findOne({ shopDomain });
     const firstItem = savedCustomer.cartItems && savedCustomer.cartItems[0];
-    const productId = (firstItem && firstItem.productId) || null;
+    const productId = (firstItem && firstItem.productId)
+      ? String(firstItem.productId)
+      : null;
 
-    let productImageUrl = savedCustomer.productImageUrl;
-    if (!productImageUrl && store && productId) {
+    // Always resolve the image for the CURRENT first cart item.
+    // The cached productImageUrl may belong to a different product if the
+    // customer updated their cart, so we re-fetch whenever the productId
+    // is available. fetchProductImage returns null on error (safe).
+    let productImageUrl = null;
+
+    if (store && productId) {
       productImageUrl = await fetchProductImage(
         shopDomain,
         store.accessToken,
         productId
       );
-      // Update DB with image
       if (productImageUrl) {
-        await AbandonedCustomer.findByIdAndUpdate(savedCustomer._id, { productImageUrl });
+        await AbandonedCustomer.findByIdAndUpdate(
+          savedCustomer._id,
+          { productImageUrl }
+        );
       }
+    }
+
+    // Fallback: use whatever image is already stored if Admin API returned nothing
+    if (!productImageUrl) {
+      productImageUrl = savedCustomer.productImageUrl || null;
     }
 
     console.log('[webhook] Final productImageUrl before push:', productImageUrl);
