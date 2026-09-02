@@ -7,6 +7,40 @@ const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotificat
 
 const router = express.Router();
 
+// In-memory map of pending abandonment push timers.
+// Key: sessionId (cart token), Value: setTimeout handle.
+const pendingPushTimers = new Map();
+
+// How long to wait after last cart activity before sending push (ms).
+// Set ABANDON_DELAY_MS env var to override (e.g. 60000 = 1 min for testing).
+const ABANDON_DELAY_MS = process.env.ABANDON_DELAY_MS
+  ? parseInt(process.env.ABANDON_DELAY_MS, 10)
+  : 15 * 60 * 1000; // default 15 minutes
+
+function schedulePush(sessionId, pushFn) {
+  // Cancel any existing timer for this session.
+  if (pendingPushTimers.has(sessionId)) {
+    clearTimeout(pendingPushTimers.get(sessionId));
+    console.log(`[webhook] Cancelled pending push for session: ${sessionId}`);
+  }
+  // Schedule a new push after the abandonment delay.
+  const timer = setTimeout(function() {
+    pendingPushTimers.delete(sessionId);
+    console.log(`[webhook] Firing abandoned push for session: ${sessionId}`);
+    pushFn();
+  }, ABANDON_DELAY_MS);
+  pendingPushTimers.set(sessionId, timer);
+  console.log(`[webhook] Push scheduled in ${ABANDON_DELAY_MS / 60000}min for session: ${sessionId}`);
+}
+
+function cancelPush(sessionId) {
+  if (pendingPushTimers.has(sessionId)) {
+    clearTimeout(pendingPushTimers.get(sessionId));
+    pendingPushTimers.delete(sessionId);
+    console.log(`[webhook] Push cancelled (checkout) for session: ${sessionId}`);
+  }
+}
+
 /**
  * Normalise a Shopify cart / checkout payload into an AbandonedCustomer document.
  */
@@ -180,14 +214,25 @@ async function handleWebhook(source, req, res) {
 
     console.log('[webhook] Final productImageUrl before push:', productImageUrl);
 
-    // Push-notify storefront customers (theme-script subscribers) for this shop.
-    sendPushToCustomers(
-      shopDomain,
-      'You left items in your cart! 🛒',
-      `Complete your order - items worth ₹${doc.cartValue} are waiting`,
-      `https://${shopDomain}`,
-      productImageUrl || null
-    );
+    // Schedule push after abandonment delay. Cancel+reschedule on each
+    // cart update so only a truly abandoned cart triggers the push.
+    const sessionId = savedCustomer.sessionId || doc.sessionId;
+    if (source === 'cart') {
+      schedulePush(sessionId, function() {
+        sendPushToCustomers(
+          shopDomain,
+          'You left items in your cart! 🛒',
+          `Complete your order - items worth ₹${doc.cartValue} are waiting`,
+          `https://${shopDomain}`,
+          productImageUrl || null
+        );
+      });
+    } else if (source === 'checkout') {
+      // Customer proceeded to checkout — cancel any pending cart push.
+      cancelPush(sessionId);
+      // Send push only after checkout abandonment (not create/update).
+      // For now do not push on checkout events.
+    }
 
     return res.status(200).json({ received: true });
   } catch (err) {
