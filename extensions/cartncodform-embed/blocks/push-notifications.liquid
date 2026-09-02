@@ -211,50 +211,58 @@
         return reject(new Error('SW not supported'));
       }
 
-      console.log('[CCF] Registering SW:', PROXY_SW_URL);
+      console.log('[CCF] Fetching SW content from proxy...');
 
-      navigator.serviceWorker.register(PROXY_SW_URL, {
-        scope: '/',
-        updateViaCache: 'none'
-      }).then(function(reg) {
-        console.log('[CCF] SW registered, scope:', reg.scope);
-        console.log('[CCF] SW state:', reg.active ? reg.active.state : 'no active SW');
+      // Fetch SW content from App Proxy
+      fetch(PROXY_SW_URL)
+        .then(function(response) {
+          if (!response.ok) throw new Error('SW fetch failed: ' + response.status);
+          return response.text();
+        })
+        .then(function(swContent) {
+          // Create blob URL from SW content - same origin!
+          var blob = new Blob([swContent], { type: 'application/javascript' });
+          var blobUrl = URL.createObjectURL(blob);
 
-        if (reg.active) {
-          console.log('[CCF] SW already active');
-          resolve(reg);
-          return;
-        }
+          console.log('[CCF] Registering SW from blob URL at root scope');
 
-        var sw = reg.installing || reg.waiting;
-        if (!sw) {
-          console.log('[CCF] No SW installing, resolving anyway');
-          resolve(reg);
-          return;
-        }
+          return navigator.serviceWorker.register(blobUrl, {
+            scope: '/'
+          });
+        })
+        .then(function(reg) {
+          console.log('[CCF] SW registered at root scope:', reg.scope);
 
-        console.log('[CCF] Waiting for SW to activate...');
-        var timeout = setTimeout(function() {
-          console.log('[CCF] SW activation timeout, resolving anyway');
-          resolve(reg);
-        }, 5000);
-
-        sw.addEventListener('statechange', function(e) {
-          console.log('[CCF] SW state changed:', e.target.state);
-          if (e.target.state === 'activated') {
-            clearTimeout(timeout);
-            console.log('[CCF] SW activated successfully');
+          if (reg.active) {
             resolve(reg);
+            return;
           }
-          if (e.target.state === 'redundant') {
-            clearTimeout(timeout);
-            reject(new Error('SW became redundant'));
-          }
+
+          var sw = reg.installing || reg.waiting;
+          if (!sw) { resolve(reg); return; }
+
+          var timeout = setTimeout(function() {
+            resolve(reg);
+          }, 5000);
+
+          sw.addEventListener('statechange', function(e) {
+            console.log('[CCF] SW state:', e.target.state);
+            if (e.target.state === 'activated') {
+              clearTimeout(timeout);
+              resolve(reg);
+            }
+          });
+        })
+        .catch(function(err) {
+          console.error('[CCF] SW blob registration failed:', err.message);
+
+          // Fallback: try direct proxy URL
+          console.log('[CCF] Trying direct proxy URL fallback...');
+          navigator.serviceWorker.register(PROXY_SW_URL, {
+            scope: '/apps/cartncodform/',
+            updateViaCache: 'none'
+          }).then(resolve).catch(reject);
         });
-      }).catch(function(err) {
-        console.error('[CCF] SW failed:', err.message);
-        reject(err);
-      });
     });
   }
 
