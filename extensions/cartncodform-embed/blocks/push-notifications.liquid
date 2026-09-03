@@ -655,6 +655,43 @@
       }
     });
 
+    // Re-sync the subscription's cartToken after an add/change,
+    // using sendBeacon so the write survives immediate page unload.
+    function resyncCartTokenBeacon(token) {
+      fetch('/cart.js').then(function(r) { return r.json(); })
+        .then(function(cart) {
+          var rawCartToken = cart.token || null;
+          var cartToken = rawCartToken ? rawCartToken.split('?')[0].trim() || null : null;
+          var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+          var deviceType = isMobile ? 'mobile' : 'desktop';
+          var customerId = (window.Shopify && window.Shopify.customerId)
+            ? String(window.Shopify.customerId) : null;
+
+          var payload = JSON.stringify({
+            shopDomain: SHOP_DOMAIN,
+            token: token,
+            oldToken: token,
+            page: window.location.pathname,
+            deviceType: deviceType,
+            cartToken: cartToken,
+            customerId: customerId,
+            ccfSessionId: getSessionId()
+          });
+
+          if (navigator.sendBeacon) {
+            var blob = new Blob([payload], { type: 'application/json' });
+            navigator.sendBeacon(BACKEND_URL + '/api/push/subscribe-customer', blob);
+            console.log('[CCF] Resync beacon sent, cartToken:', cartToken ? cartToken.substring(0,10)+'...' : 'none');
+          } else {
+            fetch(BACKEND_URL + '/api/push/subscribe-customer', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: payload
+            }).catch(function() {});
+          }
+        }).catch(function() {});
+    }
+
     // CART ADD (intercept fetch to /cart/add.js)
     var origFetch = window.fetch;
     window.fetch = function(input, init) {
@@ -691,14 +728,13 @@
       // After a cart add/change completes, re-sync the subscription's
       // cartToken so it reflects the POST-rotation cart state — this
       // keeps the Customer Journey resolve() lookup working.
+      // Uses sendBeacon (via resyncCartTokenBeacon) so the write
+      // survives immediate page unload/navigation.
       if (isCartAdd || isCartChange) {
         fetchPromise.then(function() {
           var existingToken = localStorage.getItem(TOKEN_KEY);
           if (existingToken && Notification.permission === 'granted') {
-            // Small delay to ensure Shopify's cart state has settled.
-            setTimeout(function() {
-              saveToken(existingToken);
-            }, 300);
+            resyncCartTokenBeacon(existingToken);
           }
         }).catch(function() {});
       }
