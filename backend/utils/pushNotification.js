@@ -105,6 +105,58 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
     if (cartToken) {
       query.cartToken = cartToken;
       console.log(`[push-customer] targeting cartToken: ${cartToken}`);
+      // Multiple devices may share the same cartToken — notify only
+      // the most recently active one (last add-to-cart / page load).
+      const sub = await CustomerPushSubscription.findOne(query)
+        .sort({ lastActivityAt: -1 });
+      if (!sub) {
+        console.log(`[push] No customer subscribers for ${shop} (cartToken: ${cartToken})`);
+        return { success: true, sent: 0, tokensFound: 0 };
+      }
+      console.log(`[push-customer] most recent device token: ${sub.token.substring(0, 20)}...`);
+      const singleToken = [sub.token];
+      // Build and send message to just this one token
+      const message = {
+        data: {
+          url: url || `https://${shopDomain}`,
+          imageUrl: imageUrl || '',
+          title: title,
+          body: body,
+          icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+        },
+        webpush: {
+          headers: { Urgency: 'high' },
+          notification: {
+            title,
+            body,
+            icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+            image: imageUrl || undefined,
+            badge: 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+            requireInteraction: false,
+            vibrate: [200, 100, 200],
+          },
+          fcm_options: {
+            link: url || `https://${shopDomain}`,
+          },
+        },
+        tokens: singleToken,
+      };
+      const response = await getMessaging().sendEachForMulticast(message);
+      console.log('[push-customer] FCM responses:', JSON.stringify(response.responses, null, 2));
+      if (!response.responses[0].success) {
+        const code = response.responses[0].error?.code || '';
+        const msg = response.responses[0].error?.message || 'unknown';
+        console.error(`[push-customer] token FAILED: ${code || msg}`);
+        if (
+          code === 'messaging/registration-token-not-registered' ||
+          code === 'messaging/invalid-registration-token'
+        ) {
+          await CustomerPushSubscription.deleteMany({ token: sub.token });
+          console.log(`[push-customer] Deleted 1 stale token`);
+        }
+      }
+      console.log(`[push] Sent ${response.successCount}/1 to most recent device of ${shop}`);
+      return { success: true, sent: response.successCount, tokensFound: 1 };
     }
     const subs = await CustomerPushSubscription.find(query);
     if (!subs.length) {
