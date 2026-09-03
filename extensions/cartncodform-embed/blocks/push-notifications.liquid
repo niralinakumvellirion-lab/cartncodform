@@ -406,7 +406,10 @@
         var storedToken = localStorage.getItem(TOKEN_KEY);
         if (currentToken !== storedToken) {
           console.log('[CCF] Token rotated — updating...');
-          // Clear the latch so saveToken sets it fresh.
+          // Update localStorage IMMEDIATELY so any concurrent
+          // saveToken() calls (from trackCart) use the new token,
+          // not the stale one. This prevents two rows being created.
+          localStorage.setItem(TOKEN_KEY, currentToken);
           localStorage.removeItem(SUBSCRIBED_KEY);
         }
         return saveToken(currentToken);

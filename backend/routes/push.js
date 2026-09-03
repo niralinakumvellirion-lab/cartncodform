@@ -99,6 +99,16 @@ router.post('/subscribe-customer', async (req, res) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
+    // Remove any OTHER rows with the same cartToken but a different
+    // FCM token — prevents same-cart multi-row accumulation.
+    if (normalizedCartToken) {
+      await CustomerPushSubscription.deleteMany({
+        shopDomain: shop,
+        cartToken: normalizedCartToken,
+        token: { $ne: token }
+      });
+    }
+
     console.log(`[subscribe-customer] Token saved for: ${shop}`);
     return res.status(200).json({ success: true });
 
