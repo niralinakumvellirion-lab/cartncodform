@@ -472,12 +472,9 @@
         });
       }
 
-      // Silently refresh subscription token and cartToken on each
-      // add-to-cart so the DB stays current between page loads.
-      var refreshToken = localStorage.getItem(TOKEN_KEY);
-      if (refreshToken && Notification.permission === 'granted') {
-        saveToken(refreshToken);
-      }
+      // Token/cartToken refresh now happens post-request in the
+      // window.fetch monkey-patch (initTracking), after the cart
+      // token has actually rotated — see fetchPromise.then() there.
 
       // Show popup if not subscribed
       if (!localStorage.getItem(SUBSCRIBED_KEY) && Notification.permission === 'default') {
@@ -662,7 +659,10 @@
     var origFetch = window.fetch;
     window.fetch = function(input, init) {
       var url = typeof input === 'string' ? input : (input && input.url) || '';
-      if (url.indexOf('/cart/add') !== -1) {
+      var isCartAdd = url.indexOf('/cart/add') !== -1;
+      var isCartChange = url.indexOf('/cart/change') !== -1 || url.indexOf('/cart/update') !== -1;
+
+      if (isCartAdd) {
         try {
           var body = init && init.body;
           var parsed = typeof body === 'string' ? JSON.parse(body) : null;
@@ -673,7 +673,7 @@
           });
         } catch(e) {}
       }
-      if (url.indexOf('/cart/change') !== -1 || url.indexOf('/cart/update') !== -1) {
+      if (isCartChange) {
         try {
           var cbody = init && init.body;
           var cparsed = typeof cbody === 'string' ? JSON.parse(cbody) : null;
@@ -685,7 +685,25 @@
           });
         } catch(e) {}
       }
-      return origFetch.apply(this, arguments);
+
+      var fetchPromise = origFetch.apply(this, arguments);
+
+      // After a cart add/change completes, re-sync the subscription's
+      // cartToken so it reflects the POST-rotation cart state — this
+      // keeps the Customer Journey resolve() lookup working.
+      if (isCartAdd || isCartChange) {
+        fetchPromise.then(function() {
+          var existingToken = localStorage.getItem(TOKEN_KEY);
+          if (existingToken && Notification.permission === 'granted') {
+            // Small delay to ensure Shopify's cart state has settled.
+            setTimeout(function() {
+              saveToken(existingToken);
+            }, 300);
+          }
+        }).catch(function() {});
+      }
+
+      return fetchPromise;
     };
 
     // PAGE EXIT — dwell time + scroll depth
