@@ -391,20 +391,23 @@ export default function StoreView() {
                       <div className="flex flex-col gap-1">
                         {Array.isArray(c.cartItems) && c.cartItems.length > 0 ? (
                           c.cartItems.map((item, idx) => (
-                            <div key={idx} className="flex items-center gap-2"
+                            <div key={idx}
+                              className="flex items-center justify-between gap-2 py-0.5"
                               onClick={(e) => e.stopPropagation()}>
-                              <span className="text-xs text-gray-600 flex-1">
+                              <span className="text-xs text-gray-600 truncate flex-1 mr-2">
                                 {item.title} x{item.quantity || 1}
                               </span>
-                              <SendPushButton
-                                shop={shop}
-                                cartValue={c.cartValue}
-                                cartItems={c.cartItems}
-                                productImageUrl={item.imageUrl || c.productImageUrl}
-                                sessionId={c.sessionId}
-                                itemTitle={item.title}
-                                productId={item.productId || null}
-                              />
+                              <div className="shrink-0">
+                                <SendPushButton
+                                  shop={shop}
+                                  cartValue={c.cartValue}
+                                  cartItems={c.cartItems}
+                                  productImageUrl={item.imageUrl || c.productImageUrl}
+                                  sessionId={c.sessionId}
+                                  itemTitle={item.title}
+                                  productId={item.productId || null}
+                                />
+                              </div>
                             </div>
                           ))
                         ) : (
