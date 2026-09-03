@@ -336,6 +336,11 @@
           localStorage.setItem(TOKEN_KEY, token);
           localStorage.setItem(SUBSCRIBED_KEY, '1');
           console.log('[CCF] Token saved successfully!');
+        } else {
+          // Backend rejected the token — clear latch so next visit
+          // triggers a fresh getToken() instead of re-saving this one.
+          localStorage.removeItem(SUBSCRIBED_KEY);
+          console.warn('[CCF] Token save failed — will retry on next visit');
         }
         return data;
       })
@@ -389,42 +394,41 @@
 
     console.log('[CCF] Permission:', Notification.permission);
 
-    // Already denied by browser
     if (Notification.permission === 'denied') return;
-
-    // Denied this session
     if (sessionStorage.getItem('ccf_denied_session')) return;
 
-    // Check existing token
-    var existingToken = localStorage.getItem(TOKEN_KEY);
-
     if (Notification.permission === 'granted') {
-      if (localStorage.getItem(SUBSCRIBED_KEY) === '1') {
-        console.log('[CCF] Already subscribed, skipping popup');
-        // Refresh cartToken silently on each visit so it stays current.
-        var existingFcmToken = localStorage.getItem(TOKEN_KEY);
-        if (existingFcmToken) {
-          saveToken(existingFcmToken);
+      console.log('[CCF] Permission granted — verifying token with FCM...');
+      // Always re-fetch the current FCM token to detect rotation.
+      registerSW().then(function(reg) {
+        return getToken(reg);
+      }).then(function(currentToken) {
+        var storedToken = localStorage.getItem(TOKEN_KEY);
+        if (currentToken !== storedToken) {
+          console.log('[CCF] Token rotated — updating...');
+          // Clear the latch so saveToken sets it fresh.
+          localStorage.removeItem(SUBSCRIBED_KEY);
         }
-      } else {
-        console.log('[CCF] Permission granted but not subscribed — re-subscribing');
-        registerSW().then(function(reg) {
-          return getToken(reg);
-        }).then(function(token) {
-          return saveToken(token);
-        }).then(function() {
-          setupForegroundMessages();
-        }).catch(function(err) {
-          console.error('[CCF] Silent re-subscribe failed:', err.message);
-        });
-      }
+        return saveToken(currentToken);
+      }).then(function() {
+        setupForegroundMessages();
+      }).catch(function(err) {
+        console.error('[CCF] Token verify failed:', err.message);
+        // If getToken fails entirely, fall back to saving the stored token.
+        var fallback = localStorage.getItem(TOKEN_KEY);
+        if (fallback) {
+          saveToken(fallback);
+        }
+      });
       return;
     }
 
-    // No token - show popup after delay
+    // Permission is 'default' — show popup after delay
+    if (sessionStorage.getItem('ccf_denied_session')) return;
+    if (localStorage.getItem(SUBSCRIBED_KEY) === '1') return;
+
     var delay = {{ block.settings.popup_delay }} * 1000;
     console.log('[CCF] No token, showing popup in', delay/1000, 's');
-
     setTimeout(function() {
       showPopup();
     }, delay);
@@ -477,7 +481,10 @@
   // START
   // ============================================
 
+  var ccfStarted = false;
   function start() {
+    if (ccfStarted) return;
+    ccfStarted = true;
     console.log('[CCF] Starting...');
     injectStyles();
     injectHTML();
@@ -485,7 +492,6 @@
     trackCart();
     checkAndInit();
 
-    // Setup foreground message handler
     if (Notification.permission === 'granted') {
       setupForegroundMessages();
     }
