@@ -105,18 +105,72 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
     if (cartToken) {
       query.cartToken = cartToken;
       console.log(`[push-customer] targeting cartToken: ${cartToken}`);
-      // Multiple devices may share the same cartToken — notify only
-      // the most recently active one (last add-to-cart / page load).
-      const sub = await CustomerPushSubscription.findOne(query)
+
+      // Get ALL rows matching this cartToken, sorted by most recent.
+      const cartSubs = await CustomerPushSubscription.find(query)
         .sort({ lastActivityAt: -1 });
-      if (!sub) {
-        console.log(`[push] No customer subscribers for ${shop} (cartToken: ${cartToken})`);
+
+      // Try each matching row until one succeeds.
+      for (const sub of cartSubs) {
+        console.log(`[push-customer] trying token: ${sub.token.substring(0, 20)}...`);
+        const message = {
+          data: {
+            url: url || `https://${shopDomain}`,
+            imageUrl: imageUrl || '',
+            title: title,
+            body: body,
+            icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+          },
+          webpush: {
+            headers: { Urgency: 'high' },
+            notification: {
+              title,
+              body,
+              icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+              image: imageUrl || undefined,
+              badge: 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+              requireInteraction: false,
+              vibrate: [200, 100, 200],
+            },
+            fcm_options: { link: url || `https://${shopDomain}` },
+          },
+          tokens: [sub.token],
+        };
+        const response = await getMessaging().sendEachForMulticast(message);
+        const result = response.responses[0];
+        if (result.success) {
+          console.log(`[push] Sent 1/1 to targeted device of ${shop}`);
+          return { success: true, sent: 1, tokensFound: cartSubs.length };
+        }
+        // Token is stale — delete and try next.
+        const code = result.error?.code || '';
+        if (
+          code === 'messaging/registration-token-not-registered' ||
+          code === 'messaging/invalid-registration-token'
+        ) {
+          await CustomerPushSubscription.deleteMany({ token: sub.token });
+          console.log(`[push-customer] Deleted stale token, trying next...`);
+        } else {
+          // Non-stale error — stop trying.
+          console.error(`[push-customer] token FAILED: ${code || result.error?.message}`);
+          break;
+        }
+      }
+
+      // No cartToken match succeeded — fall back to most recent
+      // mobile subscriber for this shop (cart token may have rotated).
+      console.log(`[push-customer] cartToken fallback — trying most recent mobile subscriber`);
+      const fallbackQuery = { shopDomain: shop, deviceType: { $in: ['mobile', 'unknown'] } };
+      const fallbackSub = await CustomerPushSubscription.findOne(fallbackQuery)
+        .sort({ lastActivityAt: -1 });
+
+      if (!fallbackSub) {
+        console.log(`[push] No customer subscribers for ${shop}`);
         return { success: true, sent: 0, tokensFound: 0 };
       }
-      console.log(`[push-customer] most recent device token: ${sub.token.substring(0, 20)}...`);
-      const singleToken = [sub.token];
-      // Build and send message to just this one token
-      const message = {
+
+      console.log(`[push-customer] fallback token: ${fallbackSub.token.substring(0, 20)}...`);
+      const fallbackMessage = {
         data: {
           url: url || `https://${shopDomain}`,
           imageUrl: imageUrl || '',
@@ -135,28 +189,26 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
             requireInteraction: false,
             vibrate: [200, 100, 200],
           },
-          fcm_options: {
-            link: url || `https://${shopDomain}`,
-          },
+          fcm_options: { link: url || `https://${shopDomain}` },
         },
-        tokens: singleToken,
+        tokens: [fallbackSub.token],
       };
-      const response = await getMessaging().sendEachForMulticast(message);
-      console.log('[push-customer] FCM responses:', JSON.stringify(response.responses, null, 2));
-      if (!response.responses[0].success) {
-        const code = response.responses[0].error?.code || '';
-        const msg = response.responses[0].error?.message || 'unknown';
-        console.error(`[push-customer] token FAILED: ${code || msg}`);
-        if (
-          code === 'messaging/registration-token-not-registered' ||
-          code === 'messaging/invalid-registration-token'
-        ) {
-          await CustomerPushSubscription.deleteMany({ token: sub.token });
-          console.log(`[push-customer] Deleted 1 stale token`);
-        }
+      const fallbackResponse = await getMessaging().sendEachForMulticast(fallbackMessage);
+      const fallbackResult = fallbackResponse.responses[0];
+      if (fallbackResult.success) {
+        console.log(`[push] Sent 1/1 via fallback to ${shop}`);
+        return { success: true, sent: 1, tokensFound: 1 };
       }
-      console.log(`[push] Sent ${response.successCount}/1 to most recent device of ${shop}`);
-      return { success: true, sent: response.successCount, tokensFound: 1 };
+      const fallbackCode = fallbackResult.error?.code || '';
+      if (
+        fallbackCode === 'messaging/registration-token-not-registered' ||
+        fallbackCode === 'messaging/invalid-registration-token'
+      ) {
+        await CustomerPushSubscription.deleteMany({ token: fallbackSub.token });
+        console.log(`[push-customer] Deleted stale fallback token`);
+      }
+      console.log(`[push] No active subscribers found for ${shop}`);
+      return { success: true, sent: 0, tokensFound: 0 };
     }
     const subs = await CustomerPushSubscription.find(query);
     if (!subs.length) {

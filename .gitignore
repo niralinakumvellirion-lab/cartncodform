@@ -21,3 +21,5 @@ Thumbs.db
 
 # Audit files with sensitive info
 audit.txt
+
+.vercel
