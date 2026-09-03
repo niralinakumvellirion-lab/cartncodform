@@ -2,6 +2,7 @@ const express = require('express');
 const PushSubscription = require('../models/PushSubscription');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
+const { cancelPush } = require('./webhooks');
 
 const router = express.Router();
 
@@ -66,7 +67,7 @@ router.post('/send', async (req, res) => {
  */
 router.post('/subscribe-customer', async (req, res) => {
   try {
-    const { shopDomain, token, oldToken, page, deviceType, cartToken } = req.body;
+    const { shopDomain, token, oldToken, page, deviceType, cartToken, customerId } = req.body;
 
     // Normalize cartToken — strip ?key=... suffix that /cart.js appends.
     const normalizedCartToken = cartToken
@@ -94,6 +95,7 @@ router.post('/subscribe-customer', async (req, res) => {
         page: page || undefined,
         deviceType: deviceType || 'unknown',
         cartToken: normalizedCartToken || undefined,
+        customerId: customerId || undefined,
         lastActivityAt: new Date()
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
@@ -138,15 +140,35 @@ router.post('/send-customer', async (req, res) => {
       ? cartToken.split('?')[0].trim() || null
       : null;
 
+    // Look up the customerId for this cart so the push can fall back to
+    // a customerId-scoped subscriber if the cartToken no longer matches.
+    let customerIdForPush = null;
+    if (normalizedCartToken) {
+      const AbandonedCustomer = require('../models/AbandonedCustomer');
+      const ac = await AbandonedCustomer.findOne({ sessionId: normalizedCartToken });
+      customerIdForPush = ac?.customerId || null;
+    }
+
     const result = await sendPushToCustomers(
       shopDomain, title, body, url, imageUrl,
       true,
       normalizedCartToken || null,
-      normalizedCartToken ? false : true
+      normalizedCartToken ? false : true,
+      customerIdForPush
     );
 
     console.log(`[send-customer] tokens found: ${result.tokensFound ?? 0}`);
     console.log(`[send-customer] FCM result: ${JSON.stringify(result)}`);
+
+    // Cancel the abandonment timer if a targeted push was sent manually.
+    if (normalizedCartToken && result.sent > 0) {
+      try {
+        cancelPush(normalizedCartToken);
+        console.log(`[send-customer] Cancelled pending timer for: ${normalizedCartToken}`);
+      } catch (e) {
+        // cancelPush is best-effort
+      }
+    }
 
     if (!result.success) {
       return res.status(500).json({ success: false, error: result.error });

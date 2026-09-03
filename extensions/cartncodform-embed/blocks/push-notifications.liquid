@@ -308,6 +308,10 @@
     var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
     var deviceType = isMobile ? 'mobile' : 'desktop';
 
+    var customerId = (window.Shopify && window.Shopify.customerId)
+      ? String(window.Shopify.customerId)
+      : null;
+
     // Fetch Shopify cart token to link this subscription to the cart.
     fetch('/cart.js')
       .then(function(r) { return r.json(); })
@@ -326,7 +330,8 @@
             oldToken: oldToken,
             page: window.location.pathname,
             deviceType: deviceType,
-            cartToken: cartToken
+            cartToken: cartToken,
+            customerId: customerId
           })
         });
       })

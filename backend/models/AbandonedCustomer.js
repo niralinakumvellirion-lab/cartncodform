@@ -40,6 +40,9 @@ const abandonedCustomerSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  customerId: {
+    type: String,
+  },
   status: {
     type: String,
     enum: ['abandoned', 'recovered'],

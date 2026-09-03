@@ -79,6 +79,7 @@ function mapPayloadToCustomer(shopDomain, payload) {
     productImageUrl: firstImageUrl || undefined,
     cartValue,
     sessionId: (payload.token || payload.cart_token || payload.id || '').toString(),
+    customerId: payload.customer?.id ? String(payload.customer.id) : null,
     status: 'abandoned',
   };
 }
@@ -234,7 +235,9 @@ async function handleWebhook(source, req, res) {
           `https://${shopDomain}`,
           productImageUrl || null,
           true,
-          normalizedSessionId || null
+          normalizedSessionId || null,
+          false,
+          savedCustomer.customerId || null
         );
       });
     } else if (source === 'checkout') {
@@ -263,5 +266,10 @@ router.post('/cart', (req, res) => handleWebhook('cart', req, res));
  * Handles checkouts/create and checkouts/update.
  */
 router.post('/checkout', (req, res) => handleWebhook('checkout', req, res));
+
+// Expose cancelPush so the dashboard send-customer route can stop a pending
+// abandonment timer after a manual targeted push. Attached to `router` itself
+// so it survives the `module.exports = router` assignment below.
+router.cancelPush = cancelPush;
 
 module.exports = router;

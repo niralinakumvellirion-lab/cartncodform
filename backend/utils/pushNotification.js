@@ -85,7 +85,7 @@ async function sendPushToStore(shopDomain, title, body) {
  * Send a push notification to every STOREFRONT CUSTOMER who subscribed via the
  * Shopify theme script (CustomerPushSubscription), for one shop.
  */
-async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobileOnly = true, cartToken = null, skipStaleCleanup = false) {
+async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobileOnly = true, cartToken = null, skipStaleCleanup = false, customerId = null) {
   const CustomerPushSubscription = require('../models/CustomerPushSubscription');
   try {
     if (!firebaseReady) {
@@ -160,7 +160,14 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
       // No cartToken match succeeded — fall back to most recent
       // mobile subscriber for this shop (cart token may have rotated).
       console.log(`[push-customer] cartToken fallback — trying most recent mobile subscriber`);
-      const fallbackQuery = { shopDomain: shop, deviceType: { $in: ['mobile', 'unknown'] } };
+      const fallbackQuery = {
+        shopDomain: shop,
+        deviceType: { $in: ['mobile', 'unknown'] }
+      };
+      if (customerId) {
+        fallbackQuery.customerId = customerId;
+        console.log(`[push-customer] fallback targeting customerId: ${customerId}`);
+      }
       const fallbackSub = await CustomerPushSubscription.findOne(fallbackQuery)
         .sort({ lastActivityAt: -1 });
 
