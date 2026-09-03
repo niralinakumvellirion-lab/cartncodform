@@ -36,7 +36,7 @@ function WhatsAppButton({ phone, message }) {
   );
 }
 
-function SendPushButton({ shop, cartValue, cartItems, productImageUrl, sessionId }) {
+function SendPushButton({ shop, cartValue, cartItems, productImageUrl, sessionId, itemTitle }) {
   const [state, setState] = useState('idle'); // idle | sending | sent | error
 
   async function send() {
@@ -45,7 +45,9 @@ function SendPushButton({ shop, cartValue, cartItems, productImageUrl, sessionId
       await apiSend('/api/push/send-customer', 'POST', {
         shopDomain: shop,
         title: 'You left items in your cart! 🛒',
-        body: `Your cart has items worth ₹${cartValue}. Complete your order now!`,
+        body: itemTitle
+          ? `You left "${itemTitle}" in your cart!`
+          : `Your cart has items worth ₹${cartValue}. Complete your order now!`,
         url: `https://${shop}`,
         imageUrl: productImageUrl || cartItems?.[0]?.imageUrl || null,
         cartToken: sessionId || null,
@@ -277,12 +279,27 @@ export default function StoreView() {
                       {c.phone || <span className="text-gray-400">—</span>}
                     </td>
                     <td className="px-4 py-3">
-                      {itemCount} item{itemCount === 1 ? '' : 's'}
-                      {Array.isArray(c.cartItems) && c.cartItems.length > 0 && (
-                        <span className="ml-1 text-gray-400">
-                          ({c.cartItems.map((i) => i.title).filter(Boolean).join(', ')})
-                        </span>
-                      )}
+                      <div className="flex flex-col gap-1">
+                        {Array.isArray(c.cartItems) && c.cartItems.length > 0 ? (
+                          c.cartItems.map((item, idx) => (
+                            <div key={idx} className="flex items-center gap-2">
+                              <span className="text-xs text-gray-600 flex-1">
+                                {item.title} x{item.quantity || 1}
+                              </span>
+                              <SendPushButton
+                                shop={shop}
+                                cartValue={c.cartValue}
+                                cartItems={c.cartItems}
+                                productImageUrl={item.imageUrl || c.productImageUrl}
+                                sessionId={c.sessionId}
+                                itemTitle={item.title}
+                              />
+                            </div>
+                          ))
+                        ) : (
+                          <span className="text-gray-400">{itemCount} item{itemCount === 1 ? '' : 's'}</span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3">{formatMoney(c.cartValue)}</td>
                     <td className="px-4 py-3 text-gray-500">{formatDate(c.createdAt)}</td>
@@ -291,13 +308,6 @@ export default function StoreView() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap items-center gap-2">
-                        <SendPushButton
-                          shop={shop}
-                          cartValue={c.cartValue}
-                          cartItems={c.cartItems}
-                          productImageUrl={c.productImageUrl}
-                          sessionId={c.sessionId}
-                        />
                         {c.phone && (
                           <WhatsAppButton
                             phone={c.phone}
