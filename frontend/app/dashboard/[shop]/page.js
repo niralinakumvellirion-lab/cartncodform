@@ -209,7 +209,15 @@ function CustomerAnalytics({ shop, customer, onClose }) {
             {events.map((e, i) => (
               <div key={i}
                 className="flex gap-3 p-3 rounded-lg border border-gray-100 bg-gray-50">
-                <span className="text-xl">{iconFor(e.type)}</span>
+                {e.type === 'product_view' && e.meta?.imageUrl ? (
+                  <img
+                    src={e.meta.imageUrl}
+                    alt=""
+                    className="w-10 h-10 rounded object-cover shrink-0"
+                  />
+                ) : (
+                  <span className="text-xl shrink-0">{iconFor(e.type)}</span>
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium text-gray-800 capitalize">

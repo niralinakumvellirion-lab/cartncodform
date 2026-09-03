@@ -531,13 +531,21 @@
               window.ShopifyAnalytics.meta &&
               window.ShopifyAnalytics.meta.product;
       if (!p) return null;
+
+      var imageUrl = null;
+      try {
+        var ogImage = document.querySelector('meta[property="og:image"]');
+        if (ogImage) imageUrl = ogImage.getAttribute('content');
+      } catch(e) {}
+
       return {
         productId: p.id || null,
         title: p.title || null,
         vendor: p.vendor || null,
         type: p.type || null,
         price: p.price || null,
-        variantId: (p.variants && p.variants[0] && p.variants[0].id) || null
+        variantId: (p.variants && p.variants[0] && p.variants[0].id) || null,
+        imageUrl: imageUrl
       };
     } catch(e) { return null; }
   }
