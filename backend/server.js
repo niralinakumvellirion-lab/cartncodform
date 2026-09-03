@@ -45,6 +45,8 @@ app.use(
     },
   })
 );
+// Parse text/plain bodies (sent by navigator.sendBeacon).
+app.use(express.text({ type: 'text/plain' }));
 app.use(express.urlencoded({ extended: true }));
 
 // Simple request logger.
@@ -81,6 +83,8 @@ app.use('/api/webhooks', webhookRoutes);
 app.use('/api/stores', storeRoutes);
 app.use('/api/cod', codRoutes);
 app.use('/api/push', pushRouter);
+const eventsRouter = require('./routes/events');
+app.use('/api/events', eventsRouter);
 app.use('/apps/cartncodform', proxyRouter);
 
 // --- 404 + error handlers ---------------------------------------------------

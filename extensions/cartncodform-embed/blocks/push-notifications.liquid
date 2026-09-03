@@ -485,6 +485,217 @@
     });
   }
 
+  // ============================================================
+  // EVENT TRACKING
+  // ============================================================
+  var CCF_SESSION_KEY = 'ccf_session_' + SHOP_DOMAIN;
+  var eventQueue = [];
+  var flushTimer = null;
+
+  function getSessionId() {
+    // Use Shopify cart token as session id if available, else a
+    // persistent UUID stored in sessionStorage.
+    return sessionStorage.getItem(CCF_SESSION_KEY) || null;
+  }
+
+  function setSessionId(id) {
+    if (id) sessionStorage.setItem(CCF_SESSION_KEY, id);
+  }
+
+  function getPageType() {
+    try {
+      return (window.ShopifyAnalytics &&
+              window.ShopifyAnalytics.meta &&
+              window.ShopifyAnalytics.meta.page &&
+              window.ShopifyAnalytics.meta.page.pageType) || null;
+    } catch(e) { return null; }
+  }
+
+  function getProductMeta() {
+    try {
+      var p = window.ShopifyAnalytics &&
+              window.ShopifyAnalytics.meta &&
+              window.ShopifyAnalytics.meta.product;
+      if (!p) return null;
+      return {
+        productId: p.id || null,
+        title: p.title || null,
+        vendor: p.vendor || null,
+        type: p.type || null,
+        price: p.price || null,
+        variantId: (p.variants && p.variants[0] && p.variants[0].id) || null
+      };
+    } catch(e) { return null; }
+  }
+
+  function getCollectionMeta() {
+    try {
+      var c = window.ShopifyAnalytics &&
+              window.ShopifyAnalytics.meta &&
+              window.ShopifyAnalytics.meta.collection;
+      if (!c) return null;
+      return { collectionId: c.id || null, handle: c.handle || null };
+    } catch(e) { return null; }
+  }
+
+  function trackEvent(type, meta) {
+    var token = localStorage.getItem(TOKEN_KEY);
+    var customerId = (window.Shopify && window.Shopify.customerId)
+      ? String(window.Shopify.customerId) : null;
+    var sessionId = getSessionId();
+
+    eventQueue.push({
+      type: type,
+      path: window.location.pathname,
+      pageType: getPageType(),
+      meta: meta || null,
+      ts: new Date().toISOString()
+    });
+
+    // Flush after 2s idle (debounce) or immediately for exit events.
+    if (flushTimer) clearTimeout(flushTimer);
+    if (type === 'page_exit') {
+      flushEvents(token, customerId, sessionId);
+    } else {
+      flushTimer = setTimeout(function() {
+        flushEvents(token, customerId, sessionId);
+      }, 2000);
+    }
+  }
+
+  function flushEvents(token, customerId, sessionId) {
+    if (eventQueue.length === 0) return;
+    var batch = eventQueue.splice(0);
+    var payload = JSON.stringify({
+      shopDomain: SHOP_DOMAIN,
+      sessionId:  sessionId  || null,
+      customerId: customerId || null,
+      token:      token      || null,
+      events:     batch
+    });
+
+    // Use sendBeacon for exit events (survives page unload).
+    // Use fetch for normal events.
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(BACKEND_URL + '/api/events', payload);
+    } else {
+      fetch(BACKEND_URL + '/api/events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload
+      }).catch(function() {});
+    }
+  }
+
+  function initTracking() {
+    var pageType = getPageType();
+
+    // Sync sessionId from cart token if available.
+    fetch('/cart.js').then(function(r) { return r.json(); })
+      .then(function(cart) {
+        if (cart.token) {
+          var bare = cart.token.split('?')[0].trim();
+          setSessionId(bare);
+        }
+      }).catch(function() {});
+
+    // PAGE VIEW
+    trackEvent('page_view', {
+      title: document.title,
+      referrer: document.referrer || null,
+      pageType: pageType
+    });
+
+    // PRODUCT VIEW
+    if (pageType === 'product') {
+      trackEvent('product_view', getProductMeta());
+    }
+
+    // COLLECTION VIEW
+    if (pageType === 'collection') {
+      trackEvent('collection_view', getCollectionMeta());
+    }
+
+    // SEARCH
+    if (pageType === 'search') {
+      var q = new URLSearchParams(window.location.search).get('q');
+      trackEvent('search', { query: q || null });
+    }
+
+    // CART VIEW
+    if (pageType === 'cart') {
+      trackEvent('cart_view', null);
+    }
+
+    // CHECKOUT BUTTON CLICK
+    document.addEventListener('click', function(e) {
+      var btn = e.target.closest(
+        'button[name="checkout"], a[href="/checkout"], [data-testid="Checkout-button"]'
+      );
+      if (btn) {
+        fetch('/cart.js').then(function(r) { return r.json(); })
+          .then(function(cart) {
+            trackEvent('reached_checkout', {
+              cartValue: cart.total_price ? cart.total_price / 100 : null,
+              itemCount: cart.item_count || null
+            });
+          }).catch(function() {
+            trackEvent('reached_checkout', null);
+          });
+      }
+    });
+
+    // CART ADD (intercept fetch to /cart/add.js)
+    var origFetch = window.fetch;
+    window.fetch = function(input, init) {
+      var url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (url.indexOf('/cart/add') !== -1) {
+        try {
+          var body = init && init.body;
+          var parsed = typeof body === 'string' ? JSON.parse(body) : null;
+          trackEvent('add_to_cart', {
+            productId: parsed && (parsed.id || parsed.items && parsed.items[0] && parsed.items[0].id) || null,
+            quantity: parsed && (parsed.quantity || 1) || 1,
+            url: window.location.href
+          });
+        } catch(e) {}
+      }
+      if (url.indexOf('/cart/change') !== -1 || url.indexOf('/cart/update') !== -1) {
+        try {
+          var cbody = init && init.body;
+          var cparsed = typeof cbody === 'string' ? JSON.parse(cbody) : null;
+          var qty = cparsed && cparsed.quantity;
+          trackEvent(qty === 0 ? 'remove_from_cart' : 'cart_update', {
+            line: cparsed && cparsed.line || null,
+            id: cparsed && cparsed.id || null,
+            quantity: qty
+          });
+        } catch(e) {}
+      }
+      return origFetch.apply(this, arguments);
+    };
+
+    // PAGE EXIT — dwell time + scroll depth
+    var pageLoadTime = Date.now();
+    var maxScroll = 0;
+    window.addEventListener('scroll', function() {
+      var scrollPct = Math.round(
+        (window.scrollY / (document.body.scrollHeight - window.innerHeight)) * 100
+      );
+      if (scrollPct > maxScroll) maxScroll = scrollPct;
+    }, { passive: true });
+
+    document.addEventListener('visibilitychange', function() {
+      if (document.visibilityState === 'hidden') {
+        trackEvent('page_exit', {
+          dwellSeconds: Math.round((Date.now() - pageLoadTime) / 1000),
+          scrollDepth: maxScroll,
+          pageType: pageType
+        });
+      }
+    });
+  }
+
   // ============================================
   // START
   // ============================================
@@ -499,6 +710,7 @@
     wireButtons();
     trackCart();
     checkAndInit();
+    initTracking();
 
     if (Notification.permission === 'granted') {
       setupForegroundMessages();

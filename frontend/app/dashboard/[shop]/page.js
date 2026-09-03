@@ -96,6 +96,77 @@ function StatusBadge({ status }) {
   );
 }
 
+function CustomerAnalytics({ shop, sessionId, onClose }) {
+  const [events, setEvents] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    apiGet(`/api/events/${encodeURIComponent(shop)}/customer/${encodeURIComponent(sessionId)}`)
+      .then(setEvents)
+      .catch(() => setEvents([]))
+      .finally(() => setLoading(false));
+  }, [shop, sessionId]);
+
+  const iconFor = (type) => ({
+    page_view: '👁️',
+    product_view: '🛍️',
+    collection_view: '📂',
+    search: '🔍',
+    cart_view: '🛒',
+    add_to_cart: '➕',
+    remove_from_cart: '➖',
+    cart_update: '✏️',
+    reached_checkout: '💳',
+    page_exit: '🚪',
+  }[type] || '📍');
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex justify-end">
+      <div className="bg-white w-full max-w-lg h-full overflow-y-auto shadow-xl">
+        <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white">
+          <h2 className="font-bold text-gray-900">Customer Journey</h2>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+        </div>
+        {loading ? (
+          <div className="p-8 text-center text-gray-400">Loading events...</div>
+        ) : events.length === 0 ? (
+          <div className="p-8 text-center text-gray-400">No events tracked yet.</div>
+        ) : (
+          <div className="p-4 space-y-2">
+            {events.map((e, i) => (
+              <div key={i} className="flex gap-3 p-3 rounded-lg border border-gray-100 bg-gray-50">
+                <span className="text-xl">{iconFor(e.type)}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-medium text-gray-800 capitalize">
+                      {e.type.replace(/_/g, ' ')}
+                    </span>
+                    <span className="text-xs text-gray-400 shrink-0">
+                      {new Date(e.ts).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 truncate">{e.path}</p>
+                  {e.meta && (
+                    <div className="mt-1 text-xs text-gray-600">
+                      {e.meta.title && <span>{e.meta.title}</span>}
+                      {e.meta.query && <span>Search: "{e.meta.query}"</span>}
+                      {e.meta.dwellSeconds !== undefined && (
+                        <span>{e.meta.dwellSeconds}s on page · {e.meta.scrollDepth || 0}% scrolled</span>
+                      )}
+                      {e.meta.cartValue && <span>Cart: ₹{e.meta.cartValue}</span>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function StoreView() {
   const params = useParams();
   const router = useRouter();
@@ -107,6 +178,7 @@ export default function StoreView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [disconnecting, setDisconnecting] = useState(false);
+  const [analyticsCustomer, setAnalyticsCustomer] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -188,6 +260,14 @@ export default function StoreView() {
   );
 
   return (
+    <>
+      {analyticsCustomer && (
+        <CustomerAnalytics
+          shop={shop}
+          sessionId={analyticsCustomer.sessionId}
+          onClose={() => setAnalyticsCustomer(null)}
+        />
+      )}
     <div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -270,11 +350,17 @@ export default function StoreView() {
                 return (
                   <tr key={c._id}>
                     <td className="px-4 py-3">
-                      {anon ? (
-                        <span className="italic text-gray-400">Anonymous</span>
-                      ) : (
-                        c.email || <span className="italic text-gray-400">—</span>
-                      )}
+                      <button
+                        onClick={() => setAnalyticsCustomer(c)}
+                        className="text-left hover:underline text-brand"
+                        title="View customer journey"
+                      >
+                        {anon ? (
+                          <span className="italic text-gray-400">Anonymous</span>
+                        ) : (
+                          c.email || <span className="italic text-gray-400">—</span>
+                        )}
+                      </button>
                     </td>
                     <td className="px-4 py-3">
                       {c.phone || <span className="text-gray-400">—</span>}
@@ -405,5 +491,6 @@ export default function StoreView() {
         </div>
       )}
     </div>
+    </>
   );
 }
