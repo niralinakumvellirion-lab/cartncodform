@@ -459,6 +459,13 @@
         });
       }
 
+      // Silently refresh subscription token and cartToken on each
+      // add-to-cart so the DB stays current between page loads.
+      var refreshToken = localStorage.getItem(TOKEN_KEY);
+      if (refreshToken && Notification.permission === 'granted') {
+        saveToken(refreshToken);
+      }
+
       // Show popup if not subscribed
       if (!localStorage.getItem(SUBSCRIBED_KEY) && Notification.permission === 'default') {
         showPopup();

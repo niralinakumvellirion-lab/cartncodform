@@ -85,7 +85,7 @@ async function sendPushToStore(shopDomain, title, body) {
  * Send a push notification to every STOREFRONT CUSTOMER who subscribed via the
  * Shopify theme script (CustomerPushSubscription), for one shop.
  */
-async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobileOnly = true, cartToken = null) {
+async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobileOnly = true, cartToken = null, skipStaleCleanup = false) {
   const CustomerPushSubscription = require('../models/CustomerPushSubscription');
   try {
     if (!firebaseReady) {
@@ -166,9 +166,11 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
       }
     });
 
-    if (staleTokens.length > 0) {
+    if (staleTokens.length > 0 && !skipStaleCleanup) {
       await CustomerPushSubscription.deleteMany({ token: { $in: staleTokens } });
       console.log(`[push-customer] Deleted ${staleTokens.length} stale token(s)`);
+    } else if (staleTokens.length > 0 && skipStaleCleanup) {
+      console.log(`[push-customer] ${staleTokens.length} stale token(s) found but not deleted (skipStaleCleanup)`);
     }
 
     console.log(

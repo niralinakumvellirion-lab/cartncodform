@@ -123,7 +123,7 @@ router.post('/send-customer', async (req, res) => {
       return res.status(400).json({ error: 'shopDomain, title and body are required' });
     }
 
-    const result = await sendPushToCustomers(shopDomain, title, body, url, imageUrl, true);
+    const result = await sendPushToCustomers(shopDomain, title, body, url, imageUrl, true, null, true);
 
     console.log(`[send-customer] tokens found: ${result.tokensFound ?? 0}`);
     console.log(`[send-customer] FCM result: ${JSON.stringify(result)}`);
