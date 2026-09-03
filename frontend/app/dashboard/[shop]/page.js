@@ -387,11 +387,12 @@ export default function StoreView() {
                     <td className="px-4 py-3">
                       {c.phone || <span className="text-gray-400">—</span>}
                     </td>
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-4 py-3">
                       <div className="flex flex-col gap-1">
                         {Array.isArray(c.cartItems) && c.cartItems.length > 0 ? (
                           c.cartItems.map((item, idx) => (
-                            <div key={idx} className="flex items-center gap-2">
+                            <div key={idx} className="flex items-center gap-2"
+                              onClick={(e) => e.stopPropagation()}>
                               <span className="text-xs text-gray-600 flex-1">
                                 {item.title} x{item.quantity || 1}
                               </span>
@@ -416,9 +417,10 @@ export default function StoreView() {
                     <td className="px-4 py-3">
                       <StatusBadge status={c.status} />
                     </td>
-                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <td className="px-4 py-3">
                       <div className="flex flex-wrap items-center gap-2">
                         {c.phone && (
+                          <div onClick={(e) => e.stopPropagation()}>
                           <WhatsAppButton
                             phone={c.phone}
                             message={
@@ -434,7 +436,8 @@ export default function StoreView() {
                               `Please complete your order. We'd love to help!`
                             }
                           />
-                        )}
+                        </div>
+                      )}
                       </div>
                     </td>
                   </tr>
