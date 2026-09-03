@@ -36,7 +36,7 @@ function WhatsAppButton({ phone, message }) {
   );
 }
 
-function SendPushButton({ shop, cartValue, cartItems, productImageUrl, sessionId, itemTitle }) {
+function SendPushButton({ shop, cartValue, cartItems, productImageUrl, sessionId, itemTitle, productId }) {
   const [state, setState] = useState('idle'); // idle | sending | sent | error
 
   async function send() {
@@ -51,6 +51,7 @@ function SendPushButton({ shop, cartValue, cartItems, productImageUrl, sessionId
         url: `https://${shop}`,
         imageUrl: productImageUrl || cartItems?.[0]?.imageUrl || null,
         cartToken: sessionId || null,
+        productId: productId || null,
       });
       setState('sent');
     } catch (err) {
@@ -293,6 +294,7 @@ export default function StoreView() {
                                 productImageUrl={item.imageUrl || c.productImageUrl}
                                 sessionId={c.sessionId}
                                 itemTitle={item.title}
+                                productId={item.productId || null}
                               />
                             </div>
                           ))

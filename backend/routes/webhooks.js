@@ -271,5 +271,6 @@ router.post('/checkout', (req, res) => handleWebhook('checkout', req, res));
 // abandonment timer after a manual targeted push. Attached to `router` itself
 // so it survives the `module.exports = router` assignment below.
 router.cancelPush = cancelPush;
+router.fetchProductImage = fetchProductImage;
 
 module.exports = router;

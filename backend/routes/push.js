@@ -2,7 +2,7 @@ const express = require('express');
 const PushSubscription = require('../models/PushSubscription');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
-const { cancelPush } = require('./webhooks');
+const { cancelPush, fetchProductImage } = require('./webhooks');
 
 const router = express.Router();
 
@@ -126,7 +126,7 @@ router.post('/subscribe-customer', async (req, res) => {
  */
 router.post('/send-customer', async (req, res) => {
   try {
-    const { shopDomain, title, body, url, imageUrl, cartToken } = req.body;
+    const { shopDomain, title, body, url, imageUrl, cartToken, productId } = req.body;
 
     console.log(`[send-customer] shopDomain received: ${shopDomain}`);
     console.log('[send-customer] imageUrl from request:', req.body.imageUrl || 'NONE');
@@ -149,8 +149,33 @@ router.post('/send-customer', async (req, res) => {
       customerIdForPush = ac?.customerId || null;
     }
 
+    // If a specific productId was passed, fetch its image from
+    // Shopify Admin API to ensure we show the right product image.
+    let resolvedImageUrl = imageUrl;
+    if (productId && normalizedCartToken) {
+      try {
+        const Store = require('../models/Store');
+        const store = await Store.findOne({
+          shopDomain: shopDomain.trim().toLowerCase()
+        });
+        if (store && store.accessToken) {
+          const fetchedImage = await fetchProductImage(
+            shopDomain.trim().toLowerCase(),
+            store.accessToken,
+            String(productId)
+          );
+          if (fetchedImage) {
+            resolvedImageUrl = fetchedImage;
+            console.log(`[send-customer] Fetched image for product ${productId}: ${fetchedImage.substring(0, 50)}...`);
+          }
+        }
+      } catch (e) {
+        console.log(`[send-customer] Image fetch failed for product ${productId}:`, e.message);
+      }
+    }
+
     const result = await sendPushToCustomers(
-      shopDomain, title, body, url, imageUrl,
+      shopDomain, title, body, url, resolvedImageUrl,
       true,
       normalizedCartToken || null,
       normalizedCartToken ? false : true,
