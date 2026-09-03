@@ -392,12 +392,11 @@ export default function StoreView() {
                         {Array.isArray(c.cartItems) && c.cartItems.length > 0 ? (
                           c.cartItems.map((item, idx) => (
                             <div key={idx}
-                              className="flex items-center justify-between gap-2 py-0.5"
-                              onClick={(e) => e.stopPropagation()}>
+                              className="flex items-center justify-between gap-2 py-0.5">
                               <span className="text-xs text-gray-600 truncate flex-1 mr-2">
                                 {item.title} x{item.quantity || 1}
                               </span>
-                              <div className="shrink-0">
+                              <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
                                 <SendPushButton
                                   shop={shop}
                                   cartValue={c.cartValue}
