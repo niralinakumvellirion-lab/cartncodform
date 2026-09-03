@@ -37,47 +37,97 @@ function WhatsAppButton({ phone, message }) {
 }
 
 function SendPushButton({ shop, cartValue, cartItems, productImageUrl, sessionId, itemTitle, productId }) {
+  const [expanded, setExpanded] = useState(false);
+  const [title, setTitle] = useState('You left items in your cart! 🛒');
+  const [body, setBody] = useState(
+    itemTitle
+      ? `You left "${itemTitle}" in your cart!`
+      : `Your cart has items worth ₹${cartValue}. Complete your order now!`
+  );
   const [state, setState] = useState('idle'); // idle | sending | sent | error
 
-  async function send() {
+  async function send(e) {
+    e.stopPropagation();
     setState('sending');
     try {
       await apiSend('/api/push/send-customer', 'POST', {
         shopDomain: shop,
-        title: 'You left items in your cart! 🛒',
-        body: itemTitle
-          ? `You left "${itemTitle}" in your cart!`
-          : `Your cart has items worth ₹${cartValue}. Complete your order now!`,
+        title: title,
+        body: body,
         url: `https://${shop}`,
         imageUrl: productImageUrl || cartItems?.[0]?.imageUrl || null,
         cartToken: sessionId || null,
         productId: productId || null,
       });
       setState('sent');
+      setTimeout(() => {
+        setExpanded(false);
+        setState('idle');
+      }, 1500);
     } catch (err) {
       console.error('[push] send-customer failed:', err);
       setState('error');
     }
   }
 
+  if (!expanded) {
+    return (
+      <button
+        onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
+        style={{ backgroundColor: '#7c3aed' }}
+        className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+      >
+        🔔 Push
+      </button>
+    );
+  }
+
   const label =
-    state === 'sending'
-      ? 'Sending…'
-      : state === 'sent'
-      ? 'Push sent!'
-      : state === 'error'
-      ? 'Failed'
-      : '🔔 Push';
+    state === 'sending' ? 'Sending…' :
+    state === 'sent' ? 'Sent!' :
+    state === 'error' ? 'Failed — Retry' :
+    'Send';
 
   return (
-    <button
-      onClick={send}
-      disabled={state === 'sending'}
-      style={{ backgroundColor: '#7c3aed' }}
-      className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="absolute right-0 top-full mt-1 z-10 w-64 rounded-lg border border-gray-200 bg-white p-3 shadow-lg space-y-2"
     >
-      {label}
-    </button>
+      <div>
+        <label className="block text-[10px] font-medium text-gray-500 mb-0.5">Title</label>
+        <input
+          type="text"
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className="w-full rounded border border-gray-300 px-2 py-1 text-xs focus:border-brand focus:outline-none"
+        />
+      </div>
+      <div>
+        <label className="block text-[10px] font-medium text-gray-500 mb-0.5">Message</label>
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          rows={2}
+          className="w-full rounded border border-gray-300 px-2 py-1 text-xs focus:border-brand focus:outline-none resize-none"
+        />
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={send}
+          disabled={state === 'sending'}
+          style={{ backgroundColor: '#7c3aed' }}
+          className="flex-1 rounded-lg px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+        >
+          {label}
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
+          className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -396,7 +446,7 @@ export default function StoreView() {
                               <span className="text-xs text-gray-600 truncate flex-1 mr-2">
                                 {item.title} x{item.quantity || 1}
                               </span>
-                              <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                              <div className="shrink-0 relative" onClick={(e) => e.stopPropagation()}>
                                 <SendPushButton
                                   shop={shop}
                                   cartValue={c.cartValue}
