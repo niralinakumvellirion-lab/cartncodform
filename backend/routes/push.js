@@ -124,7 +124,7 @@ router.post('/subscribe-customer', async (req, res) => {
  */
 router.post('/send-customer', async (req, res) => {
   try {
-    const { shopDomain, title, body, url, imageUrl } = req.body;
+    const { shopDomain, title, body, url, imageUrl, cartToken } = req.body;
 
     console.log(`[send-customer] shopDomain received: ${shopDomain}`);
     console.log('[send-customer] imageUrl from request:', req.body.imageUrl || 'NONE');
@@ -133,7 +133,17 @@ router.post('/send-customer', async (req, res) => {
       return res.status(400).json({ error: 'shopDomain, title and body are required' });
     }
 
-    const result = await sendPushToCustomers(shopDomain, title, body, url, imageUrl, true, null, true);
+    // Normalize cartToken — strip ?key=... suffix if present.
+    const normalizedCartToken = cartToken
+      ? cartToken.split('?')[0].trim() || null
+      : null;
+
+    const result = await sendPushToCustomers(
+      shopDomain, title, body, url, imageUrl,
+      true,
+      normalizedCartToken || null,
+      normalizedCartToken ? false : true
+    );
 
     console.log(`[send-customer] tokens found: ${result.tokensFound ?? 0}`);
     console.log(`[send-customer] FCM result: ${JSON.stringify(result)}`);
