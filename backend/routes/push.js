@@ -67,7 +67,7 @@ router.post('/send', async (req, res) => {
  */
 router.post('/subscribe-customer', async (req, res) => {
   try {
-    const { shopDomain, token, oldToken, page, deviceType, cartToken, customerId } = req.body;
+    const { shopDomain, token, oldToken, page, deviceType, cartToken, customerId, ccfSessionId } = req.body;
 
     // Normalize cartToken — strip ?key=... suffix that /cart.js appends.
     const normalizedCartToken = cartToken
@@ -96,6 +96,7 @@ router.post('/subscribe-customer', async (req, res) => {
         deviceType: deviceType || 'unknown',
         cartToken: normalizedCartToken || undefined,
         customerId: customerId || undefined,
+        ccfSessionId: ccfSessionId || undefined,
         lastActivityAt: new Date()
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }

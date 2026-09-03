@@ -7,6 +7,7 @@ const CustomerPushSubscriptionSchema = new mongoose.Schema({
   deviceType: { type: String, enum: ['mobile', 'desktop', 'unknown'], default: 'unknown' },
   cartToken: { type: String, trim: true, index: true },
   customerId: { type: String, index: true },
+  ccfSessionId: { type: String, index: true },
   createdAt: { type: Date, default: Date.now },
   // Last storefront activity recorded for this subscriber (POST /api/push/cart-activity).
   lastEvent: { type: String },

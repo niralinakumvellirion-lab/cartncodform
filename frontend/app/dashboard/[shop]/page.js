@@ -96,17 +96,34 @@ function StatusBadge({ status }) {
   );
 }
 
-function CustomerAnalytics({ shop, sessionId, onClose }) {
+function CustomerAnalytics({ shop, customer, onClose }) {
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!sessionId) return;
-    apiGet(`/api/events/${encodeURIComponent(shop)}/customer/${encodeURIComponent(sessionId)}`)
+    if (!customer) return;
+
+    const sessionId = customer.sessionId;
+    if (!sessionId) {
+      setLoading(false);
+      return;
+    }
+
+    // Step 1: resolve ccfSessionId from cartToken (sessionId)
+    apiGet(`/api/events/${encodeURIComponent(shop)}/resolve/${encodeURIComponent(sessionId)}`)
+      .then(function(data) {
+        const ccfSessionId = data.ccfSessionId;
+        if (!ccfSessionId) {
+          // No subscription found for this cart — try direct sessionId lookup
+          return apiGet(`/api/events/${encodeURIComponent(shop)}/customer/${encodeURIComponent(sessionId)}`);
+        }
+        // Step 2: fetch events by stable ccfSessionId
+        return apiGet(`/api/events/${encodeURIComponent(shop)}/ccfsession/${encodeURIComponent(ccfSessionId)}`);
+      })
       .then(setEvents)
       .catch(() => setEvents([]))
       .finally(() => setLoading(false));
-  }, [shop, sessionId]);
+  }, [shop, customer]);
 
   const iconFor = (type) => ({
     page_view: '👁️',
@@ -126,16 +143,22 @@ function CustomerAnalytics({ shop, sessionId, onClose }) {
       <div className="bg-white w-full max-w-lg h-full overflow-y-auto shadow-xl">
         <div className="flex items-center justify-between p-4 border-b sticky top-0 bg-white">
           <h2 className="font-bold text-gray-900">Customer Journey</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
+          <button onClick={onClose}
+            className="text-gray-500 hover:text-gray-700 text-xl">✕</button>
         </div>
         {loading ? (
           <div className="p-8 text-center text-gray-400">Loading events...</div>
         ) : events.length === 0 ? (
-          <div className="p-8 text-center text-gray-400">No events tracked yet.</div>
+          <div className="p-8 text-center text-gray-400">
+            No events tracked yet.
+            <p className="text-xs mt-2">Events are tracked when a
+            subscribed customer browses the store.</p>
+          </div>
         ) : (
           <div className="p-4 space-y-2">
             {events.map((e, i) => (
-              <div key={i} className="flex gap-3 p-3 rounded-lg border border-gray-100 bg-gray-50">
+              <div key={i}
+                className="flex gap-3 p-3 rounded-lg border border-gray-100 bg-gray-50">
                 <span className="text-xl">{iconFor(e.type)}</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
@@ -148,13 +171,14 @@ function CustomerAnalytics({ shop, sessionId, onClose }) {
                   </div>
                   <p className="text-xs text-gray-500 truncate">{e.path}</p>
                   {e.meta && (
-                    <div className="mt-1 text-xs text-gray-600">
-                      {e.meta.title && <span>{e.meta.title}</span>}
-                      {e.meta.query && <span>Search: "{e.meta.query}"</span>}
+                    <div className="mt-1 text-xs text-gray-600 space-y-0.5">
+                      {e.meta.title && <p>{e.meta.title}</p>}
+                      {e.meta.query && <p>Search: "{e.meta.query}"</p>}
                       {e.meta.dwellSeconds !== undefined && (
-                        <span>{e.meta.dwellSeconds}s on page · {e.meta.scrollDepth || 0}% scrolled</span>
+                        <p>{e.meta.dwellSeconds}s on page · {e.meta.scrollDepth || 0}% scrolled</p>
                       )}
-                      {e.meta.cartValue && <span>Cart: ₹{e.meta.cartValue}</span>}
+                      {e.meta.cartValue && <p>Cart: ₹{e.meta.cartValue}</p>}
+                      {e.meta.itemCount && <p>{e.meta.itemCount} items</p>}
                     </div>
                   )}
                 </div>
@@ -264,7 +288,7 @@ export default function StoreView() {
       {analyticsCustomer && (
         <CustomerAnalytics
           shop={shop}
-          sessionId={analyticsCustomer.sessionId}
+          customer={analyticsCustomer}
           onClose={() => setAnalyticsCustomer(null)}
         />
       )}

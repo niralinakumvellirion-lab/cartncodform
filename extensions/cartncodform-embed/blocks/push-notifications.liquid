@@ -331,7 +331,8 @@
             page: window.location.pathname,
             deviceType: deviceType,
             cartToken: cartToken,
-            customerId: customerId
+            customerId: customerId,
+            ccfSessionId: getSessionId()
           })
         });
       })
@@ -488,18 +489,31 @@
   // ============================================================
   // EVENT TRACKING
   // ============================================================
-  var CCF_SESSION_KEY = 'ccf_session_' + SHOP_DOMAIN;
+  var CCF_SESSION_KEY = 'ccf_analytics_session_' + SHOP_DOMAIN;
   var eventQueue = [];
   var flushTimer = null;
 
+  // Generate a stable analytics session UUID — persists in
+  // localStorage across page loads and cart token rotations.
+  function generateUUID() {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      var r = Math.random() * 16 | 0;
+      var v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
   function getSessionId() {
-    // Use Shopify cart token as session id if available, else a
-    // persistent UUID stored in sessionStorage.
-    return sessionStorage.getItem(CCF_SESSION_KEY) || null;
+    var existing = localStorage.getItem(CCF_SESSION_KEY);
+    if (existing) return existing;
+    var newId = generateUUID();
+    localStorage.setItem(CCF_SESSION_KEY, newId);
+    return newId;
   }
 
   function setSessionId(id) {
-    if (id) sessionStorage.setItem(CCF_SESSION_KEY, id);
+    // No-op — sessionId is now managed by getSessionId() via localStorage.
+    // Kept for compatibility with existing calls.
   }
 
   function getPageType() {
@@ -589,15 +603,6 @@
 
   function initTracking() {
     var pageType = getPageType();
-
-    // Sync sessionId from cart token if available.
-    fetch('/cart.js').then(function(r) { return r.json(); })
-      .then(function(cart) {
-        if (cart.token) {
-          var bare = cart.token.split('?')[0].trim();
-          setSessionId(bare);
-        }
-      }).catch(function() {});
 
     // PAGE VIEW
     trackEvent('page_view', {

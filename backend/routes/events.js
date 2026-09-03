@@ -89,4 +89,54 @@ router.get('/:shopDomain/summary', async (req, res) => {
   }
 });
 
+/**
+ * GET /api/events/:shopDomain/ccfsession/:ccfSessionId
+ * Returns all events for a stable analytics session UUID, newest first.
+ */
+router.get('/:shopDomain/ccfsession/:ccfSessionId', async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const ccfSessionId = req.params.ccfSessionId;
+
+    const events = await StorefrontEvent.find({
+      shopDomain: shop,
+      sessionId: ccfSessionId  // stored as sessionId in the model
+    })
+      .sort({ ts: -1 })
+      .limit(200);
+
+    return res.json(events);
+  } catch (err) {
+    console.error('[events] GET ccfsession error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch events' });
+  }
+});
+
+/**
+ * GET /api/events/:shopDomain/resolve/:cartToken
+ * Given a Shopify cart token, return the ccfSessionId (stable analytics
+ * session UUID) + customerId of the most recently active subscription
+ * for that cart, so the dashboard can then query events by ccfSessionId.
+ */
+router.get('/:shopDomain/resolve/:cartToken', async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const cartToken = req.params.cartToken;
+    const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+
+    const sub = await CustomerPushSubscription.findOne({
+      shopDomain: shop,
+      cartToken: cartToken
+    }).sort({ lastActivityAt: -1 });
+
+    return res.json({
+      ccfSessionId: sub?.ccfSessionId || null,
+      customerId: sub?.customerId || null
+    });
+  } catch (err) {
+    console.error('[events] GET resolve error:', err.message);
+    return res.status(500).json({ error: 'Failed to resolve session' });
+  }
+});
+
 module.exports = router;
