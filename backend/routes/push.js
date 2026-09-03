@@ -107,7 +107,6 @@ router.post('/subscribe-customer', async (req, res) => {
     return res.status(500).json({ error: 'Failed to save subscription' });
   }
 });
-
 /**
  * POST /api/push/send-customer
  * Body: { shopDomain, title, body, url, imageUrl }
@@ -124,7 +123,7 @@ router.post('/send-customer', async (req, res) => {
       return res.status(400).json({ error: 'shopDomain, title and body are required' });
     }
 
-    const result = await sendPushToCustomers(shopDomain, title, body, url, imageUrl, false);
+    const result = await sendPushToCustomers(shopDomain, title, body, url, imageUrl, true);
 
     console.log(`[send-customer] tokens found: ${result.tokensFound ?? 0}`);
     console.log(`[send-customer] FCM result: ${JSON.stringify(result)}`);
@@ -143,8 +142,7 @@ router.post('/send-customer', async (req, res) => {
 /**
  * POST /api/push/cart-activity
  * Body: { shopDomain, token, event, url }
- * Records storefront cart activity on the customer subscription and pings the
- * store owner.
+ * Records storefront cart activity on the customer subscription.
  */
 router.post('/cart-activity', async (req, res) => {
   try {
@@ -169,14 +167,6 @@ router.post('/cart-activity', async (req, res) => {
     if (!sub) {
       console.log('[cart-activity] no CustomerPushSubscription matched this token');
     }
-
-    // Auto-notify the store owner about the cart activity.
-    sendPushToStore(
-      shopDomain,
-      '🛒 Customer added to cart!',
-      `A customer just added items to cart on ${shopDomain}`
-    );
-    console.log(`[cart-activity] Owner notified for: ${shopDomain}`);
 
     return res.status(200).json({ success: true });
   } catch (err) {

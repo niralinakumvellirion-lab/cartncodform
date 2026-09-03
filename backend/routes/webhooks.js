@@ -172,12 +172,16 @@ async function handleWebhook(source, req, res) {
       console.log(`Abandoned cart email triggered for: ${savedCustomer.email}`);
     }
 
-    // Push-notify the store owner about the abandoned cart.
-    sendPushToStore(
-      shopDomain,
-      '🛒 New Abandoned Cart',
-      `A customer left items worth ₹${doc.cartValue} in their cart`
-    );
+    // Push-notify the store owner only on new carts (not updates).
+    const isNewCart = !savedCustomer.createdAt ||
+      (new Date() - new Date(savedCustomer.createdAt)) < 10000;
+    if (isNewCart) {
+      sendPushToStore(
+        shopDomain,
+        '🛒 New Abandoned Cart',
+        `A customer left items worth ₹${doc.cartValue} in their cart`
+      );
+    }
 
     // Resolve a product image for the customer notification. carts/* line_items
     // have no image, so fall back to the Admin API using the first productId.
