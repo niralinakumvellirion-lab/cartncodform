@@ -2,7 +2,7 @@ const express = require('express');
 const PushSubscription = require('../models/PushSubscription');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
-const { cancelPush, fetchProductImage } = require('./webhooks');
+const { fetchProductImage } = require('./webhooks');
 
 const router = express.Router();
 
@@ -184,16 +184,6 @@ router.post('/send-customer', async (req, res) => {
 
     console.log(`[send-customer] tokens found: ${result.tokensFound ?? 0}`);
     console.log(`[send-customer] FCM result: ${JSON.stringify(result)}`);
-
-    // Cancel the abandonment timer if a targeted push was sent manually.
-    if (normalizedCartToken && result.sent > 0) {
-      try {
-        cancelPush(normalizedCartToken);
-        console.log(`[send-customer] Cancelled pending timer for: ${normalizedCartToken}`);
-      } catch (e) {
-        // cancelPush is best-effort
-      }
-    }
 
     if (!result.success) {
       return res.status(500).json({ success: false, error: result.error });

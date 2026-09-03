@@ -7,40 +7,6 @@ const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotificat
 
 const router = express.Router();
 
-// In-memory map of pending abandonment push timers.
-// Key: sessionId (cart token), Value: setTimeout handle.
-const pendingPushTimers = new Map();
-
-// How long to wait after last cart activity before sending push (ms).
-// Set ABANDON_DELAY_MS env var to override (e.g. 60000 = 1 min for testing).
-const ABANDON_DELAY_MS = process.env.ABANDON_DELAY_MS
-  ? parseInt(process.env.ABANDON_DELAY_MS, 10)
-  : 15 * 60 * 1000; // default 15 minutes
-
-function schedulePush(sessionId, pushFn) {
-  // Cancel any existing timer for this session.
-  if (pendingPushTimers.has(sessionId)) {
-    clearTimeout(pendingPushTimers.get(sessionId));
-    console.log(`[webhook] Cancelled pending push for session: ${sessionId}`);
-  }
-  // Schedule a new push after the abandonment delay.
-  const timer = setTimeout(function() {
-    pendingPushTimers.delete(sessionId);
-    console.log(`[webhook] Firing abandoned push for session: ${sessionId}`);
-    pushFn();
-  }, ABANDON_DELAY_MS);
-  pendingPushTimers.set(sessionId, timer);
-  console.log(`[webhook] Push scheduled in ${ABANDON_DELAY_MS / 60000}min for session: ${sessionId}`);
-}
-
-function cancelPush(sessionId) {
-  if (pendingPushTimers.has(sessionId)) {
-    clearTimeout(pendingPushTimers.get(sessionId));
-    pendingPushTimers.delete(sessionId);
-    console.log(`[webhook] Push cancelled (checkout) for session: ${sessionId}`);
-  }
-}
-
 /**
  * Normalise a Shopify cart / checkout payload into an AbandonedCustomer document.
  */
@@ -219,33 +185,8 @@ async function handleWebhook(source, req, res) {
 
     console.log('[webhook] Final productImageUrl before push:', productImageUrl);
 
-    // Schedule push after abandonment delay. Cancel+reschedule on each
-    // cart update so only a truly abandoned cart triggers the push.
-    const sessionId = savedCustomer.sessionId || doc.sessionId;
-    // Normalize sessionId — strip ?key=... suffix to match stored cartToken.
-    const normalizedSessionId = sessionId
-      ? sessionId.split('?')[0].trim() || sessionId
-      : sessionId;
-    if (source === 'cart') {
-      schedulePush(normalizedSessionId, function() {
-        sendPushToCustomers(
-          shopDomain,
-          'You left items in your cart! 🛒',
-          `Complete your order - items worth ₹${doc.cartValue} are waiting`,
-          `https://${shopDomain}`,
-          productImageUrl || null,
-          true,
-          normalizedSessionId || null,
-          false,
-          savedCustomer.customerId || null
-        );
-      });
-    } else if (source === 'checkout') {
-      // Customer proceeded to checkout — cancel any pending cart push.
-      cancelPush(normalizedSessionId);
-      // Send push only after checkout abandonment (not create/update).
-      // For now do not push on checkout events.
-    }
+    // Manual push only — no automatic timer.
+    // Owner uses the dashboard "🔔 Push" button to send notifications.
 
     return res.status(200).json({ received: true });
   } catch (err) {
@@ -267,10 +208,9 @@ router.post('/cart', (req, res) => handleWebhook('cart', req, res));
  */
 router.post('/checkout', (req, res) => handleWebhook('checkout', req, res));
 
-// Expose cancelPush so the dashboard send-customer route can stop a pending
-// abandonment timer after a manual targeted push. Attached to `router` itself
-// so it survives the `module.exports = router` assignment below.
-router.cancelPush = cancelPush;
+// fetchProductImage stays exported — the dashboard "🔔 Push" route
+// (backend/routes/push.js) still uses it to resolve per-product images.
+// Attached to `router` so it survives the `module.exports = router` assignment.
 router.fetchProductImage = fetchProductImage;
 
 module.exports = router;
