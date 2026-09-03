@@ -372,24 +372,22 @@ export default function StoreView() {
                   ? c.cartItems.reduce((s, i) => s + (i.quantity || 1), 0)
                   : 0;
                 return (
-                  <tr key={c._id}>
+                  <tr
+                    key={c._id}
+                    onClick={() => setAnalyticsCustomer(c)}
+                    className="cursor-pointer hover:bg-blue-50 transition-colors"
+                  >
                     <td className="px-4 py-3">
-                      <button
-                        onClick={() => setAnalyticsCustomer(c)}
-                        className="text-left hover:underline text-brand"
-                        title="View customer journey"
-                      >
-                        {anon ? (
-                          <span className="italic text-gray-400">Anonymous</span>
-                        ) : (
-                          c.email || <span className="italic text-gray-400">—</span>
-                        )}
-                      </button>
+                      {anon ? (
+                        <span className="italic text-gray-400">Anonymous</span>
+                      ) : (
+                        c.email || <span className="italic text-gray-400">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       {c.phone || <span className="text-gray-400">—</span>}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex flex-col gap-1">
                         {Array.isArray(c.cartItems) && c.cartItems.length > 0 ? (
                           c.cartItems.map((item, idx) => (
@@ -418,7 +416,7 @@ export default function StoreView() {
                     <td className="px-4 py-3">
                       <StatusBadge status={c.status} />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex flex-wrap items-center gap-2">
                         {c.phone && (
                           <WhatsAppButton
