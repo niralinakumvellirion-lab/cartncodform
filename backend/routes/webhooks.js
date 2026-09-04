@@ -103,12 +103,6 @@ async function handleWebhook(source, req, res) {
     const topic = req.get('X-Shopify-Topic') || source;
 
     console.log(`\n[webhook:${source}] Received "${topic}" from ${shopDomain || 'unknown shop'}`);
-    console.log(JSON.stringify(req.body, null, 2));
-
-    const payload = req.body;
-    console.log('[webhook] Payload line_items sample:',
-      JSON.stringify(payload.line_items?.[0] || payload.line_items, null, 2)
-    );
 
     if (!shopDomain) {
       // Still acknowledge so Shopify doesn't retry forever.

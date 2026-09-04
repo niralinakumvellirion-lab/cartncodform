@@ -3,6 +3,7 @@ const CodOrder = require('../models/CodOrder');
 const Store = require('../models/Store');
 const { sendNewCodOrderEmail } = require('../utils/email');
 const { sendPushToStore } = require('../utils/pushNotification');
+const { requireAuth } = require('../middleware/requireOwner');
 
 const router = express.Router();
 
@@ -75,7 +76,7 @@ router.post('/order', async (req, res) => {
  * PATCH /api/cod/order/:id
  * Owner updates the status of a COD order (pending/confirmed/cancelled).
  */
-router.patch('/order/:id', async (req, res) => {
+router.patch('/order/:id', requireAuth, async (req, res) => {
   try {
     const { status } = req.body;
     const allowed = ['pending', 'confirmed', 'cancelled'];
@@ -84,15 +85,21 @@ router.patch('/order/:id', async (req, res) => {
       return res.status(400).json({ error: `status must be one of ${allowed.join(', ')}` });
     }
 
+    const existingOrder = await CodOrder.findById(req.params.id);
+    if (!existingOrder) {
+      return res.status(404).json({ error: 'COD order not found' });
+    }
+
+    const store = await Store.findOne({ shopDomain: existingOrder.shopDomain });
+    if (!store || store.ownerEmail !== req.userEmail) {
+      return res.status(403).json({ error: 'Not authorized for this order' });
+    }
+
     const order = await CodOrder.findByIdAndUpdate(
       req.params.id,
       { status },
       { new: true }
     );
-
-    if (!order) {
-      return res.status(404).json({ error: 'COD order not found' });
-    }
 
     console.log(`[cod] Order ${order._id} status -> ${status}`);
     return res.json({ success: true, order });

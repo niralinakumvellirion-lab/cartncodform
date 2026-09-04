@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const StorefrontEvent = require('../models/StorefrontEvent');
+const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
 
 /**
  * POST /api/events
@@ -51,7 +52,7 @@ router.post('/', async (req, res) => {
  * GET /api/events/:shopDomain/customer/:sessionId
  * Returns all events for a customer session, sorted newest first.
  */
-router.get('/:shopDomain/customer/:sessionId', async (req, res) => {
+router.get('/:shopDomain/customer/:sessionId', requireAuth, requireStoreOwner, async (req, res) => {
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
     const sessionId = req.params.sessionId;
@@ -71,7 +72,7 @@ router.get('/:shopDomain/customer/:sessionId', async (req, res) => {
  * GET /api/events/:shopDomain/summary
  * Returns event counts by type for the shop (last 30 days).
  */
-router.get('/:shopDomain/summary', async (req, res) => {
+router.get('/:shopDomain/summary', requireAuth, requireStoreOwner, async (req, res) => {
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -93,7 +94,7 @@ router.get('/:shopDomain/summary', async (req, res) => {
  * GET /api/events/:shopDomain/ccfsession/:ccfSessionId
  * Returns all events for a stable analytics session UUID, newest first.
  */
-router.get('/:shopDomain/ccfsession/:ccfSessionId', async (req, res) => {
+router.get('/:shopDomain/ccfsession/:ccfSessionId', requireAuth, requireStoreOwner, async (req, res) => {
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
     const ccfSessionId = req.params.ccfSessionId;
@@ -118,7 +119,7 @@ router.get('/:shopDomain/ccfsession/:ccfSessionId', async (req, res) => {
  * session UUID) + customerId of the most recently active subscription
  * for that cart, so the dashboard can then query events by ccfSessionId.
  */
-router.get('/:shopDomain/resolve/:cartToken', async (req, res) => {
+router.get('/:shopDomain/resolve/:cartToken', requireAuth, requireStoreOwner, async (req, res) => {
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
     const cartToken = req.params.cartToken;

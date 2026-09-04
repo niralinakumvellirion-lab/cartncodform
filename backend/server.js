@@ -3,6 +3,7 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 
 const connectDB = require('./config/db');
 const authRoutes = require('./routes/auth');
@@ -13,6 +14,9 @@ const pushRouter = require('./routes/push');
 const proxyRouter = require('./routes/proxy');
 
 const app = express();
+// Render sits behind a reverse proxy — trust the X-Forwarded-For
+// header so rate limiting and req.ip key on the real client IP.
+app.set('trust proxy', 1);
 const PORT = process.env.PORT || 4000;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
@@ -78,13 +82,28 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
+// Rate limiters for the high-volume / abusable public endpoints.
+const eventsLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+const pushLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/stores', storeRoutes);
 app.use('/api/cod', codRoutes);
-app.use('/api/push', pushRouter);
+app.use('/api/push', pushLimiter, pushRouter);
 const eventsRouter = require('./routes/events');
-app.use('/api/events', eventsRouter);
+app.use('/api/events', eventsLimiter, eventsRouter);
 app.use('/apps/cartncodform', proxyRouter);
 
 // --- 404 + error handlers ---------------------------------------------------
