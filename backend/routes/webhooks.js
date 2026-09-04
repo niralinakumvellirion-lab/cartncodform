@@ -4,6 +4,7 @@ const Store = require('../models/Store');
 const { verifyWebhookHmac } = require('../utils/shopify');
 const { sendAbandonedCartEmail } = require('../utils/email');
 const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
+const { scheduleCartAbandonJobs, cancelJobsForOrder } = require('../utils/automationEngine');
 
 const router = express.Router();
 
@@ -182,6 +183,18 @@ async function handleWebhook(source, req, res) {
     // Manual push only — no automatic timer.
     // Owner uses the dashboard "🔔 Push" button to send notifications.
 
+    // Schedule automation jobs for cart_abandon rules, if this is a
+    // cart webhook (not checkout) and we have a normalized cart token.
+    if (source === 'cart' && doc.sessionId) {
+      const normalizedToken = doc.sessionId.split('?')[0].trim();
+      const firstItem = savedCustomer.cartItems && savedCustomer.cartItems[0];
+      scheduleCartAbandonJobs(shopDomain, normalizedToken, savedCustomer.customerId || null, {
+        cartValue: doc.cartValue,
+        productImageUrl: productImageUrl,
+        firstItemTitle: firstItem ? firstItem.title : null,
+      });
+    }
+
     return res.status(200).json({ received: true });
   } catch (err) {
     console.error(`[webhook:${source}] error:`, err.message);
@@ -210,9 +223,17 @@ async function handleOrderWebhook(req, res) {
 
     console.log(`[webhook:order] Received orders/create from ${shopDomain}, cart_token: ${cartToken || 'none'}`);
 
-    // TODO (next stage): cancel pending ScheduledJob rows matching
-    // this cartToken/customerId, and flip the matching AbandonedCustomer
-    // to status: 'recovered'.
+    const customerId = order.customer?.id ? String(order.customer.id) : null;
+    await cancelJobsForOrder(shopDomain, cartToken, customerId);
+
+    // Mark the matching AbandonedCustomer as recovered.
+    if (cartToken) {
+      const normalizedToken = cartToken.split('?')[0].trim();
+      await AbandonedCustomer.updateMany(
+        { shopDomain, sessionId: normalizedToken, status: 'abandoned' },
+        { status: 'recovered' }
+      );
+    }
 
     return res.status(200).json({ received: true });
   } catch (err) {
