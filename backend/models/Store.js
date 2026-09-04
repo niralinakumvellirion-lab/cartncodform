@@ -21,6 +21,14 @@ const storeSchema = new mongoose.Schema({
     type: String,
     default: 'Asia/Kolkata',
   },
+  plan: {
+    type: String,
+    enum: ['free', 'pro'],
+    default: 'free',
+  },
+  subscriptionId: { type: String },
+  subscriptionStatus: { type: String },
+  planUpdatedAt: { type: Date },
   installedAt: {
     type: Date,
     default: Date.now,

@@ -331,6 +331,80 @@ async function handleOrderWebhook(req, res) {
 }
 
 /**
+ * app_subscriptions/update — fires when a subscription changes
+ * status (active, cancelled, frozen, expired, declined).
+ */
+async function handleAppSubscriptionUpdate(req, res) {
+  const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+    console.warn('[billing] app_subscriptions/update — invalid HMAC');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
+      .toString().trim().toLowerCase();
+    const subscription = req.body.app_subscription || {};
+    const status = subscription.admin_graphql_api_id ? subscription.status : req.body.status;
+    const subId = subscription.admin_graphql_api_id || null;
+
+    console.log(`[billing] app_subscriptions/update for ${shopDomain}: status=${status}`);
+
+    const isActive = status === 'ACTIVE' || status === 'active';
+
+    await Store.findOneAndUpdate(
+      { shopDomain },
+      {
+        plan: isActive ? 'pro' : 'free',
+        subscriptionId: subId,
+        subscriptionStatus: status || null,
+        planUpdatedAt: new Date(),
+      }
+    );
+
+    console.log(`[billing] Store ${shopDomain} plan updated to: ${isActive ? 'pro' : 'free'}`);
+    return res.status(200).json({ received: true });
+  } catch (err) {
+    console.error('[billing] app_subscriptions/update error:', err.message);
+    return res.status(200).json({ received: true, error: err.message });
+  }
+}
+
+/**
+ * app/uninstalled — fires immediately when a merchant uninstalls
+ * the app. Downgrade to free locally (shop/redact will delete
+ * everything 48h later per GDPR).
+ */
+async function handleAppUninstalled(req, res) {
+  const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+    console.warn('[billing] app/uninstalled — invalid HMAC');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
+      .toString().trim().toLowerCase();
+
+    console.log(`[billing] app/uninstalled for ${shopDomain} — downgrading to free`);
+
+    await Store.findOneAndUpdate(
+      { shopDomain },
+      {
+        plan: 'free',
+        subscriptionStatus: 'uninstalled',
+        planUpdatedAt: new Date(),
+      }
+    );
+
+    return res.status(200).json({ received: true });
+  } catch (err) {
+    console.error('[billing] app/uninstalled error:', err.message);
+    return res.status(200).json({ received: true, error: err.message });
+  }
+}
+
+/**
  * GDPR: customers/data_request
  * A customer has requested their data. Shopify sends this when a
  * merchant uses the "Request customer data" feature. We must respond
@@ -489,6 +563,12 @@ router.post('/checkout', (req, res) => handleWebhook('checkout', req, res));
  * Handles orders/create.
  */
 router.post('/order', (req, res) => handleOrderWebhook(req, res));
+
+/**
+ * Billing state webhooks.
+ */
+router.post('/app-subscription', (req, res) => handleAppSubscriptionUpdate(req, res));
+router.post('/app-uninstalled', (req, res) => handleAppUninstalled(req, res));
 
 /**
  * GDPR mandatory compliance webhooks — Shopify delivers all three
