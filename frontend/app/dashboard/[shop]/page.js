@@ -309,7 +309,7 @@ export default function StoreView() {
     setDisconnecting(true);
     setError('');
     try {
-      await apiSend(`/api/stores/${encodeURIComponent(shop)}`, 'DELETE');
+      await apiSend(`/api/stores/${encodeURIComponent(shop)}`, 'DELETE', {});
       router.push('/dashboard');
     } catch (err) {
       setError(err.message);

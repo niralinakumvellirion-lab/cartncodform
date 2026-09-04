@@ -1,4 +1,5 @@
 const express = require('express');
+const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
 const Store = require('../models/Store');
 const AbandonedCustomer = require('../models/AbandonedCustomer');
 const CodOrder = require('../models/CodOrder');
@@ -7,35 +8,17 @@ const PushSubscription = require('../models/PushSubscription');
 const router = express.Router();
 
 /**
- * If ?email= is supplied, make sure this store belongs to that owner.
- * Returns true when access is allowed. Verification is soft: a store with no
- * ownerEmail on record is allowed through (optional for now).
- */
-async function ownerAllowed(shopDomain, email) {
-  if (!email) return true;
-  const store = await Store.findOne({ shopDomain }).select('ownerEmail').lean();
-  if (!store || !store.ownerEmail) return true;
-  return store.ownerEmail === String(email).trim().toLowerCase();
-}
-
-/**
  * GET /api/stores
- * List connected stores (access tokens are never returned).
- * ?email=<owner> -> only stores owned by that email. No email -> all stores.
+ * List stores owned by the authenticated user (derived from the JWT,
+ * not a client-supplied query param).
  */
-router.get('/', async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   try {
-    const { email } = req.query;
-    const query = email
-      ? { ownerEmail: String(email).trim().toLowerCase() }
-      : {};
-
-    const stores = await Store.find(query)
+    const stores = await Store.find({ ownerEmail: req.userEmail })
       .sort({ installedAt: -1 })
       .select('-accessToken -__v')
       .lean();
 
-    // Attach lightweight counts for the dashboard overview.
     const withCounts = await Promise.all(
       stores.map(async (store) => {
         const [abandonedCount, codCount] = await Promise.all([
@@ -55,16 +38,11 @@ router.get('/', async (req, res) => {
 
 /**
  * GET /api/stores/:shopDomain/customers
- * Abandoned customers for a store (newest first).
  */
-router.get('/:shopDomain/customers', async (req, res) => {
+router.get('/:shopDomain/customers', requireAuth, requireStoreOwner, async (req, res) => {
   try {
     const shopDomain = req.params.shopDomain.trim().toLowerCase();
-    const { status, email } = req.query;
-
-    if (!(await ownerAllowed(shopDomain, email))) {
-      return res.status(403).json({ error: 'Not authorized for this store' });
-    }
+    const { status } = req.query;
 
     const filter = { shopDomain };
     if (status) filter.status = status;
@@ -79,16 +57,11 @@ router.get('/:shopDomain/customers', async (req, res) => {
 
 /**
  * GET /api/stores/:shopDomain/orders
- * COD orders for a store (newest first).
  */
-router.get('/:shopDomain/orders', async (req, res) => {
+router.get('/:shopDomain/orders', requireAuth, requireStoreOwner, async (req, res) => {
   try {
     const shopDomain = req.params.shopDomain.trim().toLowerCase();
-    const { status, email } = req.query;
-
-    if (!(await ownerAllowed(shopDomain, email))) {
-      return res.status(403).json({ error: 'Not authorized for this store' });
-    }
+    const { status } = req.query;
 
     const filter = { shopDomain };
     if (status) filter.status = status;
@@ -103,17 +76,13 @@ router.get('/:shopDomain/orders', async (req, res) => {
 
 /**
  * DELETE /api/stores/:shopDomain
- * Disconnect a store: remove the Store plus every record tied to that shop
- * (abandoned customers, COD orders, push subscriptions).
+ * Disconnect a store: remove the Store plus every record tied to that shop.
  */
-router.delete('/:shopDomain', async (req, res) => {
+router.delete('/:shopDomain', requireAuth, requireStoreOwner, async (req, res) => {
   try {
     const shopDomain = req.params.shopDomain.trim().toLowerCase();
 
-    const store = await Store.findOneAndDelete({ shopDomain });
-    if (!store) {
-      return res.status(404).json({ error: 'Store not found' });
-    }
+    await Store.findOneAndDelete({ shopDomain });
 
     const [abandoned, cod, push] = await Promise.all([
       AbandonedCustomer.deleteMany({ shopDomain }),

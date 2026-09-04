@@ -3,6 +3,7 @@ const PushSubscription = require('../models/PushSubscription');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
 const { fetchProductImage } = require('./webhooks');
+const { requireAuth } = require('../middleware/requireOwner');
 
 const router = express.Router();
 
@@ -38,9 +39,15 @@ router.post('/subscribe', async (req, res) => {
  * Body: { shopDomain, title, body }
  * Sends a notification to every token registered for the store.
  */
-router.post('/send', async (req, res) => {
+router.post('/send', requireAuth, async (req, res) => {
   try {
     const { shopDomain, title, body } = req.body;
+
+    const Store = require('../models/Store');
+    const store = await Store.findOne({ shopDomain: shopDomain?.trim().toLowerCase() });
+    if (!store || store.ownerEmail !== req.userEmail) {
+      return res.status(403).json({ error: 'Not authorized for this store' });
+    }
 
     if (!shopDomain || !title || !body) {
       return res.status(400).json({ error: 'shopDomain, title and body are required' });
@@ -125,9 +132,15 @@ router.post('/subscribe-customer', async (req, res) => {
  * Body: { shopDomain, title, body, url, imageUrl }
  * Sends a notification to every storefront customer subscribed for the shop.
  */
-router.post('/send-customer', async (req, res) => {
+router.post('/send-customer', requireAuth, async (req, res) => {
   try {
     const { shopDomain, title, body, url, imageUrl, cartToken, productId } = req.body;
+
+    const Store = require('../models/Store');
+    const store = await Store.findOne({ shopDomain: shopDomain?.trim().toLowerCase() });
+    if (!store || store.ownerEmail !== req.userEmail) {
+      return res.status(403).json({ error: 'Not authorized for this store' });
+    }
 
     console.log(`[send-customer] shopDomain received: ${shopDomain}`);
     console.log('[send-customer] imageUrl from request:', req.body.imageUrl || 'NONE');

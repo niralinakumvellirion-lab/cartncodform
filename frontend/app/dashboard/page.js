@@ -3,10 +3,10 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { BACKEND_URL } from '../../lib/api';
+import { apiGet, apiSend } from '../../lib/api';
 
 export default function DashboardOverview() {
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
   const email = session?.user?.email || '';
 
   const [stores, setStores] = useState([]);
@@ -15,15 +15,10 @@ export default function DashboardOverview() {
   const [busy, setBusy] = useState('');
 
   const loadStores = useCallback(async () => {
-    if (!email) return;
+    if (status !== 'authenticated') return;
     setLoading(true);
     try {
-      const res = await fetch(
-        `${BACKEND_URL}/api/stores?email=${encodeURIComponent(email)}`,
-        { cache: 'no-store' }
-      );
-      if (!res.ok) throw new Error(`status ${res.status}`);
-      const d = await res.json();
+      const d = await apiGet('/api/stores');
       setStores(Array.isArray(d) ? d : []);
       setError(null);
     } catch (err) {
@@ -31,7 +26,7 @@ export default function DashboardOverview() {
     } finally {
       setLoading(false);
     }
-  }, [email]);
+  }, [status]);
 
   useEffect(() => {
     loadStores();
@@ -46,15 +41,7 @@ export default function DashboardOverview() {
     setBusy(shopDomain);
     setError(null);
     try {
-      const res = await fetch(
-        `${BACKEND_URL}/api/stores/${encodeURIComponent(shopDomain)}`,
-        { method: 'DELETE' }
-      );
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `status ${res.status}`);
-      }
-      // Remove from the list, then re-fetch to stay in sync with the backend.
+      await apiSend(`/api/stores/${encodeURIComponent(shopDomain)}`, 'DELETE', {});
       setStores((prev) => prev.filter((s) => s.shopDomain !== shopDomain));
       loadStores();
     } catch (err) {
