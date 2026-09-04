@@ -17,6 +17,10 @@ const storeSchema = new mongoose.Schema({
     lowercase: true,
     trim: true,
   },
+  timezone: {
+    type: String,
+    default: 'Asia/Kolkata',
+  },
   installedAt: {
     type: Date,
     default: Date.now,

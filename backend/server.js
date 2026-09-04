@@ -122,6 +122,48 @@ app.use((err, _req, res, _next) => {
 
 // --- Automation: scheduled job sender -----------------------------------
 /**
+ * Returns true if sending a push right now would violate quiet
+ * hours (10pm-8am) in the given IANA timezone.
+ */
+function isQuietHours(timezone) {
+  try {
+    const now = new Date();
+    const hour = parseInt(
+      new Intl.DateTimeFormat('en-US', {
+        hour: 'numeric',
+        hour12: false,
+        timeZone: timezone || 'Asia/Kolkata',
+      }).format(now),
+      10
+    );
+    return hour >= 22 || hour < 8;
+  } catch (err) {
+    console.error('[automation] isQuietHours error:', err.message);
+    return false; // fail open — don't block sends on a bad timezone
+  }
+}
+
+/**
+ * Returns true if this cartToken/customerId has already received
+ * 3+ automation pushes in the last 24 hours.
+ */
+async function isOverFrequencyCap(shopDomain, cartToken, customerId) {
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const orClauses = [];
+  if (cartToken) orClauses.push({ cartToken });
+  if (customerId) orClauses.push({ customerId });
+  if (!orClauses.length) return false;
+
+  const count = await ScheduledJob.countDocuments({
+    shopDomain,
+    status: 'sent',
+    sentAt: { $gte: since },
+    $or: orClauses,
+  });
+  return count >= 3;
+}
+
+/**
  * Polls for due ScheduledJob rows and sends them. Runs every 30s.
  * Uses a claim-update (findOneAndUpdate with status:'pending' filter)
  * so this is safe even if multiple instances ever run.
@@ -135,6 +177,28 @@ async function processScheduledJobs() {
     }).limit(20);
 
     for (const job of dueJobs) {
+      // Check quiet hours + frequency cap BEFORE claiming — if
+      // blocked, leave the job pending and re-check next tick
+      // (quiet hours) or skip it permanently (frequency cap).
+      const Store = require('./models/Store');
+      const store = await Store.findOne({ shopDomain: job.shopDomain }).select('timezone').lean();
+      const timezone = store?.timezone || 'Asia/Kolkata';
+
+      if (isQuietHours(timezone)) {
+        console.log(`[automation] Job ${job._id} deferred — quiet hours (${timezone})`);
+        continue; // leave pending, retry next tick
+      }
+
+      const overCap = await isOverFrequencyCap(job.shopDomain, job.cartToken, job.customerId);
+      if (overCap) {
+        await ScheduledJob.findOneAndUpdate(
+          { _id: job._id, status: 'pending' },
+          { status: 'skipped', error: 'Frequency cap reached (3/24h)' }
+        );
+        console.log(`[automation] Job ${job._id} skipped — frequency cap reached`);
+        continue;
+      }
+
       // Claim the job — only proceed if we successfully flip it from pending.
       const claimed = await ScheduledJob.findOneAndUpdate(
         { _id: job._id, status: 'pending' },
