@@ -8,6 +8,7 @@ const { scheduleCartAbandonJobs, cancelJobsForOrder } = require('../utils/automa
 const PushClick = require('../models/PushClick');
 const StorefrontEvent = require('../models/StorefrontEvent');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+const ProductImageCache = require('../models/ProductImageCache');
 
 const router = express.Router();
 
@@ -60,10 +61,28 @@ function mapPayloadToCustomer(shopDomain, payload) {
  */
 async function fetchProductImage(shop, accessToken, productId) {
   try {
+    if (!productId || !accessToken) return null;
+
+    const shopKey = String(shop || '').trim().toLowerCase();
+    const productKey = String(productId);
+
+    // Check cache first — avoids a redundant Admin API call within 24h.
+    try {
+      const cached = await ProductImageCache.findOne({
+        shopDomain: shopKey,
+        productId: productKey,
+      });
+      if (cached) {
+        console.log(`[webhook] Product image for ${productId}: cache hit`);
+        return cached.imageUrl;
+      }
+    } catch (cacheErr) {
+      console.log('[webhook] Cache lookup error (proceeding to fetch):', cacheErr.message);
+    }
+
     console.log('[webhook] Fetching image for productId:', productId,
       'shop:', shop,
       'hasToken:', !!accessToken);
-    if (!productId || !accessToken) return null;
     const res = await fetch(
       `https://${shop}/admin/api/2025-01/products/${productId}.json`,
       {
@@ -78,6 +97,19 @@ async function fetchProductImage(shop, accessToken, productId) {
                      data.product?.images?.[0]?.src ||
                      null;
     console.log(`[webhook] Product image for ${productId}:`, imageUrl ? 'found' : 'not found');
+
+    // Cache the result (even null, to avoid repeatedly hitting the API
+    // for a product with no image) for 24h.
+    try {
+      await ProductImageCache.findOneAndUpdate(
+        { shopDomain: shopKey, productId: productKey },
+        { imageUrl, cachedAt: new Date() },
+        { upsert: true }
+      );
+    } catch (cacheWriteErr) {
+      console.log('[webhook] Cache write error (non-fatal):', cacheWriteErr.message);
+    }
+
     return imageUrl;
   } catch(err) {
     console.log('[webhook] Image fetch error:', err.message);
