@@ -65,21 +65,29 @@ async function scheduleCartAbandonJobs(shopDomain, cartToken, customerId, cartCo
           .replace('{cartValue}', cartContext.cartValue || '')
           .replace('{productTitle}', cartContext.firstItemTitle || 'your item');
 
-        await ScheduledJob.create({
-          shopDomain: shop,
-          ruleId: rule._id,
-          stepIndex: i,
-          cartToken,
-          customerId: customerId || sub.customerId || null,
-          runAt,
-          status: 'pending',
-          payload: {
-            title,
-            body,
-            url: `https://${shop}`,
-            imageUrl: step.imageSource === 'product' ? (cartContext.productImageUrl || null) : null,
-          },
-        });
+        try {
+          await ScheduledJob.create({
+            shopDomain: shop,
+            ruleId: rule._id,
+            stepIndex: i,
+            cartToken,
+            customerId: customerId || sub.customerId || null,
+            runAt,
+            status: 'pending',
+            payload: {
+              title,
+              body,
+              url: `https://${shop}`,
+              imageUrl: step.imageSource === 'product' ? (cartContext.productImageUrl || null) : null,
+            },
+          });
+        } catch (err) {
+          if (err.code === 11000) {
+            console.log(`[automation] Duplicate job prevented for rule "${rule.name}", cart ${cartToken}, step ${i}`);
+          } else {
+            throw err;
+          }
+        }
       }
 
       console.log(`[automation] Scheduled ${rule.steps.length} job(s) for rule "${rule.name}" (cart ${cartToken})`);

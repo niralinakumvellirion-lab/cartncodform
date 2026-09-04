@@ -28,4 +28,11 @@ const scheduledJobSchema = new mongoose.Schema({
 // Compound index for the sender's poll query.
 scheduledJobSchema.index({ status: 1, runAt: 1 });
 
+// Prevent duplicate first-step scheduling for the same rule+cart+step
+// when carts/create and carts/update fire near-simultaneously.
+scheduledJobSchema.index(
+  { shopDomain: 1, ruleId: 1, cartToken: 1, stepIndex: 1 },
+  { unique: true, partialFilterExpression: { status: { $in: ['pending', 'sent'] } } }
+);
+
 module.exports = mongoose.model('ScheduledJob', scheduledJobSchema);
