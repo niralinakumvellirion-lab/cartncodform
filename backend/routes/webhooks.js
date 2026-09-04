@@ -459,11 +459,22 @@ router.post('/checkout', (req, res) => handleWebhook('checkout', req, res));
 router.post('/order', (req, res) => handleOrderWebhook(req, res));
 
 /**
- * GDPR mandatory compliance webhooks.
+ * GDPR mandatory compliance webhooks — Shopify delivers all three
+ * compliance topics to a single endpoint; dispatch by X-Shopify-Topic.
  */
-router.post('/customers/data_request', (req, res) => handleCustomersDataRequest(req, res));
-router.post('/customers/redact', (req, res) => handleCustomersRedact(req, res));
-router.post('/shop/redact', (req, res) => handleShopRedact(req, res));
+router.post('/compliance', (req, res) => {
+  const topic = req.get('X-Shopify-Topic') || '';
+  if (topic === 'customers/data_request') {
+    return handleCustomersDataRequest(req, res);
+  } else if (topic === 'customers/redact') {
+    return handleCustomersRedact(req, res);
+  } else if (topic === 'shop/redact') {
+    return handleShopRedact(req, res);
+  } else {
+    console.warn(`[gdpr] Unknown compliance topic: ${topic}`);
+    return res.status(200).json({ received: true, warning: 'unknown topic' });
+  }
+});
 
 // fetchProductImage stays exported — the dashboard "🔔 Push" route
 // (backend/routes/push.js) still uses it to resolve per-product images.
