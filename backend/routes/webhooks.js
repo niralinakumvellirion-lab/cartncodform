@@ -189,10 +189,18 @@ async function handleWebhook(source, req, res) {
     if (source === 'cart' && doc.sessionId) {
       const normalizedToken = doc.sessionId.split('?')[0].trim();
       const firstItem = savedCustomer.cartItems && savedCustomer.cartItems[0];
+
+      // Build a product URL from the first cart item, if we have a
+      // resolvable handle. Shopify doesn't give us the handle directly
+      // from cart webhooks, but we can link to /cart as a safe fallback
+      // that at least shows the actual cart contents.
+      const productUrl = `https://${shopDomain}/cart`;
+
       scheduleCartAbandonJobs(shopDomain, normalizedToken, savedCustomer.customerId || null, {
         cartValue: doc.cartValue,
         productImageUrl: productImageUrl,
         firstItemTitle: firstItem ? firstItem.title : null,
+        productUrl: productUrl,
       });
     }
 

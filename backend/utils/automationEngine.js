@@ -10,7 +10,7 @@ const CustomerPushSubscription = require('../models/CustomerPushSubscription');
  * @param {string} shopDomain
  * @param {string} cartToken - normalized Shopify cart token (sessionId on AbandonedCustomer)
  * @param {string|null} customerId
- * @param {object} cartContext - { cartValue, productImageUrl, firstItemTitle }
+ * @param {object} cartContext - { cartValue, productImageUrl, firstItemTitle, productUrl }
  */
 async function scheduleCartAbandonJobs(shopDomain, cartToken, customerId, cartContext) {
   try {
@@ -77,7 +77,7 @@ async function scheduleCartAbandonJobs(shopDomain, cartToken, customerId, cartCo
             payload: {
               title,
               body,
-              url: `https://${shop}`,
+              url: cartContext.productUrl || `https://${shop}`,
               imageUrl: step.imageSource === 'product' ? (cartContext.productImageUrl || null) : null,
             },
           });
