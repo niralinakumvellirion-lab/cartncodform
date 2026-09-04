@@ -249,6 +249,327 @@ function CustomerAnalytics({ shop, customer, onClose }) {
   );
 }
 
+function StepEditor({ step, onChange, onRemove, canRemove }) {
+  return (
+    <div className="rounded-lg border border-gray-200 p-3 space-y-2 bg-gray-50">
+      <div className="flex items-center justify-between">
+        <label className="text-xs font-medium text-gray-600">Delay (minutes after cart abandoned)</label>
+        {canRemove && (
+          <button
+            onClick={onRemove}
+            className="text-xs text-red-600 hover:underline"
+          >
+            Remove step
+          </button>
+        )}
+      </div>
+      <input
+        type="number"
+        min="1"
+        value={step.delayMinutes}
+        onChange={(e) => onChange({ ...step, delayMinutes: e.target.value })}
+        className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+        placeholder="e.g. 30"
+      />
+      <label className="text-xs font-medium text-gray-600">Notification title</label>
+      <input
+        type="text"
+        value={step.title}
+        onChange={(e) => onChange({ ...step, title: e.target.value })}
+        className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+        placeholder="Still thinking it over?"
+      />
+      <label className="text-xs font-medium text-gray-600">
+        Message — use {'{productTitle}'} and {'{cartValue}'} as placeholders
+      </label>
+      <textarea
+        value={step.body}
+        onChange={(e) => onChange({ ...step, body: e.target.value })}
+        rows={2}
+        className="w-full rounded border border-gray-300 px-2 py-1 text-sm resize-none"
+        placeholder="Your {productTitle} is waiting (₹{cartValue})"
+      />
+      <label className="flex items-center gap-2 text-xs text-gray-600">
+        <input
+          type="checkbox"
+          checked={step.imageSource !== 'none'}
+          onChange={(e) => onChange({ ...step, imageSource: e.target.checked ? 'product' : 'none' })}
+        />
+        Include product image
+      </label>
+    </div>
+  );
+}
+
+function RuleForm({ shop, existingRule, onSaved, onCancel }) {
+  const [name, setName] = useState(existingRule?.name || '');
+  const [steps, setSteps] = useState(
+    existingRule?.steps?.length
+      ? existingRule.steps.map(s => ({ ...s, delayMinutes: String(s.delayMinutes) }))
+      : [{ delayMinutes: '30', title: '', body: '', imageSource: 'product' }]
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  function updateStep(index, updated) {
+    setSteps(prev => prev.map((s, i) => (i === index ? updated : s)));
+  }
+
+  function removeStep(index) {
+    setSteps(prev => prev.filter((_, i) => i !== index));
+  }
+
+  function addStep() {
+    setSteps(prev => [...prev, { delayMinutes: '1440', title: '', body: '', imageSource: 'product' }]);
+  }
+
+  async function handleSave() {
+    setError('');
+    if (!name.trim()) {
+      setError('Rule name is required');
+      return;
+    }
+    for (const step of steps) {
+      if (!step.delayMinutes || Number(step.delayMinutes) < 1) {
+        setError('Every step needs a delay of at least 1 minute');
+        return;
+      }
+      if (!step.title.trim() || !step.body.trim()) {
+        setError('Every step needs a title and message');
+        return;
+      }
+    }
+
+    setSaving(true);
+    try {
+      const payload = {
+        name: name.trim(),
+        trigger: 'cart_abandon',
+        steps: steps.map(s => ({
+          delayMinutes: Number(s.delayMinutes),
+          title: s.title.trim(),
+          body: s.body.trim(),
+          imageSource: s.imageSource,
+        })),
+      };
+
+      if (existingRule) {
+        await apiSend(`/api/automation/${encodeURIComponent(shop)}/rules/${existingRule._id}`, 'PATCH', payload);
+      } else {
+        await apiSend(`/api/automation/${encodeURIComponent(shop)}/rules`, 'POST', payload);
+      }
+      onSaved();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+      <div>
+        <label className="text-xs font-medium text-gray-600">Rule name</label>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+          placeholder="e.g. Cart abandonment reminders"
+        />
+      </div>
+
+      <div>
+        <p className="text-xs font-medium text-gray-600 mb-2">
+          Trigger: when a customer abandons their cart
+        </p>
+        <div className="space-y-3">
+          {steps.map((step, i) => (
+            <StepEditor
+              key={i}
+              step={step}
+              onChange={(updated) => updateStep(i, updated)}
+              onRemove={() => removeStep(i)}
+              canRemove={steps.length > 1}
+            />
+          ))}
+        </div>
+        <button
+          onClick={addStep}
+          className="mt-2 text-xs font-medium text-brand hover:underline"
+        >
+          + Add follow-up step
+        </button>
+      </div>
+
+      {error && (
+        <p className="text-xs text-red-600">{error}</p>
+      )}
+
+      <div className="flex gap-2">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : existingRule ? 'Save changes' : 'Create rule'}
+        </button>
+        <button
+          onClick={onCancel}
+          className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AutomationRules({ shop }) {
+  const [rules, setRules] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [showForm, setShowForm] = useState(false);
+  const [editingRule, setEditingRule] = useState(null);
+
+  const loadRules = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await apiGet(`/api/automation/${encodeURIComponent(shop)}/rules`);
+      setRules(Array.isArray(data) ? data : []);
+      setError('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [shop]);
+
+  useEffect(() => {
+    loadRules();
+  }, [loadRules]);
+
+  async function toggleActive(rule) {
+    try {
+      await apiSend(`/api/automation/${encodeURIComponent(shop)}/rules/${rule._id}`, 'PATCH', {
+        active: !rule.active,
+      });
+      loadRules();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function deleteRule(rule) {
+    const ok = window.confirm(`Delete "${rule.name}"? This cannot be undone.`);
+    if (!ok) return;
+    try {
+      await apiSend(`/api/automation/${encodeURIComponent(shop)}/rules/${rule._id}`, 'DELETE');
+      loadRules();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function handleFormSaved() {
+    setShowForm(false);
+    setEditingRule(null);
+    loadRules();
+  }
+
+  if (showForm || editingRule) {
+    return (
+      <div className="mt-6">
+        <RuleForm
+          shop={shop}
+          existingRule={editingRule}
+          onSaved={handleFormSaved}
+          onCancel={() => { setShowForm(false); setEditingRule(null); }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-6">
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm text-gray-500">
+          Automatically remind customers who leave items in their cart.
+        </p>
+        <button
+          onClick={() => setShowForm(true)}
+          className="rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-white hover:bg-brand-dark"
+        >
+          + New rule
+        </button>
+      </div>
+
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading rules...</p>
+      ) : rules.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center text-gray-400">
+          No automation rules yet. Create one to start sending automatic reminders.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {rules.map((rule) => (
+            <div key={rule._id} className="rounded-xl border border-gray-200 bg-white p-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-gray-900">{rule.name}</h3>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      rule.active ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'
+                    }`}>
+                      {rule.active ? 'Active' : 'Paused'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">
+                    Cart abandonment · {rule.steps.length} step{rule.steps.length === 1 ? '' : 's'}
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {rule.steps.map((step, i) => (
+                      <p key={i} className="text-xs text-gray-600">
+                        Step {i + 1}: after {step.delayMinutes} min — "{step.title}"
+                      </p>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 shrink-0">
+                  <button
+                    onClick={() => setEditingRule(rule)}
+                    className="text-xs font-medium text-brand hover:underline"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => toggleActive(rule)}
+                    className="text-xs font-medium text-gray-600 hover:underline"
+                  >
+                    {rule.active ? 'Pause' : 'Resume'}
+                  </button>
+                  <button
+                    onClick={() => deleteRule(rule)}
+                    className="text-xs font-medium text-red-600 hover:underline"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function StoreView() {
   const params = useParams();
   const router = useRouter();
@@ -337,7 +658,7 @@ export default function StoreView() {
           : 'border-transparent text-gray-500 hover:text-gray-800'
       }`}
     >
-      {label} <span className="ml-1 text-xs text-gray-400">({count})</span>
+      {label} {count !== null && <span className="ml-1 text-xs text-gray-400">({count})</span>}
     </button>
   );
 
@@ -380,6 +701,7 @@ export default function StoreView() {
       <div className="mt-6 flex flex-wrap gap-2 border-b border-gray-200 sm:gap-6">
         {tabButton('abandoned', 'Abandoned Carts', customers.length)}
         {tabButton('cod', 'COD Orders', orders.length)}
+        {tabButton('automation', 'Automations', null)}
       </div>
 
       {error && (
@@ -574,6 +896,10 @@ export default function StoreView() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {tab === 'automation' && (
+        <AutomationRules shop={shop} />
       )}
     </div>
     </>
