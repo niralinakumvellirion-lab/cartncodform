@@ -2,13 +2,13 @@ const express = require('express');
 const router = express.Router();
 const AutomationRule = require('../models/AutomationRule');
 const ScheduledJob = require('../models/ScheduledJob');
-const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
+const { requireAuth, requireStoreOwner, requirePaidPlan } = require('../middleware/requireOwner');
 
 /**
  * GET /api/automation/:shopDomain/rules
  * List all automation rules for a store.
  */
-router.get('/:shopDomain/rules', requireAuth, requireStoreOwner, async (req, res) => {
+router.get('/:shopDomain/rules', requireAuth, requireStoreOwner, requirePaidPlan, async (req, res) => {
   try {
     const shopDomain = req.params.shopDomain.trim().toLowerCase();
     const rules = await AutomationRule.find({ shopDomain }).sort({ createdAt: -1 });
@@ -24,7 +24,7 @@ router.get('/:shopDomain/rules', requireAuth, requireStoreOwner, async (req, res
  * Create a new automation rule.
  * Body: { name, trigger, steps: [{ delayMinutes, title, body, imageSource }] }
  */
-router.post('/:shopDomain/rules', requireAuth, requireStoreOwner, async (req, res) => {
+router.post('/:shopDomain/rules', requireAuth, requireStoreOwner, requirePaidPlan, async (req, res) => {
   try {
     const shopDomain = req.params.shopDomain.trim().toLowerCase();
     const { name, trigger, steps } = req.body;
@@ -75,7 +75,7 @@ router.post('/:shopDomain/rules', requireAuth, requireStoreOwner, async (req, re
  * PATCH /api/automation/:shopDomain/rules/:ruleId
  * Update a rule (name, steps, active status).
  */
-router.patch('/:shopDomain/rules/:ruleId', requireAuth, requireStoreOwner, async (req, res) => {
+router.patch('/:shopDomain/rules/:ruleId', requireAuth, requireStoreOwner, requirePaidPlan, async (req, res) => {
   try {
     const shopDomain = req.params.shopDomain.trim().toLowerCase();
     const { ruleId } = req.params;
@@ -131,7 +131,7 @@ router.patch('/:shopDomain/rules/:ruleId', requireAuth, requireStoreOwner, async
 /**
  * DELETE /api/automation/:shopDomain/rules/:ruleId
  */
-router.delete('/:shopDomain/rules/:ruleId', requireAuth, requireStoreOwner, async (req, res) => {
+router.delete('/:shopDomain/rules/:ruleId', requireAuth, requireStoreOwner, requirePaidPlan, async (req, res) => {
   try {
     const shopDomain = req.params.shopDomain.trim().toLowerCase();
     const { ruleId } = req.params;

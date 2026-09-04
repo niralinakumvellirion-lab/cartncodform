@@ -70,4 +70,21 @@ async function requireStoreOwner(req, res, next) {
   }
 }
 
-module.exports = { requireAuth, requireStoreOwner };
+/**
+ * Requires requireStoreOwner to have run first (sets req.store).
+ * Blocks access unless the store's plan is 'pro'.
+ */
+function requirePaidPlan(req, res, next) {
+  if (!req.store) {
+    return res.status(500).json({ error: 'requirePaidPlan must run after requireStoreOwner' });
+  }
+  if (req.store.plan !== 'pro') {
+    return res.status(402).json({
+      error: 'This feature requires the Pro plan',
+      upgradeRequired: true,
+    });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireStoreOwner, requirePaidPlan };
