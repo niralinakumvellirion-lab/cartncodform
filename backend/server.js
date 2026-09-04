@@ -47,7 +47,7 @@ app.use(
 // Capture the raw body so Shopify webhook HMAC can be verified if needed.
 app.use(
   express.json({
-    limit: '2mb',
+    limit: '5mb',
     verify: (req, _res, buf) => {
       req.rawBody = buf.toString('utf8');
     },
@@ -101,6 +101,13 @@ const pushLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+const attributionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/stores', storeRoutes);
@@ -110,6 +117,8 @@ const eventsRouter = require('./routes/events');
 app.use('/api/events', eventsLimiter, eventsRouter);
 const automationRouter = require('./routes/automation');
 app.use('/api/automation', automationRouter);
+const attributionRouter = require('./routes/attribution');
+app.use('/api/attribution', attributionLimiter, attributionRouter);
 app.use('/apps/cartncodform', proxyRouter);
 
 // --- 404 + error handlers ---------------------------------------------------
@@ -211,11 +220,13 @@ async function processScheduledJobs() {
 
       try {
         const payload = job.payload || {};
+        const baseUrl = payload.url || `https://${job.shopDomain}`;
+        const urlWithJob = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'ccf_job=' + job._id.toString();
         const result = await sendPushToCustomers(
           job.shopDomain,
           payload.title || 'You left something behind!',
           payload.body || 'Come back and check it out.',
-          payload.url || `https://${job.shopDomain}`,
+          urlWithJob,
           payload.imageUrl || null,
           true,
           job.cartToken || null,

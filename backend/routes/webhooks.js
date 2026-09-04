@@ -5,6 +5,7 @@ const { verifyWebhookHmac } = require('../utils/shopify');
 const { sendAbandonedCartEmail } = require('../utils/email');
 const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
 const { scheduleCartAbandonJobs, cancelJobsForOrder } = require('../utils/automationEngine');
+const PushClick = require('../models/PushClick');
 
 const router = express.Router();
 
@@ -226,12 +227,57 @@ async function handleOrderWebhook(req, res) {
     const customerId = order.customer?.id ? String(order.customer.id) : null;
     await cancelJobsForOrder(shopDomain, cartToken, customerId);
 
-    // Mark the matching AbandonedCustomer as recovered.
+    const isTestOrder = order.test === true;
+
+    // Preferred: current_total_price_set.shop_money (present money set);
+    // fall back to the legacy flat total_price / currency strings.
+    const revenueAmount =
+      order.current_total_price_set?.shop_money?.amount ||
+      order.total_price ||
+      null;
+    const revenueCurrency =
+      order.current_total_price_set?.shop_money?.currency_code ||
+      order.currency ||
+      null;
+
+    // Mark the matching AbandonedCustomer as recovered + join attribution.
     if (cartToken) {
       const normalizedToken = cartToken.split('?')[0].trim();
+
+      // 1. Clean signal — cart attribute _ccf_job re-emerges in
+      //    orders/create as a note_attributes entry.
+      let attributedJobId = null;
+      const noteAttrs = Array.isArray(order.note_attributes) ? order.note_attributes : [];
+      const jobAttr = noteAttrs.find((a) => a && a.name === '_ccf_job' && a.value);
+      if (jobAttr) {
+        attributedJobId = jobAttr.value;
+      } else if (!isTestOrder) {
+        // 2. Fallback — most recent PushClick for this cart/customer.
+        const orClauses = [{ cartToken: normalizedToken }];
+        if (customerId) orClauses.push({ customerId });
+        const click = await PushClick.findOne({ shopDomain, $or: orClauses }).sort({ clickedAt: -1 });
+        if (click) attributedJobId = click.jobId;
+      }
+
+      const updateFields = { status: 'recovered' };
+      if (!isTestOrder) {
+        updateFields.recoveredAt = new Date();
+        updateFields.recoveredOrderId = order.id ? String(order.id) : null;
+        updateFields.recoveredOrderName = order.name || null;
+        updateFields.recoveredRevenue = revenueAmount != null ? Number(revenueAmount) : null;
+        updateFields.recoveredCurrency = revenueCurrency;
+        updateFields.attributionSource = attributedJobId ? 'push' : 'organic';
+        updateFields.attributedJobId = attributedJobId;
+      }
+
       await AbandonedCustomer.updateMany(
         { shopDomain, sessionId: normalizedToken, status: 'abandoned' },
-        { status: 'recovered' }
+        updateFields
+      );
+
+      console.log(
+        `[webhook:order] Recovery recorded — revenue: ${revenueAmount || 'n/a'} ${revenueCurrency || ''} ` +
+          `source: ${isTestOrder ? 'skipped(test)' : updateFields.attributionSource} test: ${isTestOrder}`
       );
     }
 

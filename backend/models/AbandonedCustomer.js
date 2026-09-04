@@ -48,6 +48,16 @@ const abandonedCustomerSchema = new mongoose.Schema({
     enum: ['abandoned', 'recovered'],
     default: 'abandoned',
   },
+  // --- Revenue attribution (set by handleOrderWebhook on orders/create) ---
+  recoveredAt: { type: Date },
+  recoveredOrderId: { type: String },
+  recoveredOrderName: { type: String },
+  recoveredRevenue: { type: Number },
+  recoveredCurrency: { type: String },
+  // 'push'  -> a CartnCodForm automated push led to this order
+  // 'organic' -> recovered without an attributable push click
+  attributionSource: { type: String, enum: ['push', 'organic', null], default: null },
+  attributedJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'ScheduledJob' },
   createdAt: {
     type: Date,
     default: Date.now,

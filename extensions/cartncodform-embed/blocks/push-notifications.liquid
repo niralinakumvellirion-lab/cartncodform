@@ -609,6 +609,55 @@
   function initTracking() {
     var pageType = getPageType();
 
+    // PUSH CLICK ATTRIBUTION
+    // If this page load came from a CartnCodForm automated push, the URL
+    // carries ?ccf_job=<jobId>. Record the click server-side and stamp the
+    // job id onto the Shopify cart so it re-emerges in orders/create.
+    (function handlePushClickAttribution() {
+      try {
+        var ccfJob = new URLSearchParams(window.location.search).get('ccf_job');
+        if (!ccfJob) return;
+
+        var dedupeKey = 'ccf_click_recorded_' + ccfJob;
+        try {
+          if (sessionStorage.getItem(dedupeKey)) return;
+          sessionStorage.setItem(dedupeKey, '1');
+        } catch (e) {}
+
+        var token = null;
+        try { token = localStorage.getItem(TOKEN_KEY); } catch (e) {}
+        var customerId = (window.Shopify && window.Shopify.customerId)
+          ? String(window.Shopify.customerId) : null;
+
+        fetch('/cart.js').then(function(r) { return r.json(); })
+          .then(function(cart) {
+            var rawCartToken = cart && cart.token ? cart.token : null;
+            var cartToken = rawCartToken ? (rawCartToken.split('?')[0].trim() || null) : null;
+
+            fetch(BACKEND_URL + '/api/attribution/click', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                shopDomain: SHOP_DOMAIN,
+                jobId: ccfJob,
+                cartToken: cartToken,
+                customerId: customerId,
+                subscriptionToken: token || null
+              })
+            }).catch(function() {});
+
+            // Persist onto the cart so orders/create sees it in note_attributes.
+            fetch('/cart/update.js', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ attributes: { _ccf_job: ccfJob } })
+            }).catch(function() {});
+
+            console.log('[CCF] Push click attributed, job:', ccfJob);
+          }).catch(function() {});
+      } catch (e) {}
+    })();
+
     // PAGE VIEW
     trackEvent('page_view', {
       title: document.title,
