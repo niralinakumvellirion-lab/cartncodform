@@ -108,6 +108,8 @@ app.use('/api/cod', codRoutes);
 app.use('/api/push', pushLimiter, pushRouter);
 const eventsRouter = require('./routes/events');
 app.use('/api/events', eventsLimiter, eventsRouter);
+const automationRouter = require('./routes/automation');
+app.use('/api/automation', automationRouter);
 app.use('/apps/cartncodform', proxyRouter);
 
 // --- 404 + error handlers ---------------------------------------------------
