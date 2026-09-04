@@ -9,7 +9,7 @@ const storefrontEventSchema = new mongoose.Schema({
   path:       { type: String },
   pageType:   { type: String },
   meta:       { type: mongoose.Schema.Types.Mixed }, // event-specific data
-  ts:         { type: Date, default: Date.now, index: true },
+  ts:         { type: Date, default: Date.now },
 });
 
 // Auto-delete events older than 90 days.

@@ -191,6 +191,37 @@ async function handleWebhook(source, req, res) {
 }
 
 /**
+ * Handles orders/create. For v1: just logs receipt and acknowledges.
+ * Cancellation of pending ScheduledJobs will be wired in a later stage
+ * once ScheduledJob sender logic exists.
+ */
+async function handleOrderWebhook(req, res) {
+  const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+    console.warn('[webhook:order] Rejected — invalid or missing HMAC header');
+    return res.status(401).json({ error: 'Unauthorized: webhook HMAC verification failed' });
+  }
+
+  try {
+    const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shopDomain || '')
+      .toString().trim().toLowerCase();
+    const order = req.body;
+    const cartToken = order.cart_token || order.checkout_token || null;
+
+    console.log(`[webhook:order] Received orders/create from ${shopDomain}, cart_token: ${cartToken || 'none'}`);
+
+    // TODO (next stage): cancel pending ScheduledJob rows matching
+    // this cartToken/customerId, and flip the matching AbandonedCustomer
+    // to status: 'recovered'.
+
+    return res.status(200).json({ received: true });
+  } catch (err) {
+    console.error('[webhook:order] error:', err.message);
+    return res.status(200).json({ received: true, error: err.message });
+  }
+}
+
+/**
  * POST /api/webhooks/cart
  * Handles carts/create and carts/update.
  */
@@ -201,6 +232,12 @@ router.post('/cart', (req, res) => handleWebhook('cart', req, res));
  * Handles checkouts/create and checkouts/update.
  */
 router.post('/checkout', (req, res) => handleWebhook('checkout', req, res));
+
+/**
+ * POST /api/webhooks/order
+ * Handles orders/create.
+ */
+router.post('/order', (req, res) => handleOrderWebhook(req, res));
 
 // fetchProductImage stays exported — the dashboard "🔔 Push" route
 // (backend/routes/push.js) still uses it to resolve per-product images.

@@ -12,6 +12,10 @@ const storeRoutes = require('./routes/stores');
 const codRoutes = require('./routes/cod');
 const pushRouter = require('./routes/push');
 const proxyRouter = require('./routes/proxy');
+const ScheduledJob = require('./models/ScheduledJob');
+const AutomationRule = require('./models/AutomationRule');
+const { sendPushToCustomers } = require('./utils/pushNotification');
+const CustomerPushSubscription = require('./models/CustomerPushSubscription');
 
 const app = express();
 // Render sits behind a reverse proxy — trust the X-Forwarded-For
@@ -115,6 +119,69 @@ app.use((err, _req, res, _next) => {
   console.error('[error]', err.stack || err.message);
   res.status(500).json({ error: 'Internal server error' });
 });
+
+// --- Automation: scheduled job sender -----------------------------------
+/**
+ * Polls for due ScheduledJob rows and sends them. Runs every 30s.
+ * Uses a claim-update (findOneAndUpdate with status:'pending' filter)
+ * so this is safe even if multiple instances ever run.
+ */
+async function processScheduledJobs() {
+  try {
+    const now = new Date();
+    const dueJobs = await ScheduledJob.find({
+      status: 'pending',
+      runAt: { $lte: now },
+    }).limit(20);
+
+    for (const job of dueJobs) {
+      // Claim the job — only proceed if we successfully flip it from pending.
+      const claimed = await ScheduledJob.findOneAndUpdate(
+        { _id: job._id, status: 'pending' },
+        { status: 'sent', sentAt: new Date() },
+        { new: true }
+      );
+      if (!claimed) continue; // another process already claimed it
+
+      try {
+        const payload = job.payload || {};
+        const result = await sendPushToCustomers(
+          job.shopDomain,
+          payload.title || 'You left something behind!',
+          payload.body || 'Come back and check it out.',
+          payload.url || `https://${job.shopDomain}`,
+          payload.imageUrl || null,
+          true,
+          job.cartToken || null,
+          false,
+          job.customerId || null
+        );
+
+        if (!result.success || result.sent === 0) {
+          await ScheduledJob.findByIdAndUpdate(job._id, {
+            status: 'failed',
+            error: result.error || 'No active subscriber found',
+          });
+          console.log(`[automation] Job ${job._id} failed: no subscriber reached`);
+        } else {
+          console.log(`[automation] Job ${job._id} sent successfully`);
+        }
+      } catch (err) {
+        await ScheduledJob.findByIdAndUpdate(job._id, {
+          status: 'failed',
+          error: err.message,
+        });
+        console.error(`[automation] Job ${job._id} error:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[automation] processScheduledJobs error:', err.message);
+  }
+}
+
+// Poll every 30 seconds.
+setInterval(processScheduledJobs, 30 * 1000);
+console.log('[automation] Scheduled job poller started (30s interval)');
 
 // --- Boot ---------------------------------------------------------------
 async function start() {

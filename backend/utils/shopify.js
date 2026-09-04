@@ -120,10 +120,14 @@ async function registerAllWebhooks(shop, accessToken, backendUrl) {
     'carts/update',
     'checkouts/create',
     'checkouts/update',
+    'orders/create',
   ];
 
   for (const topic of topics) {
-    const path = topic.startsWith('carts/') ? 'cart' : 'checkout';
+    let path;
+    if (topic.startsWith('carts/')) path = 'cart';
+    else if (topic.startsWith('checkouts/')) path = 'checkout';
+    else if (topic.startsWith('orders/')) path = 'order';
     const address = `${backendUrl}/api/webhooks/${path}`;
     await registerWebhook(shop, accessToken, topic, address);
   }
