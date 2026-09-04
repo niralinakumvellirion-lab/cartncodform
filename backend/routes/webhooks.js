@@ -6,6 +6,8 @@ const { sendAbandonedCartEmail } = require('../utils/email');
 const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
 const { scheduleCartAbandonJobs, cancelJobsForOrder } = require('../utils/automationEngine');
 const PushClick = require('../models/PushClick');
+const StorefrontEvent = require('../models/StorefrontEvent');
+const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 
 const router = express.Router();
 
@@ -297,6 +299,148 @@ async function handleOrderWebhook(req, res) {
 }
 
 /**
+ * GDPR: customers/data_request
+ * A customer has requested their data. Shopify sends this when a
+ * merchant uses the "Request customer data" feature. We must respond
+ * 200 and (per Shopify docs) the merchant is expected to independently
+ * fulfill the data request to the customer — but we log what we have
+ * so it can be manually retrieved if needed.
+ */
+async function handleCustomersDataRequest(req, res) {
+  const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+    console.warn('[gdpr] customers/data_request — invalid HMAC');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
+      .toString().trim().toLowerCase();
+    const customerId = req.body.customer?.id ? String(req.body.customer.id) : null;
+    const customerEmail = req.body.customer?.email || null;
+
+    console.log(`[gdpr] customers/data_request for shop ${shopDomain}, customer ${customerId || customerEmail || 'unknown'}`);
+
+    // Log what data we hold for this customer, for manual fulfillment
+    // if the merchant needs it. We do not have a customer support
+    // channel to auto-deliver this, so we surface it in logs.
+    if (customerId || customerEmail) {
+      const query = { shopDomain };
+      if (customerId) query.customerId = customerId;
+      else if (customerEmail) query.email = customerEmail.toLowerCase();
+
+      const carts = await AbandonedCustomer.find(query).lean();
+      const events = await StorefrontEvent.find(
+        customerId ? { shopDomain, customerId } : {}
+      ).limit(100).lean();
+
+      console.log(`[gdpr] Data on file — AbandonedCustomer rows: ${carts.length}, StorefrontEvent rows: ${events.length}`);
+    }
+
+    return res.status(200).json({ received: true });
+  } catch (err) {
+    console.error('[gdpr] customers/data_request error:', err.message);
+    return res.status(200).json({ received: true, error: err.message });
+  }
+}
+
+/**
+ * GDPR: customers/redact
+ * A customer has requested deletion (or 6 months passed with no
+ * activity). Delete all data we hold that identifies this customer.
+ */
+async function handleCustomersRedact(req, res) {
+  const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+    console.warn('[gdpr] customers/redact — invalid HMAC');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
+      .toString().trim().toLowerCase();
+    const customerId = req.body.customer?.id ? String(req.body.customer.id) : null;
+    const customerEmail = req.body.customer?.email || null;
+
+    console.log(`[gdpr] customers/redact for shop ${shopDomain}, customer ${customerId || customerEmail || 'unknown'}`);
+
+    if (!customerId && !customerEmail) {
+      console.warn('[gdpr] customers/redact — no customer identifier in payload, nothing to delete');
+      return res.status(200).json({ received: true });
+    }
+
+    const orClauses = [];
+    if (customerId) orClauses.push({ customerId });
+    if (customerEmail) orClauses.push({ email: customerEmail.toLowerCase() });
+
+    const cartResult = await AbandonedCustomer.deleteMany({ shopDomain, $or: orClauses });
+    const eventResult = customerId
+      ? await StorefrontEvent.deleteMany({ shopDomain, customerId })
+      : { deletedCount: 0 };
+    const subResult = customerId
+      ? await CustomerPushSubscription.deleteMany({ shopDomain, customerId })
+      : { deletedCount: 0 };
+
+    console.log(`[gdpr] Redacted — carts: ${cartResult.deletedCount}, events: ${eventResult.deletedCount}, subscriptions: ${subResult.deletedCount}`);
+
+    return res.status(200).json({ received: true });
+  } catch (err) {
+    console.error('[gdpr] customers/redact error:', err.message);
+    return res.status(200).json({ received: true, error: err.message });
+  }
+}
+
+/**
+ * GDPR: shop/redact
+ * Fired 48h after a shop uninstalls the app. Delete ALL data for
+ * that shop across every collection.
+ */
+async function handleShopRedact(req, res) {
+  const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+    console.warn('[gdpr] shop/redact — invalid HMAC');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  try {
+    const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
+      .toString().trim().toLowerCase();
+
+    if (!shopDomain) {
+      console.warn('[gdpr] shop/redact — no shop domain in payload');
+      return res.status(200).json({ received: true });
+    }
+
+    console.log(`[gdpr] shop/redact for ${shopDomain} — deleting all data`);
+
+    const AutomationRule = require('../models/AutomationRule');
+    const ScheduledJob = require('../models/ScheduledJob');
+    const PushClick = require('../models/PushClick');
+    const CodOrder = require('../models/CodOrder');
+    const PushSubscription = require('../models/PushSubscription');
+
+    const results = await Promise.all([
+      AbandonedCustomer.deleteMany({ shopDomain }),
+      StorefrontEvent.deleteMany({ shopDomain }),
+      CustomerPushSubscription.deleteMany({ shopDomain }),
+      PushSubscription.deleteMany({ shopDomain }),
+      AutomationRule.deleteMany({ shopDomain }),
+      ScheduledJob.deleteMany({ shopDomain }),
+      PushClick.deleteMany({ shopDomain }),
+      CodOrder.deleteMany({ shopDomain }),
+      Store.deleteOne({ shopDomain }),
+    ]);
+
+    console.log(`[gdpr] shop/redact complete for ${shopDomain} — collections cleared: ${results.map(r => r.deletedCount ?? (r.acknowledged ? 1 : 0)).join(', ')}`);
+
+    return res.status(200).json({ received: true });
+  } catch (err) {
+    console.error('[gdpr] shop/redact error:', err.message);
+    return res.status(200).json({ received: true, error: err.message });
+  }
+}
+
+/**
  * POST /api/webhooks/cart
  * Handles carts/create and carts/update.
  */
@@ -313,6 +457,13 @@ router.post('/checkout', (req, res) => handleWebhook('checkout', req, res));
  * Handles orders/create.
  */
 router.post('/order', (req, res) => handleOrderWebhook(req, res));
+
+/**
+ * GDPR mandatory compliance webhooks.
+ */
+router.post('/customers/data_request', (req, res) => handleCustomersDataRequest(req, res));
+router.post('/customers/redact', (req, res) => handleCustomersRedact(req, res));
+router.post('/shop/redact', (req, res) => handleShopRedact(req, res));
 
 // fetchProductImage stays exported — the dashboard "🔔 Push" route
 // (backend/routes/push.js) still uses it to resolve per-product images.
