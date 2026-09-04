@@ -13,8 +13,6 @@
     "test:db": "node scripts/testConnection.js",
     "test:push": "node scripts/testPush.js",
     "check:subs": "node scripts/checkCustomerSubs.js",
-    "add:scripttags": "node scripts/addScriptTags.js",
-    "remove:scripttags": "node scripts/removeScriptTags.js",
     "test:customer:push": "node scripts/testCustomerPush.js",
     "clean:tokens": "node scripts/cleanDuplicateTokens.js",
     "delete:subs": "node scripts/deleteAllCustomerSubs.js"

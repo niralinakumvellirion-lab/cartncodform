@@ -63,13 +63,9 @@ app.use((req, _res, next) => {
   next();
 });
 
-// --- Static (Shopify theme script + its service worker) ------------------
-// Wide-open CORS on the theme script so any storefront can load it, and the
-// Service-Worker-Allowed header so the SW may claim the root scope.
-app.use('/cartncodform-push.js', (req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  next();
-});
+// --- Static (customer service worker) -----------------------------------
+// Wide-open CORS on the service worker so any storefront can load it, and
+// the Service-Worker-Allowed header so the SW may claim the root scope.
 app.use('/cartncodform-sw.js', (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Service-Worker-Allowed', '/');

@@ -24,61 +24,6 @@ function getBackendUrl(req) {
 }
 
 /**
- * Inject the storefront push script into the shop via the Shopify ScriptTag API
- * so the merchant does not have to edit theme.liquid. Idempotent — skips if a
- * script tag with the same src already exists.
- */
-async function registerScriptTag(shop, accessToken, backendUrl) {
-  try {
-    const scriptUrl = `${backendUrl}/cartncodform-push.js`;
-
-    // First check if script tag already exists
-    const listRes = await fetch(
-      `https://${shop}/admin/api/2025-01/script_tags.json`,
-      {
-        headers: {
-          'X-Shopify-Access-Token': accessToken,
-          'Content-Type': 'application/json',
-        }
-      }
-    );
-    const listData = await listRes.json();
-    const existing = listData.script_tags?.find(t => t.src === scriptUrl);
-
-    if (existing) {
-      console.log(`[auth] Script tag already exists for ${shop}`);
-      return;
-    }
-
-    // Create new script tag
-    const res = await fetch(
-      `https://${shop}/admin/api/2025-01/script_tags.json`,
-      {
-        method: 'POST',
-        headers: {
-          'X-Shopify-Access-Token': accessToken,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          script_tag: {
-            event: 'onload',
-            src: scriptUrl,
-          }
-        })
-      }
-    );
-    const data = await res.json();
-    if (data.script_tag) {
-      console.log(`[auth] Script tag registered for ${shop}: ${data.script_tag.id}`);
-    } else {
-      console.log(`[auth] Script tag registration failed:`, JSON.stringify(data));
-    }
-  } catch (err) {
-    console.error(`[auth] Script tag error:`, err.message);
-  }
-}
-
-/**
  * GET /api/auth/install?shop=example.myshopify.com
  * Kicks off the Shopify OAuth flow by redirecting to the merchant's consent screen.
  */
@@ -163,10 +108,6 @@ router.get('/callback', async (req, res) => {
 
     // Register webhooks (best-effort, non-blocking failures are logged).
     await registerAllWebhooks(shopDomain, accessToken, getBackendUrl(req));
-
-    // Inject the storefront push script via the ScriptTag API (best-effort).
-    // await registerScriptTag(shopDomain, accessToken, getBackendUrl(req));
-    // Script injection now handled by App Embed block
 
     // Strip any trailing slash on FRONTEND_URL so we never emit "//dashboard".
     const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
