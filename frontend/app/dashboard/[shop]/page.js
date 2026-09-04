@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import { onForegroundMessage } from '../../../lib/firebase';
@@ -570,6 +570,102 @@ function AutomationRules({ shop }) {
   );
 }
 
+function RevenueStats({ customers }) {
+  const stats = useMemo(() => {
+    const recovered = customers.filter(c => c.status === 'recovered');
+    const withRevenue = recovered.filter(c =>
+      typeof c.recoveredRevenue === 'number' && c.recoveredRevenue > 0
+    );
+
+    const totalRevenue = withRevenue.reduce((sum, c) => sum + c.recoveredRevenue, 0);
+    const pushAttributed = withRevenue.filter(c => c.attributionSource === 'push');
+    const pushRevenue = pushAttributed.reduce((sum, c) => sum + c.recoveredRevenue, 0);
+
+    const totalCarts = customers.length;
+    const recoveryRate = totalCarts > 0
+      ? ((recovered.length / totalCarts) * 100).toFixed(1)
+      : '0.0';
+
+    // Determine a display currency — use the most common one found,
+    // fall back to no symbol if mixed/absent.
+    const currencies = withRevenue
+      .map(c => c.recoveredCurrency)
+      .filter(Boolean);
+    const currencyCounts = {};
+    currencies.forEach(c => { currencyCounts[c] = (currencyCounts[c] || 0) + 1; });
+    const topCurrency = Object.keys(currencyCounts).sort(
+      (a, b) => currencyCounts[b] - currencyCounts[a]
+    )[0] || null;
+    const mixedCurrencies = new Set(currencies).size > 1;
+
+    const revenuePerSend = pushAttributed.length > 0
+      ? (pushRevenue / pushAttributed.length).toFixed(2)
+      : null;
+
+    return {
+      totalRevenue,
+      pushRevenue,
+      recoveredCount: recovered.length,
+      recoveryRate,
+      totalCarts,
+      revenuePerSend,
+      topCurrency,
+      mixedCurrencies,
+      hasData: withRevenue.length > 0,
+    };
+  }, [customers]);
+
+  function formatCurrency(amount) {
+    if (stats.mixedCurrencies) return amount.toFixed(2);
+    const symbol = stats.topCurrency === 'INR' ? '₹'
+      : stats.topCurrency === 'USD' ? '$'
+      : stats.topCurrency === 'EUR' ? '€'
+      : '';
+    return `${symbol}${amount.toFixed(2)}`;
+  }
+
+  if (!stats.hasData) {
+    return (
+      <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-gray-500">
+        No recovered revenue yet. Revenue will appear here once a customer completes
+        an order after receiving a push notification or reminder.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <p className="text-xs text-gray-500">Recovered Revenue</p>
+        <p className="mt-1 text-xl font-bold text-gray-900">
+          {formatCurrency(stats.totalRevenue)}
+        </p>
+      </div>
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <p className="text-xs text-gray-500">From Push Notifications</p>
+        <p className="mt-1 text-xl font-bold text-brand">
+          {formatCurrency(stats.pushRevenue)}
+        </p>
+      </div>
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <p className="text-xs text-gray-500">Recovery Rate</p>
+        <p className="mt-1 text-xl font-bold text-gray-900">
+          {stats.recoveryRate}%
+        </p>
+        <p className="mt-0.5 text-xs text-gray-400">
+          {stats.recoveredCount} of {stats.totalCarts} carts
+        </p>
+      </div>
+      <div className="rounded-xl border border-gray-200 bg-white p-4">
+        <p className="text-xs text-gray-500">Revenue per Push Sent</p>
+        <p className="mt-1 text-xl font-bold text-gray-900">
+          {stats.revenuePerSend !== null ? formatCurrency(Number(stats.revenuePerSend)) : '—'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function StoreView() {
   const params = useParams();
   const router = useRouter();
@@ -697,6 +793,8 @@ export default function StoreView() {
       <div className="mt-4">
         <PushNotificationSetup shopDomain={shop} />
       </div>
+
+      {!loading && <RevenueStats customers={customers} />}
 
       <div className="mt-6 flex flex-wrap gap-2 border-b border-gray-200 sm:gap-6">
         {tabButton('abandoned', 'Abandoned Carts', customers.length)}
