@@ -8,7 +8,7 @@ import '@shopify/polaris/build/esm/styles.css';
 export default function AdminHome() {
   const params = useParams();
   const shop = decodeURIComponent(params.shop || '');
-  const apiKey = process.env.NEXT_PUBLIC_SHOPIFY_API_KEY;
+  const apiKey = process.env.NEXT_PUBLIC_SHOPIFY_CLIENT_ID;
 
   return (
     <>

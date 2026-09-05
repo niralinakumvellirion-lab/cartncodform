@@ -1,7 +1,7 @@
 name = "CartnCodForm"
 client_id = "b2cafd271c21b90a630528234402b0a1"
-application_url = "https://cartncodform-backend.onrender.com"
-embedded = false
+application_url = "https://cartncodform-beryl.vercel.app/admin"
+embedded = true
 
 [auth]
 redirect_urls = [
