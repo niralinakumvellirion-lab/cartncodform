@@ -13,7 +13,7 @@ api_version = "2025-01"
 
   [[webhooks.subscriptions]]
   compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
-  uri = "/api/webhooks/compliance"
+  uri = "https://cartncodform-backend.onrender.com/api/webhooks/compliance"
 
 [access_scopes]
 scopes = "read_orders,read_customers,write_customers,read_products"
