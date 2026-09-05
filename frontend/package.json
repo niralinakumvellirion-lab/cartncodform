@@ -9,6 +9,8 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@shopify/app-bridge-react": "^4.2.13",
+    "@shopify/polaris": "^13.9.5",
     "firebase": "^12.18.0",
     "jsonwebtoken": "^9.0.3",
     "next": "14.2.5",
