@@ -431,7 +431,6 @@ function AutomationRules({ shop }) {
   const [error, setError] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingRule, setEditingRule] = useState(null);
-  const [upgradeRequired, setUpgradeRequired] = useState(false);
 
   const loadRules = useCallback(async () => {
     setLoading(true);
@@ -439,14 +438,8 @@ function AutomationRules({ shop }) {
       const data = await apiGet(`/api/automation/${encodeURIComponent(shop)}/rules`);
       setRules(Array.isArray(data) ? data : []);
       setError('');
-      setUpgradeRequired(false);
     } catch (err) {
-      if (err.message.includes('402') || err.message.includes('Pro plan')) {
-        setUpgradeRequired(true);
-        setError('');
-      } else {
-        setError(err.message);
-      }
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -482,24 +475,6 @@ function AutomationRules({ shop }) {
     setShowForm(false);
     setEditingRule(null);
     loadRules();
-  }
-
-  if (upgradeRequired) {
-    return (
-      <div className="mt-6 rounded-xl border border-brand bg-brand/5 p-8 text-center">
-        <p className="text-lg font-semibold text-gray-900">Automations is a Pro feature</p>
-        <p className="mt-2 text-sm text-gray-600">
-          Upgrade to automatically send reminders when customers abandon their cart —
-          no manual clicking required.
-        </p>
-        <a
-          href={`${process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000'}/api/auth/upgrade?shop=${encodeURIComponent(shop)}`}
-          className="mt-4 inline-block rounded-lg bg-brand px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark"
-        >
-          Upgrade to Pro
-        </a>
-      </div>
-    );
   }
 
   if (showForm || editingRule) {

@@ -188,20 +188,8 @@ async function processScheduledJobs() {
       // blocked, leave the job pending and re-check next tick
       // (quiet hours) or skip it permanently (frequency cap).
       const Store = require('./models/Store');
-      const store = await Store.findOne({ shopDomain: job.shopDomain }).select('timezone plan').lean();
+      const store = await Store.findOne({ shopDomain: job.shopDomain }).select('timezone').lean();
       const timezone = store?.timezone || 'Asia/Kolkata';
-
-      // Skip sends for shops that are no longer on the paid plan
-      // (e.g. cancelled after scheduling a job). Mark as skipped
-      // rather than failed — this isn't an error condition.
-      if (!store || store.plan !== 'pro') {
-        await ScheduledJob.findOneAndUpdate(
-          { _id: job._id, status: 'pending' },
-          { status: 'skipped', error: 'Store is not on the Pro plan' }
-        );
-        console.log(`[automation] Job ${job._id} skipped — shop ${job.shopDomain} not on Pro plan`);
-        continue;
-      }
 
       if (isQuietHours(timezone)) {
         console.log(`[automation] Job ${job._id} deferred — quiet hours (${timezone})`);
