@@ -45,7 +45,7 @@ router.post('/send', requireAuth, async (req, res) => {
 
     const Store = require('../models/Store');
     const store = await Store.findOne({ shopDomain: shopDomain?.trim().toLowerCase() });
-    if (!store || store.ownerEmail !== req.userEmail) {
+    if (!store || req.shopDomain !== shopDomain?.trim().toLowerCase()) {
       return res.status(403).json({ error: 'Not authorized for this store' });
     }
 
@@ -138,7 +138,7 @@ router.post('/send-customer', requireAuth, async (req, res) => {
 
     const Store = require('../models/Store');
     const store = await Store.findOne({ shopDomain: shopDomain?.trim().toLowerCase() });
-    if (!store || store.ownerEmail !== req.userEmail) {
+    if (!store || req.shopDomain !== shopDomain?.trim().toLowerCase()) {
       return res.status(403).json({ error: 'Not authorized for this store' });
     }
 

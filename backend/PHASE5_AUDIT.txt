@@ -1,0 +1,790 @@
+================================================================
+CartnCodForm — PHASE 5 AUDIT (read-only)
+Reconnaissance for adding an EMAIL channel to automation.
+Files read in full + existence check of email-related files.
+Nothing modified.
+Generated: 2026-09-07
+================================================================
+
+================================================================
+EXISTENCE CHECK (as asked)
+================================================================
+  backend/routes/email.js ........... NO  (does not exist)
+  backend/utils/email.js ............ YES (177 lines — full contents below)
+  backend/models/EmailTemplate.js ... NO  (does not exist)
+
+  There is NO email-route file and NO EmailTemplate model. Email
+  sending exists only as a utility module (utils/email.js) with
+  hard-coded inline HTML — no per-shop templating, no DB-backed
+  templates. Only two callers of utils/email.js in the whole
+  codebase:
+    - backend/routes/webhooks.js  (imports { sendAbandonedCartEmail } — see note in the
+      "SEND PATTERN" section; whether it is actually invoked today
+      is covered there)
+    - the module itself
+  `grep -rl "sendAbandonedCartEmail|resend|Resend|nodemailer|EmailTemplate"`
+  across backend/ (excluding node_modules) -> only routes/webhooks.js
+  and utils/email.js.
+
+================================================================
+1. backend/routes/push.js  (249 content lines + trailing newline)
+================================================================
+  1  const express = require('express');
+  2  const PushSubscription = require('../models/PushSubscription');
+  3  const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+  4  const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
+  5  const { fetchProductImage } = require('./webhooks');
+  6  const { requireAuth } = require('../middleware/requireOwner');
+  7
+  8  const router = express.Router();
+  9
+ 10  /**
+ 11   * POST /api/push/subscribe
+ 12   * Body: { shopDomain, token }
+ 13   * Upserts the FCM token for a store (token is unique).
+ 14   */
+ 15  router.post('/subscribe', async (req, res) => {
+ 16    try {
+ 17      const { shopDomain, token } = req.body;
+ 18
+ 19      if (!shopDomain || !token) {
+ 20        return res.status(400).json({ error: 'shopDomain and token are required' });
+ 21      }
+ 22
+ 23      await PushSubscription.findOneAndUpdate(
+ 24        { token },
+ 25        { shopDomain: shopDomain.trim().toLowerCase(), token },
+ 26        { upsert: true, new: true, setDefaultsOnInsert: true }
+ 27      );
+ 28
+ 29      console.log(`[push] Subscribed token for ${shopDomain}`);
+ 30      return res.status(200).json({ success: true });
+ 31    } catch (err) {
+ 32      console.error('[push] POST /subscribe error:', err.message);
+ 33      return res.status(500).json({ error: 'Failed to save push subscription' });
+ 34    }
+ 35  });
+ 36
+ 37  /**
+ 38   * POST /api/push/send
+ 39   * Body: { shopDomain, title, body }
+ 40   * Sends a notification to every token registered for the store.
+ 41   */
+ 42  router.post('/send', requireAuth, async (req, res) => {
+ 43    try {
+ 44      const { shopDomain, title, body } = req.body;
+ 45
+ 46      const Store = require('../models/Store');
+ 47      const store = await Store.findOne({ shopDomain: shopDomain?.trim().toLowerCase() });
+ 48      if (!store || store.ownerEmail !== req.userEmail) {
+ 49        return res.status(403).json({ error: 'Not authorized for this store' });
+ 50      }
+ 51
+ 52      if (!shopDomain || !title || !body) {
+ 53        return res.status(400).json({ error: 'shopDomain, title and body are required' });
+ 54      }
+ 55
+ 56      const result = await sendPushToStore(shopDomain, title, body);
+ 57
+ 58      if (!result.success) {
+ 59        return res.status(500).json({ success: false, error: result.error });
+ 60      }
+ 61
+ 62      return res.json({ success: true, sent: result.sent || 0 });
+ 63    } catch (err) {
+ 64      console.error('[push] POST /send error:', err.message);
+ 65      return res.status(500).json({ error: 'Failed to send push notification' });
+ 66    }
+ 67  });
+ 68
+ 69  /**
+ 70   * POST /api/push/subscribe-customer
+ 71   * Body: { shopDomain, token, oldToken, page }
+ 72   * Upserts a storefront-customer FCM token (from the Shopify theme script) and
+ 73   * cleans up a superseded token if one was supplied.
+ 74   */
+ 75  router.post('/subscribe-customer', async (req, res) => {
+ 76    try {
+ 77      const { shopDomain, token, oldToken, page, deviceType, cartToken, customerId, ccfSessionId } = req.body;
+ 78
+ 79      // Normalize cartToken — strip ?key=... suffix that /cart.js appends.
+ 80      const normalizedCartToken = cartToken
+ 81        ? cartToken.split('?')[0].trim() || null
+ 82        : null;
+ 83
+ 84      if (!shopDomain || !token) {
+ 85        return res.status(400).json({ error: 'shopDomain and token required' });
+ 86      }
+ 87
+ 88      const shop = shopDomain.trim().toLowerCase();
+ 89
+ 90      // Remove old token if different from new token
+ 91      if (oldToken && oldToken !== token) {
+ 92        await CustomerPushSubscription.deleteOne({ token: oldToken });
+ 93        console.log(`[subscribe-customer] Removed old token for: ${shop}`);
+ 94      }
+ 95
+ 96      // Upsert new token
+ 97      const result = await CustomerPushSubscription.findOneAndUpdate(
+ 98        { token },
+ 99        {
+100          shopDomain: shop,
+101          token,
+102          page: page || undefined,
+103          deviceType: deviceType || 'unknown',
+104          cartToken: normalizedCartToken || undefined,
+105          customerId: customerId || undefined,
+106          ccfSessionId: ccfSessionId || undefined,
+107          lastActivityAt: new Date()
+108        },
+109        { upsert: true, new: true, setDefaultsOnInsert: true }
+110      );
+111
+112      // Remove any OTHER rows with the same cartToken but a different
+113      // FCM token — prevents same-cart multi-row accumulation.
+114      if (normalizedCartToken) {
+115        await CustomerPushSubscription.deleteMany({
+116          shopDomain: shop,
+117          cartToken: normalizedCartToken,
+118          token: { $ne: token }
+119        });
+120      }
+121
+122      console.log(`[subscribe-customer] Token saved for: ${shop}`);
+123      return res.status(200).json({ success: true });
+124
+125    } catch (err) {
+126      console.error('[subscribe-customer] Error:', err.message);
+127      return res.status(500).json({ error: 'Failed to save subscription' });
+128    }
+129  });
+130  /**
+131   * POST /api/push/send-customer
+132   * Body: { shopDomain, title, body, url, imageUrl }
+133   * Sends a notification to every storefront customer subscribed for the shop.
+134   */
+135  router.post('/send-customer', requireAuth, async (req, res) => {
+136    try {
+137      const { shopDomain, title, body, url, imageUrl, cartToken, productId } = req.body;
+138
+139      const Store = require('../models/Store');
+140      const store = await Store.findOne({ shopDomain: shopDomain?.trim().toLowerCase() });
+141      if (!store || store.ownerEmail !== req.userEmail) {
+142        return res.status(403).json({ error: 'Not authorized for this store' });
+143      }
+144
+145      console.log(`[send-customer] shopDomain received: ${shopDomain}`);
+146      console.log('[send-customer] imageUrl from request:', req.body.imageUrl || 'NONE');
+147
+148      if (!shopDomain || !title || !body) {
+149        return res.status(400).json({ error: 'shopDomain, title and body are required' });
+150      }
+151
+152      // Normalize cartToken — strip ?key=... suffix if present.
+153      const normalizedCartToken = cartToken
+154        ? cartToken.split('?')[0].trim() || null
+155        : null;
+156
+157      // Look up the customerId for this cart so the push can fall back to
+158      // a customerId-scoped subscriber if the cartToken no longer matches.
+159      let customerIdForPush = null;
+160      if (normalizedCartToken) {
+161        const AbandonedCustomer = require('../models/AbandonedCustomer');
+162        const ac = await AbandonedCustomer.findOne({ sessionId: normalizedCartToken });
+163        customerIdForPush = ac?.customerId || null;
+164      }
+165
+166      // If a specific productId was passed, fetch its image from
+167      // Shopify Admin API to ensure we show the right product image.
+168      let resolvedImageUrl = imageUrl;
+169      if (productId && normalizedCartToken) {
+170        try {
+171          const Store = require('../models/Store');
+172          const store = await Store.findOne({
+173            shopDomain: shopDomain.trim().toLowerCase()
+174          });
+175          if (store && store.accessToken) {
+176            const fetchedImage = await fetchProductImage(
+177              shopDomain.trim().toLowerCase(),
+178              store.accessToken,
+179              String(productId)
+180            );
+181            if (fetchedImage) {
+182              resolvedImageUrl = fetchedImage;
+183              console.log(`[send-customer] Fetched image for product ${productId}: ${fetchedImage.substring(0, 50)}...`);
+184            }
+185          }
+186        } catch (e) {
+187          console.log(`[send-customer] Image fetch failed for product ${productId}:`, e.message);
+188        }
+189      }
+190
+191      const result = await sendPushToCustomers(
+192        shopDomain, title, body, url, resolvedImageUrl,
+193        true,
+194        normalizedCartToken || null,
+195        normalizedCartToken ? false : true,
+196        customerIdForPush
+197      );
+198
+199      console.log(`[send-customer] tokens found: ${result.tokensFound ?? 0}`);
+200      console.log(`[send-customer] FCM result: ${JSON.stringify(result)}`);
+201
+202      if (!result.success) {
+203        return res.status(500).json({ success: false, error: result.error });
+204      }
+205
+206      return res.json({ success: true, sent: result.sent || 0 });
+207    } catch (err) {
+208      console.error('[push] POST /send-customer error:', err.message);
+209      return res.status(500).json({ error: 'Failed to send customer push notification' });
+210    }
+211  });
+212
+213  /**
+214   * POST /api/push/cart-activity
+215   * Body: { shopDomain, token, event, url }
+216   * Records storefront cart activity on the customer subscription.
+217   */
+218  router.post('/cart-activity', async (req, res) => {
+219    try {
+220      const { shopDomain, token, event, url } = req.body;
+221
+222      console.log(`[cart-activity] shopDomain: ${shopDomain}, event: ${event}`);
+223
+224      if (!shopDomain || !token) {
+225        return res.status(400).json({ error: 'shopDomain and token are required' });
+226      }
+227
+228      // Find the subscription by token and stamp its last activity.
+229      const sub = await CustomerPushSubscription.findOneAndUpdate(
+230        { token },
+231        {
+232          lastEvent: event || 'unknown',
+233          lastActivityUrl: url || undefined,
+234          lastActivityAt: new Date(),
+235        },
+236        { new: true }
+237      );
+238      if (!sub) {
+239        console.log('[cart-activity] no CustomerPushSubscription matched this token');
+240      }
+241
+242      return res.status(200).json({ success: true });
+243    } catch (err) {
+244      console.error('[push] POST /cart-activity error:', err.message);
+245      return res.status(500).json({ error: 'Failed to record cart activity' });
+246    }
+247  });
+248
+249  module.exports = router;
+
+  SEND PATTERN — how push actually gets delivered:
+   - Two send utilities in backend/utils/pushNotification.js:
+       sendPushToStore(shopDomain, title, body)
+         -> notifies every PushSubscription row for the store
+            (the OWNER's own devices).
+       sendPushToCustomers(shopDomain, title, body, url, imageUrl,
+                            <customerOnly:true>, cartToken,
+                            <broadcast flag>, customerId)
+         -> notifies CustomerPushSubscription rows (storefront
+            shoppers). Arg 7 (cartToken) narrows to the one cart's
+            subscriber; arg 8 true = broadcast to all shop
+            subscribers when no cartToken; arg 9 = customerId
+            fallback.
+   - The AUTOMATION poller (backend/server.js processScheduledJobs)
+     calls sendPushToCustomers(job.shopDomain, payload.title,
+       payload.body, urlWithJob, payload.imageUrl, true,
+       job.cartToken || null, false, job.customerId || null).
+     i.e. automation reuses sendPushToCustomers directly, NOT this
+     route file. This route file is only the dashboard "manual
+     push" surface.
+   - Return shape from both utilities: { success, sent, tokensFound?, error? }.
+
+  *** PRE-EXISTING BUG (relevant to Phase 5's auth story) ***
+   Lines 48 and 141 still do:
+       if (!store || store.ownerEmail !== req.userEmail) return 403;
+   But the Shopify-session-token auth swap changed requireAuth to
+   set req.shopDomain (NOT req.userEmail). So on these two routes
+   req.userEmail is now always undefined -> store.ownerEmail !==
+   undefined is always true -> POST /api/push/send and
+   POST /api/push/send-customer 403 for EVERY caller. push.js was
+   not in the auth-swap's scope and was never updated. Any Phase 5
+   work that touches these routes should fix this to
+   `req.shopDomain !== <the shop being acted on>` (the pattern
+   now used in requireStoreOwner).
+
+================================================================
+2. backend/models/AbandonedCustomer.js  (67 content lines)
+================================================================
+  1  const mongoose = require('mongoose');
+  2
+  3  const abandonedCustomerSchema = new mongoose.Schema({
+  4    shopDomain: {
+  5      type: String,
+  6      required: true,
+  7      trim: true,
+  8      lowercase: true,
+  9      index: true,
+ 10    },
+ 11    email: {
+ 12      type: String,
+ 13      trim: true,
+ 14      lowercase: true,
+ 15    },
+ 16    phone: {
+ 17      type: String,
+ 18      trim: true,
+ 19    },
+ 20    cartItems: [
+ 21      {
+ 22        title: String,
+ 23        quantity: Number,
+ 24        price: Number,
+ 25        imageUrl: String,
+ 26        productId: mongoose.Schema.Types.Mixed,
+ 27        variantId: mongoose.Schema.Types.Mixed,
+ 28      },
+ 29    ],
+ 30    // First available cart-item image, used as the push notification image.
+ 31    productImageUrl: {
+ 32      type: String,
+ 33      trim: true,
+ 34    },
+ 35    cartValue: {
+ 36      type: Number,
+ 37      default: 0,
+ 38    },
+ 39    sessionId: {
+ 40      type: String,
+ 41      trim: true,
+ 42    },
+ 43    customerId: {
+ 44      type: String,
+ 45    },
+ 46    status: {
+ 47      type: String,
+ 48      enum: ['abandoned', 'recovered'],
+ 49      default: 'abandoned',
+ 50    },
+ 51    // --- Revenue attribution (set by handleOrderWebhook on orders/create) ---
+ 52    recoveredAt: { type: Date },
+ 53    recoveredOrderId: { type: String },
+ 54    recoveredOrderName: { type: String },
+ 55    recoveredRevenue: { type: Number },
+ 56    recoveredCurrency: { type: String },
+ 57    // 'push'  -> a CartnCodForm automated push led to this order
+ 58    // 'organic' -> recovered without an attributable push click
+ 59    attributionSource: { type: String, enum: ['push', 'organic', null], default: null },
+ 60    attributedJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'ScheduledJob' },
+ 61    createdAt: {
+ 62      type: Date,
+ 63      default: Date.now,
+ 64    },
+ 65  });
+ 66
+ 67  module.exports = mongoose.model('AbandonedCustomer', abandonedCustomerSchema);
+
+  CUSTOMER / CART DATA AVAILABLE FOR AN EMAIL STEP:
+   - email        (String, may be ABSENT — carts webhooks only
+                   carry an email once the shopper enters one at
+                   checkout; many abandoned-cart rows have no
+                   email at all. This is the gating field for an
+                   email channel.)
+   - phone        (String, may be absent)
+   - cartItems[]  { title, quantity, price, imageUrl, productId, variantId }
+   - productImageUrl  (first cart-item image; already used as the
+                       push image)
+   - cartValue    (Number)
+   - sessionId    (the normalized Shopify cart token — this is the
+                   key that links a row to CustomerPushSubscription.cartToken
+                   and to ScheduledJob.cartToken)
+   - customerId   (Shopify customer id, logged-in shoppers only)
+   - status       'abandoned' | 'recovered'
+   - recovered*/attribution* fields (set later by orders/create)
+   - createdAt
+
+   utils/email.js's sendAbandonedCartEmail(customer) already
+   consumes: customer.email, customer.cartItems[], customer.cartValue.
+   So an AbandonedCustomer row is a ready-made input to that
+   function — an email automation step just needs to load the row
+   by sessionId (== job.cartToken) and pass it in.
+
+================================================================
+3. backend/utils/automationEngine.js  (127 content lines)
+================================================================
+  1  const AutomationRule = require('../models/AutomationRule');
+  2  const ScheduledJob = require('../models/ScheduledJob');
+  3  const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+  4
+  5  /**
+  6   * Called after a carts/create or carts/update webhook is processed.
+  7   * Finds active cart_abandon rules for this shop and schedules jobs
+  8   * for each step, targeting the subscriber linked to this cart.
+  9   *
+ 10   * @param {string} shopDomain
+ 11   * @param {string} cartToken - normalized Shopify cart token (sessionId on AbandonedCustomer)
+ 12   * @param {string|null} customerId
+ 13   * @param {object} cartContext - { cartValue, productImageUrl, firstItemTitle, productUrl }
+ 14   */
+ 15  async function scheduleCartAbandonJobs(shopDomain, cartToken, customerId, cartContext) {
+ 16    try {
+ 17      const shop = String(shopDomain || '').trim().toLowerCase();
+ 18      if (!cartToken) return;
+ 19
+ 20      const rules = await AutomationRule.find({
+ 21        shopDomain: shop,
+ 22        trigger: 'cart_abandon',
+ 23        active: true,
+ 24      });
+ 25
+ 26      if (!rules.length) return;
+ 27
+ 28      // Find the subscriber linked to this cart (if any) so we know
+ 29      // there's someone to notify before scheduling anything.
+ 30      const sub = await CustomerPushSubscription.findOne({
+ 31        shopDomain: shop,
+ 32        cartToken: cartToken,
+ 33      }).sort({ lastActivityAt: -1 });
+ 34
+ 35      if (!sub) {
+ 36        console.log(`[automation] No subscriber for cartToken ${cartToken} — skipping schedule`);
+ 37        return;
+ 38      }
+ 39
+ 40      for (const rule of rules) {
+ 41        // Skip entirely if any non-cancelled job already exists for
+ 42        // this rule+cart (sent or still pending) — avoids re-sending
+ 43        // step 0 on every subsequent carts/update for a long-lived cart.
+ 44        const existingJob = await ScheduledJob.findOne({
+ 45          shopDomain: shop,
+ 46          ruleId: rule._id,
+ 47          cartToken,
+ 48          status: { $in: ['pending', 'sent'] },
+ 49        });
+ 50        if (existingJob) {
+ 51          console.log(`[automation] Rule "${rule.name}" already has a job for cart ${cartToken} — skipping re-schedule`);
+ 52          continue;
+ 53        }
+ 54
+ 55        let cumulativeMinutes = 0;
+ 56        for (let i = 0; i < rule.steps.length; i++) {
+ 57          const step = rule.steps[i];
+ 58          cumulativeMinutes += step.delayMinutes;
+ 59          const runAt = new Date(Date.now() + cumulativeMinutes * 60 * 1000);
+ 60
+ 61          const title = step.title
+ 62            .replace('{cartValue}', cartContext.cartValue || '')
+ 63            .replace('{productTitle}', cartContext.firstItemTitle || 'your item');
+ 64          const body = step.body
+ 65            .replace('{cartValue}', cartContext.cartValue || '')
+ 66            .replace('{productTitle}', cartContext.firstItemTitle || 'your item');
+ 67
+ 68          try {
+ 69            await ScheduledJob.create({
+ 70              shopDomain: shop,
+ 71              ruleId: rule._id,
+ 72              stepIndex: i,
+ 73              cartToken,
+ 74              customerId: customerId || sub.customerId || null,
+ 75              runAt,
+ 76              status: 'pending',
+ 77              payload: {
+ 78                title,
+ 79                body,
+ 80                url: cartContext.productUrl || `https://${shop}`,
+ 81                imageUrl: step.imageSource === 'product' ? (cartContext.productImageUrl || null) : null,
+ 82              },
+ 83            });
+ 84          } catch (err) {
+ 85            if (err.code === 11000) {
+ 86              console.log(`[automation] Duplicate job prevented for rule "${rule.name}", cart ${cartToken}, step ${i}`);
+ 87            } else {
+ 88              throw err;
+ 89            }
+ 90          }
+ 91        }
+ 92
+ 93        console.log(`[automation] Scheduled ${rule.steps.length} job(s) for rule "${rule.name}" (cart ${cartToken})`);
+ 94      }
+ 95    } catch (err) {
+ 96      console.error('[automation] scheduleCartAbandonJobs error:', err.message);
+ 97    }
+ 98  }
+ 99
+100  /**
+101   * Called after orders/create. Cancels any pending jobs tied to this
+102   * cart/customer so a converted shopper doesn't keep getting reminders.
+103   */
+104  async function cancelJobsForOrder(shopDomain, cartToken, customerId) {
+105    try {
+106      const shop = String(shopDomain || '').trim().toLowerCase();
+107      const orClauses = [];
+108      if (cartToken) orClauses.push({ cartToken });
+109      if (customerId) orClauses.push({ customerId });
+110      if (!orClauses.length) return { cancelled: 0 };
+111
+112      const result = await ScheduledJob.updateMany(
+113        { shopDomain: shop, status: 'pending', $or: orClauses },
+114        { status: 'cancelled' }
+115      );
+116
+117      if (result.modifiedCount > 0) {
+118        console.log(`[automation] Cancelled ${result.modifiedCount} pending job(s) for order (cart: ${cartToken || 'n/a'}, customer: ${customerId || 'n/a'})`);
+119      }
+120      return { cancelled: result.modifiedCount };
+121    } catch (err) {
+122      console.error('[automation] cancelJobsForOrder error:', err.message);
+123      return { cancelled: 0, error: err.message };
+124    }
+125  }
+126
+127  module.exports = { scheduleCartAbandonJobs, cancelJobsForOrder };
+
+  HOW PUSH STEPS ARE STRUCTURED (for reference to add an email channel):
+   - AutomationRule (backend/models/AutomationRule.js):
+       shopDomain, name,
+       trigger  enum: browse_abandon | cart_abandon | checkout_abandon | back_in_interest
+                (only cart_abandon is implemented today),
+       conditions (Mixed, unused),
+       steps: [ stepSchema ],  active, createdAt.
+   - stepSchema (subdoc, { _id: false }):
+       delayMinutes  Number, required
+       channel       String, enum: ['push'], default 'push'   <-- ONLY 'push' allowed today
+       title         String, required
+       body          String, required
+       imageSource   String, enum: ['product','none'], default 'product'
+   - scheduleCartAbandonJobs (above) turns each step into a
+     ScheduledJob row:
+       { shopDomain, ruleId, stepIndex, cartToken, customerId,
+         runAt (now + cumulative delayMinutes), status:'pending',
+         payload: { title, body, url, imageUrl } }
+     Templating: only two tokens, {cartValue} and {productTitle},
+     String.replace (first occurrence only) at schedule time.
+   - The poller (backend/server.js processScheduledJobs, 30s tick)
+     reads pending ScheduledJob rows and always calls
+     sendPushToCustomers(...) — there is NO channel branch. A
+     ScheduledJob has no `channel` field; the poller assumes push.
+
+  WHAT AN EMAIL CHANNEL WOULD NEED (derived from the above — not
+  a task, just the gap analysis):
+   1. stepSchema.channel enum -> add 'email' (and default stays 'push').
+   2. ScheduledJob -> add a `channel` field (persist step.channel
+      onto the job at schedule time; default 'push' for back-compat).
+   3. scheduleCartAbandonJobs -> for an email step, the "is there
+      someone to notify?" precheck currently requires a
+      CustomerPushSubscription row (lines 30-38). An email step
+      should instead require an AbandonedCustomer row WITH an
+      email for that cartToken. Right now a cart with an email but
+      no push subscription is skipped entirely.
+   4. The poller -> branch on job.channel: 'push' ->
+      sendPushToCustomers (as today); 'email' -> load
+      AbandonedCustomer by { shopDomain, sessionId: job.cartToken }
+      and call utils/email.js sendAbandonedCartEmail(row) (or a new
+      templated variant using job.payload.title/body).
+      Note the poller's quiet-hours + frequency-cap logic is push-
+      oriented; decide whether it applies to email.
+   5. utils/email.js currently hard-codes subject + HTML and a
+      generic FRONTEND_URL CTA — no per-step title/body, no
+      per-shop from-address, no EmailTemplate model. A real email
+      step wants at least: use step.title as subject, step.body in
+      the HTML, and a shop-specific return URL. An EmailTemplate
+      model (does not exist) would be the place for per-shop
+      branding if that's in scope.
+   6. Frontend automation UI (already Polaris-ported in
+      frontend/app/admin/page.js — StepEditor / RuleForm) has no
+      channel selector; every step is implicitly push.
+
+================================================================
+4. backend/utils/email.js  (176 content lines) — FULL, for reference
+================================================================
+  1  const { Resend } = require('resend');
+  2
+  3  // The Resend constructor throws if the key is falsy, which would crash server
+  4  // startup when RESEND_API_KEY is unset. Fall back to a placeholder so the app
+  5  // still boots; sends then fail with an auth error that is caught and logged.
+  6  const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
+  7  const FROM = process.env.FROM_EMAIL || 'onboarding@resend.dev';
+  8
+  9  // --- small HTML helpers -------------------------------------------------------
+ 10
+ 11  function escapeHtml(value) {
+ 12    return String(value == null ? '' : value)
+ 13      .replace(/&/g, '&amp;')
+ 14      .replace(/</g, '&lt;')
+ 15      .replace(/>/g, '&gt;')
+ 16      .replace(/"/g, '&quot;');
+ 17  }
+ 18
+ 19  function money(n) {
+ 20    const num = Number(n) || 0;
+ 21    return num.toLocaleString('en-IN', {
+ 22      minimumFractionDigits: 2,
+ 23      maximumFractionDigits: 2,
+ 24    });
+ 25  }
+ 26
+ 27  function button(href, label) {
+ 28    return (
+ 29      `<a href="${escapeHtml(href)}" ` +
+ 30      `style="display:inline-block;background:#4f46e5;color:#ffffff;` +
+ 31      `text-decoration:none;padding:12px 20px;border-radius:8px;` +
+ 32      `font-weight:600;font-family:Arial,Helvetica,sans-serif;">${escapeHtml(label)}</a>`
+ 33    );
+ 34  }
+ 35
+ 36  function shell(innerHtml) {
+ 37    return (
+ 38      `<div style="font-family:Arial,Helvetica,sans-serif;color:#111827;` +
+ 39      `max-width:560px;margin:0 auto;padding:24px;">${innerHtml}</div>`
+ 40    );
+ 41  }
+ 42
+ 43  // ---------------------------------------------------------------------------
+ 44  // 1. Abandoned cart reminder -> the customer
+ 45  // ---------------------------------------------------------------------------
+ 46
+ 47  async function sendAbandonedCartEmail(customer) {
+ 48    try {
+ 49      if (!customer || !customer.email) {
+ 50        // No email on file — nothing to send.
+ 51        return { success: false, error: 'no customer email' };
+ 52      }
+ 53
+ 54      const items = Array.isArray(customer.cartItems) ? customer.cartItems : [];
+ 55      const rows = items
+ 56        .map((i) => {
+ 57          const qty = i.quantity || 1;
+ 58          const line = (Number(i.price) || 0) * qty;
+ 59          return (
+ 60            `<tr>` +
+ 61            `<td style="padding:6px 0;">${escapeHtml(i.title || 'Item')} &times; ${qty}</td>` +
+ 62            `<td style="padding:6px 0;text-align:right;">${money(line)}</td>` +
+ 63            `</tr>`
+ 64          );
+ 65        })
+ 66        .join('');
+ 67
+ 68      const cta = process.env.FRONTEND_URL || '#';
+ 69
+ 70      const html = shell(
+ 71        `<h1 style="font-size:22px;margin:0 0 12px;">You forgot something!</h1>` +
+ 72          `<p style="margin:0 0 16px;color:#4b5563;">Here's what's still waiting in your cart:</p>` +
+ 73          `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
+ 74          `${rows || '<tr><td style="padding:6px 0;color:#6b7280;">Your saved items</td></tr>'}` +
+ 75          `<tr><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">Total</td>` +
+ 76          `<td style="padding:10px 0;border-top:1px solid #e5e7eb;text-align:right;font-weight:700;">` +
+ 77          `${money(customer.cartValue)}</td></tr>` +
+ 78          `</table>` +
+ 79          `<p style="margin:24px 0;">${button(cta, 'Complete Your Order')}</p>` +
+ 80          `<p style="margin:32px 0 0;font-size:12px;color:#9ca3af;">` +
+ 81          `This reminder was sent by CartnCodForm</p>`
+ 82      );
+ 83
+ 84      const { error } = await resend.emails.send({
+ 85        from: FROM,
+ 86        to: customer.email,
+ 87        subject: 'You left something behind! 🛒',
+ 88        html,
+ 89      });
+ 90
+ 91      if (error) throw new Error(error.message || JSON.stringify(error));
+ 92
+ 93      console.log(`Email sent: abandoned_cart to ${customer.email}`);
+ 94      return { success: true };
+ 95    } catch (err) {
+ 96      console.error(`Email failed: ${err.message}`);
+ 97      return { success: false, error: err.message };
+ 98    }
+ 99  }
+100
+101  // ---------------------------------------------------------------------------
+102  // 2. New COD order alert -> the store owner
+103  // ---------------------------------------------------------------------------
+104
+105  async function sendNewCodOrderEmail(order, ownerEmail) {
+106    try {
+107      if (!ownerEmail) {
+108        return { success: false, error: 'no owner email' };
+109      }
+110      if (!order) {
+111        return { success: false, error: 'no order' };
+112      }
+113
+114      const qty = Number(order.quantity) || 1;
+115      const price = Number(order.productPrice) || 0;
+116      const total = price * qty;
+117
+118      const html = shell(
+119        `<h1 style="font-size:22px;margin:0 0 12px;">New COD Order!</h1>` +
+120          `<h2 style="font-size:15px;margin:20px 0 6px;color:#374151;">Customer details</h2>` +
+121          `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
+122          `<tr><td style="padding:4px 0;color:#6b7280;">Name</td><td style="padding:4px 0;">${escapeHtml(order.name)}</td></tr>` +
+123          `<tr><td style="padding:4px 0;color:#6b7280;">Phone</td><td style="padding:4px 0;">${escapeHtml(order.phone)}</td></tr>` +
+124          `<tr><td style="padding:4px 0;color:#6b7280;">Address</td><td style="padding:4px 0;">${escapeHtml(order.address)}</td></tr>` +
+125          `<tr><td style="padding:4px 0;color:#6b7280;">City</td><td style="padding:4px 0;">${escapeHtml(order.city)}</td></tr>` +
+126          `<tr><td style="padding:4px 0;color:#6b7280;">Pincode</td><td style="padding:4px 0;">${escapeHtml(order.pincode)}</td></tr>` +
+127          `</table>` +
+128          `<h2 style="font-size:15px;margin:20px 0 6px;color:#374151;">Product</h2>` +
+129          `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
+130          `<tr><td style="padding:4px 0;color:#6b7280;">Item</td><td style="padding:4px 0;">${escapeHtml(order.productName)}</td></tr>` +
+131          `<tr><td style="padding:4px 0;color:#6b7280;">Price</td><td style="padding:4px 0;">₹${money(price)}</td></tr>` +
+132          `<tr><td style="padding:4px 0;color:#6b7280;">Quantity</td><td style="padding:4px 0;">${qty}</td></tr>` +
+133          `<tr><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">Total</td>` +
+134          `<td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">₹${money(total)}</td></tr>` +
+135          `</table>` +
+136          `<p style="margin:32px 0 0;font-size:12px;color:#9ca3af;">Powered by CartnCodForm</p>`
+137      );
+138
+139      const { error } = await resend.emails.send({
+140        from: FROM,
+141        to: ownerEmail,
+142        subject: 'New COD Order Received! 📦',
+143        html,
+144      });
+145
+146      if (error) throw new Error(error.message || JSON.stringify(error));
+147
+148      console.log(`Email sent: new_cod_order to ${ownerEmail}`);
+149      return { success: true };
+150    } catch (err) {
+151      console.error(`Email failed: ${err.message}`);
+152      return { success: false, error: err.message };
+153    }
+154  }
+155
+156  // ---------------------------------------------------------------------------
+157  // 3. COD order confirmation -> the customer (not wired up yet)
+158  // ---------------------------------------------------------------------------
+159
+160  async function sendCodOrderConfirmationEmail(order) {
+161    try {
+162      // TODO: integrate customer email later. COD customers may not provide an
+163      // email address on the form, so there is nothing to send to right now.
+164      // When the COD form collects an email, send a confirmation here.
+165      return { success: true };
+166    } catch (err) {
+167      console.error(`Email failed: ${err.message}`);
+168      return { success: false, error: err.message };
+169    }
+170  }
+171
+172  module.exports = {
+173    sendAbandonedCartEmail,
+174    sendNewCodOrderEmail,
+175    sendCodOrderConfirmationEmail,
+176  };
+
+  - Transport: Resend (npm `resend`). Env: RESEND_API_KEY (falls
+    back to a placeholder so boot doesn't crash), FROM_EMAIL
+    (falls back to onboarding@resend.dev).
+  - 3 exported functions; only sendAbandonedCartEmail is a
+    customer-facing cart reminder. It gates on customer.email and
+    consumes customer.cartItems / customer.cartValue — a direct
+    fit for an AbandonedCustomer row.
+  - No per-step / per-shop templating. Subjects + HTML are
+    hard-coded. No EmailTemplate model.
+
+================================================================
+NOTHING MODIFIED. Read-only audit.
+================================================================
