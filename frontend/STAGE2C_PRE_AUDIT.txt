@@ -1,0 +1,374 @@
+================================================================
+CartnCodForm — Phase 1 / Stage 2c PRE-AUDIT
+Target port: StoreView (dashboard/[shop]/page.js lines 669-1006)
+             -> the real page body of frontend/app/admin/page.js
+Generated: 2026-09-07
+Read-only. Nothing modified.
+================================================================
+
+================================================================
+1. CURRENT LINE COUNT — frontend/app/admin/page.js
+================================================================
+  791 lines (wc -l). Last content line is 791: the closing `}` of
+  `export default function AdminHome()`.
+
+  Component roster currently in admin/page.js (all ported in
+  Stages 2a/2b, all DEFINITIONS — only AdminHomeContent's
+  "Component Preview" card actually renders any of them today):
+    formatMoney (33), formatDate (38), cleanPhone (44),
+    WhatsAppButton (50), SendPushButton (59), StatusBadge (148),
+    StepEditor (168), RuleForm (225), AutomationRules (349),
+    RevenueStats (507), CustomerAnalytics (623),
+    AdminHomeContent (729), AdminHome / default export (785).
+
+================================================================
+2. POLARIS COMPONENTS CURRENTLY IN THE IMPORT LINE
+   (admin/page.js, lines 5-26, `from '@shopify/polaris'`)
+================================================================
+  20 named imports:
+     1. AppProvider
+     2. Page
+     3. Card
+     4. Text
+     5. Badge
+     6. Button
+     7. Popover
+     8. TextField
+     9. FormLayout
+    10. BlockStack
+    11. Box
+    12. InlineStack
+    13. Checkbox
+    14. Banner
+    15. ResourceList
+    16. ResourceItem
+    17. Modal
+    18. Grid
+    19. SkeletonBodyText
+    20. Thumbnail
+
+  (No Tabs, no DataTable/IndexTable, no Layout, no Spinner, no
+   Frame, no Toast yet — those are the likely additions when
+   StoreView's tab strip + the two tables are ported.)
+
+  Other imports in admin/page.js:
+    react:        { Suspense, useState, useCallback, useEffect, useMemo }
+    next/script:  Script  (default)
+    next/navigation: { useSearchParams }
+    '@shopify/polaris/build/esm/styles.css'  (side-effect)
+    '../../lib/api': { apiGet, apiSend }
+
+================================================================
+3. StoreView + NESTED HELPERS — STATE / EFFECTS / HANDLERS
+   (source dashboard/[shop]/page.js, function starts line 669)
+================================================================
+
+--- Non-state hooks (lines 670-672) ---
+  params = useParams()                       [next/navigation]
+  router = useRouter()                       [next/navigation]
+  shop   = decodeURIComponent(params.shop || '')
+           -> the myshopify domain; drives every API URL and is
+              passed to child components. In the EMBEDDED /admin
+              route this must instead come from
+              useSearchParams().get('shop') (see WIRING NOTES).
+
+--- STATE VARIABLES (lines 674-680, all React.useState) ---
+  tab              useState('abandoned')
+                   Which tab panel is visible: 'abandoned' | 'cod'
+                   | 'automation'. Set only by tabButton().
+  customers        useState([])
+                   Array of abandoned-cart rows. Set by load()
+                   (from GET .../customers). Read by RevenueStats,
+                   the abandoned-carts table, and the tab count.
+  orders           useState([])
+                   Array of COD order rows. Set by load() (from
+                   GET .../orders) and by updateOrderStatus()
+                   (optimistic + revert). Read by the COD table
+                   and the tab count.
+  loading          useState(true)
+                   True while the initial load() Promise.all is in
+                   flight. Gates RevenueStats, both table panels,
+                   and shows the "Loading store data…" row.
+  error            useState('')
+                   Human-readable error string. Set by load()
+                   (catch), handleDisconnect() (catch),
+                   updateOrderStatus() (catch). Rendered in a red
+                   alert box with a "Try again" button (-> load()).
+  disconnecting    useState(false)
+                   True while the DELETE store request is in
+                   flight. Disables the "Disconnect Store" button
+                   and swaps its label to "Disconnecting…".
+  analyticsCustomer useState(null)
+                   The abandoned-cart row whose Customer Journey
+                   panel is open; null = closed. Set to a row on
+                   table-row click (setAnalyticsCustomer(c)),
+                   cleared by CustomerAnalytics' onClose.
+
+--- EFFECTS (React.useEffect) ---
+  Effect A  (lines 699-701)   deps: [load]
+    useEffect(() => { load(); }, [load])
+    Purpose: fire the initial data fetch on mount, and re-fetch
+    if `load` changes (load is useCallback([shop]) so effectively
+    "when shop changes").
+
+  Effect B  (lines 703-718)   deps: []   (mount once)
+    const unsubscribe = onForegroundMessage((payload) => {
+      console.log('[push] Foreground message:', payload);
+      const title = payload.notification?.title || 'CartnCodForm';
+      const body  = payload.notification?.body  || 'New notification';
+      if (Notification.permission === 'granted') {
+        new Notification(title, { body, icon: '/favicon.ico' });
+      }
+    });
+    return () => unsubscribe && unsubscribe();
+    Purpose: while the dashboard tab is focused, still surface
+    incoming FCM foreground pushes as a native browser
+    Notification. Relies on onForegroundMessage from
+    ../../../lib/firebase (NOT imported in admin/page.js — see §6)
+    and the browser Notification API.
+    NOTE for the embedded context: an app iframed inside Shopify
+    Admin generally should not pop its own `new Notification(...)`;
+    this effect is a candidate to drop or gate in Stage 2c.
+
+--- HANDLERS / NESTED FUNCTIONS ---
+  load        (lines 682-697)  const load = useCallback(async () => {...}, [shop])
+    setLoading(true); setError('');
+    const [c, o] = await Promise.all([
+      apiGet(`/api/stores/${encodeURIComponent(shop)}/customers`),
+      apiGet(`/api/stores/${encodeURIComponent(shop)}/orders`),
+    ]);
+    setCustomers(c); setOrders(o);
+    catch -> setError(err.message)
+    finally -> setLoading(false)
+    Sets: loading, error, customers, orders.
+
+  handleDisconnect  (lines 720-735)  async function
+    const ok = window.confirm('Are you sure you want to disconnect
+      this store? All data will be deleted.');
+    if (!ok) return;
+    setDisconnecting(true); setError('');
+    await apiSend(`/api/stores/${encodeURIComponent(shop)}`, 'DELETE', {});
+    router.push('/dashboard');
+    catch -> setError(err.message); setDisconnecting(false)
+    Sets: disconnecting, error. Navigates via router.push on success.
+    ADAPTATION FLAGS for 2c: (a) window.confirm -> Polaris <Modal
+    destructive> (same pattern used in the AutomationRules port);
+    (b) router.push('/dashboard') has no valid target in the
+    embedded /admin route — there is no '/dashboard' in that flow;
+    the whole "Disconnect Store" affordance may not belong in the
+    embedded admin UI at all, or needs a different post-delete
+    destination (e.g. App Bridge redirect to the app listing /
+    close).
+
+  updateOrderStatus  (lines 737-746)  async function (id, status)
+    setOrders(prev => prev.map(o => o._id === id ? { ...o, status } : o));  // optimistic
+    await apiSend(`/api/cod/order/${id}`, 'PATCH', { status });
+    catch -> setError(err.message); load();   // revert by re-fetch
+    Sets: orders (optimistically), error (on failure), and
+    re-runs load() on failure.
+
+  tabButton  (lines 748-759)  const tabButton = (key, label, count) => ( <button ... /> )
+    Renders one tab-strip button. onClick -> setTab(key). Active
+    styling when tab === key. Appends " (count)" when count !== null.
+    Reads: tab. Sets: tab.
+    ADAPTATION for 2c: the source is a hand-rolled <button> strip;
+    the mapping target is Polaris <Tabs> (which owns its own
+    selected index + onSelect). tabButton likely disappears
+    entirely, replaced by a <Tabs tabs={[...]} selected={...}
+    onSelect={...}> config.
+
+================================================================
+4. API CALLS INSIDE StoreView
+================================================================
+  # | method | endpoint                                             | where            | state it sets
+  --+--------+------------------------------------------------------+------------------+---------------------------------
+  1 | GET    | /api/stores/{encodeURIComponent(shop)}/customers     | load() (apiGet)  | customers  (setCustomers)
+  2 | GET    | /api/stores/{encodeURIComponent(shop)}/orders        | load() (apiGet)  | orders     (setOrders)
+    |        |   (#1 and #2 run together in Promise.all; a throw in |                  | error (setError), loading (finally)
+    |        |    either aborts both and no customers/orders set)   |                  |
+  3 | DELETE | /api/stores/{encodeURIComponent(shop)}               | handleDisconnect | (no data state) -> router.push('/dashboard') on ok;
+    |        |   body: {}  (apiSend)                                |                  | on fail: error (setError), disconnecting (false)
+  4 | PATCH  | /api/cod/order/{id}                                  | updateOrderStatus| orders (optimistic setOrders BEFORE call);
+    |        |   body: { status }  (apiSend)                        |                  | on fail: error (setError) + load() re-fetch
+
+  (No POST from StoreView itself. The automation POST/PATCH/DELETE
+   and the push send-customer POST live inside the child
+   components AutomationRules / RuleForm / SendPushButton, which
+   are already ported.)
+
+  All four use apiGet / apiSend from lib/api — BOTH already
+  imported in admin/page.js (line 29), though from '../../lib/api'
+  vs the source's '../../../lib/api' (depth differs; the
+  already-present admin import is the correct one).
+
+================================================================
+5. CHILD COMPONENTS StoreView RENDERS (with props + render gate)
+================================================================
+  A. CustomerAnalytics                          (lines 763-769)
+       gate: {analyticsCustomer && ( ... )}
+       props: shop={shop}
+              customer={analyticsCustomer}
+              onClose={() => setAnalyticsCustomer(null)}
+       NOTE: source passes NO `open` prop (it conditionally
+       MOUNTS the component). The ported admin CustomerAnalytics
+       (Stage 2b) ADDED an `open` prop for the Polaris <Modal>
+       always-mounted pattern — so 2c wiring must render it
+       unconditionally and pass open={Boolean(analyticsCustomer)}
+       (or similar) instead of the `&&` mount gate.
+
+  B. PushNotificationSetup                      (line 794)
+       props: shopDomain={shop}
+       EXTERNAL default-export component, not in admin/page.js
+       (see §6).
+
+  C. RevenueStats                               (line 797)
+       gate: {!loading && <RevenueStats .../>}
+       props: customers={customers}
+       Already ported into admin/page.js.
+
+  D. StatusBadge                                (line 898)
+       props: status={c.status}     (per abandoned-cart row)
+       Already ported.
+
+  E. SendPushButton                             (lines 878-886)
+       per cart ITEM inside each abandoned-cart row; wrapped in
+       <div ... onClick={(e) => e.stopPropagation()}> so the row's
+       row-click (open analytics) doesn't also fire.
+       props: shop={shop}
+              cartValue={c.cartValue}
+              cartItems={c.cartItems}
+              productImageUrl={item.imageUrl || c.productImageUrl}
+              sessionId={c.sessionId}
+              itemTitle={item.title}
+              productId={item.productId || null}
+       Already ported (its own Popover; note the ported version
+       relies on Polaris ResourceItem/table cell not swallowing
+       the stopPropagation — 2c table choice matters here).
+
+  F. WhatsAppButton  (abandoned-carts table)    (lines 904-918)
+       gate: {c.phone && ( ... )}   wrapped in
+             <div onClick={(e) => e.stopPropagation()}>
+       props: phone={c.phone}
+              message={ `Hi! We noticed you left some items...` +
+                        `Items: ${cartItems map join}\n` +
+                        `Cart Value: ${formatMoney(c.cartValue)}\n` +
+                        `Please complete your order...` }
+       Already ported.
+
+  G. WhatsAppButton  (COD orders table)         (lines 981-990)
+       props: phone={o.phone}
+              message={ `Hi ${o.name}! Your COD order has been received...` +
+                        `Product: ${o.productName || '-'}\n` +
+                        `Amount: ₹${formatMoney(o.productPrice)}\n` +
+                        `Quantity: ${o.quantity}\n` +
+                        `We will process your order soon!` }
+       Already ported.
+
+  H. AutomationRules                            (line 1000)
+       gate: {tab === 'automation' && <AutomationRules shop={shop} />}
+       props: shop={shop}
+       Already ported.
+
+  RAW-HTML CONTROL (not a component, but drives a handler):
+  I. <select> COD status dropdown               (lines 969-977)
+       value={o.status}
+       onChange={(e) => updateOrderStatus(o._id, e.target.value)}
+       options: pending / confirmed / cancelled
+       -> Polaris <Select> in 2c (per Stage 2b's mapping list;
+          this is the one <select> that was noted as out-of-scope
+          in the StepEditor/RuleForm port).
+
+  Also uses the pure helpers formatMoney / formatDate throughout
+  both tables (already ported).
+
+================================================================
+6. EXTERNAL IMPORTS StoreView USES THAT ARE **NOT** ALREADY
+   IN admin/page.js
+================================================================
+  Source file's imports (dashboard/[shop]/page.js lines 3-7):
+    import { useCallback, useEffect, useMemo, useState } from 'react';
+    import { useParams, useRouter } from 'next/navigation';
+    import { apiGet, apiSend } from '../../../lib/api';
+    import { onForegroundMessage } from '../../../lib/firebase';
+    import PushNotificationSetup from '../../../components/PushNotificationSetup';
+
+  Cross-checked against admin/page.js's current imports:
+
+  ALREADY PRESENT (no action needed):
+    - react hooks: useState, useEffect, useCallback  -> all present
+      (admin also has useMemo + Suspense; useMemo is used by the
+       already-ported RevenueStats, not by StoreView).
+    - apiGet, apiSend  -> present (admin imports from '../../lib/api';
+      source used '../../../lib/api' — the admin path is correct
+      for the shallower /admin route).
+    - useSearchParams from 'next/navigation'  -> present (admin
+      uses it for shop/host); StoreView itself doesn't use it but
+      it's the replacement for useParams (see below).
+
+  MISSING — must be added to admin/page.js for a StoreView port:
+    1. useParams   from 'next/navigation'
+         Used for `params.shop`. In the embedded /admin route the
+         shop is a QUERY PARAM, so this should be replaced by the
+         already-imported useSearchParams().get('shop') rather
+         than actually adding useParams. (Listed here because it
+         IS an import StoreView currently uses and is not in
+         admin/page.js.)
+    2. useRouter   from 'next/navigation'
+         Used only by handleDisconnect -> router.push('/dashboard').
+         Needs adding IF the disconnect flow is kept; but
+         '/dashboard' is not a route in the embedded flow, so the
+         post-disconnect navigation target must be rethought
+         (App Bridge redirect / remove the feature). Could end up
+         not needed at all.
+    3. onForegroundMessage   from lib/firebase
+         Source path '../../../lib/firebase'; from admin/page.js
+         the path would be '../../lib/firebase'.
+         Used by Effect B. Confirm the module exists and exports
+         this name before importing. May be dropped for the
+         embedded context (native Notification popups from inside
+         the Shopify Admin iframe are undesirable).
+    4. PushNotificationSetup  (default export)
+         Source path '../../../components/PushNotificationSetup';
+         from admin/page.js the path would be
+         '../../components/PushNotificationSetup'.
+         Rendered as <PushNotificationSetup shopDomain={shop} />.
+         This component is itself Tailwind-based and has NOT been
+         ported/reviewed — porting StoreView pulls it in as a new
+         dependency that will need its own decision (port to
+         Polaris, keep as-is, or drop for embedded).
+
+  LIKELY-NEW POLARIS IMPORTS for the StoreView JSX (not required
+  by the task's question, noted for planning): Tabs (tab strip),
+  IndexTable or DataTable (the two tables), Select (COD status),
+  Layout / Page primary+secondary actions (header Refresh /
+  Disconnect), possibly Spinner / SkeletonPage (loading),
+  Toast + Frame (if error/success surfacing moves off the inline
+  red box).
+
+================================================================
+WIRING NOTES FOR STAGE 2c (derived from the read, not speculation)
+================================================================
+  - shop source: useParams().shop -> useSearchParams().get('shop')
+    (already the pattern in AdminHomeContent).
+  - AdminHomeContent currently renders a placeholder + the
+    temporary "Component Preview" card. Wiring StoreView means
+    AdminHomeContent's body becomes (or delegates to) the real
+    store view, and the preview card / placeholder card get
+    removed.
+  - CustomerAnalytics: mount-gate -> always-mounted + `open` prop
+    (the ported version already expects `open`).
+  - handleDisconnect: window.confirm -> <Modal destructive>;
+    router.push('/dashboard') -> no valid embedded target,
+    revisit.
+  - Foreground-notification effect: likely drop/guard for the
+    iframe context.
+  - tabButton -> Polaris <Tabs>.
+  - COD <select> -> Polaris <Select>.
+  - The two <table> blocks -> Polaris IndexTable / DataTable; the
+    per-row onClick (open analytics) + the nested
+    stopPropagation wrappers around SendPushButton / WhatsAppButton
+    need care so row-click vs action-click still separate.
+
+================================================================
+END OF PRE-AUDIT
+================================================================

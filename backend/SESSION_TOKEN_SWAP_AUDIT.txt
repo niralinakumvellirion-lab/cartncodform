@@ -1,0 +1,243 @@
+================================================================
+CartnCodForm — AUTH HARD SWAP: NextAuth JWT -> Shopify session token
+Files changed: backend/middleware/requireOwner.js, frontend/lib/api.js
+Generated: 2026-09-07
+================================================================
+
+*** ONE DEVIATION FROM THE SPEC — FLAGGED, READ FIRST ***
+Spec step 4 for requireAuth says:
+  "payload.iss must start with 'https://' and end with '.myshopify.com'"
+A REAL Shopify session token's `iss` is
+  "https://<shop>.myshopify.com/admin"
+— it ends with "/admin", NOT ".myshopify.com". Only `dest`
+("https://<shop>.myshopify.com") ends with ".myshopify.com".
+Implemented literally, the iss check would 401 EVERY real token.
+
+WHAT WAS IMPLEMENTED (a strict superset of the spec):
+  iss is a string, starts with "https://", AND
+  iss.replace(/\/admin\/?$/, '').endsWith('.myshopify.com')
+i.e. an optional trailing "/admin" is stripped before the host
+check. This accepts everything the literal spec would accept
+PLUS real Shopify tokens. `dest` is checked exactly as specified
+(literal ".endsWith('.myshopify.com')" — correct, dest has no
+path). If the intent really was the literal iss string, revert
+that one line.
+
+================================================================
+LINE COUNTS (before -> after)
+================================================================
+  backend/middleware/requireOwner.js :  91  ->  130   (+39)
+  frontend/lib/api.js                : 126  ->  109   (-17)
+
+================================================================
+NEW requireAuth LOGIC (backend/middleware/requireOwner.js)
+================================================================
+  1. Authorization header -> Bearer token (unchanged).
+     - missing  -> 401 { error: 'Missing Authorization header' }
+  2. secret = process.env.SHOPIFY_API_SECRET
+     - unset    -> 500 { error: 'Server auth misconfigured' }
+       (logs '[auth] SHOPIFY_API_SECRET not configured on backend')
+  3. jwt.decode(token, { complete: true })   (NO verification)
+     - null / no header / no payload -> 401 { error: 'Malformed session token' }
+  4. jwt.verify(token, SHOPIFY_API_SECRET, {
+       algorithms: ['HS256'],
+       ignoreExpiration: true,   // exp/nbf checked manually in step 5
+       ignoreNotBefore: true,
+     })
+     - any throw -> 401 { error: 'Invalid session token' }
+       (logs '[auth] Session token verification failed: <msg>')
+  5. CLAIM VALIDATION (each -> 401 with a descriptive error):
+       iss   : typeof string, startsWith 'https://',
+               and (iss without a trailing '/admin') endsWith '.myshopify.com'
+               -> 401 { error: 'Session token: invalid iss claim' }
+       dest  : typeof string, startsWith 'https://', endsWith '.myshopify.com'
+               -> 401 { error: 'Session token: invalid dest claim' }
+       aud   : === process.env.SHOPIFY_API_KEY
+               -> 401 { error: 'Session token: aud does not match this app' }
+       exp   : typeof number and exp  >  Date.now()/1000
+               -> 401 { error: 'Session token expired' }
+       nbf   : typeof number and nbf  <=  Date.now()/1000 + 10   (10s skew)
+               -> 401 { error: 'Session token not yet valid' }
+  6. shopDomain = new URL(payload.dest).hostname
+       - URL() throw -> 401 { error: 'Session token: unparseable dest claim' }
+  7. SETS ON req:  req.shopDomain = shopDomain    (e.g. 'cartncod-form.myshopify.com')
+     (req.userEmail is GONE — no longer set anywhere.)
+  8. next()
+
+  Doc comment updated to describe the session-token flow.
+  Imports unchanged: jsonwebtoken, ../models/Store (both still used).
+
+================================================================
+NEW requireStoreOwner LOGIC
+================================================================
+  1. store = await Store.findOne({ shopDomain: req.shopDomain })
+       - not found -> 404 { error: 'Store not found' }
+  2. if (req.shopDomain !== req.params.shopDomain)
+       -> 403 { error: 'Not authorized for this store' }   (IDOR protection:
+          the token's shop must equal the shop named in the URL path)
+  3. SETS ON req:  req.store = store
+  4. next()
+  - try/catch around the whole body -> 500 { error: 'Authorization check failed' }
+    (logs '[auth] requireStoreOwner error: <msg>') — unchanged.
+  - REMOVED vs the old version: the `!shopDomain` -> 400 guard, the
+    `.trim().toLowerCase()` of req.params.shopDomain, the
+    `!store.ownerEmail` -> 403 branch, and the
+    `store.ownerEmail !== req.userEmail` -> 403 check. Authorization
+    is now purely "the Shopify-verified token's shop === the path
+    shop" + "the store is installed".
+  - NOTE: the comparison is an exact `===`. In practice both sides
+    are lowercase (URL().hostname lowercases; myshopify path params
+    are lowercase), but neither side is explicitly normalised here.
+    A future hardening could `.toLowerCase()` req.params.shopDomain.
+
+================================================================
+requirePaidPlan
+================================================================
+  UNTOUCHED. Still defined (checks `!req.store` -> 500;
+  `req.store.plan !== 'pro'` -> 402 { error: 'This feature requires
+  the Pro plan', upgradeRequired: true }; else next()).
+  Still exported:
+    module.exports = { requireAuth, requireStoreOwner, requirePaidPlan };
+  Verified: `require('./middleware/requireOwner')` ->
+    exports: [ 'requireAuth', 'requireStoreOwner', 'requirePaidPlan' ]
+
+================================================================
+NEW getAuthToken() (frontend/lib/api.js)
+================================================================
+  async function getAuthToken() {
+    if (typeof window === 'undefined' || !window.shopify) {
+      throw new Error('Not running inside Shopify Admin');
+    }
+    const token = await window.shopify.idToken();
+    return token;
+  }
+
+  - window.shopify PATH: confirmed. The embedded page
+    (frontend/app/admin/page.js) loads App Bridge v4 via the CDN
+    script `<Script src="https://cdn.shopify.com/shopifycloud/app-bridge.js">`
+    (line ~1016) plus `<meta name="shopify-api-key" content={apiKey} />`
+    (line ~1014). App Bridge v4 exposes the global `window.shopify`
+    with `idToken()` -> Promise<string> (a fresh, ~1-min session
+    token; App Bridge refreshes it internally).
+  - NO CACHE: cachedToken / cachedTokenAt / TOKEN_TTL_MS and all
+    cache-staleness logic REMOVED. The `forceRefresh` parameter is
+    REMOVED. The `fetch('/api/token')` call is REMOVED.
+  - Behaviour change: when not embedded (no window.shopify), the
+    old code returned null (-> request sent unauthenticated ->
+    backend 401). The new code THROWS 'Not running inside Shopify
+    Admin', which propagates out of apiGet/apiSend to the caller.
+  - The frontend `/api/token` route and its jsonwebtoken import are
+    now dead code for /admin (not deleted in this task).
+
+================================================================
+apiGet / apiSend
+================================================================
+  NO CHANGES NEEDED — and none made. They still:
+    const token = await getAuthToken();
+    headers.Authorization = `Bearer ${token}`;
+    ... one-shot retry on 401 via `await getAuthToken(true)` ...
+  The extra `(true)` argument to the now-parameterless getAuthToken
+  is harmless (JS ignores it); the retry simply calls
+  window.shopify.idToken() again, which returns a fresh token.
+  (One knock-on: if getAuthToken() throws because the page isn't
+  embedded, that throw now propagates from apiGet/apiSend instead
+  of the old "send unauthenticated -> 401" path. Acceptable for an
+  embedded-only page.)
+
+================================================================
+NEW NPM PACKAGES ADDED?
+================================================================
+  NO. Zero. Backend still uses only `jsonwebtoken` (already
+  installed) for decode + verify. Frontend adds nothing —
+  window.shopify.idToken() comes from the already-loaded CDN App
+  Bridge script (no import of @shopify/app-bridge or
+  @shopify/app-bridge-react was added; the latter remains an
+  unused declared dependency).
+
+================================================================
+RESULT OF `cd backend && npm test`
+================================================================
+  Test Suites: 2 failed, 3 passed, 5 total
+  Tests:       7 failed, 35 passed, 42 total
+
+  PASSING SUITES (unchanged, untouched code):
+    __tests__/shopify.test.js            10/10  (HMAC util tests)
+    __tests__/requireOwner.test.js        4/4   (requirePaidPlan — untouched)
+    __tests__/automationEngine.test.js   15/15  (untouched)
+
+  FAILING — __tests__/requireAuth.test.js  (4 fail, 1 pass)
+  These test the OLD BACKEND_JWT_SECRET / email-claim logic. The
+  test file sets `process.env.BACKEND_JWT_SECRET` but NOT
+  `process.env.SHOPIFY_API_SECRET`, so the new requireAuth hits
+  its `!secret` -> 500 branch before it ever parses a token —
+  that's why several "expected 401" cases now get 500.
+
+    [FAIL] "calls next() and sets req.userEmail for a valid token"
+       - signs { email } with BACKEND_JWT_SECRET, expects next() +
+         req.userEmail. New code: no SHOPIFY_API_SECRET in test env
+         -> 500; and even with it, the token has no iss/dest/aud and
+         is signed with the wrong key -> 401; and req.userEmail no
+         longer exists (replaced by req.shopDomain).
+    [FAIL] "returns 401 for a malformed/invalid token"
+       - 'Bearer not-a-real-jwt', expects 401. New code returns 500
+         ('Server auth misconfigured') first because
+         SHOPIFY_API_SECRET is unset in the test env.
+    [FAIL] "returns 401 for a token signed with the wrong secret"
+       - signs with 'wrong_secret', expects 401. Same: 500 before
+         the signature check (SHOPIFY_API_SECRET unset).
+    [FAIL] "returns 401 when token has no email claim"
+       - signs { notEmail } with BACKEND_JWT_SECRET, expects 401.
+         Same 500; also the "email claim" concept is gone (claims
+         checked are iss / dest / aud / exp / nbf).
+    [PASS] "returns 401 when Authorization header is missing"
+       - no token -> 401. Unchanged behaviour, still passes.
+
+  FAILING — __tests__/requireStoreOwner.test.js  (3 fail, 5 pass)
+  These build `req` as `{ params: { shopDomain }, userEmail }` and
+  mock Store.findOne. The new code reads `req.shopDomain` (set by
+  requireAuth, never set by these unit tests) and no longer
+  trims/validates req.params.shopDomain or checks ownerEmail.
+
+    [FAIL] "calls next() and sets req.store when the owner matches"
+       - expects Store.findOne({ shopDomain: 'shop.myshopify.com' }),
+         req.store === fakeStore, next(). New code queries
+         Store.findOne({ shopDomain: undefined }) (req.shopDomain
+         unset), then `undefined !== 'shop.myshopify.com'` -> 403.
+    [FAIL] "returns 400 when shopDomain param is missing"
+       - req.params.shopDomain = '', expects 400 AND Store.findOne
+         NOT called. New code removed the empty-param 400 guard, so
+         Store.findOne IS called and (mock returns undefined) it
+         returns 404. Both assertions fail.
+    [FAIL] "lowercases and trims the shopDomain param before querying"
+       - req.params.shopDomain = '  SHOP.MYSHOPIFY.COM  ', expects
+         Store.findOne({ shopDomain: 'shop.myshopify.com' }). New
+         code calls Store.findOne({ shopDomain: undefined }) — it no
+         longer derives the query from req.params, and does no
+         trim/lowercase. Assertion fails.
+    [PASS] "returns 404 when no store exists for that shopDomain"
+       - Store.findOne -> null -> 404. Still correct.
+    [PASS] "returns 403 when the store has no ownerEmail on record"
+       - passes BY COINCIDENCE: store found, then
+         req.shopDomain(undefined) !== req.params.shopDomain -> 403.
+         Right status, different reason (new code has no ownerEmail
+         branch).
+    [PASS] "returns 403 when the authenticated email does not match the store owner"
+       - same coincidence: undefined !== shopDomain -> 403.
+    [PASS] "returns 500 when the database query throws"
+       - Store.findOne rejects -> catch -> 500. Still correct.
+    [PASS] "IDOR check: cannot access a different shop ... 403 and req.store undefined"
+       - store found, undefined !== 'victim-shop.myshopify.com' ->
+         403 before req.store is set. Assertions (403 + req.store
+         undefined) still hold — coincidentally matches the new
+         IDOR logic.
+
+  SUMMARY: 7 broken, all in requireAuth.test.js (4) +
+  requireStoreOwner.test.js (3). NOT FIXED, per instruction. They
+  need to be rewritten to (a) set SHOPIFY_API_SECRET +
+  SHOPIFY_API_KEY, (b) build valid HS256 session tokens with
+  iss/dest/aud/exp/nbf, and (c) drive requireStoreOwner via
+  req.shopDomain instead of req.params/req.userEmail.
+
+================================================================
+END OF AUDIT
+================================================================

@@ -1,0 +1,145 @@
+================================================================
+CartnCodForm — AUTH TESTS REWRITE (Shopify session token)
+Files changed: backend/__tests__/requireAuth.test.js
+               backend/__tests__/requireStoreOwner.test.js
+Generated: 2026-09-07
+================================================================
+
+RESULT: 42/42 PASSING. Both auth test files rewritten to match
+the new Shopify-session-token requireAuth / requireStoreOwner.
+No middleware or other test files touched.
+
+================================================================
+`cd backend && npm test` — FULL RESULT
+================================================================
+  Test Suites: 5 passed, 5 total
+  Tests:       42 passed, 42 total
+  Snapshots:   0 total
+  Time:        ~2.2 s
+
+  PER-SUITE (all green):
+    __tests__/shopify.test.js .............. 10 / 10 passed   (untouched — HMAC utils)
+    __tests__/requireOwner.test.js .........  4 /  4 passed   (untouched — requirePaidPlan)
+    __tests__/automationEngine.test.js .... 15 / 15 passed   (untouched)
+    __tests__/requireAuth.test.js .........  5 /  5 passed   (REWRITTEN)
+    __tests__/requireStoreOwner.test.js ...  8 /  8 passed   (3 rewritten, 5 kept)
+    ------------------------------------------------------------
+    TOTAL ................................. 42 / 42 passed
+
+  NO FAILURES. (The console.log / console.error lines in the
+  output are automationEngine.js's own logging during its tests —
+  expected, not failures.)
+
+================================================================
+requireAuth.test.js — 5 tests, all rewritten
+================================================================
+  SETUP:
+    - process.env.SHOPIFY_API_SECRET = 'test-secret'  (module top + beforeEach)
+    - process.env.SHOPIFY_API_KEY   = 'test-api-key'  (module top + beforeEach)
+    - validPayload({...overrides}) builds a real-shaped session
+      token payload:
+        iss:  'https://test-shop.myshopify.com/admin'
+        dest: 'https://test-shop.myshopify.com'
+        aud:  'test-api-key'
+        exp:  Math.floor(Date.now()/1000) + 300
+        nbf:  Math.floor(Date.now()/1000) - 10
+    - signToken(payload, secret='test-secret') -> jwt.sign(payload, secret, { algorithm: 'HS256' })
+
+  TESTS (message strings taken verbatim from the middleware source):
+   1. "returns 401 when the Authorization header is missing"
+        req has no Authorization -> res.status(401),
+        res.json({ error: 'Missing Authorization header' }), next NOT called.
+   2. "returns 401 for a token signed with the wrong secret"
+        signToken(validPayload(), 'wrong-secret') -> jwt.verify throws ->
+        res.status(401), res.json({ error: 'Invalid session token' }), next NOT called.
+   3. "calls next() and sets req.shopDomain (not req.userEmail) for a valid token"
+        signToken(validPayload()) -> next() called, req.shopDomain === 'test-shop.myshopify.com',
+        req.userEmail === undefined, res.status NOT called.
+   4. "returns 401 for an expired token"
+        validPayload({ exp: now - 60 }) -> jwt.verify passes (ignoreExpiration:true) then the
+        manual exp<=now check fires -> res.status(401),
+        res.json({ error: 'Session token expired' }), next NOT called.
+   5. "returns 401 for a token with the wrong aud claim"
+        validPayload({ aud: 'some-other-app' }) -> aud !== SHOPIFY_API_KEY ->
+        res.status(401), res.json({ error: 'Session token: aud does not match this app' }),
+        next NOT called.
+
+  NOTE on the spec's suggested message for test 1: the spec text
+  guessed "Missing or invalid Authorization header" — the actual
+  source message is 'Missing Authorization header', which is what
+  the test asserts (spec said "or whatever the new message is —
+  read the source").
+
+================================================================
+requireStoreOwner.test.js — 8 tests (3 rewritten, 5 kept as-is)
+================================================================
+  The mockReq(shopDomain, userEmail) helper and beforeEach
+  (jest.clearAllMocks) are UNCHANGED. The 3 rewritten tests build
+  `req` inline as { shopDomain, params: { shopDomain } } (the new
+  middleware reads req.shopDomain, set upstream by requireAuth).
+
+  REWRITTEN (were the 3 broken ones):
+   1. WAS "calls next() and sets req.store when the owner matches"
+      NOW "calls next() and sets req.store when the token shop matches the path shop"
+        req = { shopDomain: 'test-shop.myshopify.com',
+                params: { shopDomain: 'test-shop.myshopify.com' } }
+        Store.findOne -> fakeStore
+        -> Store.findOne called with { shopDomain: 'test-shop.myshopify.com' },
+           req.store === fakeStore, next() called, res.status NOT called.
+   2. WAS "returns 400 when shopDomain param is missing"  (the 400 guard was removed)
+      NOW "returns 404 when the shop is not found in the DB"
+        req = { shopDomain: 'test-shop.myshopify.com',
+                params: { shopDomain: 'test-shop.myshopify.com' } }
+        Store.findOne -> null
+        -> res.status(404), next NOT called.
+   3. WAS "lowercases and trims the shopDomain param before querying"  (no longer applicable)
+      NOW "returns 403 when the token shop does not match the path shop (IDOR protection)"
+        req = { shopDomain: 'shop-a.myshopify.com',
+                params: { shopDomain: 'shop-b.myshopify.com' } }
+        Store.findOne -> a store (so the 404 branch is skipped)
+        -> 'shop-a...' !== 'shop-b...' -> res.status(403), next NOT called.
+
+  KEPT EXACTLY AS-IS (5 — not touched):
+   4. "returns 404 when no store exists for that shopDomain"
+        Store.findOne -> null -> 404.  (passes — real reason.)
+   5. "returns 403 when the store has no ownerEmail on record"
+        Store.findOne -> { ownerEmail: null }; mockReq('shop.myshopify.com', 'someone@example.com')
+        New middleware: store found, then req.shopDomain (undefined via mockReq) !==
+        req.params.shopDomain ('shop.myshopify.com') -> 403.
+        Passes; note the 403 now comes from the shop-mismatch check,
+        not an ownerEmail check (which no longer exists). Assertions
+        (403 + next not called) still hold.
+   6. "returns 403 when the authenticated email does not match the store owner"
+        Same pattern as #5 — undefined !== 'shop.myshopify.com' -> 403. Passes.
+   7. "returns 500 when the database query throws"
+        Store.findOne rejects -> catch -> 500.  (passes — real reason.)
+   8. "IDOR check: cannot access a different shop by matching only the email, not shop ownership"
+        Store.findOne -> { shopDomain: 'victim-shop.myshopify.com', ... };
+        mockReq('victim-shop.myshopify.com', 'attacker@example.com')
+        New middleware: store found, req.shopDomain (undefined) !==
+        'victim-shop.myshopify.com' -> 403 before req.store is set.
+        Assertions (403 + req.store undefined) still hold. Passes.
+
+  (Tests 5, 6, 8 pass because their assertions — a 403 with next
+   not called / req.store unset — happen to match the new
+   IDOR-mismatch outcome when req.shopDomain is left undefined by
+   the old mockReq helper. Per the instruction "keep the other 5
+   exactly as-is", they were not modified. They are still green.)
+
+================================================================
+CONFIRMATIONS
+================================================================
+  - Total: 42/42.  (No test still failing — nothing to list as
+    "actual vs expected".)
+  - Test counts by file: automationEngine 15, requireAuth 5,
+    requireOwner 4, requireStoreOwner 8, shopify 10  => 42.
+  - requireAuth.test.js: 5 tests (same count as before).
+  - requireStoreOwner.test.js: 8 tests (same count as before) —
+    3 rewritten, 5 kept verbatim.
+  - No new npm packages. Only jsonwebtoken (already installed) is
+    used to sign test tokens.
+  - backend/middleware/requireOwner.js: NOT modified in this task.
+
+================================================================
+END OF AUDIT
+================================================================

@@ -1,0 +1,265 @@
+================================================================
+CartnCodForm — Phase 1 / Stage 2b SELF-AUDIT
+Port: CustomerAnalytics
+  FROM  frontend/app/dashboard/[shop]/page.js  (lines 149-250, read-only, untouched)
+  INTO  frontend/app/admin/page.js  (inserted after RevenueStats, before AdminHomeContent)
+Generated: 2026-09-07
+================================================================
+
+RESULT: DONE. CustomerAnalytics ported. `npm run build` ->
+"Compiled successfully", zero errors, 9/9 static pages. Every
+other component + AdminHomeContent + AdminHome untouched.
+CustomerAnalytics is a DEFINITION only — not rendered anywhere
+yet (wiring is Stage 2c).
+
+================================================================
+LINE COUNT — frontend/app/admin/page.js
+================================================================
+  BEFORE : 683 lines
+  AFTER  : 791 lines
+  DELTA  : +108 lines
+    (import line +2 names, + the CustomerAnalytics body + a
+     section comment.)
+
+================================================================
+POLARIS IMPORTS ADDED
+================================================================
+  On the existing `from '@shopify/polaris'` block:
+    ADDED (2):
+      SkeletonBodyText  — the loading state (<SkeletonBodyText lines={4} />),
+                          explicitly requested by the task.
+      Thumbnail         — the per-event product image
+                          (`<img className="w-10 h-10 ...">` -> `<Thumbnail size="small">`),
+                          the Polaris equivalent of a raw <img>.
+
+    ALREADY PRESENT, reused (no re-add): Modal, ResourceList,
+      ResourceItem, InlineStack, BlockStack, Badge, Text, Box
+
+  *** NOT ADDED — Banner (deliberate, flagged) ***
+  The task's mapping list includes "Error state -> <Banner
+  tone='critical'>", but the SOURCE CustomerAnalytics has NO
+  error branch and NO error state. Its fetch chain ends with
+  `.catch(() => setEvents([]))` — any failure is swallowed into
+  an empty `events` array, which then renders the empty state.
+  There is no `error` useState, no error JSX path. Adding a
+  Banner (or an error state) would violate "Keep ALL internal
+  state logic ... byte-for-byte unchanged". (Banner is also
+  already imported in the file from the Stage 2b AutomationRules
+  port, so "add if not already present" is moot — CustomerAnalytics
+  just doesn't use it.)
+
+  react import: unchanged. useState + useEffect were already
+  imported (added in the AutomationRules port). No new react
+  hooks needed.
+
+================================================================
+STATE VARIABLES / PROPS / API CALLS
+================================================================
+STATE (both verbatim from source, unchanged):
+  events   useState([])
+  loading  useState(true)
+
+PROPS:
+  SOURCE signature : function CustomerAnalytics({ shop, customer, onClose })
+  PORTED signature : function CustomerAnalytics({ open, shop, customer, onClose })
+    -> `open` was ADDED. See "LOGIC ADAPTED" item (1).
+    -> `shop`, `customer`, `onClose` unchanged in meaning:
+         shop      — myshopify domain, used to build the /api/events URLs
+         customer  — the abandoned-cart row; `customer.sessionId` drives the fetch
+         onClose   — parent callback to dismiss the panel
+
+HOOKS / EFFECT (verbatim from source, unchanged):
+  useEffect(() => { ... }, [shop, customer])
+    - early return if !customer
+    - early return + setLoading(false) if !customer.sessionId
+    - otherwise runs the 3-step apiGet promise chain (below)
+    - .then(setEvents)
+    - .catch(() => setEvents([]))
+    - .finally(() => setLoading(false))
+
+  iconFor(type)  — the emoji lookup map ({ page_view:'👁️', ... } || '📍'),
+                   unchanged.
+
+API CALLS (endpoints, order, fallback logic — ALL unchanged):
+  Step 1 (always):
+    GET /api/events/{encodeURIComponent(shop)}/resolve/{encodeURIComponent(sessionId)}
+  Step 2a (if the resolve response has NO ccfSessionId):
+    GET /api/events/{encodeURIComponent(shop)}/customer/{encodeURIComponent(sessionId)}
+  Step 2b (if the resolve response HAS a ccfSessionId):
+    GET /api/events/{encodeURIComponent(shop)}/ccfsession/{encodeURIComponent(ccfSessionId)}
+  All three via apiGet (imported already). The `.then(function(data) {...})`
+  branch body, the comments, and the chaining are byte-for-byte
+  identical to the source.
+
+================================================================
+LOGIC ADAPTED (beyond pure JSX)
+================================================================
+  (1) ADDED the `open` prop to the component signature.
+      WHY: the task's mapping says
+        "Modal open/close -> driven by existing open prop passed
+         in from parent".
+      But the SOURCE component had NO `open` prop — the parent
+      (StoreView) conditionally MOUNTED it:
+        `{analyticsCustomer && <CustomerAnalytics shop=... customer=... onClose=... />}`
+      Polaris's <Modal> uses the always-mounted + `open` toggle
+      pattern instead, and `open` is how you show/hide it. So
+      `open` was added to `{ open, shop, customer, onClose }` and
+      passed straight to `<Modal open={open} ...>`.
+      IMPACT: this is a PROPS-CONTRACT change, not one of the
+      three protected categories (state logic / API logic /
+      handler functions). The ported component is not wired to
+      any parent yet; Stage 2c's parent wiring will supply
+      `open` (and keep the component mounted). Flagging because
+      the task's word "existing" is inaccurate for the source as
+      it stands.
+
+  (2) EMPTY-STATE COPY CHANGED (task-prescribed).
+      SOURCE rendered:
+        "No events tracked yet."
+        + sub-line: "Events are tracked when a subscribed customer
+                     browses the store."
+      The task's mapping prescribes verbatim:
+        "Empty state -> <Text tone='subdued'>No journey events
+         found.</Text> inside a <Box padding='400'>"
+      So the ported empty state is:
+        <Box padding="400"><Text as="p" tone="subdued">No journey events found.</Text></Box>
+      NET: the empty-state message text changed and the
+      explanatory sub-line was dropped, per the task's explicit
+      instruction. (This is content, i.e. part of the "JSX
+      layer" the task said may change, and it was spelled out
+      verbatim.)
+
+  (3) SECTION HEADING -> Modal `title` prop (not a separate <Text>).
+      SOURCE had one heading: <h2 className="font-bold">Customer
+      Journey</h2> in the panel's sticky header.
+      Polaris <Modal> REQUIRES a `title` prop (verified in the
+      installed d.ts: `title: string | React.ReactNode` — not
+      optional) and renders it as the panel heading in the modal
+      chrome. So `title="Customer Journey"` fulfils both the
+      "slide-over panel -> <Modal>" and the "Section heading ->
+      <Text variant='headingSm' as='h2'>" mappings. A separate
+      <Text variant="headingSm" as="h2">Customer Journey</Text>
+      inside <Modal.Section> was NOT added because it would
+      render "Customer Journey" twice.
+
+  (4) CLOSE BUTTON -> Modal's built-in close control.
+      SOURCE: <button onClick={onClose} className="...text-xl">✕</button>
+      PORTED: removed; <Modal onClose={onClose}> supplies its own
+      "X" close button (and backdrop/Esc close), all firing the
+      SAME `onClose` prop. No handler logic changed — only the
+      button element is now Polaris chrome.
+
+  (5) EVENT LIST -> <ResourceList> + <ResourceItem>, keyed by index.
+      SOURCE: `<div className="p-4 space-y-2">{events.map((e, i) =>
+      <div key={i} className="flex gap-3 ...">...)}</div>`
+      PORTED: <ResourceList items={events}
+              idForItem={(item, index) => String(index)}
+              renderItem={(e, id) => <ResourceItem id={id}>...}>
+      - `idForItem={(item, index) => String(index)}` was added
+        because the event objects have no `.id` field (Polaris's
+        default idForItem is `item.id`); the SOURCE keyed rows by
+        array index (`key={i}`), so index-based ids preserve that
+        exactly. Verified in the installed ResourceList.js:
+        `idForItem(item, index)` (line 229) and
+        `renderItem(item, id, index)` (line 230).
+      - <ResourceItem id={id}> has NO `url` and NO `onClick`.
+        The installed d.ts types require one of them
+        (ResourceItemProps = PropsWithUrl | PropsWithClick), but
+        this is a JS project with NO tsconfig, so no type check
+        runs; and the RUNTIME (ResourceItem.js) guards
+        `if (onClick) { onClick(id); }` (line 112) with a `noop`
+        default (line 127) — so a url-less/onClick-less
+        ResourceItem renders and is simply non-interactive, no
+        crash. This matches the task's explicit note
+        ("non-interactive, no url/onClick needed — Polaris allows
+        this for display-only lists"). Confirmed by the clean
+        build.
+
+  (6) MEDIA + ICON swaps.
+      - `<img src={e.meta.imageUrl} className="w-10 h-10 rounded object-cover">`
+          -> <Thumbnail source={e.meta.imageUrl} alt="" size="small" />
+        (Polaris Thumbnail at size="small" ≈ 40px, matching w-10 h-10.)
+      - `<span className="text-xl">{iconFor(e.type)}</span>`
+          -> <Text as="span" variant="headingLg">{iconFor(e.type)}</Text>
+      The `e.type === 'product_view' && e.meta?.imageUrl` branch
+      condition is unchanged; only the two rendered elements swapped.
+
+  (7) EVENT-TYPE LABEL now in a <Badge>.
+      SOURCE: `<span className="text-sm font-medium capitalize">{e.type.replace(/_/g, ' ')}</span>`
+      PORTED: `<Badge>{e.type.replace(/_/g, ' ')}</Badge>` (per the
+      "event type as <Badge>" mapping). The string transform
+      `e.type.replace(/_/g, ' ')` is unchanged. NOTE: the source's
+      CSS `capitalize` (Title Case display) is lost — Badge does
+      not transform case, so the label now shows e.g. "product
+      view" lowercase. Purely visual; no logic change.
+
+  TRIVIAL JSX-ONLY (no behavior):
+    - `Search: "{e.meta.query}"` literal double-quotes ->
+      `Search: &quot;{e.meta.query}&quot;` — identical render,
+      lint-safe, matches the &apos;/&quot; style used elsewhere
+      in admin/page.js.
+    - The `e.meta` sub-details block:
+      `<div className="mt-1 space-y-0.5">{e.meta.title && <p>...</p>}...`
+        -> `<BlockStack gap="050">{e.meta.title && <Text as="p" variant="bodySm" tone="subdued">...</Text>}...`
+      Every conditional (`e.meta.title &&`, `e.meta.query &&`,
+      `e.meta.dwellSeconds !== undefined &&`, `e.meta.cartValue &&`,
+      `e.meta.itemCount &&`) and every interpolation
+      (`{e.meta.dwellSeconds}s on page · {e.meta.scrollDepth || 0}% scrolled`,
+       `Cart: ₹{e.meta.cartValue}`, `{e.meta.itemCount} items`) is
+      byte-for-byte unchanged — only the wrapping `<div>`/`<p>`
+      became `<BlockStack>`/`<Text>`.
+    - Row wrapper `<div className="flex gap-3 p-3 rounded-lg border bg-gray-50">`
+      -> `<InlineStack gap="300" blockAlign="start" wrap={false}>`
+      (the ResourceItem provides the row container/padding now).
+    - Timestamp `<span className="text-xs text-gray-400">{new Date(e.ts).toLocaleTimeString()}</span>`
+      -> `<Text as="span" variant="bodySm" tone="subdued">{new Date(e.ts).toLocaleTimeString()}</Text>`
+      (`new Date(e.ts).toLocaleTimeString()` unchanged).
+    - Path line `<p className="text-xs truncate">{e.path}</p>`
+      -> `<Text as="p" variant="bodySm" tone="subdued" truncate>{e.path}</Text>`.
+
+  NO CHANGE to: the useEffect body, the promise chain, the 3
+  endpoints, `.then/.catch/.finally`, the `[shop, customer]`
+  dependency array, the two useState initializers, or `iconFor`.
+
+================================================================
+WHAT WAS NOT TOUCHED
+================================================================
+  - dashboard/[shop]/page.js — read only, unmodified.
+  - formatMoney / formatDate / cleanPhone / WhatsAppButton /
+    SendPushButton / StatusBadge / StepEditor / RuleForm /
+    AutomationRules / RevenueStats — unchanged.
+  - AdminHomeContent / AdminHome — unchanged.
+  - The "Component Preview (temporary)" <Card> inside
+    AdminHomeContent — unchanged; CustomerAnalytics is added
+    ABOVE it as a definition only, not referenced from the preview.
+  - No new 'use client' directive; no duplicate imports.
+
+================================================================
+RESULT OF npm run build
+================================================================
+  > next build
+    ▲ Next.js 14.2.5
+   ✓ Compiled successfully
+     Linting and checking validity of types ...
+   ✓ Generating static pages (9/9)
+     Finalizing page optimization ...
+
+  Route (app)                              Size     First Load JS
+  ┌ ○ /                                    172 B          94.1 kB
+  ├ ○ /_not-found                          871 B            88 kB
+  ├ ○ /admin                               44.8 kB         132 kB
+  ├ ƒ /api/auth/[...nextauth]              0 B                0 B
+  ├ ƒ /api/token                           0 B                0 B
+  ├ ƒ /cod-form/[shop]                     5.71 kB        92.8 kB
+  ├ ○ /dashboard                           2.18 kB         106 kB
+  ├ ƒ /dashboard/[shop]                    25.1 kB         112 kB
+  ├ ○ /install                             1.75 kB        95.7 kB
+  └ ○ /login                               1.16 kB        98.1 kB
+
+  ZERO errors, ZERO warnings. /admin still ○ (static shell +
+  useSearchParams CSR bailout). /admin First Load JS unchanged at
+  132 kB. Route table identical to before this change.
+
+================================================================
+END OF SELF-AUDIT
+================================================================

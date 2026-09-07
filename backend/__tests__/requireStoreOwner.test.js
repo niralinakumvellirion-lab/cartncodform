@@ -22,31 +22,32 @@ describe('requireStoreOwner', () => {
     jest.clearAllMocks();
   });
 
-  test('calls next() and sets req.store when the owner matches', async () => {
-    const fakeStore = { shopDomain: 'shop.myshopify.com', ownerEmail: 'owner@example.com', plan: 'free' };
+  test('calls next() and sets req.store when the token shop matches the path shop', async () => {
+    const fakeStore = { shopDomain: 'test-shop.myshopify.com', ownerEmail: 'owner@example.com', plan: 'free' };
     Store.findOne.mockResolvedValue(fakeStore);
 
-    const req = mockReq('shop.myshopify.com', 'owner@example.com');
+    const req = { shopDomain: 'test-shop.myshopify.com', params: { shopDomain: 'test-shop.myshopify.com' } };
     const res = mockRes();
     const next = jest.fn();
 
     await requireStoreOwner(req, res, next);
 
-    expect(Store.findOne).toHaveBeenCalledWith({ shopDomain: 'shop.myshopify.com' });
+    expect(Store.findOne).toHaveBeenCalledWith({ shopDomain: 'test-shop.myshopify.com' });
     expect(req.store).toBe(fakeStore);
     expect(next).toHaveBeenCalledWith();
     expect(res.status).not.toHaveBeenCalled();
   });
 
-  test('returns 400 when shopDomain param is missing', async () => {
-    const req = mockReq('', 'owner@example.com');
+  test('returns 404 when the shop is not found in the DB', async () => {
+    Store.findOne.mockResolvedValue(null);
+
+    const req = { shopDomain: 'test-shop.myshopify.com', params: { shopDomain: 'test-shop.myshopify.com' } };
     const res = mockRes();
     const next = jest.fn();
 
     await requireStoreOwner(req, res, next);
 
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(Store.findOne).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(404);
     expect(next).not.toHaveBeenCalled();
   });
 
@@ -89,16 +90,17 @@ describe('requireStoreOwner', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  test('lowercases and trims the shopDomain param before querying', async () => {
-    Store.findOne.mockResolvedValue({ shopDomain: 'shop.myshopify.com', ownerEmail: 'owner@example.com' });
+  test('returns 403 when the token shop does not match the path shop (IDOR protection)', async () => {
+    Store.findOne.mockResolvedValue({ shopDomain: 'shop-a.myshopify.com', ownerEmail: 'owner@example.com' });
 
-    const req = mockReq('  SHOP.MYSHOPIFY.COM  ', 'owner@example.com');
+    const req = { shopDomain: 'shop-a.myshopify.com', params: { shopDomain: 'shop-b.myshopify.com' } };
     const res = mockRes();
     const next = jest.fn();
 
     await requireStoreOwner(req, res, next);
 
-    expect(Store.findOne).toHaveBeenCalledWith({ shopDomain: 'shop.myshopify.com' });
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
   });
 
   test('returns 500 when the database query throws', async () => {

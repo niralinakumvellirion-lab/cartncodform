@@ -1,0 +1,487 @@
+================================================================
+CartnCodForm — SESSION-TOKEN AUTH AUDIT
+(pre-work for: swap the embedded /admin auth from the NextAuth
+ /api/token HS256 JWT to a Shopify App Bridge session token)
+Generated: 2026-09-07
+Read-only. Nothing modified.
+================================================================
+
+================================================================
+A) frontend/lib/api.js
+================================================================
+FULL apiGet (lines 48-80):
+  export async function apiGet(path) {
+    const url = `${BACKEND_URL}${path}`;
+    const token = await getAuthToken();
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+    let res;
+    try {
+      res = await fetch(url, { cache: 'no-store', headers });
+    } catch (err) {
+      throw new Error(describeNetworkError(err, 'GET', url));
+    }
+
+    // Retry once with a fresh token on 401 (expired token).
+    if (res.status === 401 && token) {
+      const freshToken = await getAuthToken(true);
+      if (freshToken) {
+        try {
+          res = await fetch(url, {
+            cache: 'no-store',
+            headers: { Authorization: `Bearer ${freshToken}` },
+          });
+        } catch (err) {
+          throw new Error(describeNetworkError(err, 'GET', url));
+        }
+      }
+    }
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`GET ${path} failed (${res.status}): ${body}`);
+    }
+    return res.json();
+  }
+
+FULL apiSend (lines 82-125):
+  export async function apiSend(path, method, body) {
+    const url = `${BACKEND_URL}${path}`;
+    const token = await getAuthToken();
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+
+    let res;
+    try {
+      res = await fetch(url, { method, headers, body: JSON.stringify(body) });
+    } catch (err) {
+      throw new Error(describeNetworkError(err, method, url));
+    }
+
+    // Retry once with a fresh token on 401 (expired token).
+    if (res.status === 401 && token) {
+      const freshToken = await getAuthToken(true);
+      if (freshToken) {
+        try {
+          res = await fetch(url, {
+            method,
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${freshToken}`,
+            },
+            body: JSON.stringify(body),
+          });
+        } catch (err) {
+          throw new Error(describeNetworkError(err, method, url));
+        }
+      }
+    }
+
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error || `${method} ${path} failed (${res.status})`);
+    }
+    return data;
+  }
+
+HOW THE TOKEN IS FETCHED — getAuthToken (lines 27-46):
+  async function getAuthToken(forceRefresh = false) {
+    const isStale = Date.now() - cachedTokenAt > TOKEN_TTL_MS;
+    if (!forceRefresh && cachedToken && !isStale) {
+      return cachedToken;
+    }
+    try {
+      const res = await fetch('/api/token', { cache: 'no-store' });
+      if (!res.ok) { cachedToken = null; return null; }
+      const data = await res.json();
+      cachedToken = data.token || null;
+      cachedTokenAt = Date.now();
+      return cachedToken;
+    } catch { cachedToken = null; return null; }
+  }
+
+  - SOURCE OF THE TOKEN: `fetch('/api/token', { cache: 'no-store' })`
+    — a SAME-ORIGIN Next.js Route Handler
+    (frontend/app/api/token/route.js), NOT the Render backend.
+    CONFIRMED: the only token source is the `/api/token` endpoint.
+    What that route does (frontend/app/api/token/route.js, read for
+    this audit):
+      const session = await getServerSession(authOptions);   // NextAuth v4
+      if (!session?.user?.email) -> 401 { error: 'Not authenticated' }
+      const secret = process.env.BACKEND_JWT_SECRET;
+      jwt.sign({ email: session.user.email }, secret,
+               { expiresIn: '15m', issuer: 'cartncodform-frontend' })
+      -> Response.json({ token })
+    So the browser token is an HS256 JWT, payload `{ email }`,
+    signed with BACKEND_JWT_SECRET, 15-minute expiry, minted from
+    the NextAuth (Google) session cookie.
+
+HOW IT'S ATTACHED:
+  - Both helpers call `await getAuthToken()`, then set
+    `Authorization: Bearer <token>` on the fetch to BACKEND_URL.
+  - apiSend also always sets `Content-Type: application/json`.
+  - If getAuthToken() returns null (not signed in / mint failed),
+    the request is sent WITH NO Authorization header (headers = {}
+    / just Content-Type) — the backend then 401s.
+
+CACHE MECHANISM (lines 20-25 + getAuthToken):
+  - Module-level in-memory cache: `let cachedToken = null;`
+    `let cachedTokenAt = 0;`
+  - `const TOKEN_TTL_MS = 10 * 60 * 1000;`  (10 minutes)
+  - getAuthToken() returns the cached token unless: forceRefresh
+    is true, OR cachedToken is null, OR it's older than 10 min
+    ("token itself expires at 15" per the comment — 5 min safety
+    margin).
+  - Invalidation: a 401 from the backend triggers ONE retry via
+    `getAuthToken(true)` (forceRefresh). A failed mint sets
+    cachedToken = null.
+  - The cache is per-tab / per-page-load (module scope, lost on
+    refresh). Not persisted.
+
+  BACKEND_URL: `process.env.NEXT_PUBLIC_BACKEND_URL ||
+    'http://localhost:4000'` (line 2-3).
+
+================================================================
+B) frontend/app/admin/page.js imports (lines 1-30)
+================================================================
+  Line 1:  'use client';
+  Line 3:  import { Suspense, useState, useCallback, useEffect, useMemo } from 'react';
+  Line 4:  import Script from 'next/script';
+  Lines 5-30: import { AppProvider, Page, Card, Text, Badge, Button,
+             Popover, TextField, FormLayout, BlockStack, Box,
+             InlineStack, Checkbox, Banner, ResourceList,
+             ResourceItem, Modal, Grid, SkeletonBodyText,
+             Thumbnail, Tabs, IndexTable, Select, Spinner }
+             from '@shopify/polaris';
+  (Below line 30, not shown but known from prior reads:
+   `import { useSearchParams } from 'next/navigation';`
+   `import '@shopify/polaris/build/esm/styles.css';`
+   `import { apiGet, apiSend } from '../../lib/api';`)
+
+  IS @shopify/app-bridge OR @shopify/app-bridge-react IMPORTED
+  ANYWHERE?
+    NO. Repo-wide grep of frontend/ for "app-bridge":
+      - package.json / package-lock.json: `@shopify/app-bridge-react`
+        ^4.2.13 is a DECLARED DEPENDENCY (installed in Phase 1
+        Stage 1) — but it is NEVER `import`-ed in any source file.
+      - The ONLY app-bridge reference in code is a CDN <Script> tag
+        in admin/page.js (~line 1016 in the current file):
+          <Script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
+                  strategy="beforeInteractive" />
+        i.e. App Bridge v4 is loaded as the global CDN script
+        (paired with <meta name="shopify-api-key" content={apiKey}/>),
+        NOT via the npm package.
+    So: no `import ... from '@shopify/app-bridge'`, no
+    `import ... from '@shopify/app-bridge-react'`, no
+    `useAppBridge`, no `<Provider>` from app-bridge-react, no
+    `window.shopify` usage anywhere.
+
+  IS getSessionToken IMPORTED FROM ANYWHERE?
+    NO. Repo-wide grep of frontend/ for "getSessionToken" ->
+    zero matches. Also no `idToken`, no `window.shopify.idToken`.
+    Session-token retrieval is completely unwired today.
+
+================================================================
+C) backend/middleware/requireOwner.js
+================================================================
+IMPORTS (lines 1-2):
+  const jwt = require('jsonwebtoken');
+  const Store = require('../models/Store');
+
+FULL LOGIC — requireAuth (lines 9-36):
+  - Reads `Authorization` header; token = the part after
+    'Bearer ' (or null).
+  - No token -> 401 { error: 'Missing Authorization header' }.
+  - secret = process.env.BACKEND_JWT_SECRET;
+      if unset -> logs '[auth] BACKEND_JWT_SECRET not configured
+      on backend' and 500 { error: 'Server auth misconfigured' }.
+  - payload = jwt.verify(token, secret)
+      -> jsonwebtoken, default algorithm handling (HS256 for a
+         string secret), verifies signature + exp.
+  - email = payload.email || (payload.user && payload.user.email)
+      -> no email claim -> 401 { error: 'Token missing email claim' }.
+  - SETS ON req:  req.userEmail = String(email).trim().toLowerCase()
+  - next()
+  - Any verify throw (bad sig / expired / malformed) -> logs
+    '[auth] Token verification failed: <msg>' and 401
+    { error: 'Invalid or expired token' }.
+  -> LIBRARY: jsonwebtoken.  SECRET: process.env.BACKEND_JWT_SECRET
+     (an app-internal shared secret, same value the frontend
+     /api/token route signs with).  SETS: req.userEmail (lowercased).
+
+FULL LOGIC — requireStoreOwner (lines 44-71):
+  - Requires requireAuth to have run first (needs req.userEmail).
+  - shopDomain = (req.params.shopDomain || '').trim().toLowerCase()
+      -> empty -> 400 { error: 'shopDomain required' }.
+  - LOADS: store = await Store.findOne({ shopDomain })
+      -> not found -> 404 { error: 'Store not found' }.
+  - CHECKS:
+      * !store.ownerEmail -> warn + 403 { error: 'Store has no
+        owner on record' }.
+      * store.ownerEmail !== req.userEmail -> 403 { error: 'Not
+        authorized for this store' }.
+  - SETS ON req:  req.store = store   (the full Mongoose doc, for
+    downstream handlers / requirePaidPlan).
+  - next()
+  - Any throw -> logs '[auth] requireStoreOwner error: <msg>' and
+    500 { error: 'Authorization check failed' }.
+  -> The ownership model is purely EMAIL-BASED: the caller's
+     verified email (from the JWT) must equal Store.ownerEmail
+     (set at OAuth-callback time from the Google-login email or
+     the shop's contact email).
+
+IS requirePaidPlan EXPORTED FROM THIS FILE?
+  YES. Lines 77-88 define it; line 90:
+    module.exports = { requireAuth, requireStoreOwner, requirePaidPlan };
+  It checks req.store.plan === 'pro' (402 { upgradeRequired: true }
+  otherwise; 500 if req.store missing). Currently EXPORTED but
+  NOT WIRED to any route (the Automation gate that used it was
+  reverted in an earlier task — see §E route list).
+
+================================================================
+D) backend/server.js top section (lines 1-60)
+================================================================
+IMPORTS (lines 1-18):
+  require('dotenv').config();
+  const path        = require('path');
+  const express     = require('express');
+  const cors        = require('cors');
+  const rateLimit   = require('express-rate-limit');
+  const connectDB   = require('./config/db');
+  const authRoutes      = require('./routes/auth');
+  const webhookRoutes   = require('./routes/webhooks');
+  const storeRoutes     = require('./routes/stores');
+  const codRoutes       = require('./routes/cod');
+  const pushRouter      = require('./routes/push');
+  const proxyRouter     = require('./routes/proxy');
+  const ScheduledJob            = require('./models/ScheduledJob');
+  const AutomationRule          = require('./models/AutomationRule');
+  const { sendPushToCustomers } = require('./utils/pushNotification');
+  const CustomerPushSubscription = require('./models/CustomerPushSubscription');
+  (events / automation / attribution routers are require()'d later
+   in the file, not in this top block.)
+
+APP SETUP (lines 20-25):
+  const app = express();
+  app.set('trust proxy', 1);   // Render reverse proxy -> real req.ip
+  const PORT = process.env.PORT || 4000;
+  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+
+CORS CONFIGURATION (lines 27-45):
+  const allowedOrigins = [
+    process.env.FRONTEND_URL,
+    'https://cartncodform-beryl.vercel.app',
+    'http://localhost:3000',
+  ].filter(Boolean);
+
+  app.use(cors({
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+    credentials: true,
+  }));
+
+  - Allowlist: the FRONTEND_URL env value, the hard-coded Vercel
+    prod origin, and localhost:3000. Requests with NO Origin
+    header (server-to-server, curl) are allowed. `credentials:
+    true` (cookies/Authorization allowed cross-origin).
+  - NOTE for embedded: the /admin page is served from the SAME
+    Vercel origin, so its fetch() to the Render backend carries
+    Origin: https://cartncodform-beryl.vercel.app (already
+    allowlisted). The Shopify-Admin iframe PARENT origin
+    (https://admin.shopify.com) is NOT the fetch Origin and does
+    not need allowlisting for XHR. (If the embedded UI ever moves
+    to a different host, add it to FRONTEND_URL / the list.)
+
+BODY PARSERS (lines 47-58):
+  express.json({ limit: '5mb', verify: (req,_res,buf) =>
+    { req.rawBody = buf.toString('utf8'); } })   // raw body kept for webhook HMAC
+  express.text({ type: 'text/plain' })            // navigator.sendBeacon
+  express.urlencoded({ extended: true })
+
+ANY EXISTING SHOPIFY-RELATED VERIFICATION MIDDLEWARE (in this top
+section)?
+  NOT as app-level middleware. The top 60 lines only wire CORS +
+  body parsers + a request logger (line 60+). Shopify verification
+  exists ELSEWHERE, per-route / per-util, NONE of it session-token:
+    - backend/utils/shopify.js: verifyHmac(query)  (OAuth redirect
+      HMAC, hex), verifyWebhookHmac(rawBody, header)  (webhook
+      HMAC, base64) — both keyed on process.env.SHOPIFY_API_SECRET.
+    - backend/routes/webhooks.js: calls verifyWebhookHmac at the
+      top of every handler.
+    - backend/routes/proxy.js: verifyProxySignature (App Proxy
+      signature, SOFT enforcement).
+    - backend/middleware/requireOwner.js: the BACKEND_JWT_SECRET
+      JWT check (this audit's subject) — NOT a Shopify token.
+  There is NO middleware today that verifies a Shopify SESSION /
+  ID token (the App Bridge `Authorization: Bearer <session JWT>`).
+
+================================================================
+E) ASSESSMENT
+================================================================
+
+E1) ROUTES USING requireAuth + requireStoreOwner  (BOTH)
+    (grep of backend/routes/, confirmed this session)
+  backend/routes/stores.js
+    GET    /api/stores/:shopDomain/customers        (line 42)
+    GET    /api/stores/:shopDomain/orders           (line 61)
+    DELETE /api/stores/:shopDomain                  (line 81)
+  backend/routes/events.js
+    GET    /api/events/:shopDomain/customer/:sessionId      (line 55)
+    GET    /api/events/:shopDomain/summary                  (line 75)
+    GET    /api/events/:shopDomain/ccfsession/:ccfSessionId (line 97)
+    GET    /api/events/:shopDomain/resolve/:cartToken       (line 122)
+  backend/routes/automation.js
+    GET    /api/automation/:shopDomain/rules                (line 11)
+    POST   /api/automation/:shopDomain/rules                (line 27)
+    PATCH  /api/automation/:shopDomain/rules/:ruleId        (line 78)
+    DELETE /api/automation/:shopDomain/rules/:ruleId        (line 134)
+  = 11 routes. These are exactly the ones the ported /admin
+    StoreView + its children call (stores customers/orders,
+    events resolve/customer/ccfsession, automation rules CRUD).
+
+  ROUTES USING requireAuth ONLY (no requireStoreOwner):
+    backend/routes/stores.js  GET /api/stores/                (line 15)  — lists stores for ?email=
+    backend/routes/cod.js     PATCH /api/cod/order/:id        (line 79)  — /admin COD status change
+    backend/routes/push.js    POST /api/push/send             (line 42)
+    backend/routes/push.js    POST /api/push/send-customer    (line 135) — /admin "Push" button
+  = 4 routes. (cod PATCH and push send-customer ARE hit by the
+    embedded /admin UI; they do their own shop-scoping inside the
+    handler rather than via requireStoreOwner.)
+
+  requirePaidPlan: exported but referenced by ZERO routes (grep
+  clean). Dormant.
+
+  -> Every data call the embedded /admin page makes currently
+     flows through requireAuth (the BACKEND_JWT_SECRET JWT), and
+     most also through requireStoreOwner (Store.ownerEmail ===
+     token email).
+
+E2) FRONTEND CHANGES to swap /api/token -> App Bridge session token
+  Context: /admin runs embedded in Shopify Admin; App Bridge v4 is
+  already loaded (CDN <Script> + <meta name="shopify-api-key">).
+  The v4 global exposes `window.shopify` with `shopify.idToken()`
+  -> Promise<string> (a fresh, ~1-minute session/ID token signed
+  by Shopify). `@shopify/app-bridge-react` (installed, unused)
+  also offers `useAppBridge()` but that's a React hook and
+  lib/api.js is a plain module.
+
+  Changes:
+  (1) lib/api.js — replace getAuthToken()'s body:
+        OLD: fetch('/api/token') -> data.token
+        NEW: return await window.shopify.idToken()
+             (guard: if (typeof window === 'undefined' ||
+              !window.shopify?.idToken) return null;)
+      Keep the same "return null on failure -> request sent
+      unauthenticated -> backend 401" contract, and keep the
+      one-shot 401 retry (still useful).
+  (2) TOKEN CACHE — the current TTL is 10 min; a Shopify session
+      token lives ~60s. Either:
+        - drop TOKEN_TTL_MS to ~30-45s, OR
+        - remove the module cache entirely and call
+          shopify.idToken() every request (App Bridge caches/
+          refreshes internally and the call is cheap/local). The
+          latter is simpler and less error-prone; recommended.
+  (3) /api/token route (frontend/app/api/token/route.js) becomes
+      DEAD for /admin. Leave it only if the separate NextAuth
+      `/dashboard` UI is still shipping; otherwise delete it
+      along with its `jsonwebtoken` + `authOptions` imports.
+  (4) The App Bridge script + <meta name="shopify-api-key"> are
+      ALREADY in admin/page.js — no new markup. Optionally add
+      `@shopify/app-bridge-react`'s <AppProvider>/<NavMenu> etc.
+      later, but not required just for idToken().
+  (5) NO new npm install needed (app-bridge-react already a dep;
+      idToken() comes from the CDN global). `jsonwebtoken` in the
+      frontend can eventually be removed.
+  (6) Non-embedded contexts (opening /admin directly, or SSR):
+      `window.shopify` is undefined -> getAuthToken() returns null
+      -> every call 401s. That's acceptable for an embedded-only
+      page, but worth an explicit "must be opened from Shopify
+      Admin" empty state.
+
+E3) BACKEND CHANGES to verify a Shopify session token (instead of
+    the BACKEND_JWT_SECRET JWT)
+  A Shopify session/ID token is a JWT:
+    - alg HS256, signed with the app's CLIENT SECRET
+      (process.env.SHOPIFY_API_SECRET — ALREADY set on the
+      backend, used today for webhook/OAuth HMAC).
+    - claims: iss = "https://{shop}.myshopify.com/admin",
+      dest = "https://{shop}.myshopify.com",
+      aud = <client_id> (process.env.SHOPIFY_API_KEY — already
+      set),
+      sub = Shopify user id, sid = session id,
+      exp / nbf / iat (short, ~1 min).
+    - IT CONTAINS NO EMAIL.
+
+  requireAuth changes:
+  (1) Verify with SHOPIFY_API_SECRET, not BACKEND_JWT_SECRET:
+        jwt.verify(token, process.env.SHOPIFY_API_SECRET,
+                   { algorithms: ['HS256'] })
+      and additionally assert:
+        - payload.aud === process.env.SHOPIFY_API_KEY
+        - payload.iss and payload.dest resolve to the SAME shop
+          host (strip "/admin" from iss)
+        - exp/nbf within a small clock-skew allowance
+      (Or use @shopify/shopify-api's
+       `shopify.session.decodeSessionToken(token)` which does all
+       of the above — would be a new backend dependency.)
+  (2) STOP setting req.userEmail from the token (there is no
+      email). Instead set, e.g.:
+        req.shopDomain     = host parsed from payload.dest
+                             ("cartncod-form.myshopify.com")
+        req.shopifyUserId  = payload.sub
+      Everything downstream that reads req.userEmail must change.
+  (3) BACKEND_JWT_SECRET is no longer needed for the embedded
+      flow (keep it only if /dashboard's NextAuth JWT path stays).
+
+  requireStoreOwner changes:
+  (4) The email match (store.ownerEmail === req.userEmail) is
+      GONE. The new authorization check for an embedded call:
+        - req.shopDomain (from the verified token's `dest`) ===
+          req.params.shopDomain  -> the merchant is authenticated
+          by Shopify AS that shop's admin, so a matching shop is
+          sufficient authz.
+        - Store.findOne({ shopDomain }) still required (must be an
+          installed store) -> 404 if missing.
+        - Drop the "no ownerEmail" 403 branch for this path
+          (ownerEmail stays relevant only to the NextAuth
+          /dashboard).
+      Set req.store as before.
+  (5) requirePaidPlan is unaffected (reads req.store.plan) — still
+      dormant.
+
+  DUAL-FLOW CONSIDERATION:
+    The 15 protected routes are shared by BOTH the NextAuth
+    /dashboard UI (BACKEND_JWT_SECRET JWT, email-based) and the
+    embedded /admin UI (Shopify session token, shop-based). If
+    both must keep working, requireAuth needs to try BOTH:
+      - first jwt.verify(token, SHOPIFY_API_SECRET) + aud/iss
+        checks -> session-token path (set req.shopDomain), else
+      - jwt.verify(token, BACKEND_JWT_SECRET) -> NextAuth path
+        (set req.userEmail),
+    and requireStoreOwner authorizes if EITHER
+    (req.shopDomain === params.shopDomain) OR
+    (store.ownerEmail === req.userEmail).
+    If /dashboard is being retired in favour of /admin, the
+    BACKEND_JWT_SECRET path (and /api/token, and the frontend
+    `jsonwebtoken` dep) can all be deleted.
+
+  CORS / OTHER:
+    - No CORS change needed (the /admin fetch Origin is the
+      already-allowlisted Vercel origin).
+    - No new app-level middleware ordering issue — requireAuth is
+      per-route, runs after the JSON body parser as today.
+    - `@shopify/shopify-api` (or a hand-rolled verifier with
+      `jsonwebtoken`, already a backend dep) is the only possible
+      new backend dependency; hand-rolled is feasible since
+      jsonwebtoken + the aud/iss/dest checks are ~15 lines.
+
+================================================================
+END OF AUDIT
+================================================================

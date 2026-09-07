@@ -1,0 +1,135 @@
+================================================================
+CartnCodForm — Phase 1 / Stage 2b SELF-AUDIT
+Port inventory: dashboard/[shop]/page.js  ->  admin/page.js
+Generated: 2026-09-07
+Read-only audit. No files modified.
+================================================================
+
+================================================================
+TOTAL LINE COUNTS
+================================================================
+  frontend/app/admin/page.js .................  221 lines
+  frontend/app/dashboard/[shop]/page.js ...... 1006 lines
+  (ratio: admin is ~22% the size of the source file; the
+   remaining ~785 lines are unported components + the page shell.)
+
+================================================================
+ALL TOP-LEVEL DEFINITIONS IN dashboard/[shop]/page.js
+(name — approx line range — one-line description)
+================================================================
+   1. formatMoney        lines   9 – 12   pure helper: Number -> "1,234.50" string (toLocaleString, 2 dp)
+   2. formatDate         lines  14 – 17   pure helper: date -> locale string, "—" for falsy
+   3. cleanPhone         lines  19 – 22   pure helper: strip spaces/+/- for wa.me links
+   4. WhatsAppButton     lines  24 – 37   component: green <a href="https://wa.me/...?text="> button (Tailwind)
+   5. SendPushButton     lines  39 – 132  component: collapsible push-composer popover; useState x4 (expanded/title/body/state), async send() -> POST /api/push/send-customer
+   6. StatusBadge        lines 134 – 147  component: colored <span> pill for a status string (Tailwind color map)
+   7. CustomerAnalytics  lines 149 – 250  component: full-screen slide-over "Customer Journey" panel; fetches events via 3-step /api/events/... resolve chain; useState events/loading, useEffect, iconFor() map
+   8. StepEditor         lines 252 – 302  component: one automation-rule step editor (delay #, title, body textarea, "include image" checkbox); controlled via onChange prop
+   9. RuleForm           lines 304 – 426  component: create/edit an AutomationRule; useState name/steps/saving/error; updateStep/removeStep/addStep + async handleSave() -> POST or PATCH /api/automation/<shop>/rules
+  10. AutomationRules    lines 428 – 571  component: list + CRUD shell for automation rules; useState rules/loading/error/showForm/editingRule; loadRules (useCallback) + toggleActive/deleteRule/handleFormSaved; renders <RuleForm> or the rule list
+  11. RevenueStats       lines 573 – 667  component: 4-tile revenue KPI grid derived from `customers` via useMemo; internal formatCurrency(); empty-state card when no recovered revenue
+  12. StoreView          lines 669 – 1005 DEFAULT EXPORT — the whole dashboard page for one store
+                                          (header + Refresh/Disconnect, PushNotificationSetup, <RevenueStats>,
+                                           3 tabs [abandoned carts table / COD orders table / <AutomationRules>],
+                                           <CustomerAnalytics> slide-over)
+
+  NESTED (defined INSIDE StoreView, not exported / not top-level —
+  listed for completeness, would move with StoreView):
+    - load()             lines 682 – 697  useCallback: parallel GET /api/stores/<shop>/customers + /orders
+    - (foreground-msg useEffect)  703 – 718  onForegroundMessage -> browser Notification
+    - handleDisconnect() lines 720 – 735  window.confirm -> DELETE /api/stores/<shop> -> router.push('/dashboard')
+    - updateOrderStatus() lines 737 – 746  optimistic PATCH /api/cod/order/<id>
+    - tabButton          lines 748 – 759  const arrow: renders one tab-strip <button>
+
+  MODULE IMPORTS in the source file (context for the port):
+    react: useCallback, useEffect, useMemo, useState
+    next/navigation: useParams, useRouter
+    ../../../lib/api: apiGet, apiSend
+    ../../../lib/firebase: onForegroundMessage
+    ../../../components/PushNotificationSetup (default)
+
+================================================================
+ALREADY PRESENT IN admin/page.js  (ported in Stage 2a)
+================================================================
+  #  source item        source lines     admin/page.js lines   port notes
+  -- -----------------  ---------------  --------------------  --------------------------------------------
+  1  formatMoney         9 – 12           23 – 26              byte-for-byte, unchanged
+  2  formatDate         14 – 17           28 – 31              byte-for-byte, unchanged
+  3  cleanPhone         19 – 22           33 – 36              byte-for-byte, unchanged (comment kept)
+  4  WhatsAppButton     24 – 37           40 – 47              re-rendered as Polaris <Button url={href} external>; href construction identical
+  5  SendPushButton     39 – 132          49 – 136             all state + send() + payload + label + stopPropagation calls UNCHANGED; JSX -> Polaris <Popover>/<Card>/<FormLayout>/<TextField>x2/<Button>x2; ONE adaptation: <TextField> onChange passes value (not an event) so `(e)=>setX(e.target.value)` became `(value)=>setX(value)`
+  6  StatusBadge       134 – 147         138 – 154             re-rendered as Polaris <Badge tone={...}>; same status strings (abandoned/recovered/pending/confirmed/cancelled + unknown fallthrough); Tailwind color map -> Badge tone map
+
+  => 6 of 12 top-level items ported (the 3 pure helpers + the 3
+     "simple" components). All present in admin/page.js today.
+
+  ADMIN-ONLY items in admin/page.js (NOT from the source file):
+    - AdminHomeContent   lines 158 – 212  reads shop/host from useSearchParams; renders the placeholder card + a temporary "Component Preview" card exercising the 6 ported items with hardcoded props
+    - AdminHome (default) lines 214 – 220  <Suspense fallback={null}> wrapper around AdminHomeContent
+
+================================================================
+NOT YET PORTED  (remain only in dashboard/[shop]/page.js)
+================================================================
+  #   item               source lines   why it's harder / what it needs
+  --  ----------------   ------------   ----------------------------------------------------
+   7  CustomerAnalytics  149 – 250      slide-over panel + a 3-request /api/events resolve
+                                        chain + event-type icon map + product-image
+                                        thumbnails. Needs Polaris <Modal> or a custom
+                                        sheet; data-fetching hooks come across as-is.
+   8  StepEditor         252 – 302      pure controlled sub-form (number/text/textarea/
+                                        checkbox). Straightforward -> Polaris <TextField>
+                                        (number + multiline) + <Checkbox>. Low risk once
+                                        the TextField onChange-signature adaptation (same
+                                        one used for SendPushButton) is applied.
+   9  RuleForm           304 – 426      depends on StepEditor; adds name field + add/
+                                        remove-step logic + validation + save (POST/PATCH
+                                        /api/automation/<shop>/rules). Port StepEditor
+                                        first.
+  10  AutomationRules    428 – 571      list + CRUD shell; depends on RuleForm. Uses
+                                        window.confirm for delete (Polaris pattern:
+                                        <Modal> confirm or keep confirm()). Rule cards ->
+                                        Polaris <Card>/<Badge> (Active/Paused).
+  11  RevenueStats       573 – 667      useMemo KPI derivation is pure and ports as-is;
+                                        the 4-tile Tailwind grid -> Polaris layout
+                                        (<InlineGrid> / <Card> tiles). Needs the
+                                        `customers` array from the page-level data load.
+  12  StoreView          669 – 1005     THE PAGE ITSELF. Header + Refresh/Disconnect +
+     (default export)                   PushNotificationSetup + RevenueStats + 3 tabs
+                                        (abandoned-carts table, COD-orders table,
+                                        AutomationRules) + CustomerAnalytics slide-over.
+                                        Needs: Polaris <Page>/<Tabs>/<DataTable> or
+                                        <IndexTable>, the data-load useCallback, the
+                                        firebase onForegroundMessage effect, and — for
+                                        the embedded context — reading `shop` from
+                                        searchParams instead of useParams, and dropping
+                                        router.push('/dashboard') / NextAuth-era bits.
+                                        Also pulls in nested helpers load/handleDisconnect/
+                                        updateOrderStatus/tabButton.
+                                        PushNotificationSetup (../../../components/...)
+                                        is a separate component NOT in either page file —
+                                        will need its own port/decision.
+
+  => 6 of 12 top-level items NOT ported:
+       CustomerAnalytics, StepEditor, RuleForm, AutomationRules,
+       RevenueStats, StoreView.
+     Plus the non-page dependency components referenced by
+     StoreView that live outside both files and are also unported:
+       components/PushNotificationSetup
+       lib/firebase onForegroundMessage usage
+
+================================================================
+SUGGESTED PORT ORDER FOR STAGE 2b+ (dependency-first)
+================================================================
+  1. StepEditor        (leaf, pure controlled form)
+  2. RuleForm          (needs StepEditor)
+  3. AutomationRules   (needs RuleForm)
+  4. RevenueStats      (independent; pure useMemo + layout swap)
+  5. CustomerAnalytics (independent; needs a Polaris sheet/modal)
+  6. StoreView         (the shell; wires all of the above + tables
+                        + tabs; also the point where useParams ->
+                        useSearchParams and the disconnect/redirect
+                        flow get reconsidered for embedded mode)
+
+================================================================
+END OF SELF-AUDIT
+================================================================

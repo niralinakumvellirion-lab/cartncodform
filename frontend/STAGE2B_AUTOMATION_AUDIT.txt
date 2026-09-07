@@ -1,0 +1,310 @@
+================================================================
+CartnCodForm — Phase 1 / Stage 2b SELF-AUDIT
+Port: StepEditor + RuleForm + AutomationRules
+  FROM  frontend/app/dashboard/[shop]/page.js  (lines 252-571, read-only, untouched)
+  INTO  frontend/app/admin/page.js  (inserted after StatusBadge, before AdminHomeContent)
+Generated: 2026-09-07
+================================================================
+
+RESULT: DONE. All 3 components ported. Build "Compiled
+successfully", zero errors, 9/9 static pages. Real-server smoke
+test: GET /admin -> 200, no server errors. AdminHomeContent /
+AdminHome / the Component Preview card were NOT touched. The 3
+new components are DEFINITIONS only — not yet rendered anywhere
+(wiring is Stage 2c).
+
+================================================================
+LINE COUNT — frontend/app/admin/page.js
+================================================================
+  BEFORE : 221 lines
+  AFTER  : 566 lines
+  DELTA  : +345 lines
+    (~+9 lines of imports [react + polaris + apiGet], the rest is
+     the 3 ported component bodies + spacing/comments.)
+
+================================================================
+POLARIS COMPONENTS ADDED TO THE IMPORT LINE
+================================================================
+  frontend/app/admin/page.js, the `from '@shopify/polaris'` block.
+
+  ALREADY PRESENT (unchanged): AppProvider, Page, Card, Text,
+    Badge, Button, Popover, TextField, FormLayout, BlockStack
+
+  NEWLY ADDED (7):
+    Box            — StepEditor outer container; AutomationRules empty-state box
+    InlineStack    — StepEditor header row; RuleForm "+ Add step" row + button row;
+                     AutomationRules header row + per-rule row + name/badge row + action stack context
+    Checkbox       — StepEditor "Include product image"
+    Banner         — AutomationRules section-level error (was a bordered/bg red alert div)
+    ResourceList   — AutomationRules rules list
+    ResourceItem   — AutomationRules per-rule item (requires url OR onClick — see adaptation notes)
+    Modal          — AutomationRules delete confirmation (replaces window.confirm)
+
+  NON-POLARIS imports also extended on the SAME existing lines
+  (no new import statements, no duplicate imports, no new
+  'use client'):
+    react:  `import { Suspense, useState }` -> added `useCallback, useEffect`
+            (AutomationRules.loadRules is a useCallback; a useEffect calls it)
+    lib/api: `import { apiSend }` -> `import { apiGet, apiSend }`
+            (AutomationRules.loadRules calls apiGet)
+
+  NOTE: <Select> from the task's mapping list was NOT added —
+  there is no <select> element anywhere in source lines 252-571
+  (the only <select> in the source file is in StoreView's COD
+  table at line 969, which is out of scope for this stage).
+
+================================================================
+COMPONENT 1 — StepEditor  (source 252-302  ->  admin/page.js)
+================================================================
+STATE VARIABLES: none. Purely controlled via props
+  { step, onChange, onRemove, canRemove } — no useState, no
+  useEffect, no internal handlers.
+
+API CALLS: none.
+
+POLARIS COMPONENTS USED IN JSX:
+  Box            (outer container; background="bg-surface-secondary",
+                  borderColor/borderWidth/borderRadius/padding — replaces
+                  `div.rounded-lg.border.p-3.bg-gray-50`)
+  BlockStack     (vertical stack, gap="200" — replaces `space-y-2`)
+  InlineStack    (header row align="space-between" — replaces `flex items-center justify-between`)
+  Text           (the "Delay (minutes...)" label as `as="span" variant="bodySm" fontWeight="medium"`)
+  Button         (variant="plain" tone="critical" — "Remove step", replaces red-text `<button>`)
+  FormLayout     (wraps the 4 fields — replaces the loose label/input pairs)
+  TextField x3   (delay: type="number" min={1} label + labelHidden;
+                  title: text; body: multiline={2})
+  Checkbox       ("Include product image")
+
+LOGIC ADAPTED (beyond pure JSX): NONE that changes behavior.
+  The onChange callbacks change SHAPE to match Polaris control
+  contracts, but the state update they produce is identical:
+    - <input type="number" onChange={(e)=>onChange({...step, delayMinutes: e.target.value})}>
+        -> <TextField onChange={(value)=>onChange({...step, delayMinutes: value})}>
+      Polaris TextField passes the string VALUE, not a DOM event.
+      Still a string, still `{...step, delayMinutes}` — RuleForm's
+      handleSave still does Number(s.delayMinutes) downstream, so
+      the "keep delayMinutes as a string in state" contract is
+      preserved exactly.
+    - same value-vs-event swap for the title and body TextFields.
+    - <input type="checkbox" onChange={(e)=>onChange({...step, imageSource: e.target.checked ? 'product':'none'})}>
+        -> <Checkbox onChange={(checked)=>onChange({...step, imageSource: checked ? 'product':'none'})}>
+      Polaris Checkbox passes (checked, id). Same ternary, same key.
+  The "Message — use {productTitle} and {cartValue} as
+  placeholders" label was JSX text `{'{productTitle}'}` (a JSX
+  expression rendering the literal braces); it is now a plain
+  string prop with the same rendered characters. `min="1"`
+  (string) -> `min={1}` (number) — Polaris accepts both;
+  cosmetic.
+
+================================================================
+COMPONENT 2 — RuleForm  (source 304-426  ->  admin/page.js)
+================================================================
+STATE VARIABLES (all initializers BYTE-FOR-BYTE unchanged):
+  name          useState(existingRule?.name || '')
+  steps         useState( existingRule?.steps?.length
+                            ? existingRule.steps.map(s => ({ ...s, delayMinutes: String(s.delayMinutes) }))
+                            : [{ delayMinutes: '30', title: '', body: '', imageSource: 'product' }] )
+  saving        useState(false)
+  error         useState('')
+
+HANDLER FUNCTIONS (all BYTE-FOR-BYTE unchanged):
+  updateStep(index, updated)   — setSteps(prev => prev.map(...))
+  removeStep(index)            — setSteps(prev => prev.filter(...))
+  addStep()                    — setSteps(prev => [...prev, { delayMinutes: '1440', ... }])
+  handleSave()  (async)        — validation loop (name required; per-step delay >= 1;
+                                 per-step title+body required) -> builds `payload`
+                                 { name, trigger:'cart_abandon', steps: [...Number/trim...] }
+                                 -> PATCH or POST -> onSaved() ; catch -> setError(err.message);
+                                 finally -> setSaving(false)
+
+API CALLS (endpoints, methods, payload — unchanged):
+  PATCH  /api/automation/{encodeURIComponent(shop)}/rules/{existingRule._id}   (when existingRule)
+  POST   /api/automation/{encodeURIComponent(shop)}/rules                      (when new)
+  both via apiSend(url, method, payload); payload =
+    { name: name.trim(), trigger: 'cart_abandon',
+      steps: steps.map(s => ({ delayMinutes: Number(s.delayMinutes),
+        title: s.title.trim(), body: s.body.trim(), imageSource: s.imageSource })) }
+
+POLARIS COMPONENTS USED IN JSX:
+  Card           (outer — replaces `div.rounded-xl.border.bg-white.p-4`)
+  BlockStack     (gap="400" outer stack; gap="200" trigger section; gap="300" steps list)
+  FormLayout     (wraps the "Rule name" TextField)
+  TextField      ("Rule name")
+  Text           ("Trigger: when a customer abandons their cart" as `variant="bodyMd" fontWeight="bold"`;
+                  inline error as `variant="bodySm" tone="critical"`)
+  StepEditor     (child, per step — key/step/onChange/onRemove/canRemove props IDENTICAL to source)
+  InlineStack    ("+ Add follow-up step" wrapper; the Save/Cancel button row, gap="200")
+  Button         ("+ Add follow-up step" variant="plain";
+                  Save variant="primary" loading={saving} disabled={saving};
+                  Cancel variant="plain")
+
+LOGIC ADAPTED (beyond pure JSX):
+  - onChange value-vs-event swap on the "Rule name" TextField
+    (`(e)=>setName(e.target.value)` -> `(value)=>setName(value)`),
+    identical to the StepEditor swaps. State setter unchanged.
+  - Save <Button> gained `loading={saving}` IN ADDITION to the
+    original `disabled={saving}`. This is a rendering-layer
+    addition (spinner affordance) consistent with how
+    SendPushButton was ported in Stage 2a; the disable behavior
+    and the exact label ternary
+    (`saving ? 'Saving...' : existingRule ? 'Save changes' : 'Create rule'`)
+    are unchanged.
+  - The inline error is rendered with <Text tone="critical">
+    rather than <Banner>, because the source was a plain small
+    red <p>, not a boxed alert (AutomationRules' error, which WAS
+    a boxed alert, uses <Banner> — see below).
+  No state, no handler, no API, no validation logic changed.
+
+================================================================
+COMPONENT 3 — AutomationRules  (source 428-571  ->  admin/page.js)
+================================================================
+STATE VARIABLES:
+  rules         useState([])                 — unchanged
+  loading       useState(true)               — unchanged
+  error         useState('')                 — unchanged
+  showForm      useState(false)              — unchanged
+  editingRule   useState(null)               — unchanged
+  deleteTarget  useState(null)               — *** NEW *** (see LOGIC ADAPTED)
+
+HANDLER FUNCTIONS:
+  loadRules  (useCallback, dep [shop])       — BYTE-FOR-BYTE unchanged
+             (setLoading(true) -> apiGet(.../rules) -> setRules(Array.isArray?...) +
+              setError('') -> catch setError -> finally setLoading(false))
+  useEffect(() => { loadRules(); }, [loadRules])  — unchanged
+  toggleActive(rule)  (async)                — BYTE-FOR-BYTE unchanged
+             (apiSend PATCH .../rules/{rule._id} { active: !rule.active } -> loadRules(); catch setError)
+  handleFormSaved()                          — BYTE-FOR-BYTE unchanged
+             (setShowForm(false); setEditingRule(null); loadRules())
+  deleteRule(rule)                           — *** ADAPTED *** now just: setDeleteTarget(rule)
+  confirmDelete()  (async)                   — *** NEW *** holds the original deleteRule
+             try-body verbatim: apiSend DELETE .../rules/{rule._id} -> loadRules(); catch setError.
+             Reads `deleteTarget`, clears it first, then runs.
+
+API CALLS (endpoints, methods, bodies — unchanged):
+  GET     /api/automation/{encodeURIComponent(shop)}/rules                    (loadRules, via apiGet)
+  PATCH   /api/automation/{encodeURIComponent(shop)}/rules/{rule._id}  body { active: !rule.active }   (toggleActive)
+  DELETE  /api/automation/{encodeURIComponent(shop)}/rules/{rule._id}         (confirmDelete — was in deleteRule)
+
+POLARIS COMPONENTS USED IN JSX:
+  BlockStack     (outer gap="400" — replaces `div.mt-6`; also the per-rule left column
+                  gap="100", the steps-preview gap="050", the action button column gap="200")
+  InlineStack    (header row align="space-between"; per-rule row align="space-between" wrap={false};
+                  the name+badge row gap="200")
+  Text           (header helper text `variant="bodyMd" tone="subdued"`;
+                  "Loading rules..." `tone="subdued"`;
+                  empty-state text `alignment="center" tone="subdued"`;
+                  rule name `as="h3" variant="bodyMd" fontWeight="bold"`;
+                  "Cart abandonment · N steps" `variant="bodySm" tone="subdued"`;
+                  per-step preview lines `variant="bodySm" tone="subdued"`;
+                  Modal body `as="p"`)
+  Button         ("+ New rule" variant="primary";
+                  per-rule Edit / Pause|Resume  variant="plain";
+                  per-rule Delete  variant="plain" tone="critical")
+  Badge          (Active -> tone="success"; Paused -> tone={undefined} default neutral —
+                  replaces the green/gray Tailwind pill; same mapping approach as StatusBadge)
+  Banner         (tone="critical" — the section-level error box; replaces
+                  `div.rounded-lg.border.border-red-200.bg-red-50.p-3.text-red-700`)
+  Box            (empty-state container — replaces `div.border-dashed.p-8.text-center`)
+  ResourceList   (items={rules}, resourceName singular/plural 'rule'/'rules',
+                  renderItem=(rule)=>ResourceItem — replaces `div.space-y-3` + `rules.map`)
+  ResourceItem   (id={rule._id}, onClick — replaces the per-rule `div.rounded-xl.border.p-4`)
+  Modal          (open={Boolean(deleteTarget)}, title="Delete automation rule",
+                  primaryAction { content:'Delete', destructive:true, onAction:confirmDelete },
+                  secondaryActions [{ content:'Cancel', onAction: close }])
+  Modal.Section  (holds the confirm sentence — verbatim string from the old window.confirm:
+                  `Delete "<name>"? This cannot be undone.`)
+
+LOGIC ADAPTED (beyond pure JSX) — 2 items, both forced by the
+task's mapping rules:
+
+  (A) window.confirm  ->  Polaris <Modal destructive>.
+      REASON: window.confirm is a synchronous, blocking browser
+      primitive; a Polaris Modal is declarative and stateful, so
+      the confirm gate cannot be preserved "byte-for-byte" while
+      using a Modal (which the task explicitly requires:
+      "Confirmation dialogs (if any) -> <Modal> with destructive
+      prop").
+      WHAT CHANGED:
+        - added state `deleteTarget` (the rule pending deletion, or null)
+        - `deleteRule(rule)` no longer does the confirm + delete
+          inline; it now only opens the modal: `setDeleteTarget(rule)`
+        - new `confirmDelete()` contains the EXACT original
+          try/catch body — same apiSend('DELETE', .../rules/{_id}),
+          same `loadRules()` on success, same
+          `catch (err) => setError(err.message)`. Only the gate
+          in front of it moved from `if (!window.confirm(...)) return`
+          to "user pressed the modal's Delete button".
+        - the confirm copy is preserved verbatim in Modal.Section:
+          `Delete "{deleteTarget?.name}"? This cannot be undone.`
+      NOT CHANGED: the delete API call, the endpoint, the reload,
+      the error handling.
+
+  (B) ResourceItem requires `url` OR `onClick` (verified in the
+      installed 13.9.5 d.ts: `ResourceItemProps = PropsWithUrl |
+      PropsWithClick`). The source's per-rule card was NOT
+      clickable as a whole. To satisfy ResourceItem's contract I
+      wired `onClick={() => setEditingRule(rule)}` — the same
+      action as the explicit "Edit" button that is still present
+      inside the item. Polaris ResourceItem natively ignores
+      clicks that originate on nested interactive elements
+      (Button/link/input), so the inline Edit / Pause|Resume /
+      Delete buttons keep working independently and do NOT also
+      trigger the row onClick.
+      NET UX DELTA: clicking the body of a rule row now opens the
+      editor (it previously did nothing). Minor, additive, and
+      the only way to use ResourceItem as the task's mapping
+      ("List of rules -> <ResourceList> with <ResourceItem>")
+      demands. No state/API/handler logic added beyond the
+      existing setEditingRule.
+
+  TRIVIAL JSX-ONLY changes (not behavior):
+    - the `if (showForm || editingRule)` branch dropped its
+      `<div className="mt-6">` wrapper and returns <RuleForm />
+      directly (RuleForm is now a self-contained <Card>; the
+      Tailwind top-margin was dashboard-page spacing that the
+      Polaris <Page> layout in Stage 2c will own).
+    - `"{step.title}"` literal quotes -> `&quot;{step.title}&quot;`
+      (and same in the Modal body) — identical rendered output,
+      lint-safe, matches the &apos; style already used elsewhere
+      in admin/page.js.
+    - Active/Paused pill -> <Badge> (same as StatusBadge's
+      Tailwind-color -> Polaris-tone approach).
+
+================================================================
+WHAT WAS NOT TOUCHED (per instruction)
+================================================================
+  - dashboard/[shop]/page.js — read only, unmodified.
+  - AdminHomeContent (function) — unchanged.
+  - AdminHome (default export) — unchanged.
+  - The "Component Preview (temporary)" <Card> inside
+    AdminHomeContent — unchanged; the 3 new components are added
+    ABOVE it as definitions only and are not referenced from the
+    preview (wiring is Stage 2c).
+  - No new 'use client' directive (the file already had one at
+    line 1).
+  - No duplicate imports.
+
+================================================================
+VALIDATION
+================================================================
+  cd frontend && npm run build
+    -> ✓ Compiled successfully
+    -> ✓ Generating static pages (9/9)
+    -> ZERO errors, ZERO warnings.
+    -> Route table unchanged; /admin still ○ (static shell +
+       CSR bailout); /admin First Load JS 132 kB (unchanged from
+       Stage 2a — the added component bodies are small next to
+       the Polaris chunk already pulled in).
+
+  Real-server smoke test (npm run start + curl):
+    GET /admin?shop=test.myshopify.com&host=x  -> HTTP 200
+    server log: no error / warn / unhandled / failed lines.
+    (The 3 ported components are defined but not rendered on the
+     page yet, so this only confirms the module compiles & loads
+     cleanly — full render/interaction verification comes when
+     they're wired in Stage 2c.)
+    Server stopped after the test.
+
+================================================================
+END OF SELF-AUDIT
+================================================================

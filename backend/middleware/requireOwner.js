@@ -2,9 +2,10 @@ const jwt = require('jsonwebtoken');
 const Store = require('../models/Store');
 
 /**
- * Verifies a NextAuth-issued JWT (Authorization: Bearer <token>),
- * extracts the authenticated email, and attaches it to req.userEmail.
- * Does NOT check store ownership — see requireStoreOwner for that.
+ * Verifies a Shopify App Bridge session token (Authorization: Bearer <token>).
+ * The token is an HS256 JWT signed with the app's API secret. On success it
+ * attaches the token's shop domain to req.shopDomain. Does NOT check that the
+ * shop matches the requested resource — see requireStoreOwner for that.
  */
 function requireAuth(req, res, next) {
   const authHeader = req.get('Authorization') || '';
@@ -16,49 +17,88 @@ function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'Missing Authorization header' });
   }
 
-  try {
-    const secret = process.env.BACKEND_JWT_SECRET;
-    if (!secret) {
-      console.error('[auth] BACKEND_JWT_SECRET not configured on backend');
-      return res.status(500).json({ error: 'Server auth misconfigured' });
-    }
-    const payload = jwt.verify(token, secret);
-    const email = payload.email || (payload.user && payload.user.email);
-    if (!email) {
-      return res.status(401).json({ error: 'Token missing email claim' });
-    }
-    req.userEmail = String(email).trim().toLowerCase();
-    next();
-  } catch (err) {
-    console.error('[auth] Token verification failed:', err.message);
-    return res.status(401).json({ error: 'Invalid or expired token' });
+  const secret = process.env.SHOPIFY_API_SECRET;
+  if (!secret) {
+    console.error('[auth] SHOPIFY_API_SECRET not configured on backend');
+    return res.status(500).json({ error: 'Server auth misconfigured' });
   }
+
+  // 1. Decode without verifying, so a malformed token fails fast and clearly.
+  const decoded = jwt.decode(token, { complete: true });
+  if (!decoded || !decoded.header || !decoded.payload) {
+    return res.status(401).json({ error: 'Malformed session token' });
+  }
+
+  // 2. Verify the signature (HS256, app secret). Time claims are validated
+  //    manually below so the app's exact rules (incl. the 10s nbf skew) apply.
+  let payload;
+  try {
+    payload = jwt.verify(token, secret, {
+      algorithms: ['HS256'],
+      ignoreExpiration: true,
+      ignoreNotBefore: true,
+    });
+  } catch (err) {
+    console.error('[auth] Session token verification failed:', err.message);
+    return res.status(401).json({ error: 'Invalid session token' });
+  }
+
+  // 3. Validate the claims.
+  const nowSec = Date.now() / 1000;
+
+  // iss: a real Shopify session token's iss is
+  // "https://<shop>.myshopify.com/admin" — the trailing "/admin" is stripped
+  // before the host check (see SESSION_TOKEN_SWAP_AUDIT.txt, deviation note).
+  if (
+    typeof payload.iss !== 'string' ||
+    !payload.iss.startsWith('https://') ||
+    !payload.iss.replace(/\/admin\/?$/, '').endsWith('.myshopify.com')
+  ) {
+    return res.status(401).json({ error: 'Session token: invalid iss claim' });
+  }
+  if (
+    typeof payload.dest !== 'string' ||
+    !payload.dest.startsWith('https://') ||
+    !payload.dest.endsWith('.myshopify.com')
+  ) {
+    return res.status(401).json({ error: 'Session token: invalid dest claim' });
+  }
+  if (payload.aud !== process.env.SHOPIFY_API_KEY) {
+    return res.status(401).json({ error: 'Session token: aud does not match this app' });
+  }
+  if (typeof payload.exp !== 'number' || payload.exp <= nowSec) {
+    return res.status(401).json({ error: 'Session token expired' });
+  }
+  if (typeof payload.nbf !== 'number' || payload.nbf > nowSec + 10) {
+    return res.status(401).json({ error: 'Session token not yet valid' });
+  }
+
+  // 4. Extract the shop domain from `dest` and attach it.
+  let shopDomain;
+  try {
+    shopDomain = new URL(payload.dest).hostname;
+  } catch (err) {
+    return res.status(401).json({ error: 'Session token: unparseable dest claim' });
+  }
+
+  req.shopDomain = shopDomain;
+  next();
 }
 
 /**
- * Requires requireAuth to have run first (sets req.userEmail).
- * Loads the Store by shopDomain (from req.params.shopDomain) and
- * asserts store.ownerEmail === req.userEmail. Attaches the loaded
+ * Requires requireAuth to have run first (sets req.shopDomain).
+ * Loads the Store for that shop and asserts the token's shop matches the
+ * shop named in the request path (IDOR protection). Attaches the loaded
  * store to req.store for downstream handlers to reuse.
  */
 async function requireStoreOwner(req, res, next) {
   try {
-    const shopDomain = (req.params.shopDomain || '').trim().toLowerCase();
-    if (!shopDomain) {
-      return res.status(400).json({ error: 'shopDomain required' });
-    }
-
-    const store = await Store.findOne({ shopDomain });
+    const store = await Store.findOne({ shopDomain: req.shopDomain });
     if (!store) {
       return res.status(404).json({ error: 'Store not found' });
     }
 
-    if (!store.ownerEmail) {
-      console.warn(`[auth] Store ${shopDomain} has no ownerEmail — denying access`);
-      return res.status(403).json({ error: 'Store has no owner on record' });
-    }
-
-    if (store.ownerEmail !== req.userEmail) {
+    if (req.shopDomain !== req.params.shopDomain) {
       return res.status(403).json({ error: 'Not authorized for this store' });
     }
 

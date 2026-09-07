@@ -17,32 +17,16 @@ function describeNetworkError(err, method, url) {
   return raw;
 }
 
-// Cache the short-lived backend JWT in memory so we don't mint a
-// fresh one on every single API call. Re-fetched when missing/expired
-// (a 401 from the backend triggers one retry with a fresh token).
-let cachedToken = null;
-let cachedTokenAt = 0;
-const TOKEN_TTL_MS = 10 * 60 * 1000; // refresh proactively after 10 min (token itself expires at 15)
-
-async function getAuthToken(forceRefresh = false) {
-  const isStale = Date.now() - cachedTokenAt > TOKEN_TTL_MS;
-  if (!forceRefresh && cachedToken && !isStale) {
-    return cachedToken;
+// Auth is a Shopify App Bridge session token. App Bridge (loaded via the CDN
+// script in the embedded /admin page) exposes window.shopify.idToken(), which
+// returns a fresh, short-lived JWT and caches/refreshes internally — so we do
+// no caching of our own here.
+async function getAuthToken() {
+  if (typeof window === 'undefined' || !window.shopify) {
+    throw new Error('Not running inside Shopify Admin');
   }
-  try {
-    const res = await fetch('/api/token', { cache: 'no-store' });
-    if (!res.ok) {
-      cachedToken = null;
-      return null;
-    }
-    const data = await res.json();
-    cachedToken = data.token || null;
-    cachedTokenAt = Date.now();
-    return cachedToken;
-  } catch {
-    cachedToken = null;
-    return null;
-  }
+  const token = await window.shopify.idToken();
+  return token;
 }
 
 export async function apiGet(path) {

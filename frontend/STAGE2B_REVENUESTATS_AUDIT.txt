@@ -1,0 +1,197 @@
+================================================================
+CartnCodForm — Phase 1 / Stage 2b SELF-AUDIT
+Port: RevenueStats
+  FROM  frontend/app/dashboard/[shop]/page.js  (lines 573-667, read-only, untouched)
+  INTO  frontend/app/admin/page.js  (inserted after AutomationRules, before AdminHomeContent)
+Generated: 2026-09-07
+================================================================
+
+RESULT: DONE. RevenueStats ported. `npm run build` -> "Compiled
+successfully", zero errors, 9/9 static pages. AdminHomeContent /
+AdminHome / every other component untouched. RevenueStats is a
+DEFINITION only for now — not rendered anywhere yet (wiring is
+Stage 2c).
+
+================================================================
+LINE COUNT — frontend/app/admin/page.js
+================================================================
+  BEFORE : 566 lines
+  AFTER  : 683 lines
+  DELTA  : +117 lines
+    (2 import-line edits [+useMemo on react, +Grid on polaris] +
+     the RevenueStats body + a section comment.)
+
+================================================================
+POLARIS IMPORTS ADDED
+================================================================
+  On the existing `from '@shopify/polaris'` block:
+    ADDED (1):  Grid          — the 4-tile responsive grid (Grid + Grid.Cell)
+
+    ALREADY PRESENT, reused (no re-add): Card, Text, BlockStack, Box
+      (Card/Text used for tiles + headings/values/sub-labels;
+       BlockStack wraps each tile's stacked Text elements;
+       Box is the empty-state container)
+
+  On the existing `from 'react'` import:
+    ADDED (1):  useMemo       — RevenueStats derives `stats` from the
+                                `customers` prop via useMemo (verbatim from source)
+
+  *** NOT ADDED — SkeletonBodyText (deliberate, flagged) ***
+  The task's mapping list includes
+    "Loading state -> <SkeletonBodyText lines={1}> inside the Card"
+    "Error state   -> <Banner tone='critical'>"
+  but the SOURCE RevenueStats has NEITHER a loading branch NOR an
+  error branch. It receives an already-loaded `customers` array
+  as a prop and computes synchronously in useMemo; the parent
+  (StoreView) is what gates loading, with
+  `{!loading && <RevenueStats customers={customers} />}`
+  (source line 797). RevenueStats itself only has two render
+  paths:
+    - empty:     `!stats.hasData` -> the "No recovered revenue yet" note
+    - populated: the 4-tile grid
+  Adding `SkeletonBodyText` (or `Banner`) here would be an UNUSED
+  import / dead code and an eslint no-unused-vars warning, and
+  wiring in a loading/error branch that the source doesn't have
+  would violate "Keep ALL internal state logic ... byte-for-byte
+  unchanged". So neither was added. If Stage 2c wants a loading
+  skeleton for this tile row, that is a deliberate logic addition
+  to make at that point.
+  (Banner is in fact already imported in the file from the
+  AutomationRules port in the previous stage, so "add it if not
+  already there" is moot — RevenueStats just doesn't use it.)
+
+================================================================
+STATE VARIABLES IN RevenueStats
+================================================================
+  NONE. No useState, no useReducer, no refs.
+
+  Hooks used (verbatim from source):
+    useMemo(() => { ...derive stats... }, [customers])
+      -> produces `stats` = {
+           totalRevenue, pushRevenue, recoveredCount, recoveryRate,
+           totalCarts, revenuePerSend, topCurrency, mixedCurrencies,
+           hasData
+         }
+      derivation (all unchanged):
+        recovered      = customers.filter(c => c.status === 'recovered')
+        withRevenue    = recovered.filter(c => typeof c.recoveredRevenue === 'number' && c.recoveredRevenue > 0)
+        totalRevenue   = withRevenue.reduce((s,c) => s + c.recoveredRevenue, 0)
+        pushAttributed = withRevenue.filter(c => c.attributionSource === 'push')
+        pushRevenue    = pushAttributed.reduce((s,c) => s + c.recoveredRevenue, 0)
+        totalCarts     = customers.length
+        recoveryRate   = totalCarts > 0 ? ((recovered.length/totalCarts)*100).toFixed(1) : '0.0'
+        currencies     = withRevenue.map(c => c.recoveredCurrency).filter(Boolean)
+        topCurrency    = most-common currency, or null
+        mixedCurrencies = new Set(currencies).size > 1
+        revenuePerSend = pushAttributed.length > 0 ? (pushRevenue/pushAttributed.length).toFixed(2) : null
+        hasData        = withRevenue.length > 0
+
+  Internal helper (verbatim from source):
+    formatCurrency(amount)
+      -> stats.mixedCurrencies ? amount.toFixed(2)
+         : `${symbol}${amount.toFixed(2)}` where symbol is
+           INR '₹' / USD '$' / EUR '€' / '' (fallback)
+
+================================================================
+API CALLS IN RevenueStats
+================================================================
+  NONE. RevenueStats makes zero network calls. It is a pure
+  derivation of the `customers` prop (which the parent fetches).
+  No apiGet / apiSend / fetch anywhere in the component.
+
+================================================================
+LOGIC ADAPTED (beyond pure JSX)
+================================================================
+  NONE.
+
+  The useMemo body, the [customers] dependency array, the
+  formatCurrency helper, the `if (!stats.hasData)` early return,
+  and the `stats.revenuePerSend !== null ? ... : '—'` ternary in
+  the fourth tile are ALL byte-for-byte identical to the source.
+  Only wrapper/leaf elements changed:
+
+  EMPTY STATE (`!stats.hasData`):
+    <div className="mt-4 rounded-xl border border-dashed border-gray-300 bg-gray-50 p-4 text-sm text-gray-500">...</div>
+    ->
+    <Box background="bg-surface-secondary" borderColor="border" borderWidth="025" borderRadius="200" padding="400">
+      <Text as="p" variant="bodySm" tone="subdued">... same copy ...</Text>
+    </Box>
+    (Box/Text; same subdued-note feel as the AutomationRules
+     empty state ported in the previous stage. Text copy is
+     verbatim.)
+
+  POPULATED STATE — the 4-tile grid (per the task's mapping):
+    <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">   -> <Grid>
+    each  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                                                                   -> <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 3, xl: 3 }}><Card>...</Card></Grid.Cell>
+    tile heading  <p className="text-xs text-gray-500">Label</p>    -> <Text variant="headingSm" as="h3">Label</Text>
+    tile value    <p className="mt-1 text-xl font-bold ...">Value</p> -> <Text variant="headingLg" as="p">Value</Text>
+    tile sub-label <p className="mt-0.5 text-xs text-gray-400">...carts</p> -> <Text variant="bodySm" tone="subdued">...carts</Text>
+
+  MINOR PRESENTATIONAL NOTES (no behavior change):
+   - Each tile's stacked <Text> elements are wrapped in
+     <BlockStack gap="100"> so the heading / value / sub-label
+     have spacing (Polaris <Card> does not auto-space its
+     children; the source used Tailwind `mt-1` / `mt-0.5`).
+     BlockStack was already imported.
+   - The source rendered the "From Push Notifications" tile VALUE
+     in the brand purple (`text-brand`); the other three values
+     in `text-gray-900`. The task's tile-value mapping specifies
+     a uniform `<Text variant="headingLg" as="p">` with no tone,
+     so ALL four values now render in the default text color —
+     the single-tile purple accent is dropped. Purely visual,
+     done to follow the mapping exactly.
+   - Grid column math: Polaris <Grid> default is a 6-col track on
+     xs/sm/md and 12-col on lg/xl. columnSpan xs:6 -> full width
+     (1-up, stacked); sm:3 / md:3 -> half (2-up); lg:3 / xl:3 ->
+     quarter (4-up). The source Tailwind was `grid-cols-2 ...
+     sm:grid-cols-4` (2-up on the smallest breakpoint, 4-up on
+     sm+). So the only responsive-behavior difference is: on the
+     very smallest screens the tiles now stack 1-up instead of
+     2-up. This follows the columnSpan values the task specified
+     verbatim.
+
+================================================================
+WHAT WAS NOT TOUCHED
+================================================================
+  - dashboard/[shop]/page.js — read only, unmodified.
+  - StepEditor / RuleForm / AutomationRules — unchanged.
+  - formatMoney / formatDate / cleanPhone / WhatsAppButton /
+    SendPushButton / StatusBadge — unchanged.
+  - AdminHomeContent / AdminHome — unchanged.
+  - The "Component Preview (temporary)" <Card> inside
+    AdminHomeContent — unchanged; RevenueStats is added ABOVE it
+    as a definition only and is not referenced from the preview.
+  - No new 'use client' directive; no duplicate imports.
+
+================================================================
+RESULT OF npm run build
+================================================================
+  > next build
+    ▲ Next.js 14.2.5
+   ✓ Compiled successfully
+     Linting and checking validity of types ...
+   ✓ Generating static pages (9/9)
+     Finalizing page optimization ...
+
+  Route (app)                              Size     First Load JS
+  ┌ ○ /                                    172 B          94.1 kB
+  ├ ○ /_not-found                          871 B            88 kB
+  ├ ○ /admin                               44.8 kB         132 kB
+  ├ ƒ /api/auth/[...nextauth]              0 B                0 B
+  ├ ƒ /api/token                           0 B                0 B
+  ├ ƒ /cod-form/[shop]                     5.71 kB        92.8 kB
+  ├ ○ /dashboard                           2.18 kB         106 kB
+  ├ ƒ /dashboard/[shop]                    25.1 kB         112 kB
+  ├ ○ /install                             1.75 kB        95.7 kB
+  └ ○ /login                               1.16 kB        98.1 kB
+
+  ZERO errors, ZERO warnings. /admin still ○ (static shell +
+  useSearchParams CSR bailout). /admin First Load JS unchanged
+  at 132 kB (Grid is a small addition on top of the Polaris
+  chunk already bundled). Route table identical to before this
+  change.
+
+================================================================
+END OF SELF-AUDIT
+================================================================

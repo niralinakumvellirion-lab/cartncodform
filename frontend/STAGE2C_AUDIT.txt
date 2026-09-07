@@ -1,0 +1,374 @@
+================================================================
+CartnCodForm — Phase 1 / Stage 2c SELF-AUDIT
+Port: StoreView  ->  the real embedded page of frontend/app/admin/page.js
+  FROM  frontend/app/dashboard/[shop]/page.js  (lines 669-1006, read-only, untouched)
+Generated: 2026-09-07
+================================================================
+
+RESULT: DONE. StoreView is now the real /admin page.
+AdminHomeContent's placeholder + "Component Preview" card are
+gone; it renders <StoreView shop={shop} /> inside the App-Bridge
++ AppProvider wrappers. `npm run build` -> "Compiled
+successfully", zero errors, 9/9 static pages. Verified in a real
+browser (Chrome, localhost) — full Polaris shell renders, tabs
+switch, empty/error/loading states all render correctly (backend
+was not running locally, so the data-load error path is what
+displayed — see BROWSER RESULT below).
+
+================================================================
+LINE COUNT — frontend/app/admin/page.js
+================================================================
+  BEFORE : 791 lines
+  AFTER  : 1032 lines
+  DELTA  : +241 lines
+    (import line +4 names; +COD_STATUS_OPTIONS const; + the
+     StoreView body incl. the two IndexTables; AdminHomeContent
+     shrank by ~40 lines when the placeholder/preview cards were
+     removed.)
+
+================================================================
+POLARIS IMPORTS ADDED
+================================================================
+  Checked the existing import block first (20 names). NONE of the
+  four were present. ADDED (4):
+    Tabs         — the tab strip (replaces the hand-rolled tabButton)
+    IndexTable   — both data tables (IndexTable + IndexTable.Row + IndexTable.Cell)
+    Select       — the COD-order status dropdown (replaces <select>)
+    Spinner      — the "Loading store data…" indicator
+
+  NOT added: useRouter, useParams, any firebase import (per the
+  DROP decisions). react import unchanged (useState / useEffect /
+  useCallback / useMemo / Suspense all already present and still
+  used). useSearchParams (next/navigation) unchanged — still the
+  only next/navigation import, used by AdminHomeContent.
+
+================================================================
+CONFIRMATION — ALL 4 DROP DECISIONS APPLIED
+================================================================
+  [1] handleDisconnect + the Disconnect button -> DROPPED.
+      - No `handleDisconnect` function anywhere in StoreView.
+      - No DELETE /api/stores/:shop call.
+      - No router / router.push('/dashboard').
+      - No "Disconnect Store" button rendered (Page.secondaryActions
+        has only { content: 'Refresh', onAction: load }).
+      - The `disconnecting` useState was also removed — it
+        exclusively backed handleDisconnect + that button (see
+        LOGIC ADAPTED #1).
+
+  [2] onForegroundMessage / firebase effect -> DROPPED.
+      - No `import ... from '.../lib/firebase'`.
+      - The entire `useEffect(() => { const unsubscribe =
+        onForegroundMessage(...) ... }, [])` block is gone.
+      - Replaced in place with the exact comment:
+          // TODO: re-evaluate foreground push notifications for embedded context
+
+  [3] PushNotificationSetup -> NOT imported, NOT rendered.
+      - No `import PushNotificationSetup`.
+      - No <PushNotificationSetup .../> element.
+      - Comment placed where it used to render (top of the Page
+        BlockStack, before RevenueStats):
+          {/* TODO: port PushNotificationSetup */}
+
+  [4] useParams / useRouter -> NOT imported, NOT used.
+      - StoreView takes `shop` as a prop: `function StoreView({ shop })`.
+      - `shop` originates from useSearchParams().get('shop') in
+        AdminHomeContent and is passed down: <StoreView shop={shop} />.
+      - No `decodeURIComponent(params.shop || '')`.
+
+================================================================
+STATE VARIABLES & EFFECTS IN StoreView (as ported)
+================================================================
+STATE (6 — the source's 7 minus `disconnecting`):
+  tab               useState('abandoned')            (initializer byte-for-byte)
+  customers         useState([])                     (byte-for-byte)
+  orders            useState([])                     (byte-for-byte)
+  loading           useState(true)                   (byte-for-byte)
+  error             useState('')                     (byte-for-byte)
+  analyticsCustomer useState(null)                   (byte-for-byte)
+  -- REMOVED: disconnecting useState(false)  (see LOGIC ADAPTED #1)
+
+EFFECTS:
+  useEffect(() => { load(); }, [load])   -> KEPT BYTE-FOR-BYTE.
+  -- REMOVED: the onForegroundMessage useEffect (DROP decision 2),
+     replaced by the TODO comment.
+
+HANDLERS / DERIVED:
+  load  = useCallback(async () => {...}, [shop])
+      -> KEPT BYTE-FOR-BYTE. setLoading(true); setError('');
+         Promise.all([apiGet(.../customers), apiGet(.../orders)]);
+         setCustomers(c); setOrders(o); catch setError(err.message);
+         finally setLoading(false).
+  updateOrderStatus(id, status)  (async)
+      -> KEPT BYTE-FOR-BYTE. optimistic setOrders(prev.map(...));
+         apiSend(`/api/cod/order/${id}`, 'PATCH', { status });
+         catch -> setError(err.message); load().
+      -> NOTE on the "window.confirm in updateOrderStatus: keep
+         as-is" decision: the SOURCE updateOrderStatus has NO
+         window.confirm (the only window.confirm in StoreView was
+         inside the now-dropped handleDisconnect). So "keep as-is"
+         = nothing to change; updateOrderStatus is verbatim.
+  tabs (array) + selectedTab (derived)  -> NEW, see LOGIC ADAPTED #3.
+
+API CALLS (endpoints / methods / state — all identical to source):
+  GET    /api/stores/{encodeURIComponent(shop)}/customers   (load)   -> setCustomers
+  GET    /api/stores/{encodeURIComponent(shop)}/orders      (load)   -> setOrders
+                                                                       (+ error / loading)
+  PATCH  /api/cod/order/{id}  body { status }  (updateOrderStatus)   -> setOrders (optimistic);
+                                                                       on fail setError + load()
+  (DELETE /api/stores/{shop} is GONE — dropped with handleDisconnect.)
+
+================================================================
+LOGIC ADAPTED BEYOND JSX (and why)
+================================================================
+  #1  `disconnecting` state REMOVED.
+      WHY: it was read only by handleDisconnect (to guard re-entry)
+      and by the Disconnect button (disabled + label). Both are
+      dropped by decision [1]. Keeping the useState would be an
+      unused variable (dead code + eslint no-unused-vars). This is
+      a direct consequence of the DROP, not a separate change.
+
+  #2  `shop`: `const shop = decodeURIComponent(params.shop || '')`
+      -> `function StoreView({ shop })` (prop).
+      WHY: decision [1]/[4] — the embedded /admin route has no
+      dynamic path segment; shop is a query param read via
+      useSearchParams in AdminHomeContent and passed down. No
+      useParams. The value semantics are the same (a shop-domain
+      string); the source's decodeURIComponent is not needed
+      because searchParams.get() already returns a decoded value.
+
+  #3  Tab state <-> Polaris <Tabs> index mapping.
+      SOURCE: `tab` is a string ('abandoned'|'cod'|'automation');
+      hand-rolled tabButton(key,...) calls setTab(key).
+      PORTED: `tab` state + its useState('abandoned') initializer
+      are UNCHANGED. Added:
+        const tabs = [
+          { id: 'abandoned',  content: `Abandoned Carts (${customers.length})`, panelID: 'abandoned-panel' },
+          { id: 'cod',        content: `COD Orders (${orders.length})`,        panelID: 'cod-panel' },
+          { id: 'automation', content: 'Automations',                          panelID: 'automation-panel' },
+        ];
+        const selectedTab = Math.max(0, tabs.findIndex((t) => t.id === tab));
+      and `<Tabs tabs={tabs} selected={selectedTab}
+        onSelect={(idx) => setTab(tabs[idx].id)}>`.
+      WHY: Polaris <Tabs> is index-driven (selected: number,
+      onSelect(index)); the source's string state is preserved and
+      just bridged to/from the index. The count-in-label logic
+      matches the source's tabButton (append "(count)" for
+      abandoned/cod; none for automation, which passed count=null).
+
+  #4  COD status <select> -> Polaris <Select>.
+      SOURCE: `<select value={o.status} onChange={(e) =>
+        updateOrderStatus(o._id, e.target.value)}>` with three
+        <option>s: pending / confirmed / cancelled.
+      PORTED: `<Select label="Status" labelHidden
+        options={COD_STATUS_OPTIONS} value={o.status}
+        onChange={(value) => updateOrderStatus(o._id, value)} />`
+      where COD_STATUS_OPTIONS is a module-level const
+        [{label:'pending',value:'pending'}, {..'confirmed'..}, {..'cancelled'..}]
+      built from the distinct status strings the source used.
+      WHY: Polaris <Select> onChange passes the selected VALUE
+      string (verified in the installed d.ts:
+      `onChange?(selected: string, id: string)`), not a DOM event
+      — so `e.target.value` becomes `value`. `updateOrderStatus`
+      itself is untouched.
+
+  #5  CustomerAnalytics: mount-gate -> always-mounted + `open`.
+      SOURCE: `{analyticsCustomer && <CustomerAnalytics shop=...
+        customer=... onClose=... />}` (conditionally MOUNTED).
+      PORTED (per decision): `<CustomerAnalytics
+        open={!!analyticsCustomer} shop={shop}
+        customer={analyticsCustomer}
+        onClose={() => setAnalyticsCustomer(null)} />` — rendered
+      unconditionally; the ported CustomerAnalytics (Stage 2b)
+      already expects `open` for its Polaris <Modal>.
+      `shop={shop}` is passed even though the decision text listed
+      only open/customer/onClose — CustomerAnalytics needs `shop`
+      to build its /api/events URLs; omitting it would break the
+      fetch.
+
+  #6  Error box -> Polaris <Banner>.
+      SOURCE: a red <div> with <p className="font-medium">Couldn't
+      load store data</p> + <p>{error}</p> + a "Try again"
+      <button onClick={load}>.
+      PORTED: `<Banner tone="critical" title="Couldn't load store
+      data" action={{ content: 'Try again', onAction: load }}>
+      <Text as="p">{error}</Text></Banner>`. The "Try again" button
+      is now the Banner's `action`. (Minor: the heading apostrophe
+      is a straight ' — the source may have used a curly ’; purely
+      cosmetic.)
+
+  #7  Loading indicator -> Polaris <Spinner>.
+      SOURCE: a pulsing dot <span className="animate-pulse ..."/> +
+      "Loading store data…".
+      PORTED: `<InlineStack gap="200" blockAlign="center"><Spinner
+      accessibilityLabel="Loading store data" size="small" /><Text
+      as="span" tone="subdued">Loading store data…</Text></InlineStack>`.
+
+  #8  Sibling order around <Tabs>.
+      SOURCE flat order: tab strip, then error box, then loading
+      indicator, then the panels.
+      PORTED: RevenueStats, then error <Banner>, then loading
+      <Spinner>, then `<Tabs>` whose CHILDREN are the three panels.
+      WHY: Polaris <Tabs> renders its children as the tab panel, so
+      the non-tab-specific error/loading rows had to move above
+      <Tabs> rather than sit between the strip and the panels.
+      Functionally identical; the panels keep their exact gates:
+        {!loading && tab === 'abandoned' && <IndexTable .../>}
+        {!loading && tab === 'cod' && <IndexTable .../>}
+        {tab === 'automation' && <AutomationRules shop={shop} />}   (NOT loading-gated, matches source)
+
+  #9  Page header -> Polaris <Page>.
+      SOURCE: a custom flex <div> with <h1>{shop}</h1> + a
+      "Abandoned carts & COD orders" <p> + Refresh + Disconnect
+      buttons.
+      PORTED: `<Page title={shop} subtitle="Abandoned carts & COD
+      orders" secondaryActions={[{ content: 'Refresh', onAction:
+      load }]}>`. Disconnect dropped (decision 1). StoreView now
+      OWNS the <Page> (AdminHomeContent no longer renders one).
+
+  #10 The two <table>s -> Polaris <IndexTable>.
+      - `<table>/<thead>/<tbody>` -> `<IndexTable itemCount=...
+        selectable={false} headings={[{title:'...'}, ...]}>`.
+      - each `<tr>` -> `<IndexTable.Row id=... key=... position=...>`;
+        the abandoned-carts row keeps `onClick={() =>
+        setAnalyticsCustomer(c)}` (COD rows have no onClick, same as
+        source).
+      - each `<td>` -> `<IndexTable.Cell>`.
+      - the "No abandoned carts yet." / "No COD orders yet."
+        full-width empty <tr> -> the IndexTable `emptyState` prop
+        (renders when itemCount === 0).
+      - the `<div onClick={(e) => e.stopPropagation()}>` wrappers
+        around SendPushButton and WhatsAppButton are PRESERVED
+        verbatim from the source (so an action click doesn't also
+        fire the row's open-analytics onClick — standard React
+        bubble-stop, still valid inside IndexTable.Row).
+      - cell inner text/markup: Tailwind <span>/<p> -> <Text as=
+        "span"> (with tone="subdued" / fontWeight="medium" /
+        truncate as the source's classes implied); the item list
+        column uses <BlockStack>/<InlineStack>.
+      - VERIFIED in the installed Polaris 13.9.5 that <IndexTable>
+        wraps itself in <IndexProvider> internally (no separate
+        provider needed) and works standalone with selectable=false.
+
+  #11 AdminHomeContent trimmed.
+      - `host` (searchParams.get('host')) extraction REMOVED — it
+        was only shown in the deleted placeholder card; keeping it
+        would be an unused var. (App Bridge reads host from the URL
+        + the shopify-api-key meta itself.)
+      - The placeholder <Card> and the "Component Preview
+        (temporary)" <Card> are REMOVED entirely.
+      - The `<Page title="CartnCodForm"><BlockStack>...</BlockStack>
+        </Page>` wrappers are REMOVED — StoreView provides its own
+        <Page>.
+      - Return is now: <> <meta shopify-api-key> <Script app-bridge>
+        <AppProvider i18n={{}}> <StoreView shop={shop} /> </AppProvider> </>.
+
+  NOT CHANGED: load(), updateOrderStatus(), every WhatsApp/COD
+  message template literal (byte-for-byte), and every
+  already-ported child component (formatMoney/formatDate/
+  StatusBadge/SendPushButton/WhatsAppButton/RevenueStats/
+  CustomerAnalytics/StepEditor/RuleForm/AutomationRules) — those
+  files' regions were not touched. `export default function
+  AdminHome()` (the <Suspense> wrapper) — untouched.
+
+================================================================
+RESULT OF npm run build
+================================================================
+  > next build
+    ▲ Next.js 14.2.5
+   ✓ Compiled successfully
+     Linting and checking validity of types ...
+   ✓ Generating static pages (9/9)
+     Finalizing page optimization ...
+
+  Route (app)                              Size     First Load JS
+  ┌ ○ /                                    172 B          94.1 kB
+  ├ ○ /_not-found                          871 B            88 kB
+  ├ ○ /admin                               81.9 kB        169 kB   <- was 44.8 kB / 132 kB (Tabs + IndexTable + Select + Spinner)
+  ├ ƒ /api/auth/[...nextauth]              0 B                0 B
+  ├ ƒ /api/token                           0 B                0 B
+  ├ ƒ /cod-form/[shop]                     5.71 kB        92.8 kB
+  ├ ○ /dashboard                           2.18 kB         106 kB
+  ├ ƒ /dashboard/[shop]                    25.1 kB         112 kB
+  ├ ○ /install                             1.75 kB        95.7 kB
+  └ ○ /login                               1.16 kB        98.1 kB
+
+  ZERO errors, ZERO warnings. /admin still ○ (static shell +
+  useSearchParams CSR bailout). Route table otherwise identical.
+  Every non-/admin route byte-identical.
+
+================================================================
+RESULT OF LOADING /admin?shop=cartncod-form.myshopify.com&host=...
+IN A REAL BROWSER  (Chrome, localhost:3000 production build;
+LOCAL BACKEND WAS NOT RUNNING)
+================================================================
+  What rendered (three screenshots taken, one per tab):
+
+  PAGE CHROME:
+    - Polaris <Page> header: bold title "cartncod-form.myshopify.com"
+      (from title={shop}), grey subtitle "Abandoned carts & COD
+      orders", and a "Refresh" button in the top-right
+      (Page.secondaryActions). No "Disconnect" button anywhere
+      (drop confirmed visually).
+
+  BODY (top to bottom):
+    - RevenueStats EMPTY STATE: a light bordered box —
+      "No recovered revenue yet. Revenue will appear here once a
+      customer completes an order after receiving a push
+      notification or reminder." (rendered because !loading and no
+      revenue rows).
+    - ERROR BANNER (Polaris critical / red): heading "Couldn't
+      load store data", body "Cannot reach the backend (GET
+      http://localhost:4000/api/stores/cartncod-form.myshopify.com/customers).
+      Is it running at http://localhost:4000 and is CORS allowing
+      this origin? [Failed to fetch]", and a "Try again" button.
+      -> EXPECTED: no local backend on :4000. This proves load()
+         fired to the correct endpoint and the error path
+         (setError -> Banner) works.
+    - Polaris <Tabs> strip: "Abandoned Carts (0)", "COD Orders (0)",
+      "Automations". The count-in-label works (0 for both data
+      tabs from customers.length / orders.length; no count on
+      Automations).
+    - Tab panels (clicked each tab; the panel swapped correctly):
+        * Abandoned Carts -> IndexTable emptyState:
+          "No abandoned carts yet." (centered, subdued).
+        * COD Orders -> IndexTable emptyState:
+          "No COD orders yet." (centered, subdued).
+        * Automations -> the <AutomationRules shop={shop}>
+          component: "Automatically remind customers who leave
+          items in their cart." + a dark "+ New rule" primary
+          button + its OWN critical Banner ("Cannot reach the
+          backend (GET .../api/automation/.../rules) ... [Failed
+          to fetch]") + empty-state box "No automation rules yet.
+          Create one to start sending automatic reminders."
+      -> tab switching via Polaris <Tabs> onSelect ->
+         setTab(tabs[idx].id) works; the string<->index bridge is
+         correct.
+
+  CONSOLE:
+    - Exactly ONE error: `[next-auth][error][CLIENT_FETCH_ERROR]
+      ... There is a problem with the server configuration.`
+      -> This is from the ROOT layout's NextAuth <SessionProvider>
+         (frontend/app/layout.js -> <Providers>), which wraps
+         EVERY route incl. /admin and tries GET /api/auth/session.
+         It fails on the local production build (no NEXTAUTH_*
+         env). PRE-EXISTING and unrelated to this port — /admin
+         itself does not use NextAuth. Not introduced by Stage 2c.
+    - NO Polaris errors, NO React hydration errors, NO IndexTable
+      / Tabs / Select / Spinner / Modal errors.
+
+  NOT VERIFIABLE HERE: rendering with real customer/order/rule
+  data (needs the backend running + CORS for localhost:3000, or
+  loading inside Shopify Admin). The full UI SHELL, every Polaris
+  conversion, tab switching, all three empty states, the loading
+  path (seen briefly before the fetch rejected), and the error
+  path all render correctly.
+
+================================================================
+CLEANUP
+================================================================
+  Browser tab closed. Production server (npm run start) stopped —
+  confirmed nothing listening on :3000.
+
+================================================================
+END OF SELF-AUDIT
+================================================================
