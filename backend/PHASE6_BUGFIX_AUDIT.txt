@@ -1,0 +1,169 @@
+================================================================================
+PHASE 6 BUGFIX — COD PATCH AUTH + COD-FORM SUBMIT AUTH — SELF-AUDIT
+================================================================================
+Date: 2026-09-07
+Files modified: 2
+  1. backend/routes/cod.js
+  2. frontend/app/cod-form/[shop]/page.js
+
+
+================================================================================
+1. backend/routes/cod.js — PATCH /order/:id ownership check
+================================================================================
+Location: inside `router.patch('/order/:id', requireAuth, ...)`, immediately
+after the `existingOrder` not-found (404) guard. Was lines 93–96, now 93–95.
+
+OLD (3 lines of logic, 4 with the Store lookup):
+    const store = await Store.findOne({ shopDomain: existingOrder.shopDomain });
+    if (!store || store.ownerEmail !== req.userEmail) {
+      return res.status(403).json({ error: 'Not authorized for this order' });
+    }
+
+NEW:
+    if (req.shopDomain !== existingOrder.shopDomain) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+Why: after the Shopify session-token swap, `requireAuth` sets `req.shopDomain`
+(from the token's verified `dest`) and no longer sets `req.userEmail`. The old
+check compared a real `store.ownerEmail` against `undefined`, so it returned
+403 for every legitimate owner (or, if the store had no ownerEmail, passed
+with no shop scoping at all). The new check is the same IDOR guard already used
+in routes/push.js /send and /send-customer: the verified token's shop must
+equal the order's shopDomain. `existingOrder.shopDomain` is stored lowercase/
+trimmed by the CodOrder schema, and `req.shopDomain` is the lowercase hostname
+from the token, so the comparison is direct.
+
+Kept unchanged in cod.js:
+  - The `Store` require at the top (still used by POST /order for the
+    owner-notification email).
+  - POST /order (public), the status-enum validation, the 404 guard, the
+    findByIdAndUpdate, logging, error handling. No other edits.
+
+Line count (git HEAD -> working): 112 -> 111  (net -1: 4 lines removed,
+3 added — the Store.findOne line is gone).
+
+
+================================================================================
+2. frontend/app/cod-form/[shop]/page.js — submit via plain fetch
+================================================================================
+This is a public storefront page; it is never embedded in Shopify Admin, so
+`window.shopify` never exists and the old `apiSend()` path
+(getAuthToken -> window.shopify.idToken()) would spin 10s and throw
+"App Bridge did not initialize", so the order POST never went out.
+`POST /api/cod/order` is a public, no-auth route — no token needed.
+
+a) Import removed
+   OLD line 5:  import { apiSend } from '../../../lib/api';
+   `apiSend` was the ONLY thing imported from lib/api in this file, so the
+   whole import line was deleted (not just the specifier).
+   Post-change grep for `apiSend` / `lib/api` in the file: NO matches.
+   Remaining imports: `Suspense, useState` from react; `useParams,
+   useSearchParams` from next/navigation.
+
+b) handleSubmit — apiSend call replaced with fetch
+   OLD:
+     await apiSend('/api/cod/order', 'POST', {
+       shopDomain: shop, name: form.name, phone: form.phone,
+       address: form.address, city: form.city, pincode: form.pincode,
+       productName, productPrice: Number(price) || 0,
+       quantity: Number(form.quantity) || 1,
+     });
+     setDone(true);
+   NEW:
+     const res = await fetch(
+       `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/cod/order`,
+       {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+           shopDomain: shop,
+           name: form.name,
+           phone: form.phone,
+           address: form.address,
+           city: form.city,
+           pincode: form.pincode,
+           quantity: Number(form.quantity) || 1,
+           productName,
+           productPrice: Number(price) || 0,
+         }),
+       }
+     );
+     if (!res.ok) {
+       const err = await res.json().catch(() => ({}));
+       throw new Error(err.error || 'Order failed');
+     }
+     setDone(true);
+
+   The surrounding `setSubmitting(true)` / `try` / `catch (err) {
+   setError(err.message) }` / `finally { setSubmitting(false) }` is unchanged,
+   so a non-OK response now surfaces the backend's `error` string in the same
+   red-text UI slot as before.
+
+   DEVIATIONS from the spec's literal snippet (deliberate, to avoid a
+   regression):
+   - The snippet used bare identifiers `name, phone, address, city, pincode,
+     quantity`. In this component those live on the `form` state object
+     (`form.name`, ...), so they are sent as `form.name` etc. `productName`
+     and `price` are module-scope consts from `searchParams` and are used
+     directly.
+   - The snippet sent `price: Number(price)`. The backend
+     (routes/cod.js POST /order) reads `productPrice` from the body and would
+     store `productPrice: 0` if only `price` were sent. Kept the original
+     key/guard `productPrice: Number(price) || 0` so the order price is still
+     persisted. `quantity` kept as `Number(form.quantity) || 1` (the `|| 1`
+     guard preserved rather than a bare `Number(quantity)` that could send
+     NaN).
+   - `NEXT_PUBLIC_BACKEND_URL` is used exactly as the spec wrote it (no
+     `|| 'http://localhost:4000'` fallback like lib/api.js has). It must be
+     set in the frontend env for this page to work — it already is in
+     production (lib/api.js depends on it too).
+
+c) Kept exactly as-is: all `useState` (form, submitting, done, error), the
+   `update()` helper, the required-fields validation
+   (`!form.name.trim() || !form.phone.trim() || !form.address.trim()`), the
+   success screen, the whole form JSX, the styled-jsx `.input` block, and the
+   `Field` sub-component.
+
+Line count (git HEAD -> working): 201 -> 211  (net +10: fetch block is longer
+than the apiSend call; import line removed).
+
+
+================================================================================
+3. VALIDATION
+================================================================================
+node --check backend/routes/cod.js
+    OK  (no syntax errors)
+
+cd frontend && npm run build
+    ▲ Next.js 14.2.5
+    ✓ Compiled successfully
+    ✓ Linting and checking validity of types
+    ✓ Generating static pages (5/5)
+
+    Route (app)                     Size      First Load JS
+    ┌ ○ /                           6.95 kB   94.1 kB
+    ├ ○ /_not-found                 871 B     88 kB
+    ├ ○ /admin                      80 kB     167 kB
+    └ ƒ /cod-form/[shop]            5.17 kB   92.3 kB   (was 5.66 kB / 92.8 kB
+                                                        — lib/api no longer
+                                                        pulled into this route)
+    Zero errors, zero warnings.
+
+
+================================================================================
+4. LINE COUNTS (before -> after)
+================================================================================
+  backend/routes/cod.js                    112  ->  111   (-1)
+  frontend/app/cod-form/[shop]/page.js     201  ->  211   (+10)
+  (counts via `git show HEAD:<f> | wc -l`  vs  `wc -l < <f>`)
+
+
+================================================================================
+5. RESIDUAL NOTES (not in scope this task)
+================================================================================
+  - The COD form still collects no email address and links no cartToken /
+    sessionId, so a COD order remains disconnected from AbandonedCustomer.
+  - proxy.js still only soft-enforces the App Proxy signature (403s commented
+    out); no route there serves the COD form on the storefront domain.
+================================================================================

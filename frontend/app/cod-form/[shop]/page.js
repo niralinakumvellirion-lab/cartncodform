@@ -2,7 +2,6 @@
 
 import { Suspense, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
-import { apiSend } from '../../../lib/api';
 
 export default function CodFormPage() {
   return (
@@ -53,17 +52,28 @@ function CodForm() {
 
     setSubmitting(true);
     try {
-      await apiSend('/api/cod/order', 'POST', {
-        shopDomain: shop,
-        name: form.name,
-        phone: form.phone,
-        address: form.address,
-        city: form.city,
-        pincode: form.pincode,
-        productName,
-        productPrice: Number(price) || 0,
-        quantity: Number(form.quantity) || 1,
-      });
+      const res = await fetch(
+        `${process.env.NEXT_PUBLIC_BACKEND_URL}/api/cod/order`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            shopDomain: shop,
+            name: form.name,
+            phone: form.phone,
+            address: form.address,
+            city: form.city,
+            pincode: form.pincode,
+            quantity: Number(form.quantity) || 1,
+            productName,
+            productPrice: Number(price) || 0,
+          }),
+        }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Order failed');
+      }
       setDone(true);
     } catch (err) {
       setError(err.message);

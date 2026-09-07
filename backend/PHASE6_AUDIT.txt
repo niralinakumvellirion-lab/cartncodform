@@ -1,0 +1,572 @@
+================================================================================
+PHASE 6 — PRE-WORK AUDIT (COD FORM PATH)
+================================================================================
+Date: 2026-09-07
+Read-only. No files modified.
+Files captured verbatim with line numbers:
+  1. frontend/app/cod-form/[shop]/page.js   (202 lines)
+  2. backend/routes/cod.js                  (113 lines)
+  3. backend/routes/proxy.js                (82 lines)
+  4. backend/models/CodOrder.js             (59 lines)
+
+
+================================================================================
+1. frontend/app/cod-form/[shop]/page.js   (202 lines)
+================================================================================
+   1  'use client';
+   2
+   3  import { Suspense, useState } from 'react';
+   4  import { useParams, useSearchParams } from 'next/navigation';
+   5  import { apiSend } from '../../../lib/api';
+   6
+   7  export default function CodFormPage() {
+   8    return (
+   9      <Suspense
+  10        fallback={
+  11          <main className="flex min-h-screen items-center justify-center bg-gray-50">
+  12            <p className="text-sm text-gray-500">Loading…</p>
+  13          </main>
+  14        }
+  15      >
+  16        <CodForm />
+  17      </Suspense>
+  18    );
+  19  }
+  20
+  21  function CodForm() {
+  22    const params = useParams();
+  23    const searchParams = useSearchParams();
+  24    const shop = decodeURIComponent(params.shop || '');
+  25
+  26    const productName = searchParams.get('productName') || '';
+  27    const price = searchParams.get('price') || '';
+  28
+  29    const [form, setForm] = useState({
+  30      name: '',
+  31      phone: '',
+  32      address: '',
+  33      city: '',
+  34      pincode: '',
+  35      quantity: 1,
+  36    });
+  37    const [submitting, setSubmitting] = useState(false);
+  38    const [done, setDone] = useState(false);
+  39    const [error, setError] = useState('');
+  40
+  41    function update(field, value) {
+  42      setForm((f) => ({ ...f, [field]: value }));
+  43    }
+  44
+  45    async function handleSubmit(e) {
+  46      e.preventDefault();
+  47      setError('');
+  48
+  49      if (!form.name.trim() || !form.phone.trim() || !form.address.trim()) {
+  50        setError('Name, phone and address are required.');
+  51        return;
+  52      }
+  53
+  54      setSubmitting(true);
+  55      try {
+  56        await apiSend('/api/cod/order', 'POST', {
+  57          shopDomain: shop,
+  58          name: form.name,
+  59          phone: form.phone,
+  60          address: form.address,
+  61          city: form.city,
+  62          pincode: form.pincode,
+  63          productName,
+  64          productPrice: Number(price) || 0,
+  65          quantity: Number(form.quantity) || 1,
+  66        });
+  67        setDone(true);
+  68      } catch (err) {
+  69        setError(err.message);
+  70      } finally {
+  71        setSubmitting(false);
+  72      }
+  73    }
+  74
+  75    if (done) {
+  76      return (
+  77        <main className="flex min-h-screen items-center justify-center bg-gray-50 px-6">
+  78          <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+  79            <div className="text-4xl">✅</div>
+  80            <h1 className="mt-4 text-xl font-bold text-gray-900">Order placed!</h1>
+  81            <p className="mt-2 text-sm text-gray-600">
+  82              Thanks {form.name.split(' ')[0]}. Your Cash-on-Delivery order has been received and is
+  83              pending confirmation. We&apos;ll call you on {form.phone} shortly.
+  84            </p>
+  85          </div>
+  86        </main>
+  87      );
+  88    }
+  89
+  90    return (
+  91      <main className="flex min-h-screen items-center justify-center bg-gray-50 px-6 py-12">
+  92        <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-8 shadow-sm">
+  93          <h1 className="text-xl font-bold text-gray-900">Cash on Delivery Order</h1>
+  94          <p className="mt-1 text-xs text-gray-400">{shop}</p>
+  95
+  96          {/* Product summary */}
+  97          <div className="mt-4 rounded-xl bg-gray-50 p-4">
+  98            <p className="text-sm font-semibold text-gray-900">{productName || 'Product'}</p>
+  99            <p className="mt-1 text-sm text-gray-600">
+ 100              Price: <span className="font-medium">{price ? Number(price).toFixed(2) : '—'}</span>
+ 101            </p>
+ 102          </div>
+ 103
+ 104          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+ 105            <Field label="Full Name" required>
+ 106              <input
+ 107                type="text"
+ 108                value={form.name}
+ 109                onChange={(e) => update('name', e.target.value)}
+ 110                className="input"
+ 111              />
+ 112            </Field>
+ 113
+ 114            <Field label="Phone Number" required>
+ 115              <input
+ 116                type="tel"
+ 117                value={form.phone}
+ 118                onChange={(e) => update('phone', e.target.value)}
+ 119                className="input"
+ 120              />
+ 121            </Field>
+ 122
+ 123            <Field label="Full Address" required>
+ 124              <textarea
+ 125                rows={3}
+ 126                value={form.address}
+ 127                onChange={(e) => update('address', e.target.value)}
+ 128                className="input"
+ 129              />
+ 130            </Field>
+ 131
+ 132            <div className="grid grid-cols-2 gap-4">
+ 133              <Field label="City">
+ 134                <input
+ 135                  type="text"
+ 136                  value={form.city}
+ 137                  onChange={(e) => update('city', e.target.value)}
+ 138                  className="input"
+ 139                />
+ 140              </Field>
+ 141              <Field label="Pincode">
+ 142                <input
+ 143                  type="text"
+ 144                  value={form.pincode}
+ 145                  onChange={(e) => update('pincode', e.target.value)}
+ 146                  className="input"
+ 147                />
+ 148              </Field>
+ 149            </div>
+ 150
+ 151            <Field label="Quantity">
+ 152              <input
+ 153                type="number"
+ 154                min={1}
+ 155                value={form.quantity}
+ 156                onChange={(e) => update('quantity', e.target.value)}
+ 157                className="input"
+ 158              />
+ 159            </Field>
+ 160
+ 161            {error && <p className="text-sm text-red-600">{error}</p>}
+ 162
+ 163            <button
+ 164              type="submit"
+ 165              disabled={submitting}
+ 166              className="w-full rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
+ 167            >
+ 168              {submitting ? 'Submitting…' : 'Place COD Order'}
+ 169            </button>
+ 170          </form>
+ 171        </div>
+ 172
+ 173        <style jsx global>{`
+ 174          .input {
+ 175            width: 100%;
+ 176            border-radius: 0.5rem;
+ 177            border: 1px solid #d1d5db;
+ 178            padding: 0.5rem 0.75rem;
+ 179            font-size: 0.875rem;
+ 180          }
+ 181          .input:focus {
+ 182            outline: none;
+ 183            border-color: #4f46e5;
+ 184            box-shadow: 0 0 0 1px #4f46e5;
+ 185          }
+ 186        `}</style>
+ 187      </main>
+ 188    );
+ 189  }
+ 190
+ 191  function Field({ label, required, children }) {
+ 192    return (
+ 193      <label className="block">
+ 194        <span className="block text-sm font-medium text-gray-700">
+ 195          {label}
+ 196          {required && <span className="text-red-500"> *</span>}
+ 197        </span>
+ 198        <div className="mt-1">{children}</div>
+ 199      </label>
+ 200    );
+ 201  }
+ 202
+
+
+================================================================================
+2. backend/routes/cod.js   (113 lines)
+================================================================================
+   1  const express = require('express');
+   2  const CodOrder = require('../models/CodOrder');
+   3  const Store = require('../models/Store');
+   4  const { sendNewCodOrderEmail } = require('../utils/email');
+   5  const { sendPushToStore } = require('../utils/pushNotification');
+   6  const { requireAuth } = require('../middleware/requireOwner');
+   7
+   8  const router = express.Router();
+   9
+  10  /**
+  11   * POST /api/cod/order
+  12   * Public endpoint — the customer-facing COD form posts here.
+  13   *
+  14   * Body: { shopDomain, name, phone, address, city, pincode, productName, productPrice, quantity }
+  15   */
+  16  router.post('/order', async (req, res) => {
+  17    try {
+  18      const {
+  19        shopDomain,
+  20        name,
+  21        phone,
+  22        address,
+  23        city,
+  24        pincode,
+  25        productName,
+  26        productPrice,
+  27        quantity,
+  28      } = req.body;
+  29
+  30      if (!shopDomain || !name || !phone || !address) {
+  31        return res
+  32          .status(400)
+  33          .json({ error: 'shopDomain, name, phone and address are required' });
+  34      }
+  35
+  36      const order = await CodOrder.create({
+  37        shopDomain: shopDomain.trim().toLowerCase(),
+  38        name: name.trim(),
+  39        phone: phone.trim(),
+  40        address: address.trim(),
+  41        city: (city || '').trim(),
+  42        pincode: (pincode || '').trim(),
+  43        productName: (productName || '').trim(),
+  44        productPrice: Number(productPrice) || 0,
+  45        quantity: Number(quantity) || 1,
+  46        status: 'pending',
+  47      });
+  48
+  49      console.log(`[cod] New COD order for ${order.shopDomain} from ${order.name} (${order.phone})`);
+  50
+  51      // Notify the store owner about the new COD order.
+  52      const store = await Store.findOne({ shopDomain: order.shopDomain });
+  53      const ownerEmail = (store && store.ownerEmail) || process.env.TEST_OWNER_EMAIL;
+  54      if (ownerEmail) {
+  55        sendNewCodOrderEmail(order, ownerEmail);
+  56        console.log(`[cod] New COD order email triggered for owner: ${ownerEmail}`);
+  57      } else {
+  58        console.log('[cod] No owner email available (set TEST_OWNER_EMAIL) — skipping notification');
+  59      }
+  60
+  61      // Push-notify the store owner about the new COD order.
+  62      sendPushToStore(
+  63        order.shopDomain,
+  64        '📦 New COD Order',
+  65        `${order.name} placed a COD order for ${order.productName}`
+  66      );
+  67
+  68      return res.status(201).json({ success: true, order });
+  69    } catch (err) {
+  70      console.error('[cod] POST /order error:', err.message);
+  71      return res.status(500).json({ error: 'Failed to save COD order' });
+  72    }
+  73  });
+  74
+  75  /**
+  76   * PATCH /api/cod/order/:id
+  77   * Owner updates the status of a COD order (pending/confirmed/cancelled).
+  78   */
+  79  router.patch('/order/:id', requireAuth, async (req, res) => {
+  80    try {
+  81      const { status } = req.body;
+  82      const allowed = ['pending', 'confirmed', 'cancelled'];
+  83
+  84      if (!allowed.includes(status)) {
+  85        return res.status(400).json({ error: `status must be one of ${allowed.join(', ')}` });
+  86      }
+  87
+  88      const existingOrder = await CodOrder.findById(req.params.id);
+  89      if (!existingOrder) {
+  90        return res.status(404).json({ error: 'COD order not found' });
+  91      }
+  92
+  93      const store = await Store.findOne({ shopDomain: existingOrder.shopDomain });
+  94      if (!store || store.ownerEmail !== req.userEmail) {
+  95        return res.status(403).json({ error: 'Not authorized for this order' });
+  96      }
+  97
+  98      const order = await CodOrder.findByIdAndUpdate(
+  99        req.params.id,
+ 100        { status },
+ 101        { new: true }
+ 102      );
+ 103
+ 104      console.log(`[cod] Order ${order._id} status -> ${status}`);
+ 105      return res.json({ success: true, order });
+ 106    } catch (err) {
+ 107      console.error('[cod] PATCH /order/:id error:', err.message);
+ 108      return res.status(500).json({ error: 'Failed to update COD order' });
+ 109    }
+ 110  });
+ 111
+ 112  module.exports = router;
+ 113
+
+
+================================================================================
+3. backend/routes/proxy.js   (82 lines)
+================================================================================
+   1  const express = require('express');
+   2  const router = express.Router();
+   3  const path = require('path');
+   4  const fs = require('fs');
+   5  const crypto = require('crypto');
+   6
+   7  /**
+   8   * Verify Shopify's App Proxy request signature.
+   9   * Shopify appends ?signature=<hmac>&<other signed params> to every
+  10   * App Proxy request; the HMAC is SHA256 of the remaining params
+  11   * sorted by key and concatenated as key=value (no separator),
+  12   * keyed with the app's shared secret (SHOPIFY_API_SECRET).
+  13   */
+  14  function verifyProxySignature(query) {
+  15    try {
+  16      const { signature, ...rest } = query;
+  17      if (!signature) return false;
+  18      if (!process.env.SHOPIFY_API_SECRET) {
+  19        console.error('[proxy] SHOPIFY_API_SECRET not configured — cannot verify signature');
+  20        return false;
+  21      }
+  22
+  23      const sorted = Object.keys(rest)
+  24        .sort()
+  25        .map(key => {
+  26          const val = Array.isArray(rest[key]) ? rest[key].join(',') : rest[key];
+  27          return `${key}=${val}`;
+  28        })
+  29        .join('');
+  30
+  31      const hash = crypto
+  32        .createHmac('sha256', process.env.SHOPIFY_API_SECRET)
+  33        .update(sorted)
+  34        .digest('hex');
+  35
+  36      return hash === signature;
+  37    } catch (err) {
+  38      console.error('[proxy] Signature verification error:', err.message);
+  39      return false;
+  40    }
+  41  }
+  42
+  43  // Serve Firebase SW via App Proxy
+  44  // URL: https://cartncod-form.myshopify.com/apps/cartncodform/sw.js
+  45  router.get('/sw.js', (req, res) => {
+  46    if (!verifyProxySignature(req.query)) {
+  47      console.warn('[proxy] Invalid or missing App Proxy signature on /sw.js — allowing for now (soft enforcement)');
+  48      // return res.status(403).send('Invalid signature'); // uncomment once confirmed safe
+  49    }
+  50
+  51    const swPath = path.join(__dirname, '../public/cartncodform-sw.js');
+  52
+  53    if (!fs.existsSync(swPath)) {
+  54      return res.status(404).send('Service worker not found');
+  55    }
+  56
+  57    const swContent = fs.readFileSync(swPath, 'utf8');
+  58
+  59    res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  60    res.setHeader('Service-Worker-Allowed', '/apps/cartncodform/');
+  61    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  62    res.setHeader('Pragma', 'no-cache');
+  63    res.setHeader('Expires', '0');
+  64    res.setHeader('Access-Control-Allow-Origin', '*');
+  65    res.setHeader('X-Content-Type-Options', 'nosniff');
+  66
+  67    console.log('[proxy] Served SW, headers set for root scope');
+  68    res.send(swContent);
+  69  });
+  70
+  71  // Health check
+  72  router.get('/health', (req, res) => {
+  73    if (!verifyProxySignature(req.query)) {
+  74      console.warn('[proxy] Invalid or missing App Proxy signature on /health — allowing for now (soft enforcement)');
+  75      // return res.status(403).json({ error: 'Invalid signature' }); // uncomment once confirmed safe
+  76    }
+  77
+  78    res.json({ success: true, service: 'CartnCodForm Proxy' });
+  79  });
+  80
+  81  module.exports = router;
+  82
+
+
+================================================================================
+4. backend/models/CodOrder.js   (59 lines)
+================================================================================
+   1  const mongoose = require('mongoose');
+   2
+   3  const codOrderSchema = new mongoose.Schema({
+   4    shopDomain: {
+   5      type: String,
+   6      required: true,
+   7      trim: true,
+   8      lowercase: true,
+   9      index: true,
+  10    },
+  11    name: {
+  12      type: String,
+  13      required: true,
+  14      trim: true,
+  15    },
+  16    phone: {
+  17      type: String,
+  18      required: true,
+  19      trim: true,
+  20    },
+  21    address: {
+  22      type: String,
+  23      required: true,
+  24      trim: true,
+  25    },
+  26    city: {
+  27      type: String,
+  28      trim: true,
+  29    },
+  30    pincode: {
+  31      type: String,
+  32      trim: true,
+  33    },
+  34    productName: {
+  35      type: String,
+  36      trim: true,
+  37    },
+  38    productPrice: {
+  39      type: Number,
+  40      default: 0,
+  41    },
+  42    quantity: {
+  43      type: Number,
+  44      default: 1,
+  45      min: 1,
+  46    },
+  47    status: {
+  48      type: String,
+  49      enum: ['pending', 'confirmed', 'cancelled'],
+  50      default: 'pending',
+  51    },
+  52    createdAt: {
+  53      type: Date,
+  54      default: Date.now,
+  55    },
+  56  });
+  57
+  58  module.exports = mongoose.model('CodOrder', codOrderSchema);
+  59
+
+
+================================================================================
+OBSERVATIONS (not changes — context for Phase 6 planning)
+================================================================================
+
+A. COD form frontend (cod-form/[shop]/page.js)
+   - Public storefront page. Route param `[shop]` -> `params.shop`
+     (decodeURIComponent). `productName` + `price` come from query string.
+   - Client component, wrapped in <Suspense> because of useSearchParams()
+     (App Router CSR-bailout rule — same pattern as admin/page.js).
+   - Submits via `apiSend('/api/cod/order', 'POST', {...})`.
+     NOTE: apiSend() calls getAuthToken() -> window.shopify.idToken(). This
+     page is NOT embedded in Shopify Admin (it's a storefront page), so
+     window.shopify will never exist here -> getAuthToken() will spin for
+     10s then throw "App Bridge did not initialize", and the POST is never
+     sent. This path is currently BROKEN for the standalone storefront form.
+     (POST /api/cod/order itself is a public, no-auth route, so the fix is to
+     not send an Authorization header from this page — e.g. a plain fetch, or
+     an apiSend variant that skips the token.)
+   - Fields collected: name, phone, address, city, pincode, quantity.
+     No email field on the form. No cart-token / sessionId linkage — a COD
+     order is not tied to an AbandonedCustomer row.
+   - Tailwind utility classes reference custom colors `bg-brand` /
+     `bg-brand-dark` (defined in tailwind.config) + a local `.input` class
+     via styled-jsx global.
+
+B. backend/routes/cod.js
+   - POST /api/cod/order — PUBLIC (no requireAuth). Validates shopDomain,
+     name, phone, address. Creates CodOrder (status 'pending'). Fires (fire
+     and forget, not awaited):
+       * sendNewCodOrderEmail(order, ownerEmail)  — ownerEmail from
+         Store.ownerEmail, else process.env.TEST_OWNER_EMAIL.
+       * sendPushToStore(shopDomain, title, body) — owner FCM push.
+   - PATCH /api/cod/order/:id — requireAuth. Validates status in
+     [pending,confirmed,cancelled], loads order, then authz check:
+         if (!store || store.ownerEmail !== req.userEmail) -> 403
+     >>> STALE AUTH BUG: after the Shopify session-token swap, requireAuth no
+     longer sets req.userEmail (tokens carry no email). req.userEmail is
+     always undefined here, so:
+         - store has an ownerEmail  -> 'someone@x' !== undefined -> 403 ALWAYS
+           (owners can never update COD order status from the embedded admin)
+         - store.ownerEmail falsy   -> undefined !== undefined -> false ->
+           passes with NO shop check at all (weak).
+     Same class of bug that was already fixed in routes/push.js /send and
+     /send-customer. The correct fix mirrors those:
+         const store = await Store.findOne({ shopDomain: existingOrder.shopDomain });
+         if (!store || req.shopDomain !== existingOrder.shopDomain) return 403;
+     (existingOrder.shopDomain is already normalized lowercase by the schema.)
+   - Frontend caller: admin/page.js StoreView.updateOrderStatus() ->
+     apiSend(`/api/cod/order/${id}`, 'PATCH', { status }). That call DOES run
+     inside the embedded admin, so it will carry a valid session token and
+     set req.shopDomain — only the server-side check is wrong.
+
+C. backend/routes/proxy.js
+   - Mounted at app.use('/apps/cartncodform', proxyRouter) in server.js.
+   - verifyProxySignature() implements Shopify App Proxy HMAC (SHA256 of
+     sorted key=value params, no separator, keyed with SHOPIFY_API_SECRET).
+     NOTE: this is the App-Proxy scheme (concatenated, no '&'), distinct from
+     the query-string HMAC used for OAuth/redirect verification.
+   - BOTH routes only WARN on a bad/missing signature — the 403 returns are
+     commented out ("soft enforcement"). So /apps/cartncodform/sw.js and
+     /apps/cartncodform/health are effectively open.
+   - /sw.js reads backend/public/cartncodform-sw.js from disk and serves it
+     with wide-open CORS + Service-Worker-Allowed: /apps/cartncodform/ +
+     no-cache headers. 404 if the file is missing.
+   - No COD-form-serving route here — the proxy currently only serves the SW
+     and a health check. If Phase 6 is about serving the COD form through the
+     App Proxy (so it renders on the merchant's storefront domain), that
+     route does not exist yet.
+
+D. backend/models/CodOrder.js
+   - Flat schema: shopDomain (indexed, lowercased), name, phone, address
+     (all required), city, pincode, productName, productPrice (default 0),
+     quantity (default 1, min 1), status enum [pending,confirmed,cancelled]
+     default pending, createdAt.
+   - No email field. No sessionId / cartToken. No updatedAt. No compound
+     index (only the single shopDomain index).
+
+E. Cross-cutting
+   - server.js mounts:  /api/cod -> codRoutes ,  /apps/cartncodform ->
+     proxyRouter  (confirmed in earlier reads of server.js).
+   - The only auth helper imported by cod.js is requireAuth; requireStoreOwner
+     is NOT used here (cod.js does its own inline store/owner check — the
+     buggy one in B).
+================================================================================

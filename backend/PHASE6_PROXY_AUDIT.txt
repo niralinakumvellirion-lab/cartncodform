@@ -1,0 +1,220 @@
+================================================================================
+PHASE 6 — APP PROXY COD FORM ROUTE — SELF-AUDIT
+================================================================================
+Date: 2026-09-07
+Files:
+  - backend/routes/proxy.js   MODIFIED
+  - shopify.app.toml          READ ONLY (proxy config confirmed, not modified)
+
+
+================================================================================
+0. shopify.app.toml — App Proxy config (confirmed, unchanged)
+================================================================================
+  [app_proxy]
+  url    = "https://cartncodform-backend.onrender.com/apps/cartncodform"
+  subpath = "cartncodform"
+  prefix  = "apps"
+
+=> Shopify proxies  https://{shop}/apps/cartncodform/*
+             ->     https://cartncodform-backend.onrender.com/apps/cartncodform/*
+   server.js mounts proxyRouter at app.use('/apps/cartncodform', proxyRouter),
+   so the two new routes resolve to:
+     GET  https://{shop}/apps/cartncodform/cod-form
+     POST https://{shop}/apps/cartncodform/cod-order
+   Shopify appends shop / path_prefix / timestamp / signature to EVERY proxied
+   request (GET and POST), so verifyProxySignature(req.query) works for both.
+
+
+================================================================================
+1. GET /cod-form — exists, signature HARD-enforced
+================================================================================
+CONFIRMED. proxy.js line 103.
+
+  router.get('/cod-form', (req, res) => {
+    if (!verifyProxySignature(req.query)) {
+      console.warn('[proxy] ... /cod-form — rejecting');
+      return res.status(403).send('Invalid signature');   // <-- ENFORCED (line 106)
+    }
+    ...
+  });
+
+Behaviour:
+  a) Signature enforced: any request without a valid App Proxy signature gets
+     403 "Invalid signature" and no HTML is served. (verifyProxySignature also
+     returns false when SHOPIFY_API_SECRET is unset -> 403, fail-closed.)
+  b) Query params read:
+       - shop        -> String(req.query.shop).trim().toLowerCase()
+       - productName -> String(req.query.productName || '')
+       - price       -> String(req.query.price || '')
+       - productId   -> String(req.query.productId || '')
+     price is parsed to a number for display only (priceLabel = N.toFixed(2),
+     or "—" when absent/NaN).
+  c) Serves a single self-contained HTML document:
+       - No external JS/CSS. One inline <style> block, one inline <script>.
+       - Mobile-friendly: <meta viewport>, .wrap { max-width: 480px; margin:
+         0 auto }, box-sizing border-box, responsive .row flexbox for
+         city/pincode.
+       - productName + price shown in a ".summary" box at the top of the card.
+       - <meta name="robots" content="noindex">.
+       - Form id="cod-form" with fields (see §3).
+       - Inline <script> (IIFE, ES5-safe): client-side required-field check
+         (name/phone/address), then
+           fetch('/apps/cartncodform/cod-order', { method:'POST',
+             headers:{'Content-Type':'application/json'}, body: JSON.stringify(
+               { shopDomain, name, phone, address, city, pincode,
+                 quantity:Number, productName, productPrice:Number, productId }) })
+         -> root-relative URL, so the POST goes back through the SAME merchant
+            domain / App Proxy (NOT the Vercel domain).
+         On success ({ ok && body.success }): the card innerHTML is replaced
+         with the inline thank-you:
+           "✅  Order placed!  We'll confirm via WhatsApp/call soon."
+         On failure: button re-enabled, error text shown in the ".msg.err" div
+         (uses body.error when the backend provides one).
+  d) Content-Type: text/html; charset=utf-8   (+ Cache-Control: no-store)
+
+XSS: shop / productName / price / productId are attacker-influenceable query
+params. Text interpolation goes through escapeHtml() (new helper: & < > " ').
+The values handed to the inline script are emitted as
+  JSON.stringify({...}).replace(/</g, '\\u003c')
+so the payload cannot terminate the <script> element or inject markup.
+
+
+================================================================================
+2. POST /cod-order — exists, signature HARD-enforced, no requireAuth
+================================================================================
+CONFIRMED. proxy.js line 316.
+
+  router.post('/cod-order', async (req, res) => {
+    if (!verifyProxySignature(req.query)) {
+      console.warn('[proxy] ... /cod-order — rejecting');
+      return res.status(403).json({ success: false, error: 'Invalid signature' }); // line 319
+    }
+    try { ... } catch { 500 { success:false, error:'Failed to save COD order' } }
+  });
+
+  - NOT protected by requireAuth (public storefront route) — only by the App
+    Proxy signature. Confirmed: no `requireAuth` reference anywhere in
+    proxy.js.
+  - shop resolved from req.query.shop (App-Proxy-appended), falling back to
+    req.body.shopDomain; trimmed + lowercased.
+  - Body fields read from req.body: name, phone, address, city, pincode,
+    quantity, productName, productPrice  (productId is also accepted from the
+    body but not persisted — CodOrder has no such field).
+  - Required-field guard: shop + name + phone + address -> 400
+    { success:false, error:'shop, name, phone and address are required' }.
+  - Creates the CodOrder with the SAME normalisation as routes/cod.js
+    POST /order (trim all strings, Number(productPrice)||0, Number(quantity)||1,
+    status:'pending').
+  - Same fire-and-forget owner notifications as routes/cod.js POST /order:
+      * sendNewCodOrderEmail(order, ownerEmail)  (ownerEmail from Store, else
+        process.env.TEST_OWNER_EMAIL)
+      * sendPushToStore(shop, '📦 New COD Order', '<name> placed a COD order
+        for <productName>')
+  - Success: 201 { success: true, orderId: order._id }
+  - Failure: 500 { success: false, error: 'Failed to save COD order' }
+
+DEVIATION / INTERPRETATION:
+  The spec bullet said "Creates a CodOrder document (same logic as
+  backend/routes/cod.js POST /order)". routes/cod.js POST /order also fires the
+  owner email + owner push after creating the order. Those were included here
+  too, so a proxy-originated COD order notifies the merchant exactly like a
+  Vercel-form order does. They are unawaited (fire-and-forget), matching
+  cod.js. If undesired for the proxy path, remove the Store lookup +
+  sendNewCodOrderEmail + sendPushToStore block (lines ~348-362) and the
+  Store/email/push requires at the top.
+  Also added: `productId` is accepted in the POST body but silently ignored
+  (no schema field). The response uses `orderId` (spec's exact key), not the
+  full `order` object that cod.js returns.
+
+
+================================================================================
+3. HTML form fields — match required set
+================================================================================
+CONFIRMED — the served form has exactly these inputs (name attributes):
+    name      <input type="text">        required (client + server)
+    phone     <input type="tel">         required (client + server)
+    address   <textarea rows="3">        required (client + server)
+    city      <input type="text">        optional
+    pincode   <input type="text">        optional
+    quantity  <input type="number" min="1" value="1">   optional, defaults 1
+
+Matches the field list in the task and the existing
+frontend/app/cod-form/[shop]/page.js form (name, phone, address, city,
+pincode, quantity). productName / price are display-only (from query params),
+not user inputs — same as the Vercel page.
+
+
+================================================================================
+4. Signature enforcement on existing routes
+================================================================================
+  /health   — ENFORCEMENT UNCOMMENTED. proxy.js line 89-93:
+                if (!verifyProxySignature(req.query)) {
+                  console.warn('[proxy] ... /health — rejecting');
+                  return res.status(403).json({ error: 'Invalid signature' });
+                }
+              (comment text also updated from "allowing for now" -> "rejecting")
+
+  /sw.js    — LEFT AS SOFT ENFORCEMENT (unchanged). proxy.js line 62-66:
+                if (!verifyProxySignature(req.query)) {
+                  console.warn('[proxy] ... /sw.js — allowing for now (soft enforcement)');
+                  // return res.status(403).send('Invalid signature'); // uncomment once confirmed safe
+                }
+              The 403 return is still commented out — the service-worker
+              registration flow is sensitive and was deliberately not touched.
+
+  /cod-form  — HARD-enforced (new).
+  /cod-order — HARD-enforced (new).
+
+
+================================================================================
+5. node --check
+================================================================================
+  cd backend && node --check backend/routes/proxy.js
+    -> OK  (no syntax errors)
+
+
+================================================================================
+6. Line count — backend/routes/proxy.js
+================================================================================
+  git HEAD -> working tree:   81  ->  380   (+299)
+
+  Added:
+    +16   top: CodOrder/Store/email/push requires + escapeHtml() helper
+    + 1   /health: 403 return uncommented (net; comment line replaced)
+    ~210  GET /cod-form (route handler + the embedded HTML/CSS/JS string)
+    ~72   POST /cod-order (route handler)
+  Unchanged: verifyProxySignature(), GET /sw.js, module.exports.
+
+
+================================================================================
+7. CodOrder model fields used — vs schema
+================================================================================
+CodOrder.create({...}) in POST /cod-order writes:
+
+  field         value written                         schema (models/CodOrder.js)          match
+  -----------   -----------------------------------   ----------------------------------   -----
+  shopDomain    shop (trim + lowercase)               String, required, trim, lowercase,   YES
+                                                      index
+  name          String(name).trim()                  String, required, trim               YES
+  phone         String(phone).trim()                 String, required, trim               YES
+  address       String(address).trim()               String, required, trim               YES
+  city          String(city||'').trim()              String, trim                         YES
+  pincode       String(pincode||'').trim()           String, trim                         YES
+  productName   String(productName||'').trim()       String, trim                         YES
+  productPrice  Number(productPrice) || 0            Number, default 0                    YES
+  quantity      Number(quantity) || 1               Number, default 1, min 1             YES (>=1 guaranteed by ||1)
+  status        'pending' (literal)                  String, enum [pending,confirmed,     YES
+                                                     cancelled], default 'pending'
+
+  createdAt     not set explicitly -> schema default (Date.now)                            n/a
+
+  NOT written to the model:
+    productId — accepted from req.body but there is NO productId field on
+                CodOrder, so it is intentionally dropped (used only client-side
+                / for the notification context if ever needed).
+
+  All persisted fields exist on the schema; no unknown keys are written
+  (Mongoose would strip them anyway, but there are none). Every `required`
+  field (shopDomain, name, phone, address) is guarded by the 400 check before
+  create.
+================================================================================

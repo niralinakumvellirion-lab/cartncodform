@@ -90,9 +90,8 @@ router.patch('/order/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'COD order not found' });
     }
 
-    const store = await Store.findOne({ shopDomain: existingOrder.shopDomain });
-    if (!store || store.ownerEmail !== req.userEmail) {
-      return res.status(403).json({ error: 'Not authorized for this order' });
+    if (req.shopDomain !== existingOrder.shopDomain) {
+      return res.status(403).json({ error: 'Forbidden' });
     }
 
     const order = await CodOrder.findByIdAndUpdate(
