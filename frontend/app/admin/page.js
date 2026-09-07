@@ -148,6 +148,79 @@ function SendPushButton({ shop, cartValue, cartItems, productImageUrl, sessionId
   );
 }
 
+function SendEmailButton({ shop, sessionId, cartToken }) {
+  const [active, setActive] = useState(false);
+  const [emailSubject, setEmailSubject] = useState('');
+  const [emailBody, setEmailBody] = useState('');
+  const [sending, setSending] = useState(false);
+
+  async function sendEmail() {
+    setSending(true);
+    try {
+      await apiSend(
+        `/api/push/send-email-test`,
+        'POST',
+        { shopDomain: shop, cartToken: sessionId, subject: emailSubject, body: emailBody },
+      );
+      setActive(false);
+      setEmailSubject('');
+      setEmailBody('');
+    } catch (e) {
+      console.error('[email] send-email-test failed:', e);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const activator = (
+    <Button onClick={(e) => { e.stopPropagation(); setActive(true); }}>
+      ✉️ Email
+    </Button>
+  );
+
+  return (
+    <Popover
+      active={active}
+      activator={activator}
+      onClose={() => setActive(false)}
+      preferredAlignment="right"
+    >
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 264 }}>
+        <Card>
+          <FormLayout>
+            <TextField
+              label="Subject"
+              value={emailSubject}
+              onChange={(value) => setEmailSubject(value)}
+              autoComplete="off"
+            />
+            <TextField
+              label="Message"
+              value={emailBody}
+              onChange={(value) => setEmailBody(value)}
+              multiline={2}
+              autoComplete="off"
+            />
+            <InlineStack gap="200">
+              <Button
+                variant="primary"
+                onClick={sendEmail}
+                loading={sending}
+                disabled={sending}
+              >
+                Send
+              </Button>
+              <Button variant="plain" onClick={(e) => { e.stopPropagation(); setActive(false); }}>
+                Cancel
+              </Button>
+            </InlineStack>
+          </FormLayout>
+        </Card>
+      </div>
+    </Popover>
+  );
+}
+
 function StatusBadge({ status }) {
   // Maps the original Tailwind color classes to Polaris Badge tones:
   //   abandoned  bg-red-100 text-red-700     -> critical
@@ -199,8 +272,26 @@ function StepEditor({ step, onChange, onRemove, canRemove }) {
             autoComplete="off"
             placeholder="e.g. 30"
           />
+          <Select
+            label="Channel"
+            options={[
+              { label: 'Push Notification', value: 'push' },
+              { label: 'Email', value: 'email' },
+            ]}
+            value={step.channel || 'push'}
+            onChange={(value) => onChange({ ...step, channel: value })}
+          />
+          {step.channel === 'email' && (
+            <TextField
+              label="Email Subject"
+              value={step.subject || ''}
+              onChange={(value) => onChange({ ...step, subject: value })}
+              placeholder="e.g. You left something behind..."
+              autoComplete="off"
+            />
+          )}
           <TextField
-            label="Notification title"
+            label={step.channel === 'email' ? 'Email Intro Text' : 'Notification title'}
             value={step.title}
             onChange={(value) => onChange({ ...step, title: value })}
             autoComplete="off"
@@ -230,7 +321,7 @@ function RuleForm({ shop, existingRule, onSaved, onCancel }) {
   const [steps, setSteps] = useState(
     existingRule?.steps?.length
       ? existingRule.steps.map(s => ({ ...s, delayMinutes: String(s.delayMinutes) }))
-      : [{ delayMinutes: '30', title: '', body: '', imageSource: 'product' }]
+      : [{ delayMinutes: '30', channel: 'push', subject: '', title: '', body: '', imageSource: 'product' }]
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -244,7 +335,7 @@ function RuleForm({ shop, existingRule, onSaved, onCancel }) {
   }
 
   function addStep() {
-    setSteps(prev => [...prev, { delayMinutes: '1440', title: '', body: '', imageSource: 'product' }]);
+    setSteps(prev => [...prev, { delayMinutes: '1440', channel: 'push', subject: '', title: '', body: '', imageSource: 'product' }]);
   }
 
   async function handleSave() {
@@ -271,6 +362,8 @@ function RuleForm({ shop, existingRule, onSaved, onCancel }) {
         trigger: 'cart_abandon',
         steps: steps.map(s => ({
           delayMinutes: Number(s.delayMinutes),
+          channel: s.channel || 'push',
+          subject: (s.subject || '').trim(),
           title: s.title.trim(),
           body: s.body.trim(),
           imageSource: s.imageSource,
@@ -871,15 +964,22 @@ function StoreView({ shop }) {
                                   {item.title} x{item.quantity || 1}
                                 </Text>
                                 <div onClick={(e) => e.stopPropagation()}>
-                                  <SendPushButton
-                                    shop={shop}
-                                    cartValue={c.cartValue}
-                                    cartItems={c.cartItems}
-                                    productImageUrl={item.imageUrl || c.productImageUrl}
-                                    sessionId={c.sessionId}
-                                    itemTitle={item.title}
-                                    productId={item.productId || null}
-                                  />
+                                  <InlineStack gap="100" blockAlign="center">
+                                    <SendPushButton
+                                      shop={shop}
+                                      cartValue={c.cartValue}
+                                      cartItems={c.cartItems}
+                                      productImageUrl={item.imageUrl || c.productImageUrl}
+                                      sessionId={c.sessionId}
+                                      itemTitle={item.title}
+                                      productId={item.productId || null}
+                                    />
+                                    <SendEmailButton
+                                      shop={shop}
+                                      sessionId={c.sessionId}
+                                      cartToken={c.sessionId}
+                                    />
+                                  </InlineStack>
                                 </div>
                               </InlineStack>
                             ))}

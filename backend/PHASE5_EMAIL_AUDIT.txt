@@ -1,0 +1,725 @@
+================================================================
+CartnCodForm — PHASE 5 EMAIL AUDIT (read-only)
+Files read in full for adding an email channel to automation.
+Nothing modified.
+Generated: 2026-09-07
+================================================================
+
+NOTE on file #5: the request said "backend/server.js — lines 1-80
+only (poller section)". Lines 1-80 are imports + middleware
+setup; the actual scheduled-job POLLER
+(isQuietHours / isOverFrequencyCap / processScheduledJobs /
+setInterval) lives at lines 140-267. Both ranges are reproduced
+below (1-80 as asked, plus 140-267 since that IS the poller and is
+what an email channel has to change).
+
+================================================================
+1. backend/utils/email.js   (176 content lines)
+================================================================
+  1  const { Resend } = require('resend');
+  2
+  3  // The Resend constructor throws if the key is falsy, which would crash server
+  4  // startup when RESEND_API_KEY is unset. Fall back to a placeholder so the app
+  5  // still boots; sends then fail with an auth error that is caught and logged.
+  6  const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
+  7  const FROM = process.env.FROM_EMAIL || 'onboarding@resend.dev';
+  8
+  9  // --- small HTML helpers -------------------------------------------------------
+ 10
+ 11  function escapeHtml(value) {
+ 12    return String(value == null ? '' : value)
+ 13      .replace(/&/g, '&amp;')
+ 14      .replace(/</g, '&lt;')
+ 15      .replace(/>/g, '&gt;')
+ 16      .replace(/"/g, '&quot;');
+ 17  }
+ 18
+ 19  function money(n) {
+ 20    const num = Number(n) || 0;
+ 21    return num.toLocaleString('en-IN', {
+ 22      minimumFractionDigits: 2,
+ 23      maximumFractionDigits: 2,
+ 24    });
+ 25  }
+ 26
+ 27  function button(href, label) {
+ 28    return (
+ 29      `<a href="${escapeHtml(href)}" ` +
+ 30      `style="display:inline-block;background:#4f46e5;color:#ffffff;` +
+ 31      `text-decoration:none;padding:12px 20px;border-radius:8px;` +
+ 32      `font-weight:600;font-family:Arial,Helvetica,sans-serif;">${escapeHtml(label)}</a>`
+ 33    );
+ 34  }
+ 35
+ 36  function shell(innerHtml) {
+ 37    return (
+ 38      `<div style="font-family:Arial,Helvetica,sans-serif;color:#111827;` +
+ 39      `max-width:560px;margin:0 auto;padding:24px;">${innerHtml}</div>`
+ 40    );
+ 41  }
+ 42
+ 43  // ---------------------------------------------------------------------------
+ 44  // 1. Abandoned cart reminder -> the customer
+ 45  // ---------------------------------------------------------------------------
+ 46
+ 47  async function sendAbandonedCartEmail(customer) {
+ 48    try {
+ 49      if (!customer || !customer.email) {
+ 50        // No email on file — nothing to send.
+ 51        return { success: false, error: 'no customer email' };
+ 52      }
+ 53
+ 54      const items = Array.isArray(customer.cartItems) ? customer.cartItems : [];
+ 55      const rows = items
+ 56        .map((i) => {
+ 57          const qty = i.quantity || 1;
+ 58          const line = (Number(i.price) || 0) * qty;
+ 59          return (
+ 60            `<tr>` +
+ 61            `<td style="padding:6px 0;">${escapeHtml(i.title || 'Item')} &times; ${qty}</td>` +
+ 62            `<td style="padding:6px 0;text-align:right;">${money(line)}</td>` +
+ 63            `</tr>`
+ 64          );
+ 65        })
+ 66        .join('');
+ 67
+ 68      const cta = process.env.FRONTEND_URL || '#';
+ 69
+ 70      const html = shell(
+ 71        `<h1 style="font-size:22px;margin:0 0 12px;">You forgot something!</h1>` +
+ 72          `<p style="margin:0 0 16px;color:#4b5563;">Here's what's still waiting in your cart:</p>` +
+ 73          `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
+ 74          `${rows || '<tr><td style="padding:6px 0;color:#6b7280;">Your saved items</td></tr>'}` +
+ 75          `<tr><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">Total</td>` +
+ 76          `<td style="padding:10px 0;border-top:1px solid #e5e7eb;text-align:right;font-weight:700;">` +
+ 77          `${money(customer.cartValue)}</td></tr>` +
+ 78          `</table>` +
+ 79          `<p style="margin:24px 0;">${button(cta, 'Complete Your Order')}</p>` +
+ 80          `<p style="margin:32px 0 0;font-size:12px;color:#9ca3af;">` +
+ 81          `This reminder was sent by CartnCodForm</p>`
+ 82      );
+ 83
+ 84      const { error } = await resend.emails.send({
+ 85        from: FROM,
+ 86        to: customer.email,
+ 87        subject: 'You left something behind! 🛒',
+ 88        html,
+ 89      });
+ 90
+ 91      if (error) throw new Error(error.message || JSON.stringify(error));
+ 92
+ 93      console.log(`Email sent: abandoned_cart to ${customer.email}`);
+ 94      return { success: true };
+ 95    } catch (err) {
+ 96      console.error(`Email failed: ${err.message}`);
+ 97      return { success: false, error: err.message };
+ 98    }
+ 99  }
+100
+101  // ---------------------------------------------------------------------------
+102  // 2. New COD order alert -> the store owner
+103  // ---------------------------------------------------------------------------
+104
+105  async function sendNewCodOrderEmail(order, ownerEmail) {
+106    try {
+107      if (!ownerEmail) {
+108        return { success: false, error: 'no owner email' };
+109      }
+110      if (!order) {
+111        return { success: false, error: 'no order' };
+112      }
+113
+114      const qty = Number(order.quantity) || 1;
+115      const price = Number(order.productPrice) || 0;
+116      const total = price * qty;
+117
+118      const html = shell(
+119        `<h1 style="font-size:22px;margin:0 0 12px;">New COD Order!</h1>` +
+120          `<h2 style="font-size:15px;margin:20px 0 6px;color:#374151;">Customer details</h2>` +
+121          `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
+122          `<tr><td style="padding:4px 0;color:#6b7280;">Name</td><td style="padding:4px 0;">${escapeHtml(order.name)}</td></tr>` +
+123          `<tr><td style="padding:4px 0;color:#6b7280;">Phone</td><td style="padding:4px 0;">${escapeHtml(order.phone)}</td></tr>` +
+124          `<tr><td style="padding:4px 0;color:#6b7280;">Address</td><td style="padding:4px 0;">${escapeHtml(order.address)}</td></tr>` +
+125          `<tr><td style="padding:4px 0;color:#6b7280;">City</td><td style="padding:4px 0;">${escapeHtml(order.city)}</td></tr>` +
+126          `<tr><td style="padding:4px 0;color:#6b7280;">Pincode</td><td style="padding:4px 0;">${escapeHtml(order.pincode)}</td></tr>` +
+127          `</table>` +
+128          `<h2 style="font-size:15px;margin:20px 0 6px;color:#374151;">Product</h2>` +
+129          `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
+130          `<tr><td style="padding:4px 0;color:#6b7280;">Item</td><td style="padding:4px 0;">${escapeHtml(order.productName)}</td></tr>` +
+131          `<tr><td style="padding:4px 0;color:#6b7280;">Price</td><td style="padding:4px 0;">₹${money(price)}</td></tr>` +
+132          `<tr><td style="padding:4px 0;color:#6b7280;">Quantity</td><td style="padding:4px 0;">${qty}</td></tr>` +
+133          `<tr><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">Total</td>` +
+134          `<td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">₹${money(total)}</td></tr>` +
+135          `</table>` +
+136          `<p style="margin:32px 0 0;font-size:12px;color:#9ca3af;">Powered by CartnCodForm</p>`
+137      );
+138
+139      const { error } = await resend.emails.send({
+140        from: FROM,
+141        to: ownerEmail,
+142        subject: 'New COD Order Received! 📦',
+143        html,
+144      });
+145
+146      if (error) throw new Error(error.message || JSON.stringify(error));
+147
+148      console.log(`Email sent: new_cod_order to ${ownerEmail}`);
+149      return { success: true };
+150    } catch (err) {
+151      console.error(`Email failed: ${err.message}`);
+152      return { success: false, error: err.message };
+153    }
+154  }
+155
+156  // ---------------------------------------------------------------------------
+157  // 3. COD order confirmation -> the customer (not wired up yet)
+158  // ---------------------------------------------------------------------------
+159
+160  async function sendCodOrderConfirmationEmail(order) {
+161    try {
+162      // TODO: integrate customer email later. COD customers may not provide an
+163      // email address on the form, so there is nothing to send to right now.
+164      // When the COD form collects an email, send a confirmation here.
+165      return { success: true };
+166    } catch (err) {
+167      console.error(`Email failed: ${err.message}`);
+168      return { success: false, error: err.message };
+169    }
+170  }
+171
+172  module.exports = {
+173    sendAbandonedCartEmail,
+174    sendNewCodOrderEmail,
+175    sendCodOrderConfirmationEmail,
+176  };
+177  (EOF)
+
+  KEY FACTS:
+   - Transport: Resend (`resend` npm pkg). Env: RESEND_API_KEY
+     (placeholder fallback so boot won't crash), FROM_EMAIL
+     (fallback onboarding@resend.dev).
+   - sendAbandonedCartEmail(customer): the customer-facing cart
+     reminder. Gates on `customer.email` -> {success:false,
+     error:'no customer email'} if absent. Consumes
+     customer.cartItems[] {title,quantity,price}, customer.cartValue.
+     Subject + HTML are HARD-CODED (no per-step title/body). CTA
+     href = process.env.FRONTEND_URL || '#' (NOT shop-specific,
+     NOT the cart URL). Returns {success:true} / {success:false,error}.
+   - No per-shop from-address, no templating, no EmailTemplate
+     model. No function takes a subject/body override.
+
+================================================================
+2. backend/utils/automationEngine.js   (127 content lines)
+================================================================
+  1  const AutomationRule = require('../models/AutomationRule');
+  2  const ScheduledJob = require('../models/ScheduledJob');
+  3  const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+  4
+  5  /**
+  6   * Called after a carts/create or carts/update webhook is processed.
+  7   * Finds active cart_abandon rules for this shop and schedules jobs
+  8   * for each step, targeting the subscriber linked to this cart.
+  9   *
+ 10   * @param {string} shopDomain
+ 11   * @param {string} cartToken - normalized Shopify cart token (sessionId on AbandonedCustomer)
+ 12   * @param {string|null} customerId
+ 13   * @param {object} cartContext - { cartValue, productImageUrl, firstItemTitle, productUrl }
+ 14   */
+ 15  async function scheduleCartAbandonJobs(shopDomain, cartToken, customerId, cartContext) {
+ 16    try {
+ 17      const shop = String(shopDomain || '').trim().toLowerCase();
+ 18      if (!cartToken) return;
+ 19
+ 20      const rules = await AutomationRule.find({
+ 21        shopDomain: shop,
+ 22        trigger: 'cart_abandon',
+ 23        active: true,
+ 24      });
+ 25
+ 26      if (!rules.length) return;
+ 27
+ 28      // Find the subscriber linked to this cart (if any) so we know
+ 29      // there's someone to notify before scheduling anything.
+ 30      const sub = await CustomerPushSubscription.findOne({
+ 31        shopDomain: shop,
+ 32        cartToken: cartToken,
+ 33      }).sort({ lastActivityAt: -1 });
+ 34
+ 35      if (!sub) {
+ 36        console.log(`[automation] No subscriber for cartToken ${cartToken} — skipping schedule`);
+ 37        return;
+ 38      }
+ 39
+ 40      for (const rule of rules) {
+ 41        // Skip entirely if any non-cancelled job already exists for
+ 42        // this rule+cart (sent or still pending) — avoids re-sending
+ 43        // step 0 on every subsequent carts/update for a long-lived cart.
+ 44        const existingJob = await ScheduledJob.findOne({
+ 45          shopDomain: shop,
+ 46          ruleId: rule._id,
+ 47          cartToken,
+ 48          status: { $in: ['pending', 'sent'] },
+ 49        });
+ 50        if (existingJob) {
+ 51          console.log(`[automation] Rule "${rule.name}" already has a job for cart ${cartToken} — skipping re-schedule`);
+ 52          continue;
+ 53        }
+ 54
+ 55        let cumulativeMinutes = 0;
+ 56        for (let i = 0; i < rule.steps.length; i++) {
+ 57          const step = rule.steps[i];
+ 58          cumulativeMinutes += step.delayMinutes;
+ 59          const runAt = new Date(Date.now() + cumulativeMinutes * 60 * 1000);
+ 60
+ 61          const title = step.title
+ 62            .replace('{cartValue}', cartContext.cartValue || '')
+ 63            .replace('{productTitle}', cartContext.firstItemTitle || 'your item');
+ 64          const body = step.body
+ 65            .replace('{cartValue}', cartContext.cartValue || '')
+ 66            .replace('{productTitle}', cartContext.firstItemTitle || 'your item');
+ 67
+ 68          try {
+ 69            await ScheduledJob.create({
+ 70              shopDomain: shop,
+ 71              ruleId: rule._id,
+ 72              stepIndex: i,
+ 73              cartToken,
+ 74              customerId: customerId || sub.customerId || null,
+ 75              runAt,
+ 76              status: 'pending',
+ 77              payload: {
+ 78                title,
+ 79                body,
+ 80                url: cartContext.productUrl || `https://${shop}`,
+ 81                imageUrl: step.imageSource === 'product' ? (cartContext.productImageUrl || null) : null,
+ 82              },
+ 83            });
+ 84          } catch (err) {
+ 85            if (err.code === 11000) {
+ 86              console.log(`[automation] Duplicate job prevented for rule "${rule.name}", cart ${cartToken}, step ${i}`);
+ 87            } else {
+ 88              throw err;
+ 89            }
+ 90          }
+ 91        }
+ 92
+ 93        console.log(`[automation] Scheduled ${rule.steps.length} job(s) for rule "${rule.name}" (cart ${cartToken})`);
+ 94      }
+ 95    } catch (err) {
+ 96      console.error('[automation] scheduleCartAbandonJobs error:', err.message);
+ 97    }
+ 98  }
+ 99
+100  /**
+101   * Called after orders/create. Cancels any pending jobs tied to this
+102   * cart/customer so a converted shopper doesn't keep getting reminders.
+103   */
+104  async function cancelJobsForOrder(shopDomain, cartToken, customerId) {
+105    try {
+106      const shop = String(shopDomain || '').trim().toLowerCase();
+107      const orClauses = [];
+108      if (cartToken) orClauses.push({ cartToken });
+109      if (customerId) orClauses.push({ customerId });
+110      if (!orClauses.length) return { cancelled: 0 };
+111
+112      const result = await ScheduledJob.updateMany(
+113        { shopDomain: shop, status: 'pending', $or: orClauses },
+114        { status: 'cancelled' }
+115      );
+116
+117      if (result.modifiedCount > 0) {
+118        console.log(`[automation] Cancelled ${result.modifiedCount} pending job(s) for order (cart: ${cartToken || 'n/a'}, customer: ${customerId || 'n/a'})`);
+119      }
+120      return { cancelled: result.modifiedCount };
+121    } catch (err) {
+122      console.error('[automation] cancelJobsForOrder error:', err.message);
+123      return { cancelled: 0, error: err.message };
+124    }
+125  }
+126
+127  module.exports = { scheduleCartAbandonJobs, cancelJobsForOrder };
+128  (EOF)
+
+  KEY FACTS FOR AN EMAIL CHANNEL:
+   - PRECHECK (lines 30-38): schedules NOTHING unless a
+     CustomerPushSubscription exists for the cartToken. A cart
+     that has an email but no push subscription is skipped
+     entirely -> an email step would never be created. This
+     precheck is push-specific and would need a per-channel branch
+     (e.g. email step -> require an AbandonedCustomer row WITH an
+     email for that cartToken).
+   - `step.channel` is READ from the model but NEVER used here.
+     The created ScheduledJob has NO channel field (see file #4).
+   - Templating: only {cartValue} and {productTitle}, via
+     String.replace (FIRST occurrence only), at schedule time.
+     The rendered strings go into payload.title / payload.body.
+   - payload built here = { title, body, url, imageUrl }. No
+     recipient email, no subject vs body distinction beyond
+     title/body.
+
+================================================================
+3. backend/models/AutomationRule.js   (29 content lines)
+================================================================
+  1  const mongoose = require('mongoose');
+  2
+  3  const stepSchema = new mongoose.Schema({
+  4    delayMinutes: { type: Number, required: true },
+  5    channel: { type: String, enum: ['push'], default: 'push' },
+  6    title: { type: String, required: true },
+  7    body: { type: String, required: true },
+  8    imageSource: {
+  9      type: String,
+ 10      enum: ['product', 'none'],
+ 11      default: 'product'
+ 12    },
+ 13  }, { _id: false });
+ 14
+ 15  const automationRuleSchema = new mongoose.Schema({
+ 16    shopDomain: { type: String, required: true, lowercase: true, index: true },
+ 17    name: { type: String, required: true },
+ 18    trigger: {
+ 19      type: String,
+ 20      required: true,
+ 21      enum: ['browse_abandon', 'cart_abandon', 'checkout_abandon', 'back_in_interest'],
+ 22    },
+ 23    conditions: { type: mongoose.Schema.Types.Mixed, default: {} },
+ 24    steps: { type: [stepSchema], default: [] },
+ 25    active: { type: Boolean, default: true },
+ 26    createdAt: { type: Date, default: Date.now },
+ 27  });
+ 28
+ 29  module.exports = mongoose.model('AutomationRule', automationRuleSchema);
+ 30  (EOF)
+
+  KEY FACTS:
+   - stepSchema.channel EXISTS but `enum: ['push']` — 'email' is
+     NOT an allowed value. First change for an email channel:
+     add 'email' to this enum (keep default 'push').
+   - No subject field distinct from `title`; no per-step "from"
+     or reply-to; no HTML/text field. An email step would reuse
+     `title` as subject and `body` as the message.
+   - trigger enum has 4 values but the engine (file #2) only
+     handles 'cart_abandon'.
+   - The automation CRUD route (backend/routes/automation.js, POST
+     handler — not in this audit) validates step.title/step.body
+     and forces channel to 'push' implicitly; it would need to
+     accept/validate step.channace === 'email' too.
+
+================================================================
+4. backend/models/ScheduledJob.js   (38 content lines)
+================================================================
+  1  const mongoose = require('mongoose');
+  2
+  3  const scheduledJobSchema = new mongoose.Schema({
+  4    shopDomain: { type: String, required: true, lowercase: true, index: true },
+  5    ruleId: { type: mongoose.Schema.Types.ObjectId, ref: 'AutomationRule', required: true },
+  6    stepIndex: { type: Number, required: true, default: 0 },
+  7
+  8    // Targeting — at least one of these should be present.
+  9    subscriptionToken: { type: String },  // FCM token, if already resolved
+ 10    sessionId: { type: String, index: true },  // stable UUID (StorefrontEvent.sessionId)
+ 11    cartToken: { type: String, index: true },  // Shopify cart token, for cancellation matching
+ 12    customerId: { type: String, index: true },
+ 13
+ 14    runAt: { type: Date, required: true, index: true },
+ 15    status: {
+ 16      type: String,
+ 17      enum: ['pending', 'sent', 'cancelled', 'failed', 'skipped'],
+ 18      default: 'pending',
+ 19      index: true,
+ 20    },
+ 21    payload: { type: mongoose.Schema.Types.Mixed },  // resolved title/body/imageUrl at send time
+ 22
+ 23    createdAt: { type: Date, default: Date.now },
+ 24    sentAt: { type: Date },
+ 25    error: { type: String },
+ 26  });
+ 27
+ 28  // Compound index for the sender's poll query.
+ 29  scheduledJobSchema.index({ status: 1, runAt: 1 });
+ 30
+ 31  // Prevent duplicate first-step scheduling for the same rule+cart+step
+ 32  // when carts/create and carts/update fire near-simultaneously.
+ 33  scheduledJobSchema.index(
+ 34    { shopDomain: 1, ruleId: 1, cartToken: 1, stepIndex: 1 },
+ 35    { unique: true, partialFilterExpression: { status: { $in: ['pending', 'sent'] } } }
+ 36  );
+ 37
+ 38  module.exports = mongoose.model('ScheduledJob', scheduledJobSchema);
+ 39  (EOF)
+
+  KEY FACTS FOR AN EMAIL CHANNEL:
+   - NO `channel` field. Add `channel: { type: String, enum:
+     ['push','email'], default: 'push' }` and have
+     scheduleCartAbandonJobs persist step.channel onto it (default
+     'push' keeps existing rows working).
+   - payload is Mixed — an email job could stash { subject, body,
+     ctaUrl } or reuse { title, body, url }. No schema change
+     needed for payload itself.
+   - `status` enum already covers 'sent'/'failed'/'skipped' — an
+     email send can reuse these.
+   - The partial-unique index is keyed on
+     {shopDomain, ruleId, cartToken, stepIndex} — it does NOT
+     include channel, so a push step and an email step at the same
+     stepIndex of the same rule+cart would COLLIDE (E11000). If a
+     rule can mix channels per step that's fine; if two steps
+     could share a stepIndex across channels the index needs
+     `channel` added.
+   - There is no `recipientEmail` field. The poller/engine would
+     resolve the email from AbandonedCustomer by
+     { shopDomain, sessionId: job.cartToken } at send time.
+
+================================================================
+5a. backend/server.js — lines 1-80 (as requested)
+================================================================
+  1  require('dotenv').config();
+  2
+  3  const path = require('path');
+  4  const express = require('express');
+  5  const cors = require('cors');
+  6  const rateLimit = require('express-rate-limit');
+  7
+  8  const connectDB = require('./config/db');
+  9  const authRoutes = require('./routes/auth');
+ 10  const webhookRoutes = require('./routes/webhooks');
+ 11  const storeRoutes = require('./routes/stores');
+ 12  const codRoutes = require('./routes/cod');
+ 13  const pushRouter = require('./routes/push');
+ 14  const proxyRouter = require('./routes/proxy');
+ 15  const ScheduledJob = require('./models/ScheduledJob');
+ 16  const AutomationRule = require('./models/AutomationRule');
+ 17  const { sendPushToCustomers } = require('./utils/pushNotification');
+ 18  const CustomerPushSubscription = require('./models/CustomerPushSubscription');
+ 19
+ 20  const app = express();
+ 21  // Render sits behind a reverse proxy — trust the X-Forwarded-For
+ 22  // header so rate limiting and req.ip key on the real client IP.
+ 23  app.set('trust proxy', 1);
+ 24  const PORT = process.env.PORT || 4000;
+ 25  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+ 26
+ 27  const allowedOrigins = [
+ 28    process.env.FRONTEND_URL,
+ 29    'https://cartncodform-beryl.vercel.app',
+ 30    'https://admin.shopify.com',
+ 31    'http://localhost:3000',
+ 32  ].filter(Boolean);
+ 33
+ 34  // --- Middleware ------------------------------------------------------------
+ 35  app.use(
+ 36    cors({
+ 37      origin: function (origin, callback) {
+ 38        if (!origin || allowedOrigins.includes(origin)) {
+ 39          callback(null, true);
+ 40        } else {
+ 41          callback(new Error('Not allowed by CORS'));
+ 42        }
+ 43      },
+ 44      credentials: true,
+ 45    })
+ 46  );
+ 47
+ 48  // Capture the raw body so Shopify webhook HMAC can be verified if needed.
+ 49  app.use(
+ 50    express.json({
+ 51      limit: '5mb',
+ 52      verify: (req, _res, buf) => {
+ 53        req.rawBody = buf.toString('utf8');
+ 54      },
+ 55    })
+ 56  );
+ 57  // Parse text/plain bodies (sent by navigator.sendBeacon).
+ 58  app.use(express.text({ type: 'text/plain' }));
+ 59  app.use(express.urlencoded({ extended: true }));
+ 60
+ 61  // Simple request logger.
+ 62  app.use((req, _res, next) => {
+ 63    console.log(`[http] ${req.method} ${req.originalUrl}`);
+ 64    next();
+ 65  });
+ 66
+ 67  // Allow the app to be embedded as an iframe inside Shopify Admin.
+ 68  app.use((_req, res, next) => {
+ 69    res.setHeader(
+ 70      'Content-Security-Policy',
+ 71      "frame-ancestors https://admin.shopify.com https://*.myshopify.com"
+ 72    );
+ 73    next();
+ 74  });
+ 75
+ 76  // --- Static (customer service worker) -----------------------------------
+ 77  // Wide-open CORS on the service worker so any storefront can load it, and
+ 78  // the Service-Worker-Allowed header so the SW may claim the root scope.
+ 79  app.use('/cartncodform-sw.js', (req, res, next) => {
+ 80    res.setHeader('Access-Control-Allow-Origin', '*');
+
+  (lines 1-18 imports: note it imports sendPushToCustomers from
+   utils/pushNotification but does NOT import anything from
+   utils/email.js — an email channel would add
+   `const { sendAbandonedCartEmail } = require('./utils/email');`
+   here.)
+
+================================================================
+5b. backend/server.js — lines 140-267 (THE ACTUAL POLLER)
+================================================================
+140  // --- Automation: scheduled job sender -----------------------------------
+141  /**
+142   * Returns true if sending a push right now would violate quiet
+143   * hours (10pm-8am) in the given IANA timezone.
+144   */
+145  function isQuietHours(timezone) {
+146    try {
+147      const now = new Date();
+148      const hour = parseInt(
+149        new Intl.DateTimeFormat('en-US', {
+150          hour: 'numeric',
+151          hour12: false,
+152          timeZone: timezone || 'Asia/Kolkata',
+153        }).format(now),
+154        10
+155      );
+156      return hour >= 22 || hour < 8;
+157    } catch (err) {
+158      console.error('[automation] isQuietHours error:', err.message);
+159      return false; // fail open — don't block sends on a bad timezone
+160    }
+161  }
+162
+163  /**
+164   * Returns true if this cartToken/customerId has already received
+165   * 3+ automation pushes in the last 24 hours.
+166   */
+167  async function isOverFrequencyCap(shopDomain, cartToken, customerId) {
+168    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+169    const orClauses = [];
+170    if (cartToken) orClauses.push({ cartToken });
+171    if (customerId) orClauses.push({ customerId });
+172    if (!orClauses.length) return false;
+173
+174    const count = await ScheduledJob.countDocuments({
+175      shopDomain,
+176      status: 'sent',
+177      sentAt: { $gte: since },
+178      $or: orClauses,
+179    });
+180    return count >= 3;
+181  }
+182
+183  /**
+184   * Polls for due ScheduledJob rows and sends them. Runs every 30s.
+185   * Uses a claim-update (findOneAndUpdate with status:'pending' filter)
+186   * so this is safe even if multiple instances ever run.
+187   */
+188  async function processScheduledJobs() {
+189    try {
+190      const now = new Date();
+191      const dueJobs = await ScheduledJob.find({
+192        status: 'pending',
+193        runAt: { $lte: now },
+194      }).limit(20);
+195
+196      for (const job of dueJobs) {
+197        // Check quiet hours + frequency cap BEFORE claiming — if
+198        // blocked, leave the job pending and re-check next tick
+199        // (quiet hours) or skip it permanently (frequency cap).
+200        const Store = require('./models/Store');
+201        const store = await Store.findOne({ shopDomain: job.shopDomain }).select('timezone').lean();
+202        const timezone = store?.timezone || 'Asia/Kolkata';
+203
+204        if (isQuietHours(timezone)) {
+205          console.log(`[automation] Job ${job._id} deferred — quiet hours (${timezone})`);
+206          continue; // leave pending, retry next tick
+207        }
+208
+209        const overCap = await isOverFrequencyCap(job.shopDomain, job.cartToken, job.customerId);
+210        if (overCap) {
+211          await ScheduledJob.findOneAndUpdate(
+212            { _id: job._id, status: 'pending' },
+213            { status: 'skipped', error: 'Frequency cap reached (3/24h)' }
+214          );
+215          console.log(`[automation] Job ${job._id} skipped — frequency cap reached`);
+216          continue;
+217        }
+218
+219        // Claim the job — only proceed if we successfully flip it from pending.
+220        const claimed = await ScheduledJob.findOneAndUpdate(
+221          { _id: job._id, status: 'pending' },
+222          { status: 'sent', sentAt: new Date() },
+223          { new: true }
+224        );
+225        if (!claimed) continue; // another process already claimed it
+226
+227        try {
+228          const payload = job.payload || {};
+229          const baseUrl = payload.url || `https://${job.shopDomain}`;
+230          const urlWithJob = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'ccf_job=' + job._id.toString();
+231          const result = await sendPushToCustomers(
+232            job.shopDomain,
+233            payload.title || 'You left something behind!',
+234            payload.body || 'Come back and check it out.',
+235            urlWithJob,
+236            payload.imageUrl || null,
+237            true,
+238            job.cartToken || null,
+239            false,
+240            job.customerId || null
+241          );
+242
+243          if (!result.success || result.sent === 0) {
+244            await ScheduledJob.findByIdAndUpdate(job._id, {
+245              status: 'failed',
+246              error: result.error || 'No active subscriber found',
+247            });
+248            console.log(`[automation] Job ${job._id} failed: no subscriber reached`);
+249          } else {
+250            console.log(`[automation] Job ${job._id} sent successfully`);
+251          }
+252        } catch (err) {
+253          await ScheduledJob.findByIdAndUpdate(job._id, {
+254            status: 'failed',
+255            error: err.message,
+256          });
+257          console.error(`[automation] Job ${job._id} error:`, err.message);
+258        }
+259      }
+260    } catch (err) {
+261      console.error('[automation] processScheduledJobs error:', err.message);
+262    }
+263  }
+264
+265  // Poll every 30 seconds.
+266  setInterval(processScheduledJobs, 30 * 1000);
+267  console.log('[automation] Scheduled job poller started (30s interval)');
+
+  KEY FACTS FOR AN EMAIL CHANNEL:
+   - The send block (lines 227-258) has NO channel branch. It
+     ALWAYS calls sendPushToCustomers(...). This is the single
+     place to branch: `if (job.channel === 'email') { ...load
+     AbandonedCustomer by cartToken, call sendAbandonedCartEmail
+     (or a subject/body-aware variant)... } else { ...existing
+     push... }`.
+   - The claim-update (219-224) flips status pending -> sent
+     BEFORE the send. On failure it's re-flipped to 'failed'
+     (244) / (253). Same lifecycle works for email.
+   - isQuietHours (145-161) and isOverFrequencyCap (167-181) are
+     both worded as "push" but are channel-agnostic in
+     implementation (frequency cap counts ScheduledJob rows with
+     status:'sent', not push-specific). Decide per product
+     whether quiet hours / a 3-per-24h cap should apply to email
+     too; if email should be exempt, add a `job.channel !==
+     'email'` guard around lines 204-217.
+   - isOverFrequencyCap.countDocuments (174-179) filters only on
+     status:'sent' + sentAt + shop + cart/customer — if email and
+     push share the cap, no change; if separate caps, add
+     `channel` to that query.
+   - No import of utils/email.js in this file (see 5a) — would be
+     added.
+   - result contract expected: { success, sent, error }.
+     sendAbandonedCartEmail returns { success, error } (NO
+     `sent`), so the `result.sent === 0` check on line 243 would
+     mis-fire for email -> the branch must not reuse that exact
+     condition for email jobs.
+
+================================================================
+NOTHING MODIFIED. Read-only audit.
+================================================================

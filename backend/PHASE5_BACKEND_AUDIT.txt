@@ -1,0 +1,290 @@
+================================================================================
+PHASE 5 — EMAIL CHANNEL FOR AUTOMATION (BACKEND) — SELF-AUDIT
+================================================================================
+Date: 2026-09-07
+Scope: add an "email" channel alongside "push" to the automation pipeline.
+Files changed: 6 (2 models, 2 utils, server.js, routes/push.js).
+No new npm packages (jsonwebtoken / resend / mongoose already present).
+
+================================================================================
+1. PER-FILE: WHAT CHANGED / WHAT WAS KEPT
+================================================================================
+
+--------------------------------------------------------------------------------
+backend/models/AutomationRule.js            (29 -> 30 lines)
+--------------------------------------------------------------------------------
+CHANGED:
+  - stepSchema.channel: enum widened to ['push', 'email'] (default 'push').
+      const stepSchema = new mongoose.Schema({
+        delayMinutes: { type: Number, required: true },
+        channel: { type: String, enum: ['push', 'email'], default: 'push' },
+        subject: { type: String, default: '' },  // email subject line (ignored for push)
+        title: { type: String, required: true },
+        body: { type: String, required: true },
+        imageSource: { type: String, enum: ['product', 'none'], default: 'product' },
+      }, { _id: false });
+  - New field stepSchema.subject (String, default '') — email subject line;
+    ignored for push steps.
+KEPT byte-for-byte:
+  - delayMinutes, title, body, imageSource fields and their validators.
+  - automationRuleSchema (shopDomain, name, trigger enum, conditions, steps,
+    active, createdAt) untouched.
+  - { _id: false } on the sub-schema; model registration line.
+Existing rules in the DB with no `channel` / `subject` transparently read back
+as channel:'push', subject:'' via the schema defaults — no migration needed.
+
+--------------------------------------------------------------------------------
+backend/models/ScheduledJob.js              (38 -> 39 lines)
+--------------------------------------------------------------------------------
+CHANGED:
+  - New field `channel` inserted immediately before `payload`:
+      channel: { type: String, enum: ['push', 'email'], default: 'push' },
+      payload: { type: mongoose.Schema.Types.Mixed },
+KEPT byte-for-byte:
+  - shopDomain, ruleId, stepIndex, subscriptionToken, sessionId, cartToken,
+    customerId, runAt, status enum, createdAt, sentAt, error.
+  - Compound index { status: 1, runAt: 1 }.
+  - Partial unique index { shopDomain, ruleId, cartToken, stepIndex } with
+    partialFilterExpression { status: { $in: ['pending','sent'] } } — NOT
+    touched (per spec: do not modify the partial unique index).
+Old pending/sent jobs with no `channel` read back as 'push' via the default.
+
+--------------------------------------------------------------------------------
+backend/utils/automationEngine.js           (127 -> 137 lines)
+--------------------------------------------------------------------------------
+CHANGED:
+  - New import (line 4):
+      const AbandonedCustomer = require('../models/AbandonedCustomer');
+  - REMOVED the old top-level single precheck that fetched one
+    CustomerPushSubscription for the cart and bailed out of the whole rule
+    if none existed.
+  - ADDED a per-channel precheck INSIDE the step loop, after `runAt` is
+    computed and before template substitution:
+      const channel = step.channel || 'push';
+      let sub = null;
+      if (channel === 'push') {
+        sub = await CustomerPushSubscription.findOne({ shopDomain: shop, cartToken });
+        if (!sub) continue;
+      } else if (channel === 'email') {
+        const customer = await AbandonedCustomer.findOne({ shopDomain: shop, sessionId: cartToken });
+        if (!customer || !customer.email) continue;
+      }
+    -> a step whose channel has no reachable recipient is skipped individually;
+       the cumulativeMinutes timeline for later steps still advances.
+  - ScheduledJob.create({...}) now persists `channel`:
+      customerId: customerId || sub?.customerId || null,
+      runAt,
+      status: 'pending',
+      channel,                       <-- NEW top-level field
+      payload: { title, body, url, imageUrl },
+KEPT byte-for-byte:
+  - scheduleCartAbandonJobs signature, rule query (trigger:'cart_abandon',
+    active:true), the existingJob dedupe (status in ['pending','sent']),
+    cumulativeMinutes accumulation, {cartValue}/{productTitle} substitution,
+    payload shape (title/body/url/imageUrl), the 11000 duplicate-key catch,
+    per-rule summary log.
+  - cancelJobsForOrder() entirely unchanged.
+  - module.exports unchanged.
+
+--------------------------------------------------------------------------------
+backend/utils/email.js                      (176 -> 182 lines)
+--------------------------------------------------------------------------------
+CHANGED:
+  - sendAbandonedCartEmail(customer)  ->  sendAbandonedCartEmail(customer, options = {})
+  - Inside, three derived values from options:
+      const subject = options.subject || 'You left something behind! 🛒';
+      const introHtml = options.body
+        ? `<p style="margin:0 0 16px;color:#111827;">${escapeHtml(options.body)}</p>`
+        : '';
+      const cta = options.cartUrl || process.env.FRONTEND_URL || '#';
+  - `${introHtml}` inserted into the HTML template just before the <table>.
+  - CTA button href switched from the old hard-coded FRONTEND_URL to `cta`.
+  - Resend call: `subject: 'You left something behind! 🛒'` -> `subject: subject`.
+KEPT byte-for-byte:
+  - The `if (!customer || !customer.email) return {success:false,...}` gate.
+  - cartItems row-building loop and the money()/escapeHtml()/button()/shell()
+    helpers.
+  - resend.emails.send({ from: FROM, to: customer.email, ... }) structure,
+    the error throw, the success/failure return contract
+    ({ success: true } / { success: false, error }).
+  - sendNewCodOrderEmail() and sendCodOrderConfirmationEmail() untouched.
+  - module.exports list unchanged.
+Back-compat: existing callers that pass only `customer` get identical output
+(subject default + no intro paragraph + FRONTEND_URL CTA).
+
+--------------------------------------------------------------------------------
+backend/server.js                           (280 -> 314 lines)
+--------------------------------------------------------------------------------
+CHANGED:
+  - New imports after `sendPushToCustomers`:
+      const { sendAbandonedCartEmail } = require('./utils/email');
+      const AbandonedCustomer = require('./models/AbandonedCustomer');
+  - processScheduledJobs(): the single send block inside the inner try{} is
+    now a channel branch:
+      const channel = job.channel || 'push';
+      const payload = job.payload || {};
+      if (channel === 'push') { ...existing push send... }
+      else if (channel === 'email') {
+        lookup AbandonedCustomer by { shopDomain, sessionId: job.cartToken };
+        no customer/email  -> status:'skipped', error:'No customer email for this cart'
+        else sendAbandonedCartEmail(customer, { subject: payload.subject||undefined,
+                                                body:    payload.body||undefined,
+                                                cartUrl: `https://${job.shopDomain}/cart` })
+        !success -> status:'failed', error
+        success  -> log only (job already claimed status:'sent' up-front)
+      }
+KEPT byte-for-byte (push branch — see DEVIATIONS below):
+  - The outer try/catch around the send that flips the job to 'failed' on a
+    thrown error.
+  - `urlWithJob` = baseUrl + ('?'|'&') + 'ccf_job=' + job._id  (REVENUE
+    ATTRIBUTION — must not regress).
+  - The 9-arg sendPushToCustomers(... true, job.cartToken||null, false,
+    job.customerId||null) call, including the customerId fallback target.
+  - push failed/sent status semantics and log lines.
+  - The up-front claim-update (status pending -> sent, sentAt) at line ~222,
+    quiet-hours check, isOverFrequencyCap (3/24h) skip — all untouched.
+  - 30s setInterval poller, boot sequence, CORS list, CSP header — untouched.
+
+--------------------------------------------------------------------------------
+backend/routes/push.js                      (249 -> 291 lines)
+--------------------------------------------------------------------------------
+CHANGED:
+  - New import (line 5):
+      const { sendAbandonedCartEmail } = require('../utils/email');
+  - New route added before `module.exports = router;`:
+      router.post('/send-email-test', requireAuth, async (req, res) => {
+        const { shopDomain, cartToken, subject, body } = req.body;
+        const shop = shopDomain?.trim().toLowerCase();
+        if (req.shopDomain !== shop)               -> 403 'Not authorized for this store'
+        const AbandonedCustomer = require('../models/AbandonedCustomer');
+        customer = findOne({ shopDomain: shop, sessionId: cartToken });
+        if (!customer || !customer.email)          -> 404 'No customer email found for this cart'
+        result = await sendAbandonedCartEmail(customer, { subject, body,
+                                              cartUrl: `https://${shopDomain}/cart` });
+        !result.success -> 500 { success:false, error }
+        else            -> { success: true }
+        catch           -> 500 { success:false, error:'Failed to send test email' }
+      });
+KEPT byte-for-byte:
+  - /subscribe, /send, /subscribe-customer, /send-customer, /cart-activity
+    bodies unchanged EXCEPT the ownership checks in /send (line 49) and
+    /send-customer (line 142) which were fixed in the PRIOR task to
+    `!store || req.shopDomain !== shopDomain?.trim().toLowerCase()` — not a
+    Phase 5 change, left as-is.
+  - router creation, requireAuth import, module.exports.
+
+================================================================================
+2. REQUIRED CONFIRMATIONS
+================================================================================
+
+[x] AbandonedCustomer import added to automationEngine.js
+    Line 4:  const AbandonedCustomer = require('../models/AbandonedCustomer');
+    Used in the email-channel precheck inside scheduleCartAbandonJobs (line 63).
+
+[x] channel field persisted onto ScheduledJob in scheduleCartAbandonJobs
+    automationEngine.js — ScheduledJob.create({ ... status:'pending', channel,
+    payload:{...} });  where `channel = step.channel || 'push'` (line 53, 86).
+    Backed by the new ScheduledJob.channel schema field (models/ScheduledJob.js
+    line 21, enum ['push','email'], default 'push').
+
+[x] sendAbandonedCartEmail options signature
+    utils/email.js line 47:
+      async function sendAbandonedCartEmail(customer, options = {}) { ... }
+    Recognised keys: options.subject (string), options.body (string, rendered
+    as an escaped intro <p>), options.cartUrl (string, CTA button href).
+    All optional; omitting `options` reproduces the pre-Phase-5 email exactly.
+
+[x] new /send-email-test route exists with correct auth + IDOR check
+    routes/push.js line 256:
+      router.post('/send-email-test', requireAuth, ...)
+    - requireAuth: verifies the Shopify session token, sets req.shopDomain.
+    - IDOR: `if (req.shopDomain !== shop) return 403` — the verified token's
+      shop must equal the shopDomain in the request body (same guard style as
+      /send and /send-customer in this file).
+    - 404 when no AbandonedCustomer / no email for { shopDomain, sessionId }.
+
+================================================================================
+3. VALIDATION RESULTS
+================================================================================
+
+npm test  (cd backend):
+    Test Suites: 5 passed, 5 total
+    Tests:       42 passed, 42 total
+    Time:        ~2.3 s
+    (shopify.test.js 10, requireOwner.test.js 4, automationEngine.test.js 15,
+     requireAuth.test.js 5, requireStoreOwner.test.js 8 = 42)
+    The "db down" / "cancelJobsForOrder error" console.error lines are an
+    intentional error-path assertion in automationEngine.test.js:278, not a
+    failure.
+
+node --check:
+    OK  server.js
+    OK  utils/automationEngine.js
+    OK  utils/email.js
+    OK  routes/push.js
+    OK  models/AutomationRule.js
+    OK  models/ScheduledJob.js
+
+================================================================================
+4. LINE COUNTS  (git HEAD -> working tree)
+================================================================================
+    backend/models/AutomationRule.js     29  -> 30    (+1)
+    backend/models/ScheduledJob.js       38  -> 39    (+1)
+    backend/utils/automationEngine.js   127  -> 137   (+10)
+    backend/utils/email.js              176  -> 182   (+6)
+    backend/server.js                   280  -> 314   (+34)
+    backend/routes/push.js              249  -> 291   (+42)
+    ----------------------------------------------------------
+    TOTAL                               899  -> 993   (+94)
+
+================================================================================
+5. DEVIATIONS FROM THE LITERAL SPEC  (all deliberate)
+================================================================================
+
+(a) automationEngine.js — `sub.customerId` -> `sub?.customerId`
+    The spec's ScheduledJob.create still reads `sub.customerId`, but `sub` is
+    now null on the email branch (and only assigned inside the push branch).
+    `sub?.customerId` is required to avoid a TypeError on email steps.
+    Behaviour for push steps is unchanged (sub is a real doc there).
+
+(b) automationEngine.js — per-channel precheck placed INSIDE the step loop
+    (after runAt), not as a single rule-level gate.
+    Consequence: a rule mixing push + email steps no longer aborts wholesale
+    when only one channel has no recipient — each step is evaluated on its own
+    channel, and the delay timeline for subsequent steps still advances past a
+    skipped step. This matches the spec's stated intent ("skip just this
+    step").
+    Also: scheduleCartAbandonJobs does NOT populate payload.subject (spec said
+    "no other changes to scheduling logic"). Automated email steps therefore
+    send with email.js's default subject; only /send-email-test passes a
+    per-step subject through. If per-step subjects on automated sends are
+    wanted later, add `subject: step.subject` to the payload here.
+
+(c) server.js — push branch kept richer than the spec's replacement snippet:
+      * kept the outer try/catch (spec's snippet dropped it) — a thrown error
+        still marks the job 'failed' instead of crashing the poller tick.
+      * kept `urlWithJob` with `?ccf_job=<jobId>` (spec's snippet dropped it)
+        — this is the revenue-attribution mechanism; dropping it would break
+        order attribution for automation pushes.
+      * kept the 9-arg sendPushToCustomers call incl. the `false` flag and
+        `job.customerId || null` fallback target (spec's snippet used 7 args).
+    The email branch is implemented exactly as specified. Also dropped the
+    spec snippet's unused `Store.findOne` / no-op cartUrl ternary.
+
+(d) routes/push.js /send-email-test — IDOR (403) check placed BEFORE the DB
+    lookup (spec listed the 404 first). Done so an unauthorized caller cannot
+    probe which carts have a customer-with-email by status code, and to match
+    the guard order used by the other protected routes in this file.
+
+================================================================================
+6. NOT CHANGED (explicitly in scope-adjacent, left alone)
+================================================================================
+  - ScheduledJob partial unique index — untouched.
+  - No new migration script (schema defaults cover existing rows).
+  - No frontend changes (RuleForm/StepEditor channel+subject UI is a later
+    stage).
+  - No new npm dependency.
+  - routes/automation.js (rule CRUD) — untouched; it already persists whatever
+    step fields the client sends, so `channel`/`subject` will round-trip once
+    the frontend sends them.
+================================================================================

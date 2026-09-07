@@ -15,6 +15,8 @@ const proxyRouter = require('./routes/proxy');
 const ScheduledJob = require('./models/ScheduledJob');
 const AutomationRule = require('./models/AutomationRule');
 const { sendPushToCustomers } = require('./utils/pushNotification');
+const { sendAbandonedCartEmail } = require('./utils/email');
+const AbandonedCustomer = require('./models/AbandonedCustomer');
 const CustomerPushSubscription = require('./models/CustomerPushSubscription');
 
 const app = express();
@@ -225,29 +227,61 @@ async function processScheduledJobs() {
       if (!claimed) continue; // another process already claimed it
 
       try {
+        const channel = job.channel || 'push';
         const payload = job.payload || {};
-        const baseUrl = payload.url || `https://${job.shopDomain}`;
-        const urlWithJob = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'ccf_job=' + job._id.toString();
-        const result = await sendPushToCustomers(
-          job.shopDomain,
-          payload.title || 'You left something behind!',
-          payload.body || 'Come back and check it out.',
-          urlWithJob,
-          payload.imageUrl || null,
-          true,
-          job.cartToken || null,
-          false,
-          job.customerId || null
-        );
 
-        if (!result.success || result.sent === 0) {
-          await ScheduledJob.findByIdAndUpdate(job._id, {
-            status: 'failed',
-            error: result.error || 'No active subscriber found',
+        if (channel === 'push') {
+          const baseUrl = payload.url || `https://${job.shopDomain}`;
+          const urlWithJob = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'ccf_job=' + job._id.toString();
+          const result = await sendPushToCustomers(
+            job.shopDomain,
+            payload.title || 'You left something behind!',
+            payload.body || 'Come back and check it out.',
+            urlWithJob,
+            payload.imageUrl || null,
+            true,
+            job.cartToken || null,
+            false,
+            job.customerId || null
+          );
+
+          if (!result.success || result.sent === 0) {
+            await ScheduledJob.findByIdAndUpdate(job._id, {
+              status: 'failed',
+              error: result.error || 'No active subscriber found',
+            });
+            console.log(`[automation] Job ${job._id} failed: no subscriber reached`);
+          } else {
+            console.log(`[automation] Job ${job._id} sent successfully`);
+          }
+        } else if (channel === 'email') {
+          const customer = await AbandonedCustomer.findOne({
+            shopDomain: job.shopDomain,
+            sessionId: job.cartToken,
           });
-          console.log(`[automation] Job ${job._id} failed: no subscriber reached`);
-        } else {
-          console.log(`[automation] Job ${job._id} sent successfully`);
+          if (!customer || !customer.email) {
+            await ScheduledJob.findByIdAndUpdate(job._id, {
+              status: 'skipped',
+              error: 'No customer email for this cart',
+            });
+            console.log(`[automation] Job ${job._id} skipped — no customer email`);
+          } else {
+            const cartUrl = `https://${job.shopDomain}/cart`;
+            const sendResult = await sendAbandonedCartEmail(customer, {
+              subject: payload.subject || undefined,
+              body: payload.body || undefined,
+              cartUrl,
+            });
+            if (!sendResult.success) {
+              await ScheduledJob.findByIdAndUpdate(job._id, {
+                status: 'failed',
+                error: sendResult.error || 'Email send failed',
+              });
+              console.log(`[automation] Job ${job._id} email failed: ${sendResult.error}`);
+            } else {
+              console.log(`[automation] Job ${job._id} email sent successfully`);
+            }
+          }
         }
       } catch (err) {
         await ScheduledJob.findByIdAndUpdate(job._id, {

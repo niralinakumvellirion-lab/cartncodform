@@ -18,6 +18,7 @@ const scheduledJobSchema = new mongoose.Schema({
     default: 'pending',
     index: true,
   },
+  channel: { type: String, enum: ['push', 'email'], default: 'push' },
   payload: { type: mongoose.Schema.Types.Mixed },  // resolved title/body/imageUrl at send time
 
   createdAt: { type: Date, default: Date.now },

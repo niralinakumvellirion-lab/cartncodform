@@ -1,6 +1,7 @@
 const AutomationRule = require('../models/AutomationRule');
 const ScheduledJob = require('../models/ScheduledJob');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+const AbandonedCustomer = require('../models/AbandonedCustomer');
 
 /**
  * Called after a carts/create or carts/update webhook is processed.
@@ -25,18 +26,6 @@ async function scheduleCartAbandonJobs(shopDomain, cartToken, customerId, cartCo
 
     if (!rules.length) return;
 
-    // Find the subscriber linked to this cart (if any) so we know
-    // there's someone to notify before scheduling anything.
-    const sub = await CustomerPushSubscription.findOne({
-      shopDomain: shop,
-      cartToken: cartToken,
-    }).sort({ lastActivityAt: -1 });
-
-    if (!sub) {
-      console.log(`[automation] No subscriber for cartToken ${cartToken} — skipping schedule`);
-      return;
-    }
-
     for (const rule of rules) {
       // Skip entirely if any non-cancelled job already exists for
       // this rule+cart (sent or still pending) — avoids re-sending
@@ -58,6 +47,26 @@ async function scheduleCartAbandonJobs(shopDomain, cartToken, customerId, cartCo
         cumulativeMinutes += step.delayMinutes;
         const runAt = new Date(Date.now() + cumulativeMinutes * 60 * 1000);
 
+        // Per-channel precheck: is there anyone reachable on this
+        // step's channel for this cart? If not, skip just this step
+        // (the timeline for later steps still advances).
+        const channel = step.channel || 'push';
+        let sub = null;
+
+        if (channel === 'push') {
+          sub = await CustomerPushSubscription.findOne({
+            shopDomain: shop,
+            cartToken,
+          });
+          if (!sub) continue;
+        } else if (channel === 'email') {
+          const customer = await AbandonedCustomer.findOne({
+            shopDomain: shop,
+            sessionId: cartToken,
+          });
+          if (!customer || !customer.email) continue;
+        }
+
         const title = step.title
           .replace('{cartValue}', cartContext.cartValue || '')
           .replace('{productTitle}', cartContext.firstItemTitle || 'your item');
@@ -71,9 +80,10 @@ async function scheduleCartAbandonJobs(shopDomain, cartToken, customerId, cartCo
             ruleId: rule._id,
             stepIndex: i,
             cartToken,
-            customerId: customerId || sub.customerId || null,
+            customerId: customerId || sub?.customerId || null,
             runAt,
             status: 'pending',
+            channel,
             payload: {
               title,
               body,

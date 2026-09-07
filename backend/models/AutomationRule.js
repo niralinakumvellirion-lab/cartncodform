@@ -2,7 +2,8 @@ const mongoose = require('mongoose');
 
 const stepSchema = new mongoose.Schema({
   delayMinutes: { type: Number, required: true },
-  channel: { type: String, enum: ['push'], default: 'push' },
+  channel: { type: String, enum: ['push', 'email'], default: 'push' },
+  subject: { type: String, default: '' },  // email subject line (ignored for push)
   title: { type: String, required: true },
   body: { type: String, required: true },
   imageSource: {

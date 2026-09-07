@@ -2,6 +2,7 @@ const express = require('express');
 const PushSubscription = require('../models/PushSubscription');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
+const { sendAbandonedCartEmail } = require('../utils/email');
 const { fetchProductImage } = require('./webhooks');
 const { requireAuth } = require('../middleware/requireOwner');
 
@@ -243,6 +244,47 @@ router.post('/cart-activity', async (req, res) => {
   } catch (err) {
     console.error('[push] POST /cart-activity error:', err.message);
     return res.status(500).json({ error: 'Failed to record cart activity' });
+  }
+});
+
+/**
+ * POST /api/push/send-email-test
+ * Body: { shopDomain, cartToken, subject, body }
+ * Sends a one-off abandoned-cart email to the customer on file for a cart,
+ * so the merchant can preview the email content from the dashboard.
+ */
+router.post('/send-email-test', requireAuth, async (req, res) => {
+  try {
+    const { shopDomain, cartToken, subject, body } = req.body;
+    const shop = shopDomain?.trim().toLowerCase();
+
+    // IDOR: the verified token's shop must match the shop being acted on.
+    if (req.shopDomain !== shop) {
+      return res.status(403).json({ error: 'Not authorized for this store' });
+    }
+
+    const AbandonedCustomer = require('../models/AbandonedCustomer');
+    const customer = await AbandonedCustomer.findOne({
+      shopDomain: shop,
+      sessionId: cartToken,
+    });
+    if (!customer || !customer.email) {
+      return res.status(404).json({ error: 'No customer email found for this cart' });
+    }
+
+    const result = await sendAbandonedCartEmail(customer, {
+      subject,
+      body,
+      cartUrl: `https://${shopDomain}/cart`,
+    });
+
+    if (!result.success) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[push] POST /send-email-test error:', err.message);
+    return res.status(500).json({ success: false, error: 'Failed to send test email' });
   }
 });
 

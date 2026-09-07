@@ -44,7 +44,7 @@ function shell(innerHtml) {
 // 1. Abandoned cart reminder -> the customer
 // ---------------------------------------------------------------------------
 
-async function sendAbandonedCartEmail(customer) {
+async function sendAbandonedCartEmail(customer, options = {}) {
   try {
     if (!customer || !customer.email) {
       // No email on file — nothing to send.
@@ -65,11 +65,17 @@ async function sendAbandonedCartEmail(customer) {
       })
       .join('');
 
-    const cta = process.env.FRONTEND_URL || '#';
+    // Optional overrides (per automation step / test send).
+    const subject = options.subject || 'You left something behind! 🛒';
+    const introHtml = options.body
+      ? `<p style="margin:0 0 16px;color:#111827;">${escapeHtml(options.body)}</p>`
+      : '';
+    const cta = options.cartUrl || process.env.FRONTEND_URL || '#';
 
     const html = shell(
       `<h1 style="font-size:22px;margin:0 0 12px;">You forgot something!</h1>` +
         `<p style="margin:0 0 16px;color:#4b5563;">Here's what's still waiting in your cart:</p>` +
+        `${introHtml}` +
         `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
         `${rows || '<tr><td style="padding:6px 0;color:#6b7280;">Your saved items</td></tr>'}` +
         `<tr><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">Total</td>` +
@@ -84,7 +90,7 @@ async function sendAbandonedCartEmail(customer) {
     const { error } = await resend.emails.send({
       from: FROM,
       to: customer.email,
-      subject: 'You left something behind! 🛒',
+      subject: subject,
       html,
     });
 

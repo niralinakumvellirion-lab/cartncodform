@@ -1,0 +1,176 @@
+================================================================================
+PHASE 5 — EMAIL CHANNEL FOR AUTOMATION (FRONTEND) — SELF-AUDIT
+================================================================================
+Date: 2026-09-07
+File modified: frontend/app/admin/page.js  (only file changed)
+No new components' files, no new imports, no new API endpoints.
+`Select`, `TextField`, `Popover`, `Card`, `FormLayout`, `InlineStack`, `Button`
+were all already in the import list — nothing added to line 4–29 imports.
+
+================================================================================
+1. StepEditor — channel Select + conditional subject TextField
+================================================================================
+CONFIRMED. Inside the existing <FormLayout>, order is now:
+  1. Delay (minutes) TextField            — unchanged
+  2. <Select label="Channel" ...>         — NEW, added BEFORE the title field
+       options: [{Push Notification, push}, {Email, email}]
+       value:   step.channel || 'push'
+       onChange: onChange({ ...step, channel: value })
+  3. {step.channel === 'email' && (<TextField label="Email Subject" ... />)}
+       — NEW, added AFTER the channel Select, rendered ONLY for email
+       value:   step.subject || ''
+       onChange: onChange({ ...step, subject: value })
+       placeholder: "e.g. You left something behind..."
+  4. title TextField                       — label now dynamic (see §2)
+  5. Message (body) TextField              — UNCHANGED (still maps to the
+       custom body intro in the email template on the backend)
+  6. Include product image Checkbox        — unchanged
+
+================================================================================
+2. StepEditor — title label changes based on channel
+================================================================================
+CONFIRMED.
+  label={step.channel === 'email' ? 'Email Intro Text' : 'Notification title'}
+
+DEVIATION (minor, deliberate): the spec said the push-channel label should
+"stay 'Title' as-is". The field's pre-existing label in this file was
+"Notification title", not "Title". "as-is" was read as "leave the current
+label untouched", so push keeps "Notification title"; only the email branch
+switches to "Email Intro Text". The body field label is untouched for both
+channels, as specified.
+
+================================================================================
+3. RuleForm — new step default includes channel + subject
+================================================================================
+CONFIRMED in BOTH places a fresh step object is created:
+
+  - initial useState (no existingRule):
+      [{ delayMinutes: '30', channel: 'push', subject: '', title: '',
+         body: '', imageSource: 'product' }]
+
+  - addStep():
+      setSteps(prev => [...prev, { delayMinutes: '1440', channel: 'push',
+         subject: '', title: '', body: '', imageSource: 'product' }]);
+
+Editing an existing rule: `existingRule.steps.map(s => ({ ...s, delayMinutes:
+String(...) }))` already spreads every server field, so channel/subject on
+saved rules round-trip into the editor unchanged (fall back to 'push'/'' via
+the Select `value={step.channel || 'push'}` and TextField `value={step.subject
+|| ''}` guards).
+
+================================================================================
+4. RuleForm — channel/subject NOT dropped from the API payload
+================================================================================
+CONFIRMED. handleSave() builds `payload.steps` via an explicit field map
+(it does NOT send steps as-is), so the two new fields had to be added there:
+
+  steps: steps.map(s => ({
+    delayMinutes: Number(s.delayMinutes),
+    channel: s.channel || 'push',        <-- ADDED
+    subject: (s.subject || '').trim(),   <-- ADDED
+    title: s.title.trim(),
+    body: s.body.trim(),
+    imageSource: s.imageSource,
+  })),
+
+Same payload object is used for both the POST (create) and PATCH (update)
+branches, so both persist channel + subject. Backend AutomationRule.stepSchema
+(Phase 5 backend) accepts `channel` enum ['push','email'] and `subject`.
+
+================================================================================
+5. SendEmailButton — component exists with correct props / state / handler
+================================================================================
+CONFIRMED. Added directly AFTER SendPushButton, before StatusBadge.
+
+  Props:  { shop, sessionId, cartToken }
+          (cartToken accepted per spec; the send uses `sessionId` as the
+           cartToken value sent to the backend, matching the spec's handler.)
+  State:  active         (Popover open/closed)
+          emailSubject   (Subject TextField)
+          emailBody      (Message TextField, multiline={2})
+          sending        (button loading/disabled)
+  UI:     <Button>✉️ Email</Button> activator -> <Popover> containing a <Card>
+          + <FormLayout> with Subject TextField, Message TextField
+          (multiline={2}), and an <InlineStack gap="200"> holding
+          "Send" (variant="primary") and "Cancel" (variant="plain").
+  Handler (sendEmail): matches the spec's body exactly —
+          setSending(true) -> apiSend('/api/push/send-email-test', ...,
+          { shopDomain: shop, cartToken: sessionId, subject: emailSubject,
+            body: emailBody }) -> on success setActive(false) + clear both
+          fields -> catch logs '[email] send-email-test failed:' ->
+          finally setSending(false).
+
+DEVIATION (required): the spec snippet calls
+  apiSend(path, { ...body }, 'POST')
+but this codebase's helper signature is `apiSend(path, method, body)` (see
+frontend/lib/api.js:74 and every other call site, e.g. SendPushButton's
+`apiSend('/api/push/send-customer', 'POST', {...})`). Implemented as
+  apiSend('/api/push/send-email-test', 'POST', { shopDomain, cartToken,
+          subject, body })
+Using the spec's literal argument order would pass the body object as
+`method` and the string 'POST' as `body`, producing a broken request.
+Everything else (endpoint, payload keys, control flow) is per spec.
+
+Note: Popover activator click and the Cancel click both call
+`e.stopPropagation()` so opening/closing the email composer does not trigger
+the row's `onClick` (which opens the Customer Journey modal) — same guarding
+SendPushButton already uses.
+
+================================================================================
+6. StoreView — SendEmailButton wired into the abandoned carts table
+================================================================================
+CONFIRMED. In the `tab === 'abandoned'` IndexTable, "Cart Items" cell, the
+per-item row that renders SendPushButton now renders both buttons together:
+
+  <div onClick={(e) => e.stopPropagation()}>
+    <InlineStack gap="100" blockAlign="center">
+      <SendPushButton ... />                 (unchanged props)
+      <SendEmailButton
+        shop={shop}
+        sessionId={c.sessionId}
+        cartToken={c.sessionId}
+      />
+    </InlineStack>
+  </div>
+
+NOTE: in this file SendPushButton is rendered once per cart line-item (not
+once per row), so SendEmailButton likewise appears once per line-item. The
+props it needs (shop + c.sessionId) are row-level, so every instance in a row
+is equivalent. Placed "immediately after" SendPushButton as instructed; the
+pre-existing stopPropagation wrapper `div` was kept and an InlineStack added
+inside it so the two buttons sit side by side without changing row-click
+behaviour.
+
+================================================================================
+7. BUILD RESULT
+================================================================================
+cd frontend && npm run build
+
+  ▲ Next.js 14.2.5
+  ✓ Compiled successfully
+  ✓ Linting and checking validity of types
+  ✓ Generating static pages (5/5)
+
+  Route (app)                    Size      First Load JS
+  ┌ ○ /                          6.95 kB   94.1 kB
+  ├ ○ /_not-found                871 B     88 kB
+  ├ ○ /admin                     80 kB     167 kB   (was ~78 kB pre-change)
+  └ ƒ /cod-form/[shop]           5.66 kB   92.8 kB
+
+Zero errors, zero warnings. Only /admin grew (the SendEmailButton component +
+the two StepEditor fields).
+
+================================================================================
+8. LINE COUNT
+================================================================================
+  frontend/app/admin/page.js:  1027  ->  1127   (+100)
+
+  Breakdown:
+    +19   StepEditor: channel Select (10) + conditional subject TextField (9)
+    + 1   StepEditor: title label ternary (net, replaced 1 line)
+    + 2   RuleForm: channel/subject in initial + addStep step defaults
+    + 2   RuleForm: channel/subject in handleSave payload map
+    +70   SendEmailButton component
+    + 6   StoreView: InlineStack wrapper + <SendEmailButton .../> in the
+          abandoned carts table
+================================================================================
