@@ -85,7 +85,7 @@ async function sendPushToStore(shopDomain, title, body) {
  * Send a push notification to every STOREFRONT CUSTOMER who subscribed via the
  * Shopify theme script (CustomerPushSubscription), for one shop.
  */
-async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobileOnly = true, cartToken = null, skipStaleCleanup = false, customerId = null) {
+async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobileOnly = true, cartToken = null, skipStaleCleanup = false) {
   const CustomerPushSubscription = require('../models/CustomerPushSubscription');
   try {
     if (!firebaseReady) {
@@ -157,64 +157,9 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
         }
       }
 
-      // No cartToken match succeeded — fall back to most recent
-      // mobile subscriber for this shop (cart token may have rotated).
-      console.log(`[push-customer] cartToken fallback — trying most recent mobile subscriber`);
-      const fallbackQuery = {
-        shopDomain: shop,
-        deviceType: { $in: ['mobile', 'unknown'] }
-      };
-      if (customerId) {
-        fallbackQuery.customerId = customerId;
-        console.log(`[push-customer] fallback targeting customerId: ${customerId}`);
-      }
-      const fallbackSub = await CustomerPushSubscription.findOne(fallbackQuery)
-        .sort({ lastActivityAt: -1 });
-
-      if (!fallbackSub) {
-        console.log(`[push] No customer subscribers for ${shop}`);
-        return { success: true, sent: 0, tokensFound: 0 };
-      }
-
-      console.log(`[push-customer] fallback token: ${fallbackSub.token.substring(0, 20)}...`);
-      const fallbackMessage = {
-        data: {
-          url: url || `https://${shopDomain}`,
-          imageUrl: imageUrl || '',
-          title: title,
-          body: body,
-          icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
-        },
-        webpush: {
-          headers: { Urgency: 'high' },
-          notification: {
-            title,
-            body,
-            icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
-            image: imageUrl || undefined,
-            badge: 'https://img.icons8.com/color/96/shopping-cart--v1.png',
-            requireInteraction: false,
-            vibrate: [200, 100, 200],
-          },
-          fcm_options: { link: url || `https://${shopDomain}` },
-        },
-        tokens: [fallbackSub.token],
-      };
-      const fallbackResponse = await getMessaging().sendEachForMulticast(fallbackMessage);
-      const fallbackResult = fallbackResponse.responses[0];
-      if (fallbackResult.success) {
-        console.log(`[push] Sent 1/1 via fallback to ${shop}`);
-        return { success: true, sent: 1, tokensFound: 1 };
-      }
-      const fallbackCode = fallbackResult.error?.code || '';
-      if (
-        fallbackCode === 'messaging/registration-token-not-registered' ||
-        fallbackCode === 'messaging/invalid-registration-token'
-      ) {
-        await CustomerPushSubscription.deleteMany({ token: fallbackSub.token });
-        console.log(`[push-customer] Deleted stale fallback token`);
-      }
-      console.log(`[push] No active subscribers found for ${shop}`);
+      // No cartToken match succeeded — do not fall back to another subscriber.
+      // If the target customer has no valid token, skip this send.
+      console.log(`[push-customer] cartToken: no valid token found for cart ${cartToken} — skipping`);
       return { success: true, sent: 0, tokensFound: 0 };
     }
     const subs = await CustomerPushSubscription.find(query);

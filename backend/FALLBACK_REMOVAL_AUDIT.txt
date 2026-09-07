@@ -1,0 +1,156 @@
+================================================================================
+REMOVE "fall back to most recent subscriber" LOGIC — SELF-AUDIT
+================================================================================
+Date: 2026-09-07
+Files modified: 3
+  1. backend/utils/pushNotification.js   (fallback block + signature)
+  2. backend/server.js                   (call site — dropped 9th arg)
+  3. backend/routes/push.js              (call site — dropped 9th arg)
+
+
+================================================================================
+1. backend/utils/pushNotification.js — fallback block removed
+================================================================================
+CONFIRMED.
+
+Inside sendPushToCustomers(), the `if (cartToken) { ... }` branch previously:
+  - looped over all cartToken-matching CustomerPushSubscription rows and tried
+    each token (this per-token loop is KEPT), then
+  - if none succeeded, ran a SECOND lookup for the most-recent mobile
+    subscriber of the shop (optionally scoped by customerId), built a whole
+    second FCM message, sent it, and cleaned up a stale fallback token.
+
+The entire second part (the "fallback" section) was replaced.
+
+REMOVED — was lines 160–218 (59 lines) of the pre-change file:
+    // No cartToken match succeeded — fall back to most recent
+    // mobile subscriber for this shop (cart token may have rotated).
+    console.log(`[push-customer] cartToken fallback — trying most recent mobile subscriber`);
+    const fallbackQuery = { shopDomain: shop, deviceType: { $in: ['mobile','unknown'] } };
+    if (customerId) { fallbackQuery.customerId = customerId; ... }
+    const fallbackSub = await CustomerPushSubscription.findOne(fallbackQuery).sort({ lastActivityAt: -1 });
+    if (!fallbackSub) { ... return { success:true, sent:0, tokensFound:0 }; }
+    ... fallbackMessage { data, webpush, tokens:[fallbackSub.token] } ...
+    const fallbackResponse = await getMessaging().sendEachForMulticast(fallbackMessage);
+    ... if (fallbackResult.success) return { success:true, sent:1, tokensFound:1 };
+    ... stale-token cleanup for fallbackSub.token ...
+    return { success: true, sent: 0, tokensFound: 0 };
+  }
+
+REPLACED WITH — now lines 160–164 (5 lines):
+      // No cartToken match succeeded — do not fall back to another subscriber.
+      // If the target customer has no valid token, skip this send.
+      console.log(`[push-customer] cartToken: no valid token found for cart ${cartToken} — skipping`);
+      return { success: true, sent: 0, tokensFound: 0 };
+    }
+
+Net: -54 lines. The `}` that closes the `if (cartToken) {` block is preserved.
+Everything OUTSIDE the cartToken branch (the no-cartToken broadcast path at
+the old lines 220–295, its stale-token cleanup, the outer try/catch, and
+sendPushToStore) is untouched.
+
+Return contract unchanged: the no-token outcome still resolves
+`{ success: true, sent: 0, tokensFound: 0 }` (same shape the fallback's
+no-subscriber / failed-fallback paths returned).
+
+
+================================================================================
+2. customerId removed from the signature
+================================================================================
+CONFIRMED.
+
+OLD:
+  async function sendPushToCustomers(shopDomain, title, body, url, imageUrl,
+      mobileOnly = true, cartToken = null, skipStaleCleanup = false,
+      customerId = null) {
+
+NEW:
+  async function sendPushToCustomers(shopDomain, title, body, url, imageUrl,
+      mobileOnly = true, cartToken = null, skipStaleCleanup = false) {
+
+Post-change search for `customerId` in backend/utils/pushNotification.js:
+  -> NO matches. The only uses were the removed `fallbackQuery.customerId`
+     lines, so nothing else in the function body needed changing.
+Arity: 9 params -> 8 params.
+
+
+================================================================================
+3. 9th-argument call sites updated
+================================================================================
+Searched backend/ for calls to sendPushToCustomers. Two passed a 9th arg;
+both updated to 8 args. (routes/push.js /send-customer already builds its
+message inline for the older signature — the only 9-arg literal calls were:)
+
+a) backend/server.js — processScheduledJobs(), push branch
+   OLD (9 args, last = `job.customerId || null`):
+     const result = await sendPushToCustomers(
+       job.shopDomain, payload.title || 'You left something behind!',
+       payload.body || 'Come back and check it out.', urlWithJob,
+       payload.imageUrl || null, true, job.cartToken || null, false,
+       job.customerId || null);
+   NEW (8 args):
+     const result = await sendPushToCustomers(
+       job.shopDomain, payload.title || 'You left something behind!',
+       payload.body || 'Come back and check it out.', urlWithJob,
+       payload.imageUrl || null, true, job.cartToken || null, false);
+   `job.customerId` is still used elsewhere in the poller
+   (isOverFrequencyCap(job.shopDomain, job.cartToken, job.customerId)) — not
+   orphaned.
+
+b) backend/routes/push.js — POST /send-customer
+   OLD (9 args, last = `customerIdForPush`):
+     const result = await sendPushToCustomers(
+       shopDomain, title, body, url, resolvedImageUrl, true,
+       normalizedCartToken || null, normalizedCartToken ? false : true,
+       customerIdForPush);
+   NEW (8 args):
+     const result = await sendPushToCustomers(
+       shopDomain, title, body, url, resolvedImageUrl, true,
+       normalizedCartToken || null, normalizedCartToken ? false : true);
+
+RESIDUAL (flagged, NOT changed — outside the stated scope of "remove the 9th
+argument from those call sites"):
+  routes/push.js lines 158–165 still compute `customerIdForPush`:
+      let customerIdForPush = null;
+      if (normalizedCartToken) {
+        const AbandonedCustomer = require('../models/AbandonedCustomer');
+        const ac = await AbandonedCustomer.findOne({ sessionId: normalizedCartToken });
+        customerIdForPush = ac?.customerId || null;
+      }
+  This variable is now unused (its only consumer was the 9th arg). It is a
+  dead AbandonedCustomer.findOne() query on every /send-customer call. Safe to
+  delete those ~8 lines in a follow-up; left in place here to keep this change
+  scoped to signature + call args as instructed.
+  (Note: the `customerId` references at routes/push.js:78 and :106 are in the
+  unrelated /subscribe-customer route — they persist customerId onto the
+  subscription doc and are correct as-is.)
+
+
+================================================================================
+4. node --check
+================================================================================
+  node --check backend/utils/pushNotification.js   -> OK
+  node --check backend/server.js                   -> OK
+  node --check backend/routes/push.js              -> OK
+
+
+================================================================================
+5. npm test
+================================================================================
+  cd backend && npm test
+    Test Suites: 5 passed, 5 total
+    Tests:       42 passed, 42 total
+    Time:        ~2.7 s
+  (The "cancelJobsForOrder error: db down" console.error is the intentional
+   error-path assertion in automationEngine.test.js:278 — not a failure.)
+
+
+================================================================================
+6. LINE COUNTS  (git HEAD -> working)
+================================================================================
+  backend/utils/pushNotification.js   297  ->  242   (-55)
+       -54  fallback block (59 removed, 5 added)
+       -1   customerId param dropped from the signature line
+  backend/server.js                   314  ->  313   (-1)   (9th arg line removed)
+  backend/routes/push.js              291  ->  290   (-1)   (9th arg line removed)
+================================================================================

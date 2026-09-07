@@ -241,8 +241,7 @@ async function processScheduledJobs() {
             payload.imageUrl || null,
             true,
             job.cartToken || null,
-            false,
-            job.customerId || null
+            false
           );
 
           if (!result.success || result.sent === 0) {

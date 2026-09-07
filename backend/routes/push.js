@@ -155,15 +155,6 @@ router.post('/send-customer', requireAuth, async (req, res) => {
       ? cartToken.split('?')[0].trim() || null
       : null;
 
-    // Look up the customerId for this cart so the push can fall back to
-    // a customerId-scoped subscriber if the cartToken no longer matches.
-    let customerIdForPush = null;
-    if (normalizedCartToken) {
-      const AbandonedCustomer = require('../models/AbandonedCustomer');
-      const ac = await AbandonedCustomer.findOne({ sessionId: normalizedCartToken });
-      customerIdForPush = ac?.customerId || null;
-    }
-
     // If a specific productId was passed, fetch its image from
     // Shopify Admin API to ensure we show the right product image.
     let resolvedImageUrl = imageUrl;
@@ -193,8 +184,7 @@ router.post('/send-customer', requireAuth, async (req, res) => {
       shopDomain, title, body, url, resolvedImageUrl,
       true,
       normalizedCartToken || null,
-      normalizedCartToken ? false : true,
-      customerIdForPush
+      normalizedCartToken ? false : true
     );
 
     console.log(`[send-customer] tokens found: ${result.tokensFound ?? 0}`);
