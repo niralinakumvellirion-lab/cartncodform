@@ -239,7 +239,7 @@ async function processScheduledJobs() {
             payload.body || 'Come back and check it out.',
             urlWithJob,
             payload.imageUrl || null,
-            true,
+            false,
             job.cartToken || null,
             false
           );

@@ -85,7 +85,7 @@ async function sendPushToStore(shopDomain, title, body) {
  * Send a push notification to every STOREFRONT CUSTOMER who subscribed via the
  * Shopify theme script (CustomerPushSubscription), for one shop.
  */
-async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobileOnly = true, cartToken = null, skipStaleCleanup = false) {
+async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobileOnly = false, cartToken = null, skipStaleCleanup = false) {
   const CustomerPushSubscription = require('../models/CustomerPushSubscription');
   try {
     if (!firebaseReady) {

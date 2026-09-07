@@ -182,7 +182,7 @@ router.post('/send-customer', requireAuth, async (req, res) => {
 
     const result = await sendPushToCustomers(
       shopDomain, title, body, url, resolvedImageUrl,
-      true,
+      false,
       normalizedCartToken || null,
       normalizedCartToken ? false : true
     );
