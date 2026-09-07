@@ -1,0 +1,172 @@
+================================================================
+CartnCodForm — App Bridge readiness fix #3 (final)
+Load App Bridge synchronously from the root layout <head>.
+Files changed: frontend/app/layout.js
+               frontend/app/admin/page.js
+               frontend/lib/api.js
+Generated: 2026-09-07
+================================================================
+
+WHY #3
+  Fixes #1 (blind poll) and #2 (afterInteractive + onLoad event)
+  both still failed because App Bridge v4 needs to be loaded by a
+  SYNCHRONOUS <script> (no async / no defer). In the Next.js App
+  Router, next/script inside a Client Component can't guarantee
+  that. The only reliable place is a plain <script> in the root
+  layout's <head>, which the browser fetches + executes before it
+  parses <body> — so window.shopify exists before any client
+  component mounts.
+
+================================================================
+1. frontend/app/layout.js — CHANGE (exact)
+================================================================
+  layout.js uses `export const metadata = {...}` and renders an
+  explicit <html>/<body> with NO <head>. Added a <head> block
+  containing the plain App Bridge <script>:
+
+  BEFORE:
+    export default function RootLayout({ children }) {
+      return (
+        <html lang="en">
+          <body>
+            <Providers>{children}</Providers>
+          </body>
+        </html>
+      );
+    }
+
+  AFTER:
+    export default function RootLayout({ children }) {
+      return (
+        <html lang="en">
+          <head>
+            {/* App Bridge must load synchronously (no async/defer) — a plain
+                <script> in the root layout <head> is the only reliable way in
+                the Next.js App Router. Do NOT switch this to next/script. */}
+            <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
+          </head>
+          <body>
+            <Providers>{children}</Providers>
+          </body>
+        </html>
+      );
+    }
+
+  The <script> tag as added (verbatim):
+      <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
+
+  - Plain <script>, NOT next/script. No async, no defer -> the
+    browser blocks on it during <head> parsing and window.shopify
+    is populated before <body> / React hydration.
+  - The `export const metadata` (title / description) is
+    unchanged; Next merges it into <head> alongside this <script>.
+  - It now loads on EVERY route (marketing, login, dashboard,
+    admin) — harmless: on a non-embedded page App Bridge just
+    doesn't attach window.shopify (no parent frame), and only the
+    /admin code ever calls window.shopify.idToken(). ~1 extra
+    network request on the other pages.
+  - The per-page dynamic <meta name="shopify-api-key"> stays in
+    admin/page.js (it can't live in the static root layout).
+
+================================================================
+2. frontend/app/admin/page.js — Script import + tag REMOVED
+================================================================
+  - Removed the import:
+        - import Script from 'next/script';
+    (line 4). `grep -n "Script" app/admin/page.js` -> NO MATCHES.
+    Script was used nowhere else in the file.
+  - Removed the <Script> element from AdminHomeContent:
+        - <Script
+        -   src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
+        -   strategy="afterInteractive"
+        -   onLoad={() => document.dispatchEvent(new Event('shopify:ready'))}
+        - />
+  - KEPT unchanged, in the same place:
+        <meta name="shopify-api-key" content={apiKey} />
+    AdminHomeContent's return is now:
+        <>
+          <meta name="shopify-api-key" content={apiKey} />
+          <AppProvider i18n={{}}>
+            <StoreView shop={shop} />
+          </AppProvider>
+        </>
+  - No 'shopify:ready' event is dispatched anymore (nothing listens
+    for it after the api.js revert below).
+
+================================================================
+3. frontend/lib/api.js — new getAuthToken() (exact)
+================================================================
+  async function getAuthToken() {
+    if (typeof window === 'undefined') {
+      throw new Error('Not running in browser');
+    }
+    let waited = 0;
+    while (!window.shopify) {
+      if (waited >= 10000) {
+        throw new Error('App Bridge did not initialize');
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+      waited += 100;
+    }
+    return await window.shopify.idToken();
+  }
+
+  - Reverted to a simple bounded poll (100 ms interval, 10 s cap).
+  - The 'shopify:ready' event listener, the parallel setInterval,
+    and the 8 s inner timeout from fix #2 are all GONE.
+  - Because App Bridge now loads synchronously in <head>,
+    window.shopify is almost always already present on the first
+    call; the loop is just a small safety margin for the very
+    first render, and the 10 s ceiling still fails cleanly on a
+    genuinely non-embedded load.
+  - Everything else in api.js (BACKEND_URL, describeNetworkError,
+    apiGet, apiSend) unchanged. The explanatory comment above
+    getAuthToken was updated to describe the head-<script> load.
+
+================================================================
+BUILD RESULT — cd frontend && npm run build
+================================================================
+  ▲ Next.js 14.2.5
+   ✓ Compiled successfully
+   ✓ Generating static pages (9/9)
+     Finalizing page optimization ...
+
+  Route (app)                              Size     First Load JS
+  ┌ ○ /                                    172 B          94.1 kB
+  ├ ○ /_not-found                          871 B            88 kB
+  ├ ○ /admin                               79.8 kB        167 kB   (was 82 kB / 169 kB — next/script removed)
+  ├ ƒ /api/auth/[...nextauth]              0 B                0 B
+  ├ ƒ /api/token                           0 B                0 B
+  ├ ƒ /cod-form/[shop]                     5.69 kB        92.8 kB
+  ├ ○ /dashboard                           2.17 kB         106 kB
+  ├ ƒ /dashboard/[shop]                    25.1 kB         112 kB
+  ├ ○ /install                             1.72 kB        95.6 kB
+  └ ○ /login                               1.16 kB        98.1 kB
+
+  ZERO errors. ZERO warnings (checked specifically for the
+  @next/next/no-sync-scripts lint warning — none emitted; the
+  build's "Linting and checking validity of types" step passed
+  clean). All 9 static pages generated.
+
+================================================================
+LINE COUNTS (before -> after)
+================================================================
+  frontend/app/layout.js      :   18 ->   24    (+6)
+  frontend/app/admin/page.js  : 1033 -> 1027    (-6)
+  frontend/lib/api.js         :  121 ->  117    (-4)
+
+================================================================
+CONFIRMATIONS
+================================================================
+  - Only these 3 files changed by this task (git shows M on
+    app/layout.js, app/admin/page.js, lib/api.js; the untracked
+    APPBRIDGE_FIX*.txt files are audit artifacts, not code).
+  - `grep -n "Script" frontend/app/admin/page.js` -> no matches
+    (import + tag both gone).
+  - <meta name="shopify-api-key"> still present in admin/page.js.
+  - Build compiles successfully.
+  - NOT DEPLOYED (per instruction).
+
+================================================================
+END OF AUDIT
+================================================================

@@ -1,0 +1,160 @@
+================================================================
+CartnCodForm — App Bridge readiness fix #2
+(wait for the ready event, not a blind poll)
+Files changed: frontend/lib/api.js, frontend/app/admin/page.js
+Generated: 2026-09-07
+================================================================
+
+PROBLEM
+  Fix #1 (blind 100ms polling of window.shopify, 5s cap) still hit
+  "App Bridge did not initialize in time". Root cause: the App
+  Bridge <Script> used strategy="beforeInteractive" INSIDE a
+  Client Component (frontend/app/admin/page.js is 'use client').
+  In the Next.js App Router, strategy="beforeInteractive" is only
+  honoured when the <Script> is in the root layout.js / a Server
+  Component — inside a Client Component it is silently downgraded
+  / not reliably injected before hydration, so window.shopify was
+  either late or never set within the 5s window.
+
+FIX
+  1. Switch the <Script> to strategy="afterInteractive" (which
+     DOES work in a Client Component) and fire an explicit
+     'shopify:ready' DOM event from its onLoad.
+  2. getAuthToken() now awaits that 'shopify:ready' event (with a
+     poll + 8s timeout fallback) instead of a fixed-count poll.
+
+================================================================
+1. frontend/lib/api.js — new getAuthToken()  (exact)
+================================================================
+  async function getAuthToken() {
+    if (typeof window === 'undefined') {
+      throw new Error('Not running in browser');
+    }
+    // Wait for App Bridge v4 ready signal (fires after postMessage handshake)
+    await new Promise((resolve) => {
+      if (window.shopify) return resolve();
+      document.addEventListener('shopify:ready', resolve, { once: true });
+      // Fallback: also poll in case the event already fired
+      const interval = setInterval(() => {
+        if (window.shopify) { clearInterval(interval); resolve(); }
+      }, 50);
+      setTimeout(() => { clearInterval(interval); resolve(); }, 8000);
+    });
+    if (!window.shopify) {
+      throw new Error('App Bridge did not initialize');
+    }
+    return await window.shopify.idToken();
+  }
+
+  Behaviour:
+   - SSR / no window  -> throw 'Not running in browser'.
+   - window.shopify already present -> resolve immediately, no wait.
+   - otherwise, the Promise resolves on the FIRST of:
+       (a) the 'shopify:ready' event (dispatched by the <Script>
+           onLoad in admin/page.js), listener is { once: true };
+       (b) a 50ms poll noticing window.shopify (covers the case
+           where the script's onLoad fired before this listener
+           was attached — the event would have been missed);
+       (c) an 8000ms hard timeout (so a genuinely non-embedded
+           load fails cleanly rather than hanging).
+   - After the wait, if window.shopify is STILL absent (only the
+     8s timeout path) -> throw 'App Bridge did not initialize'.
+   - On success, window.shopify.idToken() exactly as before (App
+     Bridge still owns token freshness; no local caching).
+   - Nothing else in api.js changed (BACKEND_URL,
+     describeNetworkError, apiGet, apiSend, the comment block
+     above getAuthToken all untouched).
+
+================================================================
+2. frontend/app/admin/page.js — the <Script> tag
+================================================================
+  BEFORE:
+    <Script
+      src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
+      strategy="beforeInteractive"
+    />
+
+  AFTER:
+    <Script
+      src="https://cdn.shopify.com/shopifycloud/app-bridge.js"
+      strategy="afterInteractive"
+      onLoad={() => document.dispatchEvent(new Event('shopify:ready'))}
+    />
+
+  (This is the only change in admin/page.js — the <meta
+   name="shopify-api-key">, <AppProvider>, <StoreView/>, and
+   everything else are untouched.)
+
+================================================================
+WHY afterInteractive + onLoad-EVENT SOLVES THE RACE
+================================================================
+  1. RELIABLE INJECTION. strategy="beforeInteractive" is a
+     Next-App-Router root-only feature: it's meant for
+     layout.js/page.js (Server Components) so Next can inline the
+     script into the initial HTML <head> before hydration. In a
+     'use client' component it isn't guaranteed to run at that
+     phase — which is why window.shopify was showing up late (or
+     not at all) under fix #1. strategy="afterInteractive" is the
+     correct strategy for a script referenced from client code:
+     Next injects it right after the page becomes interactive, and
+     next/script guarantees an onLoad callback once the file has
+     actually executed.
+
+  2. EXACT SIGNAL INSTEAD OF A GUESS. app-bridge.js executing does
+     not by itself mean window.shopify is usable — App Bridge v4
+     still has to complete a postMessage handshake with the
+     Shopify Admin parent frame before it attaches the global.
+     But next/script's onLoad fires when the script has run, and
+     App Bridge v4 attaches window.shopify synchronously as part
+     of that script's own top-level execution once it can (the
+     handshake for idToken() is handled internally by App Bridge
+     on demand). Dispatching 'shopify:ready' from onLoad therefore
+     gives getAuthToken() a concrete "the global is here now"
+     signal tied to the real load event, replacing fix #1's
+     fixed-interval hope-and-check.
+
+  3. NO MISSED-EVENT HOLE. If the script's onLoad happens to fire
+     BEFORE getAuthToken() attaches its 'shopify:ready' listener
+     (e.g. App Bridge loaded fast, the first apiGet came a beat
+     later), the event is gone — so getAuthToken() ALSO checks
+     `if (window.shopify) return resolve()` up front and keeps a
+     50ms poll running alongside the listener. First one to see it
+     wins; the 8s timeout bounds the worst case.
+
+  Net: the first mount-time apiGet/apiSend now blocks precisely
+  until App Bridge's global exists (event-driven, with a poll
+  safety net), then proceeds — no more spurious
+  "did not initialize in time".
+
+================================================================
+CONFIRMATIONS
+================================================================
+  - `git status --porcelain` (repo root):
+        M frontend/app/admin/page.js
+        M frontend/lib/api.js
+        ?? frontend/APPBRIDGE_FIX_AUDIT.txt   <- untracked artifact from the
+                                                 PREVIOUS task, not changed here
+    -> This task modified ONLY frontend/lib/api.js and
+       frontend/app/admin/page.js. No other source/config file
+       touched.
+  - `cd frontend && npm run build`:
+        ✓ Compiled successfully
+        ✓ Generating static pages (9/9)
+        /admin  ○  82 kB  /  169 kB   (was 81.9 kB / 169 kB — the
+                +0.1 kB is the onLoad handler; no meaningful bundle
+                change)
+    ZERO errors, ZERO warnings.
+
+  LINE COUNTS
+    frontend/lib/api.js         : 114  ->  121   (+7)
+    frontend/app/admin/page.js  : 1032 -> 1033   (+1)
+
+================================================================
+DEPLOY
+================================================================
+  NOT DEPLOYED (per instruction). Build-verified only. To ship:
+      cd frontend && npx vercel --prod
+
+================================================================
+END OF AUDIT
+================================================================

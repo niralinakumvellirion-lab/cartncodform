@@ -17,16 +17,24 @@ function describeNetworkError(err, method, url) {
   return raw;
 }
 
-// Auth is a Shopify App Bridge session token. App Bridge (loaded via the CDN
-// script in the embedded /admin page) exposes window.shopify.idToken(), which
-// returns a fresh, short-lived JWT and caches/refreshes internally — so we do
-// no caching of our own here.
+// Auth is a Shopify App Bridge session token. App Bridge is loaded
+// synchronously by a plain <script> in the root layout <head>, so by the time
+// any api call runs window.shopify is normally already there; the short poll
+// below just covers the first render. window.shopify.idToken() returns a
+// fresh, short-lived JWT and caches/refreshes internally — no caching here.
 async function getAuthToken() {
-  if (typeof window === 'undefined' || !window.shopify) {
-    throw new Error('Not running inside Shopify Admin');
+  if (typeof window === 'undefined') {
+    throw new Error('Not running in browser');
   }
-  const token = await window.shopify.idToken();
-  return token;
+  let waited = 0;
+  while (!window.shopify) {
+    if (waited >= 10000) {
+      throw new Error('App Bridge did not initialize');
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+    waited += 100;
+  }
+  return await window.shopify.idToken();
 }
 
 export async function apiGet(path) {

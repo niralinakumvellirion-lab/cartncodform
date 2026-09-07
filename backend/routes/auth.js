@@ -110,9 +110,8 @@ router.get('/callback', async (req, res) => {
     // Register webhooks (best-effort, non-blocking failures are logged).
     await registerAllWebhooks(shopDomain, accessToken, getBackendUrl(req));
 
-    // Strip any trailing slash on FRONTEND_URL so we never emit "//dashboard".
-    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
-    const dashboardUrl = `${frontendUrl}/dashboard/${shopDomain}`;
+    // Return the merchant into the embedded app inside Shopify Admin.
+    const dashboardUrl = `https://admin.shopify.com/store/${shopDomain.replace('.myshopify.com', '')}/apps/cartncodform`;
 
     // Check for an existing active subscription. If found, sync it
     // locally and go straight to the dashboard.
@@ -195,7 +194,7 @@ router.get('/billing/callback', async (req, res) => {
   try {
     const shop = (req.query.shop || '').toString().trim().toLowerCase();
     const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
-    const dashboardUrl = `${frontendUrl}/dashboard/${shop}`;
+    const dashboardUrl = `https://admin.shopify.com/store/${shop.replace('.myshopify.com', '')}/apps/cartncodform`;
 
     if (!shop) {
       return res.redirect(frontendUrl);

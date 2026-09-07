@@ -1,0 +1,127 @@
+================================================================
+CartnCodForm — App Bridge readiness fix in frontend/lib/api.js
+Generated: 2026-09-07
+================================================================
+
+PROBLEM
+  After the auth hard-swap, getAuthToken() threw
+  "Not running inside Shopify Admin" on first mount of the
+  embedded /admin page. Cause: App Bridge v4 is loaded via the
+  CDN <Script src="https://cdn.shopify.com/shopifycloud/app-bridge.js">
+  in frontend/app/admin/page.js and initialises ASYNCHRONOUSLY.
+  StoreView's `load` effect (useEffect -> load() -> apiGet ->
+  getAuthToken) fires the instant the component mounts — which is
+  BEFORE App Bridge has finished setting up window.shopify. The
+  synchronous `!window.shopify` check therefore failed and threw.
+
+FIX
+  getAuthToken() now POLLS for window.shopify (100 ms intervals,
+  up to 5 s) before calling window.shopify.idToken().
+
+================================================================
+OLD getAuthToken() LOGIC  (7 lines)
+================================================================
+  async function getAuthToken() {
+    if (typeof window === 'undefined' || !window.shopify) {
+      throw new Error('Not running inside Shopify Admin');
+    }
+    const token = await window.shopify.idToken();
+    return token;
+  }
+
+  - Single synchronous check. If window.shopify was not present at
+    the exact moment of the call, it threw immediately — no wait,
+    no retry. Fine for a call made well after page load; broken
+    for the first call fired from a mount effect during the App
+    Bridge handshake.
+
+================================================================
+NEW getAuthToken() LOGIC  (12 lines)
+================================================================
+  async function getAuthToken() {
+    // Wait for App Bridge to initialize (max 5 seconds, 100ms intervals)
+    let waited = 0;
+    while (typeof window === 'undefined' || !window.shopify) {
+      if (waited >= 5000) {
+        throw new Error('App Bridge did not initialize in time');
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+      waited += 100;
+    }
+    return await window.shopify.idToken();
+  }
+
+  - Loops while window is undefined OR window.shopify is not yet
+    set. Each iteration awaits a 100 ms timeout and adds 100 to
+    `waited`.
+  - Gives up after 5000 ms with a clearer error
+    ("App Bridge did not initialize in time") — this only happens
+    if the page genuinely is not embedded (no parent frame to
+    hand-shake with) or App Bridge failed to load.
+  - On success, calls window.shopify.idToken() exactly as before
+    (App Bridge still handles token freshness / internal caching;
+    no caching added here).
+  - Still parameter-less; apiGet/apiSend's `getAuthToken(true)`
+    retry call passes a harmless ignored argument, unchanged.
+
+================================================================
+WHY THE POLLING FIX WORKS
+================================================================
+  App Bridge v4's CDN script does not populate window.shopify
+  synchronously on load. On startup it performs a postMessage
+  handshake with the parent frame (Shopify Admin at
+  https://admin.shopify.com): the script posts an init message
+  upward, the host responds with the shop/host/config context,
+  and only THEN does App Bridge attach the global `window.shopify`
+  object (with idToken(), etc.). That round trip is asynchronous
+  and typically completes in tens to a few hundred milliseconds
+  after the script executes.
+
+  StoreView mounts and its data-load effect runs on the SAME tick
+  the component first renders — often before that handshake has
+  resolved. The old one-shot check lost that race and threw.
+
+  The new loop simply waits for the handshake to finish:
+    - It re-checks window.shopify every 100 ms.
+    - The moment App Bridge attaches window.shopify (post-
+      handshake), the `while` condition becomes false and the loop
+      exits, then idToken() is called on a now-ready App Bridge.
+    - The 5 s ceiling (50 iterations) bounds the wait so a
+      genuinely non-embedded load fails cleanly instead of hanging
+      forever.
+
+  Net effect: the first apiGet/apiSend from mount now blocks for
+  ~1-3 polling cycles until App Bridge is ready, then proceeds
+  normally, instead of throwing on a cold start.
+
+================================================================
+CONFIRMATIONS
+================================================================
+  - ONLY frontend/lib/api.js changed. `git status --porcelain`:
+        M frontend/lib/api.js
+    (nothing else modified or staged.)
+  - No other file in the repo was touched by this task.
+  - Everything else in api.js (BACKEND_URL, describeNetworkError,
+    apiGet, apiSend, the descriptive comment block above
+    getAuthToken) is unchanged.
+  - `npm run build` -> "Compiled successfully", 9/9 static pages,
+    /admin still 81.9 kB / 169 kB (the change is ~5 lines of
+    control flow, no bundle impact).
+
+  LINE COUNT — frontend/lib/api.js
+    BEFORE : 109 lines
+    AFTER  : 114 lines
+    DELTA  : +5 lines
+
+================================================================
+DEPLOY
+================================================================
+  NOT DEPLOYED (per instruction — "do not deploy yourself").
+  The change is committed-ready and build-verified. To ship:
+      cd frontend && npx vercel --prod
+  (Vercel serves the embedded /admin page; the backend on Render
+   is unaffected by this change.)
+
+================================================================
+END OF AUDIT
+================================================================

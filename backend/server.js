@@ -27,6 +27,7 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   'https://cartncodform-beryl.vercel.app',
+  'https://admin.shopify.com',
   'http://localhost:3000',
 ].filter(Boolean);
 
@@ -60,6 +61,15 @@ app.use(express.urlencoded({ extended: true }));
 // Simple request logger.
 app.use((req, _res, next) => {
   console.log(`[http] ${req.method} ${req.originalUrl}`);
+  next();
+});
+
+// Allow the app to be embedded as an iframe inside Shopify Admin.
+app.use((_req, res, next) => {
+  res.setHeader(
+    'Content-Security-Policy',
+    "frame-ancestors https://admin.shopify.com https://*.myshopify.com"
+  );
   next();
 });
 

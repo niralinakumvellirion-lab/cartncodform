@@ -1,0 +1,278 @@
+================================================================
+CartnCodForm — PHASE 1 CLEANUP (execution)
+Delete the NextAuth / multi-store-dashboard surface; point OAuth
+at the embedded app; add the embed CSP header.
+Generated: 2026-09-07
+================================================================
+
+RESULT: 12 files deleted, 3 modified. Frontend build passes
+(9 routes -> 4). Backend tests 42/42. No broken imports remain.
+
+================================================================
+FILES DELETED (12) — each confirmed removed
+================================================================
+  All 12 were git-tracked before deletion (so each is recoverable
+  with `git checkout <path>` if ever needed). `git status` after:
+  every one shows as `D` (deleted). Verified on disk with
+  `find frontend/app frontend/components frontend/lib -type f`.
+
+    D  frontend/app/login/page.js
+    D  frontend/app/api/auth/[...nextauth]/route.js
+    D  frontend/components/AuthGuard.js
+    D  frontend/lib/session.js
+    D  frontend/app/install/page.js
+    D  frontend/app/dashboard/page.js
+    D  frontend/app/dashboard/layout.js
+    D  frontend/components/PushNotificationSetup.js
+    D  frontend/app/dashboard/[shop]/page.js
+    D  frontend/app/api/token/route.js
+    D  frontend/components/Providers.js
+    D  frontend/components/Sidebar.js
+
+  Empty directories pruned after deletion:
+    frontend/app/login/
+    frontend/app/api/auth/[...nextauth]/
+    frontend/app/api/auth/
+    frontend/app/api/token/
+    frontend/app/api/            (was left empty once token/ + auth/ went)
+    frontend/app/dashboard/[shop]/
+    frontend/app/dashboard/
+    frontend/app/install/
+    frontend/components/         (entire directory — all 4 files were on the delete list)
+
+  NOT deleted (as instructed): frontend/lib/firebase.js,
+    frontend/lib/api.js, frontend/app/admin/page.js,
+    frontend/app/page.js. All 4 confirmed still present.
+  Also untouched: frontend/app/admin/layout.js,
+    frontend/app/cod-form/[shop]/page.js, frontend/app/globals.css.
+
+  Final frontend source tree:
+    app/admin/layout.js
+    app/admin/page.js
+    app/cod-form/[shop]/page.js
+    app/globals.css
+    app/layout.js
+    app/page.js
+    lib/api.js
+    lib/firebase.js
+    (no components/ dir)
+
+================================================================
+1. backend/routes/auth.js — OAuth /callback redirect
+================================================================
+  Only the redirect TARGET changed. Token exchange, owner-email
+  resolution, Store upsert, webhook registration, and the billing
+  sync (getActiveSubscription / plan:'pro') are byte-for-byte
+  unchanged.
+
+  OLD (lines 113-115):
+    // Strip any trailing slash on FRONTEND_URL so we never emit "//dashboard".
+    const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+    const dashboardUrl = `${frontendUrl}/dashboard/${shopDomain}`;
+
+  NEW (lines 113-114):
+    // Return the merchant into the embedded app inside Shopify Admin.
+    const dashboardUrl = `https://admin.shopify.com/store/${shopDomain.replace('.myshopify.com', '')}/apps/cartncodform`;
+
+  So all three `return res.redirect(dashboardUrl)` sites in
+  /callback (active-sub found / billing-check error / no-sub) now
+  send the merchant to:
+    https://admin.shopify.com/store/<shop-without-.myshopify.com>/apps/cartncodform
+  e.g. shopDomain "cartncod-form.myshopify.com" ->
+    https://admin.shopify.com/store/cartncod-form/apps/cartncodform
+
+  Notes:
+   - The local variable is still named `dashboardUrl` (now a
+     misnomer) — left as-is per "keep everything else in /callback
+     exactly as-is". Functionally correct.
+   - The now-unused `frontendUrl` local in /callback was removed
+     (it existed only to build the old dashboardUrl).
+   - `node --check backend/routes/auth.js` -> OK.
+
+  OUT OF SCOPE / FLAGGED: the SEPARATE route
+  `GET /api/auth/billing/callback` (lines ~192-229) still has its
+  own `const frontendUrl = ...; const dashboardUrl =
+  \`${frontendUrl}/dashboard/${shop}\`;` and redirects there. That
+  now points at the deleted /dashboard route. The task scoped the
+  change to `/callback` only, so this was NOT changed — noting it
+  as a follow-up (the post-billing-approval redirect should also
+  go to admin.shopify.com/store/<shop>/apps/cartncodform).
+
+================================================================
+2. backend/server.js — CSP header + CORS
+================================================================
+  (a) CSP MIDDLEWARE — added as a global app.use BEFORE any route
+      mounting (immediately after the request logger, well before
+      the first `app.use('/api/...', ...)` at line ~117):
+
+        // Allow the app to be embedded as an iframe inside Shopify Admin.
+        app.use((_req, res, next) => {
+          res.setHeader(
+            'Content-Security-Policy',
+            "frame-ancestors https://admin.shopify.com https://*.myshopify.com"
+          );
+          next();
+        });
+
+      EXACT HEADER STRING SET:
+        Content-Security-Policy: frame-ancestors https://admin.shopify.com https://*.myshopify.com
+
+      Applies to every response the backend emits (routes, static
+      SW, health, 404).
+
+  (b) CORS ALLOWLIST:
+      OLD:
+        const allowedOrigins = [
+          process.env.FRONTEND_URL,
+          'https://cartncodform-beryl.vercel.app',
+          'http://localhost:3000',
+        ].filter(Boolean);
+      NEW:
+        const allowedOrigins = [
+          process.env.FRONTEND_URL,
+          'https://cartncodform-beryl.vercel.app',
+          'https://admin.shopify.com',
+          'http://localhost:3000',
+        ].filter(Boolean);
+      ('https://admin.shopify.com' added; existing entries and the
+       `origin` callback / `credentials: true` unchanged.)
+
+  `node --check backend/server.js` -> OK.
+  git diff --stat: backend/server.js  10 ++++++++++  (10 insertions)
+
+================================================================
+3. frontend/app/layout.js — remove NextAuth SessionProvider
+================================================================
+  BEFORE:
+    import './globals.css';
+    import Providers from '../components/Providers';
+
+    export const metadata = { ... };
+
+    export default function RootLayout({ children }) {
+      return (
+        <html lang="en">
+          <head>
+            {/* App Bridge ... */}
+            <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
+          </head>
+          <body>
+            <Providers>{children}</Providers>
+          </body>
+        </html>
+      );
+    }
+
+  AFTER:
+    import './globals.css';
+
+    export const metadata = { ... };
+
+    export default function RootLayout({ children }) {
+      return (
+        <html lang="en">
+          <head>
+            {/* App Bridge must load synchronously (no async/defer) — a plain
+                <script> in the root layout <head> is the only reliable way in
+                the Next.js App Router. Do NOT switch this to next/script. */}
+            <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
+          </head>
+          <body>
+            {children}
+          </body>
+        </html>
+      );
+    }
+
+  CONFIRMED:
+   - `import Providers from '../components/Providers';` REMOVED
+     (it was the only import of a deleted module anywhere in the
+     remaining source).
+   - `<Providers>{children}</Providers>` -> `{children}`.
+   - `import './globals.css';` KEPT.
+   - `export const metadata` KEPT unchanged.
+   - The <head> block + the App Bridge <script> KEPT exactly as-is.
+   - No route now mounts a NextAuth <SessionProvider>; the
+     CLIENT_FETCH_ERROR to /api/auth/session (which no longer
+     exists) is gone.
+
+================================================================
+BROKEN IMPORTS — search + resolution
+================================================================
+  Before deleting, grepped the whole frontend for every module
+  path on the delete list + `next-auth` + `[...nextauth]`. Every
+  hit was INSIDE one of the 12 doomed files, EXCEPT:
+    frontend/app/layout.js:2  import Providers from '../components/Providers';
+  -> fixed by change #3 (import + usage removed).
+
+  After the deletions + the 3 edits, repeat grep over the
+  surviving source (frontend/app, frontend/lib) for
+  Providers / AuthGuard / Sidebar / PushNotificationSetup /
+  lib/session / api/token / next-auth / [...nextauth]:
+    -> NO import matches. Clean.
+
+  ONE NON-IMPORT DEAD REFERENCE (flagged, NOT fixed — out of the
+  task's modify scope, and app/page.js is on the keep list):
+    frontend/app/page.js:30  <Link href="/dashboard" ...>
+    frontend/app/page.js:60  href="/dashboard"
+  The marketing landing page still links to the now-deleted
+  /dashboard route (dead links -> 404 if clicked). Not an import,
+  so the build doesn't flag it. Left as a Phase-1 follow-up (the
+  marketing page's CTAs need rethinking for the embedded-app
+  model anyway).
+
+  Also now-unused but harmless (NOT removed — package.json out of
+  scope): `next-auth` and `jsonwebtoken` remain in
+  frontend/package.json with no importer.
+
+================================================================
+BUILD RESULT — cd frontend && npm run build
+================================================================
+  ▲ Next.js 14.2.5
+   ✓ Compiled successfully
+   ✓ Generating static pages (5/5)      (was 9 pages -> now 5)
+     Finalizing page optimization ...
+
+  Route (app)                              Size     First Load JS
+  ┌ ○ /                                    6.95 kB        94.1 kB
+  ├ ○ /_not-found                          871 B            88 kB
+  ├ ○ /admin                               79.7 kB        167 kB
+  └ ƒ /cod-form/[shop]                     5.66 kB        92.8 kB
+  + First Load JS shared by all            87.1 kB
+
+  ZERO errors, ZERO warnings. Routes gone as expected:
+    /login, /install, /dashboard, /dashboard/[shop],
+    /api/auth/[...nextauth], /api/token  — all removed.
+  Remaining: / (marketing, static), /_not-found, /admin (embedded,
+  static shell + CSR), /cod-form/[shop] (public COD form, dynamic).
+  ( / grew 172 B -> 6.95 kB only because Next re-attributes shared
+    chunk weight per route after the layout/Providers change;
+    First Load JS for / is unchanged at 94.1 kB. )
+
+================================================================
+TEST RESULT — cd backend && npm test
+================================================================
+  Test Suites: 5 passed, 5 total
+  Tests:       42 passed, 42 total
+  (Unchanged — the backend changes are a redirect string, a CORS
+   array entry, and a CSP-header middleware; no test touches any
+   of them.)
+
+================================================================
+NOTE ON git status
+================================================================
+  This task's changes:
+    M backend/routes/auth.js
+    M backend/server.js
+    M frontend/app/layout.js
+    D  (the 12 files listed above)
+  Also showing as modified but NOT changed by this task
+  (pre-existing uncommitted work from the earlier App Bridge
+  fixes):
+    M frontend/app/admin/page.js
+    M frontend/lib/api.js
+  (left exactly as they were.)
+
+================================================================
+END OF AUDIT
+================================================================

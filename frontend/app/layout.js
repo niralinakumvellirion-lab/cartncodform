@@ -1,5 +1,4 @@
 import './globals.css';
-import Providers from '../components/Providers';
 
 export const metadata = {
   title: 'CartnCodForm',
@@ -10,8 +9,14 @@ export const metadata = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
+      <head>
+        {/* App Bridge must load synchronously (no async/defer) — a plain
+            <script> in the root layout <head> is the only reliable way in
+            the Next.js App Router. Do NOT switch this to next/script. */}
+        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
+      </head>
       <body>
-        <Providers>{children}</Providers>
+        {children}
       </body>
     </html>
   );

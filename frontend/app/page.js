@@ -27,7 +27,7 @@ export default function LandingPage() {
           Cart<span className="text-brand">n</span>CodForm
         </span>
         <nav className="flex items-center gap-6 text-sm font-medium text-gray-600">
-          <Link href="/dashboard" className="hover:text-gray-900">
+          <Link href="https://admin.shopify.com" className="hover:text-gray-900">
             Dashboard
           </Link>
           <Link
@@ -57,7 +57,7 @@ export default function LandingPage() {
             Connect Your Store
           </Link>
           <Link
-            href="/dashboard"
+            href="https://admin.shopify.com"
             className="rounded-lg border border-gray-300 px-6 py-3 text-base font-semibold text-gray-700 hover:bg-gray-50"
           >
             View Dashboard

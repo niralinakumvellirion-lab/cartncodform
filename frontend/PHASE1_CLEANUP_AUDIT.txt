@@ -1,0 +1,615 @@
+================================================================
+CartnCodForm — PHASE 1 CLEANUP AUDIT (read-only)
+Files read in full + existence check of NextAuth/legacy paths.
+Nothing modified.
+Generated: 2026-09-07
+================================================================
+
+================================================================
+1. backend/routes/auth.js  (234 lines, full)
+================================================================
+  1  const express = require('express');
+  2  const crypto = require('crypto');
+  3  const Store = require('../models/Store');
+  4  const OAuthState = require('../models/OAuthState');
+  5  const {
+  6    SHOPIFY_API_KEY,
+  7    buildAuthUrl,
+  8    verifyHmac,
+  9    exchangeCodeForToken,
+ 10    fetchShopEmail,
+ 11    registerAllWebhooks,
+ 12  } = require('../utils/shopify');
+ 13  const { getActiveSubscription, createSubscription } = require('../utils/billing');
+ 14
+ 15  const router = express.Router();
+ 16
+ 17  // Build the public base URL of THIS backend. In production BACKEND_URL must be
+ 18  // set (e.g. https://cartncodform-backend.onrender.com) so the OAuth redirect_uri
+ 19  // exactly matches the one registered in the Shopify app. Only when it is unset
+ 20  // do we fall back to the incoming request's protocol + host.
+ 21  function getBackendUrl(req) {
+ 22    return (
+ 23      process.env.BACKEND_URL || `${req.protocol}://${req.headers.host}`
+ 24    );
+ 25  }
+ 26
+ 27  /**
+ 28   * GET /api/auth/install?shop=example.myshopify.com
+ 29   * Kicks off the Shopify OAuth flow by redirecting to the merchant's consent screen.
+ 30   */
+ 31  router.get('/install', async (req, res) => {
+ 32    try {
+ 33      const shop = (req.query.shop || process.env.SHOP_DOMAIN || '').toString().trim().toLowerCase();
+ 34
+ 35      if (!shop || !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop)) {
+ 36        return res.status(400).json({ error: 'Missing or invalid ?shop=your-store.myshopify.com' });
+ 37      }
+ 38
+ 39      if (!SHOPIFY_API_KEY) {
+ 40        return res.status(500).json({ error: 'SHOPIFY_API_KEY is not configured on the backend' });
+ 41      }
+ 42
+ 43      // Optional: link the store to the dashboard account that started the install.
+ 44      const ownerEmail =
+ 45        (req.query.owner_email || '').toString().trim().toLowerCase() || undefined;
+ 46
+ 47      const state = crypto.randomBytes(16).toString('hex');
+ 48      await OAuthState.create({ nonce: state, ownerEmail });
+ 49
+ 50      const redirectUri = `${getBackendUrl(req)}/api/auth/callback`;
+ 51      const authUrl = buildAuthUrl(shop, redirectUri, state);
+ 52
+ 53      console.log(`[auth] Starting OAuth for ${shop}`);
+ 54      console.log(`[auth] redirect_uri: ${redirectUri}`);
+ 55      return res.redirect(authUrl);
+ 56    } catch (err) {
+ 57      console.error('[auth] /install error:', err.message);
+ 58      return res.status(500).json({ error: 'Failed to start OAuth' });
+ 59    }
+ 60  });
+ 61
+ 62  /**
+ 63   * GET /api/auth/callback
+ 64   * Handles the OAuth redirect from Shopify, exchanges the code for a token,
+ 65   * saves the store, and registers webhooks.
+ 66   */
+ 67  router.get('/callback', async (req, res) => {
+ 68    try {
+ 69      const { shop, code, state } = req.query;
+ 70
+ 71      if (!shop || !code || !state) {
+ 72        return res.status(400).json({ error: 'Missing shop, code or state in callback' });
+ 73      }
+ 74
+ 75      // Validate + consume the state nonce (single use).
+ 76      const savedState = await OAuthState.findOneAndDelete({ nonce: state });
+ 77      if (!savedState) {
+ 78        return res.status(400).json({ error: 'Invalid or expired OAuth state' });
+ 79      }
+ 80
+ 81      // Validate HMAC (skipped gracefully if secret missing, but logged).
+ 82      if (!verifyHmac(req.query)) {
+ 83        console.warn(`[auth] HMAC verification failed for ${shop} — continuing in dev mode`);
+ 84      }
+ 85
+ 86      // Normalise: lowercase, no surrounding whitespace, no trailing slash.
+ 87      const shopDomain = shop.toString().trim().toLowerCase().replace(/\/+$/, '');
+ 88      const accessToken = await exchangeCodeForToken(shopDomain, code);
+ 89
+ 90      // Owner email: prefer the one passed at install time, otherwise pull the
+ 91      // shop's contact email from the Shopify Admin API (GET /admin/api/<v>/shop.json).
+ 92      let ownerEmail = savedState.ownerEmail || null;
+ 93      if (!ownerEmail) {
+ 94        ownerEmail = await fetchShopEmail(shopDomain, accessToken);
+ 95      }
+ 96
+ 97      const update = { shopDomain, accessToken, installedAt: new Date() };
+ 98      if (ownerEmail) update.ownerEmail = ownerEmail;
+ 99
+100      const store = await Store.findOneAndUpdate(
+101        { shopDomain },
+102        update,
+103        { upsert: true, new: true, setDefaultsOnInsert: true }
+104      );
+105
+106      console.log(
+107        `[auth] Store connected: ${shopDomain}${ownerEmail ? ` (owner: ${ownerEmail})` : ''}`
+108      );
+109
+110      // Register webhooks (best-effort, non-blocking failures are logged).
+111      await registerAllWebhooks(shopDomain, accessToken, getBackendUrl(req));
+112
+113      // Strip any trailing slash on FRONTEND_URL so we never emit "//dashboard".
+114      const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+115      const dashboardUrl = `${frontendUrl}/dashboard/${shopDomain}`;
+116
+117      // Check for an existing active subscription. If found, sync it
+118      // locally and go straight to the dashboard.
+119      try {
+120        const activeSub = await getActiveSubscription(shopDomain, accessToken);
+121        if (activeSub) {
+122          await Store.findOneAndUpdate(
+123            { shopDomain },
+124            {
+125              plan: 'pro',
+126              subscriptionId: activeSub.id,
+127              subscriptionStatus: activeSub.status,
+128              planUpdatedAt: new Date(),
+129            }
+130          );
+131          console.log(`[auth] Active subscription found for ${shopDomain} — redirecting to dashboard`);
+132          return res.redirect(dashboardUrl);
+133        }
+134      } catch (billingCheckErr) {
+135        console.error(`[auth] Billing check failed for ${shopDomain}:`, billingCheckErr.message);
+136        // Fall through to dashboard on free plan — don't block install on a billing API hiccup.
+137        return res.redirect(dashboardUrl);
+138      }
+139
+140      // No active subscription — the merchant stays on the free plan
+141      // for now. They can upgrade later from the dashboard (a separate
+142      // "Upgrade" button/route will trigger createSubscription + redirect
+143      // to Shopify's hosted confirmation page).
+144      console.log(`[auth] No active subscription for ${shopDomain} — redirecting to dashboard on free plan`);
+145      return res.redirect(dashboardUrl);
+146    } catch (err) {
+147      const detail = err.response ? JSON.stringify(err.response.data) : err.message;
+148      console.error('[auth] /callback error:', detail);
+149      return res.status(500).json({ error: 'OAuth callback failed' });
+150    }
+151  });
+152
+153  /**
+154   * GET /api/auth/upgrade?shop=<domain>
+155   * Creates a new app subscription and redirects the merchant to
+156   * Shopify's hosted confirmation page. Requires the merchant to
+157   * already be an installed store (has an accessToken on file).
+158   */
+159  router.get('/upgrade', async (req, res) => {
+160    try {
+161      const shop = (req.query.shop || '').toString().trim().toLowerCase();
+162      if (!shop) {
+163        return res.status(400).json({ error: 'shop is required' });
+164      }
+165
+166      const store = await Store.findOne({ shopDomain: shop });
+167      if (!store) {
+168        return res.status(404).json({ error: 'Store not found — please reinstall the app' });
+169      }
+170
+171      const backendUrl = getBackendUrl(req);
+172      const returnUrl = `${backendUrl}/api/auth/billing/callback?shop=${encodeURIComponent(shop)}`;
+173      const isTest = process.env.NODE_ENV !== 'production';
+174
+175      const { confirmationUrl } = await createSubscription(shop, store.accessToken, returnUrl, isTest);
+176
+177      if (!confirmationUrl) {
+178        return res.status(500).json({ error: 'Failed to create subscription' });
+179      }
+180
+181      return res.redirect(confirmationUrl);
+182    } catch (err) {
+183      console.error('[auth] /upgrade error:', err.message);
+184      return res.status(500).json({ error: 'Failed to start upgrade' });
+185    }
+186  });
+187
+188  /**
+189   * GET /api/auth/billing/callback?shop=<domain>&charge_id=<id>
+190   * Shopify redirects here after the merchant approves (or declines)
+191   * the subscription on the hosted confirmation page. Re-check the
+192   * active subscription and sync locally, then send them to the dashboard.
+193   */
+194  router.get('/billing/callback', async (req, res) => {
+195    try {
+196      const shop = (req.query.shop || '').toString().trim().toLowerCase();
+197      const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+198      const dashboardUrl = `${frontendUrl}/dashboard/${shop}`;
+199
+200      if (!shop) {
+201        return res.redirect(frontendUrl);
+202      }
+203
+204      const store = await Store.findOne({ shopDomain: shop });
+205      if (!store) {
+206        return res.redirect(dashboardUrl);
+207      }
+208
+209      const activeSub = await getActiveSubscription(shop, store.accessToken);
+210      if (activeSub) {
+211        await Store.findOneAndUpdate(
+212          { shopDomain: shop },
+213          {
+214            plan: 'pro',
+215            subscriptionId: activeSub.id,
+216            subscriptionStatus: activeSub.status,
+217            planUpdatedAt: new Date(),
+218          }
+219        );
+220        console.log(`[auth] Subscription confirmed for ${shop}`);
+221      } else {
+222        console.log(`[auth] No active subscription after billing callback for ${shop} (declined?)`);
+223      }
+224
+225      return res.redirect(dashboardUrl);
+226    } catch (err) {
+227      console.error('[auth] /billing/callback error:', err.message);
+228      const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
+229      return res.redirect(frontendUrl);
+230    }
+231  });
+232
+233  module.exports = router;
+234  (EOF — file has 233 content lines + trailing newline)
+
+  OBSERVATIONS (for the Phase-1 cleanup context):
+   - OAuth is STILL the authorization-code grant (buildAuthUrl ->
+     /install redirect -> Shopify consent -> /callback ->
+     exchangeCodeForToken). Not token exchange.
+   - /callback line 132/137/145: on success it `res.redirect(...)`
+     to `${FRONTEND_URL}/dashboard/${shopDomain}` — the NON-embedded
+     Vercel dashboard route, NOT
+     `admin.shopify.com/store/<shop>/apps/<handle>`.
+   - It also syncs billing (getActiveSubscription / plan:'pro') and
+     depends on utils/billing.
+   - No route here issues or verifies a Shopify session token; the
+     session-token verification lives in
+     backend/middleware/requireOwner.js (rewritten earlier).
+
+================================================================
+2. backend/server.js  (271 lines, full)
+================================================================
+  1  require('dotenv').config();
+  2
+  3  const path = require('path');
+  4  const express = require('express');
+  5  const cors = require('cors');
+  6  const rateLimit = require('express-rate-limit');
+  7
+  8  const connectDB = require('./config/db');
+  9  const authRoutes = require('./routes/auth');
+ 10  const webhookRoutes = require('./routes/webhooks');
+ 11  const storeRoutes = require('./routes/stores');
+ 12  const codRoutes = require('./routes/cod');
+ 13  const pushRouter = require('./routes/push');
+ 14  const proxyRouter = require('./routes/proxy');
+ 15  const ScheduledJob = require('./models/ScheduledJob');
+ 16  const AutomationRule = require('./models/AutomationRule');
+ 17  const { sendPushToCustomers } = require('./utils/pushNotification');
+ 18  const CustomerPushSubscription = require('./models/CustomerPushSubscription');
+ 19
+ 20  const app = express();
+ 21  // Render sits behind a reverse proxy — trust the X-Forwarded-For
+ 22  // header so rate limiting and req.ip key on the real client IP.
+ 23  app.set('trust proxy', 1);
+ 24  const PORT = process.env.PORT || 4000;
+ 25  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+ 26
+ 27  const allowedOrigins = [
+ 28    process.env.FRONTEND_URL,
+ 29    'https://cartncodform-beryl.vercel.app',
+ 30    'http://localhost:3000',
+ 31  ].filter(Boolean);
+ 32
+ 33  // --- Middleware ------------------------------------------------------------
+ 34  app.use(
+ 35    cors({
+ 36      origin: function (origin, callback) {
+ 37        if (!origin || allowedOrigins.includes(origin)) {
+ 38          callback(null, true);
+ 39        } else {
+ 40          callback(new Error('Not allowed by CORS'));
+ 41        }
+ 42      },
+ 43      credentials: true,
+ 44    })
+ 45  );
+ 46
+ 47  // Capture the raw body so Shopify webhook HMAC can be verified if needed.
+ 48  app.use(
+ 49    express.json({
+ 50      limit: '5mb',
+ 51      verify: (req, _res, buf) => {
+ 52        req.rawBody = buf.toString('utf8');
+ 53      },
+ 54    })
+ 55  );
+ 56  // Parse text/plain bodies (sent by navigator.sendBeacon).
+ 57  app.use(express.text({ type: 'text/plain' }));
+ 58  app.use(express.urlencoded({ extended: true }));
+ 59
+ 60  // Simple request logger.
+ 61  app.use((req, _res, next) => {
+ 62    console.log(`[http] ${req.method} ${req.originalUrl}`);
+ 63    next();
+ 64  });
+ 65
+ 66  // --- Static (customer service worker) -----------------------------------
+ 67  // Wide-open CORS on the service worker so any storefront can load it, and
+ 68  // the Service-Worker-Allowed header so the SW may claim the root scope.
+ 69  app.use('/cartncodform-sw.js', (req, res, next) => {
+ 70    res.setHeader('Access-Control-Allow-Origin', '*');
+ 71    res.setHeader('Service-Worker-Allowed', '/');
+ 72    next();
+ 73  });
+ 74  app.use(express.static(path.join(__dirname, 'public')));
+ 75
+ 76  // --- Routes --------------------------------------------------------------
+ 77  app.get('/', (_req, res) => {
+ 78    res.json({ service: 'CartnCodForm API', status: 'ok' });
+ 79  });
+ 80
+ 81  app.get('/api/health', (_req, res) => {
+ 82    res.json({ status: 'ok', time: new Date().toISOString() });
+ 83  });
+ 84
+ 85  // Rate limiters for the high-volume / abusable public endpoints.
+ 86  const eventsLimiter = rateLimit({
+ 87    windowMs: 60 * 1000,
+ 88    max: 60,
+ 89    standardHeaders: true,
+ 90    legacyHeaders: false,
+ 91  });
+ 92
+ 93  const pushLimiter = rateLimit({
+ 94    windowMs: 60 * 1000,
+ 95    max: 10,
+ 96    standardHeaders: true,
+ 97    legacyHeaders: false,
+ 98  });
+ 99
+100  const attributionLimiter = rateLimit({
+101    windowMs: 60 * 1000,
+102    max: 30,
+103    standardHeaders: true,
+104    legacyHeaders: false,
+105  });
+106
+107  app.use('/api/auth', authRoutes);
+108  app.use('/api/webhooks', webhookRoutes);
+109  app.use('/api/stores', storeRoutes);
+110  app.use('/api/cod', codRoutes);
+111  app.use('/api/push', pushLimiter, pushRouter);
+112  const eventsRouter = require('./routes/events');
+113  app.use('/api/events', eventsLimiter, eventsRouter);
+114  const automationRouter = require('./routes/automation');
+115  app.use('/api/automation', automationRouter);
+116  const attributionRouter = require('./routes/attribution');
+117  app.use('/api/attribution', attributionLimiter, attributionRouter);
+118  app.use('/apps/cartncodform', proxyRouter);
+119
+120  // --- 404 + error handlers ---------------------------------------------------
+121  app.use((req, res) => {
+122    res.status(404).json({ error: `Not found: ${req.method} ${req.originalUrl}` });
+123  });
+124
+125  app.use((err, _req, res, _next) => {
+126    console.error('[error]', err.stack || err.message);
+127    res.status(500).json({ error: 'Internal server error' });
+128  });
+129
+130  // --- Automation: scheduled job sender -----------------------------------
+131  /**
+132   * Returns true if sending a push right now would violate quiet
+133   * hours (10pm-8am) in the given IANA timezone.
+134   */
+135  function isQuietHours(timezone) {
+136    try {
+137      const now = new Date();
+138      const hour = parseInt(
+139        new Intl.DateTimeFormat('en-US', {
+140          hour: 'numeric',
+141          hour12: false,
+142          timeZone: timezone || 'Asia/Kolkata',
+143        }).format(now),
+144        10
+145      );
+146      return hour >= 22 || hour < 8;
+147    } catch (err) {
+148      console.error('[automation] isQuietHours error:', err.message);
+149      return false; // fail open — don't block sends on a bad timezone
+150    }
+151  }
+152
+153  /**
+154   * Returns true if this cartToken/customerId has already received
+155   * 3+ automation pushes in the last 24 hours.
+156   */
+157  async function isOverFrequencyCap(shopDomain, cartToken, customerId) {
+158    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+159    const orClauses = [];
+160    if (cartToken) orClauses.push({ cartToken });
+161    if (customerId) orClauses.push({ customerId });
+162    if (!orClauses.length) return false;
+163
+164    const count = await ScheduledJob.countDocuments({
+165      shopDomain,
+166      status: 'sent',
+167      sentAt: { $gte: since },
+168      $or: orClauses,
+169    });
+170    return count >= 3;
+171  }
+172
+173  /**
+174   * Polls for due ScheduledJob rows and sends them. Runs every 30s.
+175   * Uses a claim-update (findOneAndUpdate with status:'pending' filter)
+176   * so this is safe even if multiple instances ever run.
+177   */
+178  async function processScheduledJobs() {
+179    try {
+180      const now = new Date();
+181      const dueJobs = await ScheduledJob.find({
+182        status: 'pending',
+183        runAt: { $lte: now },
+184      }).limit(20);
+185
+186      for (const job of dueJobs) {
+187        // Check quiet hours + frequency cap BEFORE claiming — if
+188        // blocked, leave the job pending and re-check next tick
+189        // (quiet hours) or skip it permanently (frequency cap).
+190        const Store = require('./models/Store');
+191        const store = await Store.findOne({ shopDomain: job.shopDomain }).select('timezone').lean();
+192        const timezone = store?.timezone || 'Asia/Kolkata';
+193
+194        if (isQuietHours(timezone)) {
+195          console.log(`[automation] Job ${job._id} deferred — quiet hours (${timezone})`);
+196          continue; // leave pending, retry next tick
+197        }
+198
+199        const overCap = await isOverFrequencyCap(job.shopDomain, job.cartToken, job.customerId);
+200        if (overCap) {
+201          await ScheduledJob.findOneAndUpdate(
+202            { _id: job._id, status: 'pending' },
+203            { status: 'skipped', error: 'Frequency cap reached (3/24h)' }
+204          );
+205          console.log(`[automation] Job ${job._id} skipped — frequency cap reached`);
+206          continue;
+207        }
+208
+209        // Claim the job — only proceed if we successfully flip it from pending.
+210        const claimed = await ScheduledJob.findOneAndUpdate(
+211          { _id: job._id, status: 'pending' },
+212          { status: 'sent', sentAt: new Date() },
+213          { new: true }
+214        );
+215        if (!claimed) continue; // another process already claimed it
+216
+217        try {
+218          const payload = job.payload || {};
+219          const baseUrl = payload.url || `https://${job.shopDomain}`;
+220          const urlWithJob = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'ccf_job=' + job._id.toString();
+221          const result = await sendPushToCustomers(
+222            job.shopDomain,
+223            payload.title || 'You left something behind!',
+224            payload.body || 'Come back and check it out.',
+225            urlWithJob,
+226            payload.imageUrl || null,
+227            true,
+228            job.cartToken || null,
+229            false,
+230            job.customerId || null
+231          );
+232
+233          if (!result.success || result.sent === 0) {
+234            await ScheduledJob.findByIdAndUpdate(job._id, {
+235              status: 'failed',
+236              error: result.error || 'No active subscriber found',
+237            });
+238            console.log(`[automation] Job ${job._id} failed: no subscriber reached`);
+239          } else {
+240            console.log(`[automation] Job ${job._id} sent successfully`);
+241          }
+242        } catch (err) {
+243          await ScheduledJob.findByIdAndUpdate(job._id, {
+244            status: 'failed',
+245            error: err.message,
+246          });
+247          console.error(`[automation] Job ${job._id} error:`, err.message);
+248        }
+249      }
+250    } catch (err) {
+251      console.error('[automation] processScheduledJobs error:', err.message);
+252    }
+253  }
+254
+255  // Poll every 30 seconds.
+256  setInterval(processScheduledJobs, 30 * 1000);
+257  console.log('[automation] Scheduled job poller started (30s interval)');
+258
+259  // --- Boot ---------------------------------------------------------------
+260  async function start() {
+261    await connectDB();
+262    app.listen(PORT, () => {
+263      console.log(`[server] CartnCodForm API listening on port ${PORT}`);
+264      console.log(`[server] CORS allowed origins: ${allowedOrigins.join(', ')}`);
+265    });
+266  }
+267
+268  start();
+269
+270  module.exports = app;
+271  (EOF)
+
+  OBSERVATIONS:
+   - allowedOrigins (27-31): FRONTEND_URL env + the hard-coded
+     Vercel origin + localhost:3000. No 'https://admin.shopify.com'
+     (not needed for the embedded fetch — the /admin page is served
+     from the frontend origin).
+   - No session-token / App-Bridge middleware at the app level; the
+     verification is per-route via requireOwner.js.
+   - authRoutes mounted at /api/auth (line 107).
+
+================================================================
+3. frontend/app/layout.js  (25 lines, full)
+================================================================
+  1  import './globals.css';
+  2  import Providers from '../components/Providers';
+  3
+  4  export const metadata = {
+  5    title: 'CartnCodForm',
+  6    description:
+  7      'Multi-store Shopify platform to recover abandoned carts and accept Cash on Delivery orders.',
+  8  };
+  9
+ 10  export default function RootLayout({ children }) {
+ 11    return (
+ 12      <html lang="en">
+ 13        <head>
+ 14          {/* App Bridge must load synchronously (no async/defer) — a plain
+ 15              <script> in the root layout <head> is the only reliable way in
+ 16              the Next.js App Router. Do NOT switch this to next/script. */}
+ 17          <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
+ 18        </head>
+ 19        <body>
+ 20          <Providers>{children}</Providers>
+ 21        </body>
+ 22      </html>
+ 23    );
+ 24  }
+ 25  (EOF)
+
+  OBSERVATIONS:
+   - The App Bridge CDN <script> now loads on EVERY route (it lives
+     in the shared root layout), including the NextAuth
+     /login /dashboard pages.
+   - <Providers> (../components/Providers) wraps all children — per
+     earlier recon this is the NextAuth <SessionProvider>. So every
+     route still mounts SessionProvider and hits /api/auth/session
+     (the source of the CLIENT_FETCH_ERROR seen on /admin).
+
+================================================================
+EXISTENCE CHECK — the 9 listed paths (relative to frontend/)
+================================================================
+  YES  app/login/page.js
+  YES  app/api/auth/[...nextauth]/route.js
+  YES  components/AuthGuard.js
+  YES  lib/session.js
+  YES  app/install/page.js
+  YES  app/dashboard/page.js
+  YES  app/dashboard/layout.js
+  YES  components/PushNotificationSetup.js
+  YES  app/dashboard/[shop]/page.js
+
+  ALL 9 EXIST.  (Verified with `test -f` and confirmed against
+  `ls -la` of frontend/lib/, frontend/components/, and
+  frontend/app/api/auth/[...nextauth]/.)
+
+  Sizes / mtimes for the NextAuth-era files (context only):
+    lib/session.js ..................... 113 bytes  (Aug 31)
+    components/AuthGuard.js ............ 609 bytes  (Aug 31)
+    components/Providers.js ........... 174 bytes  (Aug 31)  (not on the list, but the SessionProvider wrapper)
+    components/Sidebar.js ............. 2990 bytes (Aug 31)  (not on the list; the dashboard store-switcher)
+    app/api/auth/[...nextauth]/route.js  656 bytes  (Aug 31)
+    components/PushNotificationSetup.js 3093 bytes (Aug 27)
+
+  RELATED (also present, from the NextAuth flow, not on the list):
+    frontend/app/api/token/route.js    — the old HS256 JWT minter
+                                          (dead for /admin after the
+                                          session-token swap).
+    frontend/lib/firebase.js           — FCM helper.
+
+================================================================
+NOTHING MODIFIED. Read-only audit.
+================================================================
