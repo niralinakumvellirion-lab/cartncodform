@@ -1,0 +1,271 @@
+================================================================================
+PHASE G3 — Settings screen, Signal configs, Onboarding screen,
+ScheduledJob timestamps, wire + cleanup
+SELF-AUDIT
+================================================================================
+Date: 2026-09-08
+Branch: phase-g3-settings-cleanup   (cut from phase-g2-screens; A–G2 present)
+Status: ScheduledJob { timestamps: true }; Settings screen (3 sections + save +
+per-signal config); Onboarding "Setup" screen (4 steps); 6th nav item; old
+onboarding refs confirmed already gone. Build green, backend 123/123. Done.
+
+================================================================================
+1. FILES CHANGED
+================================================================================
+CREATED:
+  frontend/app/admin/screens/Onboarding.jsx    (134 lines)
+  audits/PHASE_G3_PRE_AUDIT.txt                 (623 lines)
+
+MODIFIED:
+  backend/models/ScheduledJob.js               65 -> 65   (2 lines swapped)
+  frontend/app/admin/screens/Settings.jsx      12 -> 283  (stub -> implemented)
+  frontend/app/admin/page.js                   71 -> 80   (6th nav item + wire)
+
+================================================================================
+2. CONFIRM — ScheduledJob has { timestamps: true }
+================================================================================
+backend/models/ScheduledJob.js:
+  - `new mongoose.Schema({ ... }, { timestamps: true })`  <- second arg added
+  - the explicit `createdAt: { type: Date, default: Date.now }` field was
+    REMOVED (would collide with the timestamps option). Replaced with a
+    comment: "createdAt + updatedAt are managed by { timestamps: true } below."
+  - `sentAt` and `error` fields kept (not timestamp-managed).
+  Mongoose now auto-maintains createdAt AND updatedAt. This makes the
+  Phase-G2 `/messages` sort ({ sentAt:-1, createdAt:-1 }) and the "When"
+  columns work with real values, and gives Phase-E analyticsService a real
+  `updatedAt` window if it wants one.
+  npm test: 13 suites / 123 tests still pass (automationEngine.test.js fully
+  mocks ScheduledJob, so the schema change is invisible to the suite).
+  OWNER STEP (see §8): ScheduledJob.syncIndexes() on Atlas is not required for
+  timestamps, but is listed for the earlier partial-index changes.
+
+================================================================================
+3. CONFIRM — Settings screen has 3 sections (voice, limits, signals)
+================================================================================
+frontend/app/admin/screens/Settings.jsx — props { shop }.
+On mount: Promise.allSettled([
+  apiGet(`/api/profiles/${shop}/settings`)        -> { voice, caps, quietHours, timezone }
+  apiGet(`/api/profiles/${shop}/signal-configs`)  -> { configs }
+])
+State: voice, caps, quietHours, timezone, configs, saving, error, success.
+
+  Section 1 "Brand voice"  (<Card><BlockStack>):
+    Select Tone (friendly/urgent/formal), Select Language (en/hi/hinglish),
+    Checkbox "Use emoji in messages", TextField "Sign-off".
+    All update local `voice` via setVoice(prev => ({...prev, k:v})).
+  Section 2 "Sending limits":
+    TextField (type=number) perDay / perWeek / maxUnopenedPush -> setCaps;
+    InlineStack of quiet-hours start / end (type=number) -> setQuietHours;
+    Select "Store timezone".
+  Section 3 "Signals":
+    SIGNAL_TYPES (the 12) mapped to a bg-surface-secondary Box each, with the
+    type name, a channel-override Select (Auto '' / Push / Email) and an
+    "Enabled" Checkbox — both call updateSignalConfig(type, patch).
+  Save row: success/critical Banners + a primary "Save settings" Button
+  (loading={saving}) calling saveSettings().
+
+DEVIATIONS:
+  (a) Timezone Select: the spec listed 3 options, two of which shared
+      value 'Asia/Kolkata' ("IST" and "IST+5:30 (same as IST)"). Kept the two
+      distinct ones — IST (Asia/Kolkata) and UTC. (Duplicate-value <option>s
+      are legal but pointless.)
+  (b) TextFields got `autoComplete="off"` (Polaris TextField warns without it).
+  (c) The Save section is a <BlockStack> with the Banners stacked ABOVE an
+      <InlineStack align="end"> holding just the Button — the spec put the
+      Banners inside the same align="end" InlineStack as the Button, which
+      right-aligns full-width Banners awkwardly. Same content, cleaner layout.
+
+================================================================================
+4. CONFIRM — saveSettings calls PATCH /settings
+================================================================================
+  async function saveSettings() {
+    setSaving(true); setError(''); setSuccess(false);
+    try {
+      await apiSend(`/api/profiles/${shop}/settings`, 'PATCH',
+        { voice, caps, quietHours, timezone });
+      setSuccess(true);
+    } catch (e) { setError(e.message || 'Save failed'); }
+    finally { setSaving(false); }
+  }
+Backend PATCH /:shopDomain/settings (Phase E) dot-notation-merges
+voice.* / caps.* / quietHours.* and sets timezone; returns { updated: true }
+and evicts the weekly-narrative cache for the shop.
+
+================================================================================
+5. CONFIRM — updateSignalConfig: optimistic update + fire-and-forget PATCH
+================================================================================
+  function updateSignalConfig(signalType, patch) {
+    setConfigs(prev => {                          // OPTIMISTIC, synchronous
+      const existing = prev.find(c => c.signalType === signalType);
+      if (existing) return prev.map(c =>
+        c.signalType === signalType ? { ...c, ...patch } : c);
+      return [...prev, { signalType, enabled: true, channelOverride: null, ...patch }];
+    });
+    apiSend(`/api/profiles/${shop}/signal-configs/${signalType}`, 'PATCH', patch)
+      .catch(e => console.error('[settings] signal config error:', e.message));  // FIRE-AND-FORGET
+  }
+No await, no reload — the local `configs` state is the source of truth for the
+UI; the PATCH persists in the background. Backend PATCH
+/:shopDomain/signal-configs/:signalType (Phase C) validates the enum -> 400,
+upserts { enabled?, channelOverride?, maxSteps? }.
+
+================================================================================
+6. CONFIRM — Onboarding screen: 4 steps with localStorage done state
+================================================================================
+frontend/app/admin/screens/Onboarding.jsx — props { shop, onNavigate }.
+STEPS (4):
+  embed      -> Button url = `https://${shop}/admin/themes/current/editor?context=apps` (external)
+  automation -> Button onClick = onNavigate('settings')
+  push       -> Button url = `https://${shop}` (external)
+  cod        -> Button onClick = navigator.clipboard.writeText(codLink)
+Each step: a <Card> with a Checkbox (labelHidden) + bold title + subdued
+description + a slim Button.
+Manual done state: localStorage key `ccf_step_${id}_done` ('true'/'false').
+  - readDone(id): try { localStorage.getItem(`ccf_step_${id}_done`) === 'true' } catch { false }
+  - writeDone(id, done): try { localStorage.setItem(...) } catch {}
+  - useState initializer seeds `done` from readDone for each step; the Checkbox
+    onChange calls writeDone + setDone.
+Progress: <Text variant="headingMd">{completed} of {STEPS.length} steps done</Text>
+at the top. NO dismiss button — permanent screen.
+<Page title="Setup">.
+
+⚠ DEVIATION vs CLAUDE.md: CLAUDE.md / the handover's hard rules say
+"No localStorage on the admin side." STEP 5 of THIS phase prompt explicitly
+specifies localStorage keys `ccf_step_{id}_done` with exact read/write code.
+Implemented per the phase prompt (all accesses try/caught so a blocked/
+partitioned iframe storage degrades to in-memory-only). RECOMMENDATION
+(open question #1): move this to `Store.onboarding.steps` — that field already
+exists on the Store schema (added Phase C: `[{ id, done, doneAt }]`) and is the
+intended home. That needs a small backend endpoint (e.g. extend PATCH
+/settings to accept `onboarding`, or a dedicated
+PATCH /:shop/onboarding/:stepId). Not done here to avoid unrequested scope.
+
+================================================================================
+7. CONFIRM — 6th nav item added to the shell
+================================================================================
+frontend/app/admin/page.js:
+  - import adds `ClipboardChecklistIcon` (see deviation) from @shopify/polaris-icons
+  - import `OnboardingScreen from './screens/Onboarding'`
+  - SCREENS gains a 6th entry:
+      { id: 'onboarding', label: 'Setup', icon: ClipboardChecklistIcon }
+    -> Navigation.Section now renders 6 items.
+  - render branch added inside <Frame>:
+      {activeScreen === 'onboarding' && (
+        <OnboardingScreen shop={shop}
+          onNavigate={(screen) => setActiveScreen(screen)} />
+      )}
+  So the Onboarding "Configure your first signal" step's "Go to Settings"
+  button flips activeScreen to 'settings'.
+
+DEVIATION: spec said `ChecklistIcon` (fallback NoteIcon/TaskIcon).
+`ChecklistIcon` is NOT an actual export of @shopify/polaris-icons 9.3.1 (the
+first build attempt warned "Attempted import error: 'ChecklistIcon' is not
+exported"). Verified real exports and used `ClipboardChecklistIcon` (closest
+semantic match; NoteIcon was the spec's fallback and is also real).
+
+================================================================================
+8. CONFIRM — old OnboardingChecklist references gone from admin/page.js
+================================================================================
+grep -rn "OnboardingChecklist|showOnboarding|ccf_onboarding_dismissed|
+isOnboardingDismissed" frontend/app/  ->  0 matches (anywhere in frontend/app/).
+They were already removed in Phase G1 when StoreView was deleted — nothing to
+strip this phase. The NEW localStorage keys are `ccf_step_<id>_done`
+(per-step), unrelated to the old `ccf_onboarding_dismissed`.
+
+================================================================================
+9. BUILD RESULT
+================================================================================
+cd frontend && npm run build
+  ▲ Next.js 14.2.5
+  (first attempt: ⚠ "Attempted import error: 'ChecklistIcon' ..." -> fixed by
+   switching to ClipboardChecklistIcon)
+  ✓ Compiled successfully
+  ✓ Linting and checking validity of types
+  ✓ Generating static pages (5/5)
+  Route /admin: 79.2 kB / 166 kB First Load JS  (was 76.2 / 163 in G2)
+  Zero errors, zero warnings on the final build.
+
+================================================================================
+10. npm test RESULT (backend)
+================================================================================
+cd backend && npm test
+  Test Suites: 13 passed, 13 total
+  Tests:       123 passed, 123 total
+  -> unchanged. node --check models/ScheduledJob.js -> OK.
+
+================================================================================
+11. OWNER DEPLOY STEPS (STEP 8 — NOT run here)
+================================================================================
+After this phase is committed:
+  1. git push  -> Render auto-deploys the backend (ScheduledJob schema change).
+  2. npx vercel --prod  (frontend).
+  3. shopify app deploy --allow-updates  (only if the liquid changed since
+     Phase D — it did NOT in G1/G2/G3, so this is a no-op unless bundling
+     other pending changes).
+  4. ScheduledJob index sync on Atlas (covers the Phase-C partial-index changes;
+     harmless to re-run):
+       node -e "
+       require('dotenv').config();
+       const dns = require('dns'); dns.setServers(['8.8.8.8','1.1.1.1']);
+       const mongoose = require('mongoose');
+       mongoose.connect(process.env.MONGODB_URI).then(async () => {
+         const ScheduledJob = require('./backend/models/ScheduledJob');
+         await ScheduledJob.syncIndexes();
+         console.log('done'); mongoose.disconnect();
+       });
+       "
+     (run from repo root; the require path is ./backend/models/ScheduledJob).
+
+================================================================================
+12. NOTICED BUT NOT TOUCHED  (out of scope for Phase G3)
+================================================================================
+- CLAUDE.md "no localStorage in admin" vs STEP 5 (see §6). Implemented per the
+  phase prompt; flagged as open question #1.
+- Settings "Signals" section: `configs` only contains rows that EXIST in the DB.
+  The 12 rows are rendered from SIGNAL_TYPES with a default fallback, so the UI
+  is complete, but toggling a signal that had no row creates one lazily via the
+  PATCH upsert. No bulk "seed all 12" call.
+- Settings save does NOT re-fetch after PATCH — the local state is left as the
+  user set it. If the backend normalises anything (it doesn't currently) the UI
+  wouldn't reflect it until remount.
+- caps.perDay / perWeek / maxUnopenedPush and quietHours.start / end accept any
+  number the user types (no min/max/int validation client-side). The backend
+  PATCH also does no range validation. A nonsense value (e.g. quietHours.start
+  = 99) would just make the brain's isQuietHour comparison never true.
+- The Onboarding "push" step ("Verify push notifications") has no actual
+  verification — it's a manual checkbox. The prototype's step 4 ("Send yourself
+  a test") implied a real test-send; not built.
+- Onboarding is a nav screen but there is no first-run redirect / nudge to it
+  (the old checklist auto-showed on the dashboard). A merchant has to click
+  "Setup" in the nav.
+- Timezone Select offers only IST + UTC. Real multi-tz support (the brain's
+  computeRunAt already handles arbitrary IANA strings) would need a fuller list
+  or a free-text field.
+- Prototype screens still NOT built: "Insights" (product/collection tables with
+  dwell/scroll — the plan's Part 5) and the richer "What to act on" grouped
+  signal view. Today's "Insights" card + Settings' flat signal list are the
+  minimal stand-ins. Presumably a later G-phase or deferred.
+- No search / stage filter / pagination on Customers, Messages, COD (routes
+  support limit/page; screens fetch page 0). Carried from G1/G2.
+
+================================================================================
+13. OPEN QUESTIONS
+================================================================================
+1. localStorage in the admin (§6) — switch the Onboarding step-done state to
+   Store.onboarding.steps (field exists) via a small backend endpoint, to
+   satisfy the CLAUDE.md hard rule? Recommended.
+2. Should Settings re-fetch /settings + /signal-configs after a successful save
+   (round-trip confirmation), or is optimistic-local enough?
+3. Client + server range validation for caps / quietHours (0..23 ints,
+   perDay >= 1, etc.)?
+4. First-run experience — auto-select the 'onboarding' screen when a shop has
+   no signal-configs / a fresh Store, instead of always landing on 'today'?
+5. Icon: ClipboardChecklistIcon for "Setup" — fine, or prefer NoteIcon /
+   something else?
+6. Insights screen + grouped "What to act on" — planned for a G4, or is the
+   admin considered "done to the prototype" after G3 (Today/Customers/Profile/
+   Messages/COD/Settings/Setup all live)?
+
+================================================================================
+END — stopping after self-audit. Phase H not started.
+================================================================================

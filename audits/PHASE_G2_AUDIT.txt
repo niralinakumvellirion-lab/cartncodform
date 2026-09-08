@@ -1,0 +1,232 @@
+================================================================================
+PHASE G2 — Admin rebuild: Profile screen, Messages screen, COD screen
+SELF-AUDIT
+================================================================================
+Date: 2026-09-08
+Branch: phase-g2-screens   (cut from phase-g1-admin-shell; Phases A–G1 present)
+Status: shell double-Page removed; Profile / Messages / CodOrders screens
+implemented; Profile wired into Customers; GET /:shop/messages route added.
+Build green, backend 123/123. Done.
+
+================================================================================
+1. FILES CHANGED
+================================================================================
+CREATED: audits/PHASE_G2_PRE_AUDIT.txt  (723 lines)
+
+MODIFIED (frontend):
+  frontend/app/admin/page.js                  73 -> 71   (shell: drop outer <Page>)
+  frontend/app/admin/screens/Profile.jsx      12 -> 238  (stub -> implemented)
+  frontend/app/admin/screens/Messages.jsx     12 -> 127  (stub -> implemented)
+  frontend/app/admin/screens/CodOrders.jsx    12 -> 198  (stub -> implemented)
+  frontend/app/admin/screens/Customers.jsx    149 -> 159 (wire in Profile)
+
+MODIFIED (backend):
+  backend/routes/profiles.js   (+1 require, +43-line GET /:shopDomain/messages route)
+
+================================================================================
+2. CONFIRM — double-Page nesting fixed in the shell
+================================================================================
+frontend/app/admin/page.js:
+  - `Page` removed from the @shopify/polaris import (now { AppProvider, Frame,
+    Navigation }).
+  - AdminHomeContent renders screens DIRECTLY inside <Frame navigation={...}>:
+        <Frame navigation={navigationMarkup}>
+          {activeScreen === 'today'     && <TodayScreen shop={shop} />}
+          {activeScreen === 'customers' && <CustomersScreen shop={shop} />}
+          {activeScreen === 'messages'  && <MessagesScreen shop={shop} />}
+          {activeScreen === 'cod'       && <CodScreen shop={shop} />}
+          {activeScreen === 'settings'  && <SettingsScreen shop={shop} />}
+        </Frame>
+  No wrapping <Page>. Every screen (Today, Customers, Profile, Messages,
+  CodOrders) owns its single <Page title=...>. The four stub screens
+  (Messages/CodOrders were stubs, now implemented; Profile now implemented;
+  Settings still a bare <Box> stub) — Settings renders without <Page> chrome,
+  acceptable for a "coming soon" stub.
+
+================================================================================
+3. CONFIRM — Profile screen: identity, orders, signals, message history
+================================================================================
+frontend/app/admin/screens/Profile.jsx — props { shop, profileId, onBack }.
+On mount: apiGet(`/api/profiles/${shop}/profiles/${profileId}`) -> { profile, signals }.
+<Page title={email|phone|`Anonymous <id-6>`} backAction={{ content:'Customers',
+  onAction: onBack }}>, with a critical <Banner> on load error.
+<Layout>:
+  - <Layout.Section variant="oneThird">:
+      Card "Identity" — Stage Badge, one row per email, one per phone,
+        "Push tokens" = identifiers.pushTokens.length, "Last seen" (en-IN date).
+      Card "Orders" (in a Box paddingBlockStart="400") — Total orders,
+        LTV (₹ en-IN), COD orders, Prepaid orders from profile.orders.*.
+  - <Layout.Section>:
+      Card "Active signals" — one bg-surface-secondary Box per signal:
+        type (underscores -> spaces), strength Badge (critical >0.7 / warning
+        >0.4 / info), each evidence line, "Expires <date>".
+        Empty -> "No active signals."
+      Card "Message history" (in a Box paddingBlockStart="400") —
+        [...profile.messages].sort(sentAt desc), one Box per entry: type,
+        "<channel> · <sentAt en-IN>", outcome Badge (converted=success /
+        clicked=info / sent=default / else=warning). Empty -> "No messages sent yet."
+
+DEVIATIONS:
+  (a) `<Layout.Section oneThird variant="oneThird">` (spec) -> `variant="oneThird"`
+      only (Polaris 13.9.5's Layout.Section reads `variant`, not the boolean;
+      same finding as G1).
+  (b) `sig.type.replace(...)` -> `sig.type?.replace(...) ?? 'signal'` (defensive;
+      Signal.type is schema-required so this never fires in practice).
+  (c) Badge `tone="default"` in the spec -> `tone={undefined}` (Polaris Badge
+      has no 'default' tone value; undefined = the neutral default). Applied in
+      Profile, Messages, CodOrders wherever the spec wrote 'default'.
+
+================================================================================
+4. CONFIRM — Profile wired into Customers via selectedProfileId
+================================================================================
+frontend/app/admin/screens/Customers.jsx:
+  - `import ProfileScreen from './Profile';`
+  - removed the `// eslint-disable-next-line no-unused-vars` on selectedProfileId.
+  - IndexTable.Row onClick still `setSelectedProfileId(p._id)`.
+  - Before the list return:
+        if (selectedProfileId) {
+          return (
+            <ProfileScreen shop={shop} profileId={selectedProfileId}
+              onBack={() => setSelectedProfileId(null)} />
+          );
+        }
+  So clicking a customer row swaps the whole screen to the Profile view; the
+  Profile's backAction / onBack returns to the list. (The list re-fetches on
+  next mount since `loadData` runs in useEffect keyed on `loadData`.)
+
+================================================================================
+5. CONFIRM — Messages screen: ScheduledJob data
+================================================================================
+frontend/app/admin/screens/Messages.jsx — props { shop }.
+apiGet(`/api/profiles/${shop}/messages?limit=50`) -> { messages, total }.
+<Page title="Messages"> + Refresh secondary action + error Banner.
+<Card><IndexTable> columns: Profile (populated profileId email|phone|
+`Anon <cartToken-6>`), Signal (signalType underscores->spaces, fallback
+reason, fallback —), Channel (Badge), Copy sent (payload.title bold +
+payload.body.slice(0,60) subdued), Status (Badge: sent=success / failed=
+critical / skipped=warning / else neutral), When (m.sentAt || m.createdAt ||
+m.updatedAt, en-IN datetime).
+DEVIATION: spec's "When" column used only `m.updatedAt`. ScheduledJob has NO
+`updatedAt` field, so the client falls back sentAt -> createdAt -> updatedAt.
+
+================================================================================
+6. CONFIRM — GET /api/profiles/:shop/messages route exists
+================================================================================
+backend/routes/profiles.js:
+  + `const ScheduledJob = require('../models/ScheduledJob');`
+  + router.get('/:shopDomain/messages', requireAuth, requireStoreOwner, ...)
+    filter = { shopDomain, status: { $in: ['sent','skipped','failed','cancelled'] } }
+    Promise.all([
+      ScheduledJob.find(filter)
+        .sort({ sentAt: -1, createdAt: -1 })         // spec: updatedAt -1 (absent field)
+        .skip(page*limit).limit(limit)
+        .select('profileId signalType channel payload status runAt reason cartToken sentAt createdAt updatedAt')
+        .populate('profileId', 'identifiers stage'),
+      ScheduledJob.countDocuments(filter),
+    ]) -> { messages, total }
+    limit default 50 / clamp 1..200 ; page default 0 / >= 0.
+  requireStoreOwner enforces the token-shop vs path-shop IDOR check.
+
+================================================================================
+7. CONFIRM — COD screen: stats + confirm/cancel
+================================================================================
+frontend/app/admin/screens/CodOrders.jsx — props { shop }.
+loadOrders(): apiGet(`/api/stores/${shop}/orders`).
+DEVIATION: that endpoint returns a BARE ARRAY (routes/stores.js:
+`res.json(orders)`), not `{ orders: [...] }` as the spec's STEP 6 said. The
+screen accepts both: `Array.isArray(data) ? data : data?.orders || []`.
+Client-side stats (useMemo over orders):
+  total = orders.length
+  pending = orders.filter(status==='pending').length
+  confirmedRevenue = sum over status==='confirmed' of productPrice*quantity
+<Page title="COD Orders"> + Refresh + error Banner.
+<Layout>:
+  - Grid of 3 stat Cards (columnSpan 4/4/4): Total orders, Pending,
+    "Confirmed revenue" (₹ en-IN).
+  - <Card><IndexTable> columns: Customer (name bold + address subdued),
+    Phone, Product (name + "Qty: n"), Value (₹ productPrice*quantity),
+    Email (o.email or —), Status (Badge: confirmed=success / cancelled=
+    critical / else neutral), Date (createdAt en-IN), Action.
+    Action cell: when status === 'pending', an InlineStack with
+      <Button size="slim" variant="primary" onClick={() => updateStatus(o._id,'confirmed')}>Confirm</Button>
+      <Button size="slim" tone="critical" onClick={() => updateStatus(o._id,'cancelled')}>Cancel</Button>
+  updateStatus(id, status): apiSend(`/api/cod/order/${id}`, 'PATCH', { status })
+  then loadOrders(); errors -> setError (Banner).
+DEVIATION: the spec's Customer/Product cells put two bare sibling <Text>
+elements in a cell; wrapped each in <BlockStack gap="050"> so name/address and
+product/qty stack (matches the Profile screen's pattern). Purely visual.
+
+================================================================================
+8. BUILD RESULT
+================================================================================
+cd frontend && npm run build
+  ▲ Next.js 14.2.5
+  ✓ Compiled successfully
+  ✓ Linting and checking validity of types
+  ✓ Generating static pages (5/5)
+  Route /admin: 76.2 kB / 163 kB First Load JS  (was 74.3 / 161 in G1)
+  Zero errors, zero warnings.
+
+================================================================================
+9. npm test RESULT (backend)
+================================================================================
+cd backend && npm test
+  Test Suites: 13 passed, 13 total
+  Tests:       123 passed, 123 total
+  -> unchanged from Phase F/G1 baseline. The new /messages route is a
+     find+count+populate; no new tests (a simple read route, existing suites
+     unaffected). node --check routes/profiles.js -> OK.
+
+================================================================================
+10. NOTICED BUT NOT TOUCHED  (out of scope for Phase G2)
+================================================================================
+- ScheduledJob has no `updatedAt` (Phase C added profileId/signalType/reason,
+  no timestamps). The /messages route and the Messages/Profile screens all
+  fall back to `sentAt` / `createdAt`. Adding `{ timestamps: true }` to
+  ScheduledJob would be a clean fix and also help analyticsService (flagged
+  since Phase B/E). Not done here.
+- Profile.messages[].sentAt is written by recordProfileMessage (Phase C).
+  outcome is only ever 'sent' today (no PushClick -> 'clicked' wiring yet —
+  Phase H). So the Profile message-history / Messages "outcome" badges will
+  almost always read "sent". Same open item carried from Phase F.
+- The Messages screen shows brain ScheduledJobs only meaningfully — legacy
+  AutomationRule jobs (profileId null) appear as "Anon <cartToken-6>" with a
+  blank Signal cell (falls back to `reason` which is '' for legacy jobs, then
+  '—'). Acceptable; legacy scheduler retirement is a Phase C open item.
+- CodOrders reuses GET /api/stores/:shop/orders and PATCH /api/cod/order/:id —
+  both pre-existing. No dedicated COD list route was added.
+- No pagination UI on Customers / Messages / COD (the routes support
+  limit/page; the screens fetch page 0 only). Prototype has no pager either;
+  add when a store exceeds ~50-200 rows.
+- Customers still has no search / stage filter (prototype has both) — G1 open
+  item, still open.
+- Settings screen is still the bare `<Box>… coming soon` stub. The prototype's
+  Settings (voice/caps/quiet-hours/channels) + Onboarding + "What to act on"
+  (SignalConfig) + Insights screens are unbuilt. Presumably Phase G3.
+- Profile screen has no loading skeleton — it renders the spec JSX with
+  optional chaining, so during the fetch it shows dashes/zeros then fills in.
+  A brief flash, not a bug.
+- recharts (prototype's weekly revenue bar chart on Today) still not added.
+
+================================================================================
+11. OPEN QUESTIONS
+================================================================================
+1. Add `{ timestamps: true }` to the ScheduledJob schema so `updatedAt` exists
+   (fixes the /messages sort + the Messages/Profile "When" columns + the
+   Phase-E analytics `messagesSent` window)? Low-risk additive change.
+2. Customers -> Profile is a full in-component screen swap (no URL change, no
+   browser back). Is that acceptable, or should Profile be a real sub-route /
+   Modal so Shopify admin back-navigation works?
+3. `/api/stores/:shop/orders` returns a bare array while the newer
+   /api/profiles/* routes return `{ ...: [], total }`. Normalise the older
+   route to `{ orders, total }` for consistency, or leave it (the screen
+   handles both)?
+4. Messages screen "Signal" for legacy jobs is blank/—. Filter legacy
+   (profileId null) jobs out of /messages, or keep them visible?
+5. Phase G3 scope confirm: Settings, Onboarding, "What to act on"
+   (SignalConfig toggles), Insights — plus search/filter/pagination and
+   optionally the recharts revenue chart.
+
+================================================================================
+END — stopping after self-audit. Phase G3 not started.
+================================================================================

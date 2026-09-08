@@ -27,10 +27,10 @@ const scheduledJobSchema = new mongoose.Schema({
   channel: { type: String, enum: ['push', 'email'], default: 'push' },
   payload: { type: mongoose.Schema.Types.Mixed },  // resolved title/body/imageUrl at send time
 
-  createdAt: { type: Date, default: Date.now },
+  // Phase G3: createdAt + updatedAt are managed by { timestamps: true } below.
   sentAt: { type: Date },
   error: { type: String },
-});
+}, { timestamps: true });
 
 // Compound index for the sender's poll query.
 scheduledJobSchema.index({ status: 1, runAt: 1 });

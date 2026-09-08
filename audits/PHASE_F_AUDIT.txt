@@ -1,0 +1,307 @@
+================================================================================
+PHASE F — Push hygiene: token pruning, stop-after-N-unopened,
+delivered-rate tracking, resubscribe signal
+SELF-AUDIT
+================================================================================
+Date: 2026-09-08
+Branch: phase-f-push-hygiene   (cut from phase-e-ai; Phases A–E present)
+"Done when": delivered rate stays >=85% over two weeks on the live store.
+Status: model fields + pushHygiene service (4 fns) + poller/ingest wiring +
+nightly reset + /push-stats route + 13 tests. Done. (The >=85% two-week
+measurement is an owner observation once this is live — see Open Questions.)
+
+================================================================================
+1. FILES CREATED
+================================================================================
+  backend/services/pushHygiene.js            (160 lines)
+      exports { handleStaleToken, checkUnopenedThreshold, updateDeliveredRate,
+                clearPushSuppression, isStaleCode }
+      (isStaleCode is an extra export — the shared FCM-dead-code test, used by
+       pushNotification.js so the 3 codes live in one place.)
+  backend/__tests__/pushHygiene.test.js      (188 lines)  — 13 tests
+  audits/PHASE_F_PRE_AUDIT.txt               (603 lines)  — read-only capture
+
+================================================================================
+2. FILES MODIFIED  (Phase-F hunks only; working tree also carries D+E)
+================================================================================
+backend/models/Store.js               (+9)
+  @@ caps: added `maxUnopenedPush: { type: Number, default: 5 }` inside the
+     existing caps object.
+  @@ after onboarding: added
+     pushStats: { deliveredLast7d:0, attemptedLast7d:0, rateLast7d:0,
+                  lastComputedAt:null }
+
+backend/utils/pushNotification.js     (242 -> 239, net -3)
+  @@ +8   const { handleStaleToken, isStaleCode } = require('../services/pushHygiene');
+  @@ cartToken loop (~line 146): the stale-token branch's
+        `await CustomerPushSubscription.deleteMany({ token: sub.token })`
+     -> `if (isStaleCode(code)) { await handleStaleToken(sub.token, shop); ... }`
+     (also now routes messaging/invalid-argument, via isStaleCode).
+  @@ broadcast path (~line 214/221): the stale-code check uses `isStaleCode(code)`;
+     the cleanup block
+        `if (staleTokens.length && !skipStaleCleanup) { deleteMany({token:{$in}}) }`
+     -> `if (staleTokens.length && !skipStaleCleanup) {
+            for (const staleToken of staleTokens) await handleStaleToken(staleToken, shop);
+         }`
+     The `skipStaleCleanup` guard was KEPT (spec's snippet omitted it; keeping
+     it preserves the /send-customer broadcast caller's opt-out — see Deviations).
+  `sendPushToStore` (owner PushSubscription cleanup) — NOT touched (STEP 5a is
+  scoped to sendPushToCustomers).
+
+backend/server.js                     (+~27)
+  @@ +26   const { checkUnopenedThreshold, updateDeliveredRate } = require('./services/pushHygiene');
+  @@ push branch, after `recordProfileMessage(job)` in the success `else`:
+        if (job.profileId) { await checkUnopenedThreshold(job.profileId, job.shopDomain).catch(...) }
+        if (result && result.tokensFound >= 0) {
+          await updateDeliveredRate(job.shopDomain, result.sent || 0, result.tokensFound || 0).catch(...)
+        }
+     (DEVIATION: spec wrote `sendResult?.tokensFound` — in the PUSH branch the
+      variable is `result`, the sendPushToCustomers return. `sendResult` is the
+      email branch. Used `result`.)
+  @@ scheduleNightlySignals setTimeout callback, after the runBrainForShop loop:
+        const sevenDaysAgo = new Date(Date.now() - 7*24*60*60*1000);
+        await Store.updateMany(
+          { 'pushStats.lastComputedAt': { $lt: sevenDaysAgo } },
+          { $set: { 'pushStats.deliveredLast7d':0, 'pushStats.attemptedLast7d':0,
+                    'pushStats.rateLast7d':0 } }
+        ).catch(err => console.error('[hygiene] stats reset error:', err.message));
+
+backend/routes/push.js                (+15)
+  @@ POST /cart-activity, before `return res.status(200)`:
+        if (event === 'page_view' && ccfSessionId) {
+          const { clearPushSuppression } = require('../services/pushHygiene');
+          const Profile = require('../models/Profile');
+          const shop = shopDomain.trim().toLowerCase();
+          const profile = await Profile.findOne({ shopDomain: shop,
+            'identifiers.sessionIds': ccfSessionId });
+          if (profile) clearPushSuppression(profile._id, shop).catch(...);
+        }
+     (await on the Profile.findOne; clearPushSuppression itself is fire-and-forget.)
+
+backend/routes/events.js              (+15)
+  @@ POST / , after StorefrontEvent.insertMany:
+        if (sessionId && events.some(e => e.type === 'page_view')) {
+          const { clearPushSuppression } = require('../services/pushHygiene');
+          const Profile = require('../models/Profile');
+          Profile.findOne({ shopDomain: shop, 'identifiers.sessionIds': sessionId })
+            .then(profile => { if (profile) clearPushSuppression(profile._id, shop).catch(...); })
+            .catch(...);
+        }
+     Fully fire-and-forget (not awaited). See Deviation (c): STEP 5c named
+     /cart-activity, but page_view events actually arrive at /api/events (the
+     storefront batch pipe). The hook was added to BOTH — /api/events is the
+     one that fires today; /cart-activity is there per the literal spec and is
+     harmless (nothing currently sends page_view to it).
+
+backend/routes/profiles.js            (+21)
+  @@ GET /:shopDomain/push-stats  (requireAuth + requireStoreOwner)
+     Store.findOne(shop, 'pushStats') ->
+     { deliveredLast7d, attemptedLast7d, rateLast7d, lastComputedAt }
+     (zeros / null when the store has no pushStats yet).
+
+No lines deleted anywhere except the two replaced cleanup blocks in
+pushNotification.js.
+
+================================================================================
+3. CONFIRM — handleStaleToken replaces the old deleteMany calls
+================================================================================
+grep in backend/utils/pushNotification.js:
+  - `CustomerPushSubscription.deleteMany` -> 0 matches (both call sites replaced).
+  - `handleStaleToken(` -> 2 matches (cartToken loop + broadcast for-loop).
+  - stale-code detection is now `isStaleCode(code)` at both sites (was two
+    hard-coded `||` checks); isStaleCode covers
+    registration-token-not-registered, invalid-registration-token, AND
+    invalid-argument.
+handleStaleToken itself does: deleteMany({ token }) on CustomerPushSubscription,
+then $pull the token from the owning Profile's identifiers.pushTokens, and
+$set channels.push.subscribed=false iff that was the last token.
+
+================================================================================
+4. CONFIRM — checkUnopenedThreshold after every push send to a profile
+================================================================================
+server.js processScheduledJobs, PUSH branch, success `else` block, immediately
+after `await recordProfileMessage(job)` (which just $push'd the 'sent' entry):
+    if (job.profileId) {
+      await checkUnopenedThreshold(job.profileId, job.shopDomain).catch(...);
+    }
+Runs only for brain-scheduled jobs (job.profileId set) and only on a
+successful send (the failed branch has no recordProfileMessage and no hygiene
+call). It re-reads the profile (so the just-logged message is counted),
+compares push 'sent' count vs store.caps.maxUnopenedPush and push
+'clicked'/'converted' count, and flips channels.push.subscribed=false when
+sent >= max AND clicked === 0.
+
+================================================================================
+5. CONFIRM — clearPushSuppression on page_view in cart-activity (and events)
+================================================================================
+routes/push.js POST /cart-activity: `if (event === 'page_view' && ccfSessionId)`
+-> Profile.findOne by identifiers.sessionIds -> clearPushSuppression(profile._id,
+shop) fire-and-forget.
+routes/events.js POST / : `if (sessionId && events.some(e => e.type ===
+'page_view'))` -> same, fully fire-and-forget.
+clearPushSuppression: no-op if already subscribed or if the profile has 0 push
+tokens; otherwise $set channels.push.subscribed=true and log.
+
+================================================================================
+6. CONFIRM — nightly pushStats reset wired in server.js
+================================================================================
+Inside the scheduleNightlySignals setTimeout callback, AFTER the
+runBrainForShop loop and BEFORE the catch: Store.updateMany zeroes
+deliveredLast7d / attemptedLast7d / rateLast7d for every shop whose
+pushStats.lastComputedAt is older than 7 days. (lastComputedAt is only bumped
+by updateDeliveredRate on a real send, so a shop that has sent recently keeps
+accumulating; one that has been quiet 7+ days gets its window closed.)
+
+================================================================================
+7. CONFIRM — /push-stats route exists and is auth-gated
+================================================================================
+GET /api/profiles/:shopDomain/push-stats
+  middleware: requireAuth, requireStoreOwner  (IDOR-guarded by
+  requireStoreOwner's token-shop vs path-shop check)
+  -> { deliveredLast7d, attemptedLast7d, rateLast7d, lastComputedAt }
+Mounted already at /api/profiles (Phase B) — no server.js mount change.
+
+================================================================================
+8. NO PII IN NEW LOG LINES
+================================================================================
+pushHygiene.js:
+  `[push-hygiene] stale token removed, profileId=${profile._id}`
+  `[push-hygiene] suppressed profileId=${profile._id} after ${sentCount} unopened pushes`
+  `[push-hygiene] resubscribed profileId=${profile._id} on new activity`
+  `[push-hygiene] subscription delete error: ${err.message}`
+pushNotification.js (changed lines):
+  `[push-customer] Stale token pruned, trying next...`
+  `[push-customer] Pruned ${staleTokens.length} stale token(s)`
+  `[push-customer] ${staleTokens.length} stale token(s) found but not pruned (skipStaleCleanup)`
+server.js (added):
+  `[hygiene] threshold error: ${err.message}`
+  `[hygiene] rate error: ${err.message}`
+  `[hygiene] stats reset error: ${err.message}`
+routes/push.js / routes/events.js (added):
+  `[hygiene] resubscribe error: ${err.message}`
+  `[hygiene] resubscribe lookup error: ${err.message}`
+routes/profiles.js (added):
+  `[profiles] GET push-stats error: ${err.message}`
+No token value, email, phone, name, or message body is logged — profileId,
+counts, and err.message only. (The PRE-EXISTING `[push-customer] token N/N:
+<token>` / `trying token: <token[:20]>` lines were NOT added by this phase and
+are left as-is.)
+
+================================================================================
+9. TESTS
+================================================================================
+BEFORE Phase F (baseline re-run on branch cut):
+  Test Suites: 12 passed, 12 total
+  Tests:       109 passed, 109 total
+
+AFTER Phase F  (cd backend && npm test):
+  Test Suites: 13 passed, 13 total
+  Tests:       122 passed, 122 total
+  Snapshots:   0 total
+  Time:        ~6.8 s
+  -> existing 109 unchanged, +13 new.
+  (The "cancelJobsForOrder error: db down" and "Invalid session token"
+   console.error lines are pre-existing intentional error-path assertions in
+   automationEngine.test.js:278 / requireAuth.test.js:64.)
+
+backend/__tests__/pushHygiene.test.js — 13 tests, all pass:
+  handleStaleToken
+    1. deletes the CustomerPushSubscription row for the token
+    2. pulls the token from profile.identifiers.pushTokens
+    3. sets channels.push.subscribed=false when that was the last token
+    4. leaves subscribed alone when other tokens remain
+  checkUnopenedThreshold
+    5. suppresses when >=5 sent pushes and 0 clicks
+    6. does NOT suppress when there is at least one click
+    7. does NOT suppress when sent count is below the cap
+    8. respects a store.caps.maxUnopenedPush override (2 -> suppresses at 2)
+  updateDeliveredRate
+    9. accumulates delivered + attempted and recomputes the rate (10+3 / 20+4)
+    (+) no-op when the store is not found
+  clearPushSuppression
+    10. sets subscribed=true when a push token still exists
+    11. does nothing when the profile is already subscribed
+    12. does nothing when no push tokens remain
+  (CustomerPushSubscription / Profile / Store auto-mocked; no DB.)
+
+================================================================================
+10. DEVIATIONS FROM THE LITERAL SPEC (all deliberate)
+================================================================================
+(a) pushNotification.js broadcast path: kept the `!skipStaleCleanup` guard
+    around the new `for … handleStaleToken` loop. The spec's snippet showed the
+    bare for-loop, but /send-customer's broadcast call passes
+    skipStaleCleanup=true (no-cartToken path) specifically to avoid pruning
+    during a broad send; removing the guard would change that caller's
+    behaviour. The cartToken-loop replacement IS unconditional (matches the
+    old code there, which had no guard).
+(b) server.js push branch: `result` not `sendResult` (spec's var name). `result`
+    is the sendPushToCustomers return in the push branch.
+(c) STEP 5c targeted routes/push.js POST /cart-activity, but the storefront
+    only ever sends `add_to_cart` (not `page_view`) to /cart-activity —
+    page_view events land at POST /api/events (the batch pipe). Added the
+    clearPushSuppression hook to BOTH: /api/events (the one that actually
+    fires) and /cart-activity (literal spec, harmless). Same class of
+    /cart-activity mismatch flagged in the Phase D audit.
+(d) `updateDeliveredRate` is called ONLY in the success `else` branch (per the
+    spec's "after recordProfileMessage"). A totally-failed batch
+    (result.sent === 0) does NOT update pushStats, so the rate skews slightly
+    optimistic — it reflects "of batches that reached >=1 device, what % of
+    targeted tokens delivered". Moving the call to also run on the failed
+    branch would make it a true attempted/delivered rate; left per spec.
+(e) `isStaleCode` added as a shared export so pushNotification.js and
+    pushHygiene.js agree on the 3 FCM dead-token codes (spec listed them only
+    in handleStaleToken's doc; pushNotification's detection previously covered
+    just 2).
+
+================================================================================
+11. NOTICED BUT NOT TOUCHED  (out of scope for Phase F)
+================================================================================
+- The message `outcome` on Profile.messages is only ever written as 'sent'
+  (recordProfileMessage). Nothing yet writes 'clicked' / 'converted', so
+  checkUnopenedThreshold's clicked_count is always 0 in practice — which means
+  after maxUnopenedPush brain pushes to a profile, push is ALWAYS suppressed
+  until a page_view resubscribes it. Wiring PushClick / order attribution back
+  into Profile.messages[].outcome is a Phase H (feedback loop) concern; until
+  then this is aggressive-by-design but worth knowing.
+- `updateDeliveredRate` treats `tokensFound` as "attempted". In the cartToken
+  path sendPushToCustomers returns tokensFound = cartSubs.length (rows matching
+  the cart), and `sent` is 0 or 1. So a single-recipient brain push reports
+  attempted = (number of stale rows tried) which can be > 1. Rate is still
+  directionally right (delivered/attempted) but "attempted" is token-attempts,
+  not people.
+- No index is added for Profile lookups by `identifiers.sessionIds` /
+  `identifiers.pushTokens` specifically for the hygiene queries — the sparse
+  identifier indexes from Phase A already cover `{ shopDomain, identifiers.* }`.
+- pushStats reset is nightly and window-approximated by accumulation (the spec
+  explicitly accepts this). A precise rolling 7-day rate would need per-send
+  timestamped rows; not built.
+- clearPushSuppression fires on EVERY page_view beacon for a matched profile
+  (one extra Profile.findById + possible updateOne). Cheap, and it early-returns
+  when already subscribed, but it is per-page_view, not throttled.
+- The `/send-customer` admin route and `sendPushToStore` owner-push path are
+  unchanged; only the customer broadcast/targeted send got hygiene wiring.
+
+================================================================================
+12. OPEN QUESTIONS
+================================================================================
+1. Profile.messages[].outcome is never set to 'clicked'/'converted' yet (see
+   §11). Should Phase F also wire PushClick -> outcome='clicked', or is that
+   strictly Phase H? Without it, checkUnopenedThreshold will suppress every
+   brain-pushed profile after N sends regardless of real engagement.
+2. `updateDeliveredRate` optimism (§10d) — move the call to also run on failed
+   push batches so the rate is a true delivered/attempted figure?
+3. "attempted" = tokensFound (token attempts) vs distinct people (§11). Which
+   does the >=85% "Done when" target refer to? If per-person, the metric needs
+   a different numerator/denominator.
+4. STEP 5c /cart-activity vs /api/events (§10c) — confirm keeping the hook in
+   both is fine, or drop the dead /cart-activity one.
+5. maxUnopenedPush default 5 (from this prompt) vs any other intended default —
+   confirm 5.
+6. Nightly pushStats reset uses `lastComputedAt < 7d ago` — a shop that sends
+   daily never resets and accumulates forever (window never closes). Should the
+   reset instead be unconditional each night, or subtract a trailing day?
+   Current behaviour matches the spec's snippet exactly.
+
+================================================================================
+END — stopping after self-audit. Phase G not started.
+================================================================================

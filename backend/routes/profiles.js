@@ -4,7 +4,12 @@ const router = express.Router();
 const Profile = require('../models/Profile');
 const Signal = require('../models/Signal');
 const SignalConfig = require('../models/SignalConfig');
+const StorefrontEvent = require('../models/StorefrontEvent');
+const Store = require('../models/Store');
+const ScheduledJob = require('../models/ScheduledJob');
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
+const { computeWeeklyStats, computeInsights } = require('../services/analyticsService');
+const { generateWeeklyNarrative, generateInsights } = require('../services/aiService');
 
 const SIGNAL_TYPES = [
   'cart_abandon', 'checkout_abandon', 'browse_abandon',
@@ -37,6 +42,81 @@ router.get('/:shopDomain/signals', requireAuth, requireStoreOwner, async (req, r
   } catch (err) {
     console.error('[profiles] GET signals error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch signals' });
+  }
+});
+
+/**
+ * GET /api/profiles/:shopDomain/messages
+ * Query: limit (default 50, max 200), page (default 0)
+ * Sent/skipped/failed/cancelled ScheduledJobs, newest first.
+ * -> { messages, total }
+ * NOTE: ScheduledJob has no `updatedAt` field — sorted by `sentAt` then
+ * `createdAt`; those + `updatedAt` are all selected so the client can fall back.
+ */
+router.get('/:shopDomain/messages', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+
+    let limit = parseInt(req.query.limit, 10);
+    if (!Number.isFinite(limit) || limit < 1) limit = 50;
+    if (limit > 200) limit = 200;
+
+    let page = parseInt(req.query.page, 10);
+    if (!Number.isFinite(page) || page < 0) page = 0;
+
+    const filter = {
+      shopDomain: shop,
+      status: { $in: ['sent', 'skipped', 'failed', 'cancelled'] },
+    };
+
+    const [messages, total] = await Promise.all([
+      ScheduledJob.find(filter)
+        .sort({ sentAt: -1, createdAt: -1 })
+        .skip(page * limit)
+        .limit(limit)
+        .select(
+          'profileId signalType channel payload status runAt reason cartToken sentAt createdAt updatedAt'
+        )
+        .populate('profileId', 'identifiers stage'),
+      ScheduledJob.countDocuments(filter),
+    ]);
+
+    return res.json({ messages, total });
+  } catch (err) {
+    console.error('[profiles] GET messages error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch messages' });
+  }
+});
+
+/**
+ * GET /api/profiles/:shopDomain/profiles
+ * Query: limit (default 50, max 200), page (default 0)
+ * -> { profiles, total }  (most recently active first)
+ */
+router.get('/:shopDomain/profiles', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+
+    let limit = parseInt(req.query.limit, 10);
+    if (!Number.isFinite(limit) || limit < 1) limit = 50;
+    if (limit > 200) limit = 200;
+
+    let page = parseInt(req.query.page, 10);
+    if (!Number.isFinite(page) || page < 0) page = 0;
+
+    const [profiles, total] = await Promise.all([
+      Profile.find({ shopDomain: shop })
+        .sort({ updatedAt: -1 })
+        .skip(page * limit)
+        .limit(limit)
+        .select('identifiers stage orders channels lastSeenAt updatedAt'),
+      Profile.countDocuments({ shopDomain: shop }),
+    ]);
+
+    return res.json({ profiles, total });
+  } catch (err) {
+    console.error('[profiles] GET profiles error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch profiles' });
   }
 });
 
@@ -113,6 +193,152 @@ router.patch('/:shopDomain/signal-configs/:signalType', requireAuth, requireStor
   } catch (err) {
     console.error('[profiles] PATCH signal-config error:', err.message);
     return res.status(500).json({ error: 'Failed to update signal config' });
+  }
+});
+
+/**
+ * GET /api/profiles/:shopDomain/optin-stats
+ * Push soft-prompt performance over the last 30 days.
+ * -> { shown, accepted, rate }   (rate = accepted / shown, 2dp, 0 when shown=0)
+ */
+router.get('/:shopDomain/optin-stats', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    const [shown, accepted] = await Promise.all([
+      StorefrontEvent.countDocuments({
+        shopDomain: shop,
+        type: 'push_prompt_shown',
+        ts: { $gte: since },
+      }),
+      StorefrontEvent.countDocuments({
+        shopDomain: shop,
+        type: 'push_prompt_accepted',
+        'meta.granted': true,
+        ts: { $gte: since },
+      }),
+    ]);
+
+    const rate = shown > 0 ? Math.round((accepted / shown) * 100) / 100 : 0;
+
+    return res.json({ shown, accepted, rate });
+  } catch (err) {
+    console.error('[profiles] GET optin-stats error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch opt-in stats' });
+  }
+});
+
+/**
+ * GET /api/profiles/:shopDomain/push-stats
+ * -> rolling 7-day push delivery health for the shop.
+ */
+router.get('/:shopDomain/push-stats', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const store = await Store.findOne({ shopDomain: shop }, 'pushStats');
+    const ps = (store && store.pushStats) || {};
+    return res.json({
+      deliveredLast7d: ps.deliveredLast7d || 0,
+      attemptedLast7d: ps.attemptedLast7d || 0,
+      rateLast7d: ps.rateLast7d || 0,
+      lastComputedAt: ps.lastComputedAt || null,
+    });
+  } catch (err) {
+    console.error('[profiles] GET push-stats error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch push stats' });
+  }
+});
+
+/**
+ * GET /api/profiles/:shopDomain/weekly-narrative
+ * -> { narrative, insights: [string], stats }
+ * The full computation is cached in-process for 1 hour per shop so an admin
+ * page load does not re-run aggregations + LLM calls every time.
+ */
+const narrativeCache = new Map(); // shopDomain -> { at: ms, data }
+const NARRATIVE_TTL = 60 * 60 * 1000;
+
+router.get('/:shopDomain/weekly-narrative', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+
+    const cached = narrativeCache.get(shop);
+    if (cached && Date.now() - cached.at < NARRATIVE_TTL) {
+      return res.json(cached.data);
+    }
+
+    const stats = await computeWeeklyStats(shop);
+    const rawInsights = await computeInsights(shop);
+    const [narrative, insights] = await Promise.all([
+      generateWeeklyNarrative(shop, stats),
+      generateInsights(shop, rawInsights),
+    ]);
+
+    const data = { narrative, insights, stats };
+    narrativeCache.set(shop, { at: Date.now(), data });
+    return res.json(data);
+  } catch (err) {
+    console.error('[profiles] GET weekly-narrative error:', err.message);
+    return res.status(500).json({ error: 'Failed to build weekly narrative' });
+  }
+});
+
+/**
+ * GET /api/profiles/:shopDomain/settings   -> { voice, caps, quietHours, timezone }
+ */
+router.get('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const store = await Store.findOne({ shopDomain: shop }, 'voice caps quietHours timezone');
+    if (!store) return res.status(404).json({ error: 'Store not found' });
+    return res.json({
+      voice: store.voice || {},
+      caps: store.caps || {},
+      quietHours: store.quietHours || {},
+      timezone: store.timezone || 'Asia/Kolkata',
+    });
+  } catch (err) {
+    console.error('[profiles] GET settings error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch settings' });
+  }
+});
+
+/**
+ * PATCH /api/profiles/:shopDomain/settings
+ * Body: { voice?, caps?, quietHours?, timezone? }
+ * Dot-notation merge (partial update; nested keys are not replaced wholesale).
+ */
+router.patch('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const set = {};
+
+    const merge = (prefix, obj) => {
+      if (obj && typeof obj === 'object') {
+        for (const [k, v] of Object.entries(obj)) set[`${prefix}.${k}`] = v;
+      }
+    };
+    merge('voice', req.body.voice);
+    merge('caps', req.body.caps);
+    merge('quietHours', req.body.quietHours);
+    if (typeof req.body.timezone === 'string' && req.body.timezone) {
+      set.timezone = req.body.timezone;
+    }
+
+    if (Object.keys(set).length === 0) {
+      return res.status(400).json({ error: 'No settings provided' });
+    }
+
+    await Store.updateOne({ shopDomain: shop }, { $set: set });
+
+    // A voice change invalidates the cached narrative for this shop.
+    narrativeCache.delete(shop);
+
+    return res.json({ updated: true });
+  } catch (err) {
+    console.error('[profiles] PATCH settings error:', err.message);
+    return res.status(500).json({ error: 'Failed to update settings' });
   }
 });
 

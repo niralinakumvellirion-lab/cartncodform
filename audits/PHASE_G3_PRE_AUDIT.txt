@@ -1,0 +1,623 @@
+================================================================================
+PHASE G3 - PRE-WORK AUDIT (read-only, no modifications)
+Generated: 2026-09-08T10:20:55Z   Branch: main   HEAD: 0491d8f
+================================================================================
+
+================================================================================
+FILE: frontend/app/admin/page.js   (71 lines)   [FULL]
+================================================================================
+    1  'use client';
+    2  
+    3  import { Suspense, useState } from 'react';
+    4  import { AppProvider, Frame, Navigation } from '@shopify/polaris';
+    5  import {
+    6    HomeIcon,
+    7    PersonIcon,
+    8    NotificationIcon,
+    9    ReceiptIcon,
+   10    SettingsIcon,
+   11  } from '@shopify/polaris-icons';
+   12  import { useSearchParams } from 'next/navigation';
+   13  import '@shopify/polaris/build/esm/styles.css';
+   14  
+   15  import TodayScreen from './screens/Today';
+   16  import CustomersScreen from './screens/Customers';
+   17  import MessagesScreen from './screens/Messages';
+   18  import CodScreen from './screens/CodOrders';
+   19  import SettingsScreen from './screens/Settings';
+   20  
+   21  const SCREENS = [
+   22    { id: 'today', label: 'Today', icon: HomeIcon },
+   23    { id: 'customers', label: 'Customers', icon: PersonIcon },
+   24    { id: 'messages', label: 'Messages', icon: NotificationIcon },
+   25    { id: 'cod', label: 'COD Orders', icon: ReceiptIcon },
+   26    { id: 'settings', label: 'Settings', icon: SettingsIcon },
+   27  ];
+   28  
+   29  function AdminHomeContent() {
+   30    const searchParams = useSearchParams();
+   31    const shop = searchParams.get('shop') || '';
+   32    const apiKey = process.env.NEXT_PUBLIC_SHOPIFY_CLIENT_ID;
+   33  
+   34    const [activeScreen, setActiveScreen] = useState('today');
+   35  
+   36    const navigationMarkup = (
+   37      <Navigation location="/">
+   38        <Navigation.Section
+   39          items={SCREENS.map((s) => ({
+   40            label: s.label,
+   41            icon: s.icon,
+   42            selected: activeScreen === s.id,
+   43            onClick: () => setActiveScreen(s.id),
+   44          }))}
+   45        />
+   46      </Navigation>
+   47    );
+   48  
+   49    return (
+   50      <>
+   51        <meta name="shopify-api-key" content={apiKey} />
+   52        <AppProvider i18n={{}}>
+   53          <Frame navigation={navigationMarkup}>
+   54            {activeScreen === 'today' && <TodayScreen shop={shop} />}
+   55            {activeScreen === 'customers' && <CustomersScreen shop={shop} />}
+   56            {activeScreen === 'messages' && <MessagesScreen shop={shop} />}
+   57            {activeScreen === 'cod' && <CodScreen shop={shop} />}
+   58            {activeScreen === 'settings' && <SettingsScreen shop={shop} />}
+   59          </Frame>
+   60        </AppProvider>
+   61      </>
+   62    );
+   63  }
+   64  
+   65  export default function AdminHome() {
+   66    return (
+   67      <Suspense fallback={null}>
+   68        <AdminHomeContent />
+   69      </Suspense>
+   70    );
+   71  }
+
+
+================================================================================
+FILE: frontend/app/admin/screens/Settings.jsx   (12 lines)   [FULL]
+================================================================================
+    1  'use client';
+    2  
+    3  import { Box, Text } from '@shopify/polaris';
+    4  
+    5  // Stub — filled in Phase G2.
+    6  export default function Settings() {
+    7    return (
+    8      <Box padding="400">
+    9        <Text tone="subdued">Settings — coming soon</Text>
+   10      </Box>
+   11    );
+   12  }
+
+
+================================================================================
+FILE: backend/models/ScheduledJob.js   (65 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const scheduledJobSchema = new mongoose.Schema({
+    4    shopDomain: { type: String, required: true, lowercase: true, index: true },
+    5    // Phase C: brain-scheduled jobs carry no ruleId — relaxed from `required`.
+    6    ruleId: { type: mongoose.Schema.Types.ObjectId, ref: 'AutomationRule', default: null },
+    7    stepIndex: { type: Number, required: true, default: 0 },
+    8  
+    9    // --- Phase C: brain targeting / explainability ---
+   10    profileId: { type: mongoose.Schema.Types.ObjectId, ref: 'Profile', default: null },
+   11    signalType: { type: String, default: null },
+   12    reason: { type: String, default: '' }, // human-readable why
+   13  
+   14    // Targeting — at least one of these should be present.
+   15    subscriptionToken: { type: String },  // FCM token, if already resolved
+   16    sessionId: { type: String, index: true },  // stable UUID (StorefrontEvent.sessionId)
+   17    cartToken: { type: String, index: true },  // Shopify cart token, for cancellation matching
+   18    customerId: { type: String, index: true },
+   19  
+   20    runAt: { type: Date, required: true, index: true },
+   21    status: {
+   22      type: String,
+   23      enum: ['pending', 'sent', 'cancelled', 'failed', 'skipped'],
+   24      default: 'pending',
+   25      index: true,
+   26    },
+   27    channel: { type: String, enum: ['push', 'email'], default: 'push' },
+   28    payload: { type: mongoose.Schema.Types.Mixed },  // resolved title/body/imageUrl at send time
+   29  
+   30    createdAt: { type: Date, default: Date.now },
+   31    sentAt: { type: Date },
+   32    error: { type: String },
+   33  });
+   34  
+   35  // Compound index for the sender's poll query.
+   36  scheduledJobSchema.index({ status: 1, runAt: 1 });
+   37  
+   38  // Prevent duplicate first-step scheduling for the same rule+cart+step
+   39  // when carts/create and carts/update fire near-simultaneously.
+   40  // Phase C: scoped to rule-based jobs (ruleId is an ObjectId) so brain jobs,
+   41  // which have ruleId=null and share cartToken+stepIndex, are NOT deduped here.
+   42  scheduledJobSchema.index(
+   43    { shopDomain: 1, ruleId: 1, cartToken: 1, stepIndex: 1 },
+   44    {
+   45      unique: true,
+   46      partialFilterExpression: {
+   47        status: { $in: ['pending', 'sent'] },
+   48        ruleId: { $type: 'objectId' },
+   49      },
+   50    }
+   51  );
+   52  
+   53  // Phase C: one pending brain job per (profile, signal) at a time.
+   54  scheduledJobSchema.index(
+   55    { shopDomain: 1, profileId: 1, signalType: 1 },
+   56    {
+   57      unique: true,
+   58      partialFilterExpression: {
+   59        status: 'pending',
+   60        profileId: { $type: 'objectId' },
+   61      },
+   62    }
+   63  );
+   64  
+   65  module.exports = mongoose.model('ScheduledJob', scheduledJobSchema);
+
+
+================================================================================
+FILE: backend/routes/profiles.js   (345 lines)   [FULL]
+================================================================================
+    1  const express = require('express');
+    2  const router = express.Router();
+    3  
+    4  const Profile = require('../models/Profile');
+    5  const Signal = require('../models/Signal');
+    6  const SignalConfig = require('../models/SignalConfig');
+    7  const StorefrontEvent = require('../models/StorefrontEvent');
+    8  const Store = require('../models/Store');
+    9  const ScheduledJob = require('../models/ScheduledJob');
+   10  const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
+   11  const { computeWeeklyStats, computeInsights } = require('../services/analyticsService');
+   12  const { generateWeeklyNarrative, generateInsights } = require('../services/aiService');
+   13  
+   14  const SIGNAL_TYPES = [
+   15    'cart_abandon', 'checkout_abandon', 'browse_abandon',
+   16    'high_intent', 'price_hesitation', 'price_drop', 'back_in_stock',
+   17    'post_purchase_d3', 'lapsing', 'winback', 'email_capture', 'cod_to_prepaid',
+   18  ];
+   19  
+   20  /**
+   21   * GET /api/profiles/:shopDomain/signals
+   22   * Query: type (optional), limit (default 20, max 100)
+   23   * -> { signals: [...] }  strongest first
+   24   */
+   25  router.get('/:shopDomain/signals', requireAuth, requireStoreOwner, async (req, res) => {
+   26    try {
+   27      const shop = req.params.shopDomain.trim().toLowerCase();
+   28  
+   29      let limit = parseInt(req.query.limit, 10);
+   30      if (!Number.isFinite(limit) || limit < 1) limit = 20;
+   31      if (limit > 100) limit = 100;
+   32  
+   33      const filter = { shopDomain: shop };
+   34      if (req.query.type) filter.type = req.query.type;
+   35  
+   36      const signals = await Signal.find(filter)
+   37        .sort({ strength: -1 })
+   38        .limit(limit)
+   39        .populate('profileId', 'identifiers stage');
+   40  
+   41      return res.json({ signals });
+   42    } catch (err) {
+   43      console.error('[profiles] GET signals error:', err.message);
+   44      return res.status(500).json({ error: 'Failed to fetch signals' });
+   45    }
+   46  });
+   47  
+   48  /**
+   49   * GET /api/profiles/:shopDomain/messages
+   50   * Query: limit (default 50, max 200), page (default 0)
+   51   * Sent/skipped/failed/cancelled ScheduledJobs, newest first.
+   52   * -> { messages, total }
+   53   * NOTE: ScheduledJob has no `updatedAt` field — sorted by `sentAt` then
+   54   * `createdAt`; those + `updatedAt` are all selected so the client can fall back.
+   55   */
+   56  router.get('/:shopDomain/messages', requireAuth, requireStoreOwner, async (req, res) => {
+   57    try {
+   58      const shop = req.params.shopDomain.trim().toLowerCase();
+   59  
+   60      let limit = parseInt(req.query.limit, 10);
+   61      if (!Number.isFinite(limit) || limit < 1) limit = 50;
+   62      if (limit > 200) limit = 200;
+   63  
+   64      let page = parseInt(req.query.page, 10);
+   65      if (!Number.isFinite(page) || page < 0) page = 0;
+   66  
+   67      const filter = {
+   68        shopDomain: shop,
+   69        status: { $in: ['sent', 'skipped', 'failed', 'cancelled'] },
+   70      };
+   71  
+   72      const [messages, total] = await Promise.all([
+   73        ScheduledJob.find(filter)
+   74          .sort({ sentAt: -1, createdAt: -1 })
+   75          .skip(page * limit)
+   76          .limit(limit)
+   77          .select(
+   78            'profileId signalType channel payload status runAt reason cartToken sentAt createdAt updatedAt'
+   79          )
+   80          .populate('profileId', 'identifiers stage'),
+   81        ScheduledJob.countDocuments(filter),
+   82      ]);
+   83  
+   84      return res.json({ messages, total });
+   85    } catch (err) {
+   86      console.error('[profiles] GET messages error:', err.message);
+   87      return res.status(500).json({ error: 'Failed to fetch messages' });
+   88    }
+   89  });
+   90  
+   91  /**
+   92   * GET /api/profiles/:shopDomain/profiles
+   93   * Query: limit (default 50, max 200), page (default 0)
+   94   * -> { profiles, total }  (most recently active first)
+   95   */
+   96  router.get('/:shopDomain/profiles', requireAuth, requireStoreOwner, async (req, res) => {
+   97    try {
+   98      const shop = req.params.shopDomain.trim().toLowerCase();
+   99  
+  100      let limit = parseInt(req.query.limit, 10);
+  101      if (!Number.isFinite(limit) || limit < 1) limit = 50;
+  102      if (limit > 200) limit = 200;
+  103  
+  104      let page = parseInt(req.query.page, 10);
+  105      if (!Number.isFinite(page) || page < 0) page = 0;
+  106  
+  107      const [profiles, total] = await Promise.all([
+  108        Profile.find({ shopDomain: shop })
+  109          .sort({ updatedAt: -1 })
+  110          .skip(page * limit)
+  111          .limit(limit)
+  112          .select('identifiers stage orders channels lastSeenAt updatedAt'),
+  113        Profile.countDocuments({ shopDomain: shop }),
+  114      ]);
+  115  
+  116      return res.json({ profiles, total });
+  117    } catch (err) {
+  118      console.error('[profiles] GET profiles error:', err.message);
+  119      return res.status(500).json({ error: 'Failed to fetch profiles' });
+  120    }
+  121  });
+  122  
+  123  /**
+  124   * GET /api/profiles/:shopDomain/profiles/:profileId
+  125   * -> { profile, signals }  (the profile + its active signals)
+  126   */
+  127  router.get('/:shopDomain/profiles/:profileId', requireAuth, requireStoreOwner, async (req, res) => {
+  128    try {
+  129      const shop = req.params.shopDomain.trim().toLowerCase();
+  130  
+  131      const profile = await Profile.findOne({
+  132        _id: req.params.profileId,
+  133        shopDomain: shop,
+  134      });
+  135      if (!profile) {
+  136        return res.status(404).json({ error: 'Profile not found' });
+  137      }
+  138  
+  139      const signals = await Signal.find({ shopDomain: shop, profileId: profile._id })
+  140        .sort({ strength: -1 });
+  141  
+  142      return res.json({ profile, signals });
+  143    } catch (err) {
+  144      console.error('[profiles] GET profile error:', err.message);
+  145      return res.status(500).json({ error: 'Failed to fetch profile' });
+  146    }
+  147  });
+  148  
+  149  /**
+  150   * GET /api/profiles/:shopDomain/signal-configs
+  151   * -> { configs: [...] }  (rows that exist; a missing type means the default
+  152   *    enabled=true / no override / maxSteps=1)
+  153   */
+  154  router.get('/:shopDomain/signal-configs', requireAuth, requireStoreOwner, async (req, res) => {
+  155    try {
+  156      const shop = req.params.shopDomain.trim().toLowerCase();
+  157      const configs = await SignalConfig.find({ shopDomain: shop });
+  158      return res.json({ configs });
+  159    } catch (err) {
+  160      console.error('[profiles] GET signal-configs error:', err.message);
+  161      return res.status(500).json({ error: 'Failed to fetch signal configs' });
+  162    }
+  163  });
+  164  
+  165  /**
+  166   * PATCH /api/profiles/:shopDomain/signal-configs/:signalType
+  167   * Body: { enabled?, channelOverride?, maxSteps? }
+  168   * Upserts the config for one signal type.
+  169   */
+  170  router.patch('/:shopDomain/signal-configs/:signalType', requireAuth, requireStoreOwner, async (req, res) => {
+  171    try {
+  172      const shop = req.params.shopDomain.trim().toLowerCase();
+  173      const { signalType } = req.params;
+  174  
+  175      if (!SIGNAL_TYPES.includes(signalType)) {
+  176        return res.status(400).json({ error: `Unknown signal type: ${signalType}` });
+  177      }
+  178  
+  179      const set = { updatedAt: new Date() };
+  180      if (typeof req.body.enabled === 'boolean') set.enabled = req.body.enabled;
+  181      if (req.body.channelOverride === 'push' || req.body.channelOverride === 'email' || req.body.channelOverride === null) {
+  182        set.channelOverride = req.body.channelOverride;
+  183      }
+  184      if (Number.isFinite(req.body.maxSteps)) set.maxSteps = req.body.maxSteps;
+  185  
+  186      const config = await SignalConfig.findOneAndUpdate(
+  187        { shopDomain: shop, signalType },
+  188        { $set: set, $setOnInsert: { shopDomain: shop, signalType } },
+  189        { upsert: true, new: true }
+  190      );
+  191  
+  192      return res.json({ config });
+  193    } catch (err) {
+  194      console.error('[profiles] PATCH signal-config error:', err.message);
+  195      return res.status(500).json({ error: 'Failed to update signal config' });
+  196    }
+  197  });
+  198  
+  199  /**
+  200   * GET /api/profiles/:shopDomain/optin-stats
+  201   * Push soft-prompt performance over the last 30 days.
+  202   * -> { shown, accepted, rate }   (rate = accepted / shown, 2dp, 0 when shown=0)
+  203   */
+  204  router.get('/:shopDomain/optin-stats', requireAuth, requireStoreOwner, async (req, res) => {
+  205    try {
+  206      const shop = req.params.shopDomain.trim().toLowerCase();
+  207      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  208  
+  209      const [shown, accepted] = await Promise.all([
+  210        StorefrontEvent.countDocuments({
+  211          shopDomain: shop,
+  212          type: 'push_prompt_shown',
+  213          ts: { $gte: since },
+  214        }),
+  215        StorefrontEvent.countDocuments({
+  216          shopDomain: shop,
+  217          type: 'push_prompt_accepted',
+  218          'meta.granted': true,
+  219          ts: { $gte: since },
+  220        }),
+  221      ]);
+  222  
+  223      const rate = shown > 0 ? Math.round((accepted / shown) * 100) / 100 : 0;
+  224  
+  225      return res.json({ shown, accepted, rate });
+  226    } catch (err) {
+  227      console.error('[profiles] GET optin-stats error:', err.message);
+  228      return res.status(500).json({ error: 'Failed to fetch opt-in stats' });
+  229    }
+  230  });
+  231  
+  232  /**
+  233   * GET /api/profiles/:shopDomain/push-stats
+  234   * -> rolling 7-day push delivery health for the shop.
+  235   */
+  236  router.get('/:shopDomain/push-stats', requireAuth, requireStoreOwner, async (req, res) => {
+  237    try {
+  238      const shop = req.params.shopDomain.trim().toLowerCase();
+  239      const store = await Store.findOne({ shopDomain: shop }, 'pushStats');
+  240      const ps = (store && store.pushStats) || {};
+  241      return res.json({
+  242        deliveredLast7d: ps.deliveredLast7d || 0,
+  243        attemptedLast7d: ps.attemptedLast7d || 0,
+  244        rateLast7d: ps.rateLast7d || 0,
+  245        lastComputedAt: ps.lastComputedAt || null,
+  246      });
+  247    } catch (err) {
+  248      console.error('[profiles] GET push-stats error:', err.message);
+  249      return res.status(500).json({ error: 'Failed to fetch push stats' });
+  250    }
+  251  });
+  252  
+  253  /**
+  254   * GET /api/profiles/:shopDomain/weekly-narrative
+  255   * -> { narrative, insights: [string], stats }
+  256   * The full computation is cached in-process for 1 hour per shop so an admin
+  257   * page load does not re-run aggregations + LLM calls every time.
+  258   */
+  259  const narrativeCache = new Map(); // shopDomain -> { at: ms, data }
+  260  const NARRATIVE_TTL = 60 * 60 * 1000;
+  261  
+  262  router.get('/:shopDomain/weekly-narrative', requireAuth, requireStoreOwner, async (req, res) => {
+  263    try {
+  264      const shop = req.params.shopDomain.trim().toLowerCase();
+  265  
+  266      const cached = narrativeCache.get(shop);
+  267      if (cached && Date.now() - cached.at < NARRATIVE_TTL) {
+  268        return res.json(cached.data);
+  269      }
+  270  
+  271      const stats = await computeWeeklyStats(shop);
+  272      const rawInsights = await computeInsights(shop);
+  273      const [narrative, insights] = await Promise.all([
+  274        generateWeeklyNarrative(shop, stats),
+  275        generateInsights(shop, rawInsights),
+  276      ]);
+  277  
+  278      const data = { narrative, insights, stats };
+  279      narrativeCache.set(shop, { at: Date.now(), data });
+  280      return res.json(data);
+  281    } catch (err) {
+  282      console.error('[profiles] GET weekly-narrative error:', err.message);
+  283      return res.status(500).json({ error: 'Failed to build weekly narrative' });
+  284    }
+  285  });
+  286  
+  287  /**
+  288   * GET /api/profiles/:shopDomain/settings   -> { voice, caps, quietHours, timezone }
+  289   */
+  290  router.get('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req, res) => {
+  291    try {
+  292      const shop = req.params.shopDomain.trim().toLowerCase();
+  293      const store = await Store.findOne({ shopDomain: shop }, 'voice caps quietHours timezone');
+  294      if (!store) return res.status(404).json({ error: 'Store not found' });
+  295      return res.json({
+  296        voice: store.voice || {},
+  297        caps: store.caps || {},
+  298        quietHours: store.quietHours || {},
+  299        timezone: store.timezone || 'Asia/Kolkata',
+  300      });
+  301    } catch (err) {
+  302      console.error('[profiles] GET settings error:', err.message);
+  303      return res.status(500).json({ error: 'Failed to fetch settings' });
+  304    }
+  305  });
+  306  
+  307  /**
+  308   * PATCH /api/profiles/:shopDomain/settings
+  309   * Body: { voice?, caps?, quietHours?, timezone? }
+  310   * Dot-notation merge (partial update; nested keys are not replaced wholesale).
+  311   */
+  312  router.patch('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req, res) => {
+  313    try {
+  314      const shop = req.params.shopDomain.trim().toLowerCase();
+  315      const set = {};
+  316  
+  317      const merge = (prefix, obj) => {
+  318        if (obj && typeof obj === 'object') {
+  319          for (const [k, v] of Object.entries(obj)) set[`${prefix}.${k}`] = v;
+  320        }
+  321      };
+  322      merge('voice', req.body.voice);
+  323      merge('caps', req.body.caps);
+  324      merge('quietHours', req.body.quietHours);
+  325      if (typeof req.body.timezone === 'string' && req.body.timezone) {
+  326        set.timezone = req.body.timezone;
+  327      }
+  328  
+  329      if (Object.keys(set).length === 0) {
+  330        return res.status(400).json({ error: 'No settings provided' });
+  331      }
+  332  
+  333      await Store.updateOne({ shopDomain: shop }, { $set: set });
+  334  
+  335      // A voice change invalidates the cached narrative for this shop.
+  336      narrativeCache.delete(shop);
+  337  
+  338      return res.json({ updated: true });
+  339    } catch (err) {
+  340      console.error('[profiles] PATCH settings error:', err.message);
+  341      return res.status(500).json({ error: 'Failed to update settings' });
+  342    }
+  343  });
+  344  
+  345  module.exports = router;
+
+
+================================================================================
+FILE: backend/models/SignalConfig.js   (27 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  /**
+    4   * Per-shop, per-signal-type configuration for the Brain (Phase C).
+    5   * Replaces AutomationRule. A missing row means the defaults below:
+    6   * enabled = true, no channel override, one step.
+    7   */
+    8  const signalConfigSchema = new mongoose.Schema({
+    9    shopDomain: { type: String, required: true, lowercase: true },
+   10    signalType: {
+   11      type: String,
+   12      required: true,
+   13      enum: [
+   14        'cart_abandon', 'checkout_abandon', 'browse_abandon',
+   15        'high_intent', 'price_hesitation', 'price_drop', 'back_in_stock',
+   16        'post_purchase_d3', 'lapsing', 'winback', 'email_capture', 'cod_to_prepaid',
+   17      ],
+   18    },
+   19    enabled: { type: Boolean, default: true },
+   20    channelOverride: { type: String, enum: ['push', 'email', null], default: null },
+   21    maxSteps: { type: Number, default: 1 },
+   22    updatedAt: { type: Date, default: Date.now },
+   23  });
+   24  
+   25  signalConfigSchema.index({ shopDomain: 1, signalType: 1 }, { unique: true });
+   26  
+   27  module.exports = mongoose.model('SignalConfig', signalConfigSchema);
+
+
+================================================================================
+FILE: backend/models/Store.js   (68 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const storeSchema = new mongoose.Schema({
+    4    shopDomain: {
+    5      type: String,
+    6      required: true,
+    7      unique: true,
+    8      trim: true,
+    9      lowercase: true,
+   10    },
+   11    accessToken: {
+   12      type: String,
+   13      required: true,
+   14    },
+   15    ownerEmail: {
+   16      type: String,
+   17      lowercase: true,
+   18      trim: true,
+   19    },
+   20    timezone: {
+   21      type: String,
+   22      default: 'Asia/Kolkata',
+   23    },
+   24    plan: {
+   25      type: String,
+   26      enum: ['free', 'pro'],
+   27      default: 'free',
+   28    },
+   29    subscriptionId: { type: String },
+   30    subscriptionStatus: { type: String },
+   31    planUpdatedAt: { type: Date },
+   32  
+   33    // --- Phase C: brain configuration ---
+   34    voice: {
+   35      tone: { type: String, default: 'friendly' },
+   36      emoji: { type: Boolean, default: true },
+   37      lang: { type: String, default: 'en' },
+   38      signOff: { type: String, default: '' },
+   39    },
+   40    caps: {
+   41      perDay: { type: Number, default: 2 },
+   42      perWeek: { type: Number, default: 5 },
+   43      maxUnopenedPush: { type: Number, default: 5 }, // Phase F: suppress push after N unopened
+   44    },
+   45    quietHours: {
+   46      start: { type: Number, default: 22 }, // hour 0-23
+   47      end: { type: Number, default: 8 },
+   48    },
+   49    onboarding: {
+   50      steps: [{ id: String, done: Boolean, doneAt: Date }],
+   51    },
+   52    // NOTE: `timezone` already exists above (default 'Asia/Kolkata') — not re-added.
+   53  
+   54    // --- Phase F: rolling 7-day push delivery health ---
+   55    pushStats: {
+   56      deliveredLast7d: { type: Number, default: 0 },
+   57      attemptedLast7d: { type: Number, default: 0 },
+   58      rateLast7d: { type: Number, default: 0 },
+   59      lastComputedAt: { type: Date, default: null },
+   60    },
+   61  
+   62    installedAt: {
+   63      type: Date,
+   64      default: Date.now,
+   65    },
+   66  });
+   67  
+   68  module.exports = mongoose.model('Store', storeSchema);
+
+

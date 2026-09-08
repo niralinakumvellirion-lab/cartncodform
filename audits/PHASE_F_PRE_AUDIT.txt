@@ -1,0 +1,603 @@
+================================================================================
+PHASE F - PRE-WORK AUDIT (read-only capture, no modifications)
+Generated: 2026-09-08T08:50:14Z
+Branch at capture: main   HEAD: 0491d8f
+================================================================================
+
+================================================================================
+FILE: backend/utils/pushNotification.js   (242 lines)   [FULL]
+================================================================================
+    1  // firebase-admin v14 exposes only the modular API from the default require:
+    2  //   admin.apps.length      -> getApps().length
+    3  //   admin.credential.cert  -> cert(...)
+    4  //   admin.messaging()      -> getMessaging()
+    5  // Behaviour / return shapes below match the original spec.
+    6  const { initializeApp, getApps, cert } = require('firebase-admin/app');
+    7  const { getMessaging } = require('firebase-admin/messaging');
+    8  
+    9  // Initialize only once. Guarded so a missing service-account config does not
+   10  // crash server startup — pushes simply no-op with an error until creds are set.
+   11  let firebaseReady = false;
+   12  
+   13  if (!getApps().length) {
+   14    const { FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY } = process.env;
+   15  
+   16    if (FIREBASE_PROJECT_ID && FIREBASE_CLIENT_EMAIL && FIREBASE_PRIVATE_KEY) {
+   17      try {
+   18        initializeApp({
+   19          credential: cert({
+   20            projectId: FIREBASE_PROJECT_ID,
+   21            clientEmail: FIREBASE_CLIENT_EMAIL,
+   22            privateKey: FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+   23          }),
+   24        });
+   25        firebaseReady = true;
+   26        console.log('[push] Firebase Admin initialized');
+   27      } catch (err) {
+   28        console.error('[push] Firebase Admin init failed:', err.message);
+   29      }
+   30    } else {
+   31      console.warn(
+   32        '[push] FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY not set — push disabled'
+   33      );
+   34    }
+   35  } else {
+   36    firebaseReady = true;
+   37  }
+   38  
+   39  async function sendPushToStore(shopDomain, title, body) {
+   40    const PushSubscription = require('../models/PushSubscription');
+   41    try {
+   42      if (!firebaseReady) {
+   43        console.log('[push] Skipped — Firebase Admin not configured');
+   44        return { success: false, error: 'Firebase Admin not configured' };
+   45      }
+   46  
+   47      const subs = await PushSubscription.find({ shopDomain });
+   48      if (!subs.length) {
+   49        console.log(`[push] No subscribers for ${shopDomain}`);
+   50        return { success: true, sent: 0 };
+   51      }
+   52      const tokens = subs.map((s) => s.token);
+   53      const message = {
+   54        notification: { title, body },
+   55        tokens,
+   56      };
+   57      const response = await getMessaging().sendEachForMulticast(message);
+   58  
+   59      const staleTokens = [];
+   60      response.responses?.forEach((r, i) => {
+   61        if (!r.success) {
+   62          const code = r.error?.code || '';
+   63          if (
+   64            code === 'messaging/registration-token-not-registered' ||
+   65            code === 'messaging/invalid-registration-token'
+   66          ) {
+   67            staleTokens.push(tokens[i]);
+   68          }
+   69        }
+   70      });
+   71      if (staleTokens.length > 0) {
+   72        await PushSubscription.deleteMany({ token: { $in: staleTokens } });
+   73        console.log(`[push] Deleted ${staleTokens.length} stale owner token(s)`);
+   74      }
+   75  
+   76      console.log(`[push] Sent ${response.successCount}/${tokens.length} for ${shopDomain}`);
+   77      return { success: true, sent: response.successCount };
+   78    } catch (err) {
+   79      console.error('[push] Error:', err.message);
+   80      return { success: false, error: err.message };
+   81    }
+   82  }
+   83  
+   84  /**
+   85   * Send a push notification to every STOREFRONT CUSTOMER who subscribed via the
+   86   * Shopify theme script (CustomerPushSubscription), for one shop.
+   87   */
+   88  async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobileOnly = false, cartToken = null, skipStaleCleanup = false) {
+   89    const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+   90    try {
+   91      if (!firebaseReady) {
+   92        console.log('[push] Skipped (customers) — Firebase Admin not configured');
+   93        return { success: false, error: 'Firebase Admin not configured', tokensFound: 0 };
+   94      }
+   95  
+   96      // Docs are stored with a lowercased shopDomain — normalise the lookup key
+   97      // so a mixed-case caller still matches.
+   98      const shop = String(shopDomain || '').trim().toLowerCase();
+   99      console.log(`[push-customer] querying subscriptions for shopDomain: ${shop}`);
+  100  
+  101      const query = { shopDomain: shop };
+  102      if (mobileOnly) {
+  103        query.deviceType = { $in: ['mobile', 'unknown'] };
+  104      }
+  105      if (cartToken) {
+  106        query.cartToken = cartToken;
+  107        console.log(`[push-customer] targeting cartToken: ${cartToken}`);
+  108  
+  109        // Get ALL rows matching this cartToken, sorted by most recent.
+  110        const cartSubs = await CustomerPushSubscription.find(query)
+  111          .sort({ lastActivityAt: -1 });
+  112  
+  113        // Try each matching row until one succeeds.
+  114        for (const sub of cartSubs) {
+  115          console.log(`[push-customer] trying token: ${sub.token.substring(0, 20)}...`);
+  116          const message = {
+  117            data: {
+  118              url: url || `https://${shopDomain}`,
+  119              imageUrl: imageUrl || '',
+  120              title: title,
+  121              body: body,
+  122              icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+  123            },
+  124            webpush: {
+  125              headers: { Urgency: 'high' },
+  126              notification: {
+  127                title,
+  128                body,
+  129                icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+  130                image: imageUrl || undefined,
+  131                badge: 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+  132                requireInteraction: false,
+  133                vibrate: [200, 100, 200],
+  134              },
+  135              fcm_options: { link: url || `https://${shopDomain}` },
+  136            },
+  137            tokens: [sub.token],
+  138          };
+  139          const response = await getMessaging().sendEachForMulticast(message);
+  140          const result = response.responses[0];
+  141          if (result.success) {
+  142            console.log(`[push] Sent 1/1 to targeted device of ${shop}`);
+  143            return { success: true, sent: 1, tokensFound: cartSubs.length };
+  144          }
+  145          // Token is stale — delete and try next.
+  146          const code = result.error?.code || '';
+  147          if (
+  148            code === 'messaging/registration-token-not-registered' ||
+  149            code === 'messaging/invalid-registration-token'
+  150          ) {
+  151            await CustomerPushSubscription.deleteMany({ token: sub.token });
+  152            console.log(`[push-customer] Deleted stale token, trying next...`);
+  153          } else {
+  154            // Non-stale error — stop trying.
+  155            console.error(`[push-customer] token FAILED: ${code || result.error?.message}`);
+  156            break;
+  157          }
+  158        }
+  159  
+  160        // No cartToken match succeeded — do not fall back to another subscriber.
+  161        // If the target customer has no valid token, skip this send.
+  162        console.log(`[push-customer] cartToken: no valid token found for cart ${cartToken} — skipping`);
+  163        return { success: true, sent: 0, tokensFound: 0 };
+  164      }
+  165      const subs = await CustomerPushSubscription.find(query);
+  166      if (!subs.length) {
+  167        console.log(`[push] No customer subscribers for ${shop}`);
+  168        return { success: true, sent: 0, tokensFound: 0 };
+  169      }
+  170      const tokens = subs.map((s) => s.token);
+  171      tokens.forEach((t, i) => {
+  172        console.log(`[push-customer] token ${i + 1}/${tokens.length}: ${t}`);
+  173      });
+  174  
+  175      console.log('[push-customer] imageUrl received:', imageUrl || 'NONE');
+  176      console.log('[push-customer] webpush notification image:',
+  177        imageUrl ? imageUrl.substring(0, 50) + '...' : 'NOT SET');
+  178  
+  179      const message = {
+  180        data: {
+  181          url: url || `https://${shopDomain}`,
+  182          imageUrl: imageUrl || '',
+  183          title: title,
+  184          body: body,
+  185          icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+  186        },
+  187        webpush: {
+  188          headers: {
+  189            Urgency: 'high',
+  190          },
+  191          notification: {
+  192            title,
+  193            body,
+  194            icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+  195            image: imageUrl || undefined,
+  196            badge: 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+  197            requireInteraction: false,
+  198            vibrate: [200, 100, 200],
+  199          },
+  200          fcm_options: {
+  201            link: url || `https://${shopDomain}`,
+  202          },
+  203        },
+  204        tokens,
+  205      };
+  206      const response = await getMessaging().sendEachForMulticast(message);
+  207  
+  208      console.log('[push-customer] FCM responses:', JSON.stringify(response.responses, null, 2));
+  209  
+  210      const staleTokens = [];
+  211      response.responses.forEach((r, i) => {
+  212        if (!r.success) {
+  213          const code = r.error?.code || '';
+  214          const msg = r.error?.message || 'unknown error';
+  215          console.error(`[push-customer] token ${i + 1} FAILED: ${code || msg}`);
+  216          if (
+  217            code === 'messaging/registration-token-not-registered' ||
+  218            code === 'messaging/invalid-registration-token'
+  219          ) {
+  220            staleTokens.push(tokens[i]);
+  221          }
+  222        }
+  223      });
+  224  
+  225      if (staleTokens.length > 0 && !skipStaleCleanup) {
+  226        await CustomerPushSubscription.deleteMany({ token: { $in: staleTokens } });
+  227        console.log(`[push-customer] Deleted ${staleTokens.length} stale token(s)`);
+  228      } else if (staleTokens.length > 0 && skipStaleCleanup) {
+  229        console.log(`[push-customer] ${staleTokens.length} stale token(s) found but not deleted (skipStaleCleanup)`);
+  230      }
+  231  
+  232      console.log(
+  233        `[push] Sent ${response.successCount}/${tokens.length} to customers of ${shop}`
+  234      );
+  235      return { success: true, sent: response.successCount, tokensFound: tokens.length };
+  236    } catch (err) {
+  237      console.error('[push] Error (customers):', err.message);
+  238      return { success: false, error: err.message, tokensFound: 0 };
+  239    }
+  240  }
+  241  
+  242  module.exports = { sendPushToStore, sendPushToCustomers };
+
+
+================================================================================
+FILE: backend/server.js   [EXCERPT: processScheduledJobs poller — lines 190-360]
+================================================================================
+  190  }
+  191  
+  192  /**
+  193   * Phase C: append a "sent" entry to the profile's message log (kept to the
+  194   * last 20). Best-effort — a logging failure must not fail the send.
+  195   */
+  196  async function recordProfileMessage(job) {
+  197    if (!job.profileId) return;
+  198    await Profile.findByIdAndUpdate(job.profileId, {
+  199      $push: {
+  200        messages: {
+  201          $each: [{
+  202            channel: job.channel,
+  203            type: job.signalType || 'manual',
+  204            sentAt: new Date(),
+  205            outcome: 'sent',
+  206            jobId: job._id,
+  207          }],
+  208          $slice: -20, // keep last 20 only
+  209        },
+  210      },
+  211    });
+  212  }
+  213  
+  214  /**
+  215   * Polls for due ScheduledJob rows and sends them. Runs every 30s.
+  216   * Uses a claim-update (findOneAndUpdate with status:'pending' filter)
+  217   * so this is safe even if multiple instances ever run.
+  218   */
+  219  async function processScheduledJobs() {
+  220    try {
+  221      const now = new Date();
+  222      const dueJobs = await ScheduledJob.find({
+  223        status: 'pending',
+  224        runAt: { $lte: now },
+  225      }).limit(20);
+  226  
+  227      for (const job of dueJobs) {
+  228        // Check quiet hours + frequency cap BEFORE claiming — if
+  229        // blocked, leave the job pending and re-check next tick
+  230        // (quiet hours) or skip it permanently (frequency cap).
+  231        const Store = require('./models/Store');
+  232        const store = await Store.findOne({ shopDomain: job.shopDomain }).select('timezone').lean();
+  233        const timezone = store?.timezone || 'Asia/Kolkata';
+  234  
+  235        if (isQuietHours(timezone)) {
+  236          console.log(`[automation] Job ${job._id} deferred — quiet hours (${timezone})`);
+  237          continue; // leave pending, retry next tick
+  238        }
+  239  
+  240        const overCap = await isOverFrequencyCap(job.shopDomain, job.cartToken, job.customerId);
+  241        if (overCap) {
+  242          await ScheduledJob.findOneAndUpdate(
+  243            { _id: job._id, status: 'pending' },
+  244            { status: 'skipped', error: 'Frequency cap reached (3/24h)' }
+  245          );
+  246          console.log(`[automation] Job ${job._id} skipped — frequency cap reached`);
+  247          continue;
+  248        }
+  249  
+  250        // Claim the job — only proceed if we successfully flip it from pending.
+  251        const claimed = await ScheduledJob.findOneAndUpdate(
+  252          { _id: job._id, status: 'pending' },
+  253          { status: 'sent', sentAt: new Date() },
+  254          { new: true }
+  255        );
+  256        if (!claimed) continue; // another process already claimed it
+  257  
+  258        // Phase C send-time re-validation — if runAt somehow sits in the
+  259        // future (clock skew / rescheduled), release the claim and retry.
+  260        if (job.profileId && job.runAt > new Date()) {
+  261          await ScheduledJob.findByIdAndUpdate(job._id, { status: 'pending' });
+  262          continue;
+  263        }
+  264  
+  265        try {
+  266          const channel = job.channel || 'push';
+  267          const payload = job.payload || {};
+  268  
+  269          // Phase E — resolve copy at SEND time (cached per shop/signal/product/
+  270          // channel/voice). Load the store once and reuse it for both branches.
+  271          const jobStore = await Store.findOne({ shopDomain: job.shopDomain });
+  272          const voice = (jobStore && jobStore.voice) || {};
+  273          const product = {
+  274            title: payload.title || '',
+  275            price: '', // not stored on the job yet — blank for now
+  276            productId: (payload.url && payload.url.split('/products/')[1]) || null,
+  277          };
+  278  
+  279          if (channel === 'push') {
+  280            // Only brain-scheduled jobs (job.profileId set) get AI copy.
+  281            // Legacy AutomationRule jobs keep their merchant-authored payload.
+  282            if (job.profileId) {
+  283              const copy = await generateCopy(
+  284                { ...(jobStore && jobStore.toObject ? jobStore.toObject() : {}), voice },
+  285                job.signalType || 'cart_abandon',
+  286                product,
+  287                'push'
+  288              ).catch(() => ({
+  289                title: 'You left something behind',
+  290                body: 'Come back and complete your order.',
+  291              }));
+  292              payload.title = copy.title || payload.title;
+  293              payload.body = copy.body || payload.body;
+  294            }
+  295  
+  296            const baseUrl = payload.url || `https://${job.shopDomain}`;
+  297            const urlWithJob = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'ccf_job=' + job._id.toString();
+  298            const result = await sendPushToCustomers(
+  299              job.shopDomain,
+  300              payload.title || 'You left something behind!',
+  301              payload.body || 'Come back and check it out.',
+  302              urlWithJob,
+  303              payload.imageUrl || null,
+  304              false,
+  305              job.cartToken || null,
+  306              false
+  307            );
+  308  
+  309            if (!result.success || result.sent === 0) {
+  310              await ScheduledJob.findByIdAndUpdate(job._id, {
+  311                status: 'failed',
+  312                error: result.error || 'No active subscriber found',
+  313              });
+  314              console.log(`[automation] Job ${job._id} failed: no subscriber reached`);
+  315            } else {
+  316              console.log(`[automation] Job ${job._id} sent successfully`);
+  317              await recordProfileMessage(job).catch((e) =>
+  318                console.error('[brain] message log error:', e.message)
+  319              );
+  320            }
+  321          } else if (channel === 'email') {
+  322            const customer = await AbandonedCustomer.findOne({
+  323              shopDomain: job.shopDomain,
+  324              sessionId: job.cartToken,
+  325            });
+  326            if (!customer || !customer.email) {
+  327              await ScheduledJob.findByIdAndUpdate(job._id, {
+  328                status: 'skipped',
+  329                error: 'No customer email for this cart',
+  330              });
+  331              console.log(`[automation] Job ${job._id} skipped — no customer email`);
+  332            } else {
+  333              // Only brain-scheduled jobs (job.profileId set) get AI copy.
+  334              // Legacy AutomationRule jobs keep their merchant-authored payload.
+  335              let copy = {};
+  336              if (job.profileId) {
+  337                copy = await generateCopy(
+  338                  { ...(jobStore && jobStore.toObject ? jobStore.toObject() : {}), voice },
+  339                  job.signalType || 'cart_abandon',
+  340                  product,
+  341                  'email'
+  342                ).catch(() => ({
+  343                  subject: 'We saved your cart',
+  344                  body: 'Hi,\n\nYou left items in your cart.\n\nThanks',
+  345                }));
+  346              }
+  347  
+  348              const cartUrl = `https://${job.shopDomain}/cart`;
+  349              const sendResult = await sendAbandonedCartEmail(customer, {
+  350                subject: copy.subject || payload.subject || undefined,
+  351                body: copy.body || payload.body || undefined,
+  352                cartUrl,
+  353              });
+  354              if (!sendResult.success) {
+  355                await ScheduledJob.findByIdAndUpdate(job._id, {
+  356                  status: 'failed',
+  357                  error: sendResult.error || 'Email send failed',
+  358                });
+  359                console.log(`[automation] Job ${job._id} email failed: ${sendResult.error}`);
+  360              } else {
+
+
+================================================================================
+FILE: backend/models/Store.js   (59 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const storeSchema = new mongoose.Schema({
+    4    shopDomain: {
+    5      type: String,
+    6      required: true,
+    7      unique: true,
+    8      trim: true,
+    9      lowercase: true,
+   10    },
+   11    accessToken: {
+   12      type: String,
+   13      required: true,
+   14    },
+   15    ownerEmail: {
+   16      type: String,
+   17      lowercase: true,
+   18      trim: true,
+   19    },
+   20    timezone: {
+   21      type: String,
+   22      default: 'Asia/Kolkata',
+   23    },
+   24    plan: {
+   25      type: String,
+   26      enum: ['free', 'pro'],
+   27      default: 'free',
+   28    },
+   29    subscriptionId: { type: String },
+   30    subscriptionStatus: { type: String },
+   31    planUpdatedAt: { type: Date },
+   32  
+   33    // --- Phase C: brain configuration ---
+   34    voice: {
+   35      tone: { type: String, default: 'friendly' },
+   36      emoji: { type: Boolean, default: true },
+   37      lang: { type: String, default: 'en' },
+   38      signOff: { type: String, default: '' },
+   39    },
+   40    caps: {
+   41      perDay: { type: Number, default: 2 },
+   42      perWeek: { type: Number, default: 5 },
+   43    },
+   44    quietHours: {
+   45      start: { type: Number, default: 22 }, // hour 0-23
+   46      end: { type: Number, default: 8 },
+   47    },
+   48    onboarding: {
+   49      steps: [{ id: String, done: Boolean, doneAt: Date }],
+   50    },
+   51    // NOTE: `timezone` already exists above (default 'Asia/Kolkata') — not re-added.
+   52  
+   53    installedAt: {
+   54      type: Date,
+   55      default: Date.now,
+   56    },
+   57  });
+   58  
+   59  module.exports = mongoose.model('Store', storeSchema);
+
+
+================================================================================
+FILE: backend/models/Profile.js   (82 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  const { Schema } = mongoose;
+    3  
+    4  /**
+    5   * One record per human, per shop. Every ingest path (storefront events, carts,
+    6   * checkouts, orders, COD orders, push subscribe) resolves to a Profile via
+    7   * backend/services/profileService.js -> upsertProfile().
+    8   *
+    9   * Merge priority (identity resolution):
+   10   *   customerId -> email -> phone -> cartToken -> ccfSessionId -> pushToken
+   11   */
+   12  const profileSchema = new Schema({
+   13    shopDomain: { type: String, required: true, lowercase: true, trim: true },
+   14  
+   15    identifiers: {
+   16      customerId: { type: String, default: null },
+   17      emails: [{ type: String, lowercase: true, trim: true }],
+   18      phones: [{ type: String }],
+   19      sessionIds: [{ type: String }], // ccfSessionIds (stable UUIDs)
+   20      cartTokens: [{ type: String }],
+   21      pushTokens: [{ type: String }], // FCM tokens
+   22    },
+   23  
+   24    channels: {
+   25      push: { subscribed: Boolean, lastToken: String, subscribedAt: Date },
+   26      email: {
+   27        address: String,
+   28        source: { type: String, enum: ['cod', 'form', 'checkout'] },
+   29      },
+   30    },
+   31  
+   32    stage: {
+   33      type: String,
+   34      enum: ['anonymous', 'identified', 'customer', 'lapsed'],
+   35      default: 'anonymous',
+   36    },
+   37  
+   38    interests: { type: Map, of: Number, default: {} }, // productId -> score 0-1
+   39  
+   40    activeHours: { type: [Number], default: [] }, // hours 0-23 when active
+   41  
+   42    orders: {
+   43      count: { type: Number, default: 0 },
+   44      ltv: { type: Number, default: 0 },
+   45      lastOrderAt: { type: Date, default: null },
+   46      codCount: { type: Number, default: 0 },
+   47      prepaidCount: { type: Number, default: 0 },
+   48    },
+   49  
+   50    messages: [
+   51      {
+   52        // last 20 only, capped in profileService
+   53        channel: String,
+   54        type: String,
+   55        sentAt: Date,
+   56        outcome: {
+   57          type: String,
+   58          enum: ['sent', 'clicked', 'converted', 'unsubscribed'],
+   59          default: 'sent',
+   60        },
+   61        jobId: { type: Schema.Types.ObjectId, ref: 'ScheduledJob' },
+   62      },
+   63    ],
+   64  
+   65    suppressed: { type: Boolean, default: false },
+   66    lastSeenAt: { type: Date, default: null },
+   67    createdAt: { type: Date, default: Date.now },
+   68    updatedAt: { type: Date, default: Date.now },
+   69  });
+   70  
+   71  // Identity-resolution lookups — one per identifier field, all sparse.
+   72  profileSchema.index({ shopDomain: 1, 'identifiers.customerId': 1 }, { sparse: true });
+   73  profileSchema.index({ shopDomain: 1, 'identifiers.emails': 1 }, { sparse: true });
+   74  profileSchema.index({ shopDomain: 1, 'identifiers.phones': 1 }, { sparse: true });
+   75  profileSchema.index({ shopDomain: 1, 'identifiers.cartTokens': 1 }, { sparse: true });
+   76  profileSchema.index({ shopDomain: 1, 'identifiers.sessionIds': 1 }, { sparse: true });
+   77  profileSchema.index({ shopDomain: 1, 'identifiers.pushTokens': 1 }, { sparse: true });
+   78  
+   79  // Dashboard "most recently active" listing.
+   80  profileSchema.index({ shopDomain: 1, updatedAt: -1 });
+   81  
+   82  module.exports = mongoose.model('Profile', profileSchema);
+
+
+================================================================================
+FILE: backend/models/CustomerPushSubscription.js   (18 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const CustomerPushSubscriptionSchema = new mongoose.Schema({
+    4    shopDomain: { type: String, required: true, lowercase: true },
+    5    token: { type: String, required: true, unique: true },
+    6    page: { type: String },
+    7    deviceType: { type: String, enum: ['mobile', 'desktop', 'unknown'], default: 'unknown' },
+    8    cartToken: { type: String, trim: true, index: true },
+    9    customerId: { type: String, index: true },
+   10    ccfSessionId: { type: String, index: true },
+   11    createdAt: { type: Date, default: Date.now },
+   12    // Last storefront activity recorded for this subscriber (POST /api/push/cart-activity).
+   13    lastEvent: { type: String },
+   14    lastActivityUrl: { type: String },
+   15    lastActivityAt: { type: Date },
+   16  });
+   17  
+   18  module.exports = mongoose.model('CustomerPushSubscription', CustomerPushSubscriptionSchema);
+
+

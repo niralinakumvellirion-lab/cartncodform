@@ -40,6 +40,7 @@ const storeSchema = new mongoose.Schema({
   caps: {
     perDay: { type: Number, default: 2 },
     perWeek: { type: Number, default: 5 },
+    maxUnopenedPush: { type: Number, default: 5 }, // Phase F: suppress push after N unopened
   },
   quietHours: {
     start: { type: Number, default: 22 }, // hour 0-23
@@ -49,6 +50,14 @@ const storeSchema = new mongoose.Schema({
     steps: [{ id: String, done: Boolean, doneAt: Date }],
   },
   // NOTE: `timezone` already exists above (default 'Asia/Kolkata') — not re-added.
+
+  // --- Phase F: rolling 7-day push delivery health ---
+  pushStats: {
+    deliveredLast7d: { type: Number, default: 0 },
+    attemptedLast7d: { type: Number, default: 0 },
+    rateLast7d: { type: Number, default: 0 },
+    lastComputedAt: { type: Date, default: null },
+  },
 
   installedAt: {
     type: Date,

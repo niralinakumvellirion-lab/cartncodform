@@ -1,0 +1,298 @@
+================================================================================
+PHASE D — Storefront intent triggers + soft push prompt + email capture
+SELF-AUDIT
+================================================================================
+Date: 2026-09-08
+Branch: phase-d-storefront   (cut from phase-c-brain; Phases A–C present)
+"Done when": opt-in rate is tracked and visible.
+Status: liquid rewritten (timer -> 4 intent triggers + two-step soft prompt);
+COD form email field + schema + profile link; /optin-stats route; 7 new tests.
+Done. (Live opt-in-rate measurement is an owner step after `shopify app deploy`.)
+
+================================================================================
+1. FILES CHANGED
+================================================================================
+CREATED:
+  backend/__tests__/optinStats.test.js          (109 lines)  — 6 tests
+  backend/__tests__/codOrder.test.js            ( 24 lines)  — 1 test
+  audits/PHASE_D_PRE_AUDIT.txt                  (1409 lines) — read-only capture
+
+MODIFIED:
+  extensions/cartncodform-embed/blocks/push-notifications.liquid   930 -> 887
+  backend/models/CodOrder.js                    58 -> 60   (+2)
+  backend/routes/proxy.js                       380 -> 397 (+17)
+  backend/routes/profiles.js                    119 -> 153 (+34)
+
+================================================================================
+2. push-notifications.liquid — what changed
+================================================================================
+KEPT UNCHANGED (per the spec's KEEP list):
+  - firebase-app-compat / firebase-messaging-compat <script> tags
+  - registerSW() (SW scope /apps/cartncodform/)
+  - getToken() (FCM) and saveToken() -> POST /api/push/subscribe-customer
+  - trackCart()'s POST /api/push/cart-activity beacon
+  - generateUUID / getSessionId / CCF_SESSION_KEY (ccfSessionId in localStorage)
+  - initTracking() and every trackEvent(): page_view, product_view,
+    collection_view, search, cart_view, reached_checkout, add_to_cart,
+    remove_from_cart, cart_update, page_exit (dwellSeconds, scrollDepth)
+  - checkAndInit()'s "permission === 'granted'" token-verify / rotation branch
+  - setupForegroundMessages()
+  - push-click attribution block
+
+REMOVED (the timer + overlay UI):
+  - injectStyles() + injectHTML()  (the full-screen #ccf-overlay card)
+  - showPopup() / hidePopup() / startCountdown() / countdownTimer / wireButtons()
+  - handleAllow()  (its logic is now inlined in the soft prompt's Allow handler)
+  - checkAndInit()'s tail: `var delay = {{ block.settings.popup_delay }} * 1000;
+    setTimeout(showPopup, delay)`  -> replaced with a comment. NO setTimeout /
+    popup_delay permission request remains (grep: 0 matches for showPopup,
+    injectStyles, injectHTML, wireButtons, handleAllow, startCountdown,
+    countdownTimer, ccf-overlay, block.settings.popup*).
+  - start(): `injectStyles(); injectHTML(); wireButtons();` -> `initIntentTriggers();`
+  - window.ccfShow / window.ccfHide test hooks (referenced removed fns)
+  - {% schema %}: all popup_* settings (popup_badge/title/description,
+    discount_text, benefit_1..3, allow_button_text, deny_button_text,
+    popup_delay) removed; only `enable_push` remains.
+    (DEVIATION from a pure "replace the timer" reading — the copy settings were
+    only consumed by the removed injectHTML(), and the contextual copy is now
+    hardcoded per trigger as the spec requires, so they were dead. A merchant's
+    previously-saved values for these become inert.)
+
+ADDED:
+  - <div id="ccf-embed-root" data-product-title="{{ product.title | escape }}"
+    style="display:none"></div>  (right after the {% if %}) — carries the
+    product title into JS for the DWELL copy; empty on non-product pages.
+  - The soft-prompt module (all inline, no external src, no eval/Function):
+      canPrompt()          — gates: Notification supported, permission==='default',
+                             !sessionStorage 'ccf_prompt_shown',
+                             localStorage SUBSCRIBED_KEY !== '1',
+                             !sessionStorage 'ccf_denied_session'
+      showSoftPrompt(trigger, productId):
+         - markPromptShown() -> sessionStorage 'ccf_prompt_shown' = 'true'
+         - trackEvent('push_prompt_shown', { trigger, productId|null })
+         - injects <div id="ccf-push-prompt" style="position:fixed;bottom:20px;
+           right:20px;z-index:999999;background:#fff;border-radius:12px;
+           box-shadow:...;padding:16px;max-width:300px;font-family:inherit;...">
+           containing <p id="ccf-prompt-text">, <button id="ccf-allow-btn">Allow</button>,
+           <button id="ccf-deny-btn">No thanks</button>  (inline styles only)
+         - Allow: Notification.requestPermission() ->
+             trackEvent('push_prompt_accepted', { trigger, granted:bool });
+             if granted -> registerSW -> getToken -> saveToken -> setupForegroundMessages
+             else -> sessionStorage 'ccf_denied_session' = '1'
+           then removes the div.
+         - No thanks: removes the div, sets 'ccf_denied_session'
+           ('ccf_prompt_shown' already set at show time).
+         - Auto-dismiss: setTimeout(cleanup, 8000), no event logged.
+      initIntentTriggers()  — wires triggers 1/2/4 (3 is wired at the cart-add
+                              hooks); early-returns if !canPrompt().
+
+  INTENT TRIGGERS (first match wins; sessionStorage 'ccf_prompt_shown' guard
+  in canPrompt() enforces once-per-session across all four):
+   1. DWELL   — pageType 'product', 45000ms setTimeout started on load;
+                visibilitychange pauses (subtract elapsed) / resumes it;
+                fires showSoftPrompt('dwell', productId).
+   2. RETURN VISIT — pageType 'product'; localStorage 'ccf_viewed_products'
+                (JSON array). On each product page: if productId already in the
+                array -> showSoftPrompt('return_visit', pid); else push it
+                (capped at 200) and store. Checked synchronously in
+                initIntentTriggers().
+   3. ADD TO CART — showSoftPrompt('add_to_cart', pid) called from BOTH
+                (a) the trackCart() click handler (old showPopup() call removed),
+                (b) the window.fetch interceptor right after
+                    trackEvent('add_to_cart', ...). Session guard prevents a
+                double prompt.
+   4. EXIT INTENT — window.innerWidth > 768 only; document mousemove listener;
+                first event with clientY < 20 removes the listener and fires
+                showSoftPrompt('exit_intent', null).
+
+  CONTEXTUAL COPY (PROMPT_COPY map):
+   dwell:        "Get notified if <product title> goes on sale or comes back in stock."
+                 (title from #ccf-embed-root data-product-title, fallback getProductMeta().title)
+   return_visit: "You've looked at this before. Want a reminder if the price drops?"
+   add_to_cart:  "Want a reminder if you leave something behind?"
+   exit_intent:  "Before you go — get notified about deals from this store?"
+
+  Extracted inline JS passes `node --check`. No `<script src>` added; no
+  eval/Function.
+
+================================================================================
+3. push_prompt_shown / push_prompt_accepted logging — HOW
+================================================================================
+DEVIATION FROM STEP 3/5 (endpoint): the spec says log these "via the
+/apps/cartncodform/cart-activity beacon". That route (backend/routes/push.js
+POST /cart-activity) ONLY stamps CustomerPushSubscription.lastEvent — it has
+NEVER written a StorefrontEvent and takes no `meta` field. STEP 6's
+/optin-stats reads StorefrontEvent. So the two prompt events are logged through
+the liquid's EXISTING trackEvent() -> flushEvents() -> POST /api/events pipe,
+which backend/routes/events.js writes straight to StorefrontEvent with
+{ type, meta, sessionId, ts }. This lands them exactly where /optin-stats looks,
+with meta = { trigger, productId } / { trigger, granted }.
+Result: /cart-activity is UNCHANGED (honours STEP 5's "No other changes"), and
+routes/events.js already accepts any `type` with no filter (line ~34:
+`type: e.type || 'unknown'`), so nothing to remove there.
+
+================================================================================
+4. COD proxy form — email capture
+================================================================================
+backend/models/CodOrder.js  (+2)
+  @@ +21  `email: { type: String, default: '' }`  inserted between phone and address.
+
+backend/routes/proxy.js  (+17)
+  @@ GET /cod-form HTML (+3):  a new optional field between phone and address:
+     <label for="ccf-email">Email (optional — for order updates)</label>
+     <input type="email" id="ccf-email" name="email" placeholder="you@example.com"
+            autocomplete="email" />
+  @@ GET /cod-form inline JS (+1):  `email: (data.get('email') || '').trim(),`
+     added to the fetch POST body (before city).
+  @@ POST /cod-order (+13):
+     - `email` added to the req.body destructure; `cleanEmail = String(email||'').trim()`
+     - `email: cleanEmail` passed to CodOrder.create()
+     - after create, fire-and-forget:
+         const { upsertProfile } = require('../services/profileService');
+         upsertProfile(shop, { phone: String(phone).trim(), email: cleanEmail || null }, {
+           ...(cleanEmail ? { 'channels.email.address': cleanEmail,
+                              'channels.email.source': 'cod' } : {}),
+           lastSeenAt: new Date(),
+         }).catch(err => console.error('[profile] cod-proxy upsert error:', err.message));
+     Not awaited; not on the response path. The 201 response is unchanged.
+
+================================================================================
+5. /optin-stats route
+================================================================================
+backend/routes/profiles.js  (+34)
+  @@ +7   require('../models/StorefrontEvent')
+  @@ +120..+152  GET /:shopDomain/optin-stats
+     - requireAuth + requireStoreOwner (auth-gated; IDOR-guarded by
+       requireStoreOwner's shop-match check — verified by test 5)
+     - since = now - 30 days
+     - Promise.all([
+         countDocuments({ shopDomain, type:'push_prompt_shown', ts:{$gte:since} }),
+         countDocuments({ shopDomain, type:'push_prompt_accepted',
+                          'meta.granted': true, ts:{$gte:since} }),
+       ])
+     - rate = shown > 0 ? Math.round((accepted/shown)*100)/100 : 0
+     - -> { shown, accepted, rate }
+  Mounted already at /api/profiles (server.js, Phase B) — no server.js change.
+
+================================================================================
+6. STEP 5 verification — /cart-activity accepts push_prompt_* types
+================================================================================
+As above (§3): the prompt events do NOT go through /cart-activity. The route
+that receives them, POST /api/events (routes/events.js), does not filter by
+type — every event in the batch is mapped as `type: e.type || 'unknown'` and
+insertMany'd into StorefrontEvent. So push_prompt_shown / push_prompt_accepted
+are accepted as-is. /cart-activity itself is byte-for-byte unchanged.
+
+================================================================================
+7. OWNER DEPLOY INSTRUCTION (STEP 7 — NOT run here)
+================================================================================
+`shopify app deploy` was NOT run. After this phase is committed, the owner runs,
+from D:\cartncodform :
+
+    shopify app deploy --allow-updates
+
+This ships the rewritten theme App Embed block (push-notifications.liquid) and
+the trimmed {% schema %}. Merchants then get the new intent-trigger prompt on
+their next storefront load; the old popup_* theme-editor settings disappear
+from the App embed panel.
+(Backend changes — proxy.js, profiles.js, CodOrder.js — deploy with the normal
+Render push of the backend branch; no extra step.)
+
+================================================================================
+8. NO PII IN NEW LOGS
+================================================================================
+Backend logs added this phase:
+  `[profile] cod-proxy upsert error: ${err.message}`
+  `[profiles] GET optin-stats error: ${err.message}`
+No email / phone / name / token logged. (The pre-existing
+`[proxy] New COD order for <shop> from <name> (<phone>)` log line was NOT
+added by this phase and was left as-is.)
+Liquid console logs added: none carry PII (trigger names + err.message only).
+
+================================================================================
+9. TESTS
+================================================================================
+BEFORE Phase D (baseline re-run on branch cut):
+  Test Suites: 8 passed, 8 total
+  Tests:       89 passed, 89 total
+
+AFTER Phase D  (cd backend && npm test):
+  Test Suites: 10 passed, 10 total
+  Tests:       96 passed, 96 total
+  Snapshots:   0 total
+  Time:        ~5 s
+  -> existing 89 unchanged, +7 new.
+  (The "cancelJobsForOrder error: db down" console.error is the pre-existing
+   intentional error-path assertion in automationEngine.test.js:278.)
+
+backend/__tests__/optinStats.test.js — 6 tests, all pass:
+  1. returns { shown:0, accepted:0, rate:0 } when there are no events
+  2. returns the push_prompt_shown count
+  3. only counts accepted events where meta.granted === true
+  4. rate is accepted/shown rounded to 2 decimals (1/3 -> 0.33)
+  5. IDOR — 403 when the token shop != the path shop (countDocuments not called)
+  6. 30-day window is applied to both counts
+  (throwaway Express app on an ephemeral port driven with Node global fetch;
+   requireOwner middleware mocked to a header-driven pass-through; StorefrontEvent
+   auto-mocked. No supertest dependency, no DB.)
+
+backend/__tests__/codOrder.test.js — 1 test, passes:
+  - CodOrder schema has an `email` path defaulting to "" (document construct +
+    validateSync; no DB).
+
+The liquid file is not Jest-testable; it was verified by `node --check` on the
+extracted inline JS and by grep for dangling references to removed symbols
+(0 matches).
+
+================================================================================
+10. NOTICED BUT NOT TOUCHED  (out of scope for Phase D)
+================================================================================
+- STEP 3/5 assumed /cart-activity writes StorefrontEvent; it does not. Rather
+  than change /cart-activity (STEP 5: "No other changes"), prompt events go via
+  /api/events. If a future phase wants ALL cart-activity events in StorefrontEvent,
+  that route needs its own change.
+- The soft prompt's "Allow" path reuses saveToken()/registerSW()/getToken()
+  which still target-by-cartToken on the backend. A profile-/pushToken-targeted
+  send path is a Phase E/F concern (already flagged in the Phase C audit).
+- RETURN VISIT stores raw productIds in localStorage 'ccf_viewed_products'
+  unbounded-ish (capped at 200, slice(-200)). First-party storefront storage,
+  per the handover rule "Storefront localStorage is fine".
+- The DWELL timer and EXIT INTENT listener are registered even after the prompt
+  has shown once (canPrompt() short-circuits inside showSoftPrompt, so they
+  just no-op). Minor; not leaking (exit-intent listener removes itself on first
+  qualifying move).
+- No A/B or before/after opt-in-rate comparison is built — /optin-stats gives
+  the raw shown/accepted/rate; the "measurably above baseline" judgement is the
+  owner's to make from live data (handover "Done when").
+- {% schema %} trim: if the owner wants to keep the old copy settings for a
+  future re-use, they are gone from git history's working copy (still in the
+  pre-Phase-D commit). Flagged as a deviation in §2.
+- CodOrder.email has no format validation (matches how name/phone/address are
+  declared — plain trimmed strings). A malformed email just won't produce a
+  usable channels.email.address downstream.
+
+================================================================================
+11. OPEN QUESTIONS
+================================================================================
+1. Confirm routing prompt events through /api/events (not /cart-activity) is
+   acceptable — it is the architecturally correct pipe, but diverges from the
+   literal STEP 3/5 wording.
+2. {% schema %} trim — OK to drop the 10 popup_* settings entirely, or keep
+   them (inert) to preserve any merchant-customised values?
+3. DWELL copy needs a product title. On themes where
+   window.ShopifyAnalytics.meta.product is absent AND {{ product.title }} is
+   empty (rare custom product templates), the copy falls back to
+   "this product". Acceptable?
+4. EXIT INTENT uses a raw document 'mousemove' listener (not passive-flagged
+   for clientY reads). Negligible perf cost; leave as-is?
+5. Should push_prompt_accepted with granted:false also set a longer-lived
+   suppression than the session (e.g. localStorage for N days)? Currently a
+   denied native prompt is browser-permanent anyway, and a dismissed soft
+   prompt is session-only.
+6. STEP 7 owner command: `shopify app deploy --allow-updates` — confirm the
+   `--allow-updates` flag is what this Shopify CLI version expects (vs a plain
+   `shopify app deploy` which prompts).
+
+================================================================================
+END — stopping after self-audit. Phase E not started.
+================================================================================

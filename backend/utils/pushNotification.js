@@ -5,6 +5,7 @@
 // Behaviour / return shapes below match the original spec.
 const { initializeApp, getApps, cert } = require('firebase-admin/app');
 const { getMessaging } = require('firebase-admin/messaging');
+const { handleStaleToken, isStaleCode } = require('../services/pushHygiene');
 
 // Initialize only once. Guarded so a missing service-account config does not
 // crash server startup — pushes simply no-op with an error until creds are set.
@@ -142,14 +143,11 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
           console.log(`[push] Sent 1/1 to targeted device of ${shop}`);
           return { success: true, sent: 1, tokensFound: cartSubs.length };
         }
-        // Token is stale — delete and try next.
+        // Token is stale — prune it (subscription + profile) and try next.
         const code = result.error?.code || '';
-        if (
-          code === 'messaging/registration-token-not-registered' ||
-          code === 'messaging/invalid-registration-token'
-        ) {
-          await CustomerPushSubscription.deleteMany({ token: sub.token });
-          console.log(`[push-customer] Deleted stale token, trying next...`);
+        if (isStaleCode(code)) {
+          await handleStaleToken(sub.token, shop);
+          console.log(`[push-customer] Stale token pruned, trying next...`);
         } else {
           // Non-stale error — stop trying.
           console.error(`[push-customer] token FAILED: ${code || result.error?.message}`);
@@ -213,20 +211,19 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
         const code = r.error?.code || '';
         const msg = r.error?.message || 'unknown error';
         console.error(`[push-customer] token ${i + 1} FAILED: ${code || msg}`);
-        if (
-          code === 'messaging/registration-token-not-registered' ||
-          code === 'messaging/invalid-registration-token'
-        ) {
+        if (isStaleCode(code)) {
           staleTokens.push(tokens[i]);
         }
       }
     });
 
     if (staleTokens.length > 0 && !skipStaleCleanup) {
-      await CustomerPushSubscription.deleteMany({ token: { $in: staleTokens } });
-      console.log(`[push-customer] Deleted ${staleTokens.length} stale token(s)`);
+      for (const staleToken of staleTokens) {
+        await handleStaleToken(staleToken, shop);
+      }
+      console.log(`[push-customer] Pruned ${staleTokens.length} stale token(s)`);
     } else if (staleTokens.length > 0 && skipStaleCleanup) {
-      console.log(`[push-customer] ${staleTokens.length} stale token(s) found but not deleted (skipStaleCleanup)`);
+      console.log(`[push-customer] ${staleTokens.length} stale token(s) found but not pruned (skipStaleCleanup)`);
     }
 
     console.log(

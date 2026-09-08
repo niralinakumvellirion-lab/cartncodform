@@ -1,4 +1,5 @@
 {% if block.settings.enable_push %}
+<div id="ccf-embed-root" data-product-title="{{ product.title | escape }}" style="display:none"></div>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js"></script>
 <script>
@@ -32,124 +33,185 @@
   console.log('[CCF] SW URL:', PROXY_SW_URL);
 
   // ============================================
-  // POPUP HTML + CSS (injected dynamically)
+  // SOFT PUSH PROMPT — intent triggers (Phase D)
   // ============================================
+  // No timer. A small soft card is shown when ONE of four intent triggers
+  // fires (first match wins, once per session). The native
+  // Notification.requestPermission() is only called if the visitor taps Allow.
 
-  function injectStyles() {
-    if (document.getElementById('ccf-styles')) return;
-    var style = document.createElement('style');
-    style.id = 'ccf-styles';
-    style.textContent = [
-      '#ccf-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;',
-      'background:rgba(0,0,0,0.65);z-index:2147483647;',
-      'align-items:center;justify-content:center;font-family:-apple-system,sans-serif;}',
-      '#ccf-card{background:#fff;border-radius:20px;padding:28px 24px;',
-      'max-width:340px;width:90%;text-align:center;position:relative;}',
-      '#ccf-close{position:absolute;top:12px;right:14px;background:none;',
-      'border:none;font-size:20px;cursor:pointer;color:#999;line-height:1;}',
-      '#ccf-timer-badge{position:absolute;top:12px;left:14px;background:#f0f0f0;',
-      'border-radius:20px;padding:2px 10px;font-size:11px;color:#666;font-weight:600;}',
-      '#ccf-emoji{font-size:48px;display:block;margin:16px 0 10px;}',
-      '#ccf-badge{background:#fee2e2;color:#dc2626;font-size:10px;font-weight:700;',
-      'padding:3px 12px;border-radius:20px;display:inline-block;margin-bottom:12px;',
-      'text-transform:uppercase;letter-spacing:0.5px;}',
-      '#ccf-discount{background:#dcfce7;color:#166534;border-radius:10px;',
-      'padding:10px;margin-bottom:14px;font-size:14px;font-weight:600;}',
-      '#ccf-title{font-size:20px;font-weight:700;color:#111;margin:0 0 8px;line-height:1.3;}',
-      '#ccf-desc{font-size:13px;color:#666;margin:0 0 14px;line-height:1.6;}',
-      '#ccf-benefits{background:#f8f9ff;border-radius:10px;padding:12px;',
-      'margin-bottom:16px;text-align:left;}',
-      '#ccf-benefits div{font-size:12px;color:#444;padding:3px 0;}',
-      '#ccf-yes{width:100%;background:linear-gradient(135deg,#667eea,#764ba2);',
-      'color:#fff;border:none;border-radius:12px;padding:15px;font-size:15px;',
-      'font-weight:700;cursor:pointer;margin-bottom:8px;display:block;}',
-      '#ccf-no{background:none;border:none;color:#aaa;font-size:12px;',
-      'cursor:pointer;text-decoration:underline;padding:4px;}'
-    ].join('');
-    (document.head || document.documentElement).appendChild(style);
+  var VIEWED_KEY = 'ccf_viewed_products';
+  var PROMPT_SHOWN_KEY = 'ccf_prompt_shown'; // sessionStorage
+
+  function ccfProductTitle() {
+    var el = document.getElementById('ccf-embed-root');
+    var fromAttr = el ? (el.getAttribute('data-product-title') || '') : '';
+    if (fromAttr) return fromAttr;
+    var m = getProductMeta();
+    return (m && m.title) || '';
   }
 
-  function injectHTML() {
-    if (document.getElementById('ccf-overlay')) return;
-    var div = document.createElement('div');
-    div.id = 'ccf-overlay';
-    div.setAttribute('role', 'dialog');
-    div.innerHTML = [
-      '<div id="ccf-card">',
-        '<button id="ccf-close">&times;</button>',
-        '<div id="ccf-timer-badge">&#9201; <span id="ccf-count">15</span>s</div>',
-        '<span id="ccf-emoji">&#128276;</span>',
-        '<div id="ccf-badge">{{ block.settings.popup_badge }}</div>',
-        '<div id="ccf-discount">&#127873; {{ block.settings.discount_text }}</div>',
-        '<h2 id="ccf-title">{{ block.settings.popup_title }}</h2>',
-        '<p id="ccf-desc">{{ block.settings.popup_description }}</p>',
-        '<div id="ccf-benefits">',
-          '<div>&#9989; {{ block.settings.benefit_1 }}</div>',
-          '<div>&#9989; {{ block.settings.benefit_2 }}</div>',
-          '<div>&#9989; {{ block.settings.benefit_3 }}</div>',
-        '</div>',
-        '<button id="ccf-yes">&#128276; {{ block.settings.allow_button_text }}</button>',
-        '<br>',
-        '<button id="ccf-no">{{ block.settings.deny_button_text }}</button>',
-      '</div>'
-    ].join('');
-    document.body.appendChild(div);
+  function promptAlreadyShown() {
+    try { return sessionStorage.getItem(PROMPT_SHOWN_KEY) === 'true'; } catch (e) { return false; }
+  }
+  function markPromptShown() {
+    try { sessionStorage.setItem(PROMPT_SHOWN_KEY, 'true'); } catch (e) {}
   }
 
-  // ============================================
-  // POPUP CONTROLS
-  // ============================================
-
-  var countdownTimer = null;
-
-  function showPopup() {
-    var o = document.getElementById('ccf-overlay');
-    if (!o) return;
-    o.style.display = 'flex';
-    o.style.alignItems = 'center';
-    o.style.justifyContent = 'center';
-    console.log('[CCF] Popup shown');
-    startCountdown();
+  function canPrompt() {
+    if (!('Notification' in window)) return false;
+    if (Notification.permission !== 'default') return false; // already granted or denied
+    if (promptAlreadyShown()) return false;
+    if (localStorage.getItem(SUBSCRIBED_KEY) === '1') return false;
+    try { if (sessionStorage.getItem('ccf_denied_session')) return false; } catch (e) {}
+    return true;
   }
 
-  function hidePopup() {
-    var o = document.getElementById('ccf-overlay');
-    if (o) o.style.display = 'none';
-    if (countdownTimer) clearInterval(countdownTimer);
+  var PROMPT_COPY = {
+    dwell: function (t) { return 'Get notified if ' + (t || 'this product') + ' goes on sale or comes back in stock.'; },
+    return_visit: function () { return "You've looked at this before. Want a reminder if the price drops?"; },
+    add_to_cart: function () { return 'Want a reminder if you leave something behind?'; },
+    exit_intent: function () { return 'Before you go — get notified about deals from this store?'; }
+  };
+
+  var promptAutoDismissTimer = null;
+
+  function showSoftPrompt(trigger, productId) {
+    if (!canPrompt()) return;
+    if (document.getElementById('ccf-push-prompt')) return;
+    markPromptShown();
+
+    // Log push_prompt_shown via the existing event pipe (-> StorefrontEvent).
+    try { trackEvent('push_prompt_shown', { trigger: trigger, productId: productId || null }); } catch (e) {}
+
+    var wrap = document.createElement('div');
+    wrap.id = 'ccf-push-prompt';
+    wrap.setAttribute('style',
+      'position:fixed;bottom:20px;right:20px;z-index:999999;background:#fff;' +
+      'border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.18);padding:16px;' +
+      'max-width:300px;font-family:inherit;font-size:14px;color:#111;line-height:1.5;');
+
+    var p = document.createElement('p');
+    p.id = 'ccf-prompt-text';
+    p.setAttribute('style', 'margin:0 0 12px;');
+    p.textContent = (PROMPT_COPY[trigger] || PROMPT_COPY.dwell)(
+      trigger === 'dwell' ? ccfProductTitle() : null
+    );
+
+    var allow = document.createElement('button');
+    allow.id = 'ccf-allow-btn';
+    allow.type = 'button';
+    allow.textContent = 'Allow';
+    allow.setAttribute('style',
+      'background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:8px 14px;' +
+      'font-size:13px;font-weight:700;cursor:pointer;margin-right:8px;');
+
+    var deny = document.createElement('button');
+    deny.id = 'ccf-deny-btn';
+    deny.type = 'button';
+    deny.textContent = 'No thanks';
+    deny.setAttribute('style',
+      'background:none;border:0;color:#888;font-size:13px;cursor:pointer;');
+
+    wrap.appendChild(p);
+    wrap.appendChild(allow);
+    wrap.appendChild(deny);
+    document.body.appendChild(wrap);
+
+    function cleanup() {
+      if (promptAutoDismissTimer) { clearTimeout(promptAutoDismissTimer); promptAutoDismissTimer = null; }
+      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+    }
+
+    allow.addEventListener('click', function () {
+      cleanup();
+      Notification.requestPermission().then(function (permission) {
+        var granted = permission === 'granted';
+        try { trackEvent('push_prompt_accepted', { trigger: trigger, granted: granted }); } catch (e) {}
+        if (granted) {
+          registerSW()
+            .then(function (reg) { return getToken(reg); })
+            .then(function (token) { return saveToken(token); })
+            .then(function () { setupForegroundMessages(); })
+            .catch(function (err) { console.error('[CCF] subscribe after prompt failed:', err.message); });
+        } else {
+          try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+        }
+      });
+    });
+
+    deny.addEventListener('click', function () {
+      cleanup();
+      try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+    });
+
+    // Auto-dismiss silently after 8s of no interaction (no event logged).
+    promptAutoDismissTimer = setTimeout(cleanup, 8000);
   }
 
-  function startCountdown() {
-    var count = 15;
-    var el = document.getElementById('ccf-count');
-    if (countdownTimer) clearInterval(countdownTimer);
-    countdownTimer = setInterval(function() {
-      count--;
-      if (el) el.textContent = count;
-      if (count <= 0) {
-        clearInterval(countdownTimer);
-        hidePopup();
+  // Wire the four intent triggers. First one to fire wins (session guard).
+  var ccfExitIntentBound = false;
+  function initIntentTriggers() {
+    if (!canPrompt()) return;
+
+    var pageType = getPageType();
+    var meta = pageType === 'product' ? getProductMeta() : null;
+    var pid = meta && meta.productId ? String(meta.productId) : null;
+
+    // Trigger 2 — RETURN VISIT: this productId seen in a previous session.
+    if (pageType === 'product' && pid) {
+      var viewed = [];
+      try { viewed = JSON.parse(localStorage.getItem(VIEWED_KEY) || '[]'); } catch (e) { viewed = []; }
+      if (!Array.isArray(viewed)) viewed = [];
+      if (viewed.indexOf(pid) !== -1) {
+        showSoftPrompt('return_visit', pid);
+      } else {
+        viewed.push(pid);
+        if (viewed.length > 200) viewed = viewed.slice(-200);
+        try { localStorage.setItem(VIEWED_KEY, JSON.stringify(viewed)); } catch (e) {}
       }
-    }, 1000);
-  }
+    }
 
-  function wireButtons() {
-    var yes = document.getElementById('ccf-yes');
-    var no = document.getElementById('ccf-no');
-    var close = document.getElementById('ccf-close');
+    // Trigger 1 — DWELL: 45s continuous on a product page (pauses when hidden).
+    if (pageType === 'product') {
+      var dwellRemaining = 45000;
+      var dwellStartedAt = 0;
+      var dwellTimer = null;
+      function startDwell() {
+        if (dwellTimer || dwellRemaining <= 0) return;
+        dwellStartedAt = Date.now();
+        dwellTimer = setTimeout(function () {
+          dwellTimer = null;
+          dwellRemaining = 0;
+          showSoftPrompt('dwell', pid);
+        }, dwellRemaining);
+      }
+      function pauseDwell() {
+        if (!dwellTimer) return;
+        clearTimeout(dwellTimer);
+        dwellTimer = null;
+        dwellRemaining -= (Date.now() - dwellStartedAt);
+        if (dwellRemaining < 0) dwellRemaining = 0;
+      }
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'hidden') pauseDwell();
+        else startDwell();
+      });
+      if (document.visibilityState === 'visible') startDwell();
+    }
 
-    if (yes) yes.addEventListener('click', function() {
-      hidePopup();
-      handleAllow();
-    });
-
-    if (no) no.addEventListener('click', function() {
-      hidePopup();
-      sessionStorage.setItem('ccf_denied_session', '1');
-    });
-
-    if (close) close.addEventListener('click', function() {
-      hidePopup();
-    });
+    // Trigger 4 — EXIT INTENT: desktop only, mouse toward the browser chrome.
+    if (window.innerWidth > 768 && !ccfExitIntentBound) {
+      ccfExitIntentBound = true;
+      var onExitMove = function (e) {
+        if (e.clientY < 20) {
+          document.removeEventListener('mousemove', onExitMove);
+          showSoftPrompt('exit_intent', null);
+        }
+      };
+      document.addEventListener('mousemove', onExitMove);
+    }
+    // Trigger 3 — ADD TO CART: fired from the cart-add hooks (see trackCart /
+    // the /cart/add.js fetch interceptor), which call showSoftPrompt('add_to_cart').
   }
 
   function setupForegroundMessages() {
@@ -359,36 +421,6 @@
   }
 
   // ============================================
-  // HANDLE ALLOW BUTTON
-  // ============================================
-
-  function handleAllow() {
-    console.log('[CCF] handleAllow called');
-    Notification.requestPermission().then(function(permission) {
-      console.log('[CCF] Permission result:', permission);
-
-      if (permission !== 'granted') {
-        sessionStorage.setItem('ccf_denied_session', '1');
-        return;
-      }
-
-      console.log('[CCF] Starting SW registration for token...');
-      registerSW().then(function(reg) {
-        console.log('[CCF] SW ready for token, getting FCM token...');
-        return getToken(reg);
-      }).then(function(token) {
-        console.log('[CCF] Token received:', token ? token.substring(0,20)+'...' : 'null');
-        return saveToken(token);
-      }).then(function() {
-        console.log('[CCF] Token saved successfully!');
-        setupForegroundMessages();
-      }).catch(function(err) {
-        console.error('[CCF] Subscribe failed:', err.message);
-      });
-    });
-  }
-
-  // ============================================
   // CHECK TOKEN + INIT
   // ============================================
 
@@ -432,15 +464,8 @@
       return;
     }
 
-    // Permission is 'default' — show popup after delay
-    if (sessionStorage.getItem('ccf_denied_session')) return;
-    if (localStorage.getItem(SUBSCRIBED_KEY) === '1') return;
-
-    var delay = {{ block.settings.popup_delay }} * 1000;
-    console.log('[CCF] No token, showing popup in', delay/1000, 's');
-    setTimeout(function() {
-      showPopup();
-    }, delay);
+    // Permission is 'default' — nothing to do here. The soft prompt is shown
+    // by intent triggers (initIntentTriggers), not on a timer.
   }
 
   // ============================================
@@ -476,10 +501,8 @@
       // window.fetch monkey-patch (initTracking), after the cart
       // token has actually rotated — see fetchPromise.then() there.
 
-      // Show popup if not subscribed
-      if (!localStorage.getItem(SUBSCRIBED_KEY) && Notification.permission === 'default') {
-        showPopup();
-      }
+      // Trigger 3 — ADD TO CART soft prompt (session-guarded internally).
+      try { showSoftPrompt('add_to_cart', null); } catch (e) {}
     });
   }
 
@@ -752,11 +775,14 @@
         try {
           var body = init && init.body;
           var parsed = typeof body === 'string' ? JSON.parse(body) : null;
+          var addedPid = parsed && (parsed.id || parsed.items && parsed.items[0] && parsed.items[0].id) || null;
           trackEvent('add_to_cart', {
-            productId: parsed && (parsed.id || parsed.items && parsed.items[0] && parsed.items[0].id) || null,
+            productId: addedPid,
             quantity: parsed && (parsed.quantity || 1) || 1,
             url: window.location.href
           });
+          // Trigger 3 — ADD TO CART soft prompt (session-guarded internally).
+          try { showSoftPrompt('add_to_cart', addedPid ? String(addedPid) : null); } catch (e) {}
         } catch(e) {}
       }
       if (isCartChange) {
@@ -821,12 +847,10 @@
     if (ccfStarted) return;
     ccfStarted = true;
     console.log('[CCF] Starting...');
-    injectStyles();
-    injectHTML();
-    wireButtons();
     trackCart();
     checkAndInit();
     initTracking();
+    initIntentTriggers();
 
     if (Notification.permission === 'granted') {
       setupForegroundMessages();
@@ -840,12 +864,8 @@
   }
 
   window.addEventListener('load', function() {
-    if (!document.getElementById('ccf-overlay')) start();
+    if (!ccfStarted) start();
   });
-
-  // Expose for testing
-  window.ccfShow = showPopup;
-  window.ccfHide = hidePopup;
 
 })();
 </script>
@@ -861,69 +881,6 @@
       "id": "enable_push",
       "label": "Enable Push Notifications",
       "default": true
-    },
-    {
-      "type": "text",
-      "id": "popup_badge",
-      "label": "Badge Text",
-      "default": "Exclusive Members Only"
-    },
-    {
-      "type": "text",
-      "id": "popup_title",
-      "label": "Popup Title",
-      "default": "Never Miss a Deal Again!"
-    },
-    {
-      "type": "textarea",
-      "id": "popup_description",
-      "label": "Description",
-      "default": "Get instant alerts for flash sales, restocks, and exclusive offers!"
-    },
-    {
-      "type": "text",
-      "id": "discount_text",
-      "label": "Discount Text",
-      "default": "Subscribe and get 10% OFF your next order!"
-    },
-    {
-      "type": "text",
-      "id": "benefit_1",
-      "label": "Benefit 1",
-      "default": "Flash sale alerts - first access"
-    },
-    {
-      "type": "text",
-      "id": "benefit_2",
-      "label": "Benefit 2",
-      "default": "Back in stock notifications"
-    },
-    {
-      "type": "text",
-      "id": "benefit_3",
-      "label": "Benefit 3",
-      "default": "Exclusive discount codes"
-    },
-    {
-      "type": "text",
-      "id": "allow_button_text",
-      "label": "Allow Button",
-      "default": "Yes! Notify Me"
-    },
-    {
-      "type": "text",
-      "id": "deny_button_text",
-      "label": "Deny Button",
-      "default": "No thanks, I hate deals"
-    },
-    {
-      "type": "range",
-      "id": "popup_delay",
-      "label": "Show popup after (seconds)",
-      "min": 2,
-      "max": 30,
-      "step": 1,
-      "default": 5
     }
   ]
 }

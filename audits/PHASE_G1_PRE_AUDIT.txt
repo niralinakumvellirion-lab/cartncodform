@@ -1,0 +1,1952 @@
+================================================================================
+PHASE G1 - PRE-WORK AUDIT (read-only capture, no modifications)
+Generated: 2026-09-08T09:02:10Z
+Branch at capture: main   HEAD: 0491d8f
+Polaris: "@shopify/polaris":"^13.9.5"   polaris-icons installed: 9.3.1 (transitive, not in package.json)
+================================================================================
+
+================================================================================
+FILE: frontend/app/admin/page.js   (958 lines)   [FULL]
+================================================================================
+    1  'use client';
+    2  
+    3  import { Suspense, useState, useCallback, useEffect, useMemo } from 'react';
+    4  import {
+    5    AppProvider,
+    6    Page,
+    7    Card,
+    8    Text,
+    9    Badge,
+   10    Button,
+   11    Popover,
+   12    TextField,
+   13    FormLayout,
+   14    BlockStack,
+   15    Box,
+   16    InlineStack,
+   17    Checkbox,
+   18    Banner,
+   19    ResourceList,
+   20    ResourceItem,
+   21    Modal,
+   22    Grid,
+   23    SkeletonBodyText,
+   24    Thumbnail,
+   25    Tabs,
+   26    IndexTable,
+   27    Select,
+   28    Spinner,
+   29  } from '@shopify/polaris';
+   30  import { useSearchParams } from 'next/navigation';
+   31  import '@shopify/polaris/build/esm/styles.css';
+   32  import { apiGet, apiSend } from '../../lib/api';
+   33  
+   34  // --- Ported pure helpers (byte-for-byte from dashboard/[shop]/page.js) ---
+   35  
+   36  function formatMoney(n) {
+   37    const num = Number(n) || 0;
+   38    return num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+   39  }
+   40  
+   41  function formatDate(d) {
+   42    if (!d) return '—';
+   43    return new Date(d).toLocaleString();
+   44  }
+   45  
+   46  // Strip spaces, plus signs and dashes so the number is wa.me-friendly.
+   47  function cleanPhone(phone) {
+   48    return String(phone || '').replace(/[\s+\-]/g, '');
+   49  }
+   50  
+   51  // --- Ported components (logic unchanged; rendering layer -> Polaris) ---
+   52  
+   53  function WhatsAppButton({ phone, message }) {
+   54    const href = `https://wa.me/${cleanPhone(phone)}?text=${encodeURIComponent(message)}`;
+   55    return (
+   56      <Button url={href} external>
+   57        💬 WhatsApp
+   58      </Button>
+   59    );
+   60  }
+   61  
+   62  function SendPushButton({ shop, cartValue, cartItems, productImageUrl, sessionId, itemTitle, productId }) {
+   63    const [expanded, setExpanded] = useState(false);
+   64    const [title, setTitle] = useState('You left items in your cart! 🛒');
+   65    const [body, setBody] = useState(
+   66      itemTitle
+   67        ? `You left "${itemTitle}" in your cart!`
+   68        : `Your cart has items worth ₹${cartValue}. Complete your order now!`
+   69    );
+   70    const [state, setState] = useState('idle'); // idle | sending | sent | error
+   71  
+   72    async function send(e) {
+   73      e.stopPropagation();
+   74      setState('sending');
+   75      try {
+   76        await apiSend('/api/push/send-customer', 'POST', {
+   77          shopDomain: shop,
+   78          title: title,
+   79          body: body,
+   80          url: `https://${shop}`,
+   81          imageUrl: productImageUrl || cartItems?.[0]?.imageUrl || null,
+   82          cartToken: sessionId || null,
+   83          productId: productId || null,
+   84        });
+   85        setState('sent');
+   86        setTimeout(() => {
+   87          setExpanded(false);
+   88          setState('idle');
+   89        }, 1500);
+   90      } catch (err) {
+   91        console.error('[push] send-customer failed:', err);
+   92        setState('error');
+   93      }
+   94    }
+   95  
+   96    const label =
+   97      state === 'sending' ? 'Sending…' :
+   98      state === 'sent' ? 'Sent!' :
+   99      state === 'error' ? 'Failed — Retry' :
+  100      'Send';
+  101  
+  102    const activator = (
+  103      <Button onClick={(e) => { e.stopPropagation(); setExpanded(true); }}>
+  104        🔔 Push
+  105      </Button>
+  106    );
+  107  
+  108    return (
+  109      <Popover
+  110        active={expanded}
+  111        activator={activator}
+  112        onClose={() => setExpanded(false)}
+  113        preferredAlignment="right"
+  114      >
+  115        <div onClick={(e) => e.stopPropagation()} style={{ width: 264 }}>
+  116          <Card>
+  117            <FormLayout>
+  118              <TextField
+  119                label="Title"
+  120                value={title}
+  121                onChange={(value) => setTitle(value)}
+  122                autoComplete="off"
+  123              />
+  124              <TextField
+  125                label="Message"
+  126                value={body}
+  127                onChange={(value) => setBody(value)}
+  128                multiline={2}
+  129                autoComplete="off"
+  130              />
+  131              <div style={{ display: 'flex', gap: 8 }}>
+  132                <Button
+  133                  variant="primary"
+  134                  onClick={send}
+  135                  loading={state === 'sending'}
+  136                  disabled={state === 'sending'}
+  137                >
+  138                  {label}
+  139                </Button>
+  140                <Button onClick={(e) => { e.stopPropagation(); setExpanded(false); }}>
+  141                  Cancel
+  142                </Button>
+  143              </div>
+  144            </FormLayout>
+  145          </Card>
+  146        </div>
+  147      </Popover>
+  148    );
+  149  }
+  150  
+  151  function SendEmailButton({ shop, sessionId, cartToken }) {
+  152    const [active, setActive] = useState(false);
+  153    const [emailSubject, setEmailSubject] = useState('');
+  154    const [emailBody, setEmailBody] = useState('');
+  155    const [sending, setSending] = useState(false);
+  156  
+  157    async function sendEmail() {
+  158      setSending(true);
+  159      try {
+  160        await apiSend(
+  161          `/api/push/send-email-test`,
+  162          'POST',
+  163          { shopDomain: shop, cartToken: sessionId, subject: emailSubject, body: emailBody },
+  164        );
+  165        setActive(false);
+  166        setEmailSubject('');
+  167        setEmailBody('');
+  168      } catch (e) {
+  169        console.error('[email] send-email-test failed:', e);
+  170      } finally {
+  171        setSending(false);
+  172      }
+  173    }
+  174  
+  175    const activator = (
+  176      <Button onClick={(e) => { e.stopPropagation(); setActive(true); }}>
+  177        ✉️ Email
+  178      </Button>
+  179    );
+  180  
+  181    return (
+  182      <Popover
+  183        active={active}
+  184        activator={activator}
+  185        onClose={() => setActive(false)}
+  186        preferredAlignment="right"
+  187      >
+  188        <div onClick={(e) => e.stopPropagation()} style={{ width: 264 }}>
+  189          <Card>
+  190            <FormLayout>
+  191              <TextField
+  192                label="Subject"
+  193                value={emailSubject}
+  194                onChange={(value) => setEmailSubject(value)}
+  195                autoComplete="off"
+  196              />
+  197              <TextField
+  198                label="Message"
+  199                value={emailBody}
+  200                onChange={(value) => setEmailBody(value)}
+  201                multiline={2}
+  202                autoComplete="off"
+  203              />
+  204              <InlineStack gap="200">
+  205                <Button
+  206                  variant="primary"
+  207                  onClick={sendEmail}
+  208                  loading={sending}
+  209                  disabled={sending}
+  210                >
+  211                  Send
+  212                </Button>
+  213                <Button variant="plain" onClick={(e) => { e.stopPropagation(); setActive(false); }}>
+  214                  Cancel
+  215                </Button>
+  216              </InlineStack>
+  217            </FormLayout>
+  218          </Card>
+  219        </div>
+  220      </Popover>
+  221    );
+  222  }
+  223  
+  224  function StatusBadge({ status }) {
+  225    // Maps the original Tailwind color classes to Polaris Badge tones:
+  226    //   abandoned  bg-red-100 text-red-700     -> critical
+  227    //   recovered  bg-green-100 text-green-700 -> success
+  228    //   pending    bg-amber-100 text-amber-700 -> warning
+  229    //   confirmed  bg-green-100 text-green-700 -> success
+  230    //   cancelled  bg-gray-200 text-gray-600   -> (default neutral, no tone)
+  231    //   (unknown)  bg-gray-100 text-gray-600   -> (default neutral, no tone)
+  232    const toneMap = {
+  233      abandoned: 'critical',
+  234      recovered: 'success',
+  235      pending: 'warning',
+  236      confirmed: 'success',
+  237      cancelled: undefined,
+  238    };
+  239    return <Badge tone={toneMap[status]}>{status}</Badge>;
+  240  }
+  241  
+  242  // --- Ported: revenue attribution KPI tiles (logic unchanged; JSX -> Polaris) ---
+  243  
+  244  function RevenueStats({ customers }) {
+  245    const stats = useMemo(() => {
+  246      const recovered = customers.filter(c => c.status === 'recovered');
+  247      const withRevenue = recovered.filter(c =>
+  248        typeof c.recoveredRevenue === 'number' && c.recoveredRevenue > 0
+  249      );
+  250  
+  251      const totalRevenue = withRevenue.reduce((sum, c) => sum + c.recoveredRevenue, 0);
+  252      const pushAttributed = withRevenue.filter(c => c.attributionSource === 'push');
+  253      const pushRevenue = pushAttributed.reduce((sum, c) => sum + c.recoveredRevenue, 0);
+  254  
+  255      const totalCarts = customers.length;
+  256      const recoveryRate = totalCarts > 0
+  257        ? ((recovered.length / totalCarts) * 100).toFixed(1)
+  258        : '0.0';
+  259  
+  260      // Determine a display currency — use the most common one found,
+  261      // fall back to no symbol if mixed/absent.
+  262      const currencies = withRevenue
+  263        .map(c => c.recoveredCurrency)
+  264        .filter(Boolean);
+  265      const currencyCounts = {};
+  266      currencies.forEach(c => { currencyCounts[c] = (currencyCounts[c] || 0) + 1; });
+  267      const topCurrency = Object.keys(currencyCounts).sort(
+  268        (a, b) => currencyCounts[b] - currencyCounts[a]
+  269      )[0] || null;
+  270      const mixedCurrencies = new Set(currencies).size > 1;
+  271  
+  272      const revenuePerSend = pushAttributed.length > 0
+  273        ? (pushRevenue / pushAttributed.length).toFixed(2)
+  274        : null;
+  275  
+  276      return {
+  277        totalRevenue,
+  278        pushRevenue,
+  279        recoveredCount: recovered.length,
+  280        recoveryRate,
+  281        totalCarts,
+  282        revenuePerSend,
+  283        topCurrency,
+  284        mixedCurrencies,
+  285        hasData: withRevenue.length > 0,
+  286      };
+  287    }, [customers]);
+  288  
+  289    function formatCurrency(amount) {
+  290      if (stats.mixedCurrencies) return amount.toFixed(2);
+  291      const symbol = stats.topCurrency === 'INR' ? '₹'
+  292        : stats.topCurrency === 'USD' ? '$'
+  293        : stats.topCurrency === 'EUR' ? '€'
+  294        : '';
+  295      return `${symbol}${amount.toFixed(2)}`;
+  296    }
+  297  
+  298    if (!stats.hasData) {
+  299      return (
+  300        <Box
+  301          background="bg-surface-secondary"
+  302          borderColor="border"
+  303          borderWidth="025"
+  304          borderRadius="200"
+  305          padding="400"
+  306        >
+  307          <Text as="p" variant="bodySm" tone="subdued">
+  308            No recovered revenue yet. Revenue will appear here once a customer completes
+  309            an order after receiving a push notification or reminder.
+  310          </Text>
+  311        </Box>
+  312      );
+  313    }
+  314  
+  315    return (
+  316      <Grid>
+  317        <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 3, xl: 3 }}>
+  318          <Card>
+  319            <BlockStack gap="100">
+  320              <Text variant="headingSm" as="h3">Recovered Revenue</Text>
+  321              <Text variant="headingLg" as="p">{formatCurrency(stats.totalRevenue)}</Text>
+  322            </BlockStack>
+  323          </Card>
+  324        </Grid.Cell>
+  325        <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 3, xl: 3 }}>
+  326          <Card>
+  327            <BlockStack gap="100">
+  328              <Text variant="headingSm" as="h3">From Push Notifications</Text>
+  329              <Text variant="headingLg" as="p">{formatCurrency(stats.pushRevenue)}</Text>
+  330            </BlockStack>
+  331          </Card>
+  332        </Grid.Cell>
+  333        <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 3, xl: 3 }}>
+  334          <Card>
+  335            <BlockStack gap="100">
+  336              <Text variant="headingSm" as="h3">Recovery Rate</Text>
+  337              <Text variant="headingLg" as="p">{stats.recoveryRate}%</Text>
+  338              <Text variant="bodySm" tone="subdued">
+  339                {stats.recoveredCount} of {stats.totalCarts} carts
+  340              </Text>
+  341            </BlockStack>
+  342          </Card>
+  343        </Grid.Cell>
+  344        <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 3, xl: 3 }}>
+  345          <Card>
+  346            <BlockStack gap="100">
+  347              <Text variant="headingSm" as="h3">Revenue per Push Sent</Text>
+  348              <Text variant="headingLg" as="p">
+  349                {stats.revenuePerSend !== null ? formatCurrency(Number(stats.revenuePerSend)) : '—'}
+  350              </Text>
+  351            </BlockStack>
+  352          </Card>
+  353        </Grid.Cell>
+  354      </Grid>
+  355    );
+  356  }
+  357  
+  358  // --- Ported: customer journey slide-over (state/effect/API unchanged; JSX -> Polaris Modal) ---
+  359  
+  360  function CustomerAnalytics({ open, shop, customer, onClose }) {
+  361    const [events, setEvents] = useState([]);
+  362    const [loading, setLoading] = useState(true);
+  363  
+  364    useEffect(() => {
+  365      if (!customer) return;
+  366  
+  367      const sessionId = customer.sessionId;
+  368      if (!sessionId) {
+  369        setLoading(false);
+  370        return;
+  371      }
+  372  
+  373      // Step 1: resolve ccfSessionId from cartToken (sessionId)
+  374      apiGet(`/api/events/${encodeURIComponent(shop)}/resolve/${encodeURIComponent(sessionId)}`)
+  375        .then(function(data) {
+  376          const ccfSessionId = data.ccfSessionId;
+  377          if (!ccfSessionId) {
+  378            // No subscription found for this cart — try direct sessionId lookup
+  379            return apiGet(`/api/events/${encodeURIComponent(shop)}/customer/${encodeURIComponent(sessionId)}`);
+  380          }
+  381          // Step 2: fetch events by stable ccfSessionId
+  382          return apiGet(`/api/events/${encodeURIComponent(shop)}/ccfsession/${encodeURIComponent(ccfSessionId)}`);
+  383        })
+  384        .then(setEvents)
+  385        .catch(() => setEvents([]))
+  386        .finally(() => setLoading(false));
+  387    }, [shop, customer]);
+  388  
+  389    const iconFor = (type) => ({
+  390      page_view: '👁️',
+  391      product_view: '🛍️',
+  392      collection_view: '📂',
+  393      search: '🔍',
+  394      cart_view: '🛒',
+  395      add_to_cart: '➕',
+  396      remove_from_cart: '➖',
+  397      cart_update: '✏️',
+  398      reached_checkout: '💳',
+  399      page_exit: '🚪',
+  400    }[type] || '📍');
+  401  
+  402    return (
+  403      <Modal open={open} onClose={onClose} title="Customer Journey" size="large">
+  404        <Modal.Section>
+  405          {loading ? (
+  406            <SkeletonBodyText lines={4} />
+  407          ) : events.length === 0 ? (
+  408            <Box padding="400">
+  409              <Text as="p" tone="subdued">No journey events found.</Text>
+  410            </Box>
+  411          ) : (
+  412            <ResourceList
+  413              resourceName={{ singular: 'event', plural: 'events' }}
+  414              items={events}
+  415              idForItem={(item, index) => String(index)}
+  416              renderItem={(e, id) => (
+  417                <ResourceItem id={id}>
+  418                  <InlineStack gap="300" blockAlign="start" wrap={false}>
+  419                    {e.type === 'product_view' && e.meta?.imageUrl ? (
+  420                      <Thumbnail source={e.meta.imageUrl} alt="" size="small" />
+  421                    ) : (
+  422                      <Text as="span" variant="headingLg">{iconFor(e.type)}</Text>
+  423                    )}
+  424                    <BlockStack gap="050">
+  425                      <InlineStack align="space-between" blockAlign="center" gap="200">
+  426                        <Badge>{e.type.replace(/_/g, ' ')}</Badge>
+  427                        <Text as="span" variant="bodySm" tone="subdued">
+  428                          {new Date(e.ts).toLocaleTimeString()}
+  429                        </Text>
+  430                      </InlineStack>
+  431                      <Text as="p" variant="bodySm" tone="subdued" truncate>{e.path}</Text>
+  432                      {e.meta && (
+  433                        <BlockStack gap="050">
+  434                          {e.meta.title && (
+  435                            <Text as="p" variant="bodySm" tone="subdued">{e.meta.title}</Text>
+  436                          )}
+  437                          {e.meta.query && (
+  438                            <Text as="p" variant="bodySm" tone="subdued">Search: &quot;{e.meta.query}&quot;</Text>
+  439                          )}
+  440                          {e.meta.dwellSeconds !== undefined && (
+  441                            <Text as="p" variant="bodySm" tone="subdued">
+  442                              {e.meta.dwellSeconds}s on page · {e.meta.scrollDepth || 0}% scrolled
+  443                            </Text>
+  444                          )}
+  445                          {e.meta.cartValue && (
+  446                            <Text as="p" variant="bodySm" tone="subdued">Cart: ₹{e.meta.cartValue}</Text>
+  447                          )}
+  448                          {e.meta.itemCount && (
+  449                            <Text as="p" variant="bodySm" tone="subdued">{e.meta.itemCount} items</Text>
+  450                          )}
+  451                        </BlockStack>
+  452                      )}
+  453                    </BlockStack>
+  454                  </InlineStack>
+  455                </ResourceItem>
+  456              )}
+  457            />
+  458          )}
+  459        </Modal.Section>
+  460      </Modal>
+  461    );
+  462  }
+  463  
+  464  // --- First-run onboarding checklist ---
+  465  
+  466  const ONBOARDING_STORAGE_KEY = 'ccf_onboarding_dismissed';
+  467  
+  468  // localStorage can throw (private mode / disabled storage) — never let that
+  469  // break the first render. Treat "can't read" as "not dismissed".
+  470  function isOnboardingDismissed() {
+  471    try {
+  472      return typeof window !== 'undefined'
+  473        && window.localStorage.getItem(ONBOARDING_STORAGE_KEY) === 'true';
+  474    } catch {
+  475      return false;
+  476    }
+  477  }
+  478  
+  479  function OnboardingChecklist({ shop, customers = [], automationRules = [], onDismiss, onTabChange }) {
+  480    const codLink = `https://${shop}/apps/cartncodform/cod-form`;
+  481  
+  482    const [dismissed, setDismissed] = useState(isOnboardingDismissed);
+  483    const [codCopied, setCodCopied] = useState(false);
+  484  
+  485    // Static step definitions. `done` is seeded false and recomputed below for
+  486    // the auto-detectable steps; 'embed' stays manual-only.
+  487    const [steps, setSteps] = useState(() => [
+  488      {
+  489        id: 'embed',
+  490        title: 'Enable App Embed block',
+  491        description:
+  492          'Turn on the CartnCodForm embed in your theme to start tracking carts and collecting push subscribers.',
+  493        actionLabel: 'Open Theme Editor',
+  494        actionUrl: `https://${shop}/admin/themes/current/editor?context=apps`,
+  495        done: false,
+  496      },
+  497      {
+  498        id: 'automation',
+  499        title: 'Turn on your first automation',
+  500        description:
+  501          'Set up a cart abandonment rule to automatically remind customers who leave items behind.',
+  502        actionLabel: 'Go to Automations',
+  503        actionUrl: null,
+  504        done: false,
+  505      },
+  506      {
+  507        id: 'push',
+  508        title: 'Send a test push notification',
+  509        description:
+  510          'Use the Push button on any abandoned cart row to verify your push notifications are working.',
+  511        actionLabel: 'View Abandoned Carts',
+  512        actionUrl: null,
+  513        done: false,
+  514      },
+  515      {
+  516        id: 'cod',
+  517        title: 'Enable the COD form',
+  518        description: `Share your COD order form link with customers: ${codLink}`,
+  519        actionLabel: 'Copy link',
+  520        actionUrl: null,
+  521        done: false,
+  522      },
+  523    ]);
+  524  
+  525    // Auto-completion signals — primitives so the effect only re-runs when a
+  526    // value actually flips (avoids a render loop on the inline [] prop).
+  527    const automationDone = automationRules.some((r) => r && r.active);
+  528    const pushDone = customers.some((c) => c && c.status && c.status !== 'abandoned');
+  529  
+  530    // Recompute the auto steps on mount and whenever a signal changes. A tab
+  531    // change re-renders the parent, so fresh props flow down here too. Auto
+  532    // `done` is sticky-once-true; 'embed' is left untouched (manual only).
+  533    useEffect(() => {
+  534      setSteps((prev) =>
+  535        prev.map((s) => {
+  536          if (s.id === 'automation') return { ...s, done: s.done || automationDone };
+  537          if (s.id === 'push') return { ...s, done: s.done || pushDone };
+  538          if (s.id === 'cod') return { ...s, done: s.done || codCopied };
+  539          return s;
+  540        })
+  541      );
+  542    }, [automationDone, pushDone, codCopied]);
+  543  
+  544    function toggleManual(id, checked) {
+  545      // Only the 'embed' step is user-toggle-able; the rest are derived.
+  546      if (id !== 'embed') return;
+  547      setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, done: checked } : s)));
+  548    }
+  549  
+  550    function handleStepAction(id) {
+  551      if (id === 'automation') {
+  552        if (onTabChange) onTabChange('automation');
+  553      } else if (id === 'push') {
+  554        if (onTabChange) onTabChange('abandoned');
+  555      } else if (id === 'cod') {
+  556        try {
+  557          navigator.clipboard.writeText(codLink);
+  558        } catch (e) {
+  559          console.error('[onboarding] clipboard write failed:', e);
+  560        }
+  561        setCodCopied(true);
+  562        setSteps((prev) => prev.map((s) => (s.id === 'cod' ? { ...s, done: true } : s)));
+  563      }
+  564    }
+  565  
+  566    function dismiss() {
+  567      try {
+  568        window.localStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
+  569      } catch (e) {
+  570        console.error('[onboarding] localStorage set failed:', e);
+  571      }
+  572      setDismissed(true);
+  573      if (onDismiss) onDismiss();
+  574    }
+  575  
+  576    if (dismissed) return null;
+  577  
+  578    const completedCount = steps.filter((s) => s.done).length;
+  579  
+  580    return (
+  581      <Card>
+  582        <BlockStack gap="300">
+  583          <BlockStack gap="100">
+  584            <Text variant="headingMd" as="h2">Get started with CartnCodForm</Text>
+  585            <Text tone="subdued" as="p">Complete these steps to start recovering revenue.</Text>
+  586            <Text as="p" variant="bodySm">{completedCount} of 4 steps completed</Text>
+  587          </BlockStack>
+  588  
+  589          <BlockStack gap="200">
+  590            {steps.map((step) => (
+  591              <Box
+  592                key={step.id}
+  593                background="bg-surface-secondary"
+  594                borderColor="border"
+  595                borderWidth="025"
+  596                borderRadius="200"
+  597                padding="300"
+  598              >
+  599                <InlineStack gap="300" blockAlign="start" wrap={false}>
+  600                  <Checkbox
+  601                    label={step.title}
+  602                    labelHidden
+  603                    checked={step.done}
+  604                    disabled={step.id !== 'embed'}
+  605                    onChange={(checked) => toggleManual(step.id, checked)}
+  606                  />
+  607                  <BlockStack gap="100">
+  608                    <Text as="p" variant="bodyMd" fontWeight="bold">{step.title}</Text>
+  609                    <Text as="p" tone="subdued" variant="bodySm">{step.description}</Text>
+  610                    <InlineStack>
+  611                      <Button
+  612                        size="slim"
+  613                        url={step.actionUrl || undefined}
+  614                        external={Boolean(step.actionUrl)}
+  615                        onClick={step.actionUrl ? undefined : () => handleStepAction(step.id)}
+  616                      >
+  617                        {step.id === 'cod' && codCopied ? 'Copied!' : step.actionLabel}
+  618                      </Button>
+  619                    </InlineStack>
+  620                  </BlockStack>
+  621                </InlineStack>
+  622              </Box>
+  623            ))}
+  624          </BlockStack>
+  625  
+  626          <InlineStack>
+  627            <Button variant="plain" onClick={dismiss}>Dismiss checklist</Button>
+  628          </InlineStack>
+  629        </BlockStack>
+  630      </Card>
+  631    );
+  632  }
+  633  
+  634  // --- Ported: the real embedded store view (Stage 2c) ---
+  635  
+  636  const COD_STATUS_OPTIONS = [
+  637    { label: 'pending', value: 'pending' },
+  638    { label: 'confirmed', value: 'confirmed' },
+  639    { label: 'cancelled', value: 'cancelled' },
+  640  ];
+  641  
+  642  function StoreView({ shop }) {
+  643    const [tab, setTab] = useState('abandoned');
+  644    const [customers, setCustomers] = useState([]);
+  645    const [orders, setOrders] = useState([]);
+  646    const [loading, setLoading] = useState(true);
+  647    const [error, setError] = useState('');
+  648    const [analyticsCustomer, setAnalyticsCustomer] = useState(null);
+  649    const [showOnboarding, setShowOnboarding] = useState(() => !isOnboardingDismissed());
+  650  
+  651    const load = useCallback(async () => {
+  652      setLoading(true);
+  653      setError('');
+  654      try {
+  655        const [c, o] = await Promise.all([
+  656          apiGet(`/api/stores/${encodeURIComponent(shop)}/customers`),
+  657          apiGet(`/api/stores/${encodeURIComponent(shop)}/orders`),
+  658        ]);
+  659        setCustomers(c);
+  660        setOrders(o);
+  661      } catch (err) {
+  662        setError(err.message);
+  663      } finally {
+  664        setLoading(false);
+  665      }
+  666    }, [shop]);
+  667  
+  668    useEffect(() => {
+  669      load();
+  670    }, [load]);
+  671  
+  672    // TODO: re-evaluate foreground push notifications for embedded context
+  673  
+  674    async function updateOrderStatus(id, status) {
+  675      // optimistic update
+  676      setOrders((prev) => prev.map((o) => (o._id === id ? { ...o, status } : o)));
+  677      try {
+  678        await apiSend(`/api/cod/order/${id}`, 'PATCH', { status });
+  679      } catch (err) {
+  680        setError(err.message);
+  681        load();
+  682      }
+  683    }
+  684  
+  685    const tabs = [
+  686      { id: 'abandoned', content: `Abandoned Carts (${customers.length})`, panelID: 'abandoned-panel' },
+  687      { id: 'cod', content: `COD Orders (${orders.length})`, panelID: 'cod-panel' },
+  688      { id: 'automation', content: 'Automations', panelID: 'automation-panel' },
+  689    ];
+  690    const selectedTab = Math.max(0, tabs.findIndex((t) => t.id === tab));
+  691  
+  692    return (
+  693      <>
+  694        <CustomerAnalytics
+  695          open={!!analyticsCustomer}
+  696          shop={shop}
+  697          customer={analyticsCustomer}
+  698          onClose={() => setAnalyticsCustomer(null)}
+  699        />
+  700        <Page
+  701          title={shop}
+  702          subtitle="Abandoned carts & COD orders"
+  703          secondaryActions={[{ content: 'Refresh', onAction: load }]}
+  704        >
+  705          <BlockStack gap="400">
+  706            {/* TODO: port PushNotificationSetup */}
+  707  
+  708            {showOnboarding && (
+  709              <OnboardingChecklist
+  710                shop={shop}
+  711                customers={customers}
+  712                automationRules={[]}
+  713                onDismiss={() => {
+  714                  try { window.localStorage.setItem('ccf_onboarding_dismissed', 'true'); } catch (e) {}
+  715                  setShowOnboarding(false);
+  716                }}
+  717                onTabChange={(tabId) => {
+  718                  if (['abandoned', 'cod', 'automation'].includes(tabId)) setTab(tabId);
+  719                }}
+  720              />
+  721            )}
+  722  
+  723            {!loading && <RevenueStats customers={customers} />}
+  724  
+  725            {error && (
+  726              <Banner
+  727                tone="critical"
+  728                title="Couldn't load store data"
+  729                action={{ content: 'Try again', onAction: load }}
+  730              >
+  731                <Text as="p">{error}</Text>
+  732              </Banner>
+  733            )}
+  734  
+  735            {loading && (
+  736              <InlineStack gap="200" blockAlign="center">
+  737                <Spinner accessibilityLabel="Loading store data" size="small" />
+  738                <Text as="span" tone="subdued">Loading store data…</Text>
+  739              </InlineStack>
+  740            )}
+  741  
+  742            <Tabs tabs={tabs} selected={selectedTab} onSelect={(idx) => setTab(tabs[idx].id)}>
+  743              {!loading && tab === 'abandoned' && (
+  744                <IndexTable
+  745                  resourceName={{ singular: 'cart', plural: 'carts' }}
+  746                  itemCount={customers.length}
+  747                  selectable={false}
+  748                  headings={[
+  749                    { title: 'Customer Email' },
+  750                    { title: 'Phone' },
+  751                    { title: 'Cart Items' },
+  752                    { title: 'Cart Value' },
+  753                    { title: 'Date' },
+  754                    { title: 'Status' },
+  755                    { title: 'Actions' },
+  756                  ]}
+  757                  emptyState={
+  758                    <Box padding="400">
+  759                      <Text as="p" alignment="center" tone="subdued">No abandoned carts yet.</Text>
+  760                    </Box>
+  761                  }
+  762                >
+  763                  {customers.map((c, index) => {
+  764                    const anon = !c.email && !c.phone;
+  765                    const itemCount = Array.isArray(c.cartItems)
+  766                      ? c.cartItems.reduce((s, i) => s + (i.quantity || 1), 0)
+  767                      : 0;
+  768                    return (
+  769                      <IndexTable.Row
+  770                        id={c._id}
+  771                        key={c._id}
+  772                        position={index}
+  773                        onClick={() => setAnalyticsCustomer(c)}
+  774                      >
+  775                        <IndexTable.Cell>
+  776                          {anon ? (
+  777                            <Text as="span" tone="subdued">Anonymous</Text>
+  778                          ) : (
+  779                            c.email || <Text as="span" tone="subdued">—</Text>
+  780                          )}
+  781                        </IndexTable.Cell>
+  782                        <IndexTable.Cell>
+  783                          {c.phone || <Text as="span" tone="subdued">—</Text>}
+  784                        </IndexTable.Cell>
+  785                        <IndexTable.Cell>
+  786                          {Array.isArray(c.cartItems) && c.cartItems.length > 0 ? (
+  787                            <BlockStack gap="100">
+  788                              {c.cartItems.map((item, idx) => (
+  789                                <InlineStack key={idx} align="space-between" blockAlign="center" gap="200">
+  790                                  <Text as="span" variant="bodySm" truncate>
+  791                                    {item.title} x{item.quantity || 1}
+  792                                  </Text>
+  793                                  <div onClick={(e) => e.stopPropagation()}>
+  794                                    <InlineStack gap="100" blockAlign="center">
+  795                                      <SendPushButton
+  796                                        shop={shop}
+  797                                        cartValue={c.cartValue}
+  798                                        cartItems={c.cartItems}
+  799                                        productImageUrl={item.imageUrl || c.productImageUrl}
+  800                                        sessionId={c.sessionId}
+  801                                        itemTitle={item.title}
+  802                                        productId={item.productId || null}
+  803                                      />
+  804                                      <SendEmailButton
+  805                                        shop={shop}
+  806                                        sessionId={c.sessionId}
+  807                                        cartToken={c.sessionId}
+  808                                      />
+  809                                    </InlineStack>
+  810                                  </div>
+  811                                </InlineStack>
+  812                              ))}
+  813                            </BlockStack>
+  814                          ) : (
+  815                            <Text as="span" tone="subdued">
+  816                              {itemCount} item{itemCount === 1 ? '' : 's'}
+  817                            </Text>
+  818                          )}
+  819                        </IndexTable.Cell>
+  820                        <IndexTable.Cell>{formatMoney(c.cartValue)}</IndexTable.Cell>
+  821                        <IndexTable.Cell>
+  822                          <Text as="span" tone="subdued">{formatDate(c.createdAt)}</Text>
+  823                        </IndexTable.Cell>
+  824                        <IndexTable.Cell>
+  825                          <StatusBadge status={c.status} />
+  826                        </IndexTable.Cell>
+  827                        <IndexTable.Cell>
+  828                          {c.phone && (
+  829                            <div onClick={(e) => e.stopPropagation()}>
+  830                              <WhatsAppButton
+  831                                phone={c.phone}
+  832                                message={
+  833                                  `Hi! We noticed you left some items in your cart.\n` +
+  834                                  `Items: ${
+  835                                    Array.isArray(c.cartItems) && c.cartItems.length > 0
+  836                                      ? c.cartItems
+  837                                          .map((i) => `${i.title} x${i.quantity || 1}`)
+  838                                          .join(', ')
+  839                                      : '-'
+  840                                  }\n` +
+  841                                  `Cart Value: ${formatMoney(c.cartValue)}\n` +
+  842                                  `Please complete your order. We'd love to help!`
+  843                                }
+  844                              />
+  845                            </div>
+  846                          )}
+  847                        </IndexTable.Cell>
+  848                      </IndexTable.Row>
+  849                    );
+  850                  })}
+  851                </IndexTable>
+  852              )}
+  853  
+  854              {!loading && tab === 'cod' && (
+  855                <IndexTable
+  856                  resourceName={{ singular: 'order', plural: 'orders' }}
+  857                  itemCount={orders.length}
+  858                  selectable={false}
+  859                  headings={[
+  860                    { title: 'Name' },
+  861                    { title: 'Phone' },
+  862                    { title: 'Address' },
+  863                    { title: 'Product' },
+  864                    { title: 'Price' },
+  865                    { title: 'Qty' },
+  866                    { title: 'Status' },
+  867                    { title: 'Date' },
+  868                    { title: 'Actions' },
+  869                  ]}
+  870                  emptyState={
+  871                    <Box padding="400">
+  872                      <Text as="p" alignment="center" tone="subdued">No COD orders yet.</Text>
+  873                    </Box>
+  874                  }
+  875                >
+  876                  {orders.map((o, index) => (
+  877                    <IndexTable.Row id={o._id} key={o._id} position={index}>
+  878                      <IndexTable.Cell>
+  879                        <Text as="span" fontWeight="medium">{o.name}</Text>
+  880                      </IndexTable.Cell>
+  881                      <IndexTable.Cell>{o.phone}</IndexTable.Cell>
+  882                      <IndexTable.Cell>
+  883                        <span title={`${o.address}, ${o.city} ${o.pincode}`}>
+  884                          <Text as="span" truncate>
+  885                            {o.address}{o.city ? `, ${o.city}` : ''} {o.pincode}
+  886                          </Text>
+  887                        </span>
+  888                      </IndexTable.Cell>
+  889                      <IndexTable.Cell>{o.productName || '—'}</IndexTable.Cell>
+  890                      <IndexTable.Cell>{formatMoney(o.productPrice)}</IndexTable.Cell>
+  891                      <IndexTable.Cell>{o.quantity}</IndexTable.Cell>
+  892                      <IndexTable.Cell>
+  893                        <Select
+  894                          label="Status"
+  895                          labelHidden
+  896                          options={COD_STATUS_OPTIONS}
+  897                          value={o.status}
+  898                          onChange={(value) => updateOrderStatus(o._id, value)}
+  899                        />
+  900                      </IndexTable.Cell>
+  901                      <IndexTable.Cell>
+  902                        <Text as="span" tone="subdued">{formatDate(o.createdAt)}</Text>
+  903                      </IndexTable.Cell>
+  904                      <IndexTable.Cell>
+  905                        <WhatsAppButton
+  906                          phone={o.phone}
+  907                          message={
+  908                            `Hi ${o.name}! Your COD order has been received.\n` +
+  909                            `Product: ${o.productName || '-'}\n` +
+  910                            `Amount: ₹${formatMoney(o.productPrice)}\n` +
+  911                            `Quantity: ${o.quantity}\n` +
+  912                            `We will process your order soon!`
+  913                          }
+  914                        />
+  915                      </IndexTable.Cell>
+  916                    </IndexTable.Row>
+  917                  ))}
+  918                </IndexTable>
+  919              )}
+  920  
+  921              {tab === 'automation' && (
+  922                <Box padding="400">
+  923                  <Text tone="subdued">
+  924                    Automation is now signal-driven. Configuration will appear here in the next update.
+  925                  </Text>
+  926                </Box>
+  927              )}
+  928            </Tabs>
+  929          </BlockStack>
+  930        </Page>
+  931      </>
+  932    );
+  933  }
+  934  
+  935  // --- Page ---
+  936  
+  937  function AdminHomeContent() {
+  938    const searchParams = useSearchParams();
+  939    const shop = searchParams.get('shop') || '';
+  940    const apiKey = process.env.NEXT_PUBLIC_SHOPIFY_CLIENT_ID;
+  941  
+  942    return (
+  943      <>
+  944        <meta name="shopify-api-key" content={apiKey} />
+  945        <AppProvider i18n={{}}>
+  946          <StoreView shop={shop} />
+  947        </AppProvider>
+  948      </>
+  949    );
+  950  }
+  951  
+  952  export default function AdminHome() {
+  953    return (
+  954      <Suspense fallback={null}>
+  955        <AdminHomeContent />
+  956      </Suspense>
+  957    );
+  958  }
+
+
+================================================================================
+FILE: frontend/app/layout.js   (23 lines)   [FULL]
+================================================================================
+    1  import './globals.css';
+    2  
+    3  export const metadata = {
+    4    title: 'CartnCodForm',
+    5    description:
+    6      'Multi-store Shopify platform to recover abandoned carts and accept Cash on Delivery orders.',
+    7  };
+    8  
+    9  export default function RootLayout({ children }) {
+   10    return (
+   11      <html lang="en">
+   12        <head>
+   13          {/* App Bridge must load synchronously (no async/defer) — a plain
+   14              <script> in the root layout <head> is the only reliable way in
+   15              the Next.js App Router. Do NOT switch this to next/script. */}
+   16          <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
+   17        </head>
+   18        <body>
+   19          {children}
+   20        </body>
+   21      </html>
+   22    );
+   23  }
+
+
+================================================================================
+FILE: frontend/lib/api.js   (117 lines)   [FULL]
+================================================================================
+    1  // Central place for the backend base URL + a small fetch helper.
+    2  export const BACKEND_URL =
+    3    process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
+    4  
+    5  // fetch() rejects with a bare "TypeError: Failed to fetch" for any network-level
+    6  // failure (backend down, wrong port, CORS blocked, DNS). Turn that into a
+    7  // message that actually says what to check.
+    8  function describeNetworkError(err, method, url) {
+    9    const raw = err && err.message ? err.message : String(err);
+   10    if (err instanceof TypeError || /failed to fetch|networkerror|load failed/i.test(raw)) {
+   11      return (
+   12        `Cannot reach the backend (${method} ${url}). ` +
+   13        `Is it running at ${BACKEND_URL} and is CORS allowing this origin? ` +
+   14        `[${raw}]`
+   15      );
+   16    }
+   17    return raw;
+   18  }
+   19  
+   20  // Auth is a Shopify App Bridge session token. App Bridge is loaded
+   21  // synchronously by a plain <script> in the root layout <head>, so by the time
+   22  // any api call runs window.shopify is normally already there; the short poll
+   23  // below just covers the first render. window.shopify.idToken() returns a
+   24  // fresh, short-lived JWT and caches/refreshes internally — no caching here.
+   25  async function getAuthToken() {
+   26    if (typeof window === 'undefined') {
+   27      throw new Error('Not running in browser');
+   28    }
+   29    let waited = 0;
+   30    while (!window.shopify) {
+   31      if (waited >= 10000) {
+   32        throw new Error('App Bridge did not initialize');
+   33      }
+   34      await new Promise(resolve => setTimeout(resolve, 100));
+   35      waited += 100;
+   36    }
+   37    return await window.shopify.idToken();
+   38  }
+   39  
+   40  export async function apiGet(path) {
+   41    const url = `${BACKEND_URL}${path}`;
+   42    const token = await getAuthToken();
+   43    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+   44  
+   45    let res;
+   46    try {
+   47      res = await fetch(url, { cache: 'no-store', headers });
+   48    } catch (err) {
+   49      throw new Error(describeNetworkError(err, 'GET', url));
+   50    }
+   51  
+   52    // Retry once with a fresh token on 401 (expired token).
+   53    if (res.status === 401 && token) {
+   54      const freshToken = await getAuthToken(true);
+   55      if (freshToken) {
+   56        try {
+   57          res = await fetch(url, {
+   58            cache: 'no-store',
+   59            headers: { Authorization: `Bearer ${freshToken}` },
+   60          });
+   61        } catch (err) {
+   62          throw new Error(describeNetworkError(err, 'GET', url));
+   63        }
+   64      }
+   65    }
+   66  
+   67    if (!res.ok) {
+   68      const body = await res.text().catch(() => '');
+   69      throw new Error(`GET ${path} failed (${res.status}): ${body}`);
+   70    }
+   71    return res.json();
+   72  }
+   73  
+   74  export async function apiSend(path, method, body) {
+   75    const url = `${BACKEND_URL}${path}`;
+   76    const token = await getAuthToken();
+   77    const headers = {
+   78      'Content-Type': 'application/json',
+   79      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+   80    };
+   81  
+   82    let res;
+   83    try {
+   84      res = await fetch(url, {
+   85        method,
+   86        headers,
+   87        body: JSON.stringify(body),
+   88      });
+   89    } catch (err) {
+   90      throw new Error(describeNetworkError(err, method, url));
+   91    }
+   92  
+   93    // Retry once with a fresh token on 401 (expired token).
+   94    if (res.status === 401 && token) {
+   95      const freshToken = await getAuthToken(true);
+   96      if (freshToken) {
+   97        try {
+   98          res = await fetch(url, {
+   99            method,
+  100            headers: {
+  101              'Content-Type': 'application/json',
+  102              Authorization: `Bearer ${freshToken}`,
+  103            },
+  104            body: JSON.stringify(body),
+  105          });
+  106        } catch (err) {
+  107          throw new Error(describeNetworkError(err, method, url));
+  108        }
+  109      }
+  110    }
+  111  
+  112    const data = await res.json().catch(() => ({}));
+  113    if (!res.ok) {
+  114      throw new Error(data.error || `${method} ${path} failed (${res.status})`);
+  115    }
+  116    return data;
+  117  }
+
+
+================================================================================
+FILE: docs/cartncodform-v2-prototype.jsx   (827 lines)   [FULL]
+================================================================================
+    1  import { useState, useMemo } from "react";
+    2  import {
+    3    Home, Users, Radio, MessageSquare, BarChart3, Package, Settings as SettingsIcon,
+    4    Sparkles, Bell, Mail, Check, ChevronRight, ArrowLeft, Eye, ShoppingCart,
+    5    Search, Clock, TrendingUp, TrendingDown, Zap, Phone, MapPin, Send, X, Info,
+    6  } from "lucide-react";
+    7  import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+    8  
+    9  /* ---------- Polaris-flavoured tokens ---------- */
+   10  const T = {
+   11    pageBg: "#F1F1F1",
+   12    card: "#FFFFFF",
+   13    border: "#E3E3E3",
+   14    text: "#303030",
+   15    sub: "#616161",
+   16    faint: "#8A8A8A",
+   17    primary: "#303030",
+   18    magicBg: "#F3F0FF",
+   19    magicBorder: "#D9CFFF",
+   20    magicText: "#4A2FBF",
+   21    successBg: "#CDFEE1", successText: "#0C5132",
+   22    warnBg: "#FFEBCD", warnText: "#5E4200",
+   23    critBg: "#FED1D7", critText: "#8E1F0B",
+   24    infoBg: "#E0F0FF", infoText: "#00527C",
+   25    neutralBg: "#EBEBEB", neutralText: "#4A4A4A",
+   26    font: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+   27  };
+   28  
+   29  /* ---------- Sample data: a Surat saree store ---------- */
+   30  const PRODUCTS = [
+   31    { id: "p1", name: "Banarasi Silk Saree — Maroon Zari", price: 2899, coll: "Silk", views: 412, uniq: 288, dwell: 58, scroll: 47, cartRate: 0.11, exit: "Price block", stock: 6 },
+   32    { id: "p2", name: "Kanjivaram Pure Silk — Peacock Blue", price: 4499, coll: "Silk", views: 305, uniq: 214, dwell: 71, scroll: 62, cartRate: 0.09, exit: "Size chart", stock: 2 },
+   33    { id: "p3", name: "Bandhani Georgette — Sunset Orange", price: 1299, coll: "Festive", views: 288, uniq: 231, dwell: 34, scroll: 78, cartRate: 0.19, exit: "Reviews", stock: 14 },
+   34    { id: "p4", name: "Patola Double Ikat — Emerald", price: 6999, coll: "Silk", views: 190, uniq: 141, dwell: 84, scroll: 41, cartRate: 0.05, exit: "Price block", stock: 3 },
+   35    { id: "p5", name: "Chanderi Cotton — Ivory & Gold", price: 1799, coll: "Daily", views: 176, uniq: 152, dwell: 29, scroll: 83, cartRate: 0.22, exit: "Added to cart", stock: 21 },
+   36    { id: "p6", name: "Paithani Silk — Magenta", price: 3599, coll: "Festive", views: 154, uniq: 118, dwell: 63, scroll: 55, cartRate: 0.10, exit: "Price block", stock: 0 },
+   37  ];
+   38  
+   39  const P = Object.fromEntries(PRODUCTS.map((p) => [p.id, p]));
+   40  
+   41  const SIGNAL_DEFS = [
+   42    { id: "cart_abandon", name: "Cart left behind", desc: "Added to cart, no checkout within 60 min.", urgency: "now", conv: 0.078, base: 9 },
+   43    { id: "checkout_abandon", name: "Checkout left behind", desc: "Reached checkout, no order within 60 min.", urgency: "now", conv: 0.124, base: 4 },
+   44    { id: "browse_abandon", name: "Looked, didn't add", desc: "Viewed a product, nothing added within 30 min.", urgency: "soon", conv: 0.031, base: 7 },
+   45    { id: "high_intent", name: "Keeps coming back", desc: "Same product viewed 3+ times in 7 days, never carted.", urgency: "soon", conv: 0.092, base: 5 },
+   46    { id: "price_hesitation", name: "Stopped at the price", desc: "40s+ on page, scroll stalled around the price, no add to cart.", urgency: "soon", conv: 0.067, base: 6 },
+   47    { id: "price_drop", name: "Price dropped on a saved item", desc: "A product they viewed got cheaper.", urgency: "now", conv: 0.148, base: 3 },
+   48    { id: "back_in_stock", name: "Back in stock", desc: "A product they viewed is available again.", urgency: "now", conv: 0.171, base: 2 },
+   49    { id: "post_purchase_d3", name: "Three days after buying", desc: "Care tips and a thank-you, no selling.", urgency: "later", conv: 0.0, base: 4 },
+   50    { id: "lapsing", name: "Going quiet", desc: "A buyer who hasn't visited in 21 days.", urgency: "later", conv: 0.044, base: 5 },
+   51    { id: "winback", name: "Been a while", desc: "A buyer who hasn't visited in 60 days.", urgency: "later", conv: 0.027, base: 3 },
+   52    { id: "email_capture", name: "Ask for an email", desc: "Push-only visitor at a high-value moment.", urgency: "later", conv: 0.0, base: 6 },
+   53    { id: "cod_to_prepaid", name: "Offer prepaid on COD", desc: "COD order from someone who has paid online before.", urgency: "now", conv: 0.21, base: 2 },
+   54  ];
+   55  
+   56  const CUSTOMERS = [
+   57    {
+   58      id: "c1", name: "Priya Shah", anon: false, stage: "buyer", push: true, email: "priya.s@gmail.com", phone: "+91 98••• ••412",
+   59      ltv: 4198, orders: 2, lastSeen: "2h ago", lastMsg: "Yesterday, 7:40pm", city: "Ahmedabad",
+   60      interests: [["p1", 0.91], ["p6", 0.62], ["p2", 0.38]],
+   61      hours: [0,0,0,0,0,0,0,1,2,3,2,1,1,1,2,3,4,5,8,9,7,4,2,1],
+   62      signals: [
+   63        { id: "high_intent", strength: 0.86, product: "p1", evidence: ["Viewed 4 times this week", "55s average on page", "Never added to cart"] },
+   64        { id: "price_hesitation", strength: 0.71, product: "p1", evidence: ["Scroll stalled at 47% on 3 visits", "That's the price block"] },
+   65      ],
+   66      journey: [
+   67        { t: "Today 14:02", type: "product_view", p: "p1", meta: "58s · scrolled 46%" },
+   68        { t: "Today 13:59", type: "collection_view", p: null, meta: "Silk sarees" },
+   69        { t: "Yesterday 19:41", type: "push_click", p: "p1", meta: "Opened: 'Still thinking about the Maroon Zari?'" },
+   70        { t: "Yesterday 19:40", type: "push_sent", p: "p1", meta: "Keeps coming back · push" },
+   71        { t: "Mon 21:15", type: "product_view", p: "p1", meta: "62s · scrolled 48%" },
+   72        { t: "Mon 21:12", type: "search", p: null, meta: "'banarasi maroon'" },
+   73        { t: "Sat 18:30", type: "product_view", p: "p6", meta: "31s · scrolled 70%" },
+   74        { t: "12 Jul", type: "order", p: "p3", meta: "COD · ₹1,299 · confirmed" },
+   75        { t: "3 May", type: "order", p: "p5", meta: "Prepaid · ₹1,799" },
+   76      ],
+   77      messages: [
+   78        { t: "Yesterday 19:40", signal: "high_intent", ch: "push", copy: "Still thinking about the Maroon Zari? Only 6 left.", outcome: "clicked" },
+   79        { t: "14 Jul", signal: "post_purchase_d3", ch: "email", copy: "How to store your Bandhani so the colours stay bright", outcome: "opened" },
+   80      ],
+   81    },
+   82    {
+   83      id: "c2", name: "Anonymous shopper", anon: true, stage: "carter", push: true, email: null, phone: null,
+   84      ltv: 0, orders: 0, lastSeen: "41 min ago", lastMsg: "Never", city: "Surat",
+   85      interests: [["p3", 0.88], ["p5", 0.44]],
+   86      hours: [0,0,0,0,0,0,1,2,4,3,2,2,3,2,1,1,2,3,3,4,5,3,1,0],
+   87      signals: [
+   88        { id: "cart_abandon", strength: 0.93, product: "p3", evidence: ["Added Sunset Orange 41 min ago", "Cart ₹1,299", "Left from cart page"] },
+   89        { id: "email_capture", strength: 0.58, product: null, evidence: ["Second visit", "Reachable by push only"] },
+   90      ],
+   91      journey: [
+   92        { t: "Today 13:21", type: "cart_view", p: "p3", meta: "₹1,299 · left here" },
+   93        { t: "Today 13:19", type: "add_to_cart", p: "p3", meta: "Qty 1" },
+   94        { t: "Today 13:14", type: "product_view", p: "p3", meta: "44s · scrolled 81%" },
+   95        { t: "Today 13:12", type: "push_optin", p: null, meta: "Accepted: 'We'll save your cart and remind you'" },
+   96        { t: "Sun 11:05", type: "product_view", p: "p5", meta: "22s · scrolled 60%" },
+   97      ],
+   98      messages: [],
+   99    },
+  100    {
+  101      id: "c3", name: "Meera Kulkarni", anon: false, stage: "repeat", push: false, email: "meera.k@outlook.com", phone: "+91 91••• ••088",
+  102      ltv: 12197, orders: 4, lastSeen: "3 days ago", lastMsg: "6 days ago", city: "Pune",
+  103      interests: [["p2", 0.79], ["p4", 0.64], ["p1", 0.31]],
+  104      hours: [0,0,0,0,0,0,0,0,1,2,3,4,3,2,2,1,1,2,3,4,3,2,1,0],
+  105      signals: [
+  106        { id: "back_in_stock", strength: 0.82, product: "p6", evidence: ["Viewed Paithani Magenta twice in Aug", "Restocked 2h ago"] },
+  107      ],
+  108      journey: [
+  109        { t: "Fri 12:10", type: "product_view", p: "p2", meta: "90s · scrolled 100%" },
+  110        { t: "Fri 12:04", type: "collection_view", p: null, meta: "Silk sarees" },
+  111        { t: "22 Aug", type: "order", p: "p4", meta: "Prepaid · ₹6,999" },
+  112        { t: "9 Aug", type: "product_view", p: "p6", meta: "48s · out of stock" },
+  113        { t: "2 Aug", type: "product_view", p: "p6", meta: "37s · out of stock" },
+  114      ],
+  115      messages: [
+  116        { t: "6 days ago", signal: "post_purchase_d3", ch: "email", copy: "Your Patola arrived — here's how to drape it", outcome: "opened" },
+  117        { t: "18 Aug", signal: "lapsing", ch: "email", copy: "New Kanjivarams just landed, Meera", outcome: "converted", rev: 6999 },
+  118      ],
+  119    },
+  120    {
+  121      id: "c4", name: "Anonymous shopper", anon: true, stage: "browser", push: true, email: null, phone: null,
+  122      ltv: 0, orders: 0, lastSeen: "6h ago", lastMsg: "2 days ago", city: "Mumbai",
+  123      interests: [["p4", 0.72], ["p2", 0.55]],
+  124      hours: [1,0,0,0,0,0,0,0,0,1,1,1,1,1,1,2,2,3,4,6,7,5,3,2],
+  125      signals: [
+  126        { id: "price_hesitation", strength: 0.77, product: "p4", evidence: ["84s on page", "Scroll stopped at 41% twice", "No add to cart"] },
+  127      ],
+  128      journey: [
+  129        { t: "Today 08:12", type: "product_view", p: "p4", meta: "84s · scrolled 41%" },
+  130        { t: "Tue 20:30", type: "product_view", p: "p4", meta: "77s · scrolled 40%" },
+  131        { t: "Tue 20:22", type: "product_view", p: "p2", meta: "35s · scrolled 62%" },
+  132      ],
+  133      messages: [
+  134        { t: "2 days ago", signal: "browse_abandon", ch: "push", copy: "The Emerald Patola is handwoven over 4 months. Take a closer look.", outcome: "delivered" },
+  135      ],
+  136    },
+  137    {
+  138      id: "c5", name: "Rekha Iyer", anon: false, stage: "lapsing", push: true, email: "rekha.iyer@yahoo.in", phone: "+91 99••• ••731",
+  139      ltv: 2899, orders: 1, lastSeen: "24 days ago", lastMsg: "Never", city: "Chennai",
+  140      interests: [["p1", 0.40], ["p6", 0.35]],
+  141      hours: [0,0,0,0,0,0,0,1,2,2,1,1,1,1,1,1,2,2,3,3,2,1,0,0],
+  142      signals: [
+  143        { id: "lapsing", strength: 0.64, product: null, evidence: ["Bought 15 Aug", "No visit since"] },
+  144      ],
+  145      journey: [
+  146        { t: "15 Aug", type: "order", p: "p1", meta: "COD · ₹2,899 · delivered" },
+  147        { t: "15 Aug", type: "add_to_cart", p: "p1", meta: "Qty 1" },
+  148      ],
+  149      messages: [],
+  150    },
+  151    {
+  152      id: "c6", name: "Anonymous shopper", anon: true, stage: "visitor", push: true, email: null, phone: null,
+  153      ltv: 0, orders: 0, lastSeen: "12 min ago", lastMsg: "Never", city: "Rajkot",
+  154      interests: [["p5", 0.51]],
+  155      hours: [0,0,0,0,0,0,0,0,0,1,2,3,3,2,1,1,1,1,1,1,1,0,0,0],
+  156      signals: [],
+  157      journey: [
+  158        { t: "Today 13:50", type: "product_view", p: "p5", meta: "18s · scrolled 55%" },
+  159        { t: "Today 13:49", type: "push_optin", p: null, meta: "Accepted: 'Get alerted if this drops in price'" },
+  160      ],
+  161      messages: [],
+  162    },
+  163  ];
+  164  
+  165  const COD_ORDERS = [
+  166    { id: "#1091", name: "Priya Shah", phone: "+91 98••• ••412", city: "Ahmedabad", product: "p3", qty: 1, status: "confirmed", when: "12 Jul", prepaidEligible: true },
+  167    { id: "#1104", name: "Rekha Iyer", phone: "+91 99••• ••731", city: "Chennai", product: "p1", qty: 1, status: "delivered", when: "15 Aug", prepaidEligible: false },
+  168    { id: "#1117", name: "Sunita Desai", phone: "+91 97••• ••205", city: "Vadodara", product: "p5", qty: 2, status: "pending", when: "Today 11:20", prepaidEligible: false },
+  169    { id: "#1118", name: "Kavita Rao", phone: "+91 96••• ••914", city: "Bengaluru", product: "p2", qty: 1, status: "pending", when: "Today 09:45", prepaidEligible: true },
+  170  ];
+  171  
+  172  const WEEK = [
+  173    { d: "Tue", rev: 1299 }, { d: "Wed", rev: 0 }, { d: "Thu", rev: 4198 }, { d: "Fri", rev: 6999 },
+  174    { d: "Sat", rev: 1799 }, { d: "Sun", rev: 2899 }, { d: "Mon", rev: 0 },
+  175  ];
+  176  
+  177  /* ---------- Small UI atoms ---------- */
+  178  function Card({ children, style, pad = true }) {
+  179    return (
+  180      <div style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 12, boxShadow: "0 1px 0 rgba(0,0,0,.04)", padding: pad ? 20 : 0, ...style }}>
+  181        {children}
+  182      </div>
+  183    );
+  184  }
+  185  function Badge({ tone = "neutral", children }) {
+  186    const m = { success: [T.successBg, T.successText], warning: [T.warnBg, T.warnText], critical: [T.critBg, T.critText], info: [T.infoBg, T.infoText], neutral: [T.neutralBg, T.neutralText], magic: [T.magicBg, T.magicText] };
+  187    const [bg, fg] = m[tone];
+  188    return <span style={{ background: bg, color: fg, fontSize: 12, fontWeight: 500, padding: "2px 8px", borderRadius: 8, whiteSpace: "nowrap", display: "inline-block" }}>{children}</span>;
+  189  }
+  190  function Btn({ children, primary, onClick, small, disabled, style }) {
+  191    return (
+  192      <button onClick={onClick} disabled={disabled} style={{
+  193        background: primary ? T.primary : "#FFFFFF", color: primary ? "#FFF" : T.text,
+  194        border: `1px solid ${primary ? T.primary : "#BABABA"}`, borderRadius: 8,
+  195        padding: small ? "4px 10px" : "8px 14px", fontSize: small ? 12 : 13, fontWeight: 500, cursor: disabled ? "default" : "pointer",
+  196        opacity: disabled ? 0.5 : 1, boxShadow: primary ? "none" : "0 1px 0 rgba(0,0,0,.05)", fontFamily: T.font, ...style,
+  197      }}>{children}</button>
+  198    );
+  199  }
+  200  function Toggle({ on, onChange }) {
+  201    return (
+  202      <button onClick={() => onChange(!on)} aria-pressed={on} style={{ width: 36, height: 20, borderRadius: 10, border: "none", background: on ? T.successText : "#BABABA", position: "relative", cursor: "pointer", padding: 0 }}>
+  203        <span style={{ position: "absolute", top: 2, left: on ? 18 : 2, width: 16, height: 16, borderRadius: 8, background: "#FFF", transition: "left .15s" }} />
+  204      </button>
+  205    );
+  206  }
+  207  function Stat({ label, value, delta, sub }) {
+  208    return (
+  209      <div>
+  210        <div style={{ fontSize: 13, color: T.sub, marginBottom: 4 }}>{label}</div>
+  211        <div style={{ fontSize: 24, fontWeight: 600, letterSpacing: "-0.01em" }}>{value}</div>
+  212        {(delta !== undefined || sub) && (
+  213          <div style={{ fontSize: 12, color: delta > 0 ? T.successText : delta < 0 ? T.critText : T.sub, marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
+  214            {delta > 0 && <TrendingUp size={12} />}{delta < 0 && <TrendingDown size={12} />}
+  215            {delta !== undefined ? `${delta > 0 ? "+" : ""}${delta}% vs last week` : sub}
+  216          </div>
+  217        )}
+  218      </div>
+  219    );
+  220  }
+  221  const stageTone = { visitor: "neutral", browser: "neutral", carter: "warning", buyer: "success", repeat: "success", lapsing: "critical", lost: "critical" };
+  222  const stageLabel = { visitor: "Visitor", browser: "Browsing", carter: "Has a cart", buyer: "Bought once", repeat: "Repeat buyer", lapsing: "Going quiet", lost: "Lost" };
+  223  const money = (n) => "₹" + n.toLocaleString("en-IN");
+  224  
+  225  /* ---------- Copy generation (what the AI layer would return) ---------- */
+  226  function copyFor(signalId, product, voice) {
+  227    const name = product ? product.name.split(" — ")[0] : "";
+  228    const e = voice.emoji;
+  229    const lib = {
+  230      cart_abandon: { warm: `Your ${name} is waiting${e ? " 🧡" : ""}. We saved it for you.`, direct: `${name} is still in your cart. ${product ? product.stock + " left." : ""}`, playful: `Psst — the ${name} misses you${e ? " 👀" : ""}.` },
+  231      high_intent: { warm: `Still thinking about the ${name}? Only ${product?.stock} left${e ? " ✨" : ""}.`, direct: `${name}: ${product?.stock} left in stock.`, playful: `Fourth look at the ${name}? We think it's a sign${e ? " 😄" : ""}.` },
+  232      price_hesitation: { warm: `The ${name} is handwoven over weeks — here's what goes into the price.`, direct: `Why the ${name} costs what it does.`, playful: `Okay, let's talk about the price of the ${name}${e ? " 💬" : ""}.` },
+  233      price_drop: { warm: `Good news — the ${name} just dropped in price${e ? " 🎉" : ""}.`, direct: `Price drop: ${name}.`, playful: `The ${name} got cheaper. You're welcome${e ? " 😉" : ""}.` },
+  234      back_in_stock: { warm: `It's back — the ${name} is in stock again${e ? " 🧡" : ""}.`, direct: `${name} is back in stock.`, playful: `The ${name} returned. Told you to wait${e ? " ✨" : ""}.` },
+  235      lapsing: { warm: `We've missed you. New silks just arrived.`, direct: `New arrivals in silk this week.`, playful: `It's been a while. The sarees noticed${e ? " 🥺" : ""}.` },
+  236      browse_abandon: { warm: `Take another look at the ${name} whenever you're ready.`, direct: `${name} — still available.`, playful: `You looked. We noticed${e ? " 👀" : ""}. ${name}.` },
+  237      email_capture: { warm: `Want us to save your picks to your email too?`, direct: `Save your cart to email.`, playful: `Let's make this official — share an email?${e ? " 💌" : ""}` },
+  238      post_purchase_d3: { warm: `How to care for your ${name} so it lasts decades.`, direct: `Care guide: ${name}.`, playful: `Your ${name} has arrived. Here's how not to ruin it${e ? " 😅" : ""}.` },
+  239      winback: { warm: `It's been a while — here's what's new.`, direct: `New collection is live.`, playful: `Long time no see${e ? " 👋" : ""}. New stuff inside.` },
+  240      cod_to_prepaid: { warm: `Pay online now and get ₹100 off this order.`, direct: `₹100 off if you pay online.`, playful: `Skip the doorstep fumble — pay online, save ₹100${e ? " 💸" : ""}.` },
+  241      checkout_abandon: { warm: `You were one step away. Your order is saved.`, direct: `Complete your order — it's saved.`, playful: `So close! Your checkout is right where you left it.` },
+  242    };
+  243    const line = lib[signalId]?.[voice.tone] || "";
+  244    if (voice.lang === "hinglish") return line.replace("Still thinking about", "Abhi bhi soch rahe ho").replace("is waiting", "aapka intezaar kar rahi hai").replace("We've missed you", "Aap bahut yaad aaye");
+  245    return line;
+  246  }
+  247  
+  248  /* ---------- Screens ---------- */
+  249  function Onboarding({ steps, setSteps, onFinish, voice }) {
+  250    const done = steps.filter(Boolean).length;
+  251    const items = [
+  252      { t: "Turn on the storefront block", d: "Adds tracking and the notification prompt to your theme. One click in the theme editor." },
+  253      { t: "Set your voice", d: `Tone, emoji, language. Every message gets written in it. Currently: ${voice.tone}, ${voice.emoji ? "emoji on" : "no emoji"}, ${voice.lang}.` },
+  254      { t: "Choose what to act on", d: "Ten signals are on by default. Turn off any you don't want." },
+  255      { t: "Send yourself a test", d: "A push to this browser so you can see what customers will see." },
+  256    ];
+  257    return (
+  258      <div style={{ maxWidth: 720, margin: "40px auto" }}>
+  259        <div style={{ marginBottom: 24 }}>
+  260          <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>Welcome to CartnCodForm</h1>
+  261          <p style={{ color: T.sub, margin: "6px 0 0", fontSize: 14, lineHeight: 1.5 }}>Four steps. After this, it runs on its own — you'll open it to see what happened, not to do work.</p>
+  262        </div>
+  263        <Card pad={false}>
+  264          <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+  265            <span style={{ fontSize: 13, fontWeight: 500 }}>{done} of 4 done</span>
+  266            <div style={{ width: 160, height: 6, background: T.neutralBg, borderRadius: 3 }}><div style={{ width: `${done * 25}%`, height: 6, background: T.successText, borderRadius: 3, transition: "width .2s" }} /></div>
+  267          </div>
+  268          {items.map((it, i) => (
+  269            <div key={i} style={{ display: "flex", gap: 14, padding: "16px 20px", borderBottom: i < 3 ? `1px solid ${T.border}` : "none", alignItems: "flex-start" }}>
+  270              <button onClick={() => setSteps(steps.map((s, j) => (j === i ? !s : s)))} aria-label={steps[i] ? "Mark not done" : "Mark done"} style={{ width: 22, height: 22, borderRadius: 11, border: `2px solid ${steps[i] ? T.successText : "#BABABA"}`, background: steps[i] ? T.successText : "#FFF", display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0, marginTop: 1 }}>
+  271                {steps[i] && <Check size={13} color="#FFF" strokeWidth={3} />}
+  272              </button>
+  273              <div style={{ flex: 1 }}>
+  274                <div style={{ fontWeight: 500, fontSize: 14, textDecoration: steps[i] ? "line-through" : "none", color: steps[i] ? T.faint : T.text }}>{it.t}</div>
+  275                <div style={{ fontSize: 13, color: T.sub, marginTop: 2, lineHeight: 1.5 }}>{it.d}</div>
+  276              </div>
+  277              {!steps[i] && <Btn small onClick={() => setSteps(steps.map((s, j) => (j === i ? true : s)))}>{i === 3 ? "Send test" : i === 0 ? "Open theme editor" : "Set up"}</Btn>}
+  278            </div>
+  279          ))}
+  280        </Card>
+  281        <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+  282          <Btn onClick={onFinish}>Skip for now</Btn>
+  283          <Btn primary disabled={done < 4} onClick={onFinish}>Go to Today</Btn>
+  284        </div>
+  285      </div>
+  286    );
+  287  }
+  288  
+  289  function Today({ signalsOn, voice, setView, setCustomer }) {
+  290    const plan = SIGNAL_DEFS.filter((s) => signalsOn[s.id]).map((s) => ({ ...s, count: s.base }));
+  291    const total = plan.reduce((a, b) => a + b.count, 0);
+  292    const narrative = voice.lang === "hinglish"
+  293      ? `Is hafte maine 1,240 customers ko dekha, 86 ko message bheja, aur 11 wapas aaye — ₹14,300 recover hua. ₹3,000 se kam ke silk sarees aapke sabse strong re-engagement product hain. Banarasi collection dekhne walon mein se 40% price section pe ruk jaate hain. Do log jinhone July mein kharida tha, phir se ready lag rahe hain; kal shaam unko reach karunga.`
+  294      : `This week I looked at 1,240 customers, messaged 86, and 11 came back — ₹14,300 recovered. Silk sarees under ₹3,000 are your strongest re-engagement product. 40% of people who open the Banarasi collection stop at the price section. Two customers who bought in July look ready to buy again; I'll reach them tomorrow evening.`;
+  295  
+  296    return (
+  297      <div>
+  298        <PageHead title="Today" sub="Tuesday, 8 September" />
+  299        <Card style={{ background: T.magicBg, border: `1px solid ${T.magicBorder}`, marginBottom: 16 }}>
+  300          <div style={{ display: "flex", gap: 12 }}>
+  301            <Sparkles size={18} color={T.magicText} style={{ flexShrink: 0, marginTop: 3 }} />
+  302            <div>
+  303              <div style={{ fontSize: 12, fontWeight: 500, color: T.magicText, marginBottom: 6 }}>This week, in plain words</div>
+  304              <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, color: T.text, maxWidth: 640 }}>{narrative}</p>
+  305            </div>
+  306          </div>
+  307        </Card>
+  308  
+  309        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
+  310          <Card>
+  311            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 12 }}>
+  312              <div style={{ fontWeight: 600, fontSize: 14 }}>Planned for today</div>
+  313              <span style={{ fontSize: 13, color: T.sub }}>{total} customers, one message each</span>
+  314            </div>
+  315            {plan.length === 0 && <div style={{ color: T.sub, fontSize: 13 }}>Nothing planned — every signal is off. <button onClick={() => setView("signals")} style={{ color: T.magicText, background: "none", border: "none", cursor: "pointer", padding: 0, fontSize: 13, fontFamily: T.font }}>Turn some on.</button></div>}
+  316            {plan.map((s) => (
+  317              <div key={s.id} style={{ display: "flex", justifyContent: "space-between", padding: "7px 0", borderTop: `1px solid ${T.border}`, fontSize: 13 }}>
+  318                <span>{s.name}</span>
+  319                <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+  320                  <span style={{ color: T.faint, fontSize: 12 }}>{s.urgency === "later" && !["email_capture", "post_purchase_d3"].includes(s.id) ? "email" : s.urgency === "later" ? "push" : "push"}</span>
+  321                  <span style={{ fontWeight: 500, minWidth: 20, textAlign: "right" }}>{s.count}</span>
+  322                </span>
+  323              </div>
+  324            ))}
+  325          </Card>
+  326          <Card>
+  327            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Yesterday</div>
+  328            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+  329              <Stat label="Sent" value="48" sub="32 push · 16 email" />
+  330              <Stat label="Opened or clicked" value="19" sub="40% — push 46%, email 28%" />
+  331              <Stat label="Came back and bought" value="3" sub="6.3% of sends" />
+  332              <Stat label="Recovered" value="₹6,999" delta={18} />
+  333            </div>
+  334          </Card>
+  335        </div>
+  336  
+  337        <div style={{ display: "grid", gridTemplateColumns: "3fr 2fr", gap: 16 }}>
+  338          <Card>
+  339            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Recovered this week</div>
+  340            <div style={{ fontSize: 13, color: T.sub, marginBottom: 12 }}>₹17,194 from 86 messages. Silk did the heavy lifting.</div>
+  341            <div style={{ height: 160 }}>
+  342              <ResponsiveContainer>
+  343                <BarChart data={WEEK} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+  344                  <XAxis dataKey="d" tick={{ fontSize: 12, fill: T.sub }} axisLine={false} tickLine={false} />
+  345                  <YAxis tick={{ fontSize: 11, fill: T.faint }} axisLine={false} tickLine={false} tickFormatter={(v) => (v ? `${v / 1000}k` : "0")} />
+  346                  <Tooltip cursor={{ fill: "#F6F6F6" }} formatter={(v) => [money(v), "Recovered"]} contentStyle={{ fontSize: 12, borderRadius: 8, border: `1px solid ${T.border}` }} />
+  347                  <Bar dataKey="rev" radius={[4, 4, 0, 0]}>
+  348                    {WEEK.map((w, i) => <Cell key={i} fill={w.rev ? T.successText : T.neutralBg} />)}
+  349                  </Bar>
+  350                </BarChart>
+  351              </ResponsiveContainer>
+  352            </div>
+  353          </Card>
+  354          <Card>
+  355            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Worth knowing</div>
+  356            {[
+  357              { i: <TrendingUp size={14} color={T.successText} />, t: "Looked-didn't-add on the Emerald Patola is up 3× this week. 4 of 5 stop at the price." , a: () => setView("insights") },
+  358              { i: <Bell size={14} color={T.magicText} />, t: "Priya Shah has viewed the Maroon Zari 4 times. Reaching her tonight at 7:40, her usual hour.", a: () => { setCustomer("c1"); setView("customers"); } },
+  359              { i: <Package size={14} color={T.warnText} />, t: "Paithani Magenta is back in stock. 6 people were waiting — 4 will hear about it today.", a: () => setView("signals") },
+  360            ].map((x, i) => (
+  361              <button key={i} onClick={x.a} style={{ display: "flex", gap: 10, alignItems: "flex-start", width: "100%", textAlign: "left", background: "none", border: "none", borderTop: i ? `1px solid ${T.border}` : "none", padding: "10px 0", cursor: "pointer", fontFamily: T.font }}>
+  362                <span style={{ marginTop: 2 }}>{x.i}</span>
+  363                <span style={{ fontSize: 13, lineHeight: 1.5, color: T.text }}>{x.t}</span>
+  364                <ChevronRight size={14} color={T.faint} style={{ marginLeft: "auto", flexShrink: 0, marginTop: 3 }} />
+  365              </button>
+  366            ))}
+  367          </Card>
+  368        </div>
+  369      </div>
+  370    );
+  371  }
+  372  
+  373  function Customers({ customer, setCustomer, voice }) {
+  374    const [q, setQ] = useState("");
+  375    const [stage, setStage] = useState("all");
+  376    const list = CUSTOMERS.filter((c) => (stage === "all" || c.stage === stage) && (q === "" || c.name.toLowerCase().includes(q.toLowerCase()) || c.city.toLowerCase().includes(q.toLowerCase())));
+  377    if (customer) return <Profile c={CUSTOMERS.find((x) => x.id === customer)} back={() => setCustomer(null)} voice={voice} />;
+  378    return (
+  379      <div>
+  380        <PageHead title="Customers" sub="1,240 people. 6 shown here as a sample." />
+  381        <Card pad={false}>
+  382          <div style={{ padding: 12, borderBottom: `1px solid ${T.border}`, display: "flex", gap: 8, alignItems: "center" }}>
+  383            <div style={{ position: "relative", flex: 1 }}>
+  384              <Search size={14} color={T.faint} style={{ position: "absolute", left: 10, top: 9 }} />
+  385              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name or city" style={{ width: "100%", boxSizing: "border-box", padding: "7px 10px 7px 30px", border: `1px solid #BABABA`, borderRadius: 8, fontSize: 13, fontFamily: T.font }} />
+  386            </div>
+  387            {["all", "carter", "buyer", "repeat", "lapsing"].map((s) => (
+  388              <button key={s} onClick={() => setStage(s)} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${stage === s ? T.text : T.border}`, background: stage === s ? T.neutralBg : "#FFF", fontSize: 12, cursor: "pointer", fontFamily: T.font }}>{s === "all" ? "Everyone" : stageLabel[s]}</button>
+  389            ))}
+  390          </div>
+  391          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+  392            <thead><tr style={{ color: T.sub, textAlign: "left" }}>
+  393              {["Customer", "Stage", "Most interested in", "Reach", "Last messaged", "Spent"].map((h) => <th key={h} style={{ padding: "10px 16px", fontWeight: 500, borderBottom: `1px solid ${T.border}` }}>{h}</th>)}
+  394            </tr></thead>
+  395            <tbody>
+  396              {list.map((c) => (
+  397                <tr key={c.id} onClick={() => setCustomer(c.id)} style={{ cursor: "pointer" }} onMouseEnter={(e) => (e.currentTarget.style.background = "#FAFAFA")} onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
+  398                  <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}>
+  399                    <div style={{ fontWeight: 500, color: c.anon ? T.sub : T.text }}>{c.name}{c.anon && <span style={{ color: T.faint, fontWeight: 400 }}> · {c.id.replace("c", "#48")}21</span>}</div>
+  400                    <div style={{ fontSize: 12, color: T.faint }}>{c.city} · seen {c.lastSeen}</div>
+  401                  </td>
+  402                  <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}><Badge tone={stageTone[c.stage]}>{stageLabel[c.stage]}</Badge></td>
+  403                  <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, maxWidth: 220 }}>
+  404                    <div style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{P[c.interests[0][0]].name.split(" — ")[0]}</div>
+  405                    {c.signals[0] && <div style={{ fontSize: 12, color: T.magicText }}>{SIGNAL_DEFS.find((s) => s.id === c.signals[0].id).name}</div>}
+  406                  </td>
+  407                  <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}>
+  408                    <span style={{ display: "flex", gap: 6 }}>
+  409                      <Bell size={14} color={c.push ? T.text : "#D0D0D0"} /><Mail size={14} color={c.email ? T.text : "#D0D0D0"} /><Phone size={14} color={c.phone ? T.text : "#D0D0D0"} />
+  410                    </span>
+  411                  </td>
+  412                  <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, color: c.lastMsg === "Never" ? T.faint : T.text }}>{c.lastMsg}</td>
+  413                  <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, fontWeight: 500 }}>{c.ltv ? money(c.ltv) : <span style={{ color: T.faint }}>—</span>}</td>
+  414                </tr>
+  415              ))}
+  416            </tbody>
+  417          </table>
+  418          {list.length === 0 && <div style={{ padding: 32, textAlign: "center", color: T.sub, fontSize: 13 }}>No one matches. Try a different stage or clear the search.</div>}
+  419        </Card>
+  420      </div>
+  421    );
+  422  }
+  423  
+  424  const journeyIcon = { product_view: Eye, collection_view: Eye, search: Search, add_to_cart: ShoppingCart, cart_view: ShoppingCart, order: Package, push_sent: Send, push_click: Zap, push_optin: Bell };
+  425  const journeyLabel = { product_view: "Viewed", collection_view: "Browsed", search: "Searched", add_to_cart: "Added to cart", cart_view: "Opened cart", order: "Ordered", push_sent: "We sent a push", push_click: "Clicked our push", push_optin: "Allowed notifications" };
+  426  
+  427  function Profile({ c, back, voice }) {
+  428    const peak = c.hours.indexOf(Math.max(...c.hours));
+  429    const fmtH = (h) => `${h % 12 || 12}${h < 12 ? "am" : "pm"}`;
+  430    return (
+  431      <div>
+  432        <button onClick={back} style={{ display: "flex", alignItems: "center", gap: 6, background: "none", border: "none", color: T.sub, cursor: "pointer", fontSize: 13, padding: 0, marginBottom: 12, fontFamily: T.font }}><ArrowLeft size={14} /> Customers</button>
+  433        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+  434          <div>
+  435            <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0, display: "flex", gap: 10, alignItems: "center" }}>{c.name} <Badge tone={stageTone[c.stage]}>{stageLabel[c.stage]}</Badge></h1>
+  436            <div style={{ fontSize: 13, color: T.sub, marginTop: 4, display: "flex", gap: 12, alignItems: "center" }}>
+  437              <span style={{ display: "flex", gap: 4, alignItems: "center" }}><MapPin size={12} /> {c.city}</span>
+  438              <span>Seen {c.lastSeen}</span>
+  439              <span>Usually here around {fmtH(peak)}</span>
+  440            </div>
+  441          </div>
+  442          <div style={{ display: "flex", gap: 8 }}>
+  443            <Btn>Pause messages</Btn>
+  444            <Btn primary>Send now</Btn>
+  445          </div>
+  446        </div>
+  447  
+  448        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }}>
+  449          <div style={{ display: "grid", gap: 16 }}>
+  450            {c.signals.length > 0 ? (
+  451              <Card style={{ background: T.magicBg, border: `1px solid ${T.magicBorder}` }}>
+  452                <div style={{ fontSize: 12, fontWeight: 500, color: T.magicText, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}><Sparkles size={13} /> What I see right now</div>
+  453                {c.signals.map((s, i) => {
+  454                  const def = SIGNAL_DEFS.find((d) => d.id === s.id);
+  455                  const prod = s.product ? P[s.product] : null;
+  456                  return (
+  457                    <div key={i} style={{ padding: "10px 0", borderTop: i ? `1px solid ${T.magicBorder}` : "none" }}>
+  458                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+  459                        <div style={{ fontWeight: 500, fontSize: 14 }}>{def.name}{prod && <span style={{ fontWeight: 400, color: T.sub }}> — {prod.name.split(" — ")[0]}</span>}</div>
+  460                        <span style={{ fontSize: 12, color: T.sub }}>{Math.round(s.strength * 100)}% sure</span>
+  461                      </div>
+  462                      <ul style={{ margin: "6px 0 8px", paddingLeft: 18, fontSize: 13, color: T.sub, lineHeight: 1.6 }}>{s.evidence.map((e, j) => <li key={j}>{e}</li>)}</ul>
+  463                      {i === 0 && (
+  464                        <div style={{ background: "#FFF", border: `1px solid ${T.magicBorder}`, borderRadius: 8, padding: "10px 12px", fontSize: 13 }}>
+  465                          <div style={{ fontSize: 11, color: T.faint, marginBottom: 4 }}>Planned: {c.push ? "push" : "email"} at {fmtH(peak)} today</div>
+  466                          <div style={{ fontWeight: 500 }}>{copyFor(s.id, prod, voice)}</div>
+  467                        </div>
+  468                      )}
+  469                    </div>
+  470                  );
+  471                })}
+  472              </Card>
+  473            ) : (
+  474              <Card><div style={{ fontSize: 13, color: T.sub }}>Nothing to act on right now. I'll keep watching.</div></Card>
+  475            )}
+  476  
+  477            <Card>
+  478              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>What they did</div>
+  479              {c.journey.map((j, i) => {
+  480                const Icon = journeyIcon[j.type] || Clock;
+  481                const ours = j.type.startsWith("push_");
+  482                return (
+  483                  <div key={i} style={{ display: "flex", gap: 12, padding: "9px 0", borderTop: i ? `1px solid ${T.border}` : "none", alignItems: "flex-start" }}>
+  484                    <div style={{ width: 26, height: 26, borderRadius: 13, background: ours ? T.magicBg : T.neutralBg, display: "grid", placeItems: "center", flexShrink: 0 }}><Icon size={13} color={ours ? T.magicText : T.sub} /></div>
+  485                    <div style={{ flex: 1, fontSize: 13 }}>
+  486                      <span style={{ fontWeight: 500 }}>{journeyLabel[j.type]}</span>{j.p && <span> {P[j.p].name.split(" — ")[0]}</span>}
+  487                      <div style={{ color: T.sub, fontSize: 12 }}>{j.meta}</div>
+  488                    </div>
+  489                    <div style={{ fontSize: 12, color: T.faint, whiteSpace: "nowrap" }}>{j.t}</div>
+  490                  </div>
+  491                );
+  492              })}
+  493            </Card>
+  494          </div>
+  495  
+  496          <div style={{ display: "grid", gap: 16, alignContent: "start" }}>
+  497            <Card>
+  498              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 10 }}>How to reach them</div>
+  499              {[["Push", c.push, "This browser, Android Chrome"], ["Email", !!c.email, c.email || "Not captured — will ask at the next good moment"], ["Phone", !!c.phone, c.phone || "Not captured"]].map(([k, on, v]) => (
+  500                <div key={k} style={{ display: "flex", gap: 10, padding: "6px 0", fontSize: 13, alignItems: "flex-start" }}>
+  501                  <span style={{ width: 8, height: 8, borderRadius: 4, background: on ? T.successText : "#D0D0D0", marginTop: 6, flexShrink: 0 }} />
+  502                  <div><div style={{ fontWeight: 500 }}>{k}</div><div style={{ color: T.sub, fontSize: 12 }}>{v}</div></div>
+  503                </div>
+  504              ))}
+  505            </Card>
+  506            <Card>
+  507              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Interested in</div>
+  508              {c.interests.map(([pid, sc]) => (
+  509                <div key={pid} style={{ marginBottom: 8 }}>
+  510                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}><span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 180 }}>{P[pid].name.split(" — ")[0]}</span><span style={{ color: T.sub }}>{money(P[pid].price)}</span></div>
+  511                  <div style={{ height: 4, background: T.neutralBg, borderRadius: 2 }}><div style={{ width: `${sc * 100}%`, height: 4, background: T.text, borderRadius: 2 }} /></div>
+  512                </div>
+  513              ))}
+  514              <div style={{ fontSize: 12, color: T.faint, marginTop: 8 }}>Fades a little every day they don't look.</div>
+  515            </Card>
+  516            <Card>
+  517              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Bought</div>
+  518              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+  519                <Stat label="Orders" value={c.orders} />
+  520                <Stat label="Lifetime" value={c.ltv ? money(c.ltv) : "—"} />
+  521              </div>
+  522            </Card>
+  523            <Card>
+  524              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Messages sent</div>
+  525              {c.messages.length === 0 && <div style={{ fontSize: 13, color: T.sub }}>None yet.</div>}
+  526              {c.messages.map((m, i) => (
+  527                <div key={i} style={{ padding: "8px 0", borderTop: i ? `1px solid ${T.border}` : "none", fontSize: 13 }}>
+  528                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+  529                    <span style={{ color: T.sub, fontSize: 12 }}>{m.t} · {m.ch}</span>
+  530                    <Badge tone={m.outcome === "converted" ? "success" : m.outcome === "clicked" || m.outcome === "opened" ? "info" : "neutral"}>{m.outcome}{m.rev ? ` · ${money(m.rev)}` : ""}</Badge>
+  531                  </div>
+  532                  <div>{m.copy}</div>
+  533                </div>
+  534              ))}
+  535            </Card>
+  536          </div>
+  537        </div>
+  538      </div>
+  539    );
+  540  }
+  541  
+  542  function Signals({ signalsOn, setSignalsOn, voice }) {
+  543    const [open, setOpen] = useState(null);
+  544    const groups = [["Right now", "now"], ["Within the hour", "soon"], ["Over the coming days", "later"]];
+  545    return (
+  546      <div>
+  547        <PageHead title="What to act on" sub="Each of these is something I watch for. Turn off anything you don't want customers to hear about. I write the message; you don't need to." />
+  548        {groups.map(([label, key]) => (
+  549          <div key={key} style={{ marginBottom: 20 }}>
+  550            <div style={{ fontSize: 13, fontWeight: 500, color: T.sub, marginBottom: 8 }}>{label}</div>
+  551            <Card pad={false}>
+  552              {SIGNAL_DEFS.filter((s) => s.urgency === key).map((s, i, arr) => {
+  553                const sample = PRODUCTS.find((p) => p.id === "p1");
+  554                return (
+  555                  <div key={s.id} style={{ borderBottom: i < arr.length - 1 ? `1px solid ${T.border}` : "none" }}>
+  556                    <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "14px 20px" }}>
+  557                      <Toggle on={!!signalsOn[s.id]} onChange={(v) => setSignalsOn({ ...signalsOn, [s.id]: v })} />
+  558                      <button onClick={() => setOpen(open === s.id ? null : s.id)} style={{ flex: 1, textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: T.font }}>
+  559                        <div style={{ fontWeight: 500, fontSize: 14, color: signalsOn[s.id] ? T.text : T.faint }}>{s.name}</div>
+  560                        <div style={{ fontSize: 13, color: T.sub }}>{s.desc}</div>
+  561                      </button>
+  562                      <div style={{ textAlign: "right", minWidth: 120 }}>
+  563                        {s.conv > 0 ? <><div style={{ fontWeight: 500, fontSize: 14 }}>{(s.conv * 100).toFixed(1)}%</div><div style={{ fontSize: 12, color: T.faint }}>bought after, your store</div></> : <div style={{ fontSize: 12, color: T.faint }}>Not a selling message</div>}
+  564                      </div>
+  565                      <ChevronRight size={16} color={T.faint} style={{ transform: open === s.id ? "rotate(90deg)" : "none", transition: "transform .15s" }} />
+  566                    </div>
+  567                    {open === s.id && (
+  568                      <div style={{ padding: "0 20px 16px 70px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+  569                        <div>
+  570                          <div style={{ fontSize: 12, color: T.faint, marginBottom: 6 }}>Example, in your voice</div>
+  571                          <div style={{ background: T.pageBg, borderRadius: 8, padding: "10px 12px", fontSize: 13, display: "flex", gap: 10 }}>
+  572                            <Bell size={14} style={{ flexShrink: 0, marginTop: 2 }} /><div><div style={{ fontWeight: 500 }}>{copyFor(s.id, sample, voice)}</div><div style={{ color: T.sub, fontSize: 12, marginTop: 2 }}>shreesarees.in</div></div>
+  573                          </div>
+  574                        </div>
+  575                        <div style={{ fontSize: 13 }}>
+  576                          <div style={{ fontSize: 12, color: T.faint, marginBottom: 6 }}>Channel</div>
+  577                          <div style={{ display: "flex", gap: 6 }}>
+  578                            {["Let me decide", "Push only", "Email only"].map((o, j) => <span key={o} style={{ padding: "5px 10px", borderRadius: 8, border: `1px solid ${j === 0 ? T.text : T.border}`, background: j === 0 ? T.neutralBg : "#FFF", fontSize: 12 }}>{o}</span>)}
+  579                          </div>
+  580                          <div style={{ fontSize: 12, color: T.sub, marginTop: 10, lineHeight: 1.5 }}>{s.urgency === "later" ? "Not urgent, so email when we have one — it lasts longer. Push if we don't." : "Time matters, so push if the browser is still reachable. Email as backup."}</div>
+  581                        </div>
+  582                      </div>
+  583                    )}
+  584                  </div>
+  585                );
+  586              })}
+  587            </Card>
+  588          </div>
+  589        ))}
+  590      </div>
+  591    );
+  592  }
+  593  
+  594  function Messages() {
+  595    const [f, setF] = useState("all");
+  596    const rows = [
+  597      { t: "Today 13:20", who: "Anonymous #4821", signal: "cart_abandon", ch: "push", copy: "Your Bandhani Georgette is waiting. We saved it for you.", out: "scheduled 14:19" },
+  598      { t: "Today 11:32", who: "Kavita Rao", signal: "cod_to_prepaid", ch: "email", copy: "Pay online now and get ₹100 off this order.", out: "delivered" },
+  599      { t: "Today 09:15", who: "Meera Kulkarni", signal: "back_in_stock", ch: "email", copy: "It's back — the Paithani Silk is in stock again.", out: "opened" },
+  600      { t: "Yesterday 19:40", who: "Priya Shah", signal: "high_intent", ch: "push", copy: "Still thinking about the Maroon Zari? Only 6 left.", out: "clicked" },
+  601      { t: "Yesterday 18:05", who: "Anonymous #3310", signal: "price_hesitation", ch: "push", copy: "The Kanjivaram is handwoven over weeks — here's what goes into the price.", out: "converted", rev: 4499 },
+  602      { t: "Yesterday 12:00", who: "Anonymous #2987", signal: "browse_abandon", ch: "push", copy: "Take another look at the Chanderi Cotton whenever you're ready.", out: "delivered" },
+  603      { t: "Sun 20:10", who: "Nisha Patel", signal: "lapsing", ch: "email", copy: "We've missed you. New silks just arrived.", out: "converted", rev: 2899 },
+  604      { t: "Sun 19:30", who: "Anonymous #2201", signal: "cart_abandon", ch: "push", copy: "Your Paithani Silk is waiting. We saved it for you.", out: "skipped — bought first" },
+  605    ];
+  606    const shown = rows.filter((r) => f === "all" || (f === "converted" ? r.out === "converted" : r.ch === f));
+  607    const tone = (o) => o === "converted" ? "success" : o === "clicked" || o === "opened" ? "info" : o.startsWith("skipped") ? "neutral" : o.startsWith("scheduled") ? "warning" : "neutral";
+  608    return (
+  609      <div>
+  610        <PageHead title="Messages" sub="Every message, why it went, and what happened after." />
+  611        <Card pad={false}>
+  612          <div style={{ padding: 12, borderBottom: `1px solid ${T.border}`, display: "flex", gap: 8 }}>
+  613            {[["all", "All"], ["push", "Push"], ["email", "Email"], ["converted", "Led to a sale"]].map(([k, l]) => <button key={k} onClick={() => setF(k)} style={{ padding: "6px 10px", borderRadius: 8, border: `1px solid ${f === k ? T.text : T.border}`, background: f === k ? T.neutralBg : "#FFF", fontSize: 12, cursor: "pointer", fontFamily: T.font }}>{l}</button>)}
+  614          </div>
+  615          {shown.map((r, i) => (
+  616            <div key={i} style={{ display: "grid", gridTemplateColumns: "120px 140px 1fr 150px", gap: 12, padding: "12px 16px", borderBottom: `1px solid ${T.border}`, fontSize: 13, alignItems: "center" }}>
+  617              <div style={{ color: T.sub, fontSize: 12 }}>{r.t}</div>
+  618              <div><div style={{ fontWeight: 500 }}>{r.who}</div><div style={{ fontSize: 12, color: T.magicText }}>{SIGNAL_DEFS.find((s) => s.id === r.signal).name}</div></div>
+  619              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>{r.ch === "push" ? <Bell size={13} color={T.sub} /> : <Mail size={13} color={T.sub} />}<span>{r.copy}</span></div>
+  620              <div style={{ textAlign: "right" }}><Badge tone={tone(r.out)}>{r.out}{r.rev ? ` · ${money(r.rev)}` : ""}</Badge></div>
+  621            </div>
+  622          ))}
+  623        </Card>
+  624      </div>
+  625    );
+  626  }
+  627  
+  628  function Insights() {
+  629    const [sort, setSort] = useState("views");
+  630    const rows = [...PRODUCTS].sort((a, b) => (sort === "views" ? b.views - a.views : sort === "dwell" ? b.dwell - a.dwell : sort === "cart" ? b.cartRate - a.cartRate : a.scroll - b.scroll));
+  631    return (
+  632      <div>
+  633        <PageHead title="What's happening on your store" sub="From how long people stay and how far they scroll. Nothing here needs an email or a login to measure." />
+  634        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 16 }}>
+  635          <Card><Stat label="Product views this week" value="1,525" delta={12} /></Card>
+  636          <Card><Stat label="Allowed notifications" value="14.2%" sub="of visitors — was 3.1% with the timed popup" /></Card>
+  637          <Card><Stat label="Add-to-cart rate" value="12.8%" delta={-3} /></Card>
+  638          <Card><Stat label="Stop at the price" value="38%" sub="of silk viewers, based on scroll" /></Card>
+  639        </div>
+  640        <Card pad={false}>
+  641          <div style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+  642            <span style={{ fontWeight: 600, fontSize: 14 }}>Products</span>
+  643            <div style={{ display: "flex", gap: 6, fontSize: 12 }}>
+  644              <span style={{ color: T.faint, alignSelf: "center" }}>Sort by</span>
+  645              {[["views", "Views"], ["dwell", "Time on page"], ["scroll", "Least scrolled"], ["cart", "Cart rate"]].map(([k, l]) => <button key={k} onClick={() => setSort(k)} style={{ padding: "4px 8px", borderRadius: 6, border: `1px solid ${sort === k ? T.text : T.border}`, background: sort === k ? T.neutralBg : "#FFF", cursor: "pointer", fontFamily: T.font, fontSize: 12 }}>{l}</button>)}
+  646            </div>
+  647          </div>
+  648          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+  649            <thead><tr style={{ color: T.sub, textAlign: "left" }}>{["Product", "Views", "Avg time", "Avg scroll", "Cart rate", "Where they leave", "Stock"].map((h) => <th key={h} style={{ padding: "10px 16px", fontWeight: 500, borderBottom: `1px solid ${T.border}` }}>{h}</th>)}</tr></thead>
+  650            <tbody>{rows.map((p) => (
+  651              <tr key={p.id}>
+  652                <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}><div style={{ fontWeight: 500 }}>{p.name}</div><div style={{ fontSize: 12, color: T.faint }}>{p.coll} · {money(p.price)}</div></td>
+  653                <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}>{p.views}<div style={{ fontSize: 12, color: T.faint }}>{p.uniq} people</div></td>
+  654                <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}>{p.dwell}s</td>
+  655                <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}>
+  656                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}><div style={{ width: 60, height: 4, background: T.neutralBg, borderRadius: 2 }}><div style={{ width: `${p.scroll}%`, height: 4, background: p.scroll < 50 ? T.critText : T.text, borderRadius: 2 }} /></div>{p.scroll}%</div>
+  657                </td>
+  658                <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, fontWeight: 500 }}>{(p.cartRate * 100).toFixed(0)}%</td>
+  659                <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}><Badge tone={p.exit === "Price block" ? "critical" : p.exit === "Added to cart" ? "success" : "neutral"}>{p.exit}</Badge></td>
+  660                <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, color: p.stock === 0 ? T.critText : p.stock < 5 ? T.warnText : T.text }}>{p.stock === 0 ? "Out" : p.stock}</td>
+  661              </tr>
+  662            ))}</tbody>
+  663          </table>
+  664        </Card>
+  665        <Card style={{ marginTop: 16, background: T.magicBg, border: `1px solid ${T.magicBorder}` }}>
+  666          <div style={{ display: "flex", gap: 12 }}>
+  667            <Sparkles size={16} color={T.magicText} style={{ flexShrink: 0, marginTop: 2 }} />
+  668            <div style={{ fontSize: 13, lineHeight: 1.6 }}>Three of your six sarees lose people at the price block, and they're the three priciest. People spend the longest on those pages — they want them. A "why it costs this" line under the price, or a Pay-in-3 option, is worth testing before a discount.</div>
+  669          </div>
+  670        </Card>
+  671      </div>
+  672    );
+  673  }
+  674  
+  675  function COD({ orders, setOrders }) {
+  676    const set = (id, status) => setOrders(orders.map((o) => (o.id === id ? { ...o, status } : o)));
+  677    const pending = orders.filter((o) => o.status === "pending").length;
+  678    return (
+  679      <div>
+  680        <PageHead title="Cash on delivery" sub={`${pending} waiting for your confirmation call.`} />
+  681        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 16 }}>
+  682          <Card><Stat label="COD orders (30d)" value="41" delta={9} /></Card>
+  683          <Card><Stat label="Confirmed" value="88%" sub="36 of 41" /></Card>
+  684          <Card><Stat label="Switched to prepaid" value="7" sub="17% of eligible — ₹700 in discounts" /></Card>
+  685          <Card><Stat label="Returned undelivered" value="3" sub="7% — was 19% before" /></Card>
+  686        </div>
+  687        <Card pad={false}>
+  688          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+  689            <thead><tr style={{ color: T.sub, textAlign: "left" }}>{["Order", "Customer", "Product", "Placed", "Status", ""].map((h, i) => <th key={i} style={{ padding: "10px 16px", fontWeight: 500, borderBottom: `1px solid ${T.border}` }}>{h}</th>)}</tr></thead>
+  690            <tbody>{orders.map((o) => (
+  691              <tr key={o.id}>
+  692                <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, fontWeight: 500 }}>{o.id}</td>
+  693                <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}><div>{o.name}</div><div style={{ fontSize: 12, color: T.faint }}>{o.phone} · {o.city}</div>{o.prepaidEligible && o.status === "pending" && <div style={{ fontSize: 12, color: T.magicText }}>Has paid online before — prepaid offer sent</div>}</td>
+  694                <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}>{P[o.product].name.split(" — ")[0]} × {o.qty}<div style={{ fontSize: 12, color: T.faint }}>{money(P[o.product].price * o.qty)}</div></td>
+  695                <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, color: T.sub }}>{o.when}</td>
+  696                <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}><Badge tone={o.status === "pending" ? "warning" : o.status === "cancelled" ? "critical" : "success"}>{o.status}</Badge></td>
+  697                <td style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, textAlign: "right" }}>
+  698                  {o.status === "pending" && <span style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}><Btn small onClick={() => set(o.id, "cancelled")}>Cancel</Btn><Btn small primary onClick={() => set(o.id, "confirmed")}>Confirm</Btn></span>}
+  699                </td>
+  700              </tr>
+  701            ))}</tbody>
+  702          </table>
+  703        </Card>
+  704      </div>
+  705    );
+  706  }
+  707  
+  708  function Settings({ voice, setVoice, caps, setCaps }) {
+  709    const sample = P.p1;
+  710    return (
+  711      <div>
+  712        <PageHead title="Settings" sub="Two minutes here shapes every message." />
+  713        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+  714          <div style={{ display: "grid", gap: 16, alignContent: "start" }}>
+  715            <Card>
+  716              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Your voice</div>
+  717              <div style={{ fontSize: 13, color: T.sub, marginBottom: 14 }}>I write every message in this voice. Change it and everything changes.</div>
+  718              <Field label="Tone">{["warm", "direct", "playful"].map((t) => <Chip key={t} on={voice.tone === t} onClick={() => setVoice({ ...voice, tone: t })}>{t[0].toUpperCase() + t.slice(1)}</Chip>)}</Field>
+  719              <Field label="Language">{[["en", "English"], ["hinglish", "Hinglish"], ["hi", "Hindi"], ["gu", "Gujarati"]].map(([k, l]) => <Chip key={k} on={voice.lang === k} onClick={() => setVoice({ ...voice, lang: k })}>{l}</Chip>)}</Field>
+  720              <Field label="Emoji"><Toggle on={voice.emoji} onChange={(v) => setVoice({ ...voice, emoji: v })} /><span style={{ fontSize: 13, color: T.sub, marginLeft: 10 }}>{voice.emoji ? "A little" : "None"}</span></Field>
+  721              <Field label="Sign off as"><input defaultValue="Shree Sarees" style={{ padding: "7px 10px", border: "1px solid #BABABA", borderRadius: 8, fontSize: 13, fontFamily: T.font, width: 220 }} /></Field>
+  722            </Card>
+  723            <Card>
+  724              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>How often</div>
+  725              <div style={{ fontSize: 13, color: T.sub, marginBottom: 14 }}>Most customers hear from you far less than this. These are ceilings, not targets.</div>
+  726              <Field label="Per customer, per day">{[1, 2].map((n) => <Chip key={n} on={caps.day === n} onClick={() => setCaps({ ...caps, day: n })}>{n}</Chip>)}</Field>
+  727              <Field label="Per customer, per week">{[2, 3, 5].map((n) => <Chip key={n} on={caps.week === n} onClick={() => setCaps({ ...caps, week: n })}>{n}</Chip>)}</Field>
+  728              <Field label="Quiet hours"><span style={{ fontSize: 13 }}>10:00 pm – 8:00 am, Asia/Kolkata</span></Field>
+  729              <Field label="Stop pushing after"><span style={{ fontSize: 13 }}>5 unopened in a row <span style={{ color: T.faint }}>— protects the channel from being blocked</span></span></Field>
+  730            </Card>
+  731          </div>
+  732          <div style={{ display: "grid", gap: 16, alignContent: "start" }}>
+  733            <Card>
+  734              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 12 }}>Preview</div>
+  735              {[["high_intent", "Keeps coming back"], ["cart_abandon", "Cart left behind"], ["price_hesitation", "Stopped at the price"], ["lapsing", "Going quiet"]].map(([id, label]) => (
+  736                <div key={id} style={{ marginBottom: 12 }}>
+  737                  <div style={{ fontSize: 11, color: T.faint, marginBottom: 4 }}>{label}</div>
+  738                  <div style={{ background: T.pageBg, borderRadius: 10, padding: "10px 12px", display: "flex", gap: 10, fontSize: 13 }}>
+  739                    <div style={{ width: 36, height: 36, borderRadius: 6, background: "#7A1F2B", flexShrink: 0 }} />
+  740                    <div><div style={{ fontWeight: 500 }}>{copyFor(id, sample, voice)}</div><div style={{ color: T.sub, fontSize: 12, marginTop: 2 }}>shreesarees.in · now</div></div>
+  741                  </div>
+  742                </div>
+  743              ))}
+  744            </Card>
+  745            <Card>
+  746              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 10 }}>Channels</div>
+  747              {[["Push", true, "Working — 412 reachable browsers"], ["Email", true, "Working — 184 addresses"], ["WhatsApp", false, "Coming later. Connect your existing Business number and keep using your phone."], ["SMS", false, "Coming later"]].map(([k, on, v]) => (
+  748                <div key={k} style={{ display: "flex", gap: 10, padding: "7px 0", fontSize: 13, alignItems: "flex-start", borderTop: k !== "Push" ? `1px solid ${T.border}` : "none" }}>
+  749                  <span style={{ width: 8, height: 8, borderRadius: 4, background: on ? T.successText : "#D0D0D0", marginTop: 6, flexShrink: 0 }} />
+  750                  <div><div style={{ fontWeight: 500, color: on ? T.text : T.faint }}>{k}</div><div style={{ color: T.sub, fontSize: 12 }}>{v}</div></div>
+  751                </div>
+  752              ))}
+  753            </Card>
+  754          </div>
+  755        </div>
+  756      </div>
+  757    );
+  758  }
+  759  function Field({ label, children }) {
+  760    return <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", alignItems: "center", gap: 12, marginBottom: 12 }}><span style={{ fontSize: 13, color: T.sub }}>{label}</span><div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>{children}</div></div>;
+  761  }
+  762  function Chip({ on, onClick, children }) {
+  763    return <button onClick={onClick} style={{ padding: "6px 12px", borderRadius: 8, border: `1px solid ${on ? T.text : "#BABABA"}`, background: on ? T.text : "#FFF", color: on ? "#FFF" : T.text, fontSize: 13, cursor: "pointer", fontFamily: T.font }}>{children}</button>;
+  764  }
+  765  function PageHead({ title, sub }) {
+  766    return <div style={{ marginBottom: 16 }}><h1 style={{ fontSize: 20, fontWeight: 600, margin: 0, letterSpacing: "-0.01em" }}>{title}</h1>{sub && <div style={{ fontSize: 13, color: T.sub, marginTop: 4, maxWidth: 640, lineHeight: 1.5 }}>{sub}</div>}</div>;
+  767  }
+  768  
+  769  /* ---------- App shell ---------- */
+  770  export default function App() {
+  771    const [onboarded, setOnboarded] = useState(false);
+  772    const [steps, setSteps] = useState([true, false, false, false]);
+  773    const [view, setView] = useState("today");
+  774    const [customer, setCustomer] = useState(null);
+  775    const [voice, setVoice] = useState({ tone: "warm", emoji: true, lang: "en" });
+  776    const [caps, setCaps] = useState({ day: 1, week: 3 });
+  777    const [signalsOn, setSignalsOn] = useState(Object.fromEntries(SIGNAL_DEFS.map((s) => [s.id, !["winback", "checkout_abandon"].includes(s.id)])));
+  778    const [orders, setOrders] = useState(COD_ORDERS);
+  779    const [toast, setToast] = useState(null);
+  780  
+  781    const nav = [
+  782      ["today", "Today", Home], ["customers", "Customers", Users], ["signals", "What to act on", Radio],
+  783      ["messages", "Messages", MessageSquare], ["insights", "Insights", BarChart3], ["cod", "Cash on delivery", Package], ["settings", "Settings", SettingsIcon],
+  784    ];
+  785    const go = (v) => { setView(v); setCustomer(null); };
+  786  
+  787    return (
+  788      <div style={{ fontFamily: T.font, color: T.text, background: T.pageBg, minHeight: "100vh", fontSize: 14 }}>
+  789        {/* Shopify admin chrome (context only) */}
+  790        <div style={{ background: "#1A1A1A", color: "#E3E3E3", height: 44, display: "flex", alignItems: "center", padding: "0 16px", gap: 16, fontSize: 13 }}>
+  791          <span style={{ fontWeight: 600, color: "#FFF" }}>shopify</span>
+  792          <div style={{ flex: 1, maxWidth: 480, background: "#303030", borderRadius: 8, height: 28, display: "flex", alignItems: "center", padding: "0 10px", color: "#8A8A8A", gap: 8 }}><Search size={13} /> Search</div>
+  793          <span style={{ marginLeft: "auto", color: "#8A8A8A" }}>Shree Sarees</span>
+  794        </div>
+  795  
+  796        <div style={{ display: "flex" }}>
+  797          {/* Shopify left nav with the app section */}
+  798          <aside style={{ width: 232, padding: "12px 8px", borderRight: `1px solid ${T.border}`, minHeight: "calc(100vh - 44px)", background: "#EBEBEB" }}>
+  799            {["Home", "Orders", "Products", "Customers", "Marketing", "Discounts", "Content", "Analytics"].map((x) => <div key={x} style={{ padding: "6px 10px", fontSize: 13, color: T.sub, borderRadius: 8 }}>{x}</div>)}
+  800            <div style={{ fontSize: 11, color: T.faint, padding: "14px 10px 4px", fontWeight: 500 }}>Apps</div>
+  801            <div style={{ padding: "6px 10px", fontSize: 13, fontWeight: 600, display: "flex", gap: 8, alignItems: "center" }}><span style={{ width: 18, height: 18, borderRadius: 4, background: T.magicText, display: "inline-block" }} />CartnCodForm</div>
+  802            {onboarded && nav.map(([k, l, I]) => (
+  803              <button key={k} onClick={() => go(k)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "6px 10px 6px 24px", fontSize: 13, borderRadius: 8, border: "none", cursor: "pointer", fontFamily: T.font, background: view === k ? "#FFF" : "transparent", color: view === k ? T.text : T.sub, fontWeight: view === k ? 500 : 400 }}>
+  804                <I size={14} /> {l}
+  805              </button>
+  806            ))}
+  807          </aside>
+  808  
+  809          <main style={{ flex: 1, padding: "24px 32px", maxWidth: 1080, boxSizing: "border-box" }}>
+  810            {!onboarded ? (
+  811              <Onboarding steps={steps} setSteps={setSteps} voice={voice} onFinish={() => { setOnboarded(true); setToast("You're set. I'll take it from here."); setTimeout(() => setToast(null), 2500); }} />
+  812            ) : view === "today" ? <Today signalsOn={signalsOn} voice={voice} setView={setView} setCustomer={setCustomer} />
+  813              : view === "customers" ? <Customers customer={customer} setCustomer={setCustomer} voice={voice} />
+  814              : view === "signals" ? <Signals signalsOn={signalsOn} setSignalsOn={setSignalsOn} voice={voice} />
+  815              : view === "messages" ? <Messages />
+  816              : view === "insights" ? <Insights />
+  817              : view === "cod" ? <COD orders={orders} setOrders={setOrders} />
+  818              : <Settings voice={voice} setVoice={setVoice} caps={caps} setCaps={setCaps} />}
+  819          </main>
+  820        </div>
+  821  
+  822        {toast && (
+  823          <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: T.text, color: "#FFF", padding: "10px 16px", borderRadius: 8, fontSize: 13, display: "flex", gap: 8, alignItems: "center", boxShadow: "0 4px 12px rgba(0,0,0,.2)" }}><Check size={14} /> {toast}</div>
+  824        )}
+  825      </div>
+  826    );
+  827  }
+
+

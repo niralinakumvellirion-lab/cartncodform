@@ -41,6 +41,21 @@ router.post('/', async (req, res) => {
     await StorefrontEvent.insertMany(docs, { ordered: false });
     console.log(`[events] Saved ${docs.length} event(s) for ${shop}`);
 
+    // Phase F — a page_view from a suppressed profile lifts push suppression.
+    // Fully fire-and-forget: the beacon response goes out immediately.
+    if (sessionId && events.some((e) => e.type === 'page_view')) {
+      const { clearPushSuppression } = require('../services/pushHygiene');
+      const Profile = require('../models/Profile');
+      Profile.findOne({ shopDomain: shop, 'identifiers.sessionIds': sessionId })
+        .then((profile) => {
+          if (profile) {
+            clearPushSuppression(profile._id, shop)
+              .catch((err) => console.error('[hygiene] resubscribe error:', err.message));
+          }
+        })
+        .catch((err) => console.error('[hygiene] resubscribe lookup error:', err.message));
+    }
+
     return res.status(200).json({ success: true });
   } catch (err) {
     console.error('[events] POST /api/events error:', err.message);

@@ -206,6 +206,9 @@ router.get('/cod-form', (req, res) => {
       <label>Phone Number <span class="req">*</span></label>
       <input type="tel" name="phone" autocomplete="tel" />
 
+      <label for="ccf-email">Email (optional — for order updates)</label>
+      <input type="email" id="ccf-email" name="email" placeholder="you@example.com" autocomplete="email" />
+
       <label>Full Address <span class="req">*</span></label>
       <textarea name="address" rows="3" autocomplete="street-address"></textarea>
 
@@ -268,6 +271,7 @@ router.get('/cod-form', (req, res) => {
         name: name,
         phone: phone,
         address: address,
+        email: (data.get('email') || '').trim(),
         city: (data.get('city') || '').trim(),
         pincode: (data.get('pincode') || '').trim(),
         quantity: Number(data.get('quantity')) || 1,
@@ -324,6 +328,7 @@ router.post('/cod-order', async (req, res) => {
     const {
       name,
       phone,
+      email,
       address,
       city,
       pincode,
@@ -338,10 +343,13 @@ router.post('/cod-order', async (req, res) => {
         .json({ success: false, error: 'shop, name, phone and address are required' });
     }
 
+    const cleanEmail = String(email || '').trim();
+
     const order = await CodOrder.create({
       shopDomain: shop,
       name: String(name).trim(),
       phone: String(phone).trim(),
+      email: cleanEmail,
       address: String(address).trim(),
       city: String(city || '').trim(),
       pincode: String(pincode || '').trim(),
@@ -352,6 +360,15 @@ router.post('/cod-order', async (req, res) => {
     });
 
     console.log(`[proxy] New COD order for ${order.shopDomain} from ${order.name} (${order.phone})`);
+
+    // Phase D: link the captured email to the phone-anchored profile.
+    const { upsertProfile } = require('../services/profileService');
+    upsertProfile(shop, { phone: String(phone).trim(), email: cleanEmail || null }, {
+      ...(cleanEmail
+        ? { 'channels.email.address': cleanEmail, 'channels.email.source': 'cod' }
+        : {}),
+      lastSeenAt: new Date(),
+    }).catch((err) => console.error('[profile] cod-proxy upsert error:', err.message));
 
     // Notify the store owner — same fire-and-forget notifications as
     // routes/cod.js POST /order.

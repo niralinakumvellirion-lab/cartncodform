@@ -1,0 +1,264 @@
+================================================================================
+PHASE G1 — Admin rebuild: shell, nav, Today screen, Customers list
+SELF-AUDIT
+================================================================================
+Date: 2026-09-08
+Branch: phase-g1-admin-shell   (cut from phase-f-push-hygiene; Phases A–F present)
+"Done when" (this slice): the nav shell + Today + Customers render real data;
+the other four screens are stubs; build passes.
+Status: shell rewritten, Today + Customers implemented, 4 stubs, profiles list
+route added, build green, backend 123/123. Done.
+
+================================================================================
+1. FILES CREATED
+================================================================================
+  frontend/app/admin/screens/Today.jsx        (195 lines)  — implemented
+  frontend/app/admin/screens/Customers.jsx    (149 lines)  — implemented
+  frontend/app/admin/screens/Profile.jsx      ( 12 lines)  — stub
+  frontend/app/admin/screens/Messages.jsx     ( 12 lines)  — stub
+  frontend/app/admin/screens/CodOrders.jsx    ( 12 lines)  — stub
+  frontend/app/admin/screens/Settings.jsx     ( 12 lines)  — stub
+  audits/PHASE_G1_PRE_AUDIT.txt               (1952 lines) — read-only capture
+
+  Each stub: default fn returning
+    <Box padding="400"><Text tone="subdued">{Name} — coming soon</Text></Box>
+  (all with 'use client'; the shell that imports them is already a client
+   component, so the directive is belt-and-braces.)
+
+  NOTE: spec named the COD stub "CodOrders.jsx" in STEP 3; the shell imports it
+  as `CodScreen` and renders it for activeScreen 'cod' (STEP 4). Filename
+  CodOrders.jsx as specified.
+
+================================================================================
+2. FILES MODIFIED
+================================================================================
+frontend/app/admin/page.js          958 -> 73  (-885)
+  Full rewrite to a navigation shell. Removed (moved to screens/ or retired):
+  StoreView, RevenueStats, CustomerAnalytics, SendPushButton, SendEmailButton,
+  WhatsAppButton, StatusBadge, OnboardingChecklist, formatMoney, formatDate,
+  cleanPhone, COD_STATUS_OPTIONS, ONBOARDING_STORAGE_KEY, isOnboardingDismissed,
+  and the 3-tab layout. Kept: 'use client', useSearchParams + `shop`,
+  AppProvider, the App Bridge <meta name="shopify-api-key">, the
+  <Suspense fallback={null}> wrapper, the polaris styles.css import.
+  Added imports: Frame, Navigation, Page from @shopify/polaris; HomeIcon,
+  PersonIcon, NotificationIcon, ReceiptIcon, SettingsIcon from
+  @shopify/polaris-icons; the 5 screen components.
+
+  Shell structure:
+    <AppProvider i18n={{}}>
+      <Frame navigation={<Navigation location="/"><Navigation.Section
+        items={SCREENS.map(s => ({ label, icon, selected: activeScreen===s.id,
+                                   onClick: () => setActiveScreen(s.id) }))} />
+      </Navigation>}>
+        <Page>
+          {activeScreen === 'today'     && <TodayScreen     shop={shop} />}
+          {activeScreen === 'customers' && <CustomersScreen shop={shop} />}
+          {activeScreen === 'messages'  && <MessagesScreen  shop={shop} />}
+          {activeScreen === 'cod'       && <CodScreen       shop={shop} />}
+          {activeScreen === 'settings'  && <SettingsScreen  shop={shop} />}
+        </Page>
+      </Frame>
+    </AppProvider>
+  State: `activeScreen` (useState('today')).
+
+frontend/package.json               (+1 line)
+  @@ dependencies: added "@shopify/polaris-icons": "^9.3.1"
+     (it was resolvable as a transitive dep of @shopify/polaris 13.9.5 but not
+      declared. `npm install` NOT run — the version already on disk is 9.3.1.
+      STEP 4 asked to "check if it needs to be added"; declared it explicitly.)
+
+backend/routes/profiles.js          119 -> 301
+  (HEAD is the pre-Phase-D committed state; the working tree already carried
+   D/E/F. Phase-G1 hunk only:)
+  @@ +47..+78  GET /:shopDomain/profiles   requireAuth + requireStoreOwner
+     Query: limit (default 50, clamped 1..200), page (default 0, >=0)
+     Promise.all([
+       Profile.find({ shopDomain }).sort({ updatedAt:-1 }).skip(page*limit)
+         .limit(limit).select('identifiers stage orders channels lastSeenAt updatedAt'),
+       Profile.countDocuments({ shopDomain }),
+     ]) -> { profiles, total }
+     Placed before GET /:shopDomain/profiles/:profileId (distinct paths, so
+     order is immaterial, but grouped for readability).
+
+================================================================================
+3. CONFIRM — Navigation renders 5 items
+================================================================================
+SCREENS = [
+  { id:'today',     label:'Today',      icon: HomeIcon },
+  { id:'customers', label:'Customers',  icon: PersonIcon },
+  { id:'messages',  label:'Messages',   icon: NotificationIcon },
+  { id:'cod',       label:'COD Orders', icon: ReceiptIcon },
+  { id:'settings',  label:'Settings',   icon: SettingsIcon },
+]
+-> exactly 5 <Navigation.Section> items, each with label + icon + selected +
+onClick. `selected` follows `activeScreen`; `onClick` calls setActiveScreen.
+
+DEVIATION: STEP 4 listed `CustomersIcon` — that name does not exist in
+@shopify/polaris-icons 9.3.1 (checked: HomeIcon, PersonIcon, NotificationIcon,
+ReceiptIcon, SettingsIcon, OrderIcon, ArrowLeftIcon, ChevronRightIcon,
+MagicIcon all present; no CustomersIcon). Used `PersonIcon` for Customers.
+
+================================================================================
+4. CONFIRM — Today screen fetches from 3 endpoints
+================================================================================
+Today.jsx useEffect (on `shop`): Promise.allSettled([
+  apiGet(`/api/profiles/${shop}/weekly-narrative`)  -> { narrative, insights, stats }
+  apiGet(`/api/profiles/${shop}/push-stats`)        -> { deliveredLast7d, attemptedLast7d, rateLast7d }
+  apiGet(`/api/profiles/${shop}/signals?limit=3`)   -> { signals }  (top 3 by strength)
+])
+State: narrative, insights, stats, pushStats, topSignals, loading, error.
+allSettled so one failing endpoint doesn't blank the others; `error` is only
+set when ALL three reject. Layout matches the spec: narrative Card, 4 stat
+tiles in a Grid, a `variant="oneThird"` push-delivery Card, a "What to act on"
+Card listing topSignals with a strength Badge (critical >0.7 / warning >0.4 /
+info), and an "Insights" Card bulleting `insights`.
+
+DEVIATION: spec wrote `<Layout.Section oneThird>` (boolean prop). Polaris
+13.9.5's Layout.Section uses `variant` (renders `Section-${variant}`), so used
+`<Layout.Section variant="oneThird">`.
+
+================================================================================
+5. CONFIRM — Customers screen fetches profiles + signals, builds signalCountMap
+================================================================================
+Customers.jsx loadData(): Promise.all([
+  apiGet(`/api/profiles/${shop}/profiles?limit=50`)   -> { profiles, total }
+  apiGet(`/api/profiles/${shop}/signals?limit=200`)   -> { signals }
+])
+signalCountMap: reduce over signals, key = sig.profileId (unwrapping a
+populated `{_id}` object if the signals route populated it), value = count.
+State: profiles, signalCountMap, loading, error, selectedProfileId (set on row
+onClick; ProfileScreen wiring deferred to G2 — the id is stored, nothing else).
+IndexTable columns: Identifier (email|phone|`Anonymous <id-6>`), Stage (Badge
+tone by stage), Signals (attention Badge with count, or —), Channels (Push /
+Email Badges from channels.push.subscribed / channels.email.address), LTV
+(₹ from orders.ltv), Last seen (lastSeenAt, en-IN date). `secondaryActions`
+Refresh -> loadData. Empty state + a critical Banner on error.
+
+================================================================================
+6. CONFIRM — GET /api/profiles/:shop/profiles exists and is auth-gated
+================================================================================
+backend/routes/profiles.js: router.get('/:shopDomain/profiles', requireAuth,
+requireStoreOwner, ...). requireStoreOwner enforces the token-shop vs
+path-shop IDOR check. `.select(...)` limits the payload to
+identifiers/stage/orders/channels/lastSeenAt/updatedAt (no message log, no
+suppressed flag). limit clamped to 200, page >= 0.
+
+================================================================================
+7. BUILD RESULT
+================================================================================
+cd frontend && npm run build
+  ▲ Next.js 14.2.5
+  ✓ Compiled successfully
+  ✓ Linting and checking validity of types
+  ✓ Generating static pages (5/5)
+
+  Route (app)              Size      First Load JS
+  ┌ ○ /                    6.95 kB   94.1 kB
+  ├ ○ /_not-found          871 B     88 kB
+  ├ ○ /admin               74.3 kB   161 kB    (was 79.5 kB / 167 kB)
+  └ ƒ /cod-form/[shop]     5.17 kB   92.3 kB
+
+  Zero errors, zero warnings. admin/page.js 958 -> 73 lines.
+
+================================================================================
+8. npm test RESULT (backend)
+================================================================================
+cd backend && npm test
+  Test Suites: 13 passed, 13 total
+  Tests:       123 passed, 123 total
+  -> unchanged from Phase F baseline (no new backend tests; the list route is a
+     simple find+count, existing suites unaffected).
+  (The pre-existing "cancelJobsForOrder error: db down" / "Invalid session
+   token" console.error lines are intentional error-path assertions.)
+
+================================================================================
+9. POLARIS ICON PACKAGE STATUS
+================================================================================
+@shopify/polaris-icons 9.3.1 is installed (transitive dep of
+@shopify/polaris 13.9.5). It was NOT listed in frontend/package.json
+dependencies -> added "@shopify/polaris-icons": "^9.3.1" explicitly (no
+npm install needed; on-disk version already matches). Icon imports used:
+HomeIcon, PersonIcon (substitute for the non-existent CustomersIcon),
+NotificationIcon, ReceiptIcon, SettingsIcon — all verified present in 9.3.1.
+Build resolves them with no error.
+
+================================================================================
+10. DEVIATIONS FROM THE LITERAL SPEC (all deliberate)
+================================================================================
+(a) Icon: CustomersIcon -> PersonIcon (CustomersIcon absent in polaris-icons 9.3.1).
+(b) Layout.Section: `oneThird` boolean -> `variant="oneThird"` (v13 API).
+(c) Shell does NOT import apiGet/apiSend (STEP 4 "keep" list). They are unused
+    in the shell now — every screen imports apiGet from ../../../lib/api itself
+    (STEP 5/6). Importing them unused in the shell would only add a lint
+    warning. The api capability is retained, just at the screen layer.
+(d) Nested <Page>: the shell wraps screens in a bare <Page> (STEP 4), and
+    Today.jsx / Customers.jsx each render their own <Page title=...> (STEP 5/6).
+    Polaris tolerates a nested <Page> (the outer is just a max-width padded
+    container) and the build is clean, but it double-pads. Dropping the shell's
+    <Page> (or the screens') is a trivial G2 cleanup — kept both per the
+    literal specs.
+(e) <Frame navigation={navigationMarkup}> (the `navigation` PROP) rather than
+    the spec's `<Frame><Navigation/><Page/></Frame>` (Navigation + Page as
+    sibling children). Polaris <Frame> renders `navigation` as the rail and
+    `children` as the main region; passing Navigation as a child would render
+    it inside the content area, not as the rail. This is the correct Frame API.
+(f) Customers row onClick sets `selectedProfileId` but nothing consumes it yet
+    (STEP 6: "stub for now, wire in G2"). No modal / navigation happens.
+(g) Frame mobile nav: no topBar / burger, so on a narrow viewport the nav rail
+    is hidden with no way to toggle it. Desktop-first for G1; the embedded
+    Shopify admin gives near-full width, so the rail shows. G2/polish can add
+    a TopBar + showMobileNavigation.
+
+================================================================================
+11. NOTICED BUT NOT TOUCHED  (out of scope for Phase G1)
+================================================================================
+- The old customer-facing helpers (SendPushButton, SendEmailButton,
+  WhatsAppButton, CustomerAnalytics journey modal, RevenueStats, the
+  OnboardingChecklist, the COD status <Select> table) are GONE from the admin.
+  Their backend endpoints (/api/push/send-customer, /send-email-test,
+  /api/stores/:shop/customers|orders, /api/cod/order/:id PATCH,
+  /api/events/:shop/...) are untouched and still live — the new screens just
+  don't call them yet. COD management + per-customer send + journey timeline
+  return in G2 (CodOrders / Profile / Messages screens).
+- Onboarding: the first-run checklist was removed with StoreView. The prototype
+  has a dedicated Onboarding screen (prototype lines 249-287) that G2 should
+  add; Store.onboarding.steps already exists (Phase C).
+- prototype uses lucide-react + recharts (the WEEK revenue bar chart on Today).
+  Neither is a dependency and both are outside the CDN allowlist for artifacts;
+  the admin is a Vercel Next app so recharts COULD be added, but G1 renders the
+  revenue figure as a stat tile, no chart. Decide in G2 whether to add recharts.
+- No route for a single COD order list tailored to the new screen — CodOrders.jsx
+  (G2) will reuse GET /api/stores/:shop/orders + PATCH /api/cod/order/:id.
+- `Profile.messages` / signals `evidence` shapes are assumed by Today/Customers
+  (sig.evidence[0], sig.type, sig.strength, sig.profileId). These match the
+  Signal model (Phase B) and the /signals route (Phase B) which does
+  .populate('profileId','identifiers stage'). signalCountMap handles both the
+  populated-object and raw-id cases.
+- next lint / type-check pass clean; no eslint-disable added except one
+  `// eslint-disable-next-line no-unused-vars` on selectedProfileId in
+  Customers.jsx (intentionally unused until G2).
+
+================================================================================
+12. OPEN QUESTIONS
+================================================================================
+1. Nested <Page> (§10d) — drop the shell's outer <Page>, or drop the per-screen
+   <Page> and give the shell `<Page title={...}>` driven by activeScreen?
+2. Frame vs App Bridge NavMenu — an embedded Shopify app usually surfaces app
+   navigation via App Bridge's NavMenu (in Shopify's own left rail), not a
+   Polaris <Frame> sidebar which visually competes with Shopify's admin nav.
+   The spec chose <Frame>; confirm that's the intended look, or switch to
+   NavMenu / Polaris <Tabs> in G2.
+3. recharts for the Today revenue chart (prototype) — add the dependency in G2
+   or keep it as a single stat tile?
+4. Customers list: no search / stage filter yet (prototype has both). Add in
+   G2, or does the IndexTable need server-side search first?
+5. `stats.revenueRecovered` unit — analyticsService sums
+   AbandonedCustomer.recoveredRevenue as-is (rupees, not paise, from the
+   webhook). Today renders `₹{...toLocaleString('en-IN')}`. Confirm the unit is
+   whole rupees so the number isn't 100x.
+6. selectedProfileId (§10f) — G2: inline <Profile> replacing the table, a
+   Modal, or a real sub-route?
+
+================================================================================
+END — stopping after self-audit. Phase G2 not started.
+================================================================================

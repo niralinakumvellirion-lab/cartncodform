@@ -1,0 +1,601 @@
+================================================================================
+PHASE E - PRE-WORK AUDIT (read-only capture, no modifications)
+Generated: 2026-09-08T08:38:44Z
+Branch at capture: main   HEAD: 0491d8f
+================================================================================
+
+================================================================================
+FILE: backend/server.js   [EXCERPT: processScheduledJobs poller — lines 185-320]
+================================================================================
+  185      sentAt: { $gte: since },
+  186      $or: orClauses,
+  187    });
+  188    return count >= 3;
+  189  }
+  190  
+  191  /**
+  192   * Phase C: append a "sent" entry to the profile's message log (kept to the
+  193   * last 20). Best-effort — a logging failure must not fail the send.
+  194   */
+  195  async function recordProfileMessage(job) {
+  196    if (!job.profileId) return;
+  197    await Profile.findByIdAndUpdate(job.profileId, {
+  198      $push: {
+  199        messages: {
+  200          $each: [{
+  201            channel: job.channel,
+  202            type: job.signalType || 'manual',
+  203            sentAt: new Date(),
+  204            outcome: 'sent',
+  205            jobId: job._id,
+  206          }],
+  207          $slice: -20, // keep last 20 only
+  208        },
+  209      },
+  210    });
+  211  }
+  212  
+  213  /**
+  214   * Polls for due ScheduledJob rows and sends them. Runs every 30s.
+  215   * Uses a claim-update (findOneAndUpdate with status:'pending' filter)
+  216   * so this is safe even if multiple instances ever run.
+  217   */
+  218  async function processScheduledJobs() {
+  219    try {
+  220      const now = new Date();
+  221      const dueJobs = await ScheduledJob.find({
+  222        status: 'pending',
+  223        runAt: { $lte: now },
+  224      }).limit(20);
+  225  
+  226      for (const job of dueJobs) {
+  227        // Check quiet hours + frequency cap BEFORE claiming — if
+  228        // blocked, leave the job pending and re-check next tick
+  229        // (quiet hours) or skip it permanently (frequency cap).
+  230        const Store = require('./models/Store');
+  231        const store = await Store.findOne({ shopDomain: job.shopDomain }).select('timezone').lean();
+  232        const timezone = store?.timezone || 'Asia/Kolkata';
+  233  
+  234        if (isQuietHours(timezone)) {
+  235          console.log(`[automation] Job ${job._id} deferred — quiet hours (${timezone})`);
+  236          continue; // leave pending, retry next tick
+  237        }
+  238  
+  239        const overCap = await isOverFrequencyCap(job.shopDomain, job.cartToken, job.customerId);
+  240        if (overCap) {
+  241          await ScheduledJob.findOneAndUpdate(
+  242            { _id: job._id, status: 'pending' },
+  243            { status: 'skipped', error: 'Frequency cap reached (3/24h)' }
+  244          );
+  245          console.log(`[automation] Job ${job._id} skipped — frequency cap reached`);
+  246          continue;
+  247        }
+  248  
+  249        // Claim the job — only proceed if we successfully flip it from pending.
+  250        const claimed = await ScheduledJob.findOneAndUpdate(
+  251          { _id: job._id, status: 'pending' },
+  252          { status: 'sent', sentAt: new Date() },
+  253          { new: true }
+  254        );
+  255        if (!claimed) continue; // another process already claimed it
+  256  
+  257        // Phase C send-time re-validation — if runAt somehow sits in the
+  258        // future (clock skew / rescheduled), release the claim and retry.
+  259        if (job.profileId && job.runAt > new Date()) {
+  260          await ScheduledJob.findByIdAndUpdate(job._id, { status: 'pending' });
+  261          continue;
+  262        }
+  263  
+  264        try {
+  265          const channel = job.channel || 'push';
+  266          const payload = job.payload || {};
+  267  
+  268          if (channel === 'push') {
+  269            const baseUrl = payload.url || `https://${job.shopDomain}`;
+  270            const urlWithJob = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'ccf_job=' + job._id.toString();
+  271            const result = await sendPushToCustomers(
+  272              job.shopDomain,
+  273              payload.title || 'You left something behind!',
+  274              payload.body || 'Come back and check it out.',
+  275              urlWithJob,
+  276              payload.imageUrl || null,
+  277              false,
+  278              job.cartToken || null,
+  279              false
+  280            );
+  281  
+  282            if (!result.success || result.sent === 0) {
+  283              await ScheduledJob.findByIdAndUpdate(job._id, {
+  284                status: 'failed',
+  285                error: result.error || 'No active subscriber found',
+  286              });
+  287              console.log(`[automation] Job ${job._id} failed: no subscriber reached`);
+  288            } else {
+  289              console.log(`[automation] Job ${job._id} sent successfully`);
+  290              await recordProfileMessage(job).catch((e) =>
+  291                console.error('[brain] message log error:', e.message)
+  292              );
+  293            }
+  294          } else if (channel === 'email') {
+  295            const customer = await AbandonedCustomer.findOne({
+  296              shopDomain: job.shopDomain,
+  297              sessionId: job.cartToken,
+  298            });
+  299            if (!customer || !customer.email) {
+  300              await ScheduledJob.findByIdAndUpdate(job._id, {
+  301                status: 'skipped',
+  302                error: 'No customer email for this cart',
+  303              });
+  304              console.log(`[automation] Job ${job._id} skipped — no customer email`);
+  305            } else {
+  306              const cartUrl = `https://${job.shopDomain}/cart`;
+  307              const sendResult = await sendAbandonedCartEmail(customer, {
+  308                subject: payload.subject || undefined,
+  309                body: payload.body || undefined,
+  310                cartUrl,
+  311              });
+  312              if (!sendResult.success) {
+  313                await ScheduledJob.findByIdAndUpdate(job._id, {
+  314                  status: 'failed',
+  315                  error: sendResult.error || 'Email send failed',
+  316                });
+  317                console.log(`[automation] Job ${job._id} email failed: ${sendResult.error}`);
+  318              } else {
+  319                console.log(`[automation] Job ${job._id} email sent successfully`);
+  320                await recordProfileMessage(job).catch((e) =>
+
+
+================================================================================
+FILE: backend/models/Store.js   (59 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const storeSchema = new mongoose.Schema({
+    4    shopDomain: {
+    5      type: String,
+    6      required: true,
+    7      unique: true,
+    8      trim: true,
+    9      lowercase: true,
+   10    },
+   11    accessToken: {
+   12      type: String,
+   13      required: true,
+   14    },
+   15    ownerEmail: {
+   16      type: String,
+   17      lowercase: true,
+   18      trim: true,
+   19    },
+   20    timezone: {
+   21      type: String,
+   22      default: 'Asia/Kolkata',
+   23    },
+   24    plan: {
+   25      type: String,
+   26      enum: ['free', 'pro'],
+   27      default: 'free',
+   28    },
+   29    subscriptionId: { type: String },
+   30    subscriptionStatus: { type: String },
+   31    planUpdatedAt: { type: Date },
+   32  
+   33    // --- Phase C: brain configuration ---
+   34    voice: {
+   35      tone: { type: String, default: 'friendly' },
+   36      emoji: { type: Boolean, default: true },
+   37      lang: { type: String, default: 'en' },
+   38      signOff: { type: String, default: '' },
+   39    },
+   40    caps: {
+   41      perDay: { type: Number, default: 2 },
+   42      perWeek: { type: Number, default: 5 },
+   43    },
+   44    quietHours: {
+   45      start: { type: Number, default: 22 }, // hour 0-23
+   46      end: { type: Number, default: 8 },
+   47    },
+   48    onboarding: {
+   49      steps: [{ id: String, done: Boolean, doneAt: Date }],
+   50    },
+   51    // NOTE: `timezone` already exists above (default 'Asia/Kolkata') — not re-added.
+   52  
+   53    installedAt: {
+   54      type: Date,
+   55      default: Date.now,
+   56    },
+   57  });
+   58  
+   59  module.exports = mongoose.model('Store', storeSchema);
+
+
+================================================================================
+FILE: backend/models/Signal.js   (41 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  const { Schema } = mongoose;
+    3  
+    4  /**
+    5   * A deterministic fact about a Profile, computed by
+    6   * backend/services/signalEngine.js on ingest and nightly.
+    7   *
+    8   * One active row per (shopDomain, profileId, type) — recompute upserts it.
+    9   * Rows self-expire via the TTL index on `expiresAt`.
+   10   */
+   11  const signalSchema = new Schema({
+   12    shopDomain: { type: String, required: true, lowercase: true, trim: true },
+   13    profileId: { type: Schema.Types.ObjectId, ref: 'Profile', required: true },
+   14    type: {
+   15      type: String,
+   16      required: true,
+   17      enum: [
+   18        'cart_abandon', 'checkout_abandon', 'browse_abandon',
+   19        'high_intent', 'price_hesitation', 'price_drop', 'back_in_stock',
+   20        'post_purchase_d3', 'lapsing', 'winback',
+   21        'email_capture', 'cod_to_prepaid',
+   22      ],
+   23    },
+   24    strength: { type: Number, min: 0, max: 1, required: true },
+   25    productId: { type: String, default: null },
+   26    evidence: [{ type: String }], // human-readable reasons, max 5
+   27    expiresAt: { type: Date, required: true },
+   28    createdAt: { type: Date, default: Date.now },
+   29    updatedAt: { type: Date, default: Date.now },
+   30  });
+   31  
+   32  // One active signal per type per profile — upsert on this key.
+   33  signalSchema.index({ shopDomain: 1, profileId: 1, type: 1 }, { unique: true });
+   34  
+   35  // Mongo auto-deletes a signal the moment it passes expiresAt.
+   36  signalSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+   37  
+   38  // Brain: strongest signals per shop per type.
+   39  signalSchema.index({ shopDomain: 1, type: 1, strength: -1 });
+   40  
+   41  module.exports = mongoose.model('Signal', signalSchema);
+
+
+================================================================================
+FILE: backend/models/ScheduledJob.js   (65 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const scheduledJobSchema = new mongoose.Schema({
+    4    shopDomain: { type: String, required: true, lowercase: true, index: true },
+    5    // Phase C: brain-scheduled jobs carry no ruleId — relaxed from `required`.
+    6    ruleId: { type: mongoose.Schema.Types.ObjectId, ref: 'AutomationRule', default: null },
+    7    stepIndex: { type: Number, required: true, default: 0 },
+    8  
+    9    // --- Phase C: brain targeting / explainability ---
+   10    profileId: { type: mongoose.Schema.Types.ObjectId, ref: 'Profile', default: null },
+   11    signalType: { type: String, default: null },
+   12    reason: { type: String, default: '' }, // human-readable why
+   13  
+   14    // Targeting — at least one of these should be present.
+   15    subscriptionToken: { type: String },  // FCM token, if already resolved
+   16    sessionId: { type: String, index: true },  // stable UUID (StorefrontEvent.sessionId)
+   17    cartToken: { type: String, index: true },  // Shopify cart token, for cancellation matching
+   18    customerId: { type: String, index: true },
+   19  
+   20    runAt: { type: Date, required: true, index: true },
+   21    status: {
+   22      type: String,
+   23      enum: ['pending', 'sent', 'cancelled', 'failed', 'skipped'],
+   24      default: 'pending',
+   25      index: true,
+   26    },
+   27    channel: { type: String, enum: ['push', 'email'], default: 'push' },
+   28    payload: { type: mongoose.Schema.Types.Mixed },  // resolved title/body/imageUrl at send time
+   29  
+   30    createdAt: { type: Date, default: Date.now },
+   31    sentAt: { type: Date },
+   32    error: { type: String },
+   33  });
+   34  
+   35  // Compound index for the sender's poll query.
+   36  scheduledJobSchema.index({ status: 1, runAt: 1 });
+   37  
+   38  // Prevent duplicate first-step scheduling for the same rule+cart+step
+   39  // when carts/create and carts/update fire near-simultaneously.
+   40  // Phase C: scoped to rule-based jobs (ruleId is an ObjectId) so brain jobs,
+   41  // which have ruleId=null and share cartToken+stepIndex, are NOT deduped here.
+   42  scheduledJobSchema.index(
+   43    { shopDomain: 1, ruleId: 1, cartToken: 1, stepIndex: 1 },
+   44    {
+   45      unique: true,
+   46      partialFilterExpression: {
+   47        status: { $in: ['pending', 'sent'] },
+   48        ruleId: { $type: 'objectId' },
+   49      },
+   50    }
+   51  );
+   52  
+   53  // Phase C: one pending brain job per (profile, signal) at a time.
+   54  scheduledJobSchema.index(
+   55    { shopDomain: 1, profileId: 1, signalType: 1 },
+   56    {
+   57      unique: true,
+   58      partialFilterExpression: {
+   59        status: 'pending',
+   60        profileId: { $type: 'objectId' },
+   61      },
+   62    }
+   63  );
+   64  
+   65  module.exports = mongoose.model('ScheduledJob', scheduledJobSchema);
+
+
+================================================================================
+FILE: backend/models/Profile.js   (82 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  const { Schema } = mongoose;
+    3  
+    4  /**
+    5   * One record per human, per shop. Every ingest path (storefront events, carts,
+    6   * checkouts, orders, COD orders, push subscribe) resolves to a Profile via
+    7   * backend/services/profileService.js -> upsertProfile().
+    8   *
+    9   * Merge priority (identity resolution):
+   10   *   customerId -> email -> phone -> cartToken -> ccfSessionId -> pushToken
+   11   */
+   12  const profileSchema = new Schema({
+   13    shopDomain: { type: String, required: true, lowercase: true, trim: true },
+   14  
+   15    identifiers: {
+   16      customerId: { type: String, default: null },
+   17      emails: [{ type: String, lowercase: true, trim: true }],
+   18      phones: [{ type: String }],
+   19      sessionIds: [{ type: String }], // ccfSessionIds (stable UUIDs)
+   20      cartTokens: [{ type: String }],
+   21      pushTokens: [{ type: String }], // FCM tokens
+   22    },
+   23  
+   24    channels: {
+   25      push: { subscribed: Boolean, lastToken: String, subscribedAt: Date },
+   26      email: {
+   27        address: String,
+   28        source: { type: String, enum: ['cod', 'form', 'checkout'] },
+   29      },
+   30    },
+   31  
+   32    stage: {
+   33      type: String,
+   34      enum: ['anonymous', 'identified', 'customer', 'lapsed'],
+   35      default: 'anonymous',
+   36    },
+   37  
+   38    interests: { type: Map, of: Number, default: {} }, // productId -> score 0-1
+   39  
+   40    activeHours: { type: [Number], default: [] }, // hours 0-23 when active
+   41  
+   42    orders: {
+   43      count: { type: Number, default: 0 },
+   44      ltv: { type: Number, default: 0 },
+   45      lastOrderAt: { type: Date, default: null },
+   46      codCount: { type: Number, default: 0 },
+   47      prepaidCount: { type: Number, default: 0 },
+   48    },
+   49  
+   50    messages: [
+   51      {
+   52        // last 20 only, capped in profileService
+   53        channel: String,
+   54        type: String,
+   55        sentAt: Date,
+   56        outcome: {
+   57          type: String,
+   58          enum: ['sent', 'clicked', 'converted', 'unsubscribed'],
+   59          default: 'sent',
+   60        },
+   61        jobId: { type: Schema.Types.ObjectId, ref: 'ScheduledJob' },
+   62      },
+   63    ],
+   64  
+   65    suppressed: { type: Boolean, default: false },
+   66    lastSeenAt: { type: Date, default: null },
+   67    createdAt: { type: Date, default: Date.now },
+   68    updatedAt: { type: Date, default: Date.now },
+   69  });
+   70  
+   71  // Identity-resolution lookups — one per identifier field, all sparse.
+   72  profileSchema.index({ shopDomain: 1, 'identifiers.customerId': 1 }, { sparse: true });
+   73  profileSchema.index({ shopDomain: 1, 'identifiers.emails': 1 }, { sparse: true });
+   74  profileSchema.index({ shopDomain: 1, 'identifiers.phones': 1 }, { sparse: true });
+   75  profileSchema.index({ shopDomain: 1, 'identifiers.cartTokens': 1 }, { sparse: true });
+   76  profileSchema.index({ shopDomain: 1, 'identifiers.sessionIds': 1 }, { sparse: true });
+   77  profileSchema.index({ shopDomain: 1, 'identifiers.pushTokens': 1 }, { sparse: true });
+   78  
+   79  // Dashboard "most recently active" listing.
+   80  profileSchema.index({ shopDomain: 1, updatedAt: -1 });
+   81  
+   82  module.exports = mongoose.model('Profile', profileSchema);
+
+
+================================================================================
+FILE: backend/utils/email.js   (182 lines)   [FULL]
+================================================================================
+    1  const { Resend } = require('resend');
+    2  
+    3  // The Resend constructor throws if the key is falsy, which would crash server
+    4  // startup when RESEND_API_KEY is unset. Fall back to a placeholder so the app
+    5  // still boots; sends then fail with an auth error that is caught and logged.
+    6  const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
+    7  const FROM = process.env.FROM_EMAIL || 'onboarding@resend.dev';
+    8  
+    9  // --- small HTML helpers -------------------------------------------------------
+   10  
+   11  function escapeHtml(value) {
+   12    return String(value == null ? '' : value)
+   13      .replace(/&/g, '&amp;')
+   14      .replace(/</g, '&lt;')
+   15      .replace(/>/g, '&gt;')
+   16      .replace(/"/g, '&quot;');
+   17  }
+   18  
+   19  function money(n) {
+   20    const num = Number(n) || 0;
+   21    return num.toLocaleString('en-IN', {
+   22      minimumFractionDigits: 2,
+   23      maximumFractionDigits: 2,
+   24    });
+   25  }
+   26  
+   27  function button(href, label) {
+   28    return (
+   29      `<a href="${escapeHtml(href)}" ` +
+   30      `style="display:inline-block;background:#4f46e5;color:#ffffff;` +
+   31      `text-decoration:none;padding:12px 20px;border-radius:8px;` +
+   32      `font-weight:600;font-family:Arial,Helvetica,sans-serif;">${escapeHtml(label)}</a>`
+   33    );
+   34  }
+   35  
+   36  function shell(innerHtml) {
+   37    return (
+   38      `<div style="font-family:Arial,Helvetica,sans-serif;color:#111827;` +
+   39      `max-width:560px;margin:0 auto;padding:24px;">${innerHtml}</div>`
+   40    );
+   41  }
+   42  
+   43  // ---------------------------------------------------------------------------
+   44  // 1. Abandoned cart reminder -> the customer
+   45  // ---------------------------------------------------------------------------
+   46  
+   47  async function sendAbandonedCartEmail(customer, options = {}) {
+   48    try {
+   49      if (!customer || !customer.email) {
+   50        // No email on file — nothing to send.
+   51        return { success: false, error: 'no customer email' };
+   52      }
+   53  
+   54      const items = Array.isArray(customer.cartItems) ? customer.cartItems : [];
+   55      const rows = items
+   56        .map((i) => {
+   57          const qty = i.quantity || 1;
+   58          const line = (Number(i.price) || 0) * qty;
+   59          return (
+   60            `<tr>` +
+   61            `<td style="padding:6px 0;">${escapeHtml(i.title || 'Item')} &times; ${qty}</td>` +
+   62            `<td style="padding:6px 0;text-align:right;">${money(line)}</td>` +
+   63            `</tr>`
+   64          );
+   65        })
+   66        .join('');
+   67  
+   68      // Optional overrides (per automation step / test send).
+   69      const subject = options.subject || 'You left something behind! 🛒';
+   70      const introHtml = options.body
+   71        ? `<p style="margin:0 0 16px;color:#111827;">${escapeHtml(options.body)}</p>`
+   72        : '';
+   73      const cta = options.cartUrl || process.env.FRONTEND_URL || '#';
+   74  
+   75      const html = shell(
+   76        `<h1 style="font-size:22px;margin:0 0 12px;">You forgot something!</h1>` +
+   77          `<p style="margin:0 0 16px;color:#4b5563;">Here's what's still waiting in your cart:</p>` +
+   78          `${introHtml}` +
+   79          `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
+   80          `${rows || '<tr><td style="padding:6px 0;color:#6b7280;">Your saved items</td></tr>'}` +
+   81          `<tr><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">Total</td>` +
+   82          `<td style="padding:10px 0;border-top:1px solid #e5e7eb;text-align:right;font-weight:700;">` +
+   83          `${money(customer.cartValue)}</td></tr>` +
+   84          `</table>` +
+   85          `<p style="margin:24px 0;">${button(cta, 'Complete Your Order')}</p>` +
+   86          `<p style="margin:32px 0 0;font-size:12px;color:#9ca3af;">` +
+   87          `This reminder was sent by CartnCodForm</p>`
+   88      );
+   89  
+   90      const { error } = await resend.emails.send({
+   91        from: FROM,
+   92        to: customer.email,
+   93        subject: subject,
+   94        html,
+   95      });
+   96  
+   97      if (error) throw new Error(error.message || JSON.stringify(error));
+   98  
+   99      console.log(`Email sent: abandoned_cart to ${customer.email}`);
+  100      return { success: true };
+  101    } catch (err) {
+  102      console.error(`Email failed: ${err.message}`);
+  103      return { success: false, error: err.message };
+  104    }
+  105  }
+  106  
+  107  // ---------------------------------------------------------------------------
+  108  // 2. New COD order alert -> the store owner
+  109  // ---------------------------------------------------------------------------
+  110  
+  111  async function sendNewCodOrderEmail(order, ownerEmail) {
+  112    try {
+  113      if (!ownerEmail) {
+  114        return { success: false, error: 'no owner email' };
+  115      }
+  116      if (!order) {
+  117        return { success: false, error: 'no order' };
+  118      }
+  119  
+  120      const qty = Number(order.quantity) || 1;
+  121      const price = Number(order.productPrice) || 0;
+  122      const total = price * qty;
+  123  
+  124      const html = shell(
+  125        `<h1 style="font-size:22px;margin:0 0 12px;">New COD Order!</h1>` +
+  126          `<h2 style="font-size:15px;margin:20px 0 6px;color:#374151;">Customer details</h2>` +
+  127          `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
+  128          `<tr><td style="padding:4px 0;color:#6b7280;">Name</td><td style="padding:4px 0;">${escapeHtml(order.name)}</td></tr>` +
+  129          `<tr><td style="padding:4px 0;color:#6b7280;">Phone</td><td style="padding:4px 0;">${escapeHtml(order.phone)}</td></tr>` +
+  130          `<tr><td style="padding:4px 0;color:#6b7280;">Address</td><td style="padding:4px 0;">${escapeHtml(order.address)}</td></tr>` +
+  131          `<tr><td style="padding:4px 0;color:#6b7280;">City</td><td style="padding:4px 0;">${escapeHtml(order.city)}</td></tr>` +
+  132          `<tr><td style="padding:4px 0;color:#6b7280;">Pincode</td><td style="padding:4px 0;">${escapeHtml(order.pincode)}</td></tr>` +
+  133          `</table>` +
+  134          `<h2 style="font-size:15px;margin:20px 0 6px;color:#374151;">Product</h2>` +
+  135          `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
+  136          `<tr><td style="padding:4px 0;color:#6b7280;">Item</td><td style="padding:4px 0;">${escapeHtml(order.productName)}</td></tr>` +
+  137          `<tr><td style="padding:4px 0;color:#6b7280;">Price</td><td style="padding:4px 0;">₹${money(price)}</td></tr>` +
+  138          `<tr><td style="padding:4px 0;color:#6b7280;">Quantity</td><td style="padding:4px 0;">${qty}</td></tr>` +
+  139          `<tr><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">Total</td>` +
+  140          `<td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">₹${money(total)}</td></tr>` +
+  141          `</table>` +
+  142          `<p style="margin:32px 0 0;font-size:12px;color:#9ca3af;">Powered by CartnCodForm</p>`
+  143      );
+  144  
+  145      const { error } = await resend.emails.send({
+  146        from: FROM,
+  147        to: ownerEmail,
+  148        subject: 'New COD Order Received! 📦',
+  149        html,
+  150      });
+  151  
+  152      if (error) throw new Error(error.message || JSON.stringify(error));
+  153  
+  154      console.log(`Email sent: new_cod_order to ${ownerEmail}`);
+  155      return { success: true };
+  156    } catch (err) {
+  157      console.error(`Email failed: ${err.message}`);
+  158      return { success: false, error: err.message };
+  159    }
+  160  }
+  161  
+  162  // ---------------------------------------------------------------------------
+  163  // 3. COD order confirmation -> the customer (not wired up yet)
+  164  // ---------------------------------------------------------------------------
+  165  
+  166  async function sendCodOrderConfirmationEmail(order) {
+  167    try {
+  168      // TODO: integrate customer email later. COD customers may not provide an
+  169      // email address on the form, so there is nothing to send to right now.
+  170      // When the COD form collects an email, send a confirmation here.
+  171      return { success: true };
+  172    } catch (err) {
+  173      console.error(`Email failed: ${err.message}`);
+  174      return { success: false, error: err.message };
+  175    }
+  176  }
+  177  
+  178  module.exports = {
+  179    sendAbandonedCartEmail,
+  180    sendNewCodOrderEmail,
+  181    sendCodOrderConfirmationEmail,
+  182  };
+
+

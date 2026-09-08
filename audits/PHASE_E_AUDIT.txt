@@ -1,0 +1,304 @@
+================================================================================
+PHASE E — AI copy generation, brand voice, weekly narrative, insights
+SELF-AUDIT
+================================================================================
+Date: 2026-09-08
+Branch: phase-e-ai   (cut from phase-d-storefront; Phases A–D present)
+"Done when": Today shows the narrative and it's derivable from real numbers;
+cache hit rate logged.
+Status: CopyCache + aiService + analyticsService + poller wiring + 4 routes
+(weekly-narrative, settings GET/PATCH) + 13 tests. Done. LLM_API_KEY is NOT
+set anywhere — every AI function degrades to a deterministic fallback until the
+owner adds it in Render (see Open Questions).
+
+================================================================================
+1. FILES CREATED
+================================================================================
+  backend/models/CopyCache.js               (38 lines)
+      schema + 3 indexes (cacheKey unique, expiresAt TTL, {shop,signal,channel})
+      exports the model, plus  module.exports.buildCacheKey  (sha256 helper)
+  backend/services/aiService.js             (213 lines)
+      exports { generateCopy, generateWeeklyNarrative, generateInsights }
+      raw fetch to https://api.anthropic.com/v1/messages, no SDK.
+  backend/services/analyticsService.js      (174 lines)
+      exports { computeWeeklyStats, computeInsights }  (deterministic; the AI
+      only narrates these numbers)
+  backend/__tests__/aiService.test.js        (131 lines)  — 8 tests
+  backend/__tests__/analyticsService.test.js ( 91 lines)  — 5 tests
+  audits/PHASE_E_PRE_AUDIT.txt               (601 lines)  — read-only capture
+
+================================================================================
+2. FILES MODIFIED  (exact hunks)
+================================================================================
+backend/models/Store.js       — NOT CHANGED. `voice` / `caps` / `quietHours` /
+  `timezone` already exist (added in Phase C). STEP 10 said "Store.js (if
+  changed)" — it wasn't.
+
+backend/server.js             381 -> 414  (+33)
+  @@ +25        const { generateCopy } = require('./services/aiService');
+  @@ +269..+278  processScheduledJobs inner try, right after `const payload =`:
+                 load the store ONCE per job —
+                   const jobStore = await Store.findOne({ shopDomain: job.shopDomain });
+                   const voice = (jobStore && jobStore.voice) || {};
+                   const product = { title: payload.title || '', price: '',
+                     productId: (payload.url && payload.url.split('/products/')[1]) || null };
+                 (DEVIATION: named `jobStore`, not the spec's `const store`, to
+                  avoid shadowing the lean `const store` used a few lines above
+                  for the quiet-hours check.)
+  @@ +280..+291  PUSH branch — before building urlWithJob / sendPushToCustomers:
+                   const copy = await generateCopy(
+                     { ...(jobStore && jobStore.toObject ? jobStore.toObject() : {}), voice },
+                     job.signalType || 'cart_abandon', product, 'push'
+                   ).catch(() => ({ title:'You left something behind',
+                                    body:'Come back and complete your order.' }));
+                   payload.title = copy.title || payload.title;
+                   payload.body  = copy.body  || payload.body;
+  @@ +329..+340  EMAIL branch — before sendAbandonedCartEmail:
+                   const copy = await generateCopy(
+                     { ...(jobStore && jobStore.toObject ? jobStore.toObject() : {}), voice },
+                     job.signalType || 'cart_abandon', product, 'email'
+                   ).catch(() => ({ subject:'We saved your cart',
+                                    body:'Hi,\n\nYou left items in your cart.\n\nThanks' }));
+                 and the sendAbandonedCartEmail options became
+                   { subject: copy.subject || payload.subject || undefined,
+                     body:    copy.body    || payload.body    || undefined, cartUrl }
+  Store load is awaited (spec: acceptable latency on the poller path).
+
+backend/routes/profiles.js    119 -> 248  (+129)
+  @@ +8         require('../models/Store')
+  @@ +10..+11   require analyticsService { computeWeeklyStats, computeInsights }
+                require aiService { generateWeeklyNarrative, generateInsights }
+  @@ +156..+195  GET /:shopDomain/weekly-narrative  (requireAuth+requireStoreOwner)
+                 - module-level `narrativeCache = new Map()`, 1h TTL per shop
+                 - on miss: computeWeeklyStats -> computeInsights ->
+                   Promise.all([generateWeeklyNarrative, generateInsights])
+                 - -> { narrative, insights, stats }
+  @@ +197..+215  GET /:shopDomain/settings   -> { voice, caps, quietHours, timezone }
+                 (404 if Store not found)
+  @@ +217..+247  PATCH /:shopDomain/settings  Body { voice?, caps?, quietHours?,
+                 timezone? } -> dot-notation $set merge (nested keys not
+                 replaced wholesale); 400 if nothing provided; clears
+                 narrativeCache for the shop; -> { updated: true }
+
+No server.js route-mount change needed — /api/profiles is already mounted
+(Phase B). No lines deleted anywhere.
+
+================================================================================
+3. CONFIRM — generateCopy called in BOTH poller branches
+================================================================================
+processScheduledJobs, inside the per-job `try`:
+  PUSH branch  : `const copy = await generateCopy({...store,voice}, signalType,
+                  product, 'push').catch(fallback)` before sendPushToCustomers;
+                  payload.title/body overwritten with copy.
+  EMAIL branch : `const copy = await generateCopy({...store,voice}, signalType,
+                  product, 'email').catch(fallback)` before sendAbandonedCartEmail;
+                  copy.subject/body passed as options.
+Both `.catch()` to the exact fallback objects from the spec, so a rejected
+generateCopy never breaks the poll tick (and generateCopy itself never rejects —
+the .catch is belt-and-braces).
+
+================================================================================
+4. CONFIRM — cache checked before every LLM call
+================================================================================
+aiService.generateCopy step order:
+  1. build voiceHash = md5(JSON.stringify(store.voice))
+     cacheKey    = buildCacheKey(shop, signalType, productId, channel, voiceHash)
+  2. CopyCache.findOne({ cacheKey })  -> HIT: log `[ai] cache hit for <key[:8]>`,
+     return { title, body, subject } from the row. NO fetch.
+  3. MISS + no LLM_API_KEY -> return fallback. NO fetch.
+  4. MISS + key -> ONE fetch to Anthropic -> parse -> CopyCache.create(... 24h TTL)
+     -> log `[ai] generated copy for <signal>/<channel>, tokens=<n>`.
+There is no code path that calls fetch() without a prior CopyCache.findOne.
+(Tested: test 1 = hit returns cache, fetch not called; test 2 = miss triggers
+fetch.)
+
+================================================================================
+5. CONFIRM — fallback returned when LLM_API_KEY unset
+================================================================================
+`hasKey()` = Boolean(process.env.LLM_API_KEY).
+  generateCopy         : no key -> { title/body/subject } from FALLBACK_PUSH
+                         or FALLBACK_EMAIL (never calls fetch).
+  generateWeeklyNarrative: no key -> ruleBasedNarrative(stats) =
+                         "This week: N messages sent to M customers. C
+                          conversions, ₹R recovered."
+  generateInsights     : no key (or empty input) -> rawInsights.map(i => i.evidence)
+Also: even WITH a key, any fetch/parse error falls through to the same
+fallbacks (tested: test 4 API throws -> fallback).
+
+================================================================================
+6. CONFIRM — weekly-narrative route exists and is auth-gated
+================================================================================
+GET /api/profiles/:shopDomain/weekly-narrative
+  middleware: requireAuth, requireStoreOwner  (IDOR-guarded by
+  requireStoreOwner's token-shop vs path-shop check)
+  1h in-process Map cache keyed by shopDomain; PATCH /settings evicts it.
+  Response body: { narrative: string, insights: string[], stats: {...} }.
+
+================================================================================
+7. CONFIRM — settings GET / PATCH routes exist
+================================================================================
+GET   /api/profiles/:shopDomain/settings   requireAuth + requireStoreOwner
+      -> { voice, caps, quietHours, timezone }  (404 if store missing)
+PATCH /api/profiles/:shopDomain/settings    requireAuth + requireStoreOwner
+      Body { voice?, caps?, quietHours?, timezone? }
+      -> Store.updateOne({ shopDomain }, { $set: { 'voice.tone': ..., 'caps.perDay':
+         ..., 'quietHours.start': ..., timezone: ... } })  (dot-notation merge,
+         only provided keys; unknown top-level keys ignored)
+      -> { updated: true }   (400 if the body carries none of the 4 fields)
+
+================================================================================
+8. NO PII IN NEW LOG LINES
+================================================================================
+aiService.js:
+  `[ai] cache hit for ${cacheKey.slice(0,8)}`          (hash prefix)
+  `[ai] generated copy for ${signalType}/${channel}, tokens=${promptTokens}`
+  `[ai] cache lookup failed: ${err.message}`
+  `[ai] generateCopy failed (${signalType}/${channel}): ${err.message}`
+  `[ai] cache save failed: ${err.message}`
+  `[ai] generateWeeklyNarrative failed: ${err.message}`
+  `[ai] generateInsights failed: ${err.message}`
+analyticsService.js: (no console.* at all)
+routes/profiles.js (added):
+  `[profiles] GET weekly-narrative error: ${err.message}`
+  `[profiles] GET settings error: ${err.message}`
+  `[profiles] PATCH settings error: ${err.message}`
+server.js: no new log lines (the generateCopy calls log via aiService).
+No email / phone / name / customer / message body / product title is logged.
+The generated copy body/title is written to CopyCache + the outgoing message
+only — never to a log. `stats` (which may contain a product TITLE, not PII) is
+sent to the LLM and returned in the API response but not logged.
+
+================================================================================
+9. CACHE HIT RATE — how it will be measured
+================================================================================
+Every generateCopy outcome emits exactly one line:
+    cache HIT      ->  "[ai] cache hit for <8hex>"
+    cache MISS+gen ->  "[ai] generated copy for <signal>/<channel>, tokens=<n>"
+    (no-key / error fallbacks emit a "[ai] ... failed" or nothing)
+
+    hit_rate  =  count("[ai] cache hit")  /  ( count("[ai] cache hit")
+                                             + count("[ai] generated copy") )
+
+over any log window. Both lines are unique-prefixed and PII-free, so this is a
+plain `grep -c` on Render logs. (A DB-side proxy also works: with 24h TTL, at
+steady state CopyCache row count per shop ≈ distinct (signal, product, channel,
+voice) tuples; sends beyond that are cache hits.)
+
+================================================================================
+10. TESTS
+================================================================================
+BEFORE Phase E (baseline re-run on branch cut):
+  Test Suites: 10 passed, 10 total
+  Tests:       96 passed, 96 total
+
+AFTER Phase E  (cd backend && npm test):
+  Test Suites: 12 passed, 12 total
+  Tests:       109 passed, 109 total
+  Snapshots:   0 total
+  Time:        ~4.3 s
+  -> existing 96 unchanged, +13 new.
+  (The "cancelJobsForOrder error: db down" console.error is the pre-existing
+   intentional error-path assertion in automationEngine.test.js:278.)
+
+backend/__tests__/aiService.test.js — 8 tests, all pass
+  1. returns cached copy on a cache hit (no API call)
+  2. calls the Anthropic API on a cache miss (url + x-api-key + anthropic-version)
+  3. returns fallback copy when LLM_API_KEY is not set
+  4. returns fallback copy when the API call throws
+  5. strips markdown fences before parsing JSON
+  6. saves the generated copy to CopyCache (cacheKey, signalType, channel, body,
+     promptTokens, expiresAt)
+  7. generateWeeklyNarrative returns a rule-based string without an API key
+  8. cache key differs for different store voices (voiceHash)
+  (global.fetch stubbed; CopyCache partially mocked — real buildCacheKey, mocked
+   findOne/create; LLM_API_KEY saved/restored around the file.)
+
+backend/__tests__/analyticsService.test.js — 5 tests, all pass
+  1. computeWeeklyStats returns zeros / nulls when there is no data
+  2. messagesSent counts only status="sent" ScheduledJobs
+  3. revenueRecovered sums recoveredRevenue (+ conversions + topProduct)
+  4. computeInsights always returns exactly 3 insights, in order
+  5. BEST_CHANNEL is "push" when push recoveries outweigh email
+  (Profile / ScheduledJob / AbandonedCustomer / Store auto-mocked.)
+
+================================================================================
+11. DEVIATIONS FROM THE LITERAL SPEC (all deliberate)
+================================================================================
+(a) MODEL: spec says `claude-sonnet-4-6`. Implemented as
+    `process.env.LLM_MODEL || 'claude-sonnet-4-6'` so the owner can point it at
+    the current model without a code change. Per the running environment's
+    guidance the latest is `claude-sonnet-5`; the owner should very likely set
+    LLM_MODEL=claude-sonnet-5 in Render. (See Open Questions.)
+(b) poller store var named `jobStore` not `store` — the surrounding code already
+    has a lean `const store` (timezone only) in the same loop iteration;
+    reusing that name would shadow it and read confusingly.
+(c) `product.price` is passed as `''` on every job (spec: "not stored on the
+    job yet — leave blank for now"). Kept verbatim; a price would improve copy
+    quality once the brain stores it on the job payload.
+(d) computeWeeklyStats.`conversions` is `recoveredCarts.length` (from the same
+    `find` used for revenue/topProduct) rather than a separate
+    `countDocuments` — identical result, one fewer query.
+(e) STEP 6 said ScheduledJob `updatedAt >= sevenDaysAgo` for messagesSent —
+    ScheduledJob has NO `updatedAt` field (Phase C added profileId/signalType/
+    reason, no timestamps). Used `sentAt >= sevenDaysAgo`, which is what the
+    poller actually stamps.
+(f) `bestChannel` (weekly) and BEST_CHANNEL (insight) join sent ScheduledJobs to
+    recovered AbandonedCustomers by cartToken == sessionId (a heuristic, not the
+    attribution join). Adequate for a weekly summary; a precise version would
+    walk AbandonedCustomer.attributedJobId.
+(g) generateInsights LLM path parses a `[...]` block and only uses the result if
+    it's an array of the same length as the input; otherwise it returns the
+    deterministic evidence strings.
+
+================================================================================
+12. NOTICED BUT NOT TOUCHED  (out of scope for Phase E)
+================================================================================
+- With LLM_API_KEY UNSET (current reality), the poller now overwrites EVERY
+  job's payload copy with the generic fallback — including legacy AutomationRule
+  jobs that had merchant-authored title/body frozen at schedule time. This is
+  the spec's `payload.title = copy.title || payload.title` (copy.title is always
+  truthy). It matches the handover's "copy resolves at send time" but is a
+  visible regression for the old scheduler until either (a) LLM_API_KEY is set,
+  or (b) the old AutomationRule path is retired (already a Phase C open item).
+- Brain EMAIL jobs still can't reach a profile whose address is only in
+  Profile.channels.email.address (the poller's email branch looks up
+  AbandonedCustomer by cartToken and needs customer.email). generateCopy now
+  produces good email copy, but the SEND path for profile-only emails is still
+  a Phase F/G gap (carried from Phase C).
+- No CopyCache index build is forced; Mongo builds cacheKey-unique + TTL lazily.
+- narrativeCache is a per-process Map — not shared across dynos and lost on
+  restart. Fine for one Render instance; a real cache (Mongo/Redis) is a later
+  optimisation.
+- computeWeeklyStats / computeInsights scan the last 7 / 30 days of
+  AbandonedCustomer + ScheduledJob with no pagination. Fine at current volume.
+- aiService has no rate-limit / retry / backoff on the Anthropic call — one
+  attempt, then fallback. Acceptable for now (fallbacks are safe); revisit if
+  429s show up in logs.
+- STEP 7 route returns `stats` verbatim to the admin; `stats.topProduct` is a
+  product title (not PII). The admin (Phase G) renders it.
+
+================================================================================
+13. OPEN QUESTIONS
+================================================================================
+1. LLM_API_KEY is not set in Render (the handover lists it as an owner task
+   "before Phase E"). Until it is, all AI output is the deterministic fallback,
+   AND legacy automation-job copy is replaced by the fallback (see §12). Confirm
+   the owner will add LLM_API_KEY (and likely LLM_MODEL=claude-sonnet-5) to
+   Render before the poller runs for real merchants.
+2. Model string: spec pinned `claude-sonnet-4-6`; env override defaults to it.
+   Should the default be `claude-sonnet-5` instead?
+3. Should generateCopy be SKIPPED for legacy jobs (ruleId set / no signalType)
+   so their frozen merchant copy survives when there's no API key? (Would
+   diverge from the spec's unconditional overwrite.)
+4. weekly-narrative cache is in-process (1h). Acceptable, or move to a
+   CopyCache-style Mongo doc so it survives restarts and is shared?
+5. `product.price` is always '' on the job. Add `price` to the brain's
+   ScheduledJob payload in a follow-up so copy can reference it?
+6. generateInsights / generateWeeklyNarrative send `stats` (incl. a product
+   title) to Anthropic. Confirmed acceptable under the "no PII to third parties"
+   rule — a product title is store data, not customer PII — but flagging it.
+7. max_tokens: 500 for copy, 400 for narrative/insights. Enough headroom?
+
+================================================================================
+END — stopping after self-audit. Phase F not started.
+================================================================================

@@ -252,6 +252,21 @@ router.post('/cart-activity', async (req, res) => {
       lastSeenAt: new Date(),
     }).catch((err) => console.error('[profile] upsert error:', err.message));
 
+    // Phase F — a page_view from a suppressed profile lifts push suppression.
+    if (event === 'page_view' && ccfSessionId) {
+      const { clearPushSuppression } = require('../services/pushHygiene');
+      const Profile = require('../models/Profile');
+      const shop = shopDomain.trim().toLowerCase();
+      const profile = await Profile.findOne({
+        shopDomain: shop,
+        'identifiers.sessionIds': ccfSessionId,
+      });
+      if (profile) {
+        clearPushSuppression(profile._id, shop)
+          .catch((err) => console.error('[hygiene] resubscribe error:', err.message));
+      }
+    }
+
     return res.status(200).json({ success: true });
   } catch (err) {
     console.error('[push] POST /cart-activity error:', err.message);

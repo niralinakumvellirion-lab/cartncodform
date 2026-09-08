@@ -1,0 +1,723 @@
+================================================================================
+PHASE G2 - PRE-WORK AUDIT (read-only capture, no modifications)
+Generated: 2026-09-08T09:08:45Z
+Branch at capture: main   HEAD: 0491d8f
+================================================================================
+
+================================================================================
+FILE: frontend/app/admin/page.js   (73 lines)   [FULL]
+================================================================================
+    1  'use client';
+    2  
+    3  import { Suspense, useState } from 'react';
+    4  import { AppProvider, Frame, Navigation, Page } from '@shopify/polaris';
+    5  import {
+    6    HomeIcon,
+    7    PersonIcon,
+    8    NotificationIcon,
+    9    ReceiptIcon,
+   10    SettingsIcon,
+   11  } from '@shopify/polaris-icons';
+   12  import { useSearchParams } from 'next/navigation';
+   13  import '@shopify/polaris/build/esm/styles.css';
+   14  
+   15  import TodayScreen from './screens/Today';
+   16  import CustomersScreen from './screens/Customers';
+   17  import MessagesScreen from './screens/Messages';
+   18  import CodScreen from './screens/CodOrders';
+   19  import SettingsScreen from './screens/Settings';
+   20  
+   21  const SCREENS = [
+   22    { id: 'today', label: 'Today', icon: HomeIcon },
+   23    { id: 'customers', label: 'Customers', icon: PersonIcon },
+   24    { id: 'messages', label: 'Messages', icon: NotificationIcon },
+   25    { id: 'cod', label: 'COD Orders', icon: ReceiptIcon },
+   26    { id: 'settings', label: 'Settings', icon: SettingsIcon },
+   27  ];
+   28  
+   29  function AdminHomeContent() {
+   30    const searchParams = useSearchParams();
+   31    const shop = searchParams.get('shop') || '';
+   32    const apiKey = process.env.NEXT_PUBLIC_SHOPIFY_CLIENT_ID;
+   33  
+   34    const [activeScreen, setActiveScreen] = useState('today');
+   35  
+   36    const navigationMarkup = (
+   37      <Navigation location="/">
+   38        <Navigation.Section
+   39          items={SCREENS.map((s) => ({
+   40            label: s.label,
+   41            icon: s.icon,
+   42            selected: activeScreen === s.id,
+   43            onClick: () => setActiveScreen(s.id),
+   44          }))}
+   45        />
+   46      </Navigation>
+   47    );
+   48  
+   49    return (
+   50      <>
+   51        <meta name="shopify-api-key" content={apiKey} />
+   52        <AppProvider i18n={{}}>
+   53          <Frame navigation={navigationMarkup}>
+   54            <Page>
+   55              {activeScreen === 'today' && <TodayScreen shop={shop} />}
+   56              {activeScreen === 'customers' && <CustomersScreen shop={shop} />}
+   57              {activeScreen === 'messages' && <MessagesScreen shop={shop} />}
+   58              {activeScreen === 'cod' && <CodScreen shop={shop} />}
+   59              {activeScreen === 'settings' && <SettingsScreen shop={shop} />}
+   60            </Page>
+   61          </Frame>
+   62        </AppProvider>
+   63      </>
+   64    );
+   65  }
+   66  
+   67  export default function AdminHome() {
+   68    return (
+   69      <Suspense fallback={null}>
+   70        <AdminHomeContent />
+   71      </Suspense>
+   72    );
+   73  }
+
+
+================================================================================
+FILE: frontend/app/admin/screens/Customers.jsx   (149 lines)   [FULL]
+================================================================================
+    1  'use client';
+    2  
+    3  import { useState, useEffect, useCallback } from 'react';
+    4  import {
+    5    Page,
+    6    Card,
+    7    IndexTable,
+    8    Text,
+    9    Badge,
+   10    InlineStack,
+   11    Banner,
+   12  } from '@shopify/polaris';
+   13  import { apiGet } from '../../../lib/api';
+   14  
+   15  export default function Customers({ shop }) {
+   16    const [profiles, setProfiles] = useState([]);
+   17    const [signalCountMap, setSignalCountMap] = useState({});
+   18    const [loading, setLoading] = useState(true);
+   19    const [error, setError] = useState('');
+   20    // eslint-disable-next-line no-unused-vars
+   21    const [selectedProfileId, setSelectedProfileId] = useState(null); // wired in G2
+   22  
+   23    const loadData = useCallback(async () => {
+   24      if (!shop) return;
+   25      setLoading(true);
+   26      setError('');
+   27      try {
+   28        const [profRes, sigRes] = await Promise.all([
+   29          apiGet(`/api/profiles/${encodeURIComponent(shop)}/profiles?limit=50`),
+   30          apiGet(`/api/profiles/${encodeURIComponent(shop)}/signals?limit=200`),
+   31        ]);
+   32  
+   33        setProfiles(Array.isArray(profRes?.profiles) ? profRes.profiles : []);
+   34  
+   35        const map = {};
+   36        for (const sig of Array.isArray(sigRes?.signals) ? sigRes.signals : []) {
+   37          const pid =
+   38            typeof sig.profileId === 'object' && sig.profileId
+   39              ? sig.profileId._id
+   40              : sig.profileId;
+   41          if (!pid) continue;
+   42          map[pid] = (map[pid] || 0) + 1;
+   43        }
+   44        setSignalCountMap(map);
+   45      } catch (err) {
+   46        setError(err.message || 'Failed to load customers');
+   47      } finally {
+   48        setLoading(false);
+   49      }
+   50    }, [shop]);
+   51  
+   52    useEffect(() => {
+   53      loadData();
+   54    }, [loadData]);
+   55  
+   56    return (
+   57      <Page
+   58        title="Customers"
+   59        secondaryActions={[{ content: 'Refresh', onAction: loadData }]}
+   60      >
+   61        {error && (
+   62          <Banner tone="critical" title="Couldn't load customers">
+   63            <Text as="p">{error}</Text>
+   64          </Banner>
+   65        )}
+   66        <Card>
+   67          <IndexTable
+   68            resourceName={{ singular: 'customer', plural: 'customers' }}
+   69            itemCount={profiles.length}
+   70            loading={loading}
+   71            selectable={false}
+   72            headings={[
+   73              { title: 'Identifier' },
+   74              { title: 'Stage' },
+   75              { title: 'Signals' },
+   76              { title: 'Channels' },
+   77              { title: 'LTV' },
+   78              { title: 'Last seen' },
+   79            ]}
+   80            emptyState={
+   81              <Text as="p" alignment="center" tone="subdued">
+   82                No customer profiles yet.
+   83              </Text>
+   84            }
+   85          >
+   86            {profiles.map((p, i) => {
+   87              const emails = p.identifiers?.emails || [];
+   88              const phones = p.identifiers?.phones || [];
+   89              const identifier =
+   90                emails[0] || phones[0] || `Anonymous ${String(p._id).slice(-6)}`;
+   91              const sigCount = signalCountMap[p._id] || 0;
+   92              return (
+   93                <IndexTable.Row
+   94                  id={p._id}
+   95                  key={p._id}
+   96                  position={i}
+   97                  onClick={() => setSelectedProfileId(p._id)}
+   98                >
+   99                  <IndexTable.Cell>
+  100                    <Text fontWeight="bold">{identifier}</Text>
+  101                  </IndexTable.Cell>
+  102                  <IndexTable.Cell>
+  103                    <Badge
+  104                      tone={
+  105                        p.stage === 'customer'
+  106                          ? 'success'
+  107                          : p.stage === 'identified'
+  108                          ? 'info'
+  109                          : p.stage === 'lapsed'
+  110                          ? 'warning'
+  111                          : undefined
+  112                      }
+  113                    >
+  114                      {p.stage || 'anonymous'}
+  115                    </Badge>
+  116                  </IndexTable.Cell>
+  117                  <IndexTable.Cell>
+  118                    {sigCount > 0 ? (
+  119                      <Badge tone="attention">{String(sigCount)}</Badge>
+  120                    ) : (
+  121                      <Text tone="subdued">—</Text>
+  122                    )}
+  123                  </IndexTable.Cell>
+  124                  <IndexTable.Cell>
+  125                    <InlineStack gap="100">
+  126                      {p.channels?.push?.subscribed && <Badge>Push</Badge>}
+  127                      {p.channels?.email?.address && <Badge>Email</Badge>}
+  128                    </InlineStack>
+  129                  </IndexTable.Cell>
+  130                  <IndexTable.Cell>
+  131                    {p.orders?.ltv > 0
+  132                      ? `₹${p.orders.ltv.toLocaleString('en-IN')}`
+  133                      : '—'}
+  134                  </IndexTable.Cell>
+  135                  <IndexTable.Cell>
+  136                    <Text tone="subdued">
+  137                      {p.lastSeenAt
+  138                        ? new Date(p.lastSeenAt).toLocaleDateString('en-IN')
+  139                        : '—'}
+  140                    </Text>
+  141                  </IndexTable.Cell>
+  142                </IndexTable.Row>
+  143              );
+  144            })}
+  145          </IndexTable>
+  146        </Card>
+  147      </Page>
+  148    );
+  149  }
+
+
+================================================================================
+FILE: frontend/app/admin/screens/Profile.jsx   (12 lines)   [FULL]
+================================================================================
+    1  'use client';
+    2  
+    3  import { Box, Text } from '@shopify/polaris';
+    4  
+    5  // Stub — filled in Phase G2.
+    6  export default function Profile() {
+    7    return (
+    8      <Box padding="400">
+    9        <Text tone="subdued">Profile — coming soon</Text>
+   10      </Box>
+   11    );
+   12  }
+
+
+================================================================================
+FILE: frontend/app/admin/screens/Messages.jsx   (12 lines)   [FULL]
+================================================================================
+    1  'use client';
+    2  
+    3  import { Box, Text } from '@shopify/polaris';
+    4  
+    5  // Stub — filled in Phase G2.
+    6  export default function Messages() {
+    7    return (
+    8      <Box padding="400">
+    9        <Text tone="subdued">Messages — coming soon</Text>
+   10      </Box>
+   11    );
+   12  }
+
+
+================================================================================
+FILE: frontend/app/admin/screens/CodOrders.jsx   (12 lines)   [FULL]
+================================================================================
+    1  'use client';
+    2  
+    3  import { Box, Text } from '@shopify/polaris';
+    4  
+    5  // Stub — filled in Phase G2.
+    6  export default function CodOrders() {
+    7    return (
+    8      <Box padding="400">
+    9        <Text tone="subdued">COD Orders — coming soon</Text>
+   10      </Box>
+   11    );
+   12  }
+
+
+================================================================================
+FILE: backend/routes/profiles.js   (301 lines)   [FULL]
+================================================================================
+    1  const express = require('express');
+    2  const router = express.Router();
+    3  
+    4  const Profile = require('../models/Profile');
+    5  const Signal = require('../models/Signal');
+    6  const SignalConfig = require('../models/SignalConfig');
+    7  const StorefrontEvent = require('../models/StorefrontEvent');
+    8  const Store = require('../models/Store');
+    9  const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
+   10  const { computeWeeklyStats, computeInsights } = require('../services/analyticsService');
+   11  const { generateWeeklyNarrative, generateInsights } = require('../services/aiService');
+   12  
+   13  const SIGNAL_TYPES = [
+   14    'cart_abandon', 'checkout_abandon', 'browse_abandon',
+   15    'high_intent', 'price_hesitation', 'price_drop', 'back_in_stock',
+   16    'post_purchase_d3', 'lapsing', 'winback', 'email_capture', 'cod_to_prepaid',
+   17  ];
+   18  
+   19  /**
+   20   * GET /api/profiles/:shopDomain/signals
+   21   * Query: type (optional), limit (default 20, max 100)
+   22   * -> { signals: [...] }  strongest first
+   23   */
+   24  router.get('/:shopDomain/signals', requireAuth, requireStoreOwner, async (req, res) => {
+   25    try {
+   26      const shop = req.params.shopDomain.trim().toLowerCase();
+   27  
+   28      let limit = parseInt(req.query.limit, 10);
+   29      if (!Number.isFinite(limit) || limit < 1) limit = 20;
+   30      if (limit > 100) limit = 100;
+   31  
+   32      const filter = { shopDomain: shop };
+   33      if (req.query.type) filter.type = req.query.type;
+   34  
+   35      const signals = await Signal.find(filter)
+   36        .sort({ strength: -1 })
+   37        .limit(limit)
+   38        .populate('profileId', 'identifiers stage');
+   39  
+   40      return res.json({ signals });
+   41    } catch (err) {
+   42      console.error('[profiles] GET signals error:', err.message);
+   43      return res.status(500).json({ error: 'Failed to fetch signals' });
+   44    }
+   45  });
+   46  
+   47  /**
+   48   * GET /api/profiles/:shopDomain/profiles
+   49   * Query: limit (default 50, max 200), page (default 0)
+   50   * -> { profiles, total }  (most recently active first)
+   51   */
+   52  router.get('/:shopDomain/profiles', requireAuth, requireStoreOwner, async (req, res) => {
+   53    try {
+   54      const shop = req.params.shopDomain.trim().toLowerCase();
+   55  
+   56      let limit = parseInt(req.query.limit, 10);
+   57      if (!Number.isFinite(limit) || limit < 1) limit = 50;
+   58      if (limit > 200) limit = 200;
+   59  
+   60      let page = parseInt(req.query.page, 10);
+   61      if (!Number.isFinite(page) || page < 0) page = 0;
+   62  
+   63      const [profiles, total] = await Promise.all([
+   64        Profile.find({ shopDomain: shop })
+   65          .sort({ updatedAt: -1 })
+   66          .skip(page * limit)
+   67          .limit(limit)
+   68          .select('identifiers stage orders channels lastSeenAt updatedAt'),
+   69        Profile.countDocuments({ shopDomain: shop }),
+   70      ]);
+   71  
+   72      return res.json({ profiles, total });
+   73    } catch (err) {
+   74      console.error('[profiles] GET profiles error:', err.message);
+   75      return res.status(500).json({ error: 'Failed to fetch profiles' });
+   76    }
+   77  });
+   78  
+   79  /**
+   80   * GET /api/profiles/:shopDomain/profiles/:profileId
+   81   * -> { profile, signals }  (the profile + its active signals)
+   82   */
+   83  router.get('/:shopDomain/profiles/:profileId', requireAuth, requireStoreOwner, async (req, res) => {
+   84    try {
+   85      const shop = req.params.shopDomain.trim().toLowerCase();
+   86  
+   87      const profile = await Profile.findOne({
+   88        _id: req.params.profileId,
+   89        shopDomain: shop,
+   90      });
+   91      if (!profile) {
+   92        return res.status(404).json({ error: 'Profile not found' });
+   93      }
+   94  
+   95      const signals = await Signal.find({ shopDomain: shop, profileId: profile._id })
+   96        .sort({ strength: -1 });
+   97  
+   98      return res.json({ profile, signals });
+   99    } catch (err) {
+  100      console.error('[profiles] GET profile error:', err.message);
+  101      return res.status(500).json({ error: 'Failed to fetch profile' });
+  102    }
+  103  });
+  104  
+  105  /**
+  106   * GET /api/profiles/:shopDomain/signal-configs
+  107   * -> { configs: [...] }  (rows that exist; a missing type means the default
+  108   *    enabled=true / no override / maxSteps=1)
+  109   */
+  110  router.get('/:shopDomain/signal-configs', requireAuth, requireStoreOwner, async (req, res) => {
+  111    try {
+  112      const shop = req.params.shopDomain.trim().toLowerCase();
+  113      const configs = await SignalConfig.find({ shopDomain: shop });
+  114      return res.json({ configs });
+  115    } catch (err) {
+  116      console.error('[profiles] GET signal-configs error:', err.message);
+  117      return res.status(500).json({ error: 'Failed to fetch signal configs' });
+  118    }
+  119  });
+  120  
+  121  /**
+  122   * PATCH /api/profiles/:shopDomain/signal-configs/:signalType
+  123   * Body: { enabled?, channelOverride?, maxSteps? }
+  124   * Upserts the config for one signal type.
+  125   */
+  126  router.patch('/:shopDomain/signal-configs/:signalType', requireAuth, requireStoreOwner, async (req, res) => {
+  127    try {
+  128      const shop = req.params.shopDomain.trim().toLowerCase();
+  129      const { signalType } = req.params;
+  130  
+  131      if (!SIGNAL_TYPES.includes(signalType)) {
+  132        return res.status(400).json({ error: `Unknown signal type: ${signalType}` });
+  133      }
+  134  
+  135      const set = { updatedAt: new Date() };
+  136      if (typeof req.body.enabled === 'boolean') set.enabled = req.body.enabled;
+  137      if (req.body.channelOverride === 'push' || req.body.channelOverride === 'email' || req.body.channelOverride === null) {
+  138        set.channelOverride = req.body.channelOverride;
+  139      }
+  140      if (Number.isFinite(req.body.maxSteps)) set.maxSteps = req.body.maxSteps;
+  141  
+  142      const config = await SignalConfig.findOneAndUpdate(
+  143        { shopDomain: shop, signalType },
+  144        { $set: set, $setOnInsert: { shopDomain: shop, signalType } },
+  145        { upsert: true, new: true }
+  146      );
+  147  
+  148      return res.json({ config });
+  149    } catch (err) {
+  150      console.error('[profiles] PATCH signal-config error:', err.message);
+  151      return res.status(500).json({ error: 'Failed to update signal config' });
+  152    }
+  153  });
+  154  
+  155  /**
+  156   * GET /api/profiles/:shopDomain/optin-stats
+  157   * Push soft-prompt performance over the last 30 days.
+  158   * -> { shown, accepted, rate }   (rate = accepted / shown, 2dp, 0 when shown=0)
+  159   */
+  160  router.get('/:shopDomain/optin-stats', requireAuth, requireStoreOwner, async (req, res) => {
+  161    try {
+  162      const shop = req.params.shopDomain.trim().toLowerCase();
+  163      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  164  
+  165      const [shown, accepted] = await Promise.all([
+  166        StorefrontEvent.countDocuments({
+  167          shopDomain: shop,
+  168          type: 'push_prompt_shown',
+  169          ts: { $gte: since },
+  170        }),
+  171        StorefrontEvent.countDocuments({
+  172          shopDomain: shop,
+  173          type: 'push_prompt_accepted',
+  174          'meta.granted': true,
+  175          ts: { $gte: since },
+  176        }),
+  177      ]);
+  178  
+  179      const rate = shown > 0 ? Math.round((accepted / shown) * 100) / 100 : 0;
+  180  
+  181      return res.json({ shown, accepted, rate });
+  182    } catch (err) {
+  183      console.error('[profiles] GET optin-stats error:', err.message);
+  184      return res.status(500).json({ error: 'Failed to fetch opt-in stats' });
+  185    }
+  186  });
+  187  
+  188  /**
+  189   * GET /api/profiles/:shopDomain/push-stats
+  190   * -> rolling 7-day push delivery health for the shop.
+  191   */
+  192  router.get('/:shopDomain/push-stats', requireAuth, requireStoreOwner, async (req, res) => {
+  193    try {
+  194      const shop = req.params.shopDomain.trim().toLowerCase();
+  195      const store = await Store.findOne({ shopDomain: shop }, 'pushStats');
+  196      const ps = (store && store.pushStats) || {};
+  197      return res.json({
+  198        deliveredLast7d: ps.deliveredLast7d || 0,
+  199        attemptedLast7d: ps.attemptedLast7d || 0,
+  200        rateLast7d: ps.rateLast7d || 0,
+  201        lastComputedAt: ps.lastComputedAt || null,
+  202      });
+  203    } catch (err) {
+  204      console.error('[profiles] GET push-stats error:', err.message);
+  205      return res.status(500).json({ error: 'Failed to fetch push stats' });
+  206    }
+  207  });
+  208  
+  209  /**
+  210   * GET /api/profiles/:shopDomain/weekly-narrative
+  211   * -> { narrative, insights: [string], stats }
+  212   * The full computation is cached in-process for 1 hour per shop so an admin
+  213   * page load does not re-run aggregations + LLM calls every time.
+  214   */
+  215  const narrativeCache = new Map(); // shopDomain -> { at: ms, data }
+  216  const NARRATIVE_TTL = 60 * 60 * 1000;
+  217  
+  218  router.get('/:shopDomain/weekly-narrative', requireAuth, requireStoreOwner, async (req, res) => {
+  219    try {
+  220      const shop = req.params.shopDomain.trim().toLowerCase();
+  221  
+  222      const cached = narrativeCache.get(shop);
+  223      if (cached && Date.now() - cached.at < NARRATIVE_TTL) {
+  224        return res.json(cached.data);
+  225      }
+  226  
+  227      const stats = await computeWeeklyStats(shop);
+  228      const rawInsights = await computeInsights(shop);
+  229      const [narrative, insights] = await Promise.all([
+  230        generateWeeklyNarrative(shop, stats),
+  231        generateInsights(shop, rawInsights),
+  232      ]);
+  233  
+  234      const data = { narrative, insights, stats };
+  235      narrativeCache.set(shop, { at: Date.now(), data });
+  236      return res.json(data);
+  237    } catch (err) {
+  238      console.error('[profiles] GET weekly-narrative error:', err.message);
+  239      return res.status(500).json({ error: 'Failed to build weekly narrative' });
+  240    }
+  241  });
+  242  
+  243  /**
+  244   * GET /api/profiles/:shopDomain/settings   -> { voice, caps, quietHours, timezone }
+  245   */
+  246  router.get('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req, res) => {
+  247    try {
+  248      const shop = req.params.shopDomain.trim().toLowerCase();
+  249      const store = await Store.findOne({ shopDomain: shop }, 'voice caps quietHours timezone');
+  250      if (!store) return res.status(404).json({ error: 'Store not found' });
+  251      return res.json({
+  252        voice: store.voice || {},
+  253        caps: store.caps || {},
+  254        quietHours: store.quietHours || {},
+  255        timezone: store.timezone || 'Asia/Kolkata',
+  256      });
+  257    } catch (err) {
+  258      console.error('[profiles] GET settings error:', err.message);
+  259      return res.status(500).json({ error: 'Failed to fetch settings' });
+  260    }
+  261  });
+  262  
+  263  /**
+  264   * PATCH /api/profiles/:shopDomain/settings
+  265   * Body: { voice?, caps?, quietHours?, timezone? }
+  266   * Dot-notation merge (partial update; nested keys are not replaced wholesale).
+  267   */
+  268  router.patch('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req, res) => {
+  269    try {
+  270      const shop = req.params.shopDomain.trim().toLowerCase();
+  271      const set = {};
+  272  
+  273      const merge = (prefix, obj) => {
+  274        if (obj && typeof obj === 'object') {
+  275          for (const [k, v] of Object.entries(obj)) set[`${prefix}.${k}`] = v;
+  276        }
+  277      };
+  278      merge('voice', req.body.voice);
+  279      merge('caps', req.body.caps);
+  280      merge('quietHours', req.body.quietHours);
+  281      if (typeof req.body.timezone === 'string' && req.body.timezone) {
+  282        set.timezone = req.body.timezone;
+  283      }
+  284  
+  285      if (Object.keys(set).length === 0) {
+  286        return res.status(400).json({ error: 'No settings provided' });
+  287      }
+  288  
+  289      await Store.updateOne({ shopDomain: shop }, { $set: set });
+  290  
+  291      // A voice change invalidates the cached narrative for this shop.
+  292      narrativeCache.delete(shop);
+  293  
+  294      return res.json({ updated: true });
+  295    } catch (err) {
+  296      console.error('[profiles] PATCH settings error:', err.message);
+  297      return res.status(500).json({ error: 'Failed to update settings' });
+  298    }
+  299  });
+  300  
+  301  module.exports = router;
+
+
+================================================================================
+FILE: backend/routes/cod.js   (123 lines)   [FULL]
+================================================================================
+    1  const express = require('express');
+    2  const CodOrder = require('../models/CodOrder');
+    3  const Store = require('../models/Store');
+    4  const { sendNewCodOrderEmail } = require('../utils/email');
+    5  const { sendPushToStore } = require('../utils/pushNotification');
+    6  const { requireAuth } = require('../middleware/requireOwner');
+    7  const { upsertProfile } = require('../services/profileService');
+    8  
+    9  const router = express.Router();
+   10  
+   11  /**
+   12   * POST /api/cod/order
+   13   * Public endpoint — the customer-facing COD form posts here.
+   14   *
+   15   * Body: { shopDomain, name, phone, address, city, pincode, productName, productPrice, quantity }
+   16   */
+   17  router.post('/order', async (req, res) => {
+   18    try {
+   19      const {
+   20        shopDomain,
+   21        name,
+   22        phone,
+   23        address,
+   24        city,
+   25        pincode,
+   26        productName,
+   27        productPrice,
+   28        quantity,
+   29      } = req.body;
+   30  
+   31      if (!shopDomain || !name || !phone || !address) {
+   32        return res
+   33          .status(400)
+   34          .json({ error: 'shopDomain, name, phone and address are required' });
+   35      }
+   36  
+   37      const order = await CodOrder.create({
+   38        shopDomain: shopDomain.trim().toLowerCase(),
+   39        name: name.trim(),
+   40        phone: phone.trim(),
+   41        address: address.trim(),
+   42        city: (city || '').trim(),
+   43        pincode: (pincode || '').trim(),
+   44        productName: (productName || '').trim(),
+   45        productPrice: Number(productPrice) || 0,
+   46        quantity: Number(quantity) || 1,
+   47        status: 'pending',
+   48      });
+   49  
+   50      console.log(`[cod] New COD order for ${order.shopDomain} from ${order.name} (${order.phone})`);
+   51  
+   52      // Identity resolution — the verified COD phone is the strongest identity
+   53      // anchor for an Indian D2C shopper. Fire-and-forget.
+   54      upsertProfile(order.shopDomain, {
+   55        phone: phone,
+   56        email: req.body.email || null,
+   57      }, {
+   58        'channels.email.address': req.body.email || undefined,
+   59        'channels.email.source': req.body.email ? 'cod' : undefined,
+   60        lastSeenAt: new Date(),
+   61      }).catch((err) => console.error('[profile] upsert error:', err.message));
+   62  
+   63      // Notify the store owner about the new COD order.
+   64      const store = await Store.findOne({ shopDomain: order.shopDomain });
+   65      const ownerEmail = (store && store.ownerEmail) || process.env.TEST_OWNER_EMAIL;
+   66      if (ownerEmail) {
+   67        sendNewCodOrderEmail(order, ownerEmail);
+   68        console.log(`[cod] New COD order email triggered for owner: ${ownerEmail}`);
+   69      } else {
+   70        console.log('[cod] No owner email available (set TEST_OWNER_EMAIL) — skipping notification');
+   71      }
+   72  
+   73      // Push-notify the store owner about the new COD order.
+   74      sendPushToStore(
+   75        order.shopDomain,
+   76        '📦 New COD Order',
+   77        `${order.name} placed a COD order for ${order.productName}`
+   78      );
+   79  
+   80      return res.status(201).json({ success: true, order });
+   81    } catch (err) {
+   82      console.error('[cod] POST /order error:', err.message);
+   83      return res.status(500).json({ error: 'Failed to save COD order' });
+   84    }
+   85  });
+   86  
+   87  /**
+   88   * PATCH /api/cod/order/:id
+   89   * Owner updates the status of a COD order (pending/confirmed/cancelled).
+   90   */
+   91  router.patch('/order/:id', requireAuth, async (req, res) => {
+   92    try {
+   93      const { status } = req.body;
+   94      const allowed = ['pending', 'confirmed', 'cancelled'];
+   95  
+   96      if (!allowed.includes(status)) {
+   97        return res.status(400).json({ error: `status must be one of ${allowed.join(', ')}` });
+   98      }
+   99  
+  100      const existingOrder = await CodOrder.findById(req.params.id);
+  101      if (!existingOrder) {
+  102        return res.status(404).json({ error: 'COD order not found' });
+  103      }
+  104  
+  105      if (req.shopDomain !== existingOrder.shopDomain) {
+  106        return res.status(403).json({ error: 'Forbidden' });
+  107      }
+  108  
+  109      const order = await CodOrder.findByIdAndUpdate(
+  110        req.params.id,
+  111        { status },
+  112        { new: true }
+  113      );
+  114  
+  115      console.log(`[cod] Order ${order._id} status -> ${status}`);
+  116      return res.json({ success: true, order });
+  117    } catch (err) {
+  118      console.error('[cod] PATCH /order/:id error:', err.message);
+  119      return res.status(500).json({ error: 'Failed to update COD order' });
+  120    }
+  121  });
+  122  
+  123  module.exports = router;
+
+

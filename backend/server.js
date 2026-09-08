@@ -22,6 +22,8 @@ const CustomerPushSubscription = require('./models/CustomerPushSubscription');
 const Profile = require('./models/Profile');
 const { runNightlySignals } = require('./services/signalEngine');
 const { runBrainForShop } = require('./services/brain');
+const { generateCopy } = require('./services/aiService');
+const { checkUnopenedThreshold, updateDeliveredRate } = require('./services/pushHygiene');
 
 const app = express();
 // Render sits behind a reverse proxy — trust the X-Forwarded-For
@@ -265,7 +267,33 @@ async function processScheduledJobs() {
         const channel = job.channel || 'push';
         const payload = job.payload || {};
 
+        // Phase E — resolve copy at SEND time (cached per shop/signal/product/
+        // channel/voice). Load the store once and reuse it for both branches.
+        const jobStore = await Store.findOne({ shopDomain: job.shopDomain });
+        const voice = (jobStore && jobStore.voice) || {};
+        const product = {
+          title: payload.title || '',
+          price: '', // not stored on the job yet — blank for now
+          productId: (payload.url && payload.url.split('/products/')[1]) || null,
+        };
+
         if (channel === 'push') {
+          // Only brain-scheduled jobs (job.profileId set) get AI copy.
+          // Legacy AutomationRule jobs keep their merchant-authored payload.
+          if (job.profileId) {
+            const copy = await generateCopy(
+              { ...(jobStore && jobStore.toObject ? jobStore.toObject() : {}), voice },
+              job.signalType || 'cart_abandon',
+              product,
+              'push'
+            ).catch(() => ({
+              title: 'You left something behind',
+              body: 'Come back and complete your order.',
+            }));
+            payload.title = copy.title || payload.title;
+            payload.body = copy.body || payload.body;
+          }
+
           const baseUrl = payload.url || `https://${job.shopDomain}`;
           const urlWithJob = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'ccf_job=' + job._id.toString();
           const result = await sendPushToCustomers(
@@ -290,6 +318,19 @@ async function processScheduledJobs() {
             await recordProfileMessage(job).catch((e) =>
               console.error('[brain] message log error:', e.message)
             );
+
+            // Phase F — push hygiene after a successful send.
+            if (job.profileId) {
+              await checkUnopenedThreshold(job.profileId, job.shopDomain)
+                .catch((err) => console.error('[hygiene] threshold error:', err.message));
+            }
+            if (result && result.tokensFound >= 0) {
+              await updateDeliveredRate(
+                job.shopDomain,
+                result.sent || 0,
+                result.tokensFound || 0
+              ).catch((err) => console.error('[hygiene] rate error:', err.message));
+            }
           }
         } else if (channel === 'email') {
           const customer = await AbandonedCustomer.findOne({
@@ -303,10 +344,25 @@ async function processScheduledJobs() {
             });
             console.log(`[automation] Job ${job._id} skipped — no customer email`);
           } else {
+            // Only brain-scheduled jobs (job.profileId set) get AI copy.
+            // Legacy AutomationRule jobs keep their merchant-authored payload.
+            let copy = {};
+            if (job.profileId) {
+              copy = await generateCopy(
+                { ...(jobStore && jobStore.toObject ? jobStore.toObject() : {}), voice },
+                job.signalType || 'cart_abandon',
+                product,
+                'email'
+              ).catch(() => ({
+                subject: 'We saved your cart',
+                body: 'Hi,\n\nYou left items in your cart.\n\nThanks',
+              }));
+            }
+
             const cartUrl = `https://${job.shopDomain}/cart`;
             const sendResult = await sendAbandonedCartEmail(customer, {
-              subject: payload.subject || undefined,
-              body: payload.body || undefined,
+              subject: copy.subject || payload.subject || undefined,
+              body: copy.body || payload.body || undefined,
               cartUrl,
             });
             if (!sendResult.success) {
@@ -358,6 +414,20 @@ function scheduleNightlySignals() {
         await runBrainForShop(s.shopDomain)
           .catch((err) => console.error('[brain] run error:', err.message));
       }
+
+      // Phase F — reset the rolling 7-day push stats for shops whose window
+      // has aged out (accumulation approximates the window; this closes it).
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      await Store.updateMany(
+        { 'pushStats.lastComputedAt': { $lt: sevenDaysAgo } },
+        {
+          $set: {
+            'pushStats.deliveredLast7d': 0,
+            'pushStats.attemptedLast7d': 0,
+            'pushStats.rateLast7d': 0,
+          },
+        }
+      ).catch((err) => console.error('[hygiene] stats reset error:', err.message));
     } catch (err) {
       console.error('[signals] nightly run error:', err.message);
     }

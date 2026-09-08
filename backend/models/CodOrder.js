@@ -18,6 +18,8 @@ const codOrderSchema = new mongoose.Schema({
     required: true,
     trim: true,
   },
+  // Phase D: optional email captured on the COD form ("for order updates").
+  email: { type: String, default: '' },
   address: {
     type: String,
     required: true,
