@@ -10,6 +10,7 @@ const StorefrontEvent = require('../models/StorefrontEvent');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const ProductImageCache = require('../models/ProductImageCache');
 const { upsertProfile } = require('../services/profileService');
+const { computeSignalsForProfile } = require('../services/signalEngine');
 
 const router = express.Router();
 
@@ -164,7 +165,8 @@ async function handleWebhook(source, req, res) {
       savedCustomer = await AbandonedCustomer.create(doc);
     }
 
-    // Identity resolution — fire-and-forget, off the webhook critical path.
+    // Identity resolution + signal computation — fire-and-forget, off the
+    // webhook critical path.
     upsertProfile(shopDomain, {
       customerId: req.body.customer?.id?.toString() || null,
       email: req.body.customer?.email || null,
@@ -172,6 +174,11 @@ async function handleWebhook(source, req, res) {
       cartToken: doc.sessionId || null,
     }, {
       lastSeenAt: new Date(),
+    }).then((profile) => {
+      if (profile?._id) {
+        computeSignalsForProfile(profile._id, shopDomain)
+          .catch((err) => console.error('[signals] compute error:', err.message));
+      }
     }).catch((err) => console.error('[profile] upsert error:', err.message));
 
     // Fire the abandoned-cart reminder email if we have an address to send to.

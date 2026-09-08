@@ -1,0 +1,848 @@
+================================================================================
+PHASE B - PRE-WORK AUDIT (read-only capture, no modifications)
+Generated: 2026-09-08T07:52:20Z
+Branch at capture: main   HEAD: b61277a
+================================================================================
+
+================================================================================
+FILE: backend/models/Profile.js   (82 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  const { Schema } = mongoose;
+    3  
+    4  /**
+    5   * One record per human, per shop. Every ingest path (storefront events, carts,
+    6   * checkouts, orders, COD orders, push subscribe) resolves to a Profile via
+    7   * backend/services/profileService.js -> upsertProfile().
+    8   *
+    9   * Merge priority (identity resolution):
+   10   *   customerId -> email -> phone -> cartToken -> ccfSessionId -> pushToken
+   11   */
+   12  const profileSchema = new Schema({
+   13    shopDomain: { type: String, required: true, lowercase: true, trim: true },
+   14  
+   15    identifiers: {
+   16      customerId: { type: String, default: null },
+   17      emails: [{ type: String, lowercase: true, trim: true }],
+   18      phones: [{ type: String }],
+   19      sessionIds: [{ type: String }], // ccfSessionIds (stable UUIDs)
+   20      cartTokens: [{ type: String }],
+   21      pushTokens: [{ type: String }], // FCM tokens
+   22    },
+   23  
+   24    channels: {
+   25      push: { subscribed: Boolean, lastToken: String, subscribedAt: Date },
+   26      email: {
+   27        address: String,
+   28        source: { type: String, enum: ['cod', 'form', 'checkout'] },
+   29      },
+   30    },
+   31  
+   32    stage: {
+   33      type: String,
+   34      enum: ['anonymous', 'identified', 'customer', 'lapsed'],
+   35      default: 'anonymous',
+   36    },
+   37  
+   38    interests: { type: Map, of: Number, default: {} }, // productId -> score 0-1
+   39  
+   40    activeHours: { type: [Number], default: [] }, // hours 0-23 when active
+   41  
+   42    orders: {
+   43      count: { type: Number, default: 0 },
+   44      ltv: { type: Number, default: 0 },
+   45      lastOrderAt: { type: Date, default: null },
+   46      codCount: { type: Number, default: 0 },
+   47      prepaidCount: { type: Number, default: 0 },
+   48    },
+   49  
+   50    messages: [
+   51      {
+   52        // last 20 only, capped in profileService
+   53        channel: String,
+   54        type: String,
+   55        sentAt: Date,
+   56        outcome: {
+   57          type: String,
+   58          enum: ['sent', 'clicked', 'converted', 'unsubscribed'],
+   59          default: 'sent',
+   60        },
+   61        jobId: { type: Schema.Types.ObjectId, ref: 'ScheduledJob' },
+   62      },
+   63    ],
+   64  
+   65    suppressed: { type: Boolean, default: false },
+   66    lastSeenAt: { type: Date, default: null },
+   67    createdAt: { type: Date, default: Date.now },
+   68    updatedAt: { type: Date, default: Date.now },
+   69  });
+   70  
+   71  // Identity-resolution lookups — one per identifier field, all sparse.
+   72  profileSchema.index({ shopDomain: 1, 'identifiers.customerId': 1 }, { sparse: true });
+   73  profileSchema.index({ shopDomain: 1, 'identifiers.emails': 1 }, { sparse: true });
+   74  profileSchema.index({ shopDomain: 1, 'identifiers.phones': 1 }, { sparse: true });
+   75  profileSchema.index({ shopDomain: 1, 'identifiers.cartTokens': 1 }, { sparse: true });
+   76  profileSchema.index({ shopDomain: 1, 'identifiers.sessionIds': 1 }, { sparse: true });
+   77  profileSchema.index({ shopDomain: 1, 'identifiers.pushTokens': 1 }, { sparse: true });
+   78  
+   79  // Dashboard "most recently active" listing.
+   80  profileSchema.index({ shopDomain: 1, updatedAt: -1 });
+   81  
+   82  module.exports = mongoose.model('Profile', profileSchema);
+
+
+================================================================================
+FILE: backend/services/profileService.js   (251 lines)   [FULL]
+================================================================================
+    1  const Profile = require('../models/Profile');
+    2  
+    3  /**
+    4   * Identity resolution + profile upsert.
+    5   *
+    6   *   upsertProfile(shopDomain, identifiers, updates = {})
+    7   *
+    8   * `identifiers` may contain any subset of:
+    9   *   { customerId, email, phone, sessionId, cartToken, pushToken }
+   10   *   - sessionId  -> stored in identifiers.sessionIds (ccfSessionId, a stable UUID)
+   11   *   - cartToken  -> stored in identifiers.cartTokens
+   12   *   - pushToken  -> stored in identifiers.pushTokens (FCM token)
+   13   *
+   14   * `updates` may mix:
+   15   *   - plain dot-notation fields   -> applied via $set   (e.g. 'lastSeenAt', 'channels.push.subscribed')
+   16   *   - MongoDB update operators    -> merged at top level (e.g. { $inc: { 'orders.count': 1 } })
+   17   *
+   18   * Merge priority (highest first): customerId -> email -> phone -> cartToken -> sessionId -> pushToken
+   19   *
+   20   * Fire-and-forget from every ingest path. Never logs PII — only profileId + shopDomain.
+   21   *
+   22   * @returns {Promise<Profile|null>} the resolved profile, or null if no usable identifier was supplied.
+   23   */
+   24  
+   25  // Priority order + the array field each identifier maps to.
+   26  const PRIORITY = ['customerId', 'email', 'phone', 'cartToken', 'sessionId', 'pushToken'];
+   27  const ARRAY_FIELD = {
+   28    email: 'emails',
+   29    phone: 'phones',
+   30    cartToken: 'cartTokens',
+   31    sessionId: 'sessionIds',
+   32    pushToken: 'pushTokens',
+   33  };
+   34  
+   35  function cleanIdentifiers(identifiers = {}) {
+   36    const out = {};
+   37    for (const key of PRIORITY) {
+   38      let val = identifiers[key];
+   39      if (val == null) continue;
+   40      val = String(val).trim();
+   41      if (!val) continue;
+   42      if (key === 'email') val = val.toLowerCase();
+   43      out[key] = val;
+   44    }
+   45    return out;
+   46  }
+   47  
+   48  // Split the `updates` param into a $set object and a bag of other operators.
+   49  function splitUpdates(updates = {}) {
+   50    const set = {};
+   51    const operators = {};
+   52    for (const [key, value] of Object.entries(updates)) {
+   53      if (key.startsWith('$')) {
+   54        operators[key] = { ...(operators[key] || {}), ...value };
+   55      } else if (value !== undefined) {
+   56        set[key] = value;
+   57      }
+   58    }
+   59    return { set, operators };
+   60  }
+   61  
+   62  // Build the $or clause (+ shopDomain) that finds every profile any provided
+   63  // identifier already points at.
+   64  function buildQuery(shopDomain, ids) {
+   65    const or = [];
+   66    for (const [key, val] of Object.entries(ids)) {
+   67      if (key === 'customerId') {
+   68        or.push({ 'identifiers.customerId': val });
+   69      } else {
+   70        or.push({ [`identifiers.${ARRAY_FIELD[key]}`]: val });
+   71      }
+   72    }
+   73    return { shopDomain, $or: or };
+   74  }
+   75  
+   76  // Rank a profile by the highest-priority identifier it already contains.
+   77  // Lower number = higher priority. PRIORITY.length = matches nothing.
+   78  function matchRank(profile, ids) {
+   79    const pid = profile.identifiers || {};
+   80    for (let i = 0; i < PRIORITY.length; i++) {
+   81      const key = PRIORITY[i];
+   82      const val = ids[key];
+   83      if (!val) continue;
+   84      if (key === 'customerId') {
+   85        if (pid.customerId && pid.customerId === val) return i;
+   86      } else {
+   87        const arr = pid[ARRAY_FIELD[key]] || [];
+   88        if (arr.includes(val)) return i;
+   89      }
+   90    }
+   91    return PRIORITY.length;
+   92  }
+   93  
+   94  // Derive stage from identity + order history, never downgrading.
+   95  const STAGE_RANK = { anonymous: 0, identified: 1, lapsed: 2, customer: 3 };
+   96  function nextStage(profile) {
+   97    const pid = profile.identifiers || {};
+   98    const hasCustomer = Boolean(pid.customerId) || (profile.orders && profile.orders.count > 0);
+   99    const hasContact = (pid.emails && pid.emails.length > 0) || (pid.phones && pid.phones.length > 0);
+  100  
+  101    let candidate = 'anonymous';
+  102    if (hasCustomer) candidate = 'customer';
+  103    else if (hasContact) candidate = 'identified';
+  104  
+  105    const current = profile.stage || 'anonymous';
+  106    return STAGE_RANK[candidate] > STAGE_RANK[current] ? candidate : current;
+  107  }
+  108  
+  109  // Keep only the 20 most recent messages, newest first.
+  110  function capMessages(messages) {
+  111    const list = Array.isArray(messages) ? messages.slice() : [];
+  112    list.sort((a, b) => new Date(b.sentAt || 0) - new Date(a.sentAt || 0));
+  113    return list.slice(0, 20);
+  114  }
+  115  
+  116  // $addToSet payload that adds every provided identifier value to its array.
+  117  function addToSetForIds(ids) {
+  118    const add = {};
+  119    for (const [key, val] of Object.entries(ids)) {
+  120      if (key === 'customerId') continue; // scalar, handled separately
+  121      add[`identifiers.${ARRAY_FIELD[key]}`] = val;
+  122    }
+  123    return add;
+  124  }
+  125  
+  126  // Apply identifiers + updates to one existing profile, then fix up stage +
+  127  // messages cap in a second lightweight write. Returns the final doc.
+  128  async function applyToProfile(profileId, shopDomain, ids, updates, existingCustomerId) {
+  129    const { set, operators } = splitUpdates(updates);
+  130  
+  131    const update = { ...operators };
+  132    update.$set = { ...(operators.$set || {}), ...set, updatedAt: new Date() };
+  133  
+  134    // customerId is a scalar — only set it if the profile doesn't already have one.
+  135    if (ids.customerId && !existingCustomerId) {
+  136      update.$set['identifiers.customerId'] = ids.customerId;
+  137    }
+  138  
+  139    const addToSet = addToSetForIds(ids);
+  140    if (Object.keys(addToSet).length > 0) {
+  141      update.$addToSet = { ...(operators.$addToSet || {}), ...addToSet };
+  142    }
+  143  
+  144    let doc = await Profile.findOneAndUpdate({ _id: profileId, shopDomain }, update, { new: true });
+  145    if (!doc) return null;
+  146  
+  147    const stage = nextStage(doc);
+  148    const capped = capMessages(doc.messages);
+  149    const needsMessageCap = Array.isArray(doc.messages) && doc.messages.length > capped.length;
+  150  
+  151    if (stage !== doc.stage || needsMessageCap) {
+  152      doc = await Profile.findOneAndUpdate(
+  153        { _id: profileId, shopDomain },
+  154        { $set: { stage, messages: capped, updatedAt: new Date() } },
+  155        { new: true }
+  156      );
+  157    }
+  158    return doc;
+  159  }
+  160  
+  161  async function upsertProfile(shopDomain, identifiers = {}, updates = {}) {
+  162    try {
+  163      const shop = String(shopDomain || '').trim().toLowerCase();
+  164      const ids = cleanIdentifiers(identifiers);
+  165  
+  166      if (!shop || Object.keys(ids).length === 0) {
+  167        // Nothing to resolve on — silently no-op (no PII, no id to log).
+  168        return null;
+  169      }
+  170  
+  171      const matches = await Profile.find(buildQuery(shop, ids));
+  172  
+  173      // ---- 0 matches: create fresh, then apply updates ----
+  174      if (matches.length === 0) {
+  175        const seed = { shopDomain: shop, identifiers: {} };
+  176        if (ids.customerId) seed.identifiers.customerId = ids.customerId;
+  177        for (const [key, val] of Object.entries(ids)) {
+  178          if (key === 'customerId') continue;
+  179          seed.identifiers[ARRAY_FIELD[key]] = [val];
+  180        }
+  181        const created = await Profile.create(seed);
+  182        const result = await applyToProfile(created._id, shop, ids, updates, ids.customerId || null);
+  183        console.log(`[profile] created ${result?._id} for ${shop}`);
+  184        return result;
+  185      }
+  186  
+  187      // ---- 1 match: add new identifiers + apply updates ----
+  188      if (matches.length === 1) {
+  189        const p = matches[0];
+  190        const result = await applyToProfile(
+  191          p._id,
+  192          shop,
+  193          ids,
+  194          updates,
+  195          p.identifiers && p.identifiers.customerId
+  196        );
+  197        return result;
+  198      }
+  199  
+  200      // ---- multiple matches: merge into the highest-priority profile ----
+  201      const ranked = matches
+  202        .map((p) => ({ p, rank: matchRank(p, ids) }))
+  203        .sort((a, b) => a.rank - b.rank || new Date(a.p.createdAt || 0) - new Date(b.p.createdAt || 0));
+  204  
+  205      const winner = ranked[0].p;
+  206      const losers = ranked.slice(1).map((r) => r.p);
+  207  
+  208      // Collect identifier values from every loser.
+  209      const mergedArrays = { emails: [], phones: [], sessionIds: [], cartTokens: [], pushTokens: [] };
+  210      let mergedCustomerId = (winner.identifiers && winner.identifiers.customerId) || null;
+  211      let mergedMessages = Array.isArray(winner.messages) ? winner.messages.slice() : [];
+  212  
+  213      for (const loser of losers) {
+  214        const lid = loser.identifiers || {};
+  215        for (const arrKey of Object.keys(mergedArrays)) {
+  216          if (Array.isArray(lid[arrKey])) mergedArrays[arrKey].push(...lid[arrKey]);
+  217        }
+  218        if (!mergedCustomerId && lid.customerId) mergedCustomerId = lid.customerId;
+  219        if (Array.isArray(loser.messages)) mergedMessages.push(...loser.messages);
+  220      }
+  221  
+  222      const mergeUpdate = { $addToSet: {}, $set: { updatedAt: new Date() } };
+  223      for (const [arrKey, vals] of Object.entries(mergedArrays)) {
+  224        if (vals.length > 0) mergeUpdate.$addToSet[`identifiers.${arrKey}`] = { $each: vals };
+  225      }
+  226      if (mergedCustomerId && !(winner.identifiers && winner.identifiers.customerId)) {
+  227        mergeUpdate.$set['identifiers.customerId'] = mergedCustomerId;
+  228      }
+  229      mergeUpdate.$set.messages = capMessages(mergedMessages);
+  230      if (Object.keys(mergeUpdate.$addToSet).length === 0) delete mergeUpdate.$addToSet;
+  231  
+  232      await Profile.findOneAndUpdate({ _id: winner._id, shopDomain: shop }, mergeUpdate);
+  233      await Profile.deleteMany({ _id: { $in: losers.map((l) => l._id) } });
+  234      console.log(`[profile] merged ${losers.length} profile(s) into ${winner._id} for ${shop}`);
+  235  
+  236      // Re-apply this call's own identifiers + updates onto the winner.
+  237      const result = await applyToProfile(
+  238        winner._id,
+  239        shop,
+  240        ids,
+  241        updates,
+  242        mergedCustomerId
+  243      );
+  244      return result;
+  245    } catch (err) {
+  246      console.error('[profile] upsertProfile error:', err.message);
+  247      return null;
+  248    }
+  249  }
+  250  
+  251  module.exports = { upsertProfile };
+
+
+================================================================================
+FILE: backend/models/AbandonedCustomer.js   (67 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const abandonedCustomerSchema = new mongoose.Schema({
+    4    shopDomain: {
+    5      type: String,
+    6      required: true,
+    7      trim: true,
+    8      lowercase: true,
+    9      index: true,
+   10    },
+   11    email: {
+   12      type: String,
+   13      trim: true,
+   14      lowercase: true,
+   15    },
+   16    phone: {
+   17      type: String,
+   18      trim: true,
+   19    },
+   20    cartItems: [
+   21      {
+   22        title: String,
+   23        quantity: Number,
+   24        price: Number,
+   25        imageUrl: String,
+   26        productId: mongoose.Schema.Types.Mixed,
+   27        variantId: mongoose.Schema.Types.Mixed,
+   28      },
+   29    ],
+   30    // First available cart-item image, used as the push notification image.
+   31    productImageUrl: {
+   32      type: String,
+   33      trim: true,
+   34    },
+   35    cartValue: {
+   36      type: Number,
+   37      default: 0,
+   38    },
+   39    sessionId: {
+   40      type: String,
+   41      trim: true,
+   42    },
+   43    customerId: {
+   44      type: String,
+   45    },
+   46    status: {
+   47      type: String,
+   48      enum: ['abandoned', 'recovered'],
+   49      default: 'abandoned',
+   50    },
+   51    // --- Revenue attribution (set by handleOrderWebhook on orders/create) ---
+   52    recoveredAt: { type: Date },
+   53    recoveredOrderId: { type: String },
+   54    recoveredOrderName: { type: String },
+   55    recoveredRevenue: { type: Number },
+   56    recoveredCurrency: { type: String },
+   57    // 'push'  -> a CartnCodForm automated push led to this order
+   58    // 'organic' -> recovered without an attributable push click
+   59    attributionSource: { type: String, enum: ['push', 'organic', null], default: null },
+   60    attributedJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'ScheduledJob' },
+   61    createdAt: {
+   62      type: Date,
+   63      default: Date.now,
+   64    },
+   65  });
+   66  
+   67  module.exports = mongoose.model('AbandonedCustomer', abandonedCustomerSchema);
+
+
+================================================================================
+FILE: backend/models/StorefrontEvent.js   (18 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const storefrontEventSchema = new mongoose.Schema({
+    4    shopDomain: { type: String, required: true, lowercase: true, index: true },
+    5    sessionId:  { type: String, index: true },   // Shopify cart token
+    6    customerId: { type: String, index: true },   // Shopify customer id (logged-in only)
+    7    token:      { type: String },                // FCM push token (subscribed only)
+    8    type:       { type: String, required: true }, // event type
+    9    path:       { type: String },
+   10    pageType:   { type: String },
+   11    meta:       { type: mongoose.Schema.Types.Mixed }, // event-specific data
+   12    ts:         { type: Date, default: Date.now },
+   13  });
+   14  
+   15  // Auto-delete events older than 90 days.
+   16  storefrontEventSchema.index({ ts: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
+   17  
+   18  module.exports = mongoose.model('StorefrontEvent', storefrontEventSchema);
+
+
+================================================================================
+FILE: backend/models/CustomerPushSubscription.js   (18 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const CustomerPushSubscriptionSchema = new mongoose.Schema({
+    4    shopDomain: { type: String, required: true, lowercase: true },
+    5    token: { type: String, required: true, unique: true },
+    6    page: { type: String },
+    7    deviceType: { type: String, enum: ['mobile', 'desktop', 'unknown'], default: 'unknown' },
+    8    cartToken: { type: String, trim: true, index: true },
+    9    customerId: { type: String, index: true },
+   10    ccfSessionId: { type: String, index: true },
+   11    createdAt: { type: Date, default: Date.now },
+   12    // Last storefront activity recorded for this subscriber (POST /api/push/cart-activity).
+   13    lastEvent: { type: String },
+   14    lastActivityUrl: { type: String },
+   15    lastActivityAt: { type: Date },
+   16  });
+   17  
+   18  module.exports = mongoose.model('CustomerPushSubscription', CustomerPushSubscriptionSchema);
+
+
+================================================================================
+FILE: backend/models/CodOrder.js   (58 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const codOrderSchema = new mongoose.Schema({
+    4    shopDomain: {
+    5      type: String,
+    6      required: true,
+    7      trim: true,
+    8      lowercase: true,
+    9      index: true,
+   10    },
+   11    name: {
+   12      type: String,
+   13      required: true,
+   14      trim: true,
+   15    },
+   16    phone: {
+   17      type: String,
+   18      required: true,
+   19      trim: true,
+   20    },
+   21    address: {
+   22      type: String,
+   23      required: true,
+   24      trim: true,
+   25    },
+   26    city: {
+   27      type: String,
+   28      trim: true,
+   29    },
+   30    pincode: {
+   31      type: String,
+   32      trim: true,
+   33    },
+   34    productName: {
+   35      type: String,
+   36      trim: true,
+   37    },
+   38    productPrice: {
+   39      type: Number,
+   40      default: 0,
+   41    },
+   42    quantity: {
+   43      type: Number,
+   44      default: 1,
+   45      min: 1,
+   46    },
+   47    status: {
+   48      type: String,
+   49      enum: ['pending', 'confirmed', 'cancelled'],
+   50      default: 'pending',
+   51    },
+   52    createdAt: {
+   53      type: Date,
+   54      default: Date.now,
+   55    },
+   56  });
+   57  
+   58  module.exports = mongoose.model('CodOrder', codOrderSchema);
+
+
+================================================================================
+FILE: backend/server.js   (313 lines)   [FULL]
+================================================================================
+    1  require('dotenv').config();
+    2  
+    3  const path = require('path');
+    4  const express = require('express');
+    5  const cors = require('cors');
+    6  const rateLimit = require('express-rate-limit');
+    7  
+    8  const connectDB = require('./config/db');
+    9  const authRoutes = require('./routes/auth');
+   10  const webhookRoutes = require('./routes/webhooks');
+   11  const storeRoutes = require('./routes/stores');
+   12  const codRoutes = require('./routes/cod');
+   13  const pushRouter = require('./routes/push');
+   14  const proxyRouter = require('./routes/proxy');
+   15  const ScheduledJob = require('./models/ScheduledJob');
+   16  const AutomationRule = require('./models/AutomationRule');
+   17  const { sendPushToCustomers } = require('./utils/pushNotification');
+   18  const { sendAbandonedCartEmail } = require('./utils/email');
+   19  const AbandonedCustomer = require('./models/AbandonedCustomer');
+   20  const CustomerPushSubscription = require('./models/CustomerPushSubscription');
+   21  
+   22  const app = express();
+   23  // Render sits behind a reverse proxy — trust the X-Forwarded-For
+   24  // header so rate limiting and req.ip key on the real client IP.
+   25  app.set('trust proxy', 1);
+   26  const PORT = process.env.PORT || 4000;
+   27  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+   28  
+   29  const allowedOrigins = [
+   30    process.env.FRONTEND_URL,
+   31    'https://cartncodform-beryl.vercel.app',
+   32    'https://admin.shopify.com',
+   33    'http://localhost:3000',
+   34  ].filter(Boolean);
+   35  
+   36  // --- Middleware ------------------------------------------------------------
+   37  app.use(
+   38    cors({
+   39      origin: function (origin, callback) {
+   40        if (!origin || allowedOrigins.includes(origin)) {
+   41          callback(null, true);
+   42        } else {
+   43          callback(new Error('Not allowed by CORS'));
+   44        }
+   45      },
+   46      credentials: true,
+   47    })
+   48  );
+   49  
+   50  // Capture the raw body so Shopify webhook HMAC can be verified if needed.
+   51  app.use(
+   52    express.json({
+   53      limit: '5mb',
+   54      verify: (req, _res, buf) => {
+   55        req.rawBody = buf.toString('utf8');
+   56      },
+   57    })
+   58  );
+   59  // Parse text/plain bodies (sent by navigator.sendBeacon).
+   60  app.use(express.text({ type: 'text/plain' }));
+   61  app.use(express.urlencoded({ extended: true }));
+   62  
+   63  // Simple request logger.
+   64  app.use((req, _res, next) => {
+   65    console.log(`[http] ${req.method} ${req.originalUrl}`);
+   66    next();
+   67  });
+   68  
+   69  // Allow the app to be embedded as an iframe inside Shopify Admin.
+   70  app.use((_req, res, next) => {
+   71    res.setHeader(
+   72      'Content-Security-Policy',
+   73      "frame-ancestors https://admin.shopify.com https://*.myshopify.com"
+   74    );
+   75    next();
+   76  });
+   77  
+   78  // --- Static (customer service worker) -----------------------------------
+   79  // Wide-open CORS on the service worker so any storefront can load it, and
+   80  // the Service-Worker-Allowed header so the SW may claim the root scope.
+   81  app.use('/cartncodform-sw.js', (req, res, next) => {
+   82    res.setHeader('Access-Control-Allow-Origin', '*');
+   83    res.setHeader('Service-Worker-Allowed', '/');
+   84    next();
+   85  });
+   86  app.use(express.static(path.join(__dirname, 'public')));
+   87  
+   88  // --- Routes --------------------------------------------------------------
+   89  app.get('/', (_req, res) => {
+   90    res.json({ service: 'CartnCodForm API', status: 'ok' });
+   91  });
+   92  
+   93  app.get('/api/health', (_req, res) => {
+   94    res.json({ status: 'ok', time: new Date().toISOString() });
+   95  });
+   96  
+   97  // Rate limiters for the high-volume / abusable public endpoints.
+   98  const eventsLimiter = rateLimit({
+   99    windowMs: 60 * 1000,
+  100    max: 60,
+  101    standardHeaders: true,
+  102    legacyHeaders: false,
+  103  });
+  104  
+  105  const pushLimiter = rateLimit({
+  106    windowMs: 60 * 1000,
+  107    max: 10,
+  108    standardHeaders: true,
+  109    legacyHeaders: false,
+  110  });
+  111  
+  112  const attributionLimiter = rateLimit({
+  113    windowMs: 60 * 1000,
+  114    max: 30,
+  115    standardHeaders: true,
+  116    legacyHeaders: false,
+  117  });
+  118  
+  119  app.use('/api/auth', authRoutes);
+  120  app.use('/api/webhooks', webhookRoutes);
+  121  app.use('/api/stores', storeRoutes);
+  122  app.use('/api/cod', codRoutes);
+  123  app.use('/api/push', pushLimiter, pushRouter);
+  124  const eventsRouter = require('./routes/events');
+  125  app.use('/api/events', eventsLimiter, eventsRouter);
+  126  const automationRouter = require('./routes/automation');
+  127  app.use('/api/automation', automationRouter);
+  128  const attributionRouter = require('./routes/attribution');
+  129  app.use('/api/attribution', attributionLimiter, attributionRouter);
+  130  app.use('/apps/cartncodform', proxyRouter);
+  131  
+  132  // --- 404 + error handlers ---------------------------------------------------
+  133  app.use((req, res) => {
+  134    res.status(404).json({ error: `Not found: ${req.method} ${req.originalUrl}` });
+  135  });
+  136  
+  137  app.use((err, _req, res, _next) => {
+  138    console.error('[error]', err.stack || err.message);
+  139    res.status(500).json({ error: 'Internal server error' });
+  140  });
+  141  
+  142  // --- Automation: scheduled job sender -----------------------------------
+  143  /**
+  144   * Returns true if sending a push right now would violate quiet
+  145   * hours (10pm-8am) in the given IANA timezone.
+  146   */
+  147  function isQuietHours(timezone) {
+  148    try {
+  149      const now = new Date();
+  150      const hour = parseInt(
+  151        new Intl.DateTimeFormat('en-US', {
+  152          hour: 'numeric',
+  153          hour12: false,
+  154          timeZone: timezone || 'Asia/Kolkata',
+  155        }).format(now),
+  156        10
+  157      );
+  158      return hour >= 22 || hour < 8;
+  159    } catch (err) {
+  160      console.error('[automation] isQuietHours error:', err.message);
+  161      return false; // fail open — don't block sends on a bad timezone
+  162    }
+  163  }
+  164  
+  165  /**
+  166   * Returns true if this cartToken/customerId has already received
+  167   * 3+ automation pushes in the last 24 hours.
+  168   */
+  169  async function isOverFrequencyCap(shopDomain, cartToken, customerId) {
+  170    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  171    const orClauses = [];
+  172    if (cartToken) orClauses.push({ cartToken });
+  173    if (customerId) orClauses.push({ customerId });
+  174    if (!orClauses.length) return false;
+  175  
+  176    const count = await ScheduledJob.countDocuments({
+  177      shopDomain,
+  178      status: 'sent',
+  179      sentAt: { $gte: since },
+  180      $or: orClauses,
+  181    });
+  182    return count >= 3;
+  183  }
+  184  
+  185  /**
+  186   * Polls for due ScheduledJob rows and sends them. Runs every 30s.
+  187   * Uses a claim-update (findOneAndUpdate with status:'pending' filter)
+  188   * so this is safe even if multiple instances ever run.
+  189   */
+  190  async function processScheduledJobs() {
+  191    try {
+  192      const now = new Date();
+  193      const dueJobs = await ScheduledJob.find({
+  194        status: 'pending',
+  195        runAt: { $lte: now },
+  196      }).limit(20);
+  197  
+  198      for (const job of dueJobs) {
+  199        // Check quiet hours + frequency cap BEFORE claiming — if
+  200        // blocked, leave the job pending and re-check next tick
+  201        // (quiet hours) or skip it permanently (frequency cap).
+  202        const Store = require('./models/Store');
+  203        const store = await Store.findOne({ shopDomain: job.shopDomain }).select('timezone').lean();
+  204        const timezone = store?.timezone || 'Asia/Kolkata';
+  205  
+  206        if (isQuietHours(timezone)) {
+  207          console.log(`[automation] Job ${job._id} deferred — quiet hours (${timezone})`);
+  208          continue; // leave pending, retry next tick
+  209        }
+  210  
+  211        const overCap = await isOverFrequencyCap(job.shopDomain, job.cartToken, job.customerId);
+  212        if (overCap) {
+  213          await ScheduledJob.findOneAndUpdate(
+  214            { _id: job._id, status: 'pending' },
+  215            { status: 'skipped', error: 'Frequency cap reached (3/24h)' }
+  216          );
+  217          console.log(`[automation] Job ${job._id} skipped — frequency cap reached`);
+  218          continue;
+  219        }
+  220  
+  221        // Claim the job — only proceed if we successfully flip it from pending.
+  222        const claimed = await ScheduledJob.findOneAndUpdate(
+  223          { _id: job._id, status: 'pending' },
+  224          { status: 'sent', sentAt: new Date() },
+  225          { new: true }
+  226        );
+  227        if (!claimed) continue; // another process already claimed it
+  228  
+  229        try {
+  230          const channel = job.channel || 'push';
+  231          const payload = job.payload || {};
+  232  
+  233          if (channel === 'push') {
+  234            const baseUrl = payload.url || `https://${job.shopDomain}`;
+  235            const urlWithJob = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'ccf_job=' + job._id.toString();
+  236            const result = await sendPushToCustomers(
+  237              job.shopDomain,
+  238              payload.title || 'You left something behind!',
+  239              payload.body || 'Come back and check it out.',
+  240              urlWithJob,
+  241              payload.imageUrl || null,
+  242              false,
+  243              job.cartToken || null,
+  244              false
+  245            );
+  246  
+  247            if (!result.success || result.sent === 0) {
+  248              await ScheduledJob.findByIdAndUpdate(job._id, {
+  249                status: 'failed',
+  250                error: result.error || 'No active subscriber found',
+  251              });
+  252              console.log(`[automation] Job ${job._id} failed: no subscriber reached`);
+  253            } else {
+  254              console.log(`[automation] Job ${job._id} sent successfully`);
+  255            }
+  256          } else if (channel === 'email') {
+  257            const customer = await AbandonedCustomer.findOne({
+  258              shopDomain: job.shopDomain,
+  259              sessionId: job.cartToken,
+  260            });
+  261            if (!customer || !customer.email) {
+  262              await ScheduledJob.findByIdAndUpdate(job._id, {
+  263                status: 'skipped',
+  264                error: 'No customer email for this cart',
+  265              });
+  266              console.log(`[automation] Job ${job._id} skipped — no customer email`);
+  267            } else {
+  268              const cartUrl = `https://${job.shopDomain}/cart`;
+  269              const sendResult = await sendAbandonedCartEmail(customer, {
+  270                subject: payload.subject || undefined,
+  271                body: payload.body || undefined,
+  272                cartUrl,
+  273              });
+  274              if (!sendResult.success) {
+  275                await ScheduledJob.findByIdAndUpdate(job._id, {
+  276                  status: 'failed',
+  277                  error: sendResult.error || 'Email send failed',
+  278                });
+  279                console.log(`[automation] Job ${job._id} email failed: ${sendResult.error}`);
+  280              } else {
+  281                console.log(`[automation] Job ${job._id} email sent successfully`);
+  282              }
+  283            }
+  284          }
+  285        } catch (err) {
+  286          await ScheduledJob.findByIdAndUpdate(job._id, {
+  287            status: 'failed',
+  288            error: err.message,
+  289          });
+  290          console.error(`[automation] Job ${job._id} error:`, err.message);
+  291        }
+  292      }
+  293    } catch (err) {
+  294      console.error('[automation] processScheduledJobs error:', err.message);
+  295    }
+  296  }
+  297  
+  298  // Poll every 30 seconds.
+  299  setInterval(processScheduledJobs, 30 * 1000);
+  300  console.log('[automation] Scheduled job poller started (30s interval)');
+  301  
+  302  // --- Boot ---------------------------------------------------------------
+  303  async function start() {
+  304    await connectDB();
+  305    app.listen(PORT, () => {
+  306      console.log(`[server] CartnCodForm API listening on port ${PORT}`);
+  307      console.log(`[server] CORS allowed origins: ${allowedOrigins.join(', ')}`);
+  308    });
+  309  }
+  310  
+  311  start();
+  312  
+  313  module.exports = app;
+
+

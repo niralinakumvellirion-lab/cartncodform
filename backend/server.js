@@ -14,10 +14,12 @@ const pushRouter = require('./routes/push');
 const proxyRouter = require('./routes/proxy');
 const ScheduledJob = require('./models/ScheduledJob');
 const AutomationRule = require('./models/AutomationRule');
+const Store = require('./models/Store');
 const { sendPushToCustomers } = require('./utils/pushNotification');
 const { sendAbandonedCartEmail } = require('./utils/email');
 const AbandonedCustomer = require('./models/AbandonedCustomer');
 const CustomerPushSubscription = require('./models/CustomerPushSubscription');
+const { runNightlySignals } = require('./services/signalEngine');
 
 const app = express();
 // Render sits behind a reverse proxy — trust the X-Forwarded-For
@@ -127,6 +129,8 @@ const automationRouter = require('./routes/automation');
 app.use('/api/automation', automationRouter);
 const attributionRouter = require('./routes/attribution');
 app.use('/api/attribution', attributionLimiter, attributionRouter);
+const profilesRouter = require('./routes/profiles');
+app.use('/api/profiles', profilesRouter);
 app.use('/apps/cartncodform', proxyRouter);
 
 // --- 404 + error handlers ---------------------------------------------------
@@ -298,6 +302,28 @@ async function processScheduledJobs() {
 // Poll every 30 seconds.
 setInterval(processScheduledJobs, 30 * 1000);
 console.log('[automation] Scheduled job poller started (30s interval)');
+
+// --- Nightly signal computation — runs at 02:00 server time ------------
+function scheduleNightlySignals() {
+  const now = new Date();
+  const next2am = new Date();
+  next2am.setHours(2, 0, 0, 0);
+  if (next2am <= now) next2am.setDate(next2am.getDate() + 1);
+  const msUntil2am = next2am - now;
+  setTimeout(async () => {
+    try {
+      const shops = await Store.find({}, 'shopDomain');
+      for (const s of shops) {
+        await runNightlySignals(s.shopDomain);
+      }
+    } catch (err) {
+      console.error('[signals] nightly run error:', err.message);
+    }
+    scheduleNightlySignals(); // reschedule for next night
+  }, msUntil2am);
+}
+scheduleNightlySignals();
+console.log('[signals] Nightly signal job scheduled (02:00 server time)');
 
 // --- Boot ---------------------------------------------------------------
 async function start() {

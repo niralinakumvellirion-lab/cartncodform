@@ -1,0 +1,274 @@
+================================================================================
+PHASE B — Signal model + signal engine — SELF-AUDIT
+================================================================================
+Date: 2026-09-08
+Branch: phase-b-signals   (cut from commit b61277a "phase A: Profile model,
+        identity resolution, ..." — Phase A is committed and is the parent of
+        this branch; all Phase A files are present)
+"Done when": Profile API returns active signals with evidence; tests per
+signal condition.
+Status: model + engine (10 live + 2 stubs) + orchestrator + nightly runner +
+ingest wiring + 2 admin routes + 20 tests. All done.
+
+================================================================================
+1. FILES CREATED
+================================================================================
+  backend/models/Signal.js                     (41 lines)
+  backend/services/signalEngine.js             (423 lines)
+      exports: computeCartAbandon, computeCheckoutAbandon, computeBrowseAbandon,
+      computeHighIntent, computePriceHesitation, computePriceDrop (stub),
+      computeBackInStock (stub), computePostPurchaseD3, computeLapsing,
+      computeWinback, computeEmailCapture, computeCodToPrepaid,
+      computeSignalsForProfile, runNightlySignals
+      (spec named only the last two — the individual compute fns are also
+       exported because STEP 8's own test list calls them directly.)
+  backend/routes/profiles.js                   (62 lines)
+  backend/__tests__/signalEngine.test.js       (276 lines)  — 20 tests
+  audits/PHASE_B_PRE_AUDIT.txt                 (848 lines)  — read-only capture
+
+================================================================================
+2. FILES MODIFIED  (exact hunks)
+================================================================================
+backend/routes/webhooks.js        631 -> 638  (+7)
+  @@ +13         require('../services/signalEngine') -> { computeSignalsForProfile }
+  @@ ~168, +177..+181   handleWebhook (carts/create + carts/update, shared with
+                checkouts/*): the Phase-A upsertProfile(...).catch() was
+                RESTRUCTURED to
+                  upsertProfile(...)
+                    .then(profile => { if (profile?._id)
+                        computeSignalsForProfile(profile._id, shopDomain)
+                          .catch(err => console.error('[signals] compute error:', err.message)); })
+                    .catch(err => console.error('[profile] upsert error:', err.message));
+                Only this call was changed. handleOrderWebhook's upsertProfile
+                call is untouched (still a bare .catch).
+
+backend/server.js                 313 -> 339  (+26)
+  @@ +17        const Store = require('./models/Store');       (was only require'd
+               inline inside processScheduledJobs; the inline require at the old
+               line 202 still works and was left in place)
+  @@ +22        const { runNightlySignals } = require('./services/signalEngine');
+  @@ +132..+133  const profilesRouter = require('./routes/profiles');
+               app.use('/api/profiles', profilesRouter);   (before the
+               /apps/cartncodform proxy mount)
+  @@ +306..+327  after the 30s poller setInterval + its log line:
+               scheduleNightlySignals() — a self-rescheduling setTimeout that
+               fires at 02:00 server time, iterates Store.find({}, 'shopDomain')
+               and awaits runNightlySignals(s.shopDomain) for each, catches,
+               then reschedules for the next night. Implemented verbatim from
+               the spec snippet + one console.log confirming it is scheduled.
+
+No lines deleted anywhere. No existing behaviour on any critical path changed.
+
+================================================================================
+3. CONFIRM — all 10 compute functions exist + 2 stubs with comments
+================================================================================
+LIVE (return null | { type, strength, productId, evidence, expiresAt }):
+  computeCartAbandon        cart still 'abandoned' > 60 min; strength 1.0/0.8/
+                            0.6/0.3 by age (<2h/<6h/<24h/older); productId =
+                            cartItems[0].productId; evidence = abandoned-ago +
+                            cart value + item; TTL 48h.
+  computeCheckoutAbandon    reached_checkout event < 24h on any session/cart
+                            token AND cart still an 'abandoned' AbandonedCustomer;
+                            strength 0.95; TTL 24h.
+  computeBrowseAbandon      product_view < 30 min AND no add_to_cart in the same
+                            session/window; strength 0.5; productId from the
+                            view meta; TTL 2h.
+  computeHighIntent         same productId viewed >= 2x in ONE session, last 2h;
+                            strength 0.75; TTL 4h.
+  computePriceHesitation    same productId viewed across >= 3 DISTINCT sessions
+                            (last 30d) AND never added to cart; strength 0.7;
+                            TTL 72h.
+  computePostPurchaseD3     orders.count>=1 AND lastOrderAt in [2.5d, 4d] ago;
+                            strength 0.6; TTL 36h.
+  computeLapsing            lastSeenAt in [21d, 44d] ago; strength 0.5; TTL 7d.
+  computeWinback            lastSeenAt > 45d ago AND orders.count>=1; strength
+                            0.4; TTL 14d.
+  computeEmailCapture       channels.push.subscribed === true AND no
+                            channels.email.address; strength 0.65; TTL 7d.
+  computeCodToPrepaid       orders.codCount>=1 AND orders.prepaidCount===0;
+                            strength 0.55; TTL 7d.
+
+STUBS (return null, with the required comment above them):
+  // Requires products/update webhook + read_inventory scope
+  // Full implementation deferred to Phase F scope change.
+  async function computePriceDrop(profile, shopDomain) { return null; }
+  async function computeBackInStock(profile, shopDomain) { return null; }
+  (NOT in COMPUTE_FNS, so the orchestrator never runs them.)
+
+Orchestrator computeSignalsForProfile(profileId, shopDomain):
+  loads Profile.findById; returns [] if missing or profile.suppressed; runs the
+  10 live fns via Promise.all (each individually .catch'd -> null); upserts each
+  non-null via Signal.findOneAndUpdate({shopDomain,profileId,type}, {$set:{...}},
+  {upsert:true,new:true}); then Signal.deleteMany({shopDomain,profileId,
+  type:{$nin: activeTypes}}); logs `[signals] profile <id>: <n> active`;
+  returns the computed signal objects.
+
+runNightlySignals(shopDomain): Profile.find({shopDomain, suppressed:{$ne:true}},
+  '_id', {lean:true}); processes in batches of 100 (Promise.all within a batch,
+  sequential between batches); logs `[signals] nightly run complete: N profiles
+  processed`.
+
+================================================================================
+4. CONFIRM — computeSignalsForProfile fires on cart ingest (fire-and-forget)
+================================================================================
+webhooks.js handleWebhook (carts/create + carts/update):
+  upsertProfile(...)                    <- not awaited
+    .then(profile => {                  <- runs after the profile resolves
+        if (profile?._id) {
+          computeSignalsForProfile(profile._id, shopDomain)   <- not awaited
+            .catch(err => console.error('[signals] compute error:', err.message));
+        }
+    })
+    .catch(err => console.error('[profile] upsert error:', err.message));
+The webhook still sends its 200 immediately; neither the upsert nor the signal
+computation is on the response path. checkouts/* share handleWebhook, so
+checkout ingest also triggers computation.
+
+================================================================================
+5. CONFIRM — nightly cron wired in server.js
+================================================================================
+scheduleNightlySignals() is defined and called once at module load, right after
+the automation poller's setInterval. It computes ms until the next 02:00 local,
+setTimeout's a run that loops every Store and awaits runNightlySignals, then
+calls itself again to reschedule. A `[signals] Nightly signal job scheduled`
+log line confirms wiring at boot.
+(Note: this is an in-process timer, not a real cron — same pattern as the
+existing 30s poller. It resets on every deploy/restart; fine for a single
+Render instance. See open questions.)
+
+================================================================================
+6. CONFIRM — no PII in any new console.log
+================================================================================
+signalEngine.js:
+  `[signals] compute error: ${err.message}`
+  `[signals] profile ${profileId}: ${results.length} active`        (id + count)
+  `[signals] nightly compute error: ${err.message}`
+  `[signals] nightly run complete: ${processed} profiles processed` (count)
+routes/profiles.js:
+  `[profiles] GET signals error: ${err.message}`
+  `[profiles] GET profile error: ${err.message}`
+server.js:
+  `[signals] nightly run error: ${err.message}`
+  `[signals] Nightly signal job scheduled (02:00 server time)`
+webhooks.js (added):
+  `[signals] compute error: ${err.message}`
+No email, phone, name, token, product title, or evidence string is logged.
+(Signal.evidence CAN contain a product title e.g. "Item: Silk Saree", but it is
+only ever written to the DB, never logged.)
+
+================================================================================
+7. TESTS
+================================================================================
+BEFORE Phase B (baseline re-run on branch cut):
+  Test Suites: 6 passed, 6 total
+  Tests:       55 passed, 55 total
+
+AFTER Phase B  (cd backend && npm test):
+  Test Suites: 7 passed, 7 total
+  Tests:       75 passed, 75 total
+  Snapshots:   0 total
+  Time:        ~2.9 s
+  -> existing 55 unchanged, +20 new (backend/__tests__/signalEngine.test.js).
+  (The "cancelJobsForOrder error: db down" console.error is the pre-existing
+   intentional error-path assertion in automationEngine.test.js:278.)
+
+New file backend/__tests__/signalEngine.test.js — 20 tests, all pass
+(isolated: `npx jest __tests__/signalEngine.test.js`):
+  computeCartAbandon
+    1.  returns null when no AbandonedCustomer exists
+    2.  strength 1.0 for a cart < 2h old
+    3.  strength 0.6 for a cart 7h old
+    4.  queries only status:"abandoned" (recovered carts never match)
+    (+) returns null when cart is younger than 60 min
+  computeBrowseAbandon
+    5.  returns null when a product_view AND an add_to_cart exist in the window
+    6.  returns a signal when only a product_view exists
+  computeHighIntent
+    7.  returns a signal when the same product is viewed 2+ times in one session
+    8.  returns null when the views are for different products
+  computeLapsing
+    9.  returns a signal when lastSeenAt is 25 days ago
+    10. returns null when lastSeenAt is 10 days ago
+  computeWinback
+    11. returns null when the profile has no orders
+    (+) returns a signal at 60 days silent with a prior order
+  computeEmailCapture
+    12. returns a signal when push-subscribed with no email on file
+    (+) returns null when an email address is on file
+  computeCodToPrepaid
+    13. returns a signal when codCount>=1 and prepaidCount===0
+    (+) returns null once a prepaid order exists
+  computeSignalsForProfile
+    14. deletes stale signals whose type is not in the current results
+    (+) returns [] and writes nothing when the profile is suppressed
+    (+) checkout_abandon: fires only while the cart is still abandoned
+
+  Approach: jest.mock() auto-mocks Profile / Signal / AbandonedCustomer /
+  StorefrontEvent. The engine uses Model.findOne(filter, null, {sort}) and
+  Model.find(filter, null, {limit}), which are plain thenables, so
+  mockResolvedValue / mockImplementation is sufficient (no .sort() chain to
+  fake). No live DB.
+
+================================================================================
+8. NOTICED BUT NOT TOUCHED  (out of scope for Phase B)
+================================================================================
+- AbandonedCustomer has NO updatedAt field (no `timestamps:true`), so
+  computeCartAbandon uses `createdAt` as the abandon clock. `createdAt` is set
+  once on first sighting and NOT bumped by carts/update, so it effectively
+  measures "cart first seen N minutes ago", not "last touched N minutes ago".
+  For a long-lived cart the shopper could be active right now and still score
+  cart_abandon. A real "last activity" needs either timestamps on
+  AbandonedCustomer or a join to the newest StorefrontEvent / CPS.lastActivityAt.
+  Flagged; not fixed (would be a model change).
+- add_to_cart events store the added VARIANT id under `meta.productId` (a
+  storefront-embed naming quirk — see push-notifications.liquid ~line 755),
+  while product_view stores the real product id under `meta.productId` and the
+  variant under `meta.variantId`. computePriceHesitation works around this by
+  matching a candidate against {productId} ∪ {its seen variantIds}. Still
+  best-effort; a shopper who added variant X of product P where X was never in
+  a product_view meta would slip through.
+- routes/events.js (raw /api/events ingest) still does NOT trigger
+  computeSignalsForProfile — Phase B only wired the cart webhook (per STEP 5).
+  Browse/high_intent/price_hesitation therefore only recompute on the next
+  cart webhook or the nightly run, not the instant a product_view lands.
+  Same open item carried from Phase A ("events.js has no profile touch").
+- profileService.upsertProfile is unchanged — no orders/interests deep-merge
+  was added (still a Phase A open question).
+- The nightly job uses an in-process setTimeout (not node-cron / a real
+  scheduler), matching the existing 30s poller style. On Render free tier the
+  dyno can sleep and miss 02:00 entirely (the handover already flags "move off
+  free tiers before the brain runs for real").
+- No index build is forced for the new Signal collection; Mongo builds the
+  unique + TTL + brain indexes lazily on first write.
+- Signal.evidence is capped to 5 entries in sig(); the schema comment says
+  "max 5" but there is no schema-level validator — enforced only in code.
+
+================================================================================
+9. OPEN QUESTIONS
+================================================================================
+1. cart_abandon recency — acceptable to use AbandonedCustomer.createdAt as the
+   clock for now, or should Phase B add `timestamps:true` to AbandonedCustomer
+   (a safe additive change) so "abandoned 60 min ago" means "not touched for
+   60 min"? Recommend the model change early in Phase C.
+2. Should the raw event ingest (routes/events.js POST /) also fire
+   computeSignalsForProfile (needs a profile lookup by sessionId first)?
+   STEP 5 only asked for the cart webhook. Browse-type signals are latency-
+   sensitive for the Brain's real-time path in Phase C.
+3. checkout_abandon "no order since" proxy = AbandonedCustomer.status ===
+   'abandoned'. If a checkout is reached but no carts/* webhook ever created an
+   AbandonedCustomer row (possible for a fast checkout), the signal never
+   fires. Is a StorefrontEvent-only fallback (no reached_checkout followed by
+   an orders/create for that session within 24h) wanted?
+4. price_hesitation add_to_cart matching relies on the variant/product id
+   overlap hack. Worth normalising add_to_cart.meta to carry the real
+   product_id in the storefront embed (Phase D storefront rework)?
+5. Nightly runner scans EVERY non-suppressed profile every night with no
+   "changed since last run" filter. Fine at hundreds of profiles; at scale it
+   should be bounded to profiles with recent activity (lastSeenAt within N
+   days) or an updatedAt watermark.
+6. computeSignalsForProfile returns the in-memory computed objects, not the
+   persisted Signal docs. If a caller needs `_id` it must re-query. Acceptable?
+
+================================================================================
+END — stopping after self-audit. Phase C not started.
+================================================================================
