@@ -24,6 +24,7 @@ const { runNightlySignals } = require('./services/signalEngine');
 const { runBrainForShop } = require('./services/brain');
 const { generateCopy } = require('./services/aiService');
 const { checkUnopenedThreshold, updateDeliveredRate } = require('./services/pushHygiene');
+const { computeWeights } = require('./services/weightsService');
 
 const app = express();
 // Render sits behind a reverse proxy — trust the X-Forwarded-For
@@ -249,6 +250,7 @@ async function processScheduledJobs() {
 
           runNightlySignals(s.shopDomain)
             .then(() => runBrainForShop(s.shopDomain))
+            .then(() => computeWeights(s.shopDomain)) // Phase H — refresh weights for tomorrow
             .catch((err) => console.error('[signals] nightly error:', err.message));
 
           // Reset the rolling 7-day push stats for shops whose window expired.

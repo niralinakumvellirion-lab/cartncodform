@@ -1,0 +1,278 @@
+================================================================================
+PHASE H — Feedback loop: outcome rates into Brain weights
+SELF-AUDIT
+================================================================================
+Date: 2026-09-08
+Branch: phase-h-feedback   (cut from main @ 0511518 "phase C2: nightly signals
+        survive restarts, PII scrub, outcome writes, events ingest profile")
+Status: ShopWeights model + weightsService + brain EV ranking + nightly wiring
++ /weights route + 8 tests. Backend 131/131. Done.
+
+BASE: this branch is on top of the committed Phase-C2 fixes. Everything H
+depends on is present:
+  - ScheduledJob.outcome / .clickedAt fields (C2) — verified present at
+    models/ScheduledJob.js:31,36.
+  - the outcome WRITES: attribution.js sets outcome='clicked', webhooks.js
+    handleOrderWebhook sets outcome='converted' (C2). So weightsService has a
+    real data source. It will still produce all-neutral (1.0) rates for a
+    shop until enough clicks/conversions accumulate past the sample
+    thresholds (>=10 signal/channel sends, >=5 per hour) — the expected
+    cold-start (open question #1).
+  - the Phase-C2 per-shop nightly gate in server.js — the computeWeights call
+    was chained into it directly (server.js:252-253).
+
+================================================================================
+1. FILES CREATED
+================================================================================
+  backend/models/ShopWeights.js            (66 lines)
+      { shopDomain(unique), signalRates: Map<type,{sends,clicks,conversions,rate}>,
+        channelRates: { push:{...,rate}, email:{...,rate} },
+        hourRates: Map<hour,{sends,conversions,rate}>, lastComputedAt, updatedAt }
+      All `rate` default 1.0. Map values are sub-schemas ({_id:false}).
+  backend/services/weightsService.js       (106 lines)  — exports { computeWeights }
+  backend/__tests__/weightsService.test.js  (205 lines) — 8 tests
+  audits/PHASE_H_PRE_AUDIT.txt              (458 lines)  — read-only capture
+
+================================================================================
+2. FILES MODIFIED
+================================================================================
+backend/services/brain.js          248 -> 322  (+74)
+  @@ +26..+49   BASE_VALUE map (12 signal types) + rateFromMap(mapLike, key)
+               helper (reads `.rate` from a Map OR plain object, default 1.0).
+  @@ computeRunAt signature: + `hourRates` 5th param.
+  @@ computeRunAt body: NEW middle branch — when profile.activeHours < 3 AND
+               hourRates has data, pick the non-quiet hour with the highest
+               `rate` among buckets with sends >= 5; else fall through to the
+               existing "next non-quiet hour from now".
+  @@ runBrainForProfile: after the Store load, added
+               `const ShopWeights = require('../models/ShopWeights');
+                const weights = (await ShopWeights.findOne({ shopDomain: shop })) || {};
+                const signalRates = weights.signalRates || new Map();
+                const channelRates = weights.channelRates || {};
+                const hourRates = weights.hourRates || new Map();`
+  @@ runBrainForProfile: the rank loop was REPLACED. Was: iterate signals
+               (DB-sorted by strength desc), pick first that passes config +
+               6h cooldown. Now: build `ranked = signals.map(s => ({signal,
+               ev}))` where
+                   ev = strength × BASE_VALUE[type] × sigRate × chanRate
+               (sigRate = rateFromMap(signalRates,type);
+                chanRate = channelRates[estChannel]?.rate ?? 1.0;
+                estChannel = selectChannel(s.type, null, profile) — base-pref
+                estimate), `.sort((a,b) => b.ev - a.ev)`, then the SAME
+               config + 6h-cooldown filter loop over the EV-sorted list.
+  @@ computeRunAt call now passes `hourRates`.
+
+backend/server.js                  461 -> 463  (+2)
+  @@ +27   const { computeWeights } = require('./services/weightsService');
+  @@ +253  the Phase-C2 per-shop nightly gate's promise chain gained a link:
+        runNightlySignals(s.shopDomain)
+          .then(() => runBrainForShop(s.shopDomain))
+          .then(() => computeWeights(s.shopDomain))   // Phase H
+          .catch((err) => console.error('[signals] nightly error:', err.message));
+  `grep computeWeights backend/server.js` -> 2 hits (import at :27, call at :253).
+
+backend/routes/profiles.js         345 -> 363  (+18)
+  @@ +10   const ShopWeights = require('../models/ShopWeights');
+  @@ +346..+362  GET /:shopDomain/weights  (requireAuth + requireStoreOwner)
+               -> ShopWeights.findOne({ shopDomain }) -> { weights: doc || null }
+
+backend/__tests__/brain.test.js    191 -> 194  (+3)
+  @@ +14  jest.mock('../models/ShopWeights')
+  @@ +21  const ShopWeights = require('../models/ShopWeights')
+  @@ +63  ShopWeights.findOne.mockResolvedValue(null)  in beforeEach
+  (brain.js now require()s ShopWeights inline; without the mock the existing
+   brain tests hit a real unconnected mongoose model and hung — 12 failures +
+   a 66s run. With the mock returning null, brain falls to `|| {}` -> neutral
+   rates -> every existing brain assertion passes unchanged.)
+
+================================================================================
+3. CONFIRM — EV formula uses signalRates × channelRates from ShopWeights
+================================================================================
+brain.js runBrainForProfile, ranking step:
+    const base = BASE_VALUE[s.type] != null ? BASE_VALUE[s.type] : 0.5;
+    const sigRate  = rateFromMap(signalRates, s.type);              // ShopWeights.signalRates
+    const chanRate = channelRates[estChannel]?.rate ?? 1.0;         // ShopWeights.channelRates
+    const ev = Number(s.strength) * base * sigRate * chanRate;
+  signalRates / channelRates come from
+  `(await ShopWeights.findOne({ shopDomain: shop })) || {}`.
+  Signals are ranked `.sort((a,b) => b.ev - a.ev)` — highest EV first — then the
+  existing enabled/6h-cooldown filter picks the top survivor. Test 8 proves a
+  weak+high-rate signal (browse_abandon EV 0.064) beats a strong+low-rate one
+  (cart_abandon EV 0.045).
+  DEVIATION: `chanRate` uses `estChannel` = selectChannel(type, null, profile)
+  — the BASE-preference channel, computed WITHOUT the per-signal SignalConfig
+  (config isn't loaded until the filter pass). So if a signal has a
+  channelOverride that flips push<->email, its EV uses the wrong channel's
+  rate. Ranking heuristic only; the actual send channel is still resolved
+  correctly with the real config after a winner is chosen.
+
+================================================================================
+4. CONFIRM — hourRates influence send-time selection
+================================================================================
+computeRunAt(profile, quietStart, quietEnd, timezone, hourRates):
+  1. profile.activeHours >= 3 entries  -> personal most-common non-quiet hour
+     (unchanged).
+  2. else if hourRates has entries     -> the non-quiet hour with the highest
+     `rate` among buckets whose `sends >= 5` (well-sampled only). NEW.
+  3. else                              -> next non-quiet hour from now
+     (unchanged — this is the path when there is no learned data, matching
+     "rate = 1.0 for all hours = current behavior").
+  hourRates is threaded from runBrainForProfile
+  (`weights.hourRates || new Map()`) into the computeRunAt call.
+
+================================================================================
+5. CONFIRM — computeWeights wired into the nightly run after the brain
+================================================================================
+server.js nightly per-shop chain:
+   runNightlySignals(shop) -> runBrainForShop(shop) -> computeWeights(shop)
+computeWeights runs ONCE per shop per day, AFTER signals are fresh and AFTER
+the brain has scheduled, so the numbers reflect the just-completed cycle and
+the NEXT day's runBrainForProfile picks up the new ShopWeights doc.
+`.catch(err => console.error('[weights] compute error:', err.message))` — a
+weights failure never blocks the nightly.
+
+================================================================================
+6. CONFIRM — neutral rate 1.0 used when the sample is too small
+================================================================================
+weightsService.js thresholds:
+  MIN_SIGNAL_SENDS  = 10   -> signalRates[type].rate = 1.0 when sends < 10
+  MIN_CHANNEL_SENDS = 10   -> channelRates[push|email].rate = 1.0 when sends < 10
+  MIN_HOUR_SENDS    = 5    -> hourRates[hour].rate = 1.0 when sends < 5
+  rate (when sampled) = (clicks + conversions) / sends   [signal, channel]
+                      = conversions / sends              [hour, where
+                        conversions counts clicked+converted]
+Tests 1 (5 sends -> 1.0), 6 (3 sends -> 1.0) assert this directly; test 2
+(10 sends -> 0.5) and test 5 (10 sends -> 0.5 / 0.1) assert the sampled path.
+On the read side, rateFromMap() and the channelRates access both default to
+1.0 when a key/entry is absent, so a shop with NO ShopWeights doc at all ranks
+identically to pre-Phase-H.
+
+================================================================================
+7. CONFIRM — no PII in any new log line
+================================================================================
+weightsService.js — the only log:
+  `[weights] computed for ${shop}: ${N} signal types, push rate=${x}, email rate=${y}`
+  (shopDomain + counts + two numbers — no PII.)
+brain.js — no new log lines (the existing `[brain] profile <id>: scheduled ...`
+  is unchanged; <id> is a Mongo _id, not PII).
+server.js — `[weights] compute error: ${err.message}` (Error.message only).
+routes/profiles.js — `[profiles] GET weights error: ${err.message}`.
+No email / phone / name / token / message body anywhere in the new code.
+
+================================================================================
+8. TESTS
+================================================================================
+BEFORE Phase H (baseline re-run on branch cut):
+  Test Suites: 13 passed, 13 total
+  Tests:       123 passed, 123 total
+
+AFTER Phase H  (cd backend && npm test):
+  Test Suites: 14 passed, 14 total
+  Tests:       131 passed, 131 total
+  Snapshots:   0 total
+  Time:        ~6.7 s
+  -> existing 123 unchanged (brain.test.js got 3 setup lines so it keeps
+     passing with the new ShopWeights dependency), +8 new.
+  (The console.error at the tail is the pre-existing intentional error-path
+   assertion in requireStoreOwner.test.js:113 / automationEngine.test.js.)
+
+node --check:
+  backend/models/ShopWeights.js         -> OK
+  backend/services/weightsService.js    -> OK
+  backend/services/brain.js             -> OK
+  backend/server.js                     -> OK
+  backend/routes/profiles.js            -> OK
+  backend/__tests__/weightsService.test.js -> OK
+
+New file backend/__tests__/weightsService.test.js — 8 tests, all pass:
+  computeWeights — signalRates
+    1. neutral rate 1.0 when a signal has fewer than 10 sends
+    2. real rate once >= 10 sends exist  ((3 clicks + 2 conv)/10 = 0.5)
+    3. clicks and conversions both count  ((4+3)/10 = 0.7)
+  computeWeights — channelRates
+    4. push and email rates computed independently  (6/12=0.5 ; 3/15=0.2)
+  computeWeights — hourRates
+    5. the hour with the most conversions gets the highest rate  (0.5 > 0.1)
+    6. an hour with < 5 sends gets the neutral rate 1.0
+  computeWeights — persistence
+    7. ShopWeights upserted (filter {shopDomain}, upsert:true, $set shape)
+  brain EV ranking (integration)
+    8. a weak signal with a high shop rate beats a strong signal with a low
+       shop rate  (browse_abandon EV 0.064 > cart_abandon EV 0.045 -> the
+       scheduled job is browse_abandon)
+
+================================================================================
+9. DEVIATIONS FROM THE LITERAL SPEC (all deliberate)
+================================================================================
+(a) EV chanRate uses the base-preference channel estimate (selectChannel with
+    null config), not the per-signal channelOverride (config not yet loaded at
+    ranking time). Heuristic-only; the real send channel is unaffected. (§3)
+(b) hourRates influences send time only among WELL-SAMPLED buckets (sends >= 5).
+    The spec said "highest hourRates rate"; taken literally, an under-sampled
+    hour (rate 1.0) would always beat a well-sampled real hour (rate ~0.1),
+    which is backwards. Restricted to sends >= 5 so only learned hours compete.
+(c) hourRates in weightsService keys off `job.sentAt` and falls back to
+    `job.runAt` when a job was skipped before it was ever claimed (no sentAt).
+    Spec said `sentAt.getHours()`; used `.getUTCHours()` per the spec's own
+    "in UTC" note.
+(d) STEP 6 named "the Phase-C2 nightly gate" — the branch base (main @ 0511518)
+    already has it, so computeWeights was chained straight into the gate's
+    per-shop `.then()` (runNightlySignals -> runBrainForShop -> computeWeights).
+    No adaptation was needed.
+(e) brain.test.js was edited (+3 lines: mock ShopWeights, return null) — a test
+    change, required so the pre-existing brain tests don't hit a real mongoose
+    model now that brain.js require()s ShopWeights.
+(f) ShopWeights Map fields use `of: new mongoose.Schema({...},{_id:false})`
+    rather than an inline `of: { ... }` — the inline form does not reliably
+    give per-key defaults on a Map in Mongoose 8.
+
+================================================================================
+10. NOTICED BUT NOT TOUCHED  (out of scope for Phase H)
+================================================================================
+- The outcome WRITE path (C2: attribution click / order convert) is in the
+  base, but no shop has accumulated enough clicks/conversions yet, so
+  computeWeights currently produces all-1.0 rates and the brain effectively
+  ranks by `strength × BASE_VALUE` until real data crosses the thresholds.
+  Intended cold-start behaviour. (Open question #1.)
+- computeWeights loads up to 90 days of ScheduledJob rows per shop with no cap
+  / streaming. Fine at current volume (21 jobs in the live DB); a busy shop
+  could return tens of thousands. Consider an aggregate() pipeline instead.
+- BASE_VALUE is a hard-coded constant in brain.js, not configurable per shop.
+  The plan's Part 3 formula also has `shopConversionRate` — that role is now
+  filled by `signalRates[type].rate`. There is still no per-shop `baseValue`
+  override.
+- No Today-screen UI reads /weights yet (STEP 7 says "eventually"). The route
+  exists and returns `{ weights }`.
+- The nightly gate (whichever form) still runs signals+brain+weights
+  sequentially per shop; a slow shop delays the next. Fine for one design
+  partner.
+- ShopWeights has no TTL / cleanup; one small doc per shop, grows with
+  signal-type variety only.
+- weightsService counts a 'failed'/'skipped' job as a "send" in the
+  denominator (status IN ['sent','failed','skipped'] per the spec). A shop
+  with many no-subscriber failures will see depressed rates. Arguably correct
+  (a message that couldn't be delivered has 0 conversions) but worth noting.
+
+================================================================================
+11. OPEN QUESTIONS
+================================================================================
+1. Cold start: the outcome-write path exists (C2, in the base), but until a
+   shop logs >=10 signal/channel sends and >=5 sends/hour WITH clicks or
+   conversions, every rate stays 1.0 and the brain ranks by
+   strength × BASE_VALUE only. Expected; no action, just a heads-up that
+   Phase H does nothing visible on day one.
+2. EV `chanRate` estimate ignores channelOverride (§9a). Load SignalConfig in
+   the ranking map() so the EV uses the true channel? (One extra
+   SignalConfig.findOne per signal per profile per night.)
+3. hourRates gate at sends >= 5 (§9b) vs the spec's literal "highest rate".
+   Confirm the well-sampled-only interpretation.
+4. weightsService: 'failed'/'skipped' jobs in the send denominator (§10) —
+   keep, or count only status 'sent'?
+5. BASE_VALUE hard-coded in brain.js — leave, or move to a Store field /
+   ShopWeights so it's tunable?
+6. Should /api/profiles/:shop/weights be surfaced on the Today screen now
+   ("what's working"), or is that a later G-phase?
+
+================================================================================
+END — stopping after self-audit. No further phase.
+================================================================================

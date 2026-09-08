@@ -11,12 +11,14 @@ jest.mock('../models/Signal');
 jest.mock('../models/SignalConfig');
 jest.mock('../models/ScheduledJob');
 jest.mock('../models/Store');
+jest.mock('../models/ShopWeights');
 
 const Profile = require('../models/Profile');
 const Signal = require('../models/Signal');
 const SignalConfig = require('../models/SignalConfig');
 const ScheduledJob = require('../models/ScheduledJob');
 const Store = require('../models/Store');
+const ShopWeights = require('../models/ShopWeights');
 
 const { runBrainForProfile } = require('../services/brain');
 
@@ -58,6 +60,7 @@ beforeEach(() => {
   SignalConfig.findOne.mockResolvedValue(null);
   ScheduledJob.findOne.mockResolvedValue(null);
   ScheduledJob.create.mockResolvedValue({ _id: 'job1' });
+  ShopWeights.findOne.mockResolvedValue(null); // Phase H — no learned weights -> neutral
 });
 
 test('1. returns null when the profile is not found', async () => {

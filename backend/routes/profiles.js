@@ -7,6 +7,7 @@ const SignalConfig = require('../models/SignalConfig');
 const StorefrontEvent = require('../models/StorefrontEvent');
 const Store = require('../models/Store');
 const ScheduledJob = require('../models/ScheduledJob');
+const ShopWeights = require('../models/ShopWeights');
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
 const { computeWeeklyStats, computeInsights } = require('../services/analyticsService');
 const { generateWeeklyNarrative, generateInsights } = require('../services/aiService');
@@ -339,6 +340,23 @@ router.patch('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req
   } catch (err) {
     console.error('[profiles] PATCH settings error:', err.message);
     return res.status(500).json({ error: 'Failed to update settings' });
+  }
+});
+
+/**
+ * GET /api/profiles/:shopDomain/weights
+ * The shop's learned Brain weights (Phase H). null until the first nightly
+ * compute has run.
+ * -> { weights }
+ */
+router.get('/:shopDomain/weights', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const weights = await ShopWeights.findOne({ shopDomain: shop });
+    return res.json({ weights: weights || null });
+  } catch (err) {
+    console.error('[profiles] GET weights error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch weights' });
   }
 });
 

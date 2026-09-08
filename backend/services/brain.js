@@ -23,6 +23,30 @@ const EMAIL_FIRST = new Set([
 // Everything else (cart_abandon, checkout_abandon, browse_abandon, high_intent,
 // price_hesitation, price_drop, back_in_stock) prefers push — time-sensitive.
 
+// Phase H — static base value per signal type (the EV formula's `baseValue`).
+const BASE_VALUE = {
+  cart_abandon: 1.0,
+  checkout_abandon: 1.2,
+  price_drop: 0.9,
+  back_in_stock: 0.9,
+  high_intent: 0.7,
+  price_hesitation: 0.6,
+  cod_to_prepaid: 0.8,
+  browse_abandon: 0.4,
+  post_purchase_d3: 0.3,
+  lapsing: 0.5,
+  winback: 0.4,
+  email_capture: 0.3,
+};
+
+// Read a `.rate` from a Map (ShopWeights.signalRates / .hourRates) or a plain
+// object, defaulting to the neutral 1.0 when there is no learned value yet.
+function rateFromMap(mapLike, key) {
+  if (!mapLike) return 1.0;
+  const v = typeof mapLike.get === 'function' ? mapLike.get(String(key)) : mapLike[String(key)];
+  return v && typeof v.rate === 'number' ? v.rate : 1.0;
+}
+
 // --- quiet hours -----------------------------------------------------------
 
 function isQuietHour(hour, start, end) {
@@ -71,7 +95,7 @@ function selectChannel(signalType, config, profile) {
 
 // --- send time ---------------------------------------------------------
 
-function computeRunAt(profile, quietStart, quietEnd, timezone) {
+function computeRunAt(profile, quietStart, quietEnd, timezone, hourRates) {
   const now = new Date();
   const curHour = hourInTz(now, timezone);
 
@@ -82,6 +106,7 @@ function computeRunAt(profile, quietStart, quietEnd, timezone) {
     : [];
 
   if (ah.length >= 3) {
+    // Personal history: the profile's own most-common non-quiet hour.
     const counts = {};
     for (const h of ah) counts[h] = (counts[h] || 0) + 1;
     const ranked = Object.keys(counts)
@@ -91,7 +116,31 @@ function computeRunAt(profile, quietStart, quietEnd, timezone) {
     if (ranked.length) targetHour = ranked[0];
   }
 
+  if (targetHour == null && hourRates) {
+    // Phase H: no personal history -> the shop's best-converting non-quiet
+    // hour (only among well-sampled buckets, sends >= 5).
+    const entries =
+      typeof hourRates.entries === 'function'
+        ? Array.from(hourRates.entries())
+        : Object.entries(hourRates);
+    let bestHour = null;
+    let bestRate = -1;
+    for (const [hStr, e] of entries) {
+      const h = Number(hStr);
+      if (!Number.isInteger(h) || h < 0 || h > 23) continue;
+      if (isQuietHour(h, quietStart, quietEnd)) continue;
+      if (!e || (e.sends || 0) < 5) continue;
+      const r = typeof e.rate === 'number' ? e.rate : 1.0;
+      if (r > bestRate) {
+        bestRate = r;
+        bestHour = h;
+      }
+    }
+    if (bestHour != null) targetHour = bestHour;
+  }
+
   if (targetHour == null) {
+    // No history at all: the next non-quiet hour from now.
     for (let i = 0; i < 24; i++) {
       const h = (curHour + 1 + i) % 24;
       if (!isQuietHour(h, quietStart, quietEnd)) {
@@ -127,6 +176,13 @@ async function runBrainForProfile(profileId, shopDomain) {
   const quietEnd = qh.end != null ? qh.end : 8;
   const timezone = (store && store.timezone) || 'Asia/Kolkata';
 
+  // Phase H — learned per-shop weights (all rates default 1.0 = neutral).
+  const ShopWeights = require('../models/ShopWeights');
+  const weights = (await ShopWeights.findOne({ shopDomain: shop })) || {};
+  const signalRates = weights.signalRates || new Map();
+  const channelRates = weights.channelRates || {};
+  const hourRates = weights.hourRates || new Map();
+
   const signals = await Signal.find(
     { shopDomain: shop, profileId },
     null,
@@ -143,10 +199,28 @@ async function runBrainForProfile(profileId, shopDomain) {
   if (sentSince(24 * HOUR).length >= perDay) return null;
   if (sentSince(7 * DAY).length >= perWeek) return null;
 
-  // --- rank: strongest first, honouring config + per-signal 6h cooldown ---
+  // --- rank by expected value: strength × baseValue × shopSignalRate ×
+  //     shopChannelRate. Channel here is the base-preference estimate (the
+  //     real per-signal config channel is resolved in the filter pass below).
+  const ranked = signals
+    .map((s) => {
+      const estChannel = selectChannel(s.type, null, profile);
+      const base = BASE_VALUE[s.type] != null ? BASE_VALUE[s.type] : 0.5;
+      const sigRate = rateFromMap(signalRates, s.type);
+      const chanRate = estChannel
+        ? (channelRates[estChannel] && typeof channelRates[estChannel].rate === 'number'
+            ? channelRates[estChannel].rate
+            : 1.0)
+        : 1.0;
+      const ev = Number(s.strength) * base * sigRate * chanRate;
+      return { signal: s, ev };
+    })
+    .sort((a, b) => b.ev - a.ev);
+
+  // --- pick the top-EV signal that passes config + the per-signal 6h cooldown ---
   let winner = null;
   let winnerConfig = null;
-  for (const s of signals) {
+  for (const { signal: s } of ranked) {
     const config = await SignalConfig.findOne({ shopDomain: shop, signalType: s.type });
     if (config && config.enabled === false) continue;
 
@@ -166,7 +240,7 @@ async function runBrainForProfile(profileId, shopDomain) {
   if (!channel) return null;
 
   // --- send time ---
-  const runAt = computeRunAt(profile, quietStart, quietEnd, timezone);
+  const runAt = computeRunAt(profile, quietStart, quietEnd, timezone, hourRates);
 
   // --- schedule (dedup: one pending job per profile+signal) ---
   const existing = await ScheduledJob.findOne({

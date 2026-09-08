@@ -1,0 +1,458 @@
+================================================================================
+PHASE H - PRE-WORK AUDIT (read-only, no modifications)
+Generated: 2026-09-08T11:59:56Z   Branch: phase-h-feedback   HEAD: 0511518
+================================================================================
+
+================================================================================
+FILE: backend/services/brain.js   (248 lines)   [FULL]
+================================================================================
+    1  const Profile = require('../models/Profile');
+    2  const Signal = require('../models/Signal');
+    3  const SignalConfig = require('../models/SignalConfig');
+    4  const ScheduledJob = require('../models/ScheduledJob');
+    5  const Store = require('../models/Store');
+    6  
+    7  /**
+    8   * Layer 3 — Brain. For one profile per day: rank its active signals, apply
+    9   * fatigue caps, pick ONE signal, pick ONE channel, pick a send time, and
+   10   * schedule a single ScheduledJob carrying (profileId, signalType, reason) —
+   11   * NOT resolved copy. Copy is resolved in the poller at send time (Phase E).
+   12   *
+   13   * Everything here is deterministic and inspectable.
+   14   */
+   15  
+   16  const HOUR = 60 * 60 * 1000;
+   17  const DAY = 24 * HOUR;
+   18  
+   19  // Signal-type channel defaults (SignalConfig.channelOverride wins over these).
+   20  const EMAIL_FIRST = new Set([
+   21    'lapsing', 'winback', 'post_purchase_d3', 'email_capture', 'cod_to_prepaid',
+   22  ]);
+   23  // Everything else (cart_abandon, checkout_abandon, browse_abandon, high_intent,
+   24  // price_hesitation, price_drop, back_in_stock) prefers push — time-sensitive.
+   25  
+   26  // --- quiet hours -----------------------------------------------------------
+   27  
+   28  function isQuietHour(hour, start, end) {
+   29    if (start === end) return false;
+   30    if (start < end) return hour >= start && hour < end; // same-day window
+   31    return hour >= start || hour < end;                  // wraps midnight (e.g. 22->8)
+   32  }
+   33  
+   34  function hourInTz(date, tz) {
+   35    try {
+   36      const h = parseInt(
+   37        new Intl.DateTimeFormat('en-US', {
+   38          hour: 'numeric',
+   39          hour12: false,
+   40          timeZone: tz || 'Asia/Kolkata',
+   41        }).format(date),
+   42        10
+   43      );
+   44      return h % 24; // some ICU builds emit "24" at midnight
+   45    } catch {
+   46      return date.getHours();
+   47    }
+   48  }
+   49  
+   50  // --- channel selection ---------------------------------------------------
+   51  
+   52  function selectChannel(signalType, config, profile) {
+   53    const ch = profile.channels || {};
+   54    const avail = {
+   55      push: !!(ch.push && ch.push.subscribed === true),
+   56      email: !!(ch.email && ch.email.address),
+   57    };
+   58  
+   59    let preferred;
+   60    if (config && (config.channelOverride === 'push' || config.channelOverride === 'email')) {
+   61      preferred = config.channelOverride;
+   62    } else {
+   63      preferred = EMAIL_FIRST.has(signalType) ? 'email' : 'push';
+   64    }
+   65    const other = preferred === 'push' ? 'email' : 'push';
+   66  
+   67    if (avail[preferred]) return preferred;
+   68    if (avail[other]) return other;
+   69    return null;
+   70  }
+   71  
+   72  // --- send time ---------------------------------------------------------
+   73  
+   74  function computeRunAt(profile, quietStart, quietEnd, timezone) {
+   75    const now = new Date();
+   76    const curHour = hourInTz(now, timezone);
+   77  
+   78    let targetHour = null;
+   79  
+   80    const ah = Array.isArray(profile.activeHours)
+   81      ? profile.activeHours.filter((h) => Number.isInteger(h) && h >= 0 && h <= 23)
+   82      : [];
+   83  
+   84    if (ah.length >= 3) {
+   85      const counts = {};
+   86      for (const h of ah) counts[h] = (counts[h] || 0) + 1;
+   87      const ranked = Object.keys(counts)
+   88        .map(Number)
+   89        .filter((h) => !isQuietHour(h, quietStart, quietEnd))
+   90        .sort((a, b) => counts[b] - counts[a] || a - b);
+   91      if (ranked.length) targetHour = ranked[0];
+   92    }
+   93  
+   94    if (targetHour == null) {
+   95      for (let i = 0; i < 24; i++) {
+   96        const h = (curHour + 1 + i) % 24;
+   97        if (!isQuietHour(h, quietStart, quietEnd)) {
+   98          targetHour = h;
+   99          break;
+  100        }
+  101      }
+  102      if (targetHour == null) targetHour = (curHour + 1) % 24; // all-quiet fallback
+  103    }
+  104  
+  105    // Next occurrence of targetHour (store-local), aligned to the top of the hour.
+  106    let deltaHours = targetHour - curHour;
+  107    if (deltaHours <= 0) deltaHours += 24;
+  108    const runAt = new Date(now.getTime() + deltaHours * HOUR);
+  109    runAt.setMinutes(0, 0, 0);
+  110    return runAt;
+  111  }
+  112  
+  113  // --- per-profile -----------------------------------------------------------
+  114  
+  115  async function runBrainForProfile(profileId, shopDomain) {
+  116    const profile = await Profile.findById(profileId);
+  117    if (!profile || profile.suppressed) return null;
+  118  
+  119    const shop = shopDomain || profile.shopDomain;
+  120  
+  121    const store = await Store.findOne({ shopDomain: shop });
+  122    const caps = (store && store.caps) || {};
+  123    const perDay = caps.perDay != null ? caps.perDay : 2;
+  124    const perWeek = caps.perWeek != null ? caps.perWeek : 5;
+  125    const qh = (store && store.quietHours) || {};
+  126    const quietStart = qh.start != null ? qh.start : 22;
+  127    const quietEnd = qh.end != null ? qh.end : 8;
+  128    const timezone = (store && store.timezone) || 'Asia/Kolkata';
+  129  
+  130    const signals = await Signal.find(
+  131      { shopDomain: shop, profileId },
+  132      null,
+  133      { sort: { strength: -1 } }
+  134    );
+  135    if (!signals || !signals.length) return null;
+  136  
+  137    // --- fatigue: daily + weekly caps from the profile's message log ---
+  138    const now = Date.now();
+  139    const msgs = Array.isArray(profile.messages) ? profile.messages : [];
+  140    const sentSince = (ms) =>
+  141      msgs.filter((m) => m.sentAt && now - new Date(m.sentAt).getTime() < ms);
+  142  
+  143    if (sentSince(24 * HOUR).length >= perDay) return null;
+  144    if (sentSince(7 * DAY).length >= perWeek) return null;
+  145  
+  146    // --- rank: strongest first, honouring config + per-signal 6h cooldown ---
+  147    let winner = null;
+  148    let winnerConfig = null;
+  149    for (const s of signals) {
+  150      const config = await SignalConfig.findOne({ shopDomain: shop, signalType: s.type });
+  151      if (config && config.enabled === false) continue;
+  152  
+  153      const tooSoon = msgs.some(
+  154        (m) => m.type === s.type && m.sentAt && now - new Date(m.sentAt).getTime() < 6 * HOUR
+  155      );
+  156      if (tooSoon) continue;
+  157  
+  158      winner = s;
+  159      winnerConfig = config;
+  160      break;
+  161    }
+  162    if (!winner) return null;
+  163  
+  164    // --- channel ---
+  165    const channel = selectChannel(winner.type, winnerConfig, profile);
+  166    if (!channel) return null;
+  167  
+  168    // --- send time ---
+  169    const runAt = computeRunAt(profile, quietStart, quietEnd, timezone);
+  170  
+  171    // --- schedule (dedup: one pending job per profile+signal) ---
+  172    const existing = await ScheduledJob.findOne({
+  173      profileId,
+  174      signalType: winner.type,
+  175      status: 'pending',
+  176    });
+  177    if (existing) return null;
+  178  
+  179    const carts = (profile.identifiers && profile.identifiers.cartTokens) || [];
+  180    const strengthStr = Number(winner.strength).toFixed(2);
+  181    const reason = `${winner.type} strength=${strengthStr}`;
+  182  
+  183    try {
+  184      await ScheduledJob.create({
+  185        shopDomain: shop,
+  186        profileId,
+  187        signalType: winner.type,
+  188        channel,
+  189        reason,
+  190        payload: {
+  191          title: '', // resolved at send time by AI (Phase E)
+  192          body: '',  // resolved at send time by AI (Phase E)
+  193          url: winner.productId
+  194            ? `https://${shop}/products/${winner.productId}`
+  195            : `https://${shop}`,
+  196          imageUrl: '', // resolved at send time
+  197        },
+  198        cartToken: carts[0] || null,
+  199        ruleId: null,
+  200        stepIndex: 0,
+  201        status: 'pending',
+  202        runAt,
+  203      });
+  204    } catch (err) {
+  205      // 11000 = the unique brain-job index caught a race — treat as already scheduled.
+  206      if (err && err.code === 11000) return null;
+  207      throw err;
+  208    }
+  209  
+  210    console.log(`[brain] profile ${profileId}: scheduled ${winner.type} on ${channel}`);
+  211    return { profileId, signalType: winner.type, channel, runAt, reason };
+  212  }
+  213  
+  214  // --- per-shop ------------------------------------------------------------
+  215  
+  216  async function runBrainForShop(shopDomain) {
+  217    const shop = String(shopDomain || '').trim().toLowerCase();
+  218    const profiles = await Profile.find(
+  219      { shopDomain: shop, suppressed: { $ne: true } },
+  220      '_id',
+  221      { lean: true }
+  222    );
+  223    const ids = (profiles || []).map((p) => p._id);
+  224  
+  225    let scheduled = 0;
+  226    let skipped = 0;
+  227  
+  228    for (let i = 0; i < ids.length; i += 50) {
+  229      const batch = ids.slice(i, i + 50);
+  230      const results = await Promise.all(
+  231        batch.map((id) =>
+  232          runBrainForProfile(id, shop).catch((err) => {
+  233            console.error('[brain] profile error:', err.message);
+  234            return null;
+  235          })
+  236        )
+  237      );
+  238      for (const r of results) {
+  239        if (r) scheduled += 1;
+  240        else skipped += 1;
+  241      }
+  242    }
+  243  
+  244    console.log(`[brain] shop done: ${scheduled} scheduled, ${skipped} skipped`);
+  245    return { scheduled, skipped };
+  246  }
+  247  
+  248  module.exports = { runBrainForProfile, runBrainForShop };
+
+
+================================================================================
+FILE: backend/models/ScheduledJob.js   (73 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const scheduledJobSchema = new mongoose.Schema({
+    4    shopDomain: { type: String, required: true, lowercase: true, index: true },
+    5    // Phase C: brain-scheduled jobs carry no ruleId — relaxed from `required`.
+    6    ruleId: { type: mongoose.Schema.Types.ObjectId, ref: 'AutomationRule', default: null },
+    7    stepIndex: { type: Number, required: true, default: 0 },
+    8  
+    9    // --- Phase C: brain targeting / explainability ---
+   10    profileId: { type: mongoose.Schema.Types.ObjectId, ref: 'Profile', default: null },
+   11    signalType: { type: String, default: null },
+   12    reason: { type: String, default: '' }, // human-readable why
+   13  
+   14    // Targeting — at least one of these should be present.
+   15    subscriptionToken: { type: String },  // FCM token, if already resolved
+   16    sessionId: { type: String, index: true },  // stable UUID (StorefrontEvent.sessionId)
+   17    cartToken: { type: String, index: true },  // Shopify cart token, for cancellation matching
+   18    customerId: { type: String, index: true },
+   19  
+   20    runAt: { type: Date, required: true, index: true },
+   21    status: {
+   22      type: String,
+   23      enum: ['pending', 'sent', 'cancelled', 'failed', 'skipped'],
+   24      default: 'pending',
+   25      index: true,
+   26    },
+   27    channel: { type: String, enum: ['push', 'email'], default: 'push' },
+   28    payload: { type: mongoose.Schema.Types.Mixed },  // resolved title/body/imageUrl at send time
+   29  
+   30    // Phase C2: outcome of the send, updated by attribution (click) + order webhook (convert).
+   31    outcome: {
+   32      type: String,
+   33      enum: ['delivered', 'clicked', 'converted', 'failed', 'skipped'],
+   34      default: null,
+   35    },
+   36    clickedAt: { type: Date, default: null },
+   37  
+   38    // Phase G3: createdAt + updatedAt are managed by { timestamps: true } below.
+   39    sentAt: { type: Date },
+   40    error: { type: String },
+   41  }, { timestamps: true });
+   42  
+   43  // Compound index for the sender's poll query.
+   44  scheduledJobSchema.index({ status: 1, runAt: 1 });
+   45  
+   46  // Prevent duplicate first-step scheduling for the same rule+cart+step
+   47  // when carts/create and carts/update fire near-simultaneously.
+   48  // Phase C: scoped to rule-based jobs (ruleId is an ObjectId) so brain jobs,
+   49  // which have ruleId=null and share cartToken+stepIndex, are NOT deduped here.
+   50  scheduledJobSchema.index(
+   51    { shopDomain: 1, ruleId: 1, cartToken: 1, stepIndex: 1 },
+   52    {
+   53      unique: true,
+   54      partialFilterExpression: {
+   55        status: { $in: ['pending', 'sent'] },
+   56        ruleId: { $type: 'objectId' },
+   57      },
+   58    }
+   59  );
+   60  
+   61  // Phase C: one pending brain job per (profile, signal) at a time.
+   62  scheduledJobSchema.index(
+   63    { shopDomain: 1, profileId: 1, signalType: 1 },
+   64    {
+   65      unique: true,
+   66      partialFilterExpression: {
+   67        status: 'pending',
+   68        profileId: { $type: 'objectId' },
+   69      },
+   70    }
+   71  );
+   72  
+   73  module.exports = mongoose.model('ScheduledJob', scheduledJobSchema);
+
+
+================================================================================
+FILE: backend/models/Store.js   (71 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const storeSchema = new mongoose.Schema({
+    4    shopDomain: {
+    5      type: String,
+    6      required: true,
+    7      unique: true,
+    8      trim: true,
+    9      lowercase: true,
+   10    },
+   11    accessToken: {
+   12      type: String,
+   13      required: true,
+   14    },
+   15    ownerEmail: {
+   16      type: String,
+   17      lowercase: true,
+   18      trim: true,
+   19    },
+   20    timezone: {
+   21      type: String,
+   22      default: 'Asia/Kolkata',
+   23    },
+   24    plan: {
+   25      type: String,
+   26      enum: ['free', 'pro'],
+   27      default: 'free',
+   28    },
+   29    subscriptionId: { type: String },
+   30    subscriptionStatus: { type: String },
+   31    planUpdatedAt: { type: Date },
+   32  
+   33    // --- Phase C: brain configuration ---
+   34    voice: {
+   35      tone: { type: String, default: 'friendly' },
+   36      emoji: { type: Boolean, default: true },
+   37      lang: { type: String, default: 'en' },
+   38      signOff: { type: String, default: '' },
+   39    },
+   40    caps: {
+   41      perDay: { type: Number, default: 2 },
+   42      perWeek: { type: Number, default: 5 },
+   43      maxUnopenedPush: { type: Number, default: 5 }, // Phase F: suppress push after N unopened
+   44    },
+   45    quietHours: {
+   46      start: { type: Number, default: 22 }, // hour 0-23
+   47      end: { type: Number, default: 8 },
+   48    },
+   49    onboarding: {
+   50      steps: [{ id: String, done: Boolean, doneAt: Date }],
+   51    },
+   52    // NOTE: `timezone` already exists above (default 'Asia/Kolkata') — not re-added.
+   53  
+   54    // --- Phase F: rolling 7-day push delivery health ---
+   55    pushStats: {
+   56      deliveredLast7d: { type: Number, default: 0 },
+   57      attemptedLast7d: { type: Number, default: 0 },
+   58      rateLast7d: { type: Number, default: 0 },
+   59      lastComputedAt: { type: Date, default: null },
+   60    },
+   61  
+   62    // --- Phase C2: last time the nightly signals+brain gate ran for this shop ---
+   63    lastSignalRunAt: { type: Date, default: null },
+   64  
+   65    installedAt: {
+   66      type: Date,
+   67      default: Date.now,
+   68    },
+   69  });
+   70  
+   71  module.exports = mongoose.model('Store', storeSchema);
+
+
+================================================================================
+FILE: backend/models/Signal.js   (41 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  const { Schema } = mongoose;
+    3  
+    4  /**
+    5   * A deterministic fact about a Profile, computed by
+    6   * backend/services/signalEngine.js on ingest and nightly.
+    7   *
+    8   * One active row per (shopDomain, profileId, type) — recompute upserts it.
+    9   * Rows self-expire via the TTL index on `expiresAt`.
+   10   */
+   11  const signalSchema = new Schema({
+   12    shopDomain: { type: String, required: true, lowercase: true, trim: true },
+   13    profileId: { type: Schema.Types.ObjectId, ref: 'Profile', required: true },
+   14    type: {
+   15      type: String,
+   16      required: true,
+   17      enum: [
+   18        'cart_abandon', 'checkout_abandon', 'browse_abandon',
+   19        'high_intent', 'price_hesitation', 'price_drop', 'back_in_stock',
+   20        'post_purchase_d3', 'lapsing', 'winback',
+   21        'email_capture', 'cod_to_prepaid',
+   22      ],
+   23    },
+   24    strength: { type: Number, min: 0, max: 1, required: true },
+   25    productId: { type: String, default: null },
+   26    evidence: [{ type: String }], // human-readable reasons, max 5
+   27    expiresAt: { type: Date, required: true },
+   28    createdAt: { type: Date, default: Date.now },
+   29    updatedAt: { type: Date, default: Date.now },
+   30  });
+   31  
+   32  // One active signal per type per profile — upsert on this key.
+   33  signalSchema.index({ shopDomain: 1, profileId: 1, type: 1 }, { unique: true });
+   34  
+   35  // Mongo auto-deletes a signal the moment it passes expiresAt.
+   36  signalSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+   37  
+   38  // Brain: strongest signals per shop per type.
+   39  signalSchema.index({ shopDomain: 1, type: 1, strength: -1 });
+   40  
+   41  module.exports = mongoose.model('Signal', signalSchema);
+
+
