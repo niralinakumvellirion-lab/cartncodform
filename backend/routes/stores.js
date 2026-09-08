@@ -7,34 +7,9 @@ const PushSubscription = require('../models/PushSubscription');
 
 const router = express.Router();
 
-/**
- * GET /api/stores
- * List stores owned by the authenticated user (derived from the JWT,
- * not a client-supplied query param).
- */
-router.get('/', requireAuth, async (req, res) => {
-  try {
-    const stores = await Store.find({ ownerEmail: req.userEmail })
-      .sort({ installedAt: -1 })
-      .select('-accessToken -__v')
-      .lean();
-
-    const withCounts = await Promise.all(
-      stores.map(async (store) => {
-        const [abandonedCount, codCount] = await Promise.all([
-          AbandonedCustomer.countDocuments({ shopDomain: store.shopDomain, status: 'abandoned' }),
-          CodOrder.countDocuments({ shopDomain: store.shopDomain }),
-        ]);
-        return { ...store, abandonedCount, codCount };
-      })
-    );
-
-    return res.json(withCounts);
-  } catch (err) {
-    console.error('[stores] GET / error:', err.message);
-    return res.status(500).json({ error: 'Failed to list stores' });
-  }
-});
+// Phase C2: the old `GET /api/stores` (list-my-stores) route was removed. It
+// filtered on `req.userEmail`, which no longer exists after the session-token
+// auth swap, and a single-shop embedded app has no use for it.
 
 /**
  * GET /api/stores/:shopDomain/customers

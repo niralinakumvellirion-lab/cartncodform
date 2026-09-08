@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const PushClick = require('../models/PushClick');
 const ScheduledJob = require('../models/ScheduledJob');
+const Profile = require('../models/Profile');
 
 /**
  * POST /api/attribution/click
@@ -49,6 +50,18 @@ router.post('/click', async (req, res) => {
       } else {
         throw err;
       }
+    }
+
+    // Phase C2 — mark the job + the profile's message-log entry as 'clicked'.
+    await ScheduledJob.findByIdAndUpdate(job._id, {
+      outcome: 'clicked',
+      clickedAt: new Date(),
+    });
+    if (job.profileId) {
+      await Profile.updateOne(
+        { _id: job.profileId, 'messages.jobId': job._id },
+        { $set: { 'messages.$.outcome': 'clicked' } }
+      );
     }
 
     return res.status(200).json({ success: true });

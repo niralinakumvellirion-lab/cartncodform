@@ -47,7 +47,7 @@ router.post('/order', async (req, res) => {
       status: 'pending',
     });
 
-    console.log(`[cod] New COD order for ${order.shopDomain} from ${order.name} (${order.phone})`);
+    console.log(`[cod] New COD order for ${order.shopDomain} — orderId: ${order._id}`);
 
     // Identity resolution — the verified COD phone is the strongest identity
     // anchor for an Indian D2C shopper. Fire-and-forget.

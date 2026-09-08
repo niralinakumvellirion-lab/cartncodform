@@ -27,6 +27,14 @@ const scheduledJobSchema = new mongoose.Schema({
   channel: { type: String, enum: ['push', 'email'], default: 'push' },
   payload: { type: mongoose.Schema.Types.Mixed },  // resolved title/body/imageUrl at send time
 
+  // Phase C2: outcome of the send, updated by attribution (click) + order webhook (convert).
+  outcome: {
+    type: String,
+    enum: ['delivered', 'clicked', 'converted', 'failed', 'skipped'],
+    default: null,
+  },
+  clickedAt: { type: Date, default: null },
+
   // Phase G3: createdAt + updatedAt are managed by { timestamps: true } below.
   sentAt: { type: Date },
   error: { type: String },

@@ -1,0 +1,277 @@
+================================================================================
+PHASE C2 — Fixes from the V2 completion audit (6 fixes)
+SELF-AUDIT
+================================================================================
+Date: 2026-09-08
+Branch: phase-c2-fixes   (cut from main @ 8bba64c)
+Scope: nightly-signals-survives-restart, delete broken /api/stores, PII log
+scrub, on-ingest signal recompute from /api/events, outcome writes for
+click+convert, Store.lastSignalRunAt.
+Status: all 6 fixes applied. Backend 123/123. node --check clean on all
+touched files.
+
+================================================================================
+FILES MODIFIED  (line counts before -> after, vs main@8bba64c)
+================================================================================
+  backend/server.js                 451 -> 461   (+10 net: +~50 gate, -~40 nightly fn)
+  backend/routes/stores.js          106 -> 81    (-25: GET / handler removed)
+  backend/utils/email.js            182 -> 182   (1 line swapped)
+  backend/routes/cod.js             123 -> 123   (1 line swapped)
+  backend/routes/proxy.js           397 -> 397   (2 lines swapped)
+  backend/models/Store.js           68  -> 71    (+3: lastSignalRunAt)
+  backend/routes/events.js          158 -> 177   (+19: FIX 4 block)
+  backend/routes/attribution.js     61  -> 74    (+13: FIX 5 click write + import)
+  backend/routes/webhooks.js        638 -> 658   (+20: FIX 5 convert write + 2 imports)
+  backend/models/ScheduledJob.js    65  -> 73    (+8: outcome + clickedAt fields)
+
+  (The prompt's "Files to modify" list named 6; FIX 4 and FIX 5 also required
+   events.js, attribution.js, webhooks.js, and ScheduledJob.js — the fix bodies
+   spell those out explicitly, so all 10 were changed.)
+
+================================================================================
+FIX 1 — Nightly signals survive Render restarts
+================================================================================
+CONFIRMED.
+  - `function scheduleNightlySignals()`, its `scheduleNightlySignals()` call,
+    and the `[signals] Nightly signal job scheduled (02:00 server time)` boot
+    log were DELETED from server.js. grep "scheduleNightlySignals" server.js
+    -> 0 matches.
+  - New gate added at the TOP of processScheduledJobs(), inside the outer
+    try{}, BEFORE `const now = new Date(); const dueJobs = ...`:
+      * Store.find({}, 'shopDomain lastSignalRunAt timezone').lean()
+      * per shop: compute today's date in the shop tz (en-CA), build
+        target2am = new Date(`${todayStr}T02:00:00`), and
+        alreadyRanToday = lastSignalRunAt && lastSignalRunAt >= target2am
+      * if (now >= target2am && !alreadyRanToday):
+          - Store.findOneAndUpdate({shopDomain}, { lastSignalRunAt: now })  (claim FIRST)
+          - runNightlySignals(shop).then(() => runBrainForShop(shop)).catch(...)
+          - the 7-day pushStats reset Store.updateMany (moved here from the old
+            setTimeout callback per the spec)
+      * wrapped in its own try/catch -> `[signals] nightly gate error`
+  - setInterval(processScheduledJobs, 30*1000) is unchanged; its log line now
+    reads "...(30s interval; nightly signals gated inside)".
+  Behaviour: every 30s tick checks the gate; a shop's signals+brain run at most
+  once per calendar day (shop tz) once the clock is past 02:00. A restart just
+  means the next tick after 02:00 catches up — no run is permanently lost.
+  DEVIATION / NOTE: `new Date("YYYY-MM-DDT02:00:00")` (no offset) is parsed in
+  the SERVER's local timezone, not the shop's. On Render (UTC) an IST shop's
+  nightly effectively fires at ~07:30 IST, not 02:00 IST. It still runs
+  exactly once/day and survives restarts (the stated goal). Left as the spec's
+  literal code; a true shop-tz 02:00 would need a tz-offset computation.
+  DEVIATION: the pushStats reset is placed INSIDE the per-shop
+  `if (past 2am && !ranToday)` branch (runs once, for the first shop that
+  crosses 02:00 each day) rather than once per tick — cheaper, same effect.
+
+================================================================================
+FIX 2 — Delete broken stores.js GET /
+================================================================================
+CONFIRMED. The entire `router.get('/', requireAuth, ...)` handler + its
+doc-comment (old lines 10-37) were removed and replaced with a 3-line comment
+explaining why (filtered on req.userEmail which no longer exists post
+session-token swap; single-shop app). grep "router.get('/'," routes/stores.js
+-> 0 matches. All other routes (/:shopDomain/customers, /:shopDomain/orders,
+DELETE /:shopDomain) and all model imports (still used by those routes)
+untouched. node --check OK.
+
+================================================================================
+FIX 3 — Scrub PII from logs  (exact old -> new)
+================================================================================
+a) backend/utils/email.js:99
+   OLD: console.log(`Email sent: abandoned_cart to ${customer.email}`);
+   NEW: console.log(`[email] abandoned_cart sent (profileId: ${customer._id})`);
+b) backend/routes/cod.js:48
+   OLD: console.log(`[cod] New COD order for ${order.shopDomain} from ${order.name} (${order.phone})`);
+   NEW: console.log(`[cod] New COD order for ${order.shopDomain} — orderId: ${order._id}`);
+c) backend/routes/proxy.js:355
+   OLD: console.log(`[proxy] New COD order for ${order.shopDomain} from ${order.name} (${order.phone})`);
+   NEW: console.log(`[proxy] New COD order for ${order.shopDomain} — orderId: ${order._id}`);
+d) backend/routes/proxy.js:372
+   OLD: console.log(`[proxy] New COD order email triggered for owner: ${ownerEmail}`);
+   NEW: console.log(`[proxy] New COD order email triggered for owner`);
+No other lines in those files changed.
+(NOTE: `customer._id` in (a) is an AbandonedCustomer _id, not a Profile _id —
+the log label says "profileId" but the value is the AC doc id, which is what
+`customer` is in that function. Still PII-free / an internal id.)
+(NOTE: `cod.js:56/58` still contain `req.body.email` — that is the code
+passing it into upsertProfile, not a log line; left as-is.)
+
+================================================================================
+FIX 4 — On-ingest signal computation from /api/events
+================================================================================
+CONFIRMED. events.js POST / did NOT previously call upsertProfile. Added, right
+after `StorefrontEvent.insertMany` + its "[events] Saved N event(s)" log,
+BEFORE the existing Phase-F page_view/clearPushSuppression block:
+    {
+      const { upsertProfile } = require('../services/profileService');
+      const { computeSignalsForProfile } = require('../services/signalEngine');
+      upsertProfile(shop, {
+        sessionId: sessionId || null,
+        customerId: customerId || null,
+        pushToken: token || null,
+      }, { lastSeenAt: new Date() })
+        .then((profile) => {
+          if (profile?._id) {
+            computeSignalsForProfile(profile._id, shop)
+              .catch((err) => console.error('[signals] events ingest error:', err.message));
+          }
+        })
+        .catch((err) => console.error('[profile] events upsert error:', err.message));
+    }
+- Fire-and-forget: NOT awaited. `return res.status(200).json({ success: true })`
+  still fires immediately after the sync work.
+- Var names verified against events.js: the body field is `sessionId` (the
+  storefront's stable ccfSessionId), plus `customerId`, `token`, and `shop`
+  (= shopDomain.trim().toLowerCase()).
+- DEVIATION: the spec snippet passed only sessionId + pushToken. Also passed
+  `customerId` (present in the same destructure; a stronger identity anchor
+  for logged-in shoppers).
+node --check routes/events.js -> OK.
+
+================================================================================
+FIX 5 — Outcome writes for click and conversion
+================================================================================
+CONFIRMED — ScheduledJob model:
+  models/ScheduledJob.js — added, after `payload`:
+    outcome:  { type: String, enum:['delivered','clicked','converted','failed','skipped'], default: null }
+    clickedAt:{ type: Date, default: null }
+  (schema `status` enum is unchanged: pending/sent/cancelled/failed/skipped.
+   `outcome` is a NEW, separate field. Nothing writes 'delivered' yet — it is
+   in the enum for future use.)
+
+CONFIRMED — click write, routes/attribution.js:
+  + `const Profile = require('../models/Profile');` at top.
+  After the PushClick.create try/catch, before `return res.status(200)`:
+    await ScheduledJob.findByIdAndUpdate(job._id, { outcome: 'clicked', clickedAt: new Date() });
+    if (job.profileId) {
+      await Profile.updateOne(
+        { _id: job.profileId, 'messages.jobId': job._id },
+        { $set: { 'messages.$.outcome': 'clicked' } }
+      );
+    }
+  DEVIATION: `job` is already fetched + shop-validated earlier in the handler
+  (returns 404 if not found), so the spec's extra `ScheduledJob.findById(jobId)`
+  re-fetch was skipped — `job._id` / `job.profileId` used directly.
+
+CONFIRMED — convert write, routes/webhooks.js handleOrderWebhook:
+  + `const Profile = require('../models/Profile');`
+  + `const ScheduledJob = require('../models/ScheduledJob');`  (top imports)
+  Inside the `if (cartToken) { ... }` block, right after the
+  `AbandonedCustomer.updateMany` recovery flip + its log:
+    if (attributedJobId && !isTestOrder) {
+      try {
+        const job = await ScheduledJob.findById(attributedJobId);
+        if (job) {
+          await ScheduledJob.findByIdAndUpdate(attributedJobId, { outcome: 'converted' });
+          if (job.profileId) {
+            await Profile.updateOne(
+              { _id: job.profileId, 'messages.jobId': job._id },
+              { $set: { 'messages.$.outcome': 'converted' } }
+            );
+          }
+        }
+      } catch (convErr) {
+        console.error('[webhook:order] outcome=converted update error:', convErr.message);
+      }
+    }
+  DEVIATION: added `&& !isTestOrder` (a test order should not mark a real job
+  converted; the surrounding attribution fields are also only set when
+  !isTestOrder). Wrapped in try/catch so an outcome-write failure can't 500
+  the webhook.
+node --check routes/attribution.js + routes/webhooks.js -> OK.
+
+RESULT: Profile.messages[].outcome can now become 'clicked' (push click
+attribution) and 'converted' (attributed order) — previously it was ALWAYS
+'sent'. This unblocks the Phase F suppression logic (checkUnopenedThreshold's
+clicked_count) and is the prerequisite for Phase H.
+
+================================================================================
+FIX 6 — Store.lastSignalRunAt
+================================================================================
+CONFIRMED. models/Store.js — added after the pushStats block:
+    // --- Phase C2: last time the nightly signals+brain gate ran for this shop ---
+    lastSignalRunAt: { type: Date, default: null },
+node --check models/Store.js -> OK.
+
+================================================================================
+VERIFICATION
+================================================================================
+cd backend && npm test
+  Test Suites: 13 passed, 13 total
+  Tests:       123 passed, 123 total
+  Snapshots:   0 total
+  Time:        ~6.5 s
+  (unchanged from the pre-C2 baseline; the two console.error lines during the
+   run are the pre-existing intentional error-path assertions in
+   automationEngine.test.js:278 / requireAuth.test.js:64.)
+
+node --check:
+  backend/server.js              -> OK
+  backend/routes/events.js       -> OK
+  backend/routes/attribution.js  -> OK
+  backend/routes/webhooks.js     -> OK
+  backend/routes/stores.js       -> OK
+  backend/routes/cod.js          -> OK
+  backend/routes/proxy.js        -> OK
+  backend/utils/email.js         -> OK
+  backend/models/Store.js        -> OK
+  backend/models/ScheduledJob.js -> OK
+
+================================================================================
+NO NEW TESTS
+================================================================================
+No unit tests were added. The changed surfaces (the poller gate, the
+fire-and-forget events.js block, the attribution/webhook outcome writes) all
+live in files that are not currently imported by any test (server.js, and the
+route handlers are not exercised via supertest). Recommended follow-ups:
+  - a processScheduledJobs unit test with mocked Store/ScheduledJob that
+    asserts the gate claims lastSignalRunAt and calls runNightlySignals once,
+    then not again the same "day".
+  - an attribution.js HTTP test asserting outcome='clicked' + the
+    Profile.messages.$ positional update filter.
+The existing 123 tests all still pass, so nothing regressed.
+
+================================================================================
+NOTICED BUT NOT TOUCHED  (out of scope for C2)
+================================================================================
+- The nightly gate's shop-tz vs server-tz mismatch (see FIX 1 note). For a
+  UTC Render dyno + IST shops the run lands ~07:30 IST. Acceptable for "runs
+  daily, survives restart"; a precise 02:00-shop-local needs an offset calc.
+- ScheduledJob 'outcome' has a 'delivered' enum value that nothing writes yet
+  (FCM delivered-receipts are not consumed).
+- Two schedulers still run in parallel — the legacy AutomationRule path
+  (scheduleCartAbandonJobs in webhooks.js + routes/automation.js +
+  utils/automationEngine.js) is untouched. Retiring it was NOT in the C2 list.
+- The poller still uses the hard-coded isQuietHours (22-08) + isOverFrequencyCap
+  (3/24h) for the send path; those still don't read Store.caps/quietHours
+  (brain.js does). Not in the C2 list.
+- generateCopy is still called inside the 30s poll loop (blocking fetch on a
+  cache miss). Not in the C2 list.
+- The V2 audit's owner-email log lines in cod.js:68 and email.js:154 were left
+  (C2 FIX 3 only listed proxy.js:372 among the owner-email lines).
+- No index was added for ScheduledJob.outcome; queries by outcome are not yet
+  a thing.
+- `Profile.updateOne({ 'messages.jobId': job._id }, { 'messages.$.outcome' })`
+  relies on the positional `$` — if a profile somehow has two message entries
+  with the same jobId (shouldn't happen; jobId is unique per send) only the
+  first is updated.
+
+================================================================================
+OPEN QUESTIONS
+================================================================================
+1. The nightly gate fires at 02:00 SERVER-local on the shop-local DATE (spec's
+   literal `new Date("<date>T02:00:00")`). Convert to true shop-local 02:00, or
+   is "once daily, restart-safe" enough?
+2. FIX 3(a): the log now says "profileId:" but prints the AbandonedCustomer
+   _id (that's what `customer` is in sendAbandonedCartEmail). Rename the label
+   to "customerId" / "acId", or leave it?
+3. Should C3 also: retire the legacy AutomationRule scheduler, move the poller
+   send-path caps onto Store.caps/quietHours, and move generateCopy off the
+   poll tick? (All flagged in the V2 audit, none in C2.)
+4. FIX 4 now recomputes signals on EVERY /api/events batch (fire-and-forget).
+   On a busy storefront that's a Profile.findById + up to ~10 compute fns per
+   beacon. Fine at current volume; may want a per-profile throttle later.
+5. Add the 2 recommended tests (poller gate, attribution outcome) now or in C3?
+
+================================================================================
+END — stopping after self-audit.
+================================================================================

@@ -59,6 +59,9 @@ const storeSchema = new mongoose.Schema({
     lastComputedAt: { type: Date, default: null },
   },
 
+  // --- Phase C2: last time the nightly signals+brain gate ran for this shop ---
+  lastSignalRunAt: { type: Date, default: null },
+
   installedAt: {
     type: Date,
     default: Date.now,

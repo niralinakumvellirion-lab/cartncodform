@@ -41,6 +41,25 @@ router.post('/', async (req, res) => {
     await StorefrontEvent.insertMany(docs, { ordered: false });
     console.log(`[events] Saved ${docs.length} event(s) for ${shop}`);
 
+    // Phase C2 — on-ingest identity resolution + signal recompute. Fire-and-
+    // forget: the beacon response must not wait on this.
+    {
+      const { upsertProfile } = require('../services/profileService');
+      const { computeSignalsForProfile } = require('../services/signalEngine');
+      upsertProfile(shop, {
+        sessionId: sessionId || null,
+        customerId: customerId || null,
+        pushToken: token || null,
+      }, { lastSeenAt: new Date() })
+        .then((profile) => {
+          if (profile?._id) {
+            computeSignalsForProfile(profile._id, shop)
+              .catch((err) => console.error('[signals] events ingest error:', err.message));
+          }
+        })
+        .catch((err) => console.error('[profile] events upsert error:', err.message));
+    }
+
     // Phase F — a page_view from a suppressed profile lifts push suppression.
     // Fully fire-and-forget: the beacon response goes out immediately.
     if (sessionId && events.some((e) => e.type === 'page_view')) {

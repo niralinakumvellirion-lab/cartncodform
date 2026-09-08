@@ -1,0 +1,794 @@
+================================================================================
+CartnCodForm v2 — READ-ONLY COMPLETION AUDIT
+================================================================================
+Date: 2026-09-08
+Auditor branch/HEAD: main @ 8bba64c   (working tree clean)
+Setup baseline commit: de61791 "docs: v2 handover, CLAUDE.md, product plan, ..."
+Method: git inspection, grep across backend/ + frontend/app/, `npm test`,
+        `npm run build`, and read-only queries against the dev-store MongoDB
+        (MONGODB_URI present in backend/.env).
+NO FILES WERE MODIFIED. This report is the only artifact written.
+
+================================================================================
+SUMMARY TABLE
+================================================================================
+Phase | Status  | One-line reason
+------|---------|-------------------------------------------------------------
+A     | DONE*   | Profile model + resolution + backfill + ingest wiring all
+      |         | present; 84 clean profiles, 0 dup emails/phones in live DB.
+      |         | (*AbandonedCustomer NOT converted to a profile view; raw
+      |         | /api/events POST does not upsert a profile.)
+B     | PARTIAL | Model + engine (10 signals + 2 stubs) + nightly + tests all
+      |         | exist, but the LIVE Signal collection is EMPTY (0 rows) —
+      |         | nothing is actually computing signals in production.
+C     | PARTIAL | brain.js exists and is unit-tested, but: AutomationRule +
+      |         | trigger enum + automation route + engine are STILL LIVE and
+      |         | run in parallel; ranking is "highest strength", NOT the plan's
+      |         | EV formula; send-time re-validation only re-checks runAt, not
+      |         | that the signal is still true; live DB has 0 brain jobs and
+      |         | 21 legacy jobs, all with copy frozen at schedule time.
+D     | DONE    | Timer removed; 4 intent triggers + two-step soft prompt +
+      |         | contextual copy + prompt_shown/accepted events + COD email
+      |         | field all present. (Owner must `shopify app deploy` to ship.)
+E     | DONE*   | aiService.js (not utils/ai.js): cached generateCopy, weekly
+      |         | narrative, insights, voice in Settings, cache-hit log — all
+      |         | present. (*LLM_API_KEY not confirmed set; generateCopy runs
+      |         | inside the poll loop per job; generateInsights has no test.)
+F     | DONE*   | Stale-token pruning, stop-after-N (+7d guard), per-shop
+      |         | delivered rate, resubscribe-on-activity, /push-stats — all
+      |         | present, 14 tests. (*outcome is never written as
+      |         | clicked/converted, so suppression logic runs half-blind.)
+G     | PARTIAL | Today / Customers / Profile / Messages / COD / Settings /
+      |         | Onboarding screens exist, Polaris, read real data; old 3-tab
+      |         | page retired. MISSING: the "Insights" screen; the grouped
+      |         | "What to act on" screen. Onboarding.jsx uses localStorage
+      |         | (violates CLAUDE.md hard rule).
+H     | NOT DONE | No brain weights, no outcome-rate computation, no feedback
+      |         | loop. Never attempted (no phase prompt was issued).
+
+================================================================================
+1. INVENTORY
+================================================================================
+
+1a. git log  de61791..HEAD  (every commit)
+--------------------------------------------------------------------------------
+  8bba64c  phases D-G3: signals, brain, storefront, AI copy, push hygiene,
+           admin rebuild
+  0491d8f  phase C: Brain service, SignalConfig, nightly cron, poller message
+           log, admin placeholder
+  d322cbc  phase B: Signal model, signal engine (10 signals + 2 stubs), nightly
+           cron, profiles API
+  b61277a  phase A: Profile model, identity resolution, upsertProfile wired to
+           all ingest paths
+
+  -> 4 commits. Phases D through G3 were squashed into a single commit (8bba64c).
+
+1b. git branch -a
+--------------------------------------------------------------------------------
+  Local: main, setup-v2-docs, and phase-a-profile … phase-g3-settings-cleanup
+         (9 phase branches).
+  Remote: origin/ has main + all 9 phase branches pushed.
+  `git branch --merged main`  -> ALL branches listed as merged (they are
+         ancestors of / identical to points on main; nothing is ahead).
+  `git branch --no-merged main`  -> empty.
+  So: every phase branch's work is on main. No unmerged work. HEAD (main)
+  includes the latest App-Bridge-meta fix (layout.js has
+  <meta name="shopify-api-key">, admin/page.js no longer does).
+
+1c. git diff --stat de61791..HEAD  (headline numbers)
+--------------------------------------------------------------------------------
+  59 files changed, 16,379 insertions(+), 1,524 deletions(-)
+
+  ADDED (new source, non-test, non-audit):
+    backend/models/       Profile.js, Signal.js, SignalConfig.js, CopyCache.js
+    backend/services/     profileService.js, signalEngine.js, brain.js,
+                          aiService.js, analyticsService.js, pushHygiene.js
+    backend/scripts/      backfillProfiles.js
+    frontend/app/admin/screens/  Today, Customers, Profile, Messages, CodOrders,
+                          Settings, Onboarding  (7 .jsx)
+  ADDED (tests): aiService, analyticsService, brain, codOrder, optinStats,
+                 profileService, pushHygiene, signalEngine  (8 .test.js)
+  CHANGED (notable): backend/server.js (+142/-… poller + nightly + hygiene),
+    backend/routes/profiles.js (+345, was tiny), webhooks.js (+42), push.js
+    (+39/-…), proxy.js (+17), events.js (+15), cod.js (+12),
+    utils/pushNotification.js (+25/-…), models/ScheduledJob.js (+34/-…),
+    models/Store.js (+30), models/CodOrder.js (+2),
+    extensions/…/push-notifications.liquid (+…/-… big rewrite),
+    frontend/app/admin/page.js (1335 lines removed — old StoreView etc.),
+    frontend/app/layout.js (+8), frontend/package.json (+1 polaris-icons).
+  DELETED: no whole files (page.js was gutted, not removed).
+  18 audit .txt files added under /audits/.
+
+================================================================================
+2. PHASE-BY-PHASE ("Done when" from CHAT_HANDOVER_V2.md)
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────
+PHASE A — Profile + identity resolution
+"Done when": every event/cart/order/COD order lands on a profile;
+AbandonedCustomer reads become profile queries; tests for merge priority.
+STATUS: DONE (with two documented gaps)
+────────────────────────────────────────────────────────────────────────────
+Evidence:
+  - backend/models/Profile.js — has identifiers{customerId, emails[], phones[],
+    sessionIds[], cartTokens[], pushTokens[]} (L15-23), channels{push,email}
+    (L24-31), stage enum (L32-37), interests Map (L38), activeHours [Number]
+    (L40), orders{count,ltv,lastOrderAt,codCount,prepaidCount} (L42-49),
+    messages[] (L50-64), suppressed (L65). 6 sparse identifier indexes +
+    {shopDomain,updatedAt:-1} (L72-79).  ✅ full shape.
+  - backend/services/profileService.js — PRIORITY =
+    ['customerId','email','phone','cartToken','sessionId','pushToken'] (L26),
+    matchRank() (L79-92), "merge into the highest-priority profile" (L200+).
+    Exports { upsertProfile } only.  ✅ merge priority as specified.
+  - backend/scripts/backfillProfiles.js exists (5,298 bytes) — 4 steps
+    (CPS -> AC -> CodOrder -> grouped StorefrontEvent).  ✅
+  - upsertProfile wired: cod.js:54, proxy.js:366 (COD proxy), push.js:125
+    (/subscribe-customer), push.js:247 (/cart-activity), webhooks.js:170
+    (carts+checkouts via shared handleWebhook), webhooks.js:357 (orders).  ✅
+    for those paths.
+  - Tests: __tests__/profileService.test.js — 15 tests, incl. "merges two
+    profiles", "customerId takes priority over email", "never downgrades
+    stage", "messages capped at 20".  ✅
+  - LIVE DB: Profile count 84; 0 profiles with 0 identifiers; 0 duplicate
+    emails across profiles; 0 duplicate phones. Legacy tables: AbandonedCustomer
+    36, CustomerPushSubscription 26, CodOrder 5, StorefrontEvent 511.
+    -> backfill ran and identity resolution is producing clean, de-duplicated
+    profiles.  ✅ strong evidence the core works.
+GAPS:
+  (i)  "AbandonedCustomer reads become profile queries" — NOT done. grep shows
+       AbandonedCustomer is still queried directly in routes/stores.js:50 (the
+       admin "customers" list), webhooks.js (recovery flip + GDPR),
+       services/signalEngine.js:46/94, services/analyticsService.js:47/103,
+       server.js:336 (email poller). AbandonedCustomer is still a first-class
+       table, not a view of Profile stage='carter'.
+  (ii) routes/events.js POST / (the raw storefront batch ingest that writes 511
+       StorefrontEvent rows) does NOT call upsertProfile. It only does a
+       Profile.findOne for the Phase-F clearPushSuppression lookup (events.js:48).
+       So "every event lands on a profile" holds only via the backfill grouping
+       + the /cart-activity beacon, not the primary event pipe in real time.
+
+────────────────────────────────────────────────────────────────────────────
+PHASE B — Signals
+"Done when": Profile API returns active signals with evidence; tests per
+signal condition.
+STATUS: PARTIAL
+────────────────────────────────────────────────────────────────────────────
+Evidence FOR:
+  - backend/models/Signal.js — {shopDomain, profileId, type(12-enum), strength
+    0..1 required, productId, evidence[], expiresAt required}; unique
+    {shopDomain,profileId,type}; TTL on expiresAt; {shopDomain,type,strength:-1}.  ✅
+  - backend/services/signalEngine.js — computeCartAbandon (L42), CheckoutAbandon
+    (L76), BrowseAbandon (L114), HighIntent (L152), PriceHesitation (L196),
+    PostPurchaseD3 (L260), Lapsing (L271), Winback (L281), EmailCapture (L292),
+    CodToPrepaid (L304) — 10 live; computePriceDrop / computeBackInStock (L317-
+    318) return null (STUBS, as the plan allows — need products/update +
+    read_inventory). computeSignalsForProfile orchestrator (L336),
+    runNightlySignals (L382).  ✅
+  - Runs on ingest: webhooks.js:179 computeSignalsForProfile fired after the
+    cart-webhook upsertProfile (fire-and-forget). Runs nightly: server.js:410
+    inside the 02:00 scheduleNightlySignals callback.  ✅ both.
+  - GET /api/profiles/:shop/signals (profiles.js:25) + used by admin Today /
+    Customers / Profile screens.  ✅ Profile API returns signals with evidence.
+  - Tests: __tests__/signalEngine.test.js — 20 tests, per-condition
+    (cart<2h -> 1.0, cart 7h -> 0.6, browse_abandon suppressed by add_to_cart,
+    high_intent needs same product 2x same session, lapsing 25d vs 10d, etc.).  ✅
+STATUS = PARTIAL because:
+  - LIVE DB: Signal collection count = 0. With 84 profiles, 36 abandoned carts
+    and 511 events there should be cart_abandon / browse_abandon rows. Zero
+    means the engine is NOT producing signals in production. Likely causes:
+    the nightly cron on Render has not fired since deploy (in-process
+    setTimeout, resets every restart / sleeps on a free dyno), and the
+    ingest-time trigger only fires on a live carts/* webhook. This is the
+    single biggest "built but not working" finding.
+  - "Runs on ingest" is only the carts webhook — a raw product_view /
+    add_to_cart event (routes/events.js) does NOT recompute signals, so
+    browse_abandon / high_intent / price_hesitation only refresh on the next
+    cart webhook or the (apparently non-firing) nightly.
+
+────────────────────────────────────────────────────────────────────────────
+PHASE C — Brain
+"Done when": set a voice, walk away 24h, the Messages log shows sends each with
+a stored reason; tests for ranking and fatigue.
+STATUS: PARTIAL
+────────────────────────────────────────────────────────────────────────────
+Evidence FOR:
+  - backend/services/brain.js — runBrainForProfile (L115): load profile ->
+    caps/quiet-hours from Store -> Signal.find sort strength:-1 -> fatigue
+    (perDay/perWeek from profile.messages) L140-144 -> rank loop L147-165
+    (skip disabled SignalConfig, skip 6h-cooldown, pick first) -> selectChannel
+    L165 -> computeRunAt L169 -> dedup ScheduledJob.findOne pending L… ->
+    ScheduledJob.create with payload {title:'', body:''} (L191-192) and
+    reason = `${winner.type} strength=${n}` (L181).  ✅ reason stored;
+    ✅ copy NOT resolved at schedule time (in this code path).
+  - SignalConfig model exists (backend/models/SignalConfig.js).  ✅
+  - Store.caps {perDay, perWeek, maxUnopenedPush}, Store.quietHours {start,end},
+    Store.voice {tone, emoji, lang, signOff} — models/Store.js L34-47.  ✅
+  - runBrainForShop wired into the nightly callback (server.js, after the
+    signals loop).  ✅
+  - Tests: __tests__/brain.test.js — 14 tests (null when no signals / daily cap
+    / weekly cap; skips disabled signal; skips 6h-cooldown; push vs email
+    fallback; no channel -> null; dedup; runAt outside quiet hours; reason
+    stored; channelOverride wins).  ✅ ranking + fatigue covered.
+STATUS = PARTIAL because:
+  (1) NOT deleted: AutomationRule model, its `trigger` enum
+      ['browse_abandon','cart_abandon','checkout_abandon','back_in_interest']
+      (models/AutomationRule.js:22 ; routes/automation.js:32), routes/automation.js
+      (still mounted server.js:133 at /api/automation), utils/automationEngine.js
+      (scheduleCartAbandonJobs still called from webhooks.js:251), and
+      __tests__/automationEngine.test.js. The handover's Phase-C build line
+      says "Delete AutomationRule.steps editor and the trigger enum" — only the
+      ADMIN step editor was removed (G1). The backend legacy scheduler runs in
+      parallel with the brain: a cart can be scheduled by BOTH.
+  (2) Ranking is NOT the plan's expected-value formula. brain.js:147-165 simply
+      iterates `signals` (already sorted by strength desc) and takes the first
+      enabled, non-cooled one. The plan's Part 3 formula
+      `strength × baseValue[type] × reachability[channel] × shopConversionRate`
+      is not implemented anywhere. grep for baseValue / reachability /
+      shopConversionRate / weight in backend/ -> 0 hits.
+  (3) Send-time re-validation (plan: "re-checks the signal is still true — they
+      didn't buy, product still in stock, price still dropped") is NOT done.
+      server.js:259-262 only re-checks `job.runAt > new Date()` and releases a
+      future job. The signal is never re-queried before send.
+  (4) "productId" on the job — the plan says ScheduledJob carries
+      profileId + signalType + productId. brain.js puts productId only inside
+      payload.url (`https://${shop}/products/${winner.productId}`, L193-194),
+      not as a first-class field.
+  (5) LIVE DB: ScheduledJob total 21, profileId set (brain jobs) = 0, jobs with
+      non-empty payload.title/body = 21. i.e. EVERY scheduled job in the live
+      DB is a legacy AutomationRule job with copy frozen at schedule time. The
+      brain has scheduled nothing (because Signal count is 0 — see Phase B).
+      The "walk away 24h -> Messages log shows brain sends with a reason"
+      acceptance test cannot currently pass on real data.
+
+────────────────────────────────────────────────────────────────────────────
+PHASE D — Storefront intent triggers + soft prompt + email capture
+"Done when": opt-in rate is tracked and visible; measurably above baseline on
+the live store.
+STATUS: DONE (tracking in place; "above baseline" is an owner measurement)
+────────────────────────────────────────────────────────────────────────────
+Evidence:
+  - popup_delay / setTimeout(showPopup) / showPopup — grep of
+    push-notifications.liquid: 0 matches. Removed.  ✅
+  - Intent triggers (liquid): initIntentTriggers() L153; return_visit L166
+    (localStorage 'ccf_viewed_products'); dwell 45000ms with visibilitychange
+    pause/resume L176-190; exit_intent (clientY<20, innerWidth>768) L…;
+    add_to_cart fires showSoftPrompt from the /cart/add.js fetch hook + the
+    trackCart click handler.  ✅ all four.
+  - Two-step: showSoftPrompt() injects #ccf-push-prompt with Allow/No-thanks;
+    Notification.requestPermission() is only called on Allow (L127).
+    sessionStorage 'ccf_prompt_shown' guards once-per-session.  ✅
+  - Contextual copy PROMPT_COPY map L69-74 (dwell uses product title).  ✅
+  - Events: trackEvent('push_prompt_shown', {trigger, productId}) L84 and
+    trackEvent('push_prompt_accepted', {trigger, granted}) L129 — routed through
+    the existing /api/events pipe to StorefrontEvent (NOT /cart-activity — a
+    deliberate deviation, /cart-activity never wrote StorefrontEvent).  ✅
+    GET /api/profiles/:shop/optin-stats (profiles.js:204) aggregates them;
+    __tests__/optinStats.test.js has 6 tests.  ✅
+  - COD form email field: proxy.js:209-210 (<input type="email" name="email">);
+    CodOrder.email field models/CodOrder.js:22; proxy.js POST /cod-order reads
+    it and upserts the profile.  ✅
+NOTE: none of this is live on any storefront until the owner runs
+`shopify app deploy` — the theme App Embed block change is not auto-deployed.
+
+────────────────────────────────────────────────────────────────────────────
+PHASE E — AI copy + weekly narrative + insights
+"Done when": Today shows the narrative and it's derivable from real numbers;
+cache hit rate is logged.
+STATUS: DONE (with caveats)
+────────────────────────────────────────────────────────────────────────────
+Evidence:
+  - backend/utils/ai.js does NOT exist. The implementation is
+    backend/services/aiService.js (CLAUDE.md / handover both name utils/ai.js —
+    a path deviation, single-location is still respected).
+  - generateCopy(store, signalType, product, channel) — voiceHash =
+    md5(JSON.stringify(voice)) (L77); cacheKey = buildCacheKey(shopDomain,
+    signalType, productId, channel, voiceHash) (L78, from models/CopyCache.js);
+    CopyCache.findOne({cacheKey}) BEFORE any fetch (L82) -> logs
+    "[ai] cache hit for <8hex>" (L84). Miss + LLM_API_KEY -> one fetch to
+    api.anthropic.com -> CopyCache.create with 24h expiresAt -> logs
+    "[ai] generated copy for <signal>/<channel>, tokens=<n>" (L154). No key or
+    any error -> deterministic fallback.  ✅ cached per (shop,signal,product,
+    channel,voiceHash); ✅ cache-hit-rate is derivable from those two log lines.
+  - No LLM call is unconditional per customer: brain schedules ONE job per
+    profile per day, and generateCopy is called per job (server.js:284 push,
+    :351 email) — cache-gated, so the actual Anthropic call is per
+    (product,signal,channel,voice), not per customer. The rule's INTENT
+    (cost/latency) is met; the letter ("never … per-customer at send time") is
+    arguably bent — generateCopy IS invoked in the poll loop for every
+    brain job.
+  - Store.voice editable in Settings: frontend/app/admin/screens/Settings.jsx
+    L109-142 (Tone/Language Selects, emoji Checkbox, Sign-off TextField) ->
+    PATCH /api/profiles/:shop/settings.  ✅
+  - generateWeeklyNarrative (L168) + generateInsights (L189); analyticsService.js
+    computeWeeklyStats + computeInsights (3 rule-based: TOP_PRODUCT,
+    BEST_CHANNEL, BEST_HOUR). GET /api/profiles/:shop/weekly-narrative
+    (profiles.js:262) with a 1h in-process Map cache. Admin Today screen
+    renders narrative + insights.  ✅
+  - Tests: __tests__/aiService.test.js (8: cache hit/miss, fallback no-key,
+    fallback on throw, fence-strip, cache save, weekly rule-based, voiceHash
+    key differs) + __tests__/analyticsService.test.js (5).
+CAVEATS:
+  - `LLM_API_KEY` is not confirmed set in Render (handover lists it as an owner
+    "before Phase E" task). If unset, ALL copy is the generic fallback AND the
+    poller overwrites even legacy AutomationRule jobs' merchant-written copy
+    with the fallback (server.js has a `if (job.profileId)` guard added later,
+    so legacy jobs are actually spared — verify).
+  - generateInsights has NO dedicated test (aiService.test.js covers generateCopy
+    + generateWeeklyNarrative only).
+  - MODEL default is 'claude-sonnet-4-6' (aiService.js:15, env-overridable via
+    LLM_MODEL). The current model family is claude-sonnet-5 — owner should set
+    LLM_MODEL.
+  - On a cache MISS, generateCopy does a synchronous `await fetch()` to
+    Anthropic INSIDE processScheduledJobs — one slow/hung request blocks that
+    poll tick (30s interval).
+
+────────────────────────────────────────────────────────────────────────────
+PHASE F — Push hygiene
+"Done when": delivered rate stays >=85% over two weeks on the live store.
+STATUS: DONE (mechanics in place; the 2-week live number is an owner obs.)
+────────────────────────────────────────────────────────────────────────────
+Evidence:
+  - backend/services/pushHygiene.js — STALE_CODES set incl.
+    'messaging/invalid-argument' (L18-20); handleStaleToken (L32) deletes the
+    CustomerPushSubscription + $pull from Profile.identifiers.pushTokens + flips
+    channels.push.subscribed=false when it was the last token;
+    checkUnopenedThreshold (L69) — suppress when push 'sent' count >=
+    Store.caps.maxUnopenedPush AND 0 clicks AND the oldest unopened push is
+    >7d old; updateDeliveredRate (L124) accumulates Store.pushStats +
+    recomputes rateLast7d; clearPushSuppression (L151) re-enables on activity
+    if a token remains.
+  - Wired: utils/pushNotification.js:148-149 (cartToken loop) + :214/:222
+    (broadcast loop) call handleStaleToken via isStaleCode. server.js push
+    branch calls checkUnopenedThreshold + updateDeliveredRate after a
+    successful send. routes/push.js /cart-activity + routes/events.js POST /
+    call clearPushSuppression on a page_view. Nightly Store.updateMany zeroes
+    aged-out pushStats.
+  - GET /api/profiles/:shop/push-stats (profiles.js:236). Admin Today screen
+    renders "Push delivery" rate.  ✅
+  - Tests: __tests__/pushHygiene.test.js — 14 (incl. the "< 7d old -> do not
+    suppress" case).  ✅
+CAVEAT (significant): Profile.messages[].outcome is ONLY ever written as 'sent'
+  (server.js:206, recordProfileMessage). Nothing sets 'clicked' or 'converted'
+  — PushClick rows and order attribution (webhooks.js:318, attributionSource)
+  are NOT fed back onto Profile.messages. So checkUnopenedThreshold's
+  clicked_count is always 0 -> after maxUnopenedPush brain pushes + 7 days,
+  push is ALWAYS suppressed for that profile regardless of real engagement.
+
+────────────────────────────────────────────────────────────────────────────
+PHASE G — Admin rebuild
+"Done when": every screen in the prototype exists and reads real data.
+STATUS: PARTIAL
+────────────────────────────────────────────────────────────────────────────
+Prototype screen        exists  Polaris  reads real data  route/component
+----------------------  ------  -------  ---------------  ------------------------
+Onboarding ("Setup")     Y       Y       n/a (static)     screens/Onboarding.jsx
+Today                    Y       Y       Y                screens/Today.jsx ->
+                                                          /weekly-narrative,
+                                                          /push-stats, /signals?limit=3
+Customers                Y       Y       Y                screens/Customers.jsx ->
+                                                          /profiles, /signals?limit=200
+Profile (per-customer)   Y       Y       Y                screens/Profile.jsx ->
+                                                          /profiles/:id
+What to act on           PARTIAL Y       Y                folded into Today's
+ (grouped signal view)                                    "What to act on" card +
+                                                          Settings' flat 12-signal
+                                                          list. No dedicated
+                                                          grouped screen.
+Messages                 Y       Y       Y                screens/Messages.jsx ->
+                                                          /messages (ScheduledJob)
+Insights (product/       N       -       -                NO Insights.jsx.
+ collection dwell/scroll                                  Nothing renders the
+ tables)                                                  StorefrontEvent
+                                                          dwell/scroll analytics.
+COD (with stats)         Y       Y       Y                screens/CodOrders.jsx ->
+                                                          /api/stores/:shop/orders
+                                                          + PATCH /api/cod/order/:id;
+                                                          client-side total /
+                                                          pending / confirmedRevenue.
+Settings                 Y       Y       Y                screens/Settings.jsx ->
+                                                          /settings + /signal-configs
+Old 3-tab page.js:  RETIRED. grep for Tabs / StoreView / OnboardingChecklist /
+  showOnboarding in frontend/app/admin -> 0. page.js is now a 79-line
+  Frame+Navigation shell with 6 nav items.  ✅
+Nav items (page.js L24-29): today, customers, messages, cod, settings,
+  onboarding — 6. (No "Insights", no dedicated "Signals/What-to-act-on".)
+Build: `cd frontend && npm run build` -> ✓ Compiled successfully, zero warnings,
+  /admin 78.5 kB.
+MISSING vs prototype:
+  - Insights screen (product table: views/uniques/avg dwell/avg scroll/cart
+    rate/top exit; collection table). This is where the plan says "dwell and
+    scroll finally earn their keep" — currently consumed by NOTHING in the UI.
+  - The grouped "What to act on" screen (now/soon/later groupings, per-signal
+    conversion rate, example copy in-voice). Settings has a flat toggle list
+    instead.
+  - Onboarding auto-nudge / first-run redirect (it's just a nav item).
+  - No search / stage filter / pagination on Customers, Messages, COD.
+  - recharts weekly-revenue bar chart on Today (rendered as a stat tile).
+
+────────────────────────────────────────────────────────────────────────────
+PHASE H — Feedback loop into Brain weights
+"Done when": brain weights differ per shop after two weeks of data.
+STATUS: NOT DONE
+────────────────────────────────────────────────────────────────────────────
+- No brain-weights model or Store field. grep backend/ for weight / baseValue /
+  reachability / shopConversionRate / BrainWeight -> 0 source hits.
+- No per-signal / per-channel / per-hour outcome-rate computation exists
+  (analyticsService.computeInsights has a coarse "BEST_CHANNEL recovery rate"
+  but it is not consumed by brain.js).
+- brain.js ranking uses raw signal.strength only; nothing adjusts it.
+- Prerequisite is also missing: Profile.messages[].outcome is never 'clicked'
+  or 'converted' (see Phase F caveat), so there is no outcome signal to learn
+  from.
+- No phase prompt for H was ever issued in this project; it was never started.
+
+================================================================================
+3. HARD-RULE COMPLIANCE
+================================================================================
+
+3a. PII in logs
+--------------------------------------------------------------------------------
+HITS (customer PII):
+  backend/routes/webhooks.js:187
+    console.log(`Abandoned cart email triggered for: ${savedCustomer.email}`)
+  backend/utils/email.js:99
+    console.log(`Email sent: abandoned_cart to ${customer.email}`)
+  backend/routes/cod.js:50
+    console.log(`[cod] New COD order for ${order.shopDomain} from ${order.name}
+                 (${order.phone})`)
+  backend/routes/proxy.js:362  (same pattern as cod.js:50 — name + phone)
+LOWER RISK:
+  backend/routes/push.js:160  console.log('[send-customer] imageUrl from
+    request:', req.body.imageUrl || 'NONE')   — a URL, not identity PII.
+STORE-OWNER email (merchant, not a shopper, but still an email in a log line):
+  backend/routes/cod.js:68, proxy.js:379  "email triggered for owner: <email>"
+  backend/utils/email.js:154              "Email sent: new_cod_order to <email>"
+  backend/routes/auth.js:107              "Store connected: <shop> (owner: <email>)"
+All of the above pre-date v2 (they are in code paths untouched by phases A-H)
+EXCEPT cod.js:50's name+phone which is close to a line phases A/D touched.
+Nothing in the NEW services (profileService, signalEngine, brain, aiService,
+pushHygiene, analyticsService) logs PII — they log profileId / counts /
+err.message only.  ✅ for the new code, ✗ for the pre-existing cart/COD/email
+paths.
+
+3b. Unauthenticated routes  (every router.<verb> in backend/routes/)
+--------------------------------------------------------------------------------
+GATED (requireAuth + requireStoreOwner) — correct:
+  automation.js  4 routes            (but see §5 — this router should be gone)
+  events.js      4 GET routes
+  profiles.js    11 routes           ✅ all AUTH+OWNER
+  stores.js      /:shopDomain/customers, /:shopDomain/orders, DELETE /:shopDomain
+
+requireAuth ONLY (no requireStoreOwner) — each does a manual shop check inside:
+  push.js /send (L44), /send-customer (L149), /send-email-test (L283)
+    -> `req.shopDomain !== body.shopDomain` guard inside. Works, but
+       inconsistent with the "use requireAuth + requireStoreOwner" rule.
+  cod.js  PATCH /order/:id (L91)
+    -> `req.shopDomain !== existingOrder.shopDomain` guard inside. OK.
+
+⚠ BROKEN / LEGACY:
+  stores.js GET / (L15)  — requireAuth ONLY, NO requireStoreOwner, body:
+    `Store.find({ ownerEmail: req.userEmail })`. `req.userEmail` was removed in
+    the session-token auth swap (requireAuth now sets req.shopDomain, never
+    req.userEmail). So this query is `Store.find({ ownerEmail: undefined })` —
+    returns the wrong set (all stores whose ownerEmail is unset, or none). This
+    is the old multi-store "list my stores" endpoint and has no place in a
+    single-shop embedded app.
+
+PUBLIC BY DESIGN (acceptable): auth.js (OAuth), webhooks.js (HMAC verified),
+  proxy.js /sw.js + /health + /cod-form + /cod-order (App Proxy signature —
+  /health hard-enforced, /cod-form + /cod-order hard-enforced, /sw.js soft),
+  events.js POST / (rate-limited public ingest), cod.js POST /order (public COD
+  form), push.js /subscribe + /subscribe-customer + /cart-activity (public
+  storefront beacons, rate-limited), attribution.js POST /click (rate-limited,
+  jobId format-validated).
+
+3c. localStorage in the admin
+--------------------------------------------------------------------------------
+HIT: frontend/app/admin/screens/Onboarding.jsx:21, :29
+  window.localStorage.getItem/setItem(`ccf_step_${id}_done`)
+  — per-step "done" state. Directly contradicts CLAUDE.md / handover hard rule
+  "No localStorage on the admin side." Introduced in Phase G3, and the file's
+  own comment (L16) acknowledges the conflict. Store.onboarding.steps
+  ({id,done,doneAt}) already exists on the schema and is the intended home.
+No other localStorage in frontend/app/admin or frontend/lib. (lib/api.js uses
+window.shopify.idToken(), not storage.)
+
+3d. LLM calls outside a single module
+--------------------------------------------------------------------------------
+grep backend/ for anthropic / openai / api.anthropic / api.openai (excl.
+node_modules, tests) -> only backend/services/aiService.js. ✅ single location.
+Deviation: the file is services/aiService.js, not the CLAUDE.md-named
+utils/ai.js. server.js and profiles.js import { generateCopy /
+generateWeeklyNarrative / generateInsights } from it; no raw fetch to an LLM
+anywhere else.
+
+3e. Copy resolved at schedule time
+--------------------------------------------------------------------------------
+HIT (legacy path): backend/utils/automationEngine.js — scheduleCartAbandonJobs
+  builds `payload.title` / `payload.body` from the AutomationRule step and
+  writes them into ScheduledJob at CREATE time. Still called from
+  webhooks.js:251.
+LIVE DB CONFIRMS IT: of 21 ScheduledJob rows, 21 have a non-empty
+  payload.title/body and 0 have profileId set — every job in the DB is a
+  legacy job with frozen copy.
+The brain path (brain.js:191-192) correctly writes payload.title:'' /
+  body:'' and resolves at send time via generateCopy — but it has scheduled
+  nothing (Signal count 0).
+
+3f. Scope creep
+--------------------------------------------------------------------------------
+No files or routes for a flow builder, campaigns, an email editor, segments,
+multi-store, WhatsApp, SMS, ScriptTags, or NextAuth were found.
+  - grep next-auth / NextAuth / ScriptTag / script_tag in backend + frontend
+    src -> 0.
+  - `next-auth` and `jsonwebtoken` are still listed in frontend/package.json
+    dependencies but are not imported anywhere in frontend/app or frontend/lib
+    (dead dependency lines, flagged in an earlier phase; not code).
+  - shopify.app.toml access_scopes = "read_orders,read_customers,
+    write_customers,read_products" — no over-broad scopes.
+  - AbandonedCustomer / CustomerPushSubscription / PushSubscription /
+    AutomationRule / OAuthState remain from the pre-v2 multi-store design (see
+    §5) but are not "new" scope creep.
+
+3g. Business logic in React
+--------------------------------------------------------------------------------
+grep frontend/app for ranking / EV / scheduleJob / computeRunAt / signal-compute
+logic -> 0. The screens fetch from /api/profiles/* and render. Client-side
+computation is limited to trivial display math (COD stats: total / pending /
+sum(price*qty); Customers signalCountMap; Onboarding "N of 4 done"). ✅ clean.
+
+================================================================================
+4. TESTS
+================================================================================
+
+`cd backend && npm test`  (verbatim summary):
+--------------------------------------------------------------------------------
+  Test Suites: 13 passed, 13 total
+  Tests:       123 passed, 123 total
+  Snapshots:   0 total
+  Time:        4.428 s
+  Ran all test suites.
+  (Two console.error lines during the run — automationEngine.test.js:278
+  "cancelJobsForOrder error: db down" and requireAuth.test.js:64 "Invalid
+  session token" — are intentional error-path assertions, not failures.)
+
+Test count: BEFORE de61791: 5 suites (automationEngine, requireAuth,
+  requireOwner, requireStoreOwner, shopify) ≈ 42 tests.
+  NOW: 13 suites, 123 tests. +8 suites (aiService 8, analyticsService 5,
+  brain 14, codOrder 1, optinStats 6, profileService 15, pushHygiene 14,
+  signalEngine 20).
+
+New logic with NO test coverage:
+  - backend/server.js processScheduledJobs (the poller): generateCopy wiring,
+    recordProfileMessage, checkUnopenedThreshold/updateDeliveredRate calls,
+    the profileId re-validation guard, the nightly scheduleNightlySignals /
+    runBrainForShop / pushStats-reset callback. server.js is never require()d
+    by any test.
+  - All 11 routes in profiles.js EXCEPT /optin-stats (covered by optinStats.
+    test.js): /signals, /messages, /profiles, /profiles/:id, /signal-configs
+    GET+PATCH, /push-stats, /weekly-narrative, /settings GET+PATCH — no route
+    tests.
+  - aiService.generateInsights — no test.
+  - backend/scripts/backfillProfiles.js — no test.
+  - webhooks.js handleWebhook / handleOrderWebhook profile+signal wiring — no
+    test.
+  - routes/events.js clearPushSuppression hook, routes/push.js /cart-activity
+    hook — no test.
+  - The rewritten push-notifications.liquid — not Jest-testable (known).
+  - The 7 admin screen .jsx files — no component tests (no test runner for
+    frontend at all).
+
+================================================================================
+5. DEAD CODE AND LEFTOVERS
+================================================================================
+
+AutomationRule / trigger enum — STILL PRESENT AND WIRED:
+  models/AutomationRule.js (trigger enum L22), routes/automation.js (mounted
+  server.js:133), utils/automationEngine.js, __tests__/automationEngine.test.js,
+  ScheduledJob.js still `ref: 'AutomationRule'`, webhooks.js:251 calls
+  scheduleCartAbandonJobs, server.js poller runs these jobs. This is the
+  parallel legacy scheduler that Phase C was meant to retire.
+"coming soon" string: routes/automation.js:41
+  "Only cart_abandon is currently supported. Other triggers are coming soon."
+"TODO": backend/utils/email.js:168 (sendCodOrderConfirmationEmail is a no-op
+  stub — "integrate customer email later").
+popup_delay: gone from the liquid JS, but the schema still has NO reference
+  either — clean (all popup_* settings removed from {% schema %}).
+ownerEmail / req.userEmail:
+  - Store.ownerEmail + OAuthState.ownerEmail fields still exist and are set at
+    install (auth.js) — used for owner COD notification emails (cod.js:65,
+    proxy.js:376). That USE is fine.
+  - routes/stores.js:17 `Store.find({ ownerEmail: req.userEmail })` — BROKEN
+    (req.userEmail no longer exists). Dead/legacy.
+Legacy multi-store models kept (single-shop app now): AbandonedCustomer,
+  CustomerPushSubscription, PushSubscription, ProductImageCache, OAuthState —
+  all still imported and used; not strictly dead, but AbandonedCustomer was
+  supposed to become a Profile view (Phase A gap).
+Orphan models: none — every models/*.js has at least one non-test importer.
+Frontend dead deps: `next-auth`, `jsonwebtoken` in frontend/package.json,
+  imported nowhere in frontend src.
+Frontend "coming soon": 0 (all G1/G2 stub screens are now implemented).
+
+================================================================================
+6. DATA SANITY  (read-only queries, dev-store MongoDB via backend/.env)
+================================================================================
+Collection counts:
+  Profile 84 | AbandonedCustomer 36 | CustomerPushSubscription 26 |
+  CodOrder 5 | StorefrontEvent 511 | ScheduledJob 21 | Signal 0
+
+Identity resolution health:
+  - Profiles with 0 identifiers: 0     ✅ (backfill/upsert never creates empty shells)
+  - Distinct emails appearing on >1 profile: 0   ✅ (no un-merged email dupes)
+  - Distinct phones appearing on >1 profile: 0   ✅ (no un-merged phone dupes)
+  - 84 profiles vs 36 AC + 26 CPS + 5 COD + (many event sessions) — plausible
+    (a profile can be built from an event session alone).
+
+Signal engine:  Signal count = 0.  ⚠ With 36 abandoned carts and 511 events
+  there should be cart_abandon / browse_abandon rows. The engine is not
+  producing anything in production (nightly cron not firing on Render, and the
+  ingest trigger needs live carts/* webhook traffic).
+
+Brain:  ScheduledJob profileId-set (brain jobs) = 0.  ⚠ The brain has scheduled
+  nothing (direct consequence of Signal = 0).
+
+Copy-at-schedule-time:  21 of 21 ScheduledJob rows carry a non-empty
+  payload.title/body — i.e. 100% are legacy AutomationRule jobs with frozen
+  copy. Zero brain jobs. This confirms §3e at the data level.
+
+================================================================================
+7. RISKS AND OPEN QUESTIONS
+================================================================================
+
+7a. Would fail / jeopardise Shopify App Store review
+  R1. PII in logs (§3a): customer email / name / phone printed to stdout
+      (Render logs). Shopify's Protected Customer Data requirements expect PII
+      minimisation in logs. Must be scrubbed before submission.
+  R2. The dead `stores.js GET /` route (§3b): requireAuth-only, filters on a
+      field that is always undefined post-auth-swap. A reviewer poking the API
+      surface will find an endpoint that behaves undefinedly. Remove it.
+  R3. shopify.app.toml only declares the `compliance` webhook subscription.
+      carts/*, checkouts/*, orders/create, app_subscriptions/update,
+      app/uninstalled must be registered (currently presumably at runtime on
+      install). If runtime registration is flaky, GDPR/mandatory topics look
+      fine but the product topics don't fire — verify on a fresh install.
+  R4. `read_inventory` is NOT in access_scopes, and `products/update` is not a
+      declared webhook — back_in_stock / price_drop signals can never work
+      without a scope change + review re-approval. They are stubs today, so
+      this is a "known future" not a blocker, but note it.
+  R5. localStorage in the embedded admin (§3c): Safari / embedded-iframe
+      storage partitioning can make it silently no-op; not a review blocker but
+      a functional risk and a self-imposed-rule violation.
+
+7b. Passes on the dev store, would fail / do nothing on a real store
+  R6. THE SIGNAL ENGINE PRODUCES ZERO SIGNALS IN THE LIVE DB (§6). Everything
+      downstream (brain, brain-scheduled sends, AI copy at send time, the
+      Today "what to act on" card, Customers signal counts, Messages showing
+      brain sends) is therefore inert. On a real store with traffic the
+      ingest-time trigger would fire on carts/* — but the nightly recompute
+      (the only thing that produces browse/high-intent/lapsing/etc.) is an
+      in-process setTimeout that resets on every Render restart and never runs
+      on a sleeping free dyno. Move it off the free tier AND/OR use a real
+      scheduler (node-cron / an external ping).
+  R7. Two schedulers run in parallel (legacy AutomationRule + brain). On a
+      real store with an active rule, a cart could get both a legacy reminder
+      and (once signals work) a brain message — double-messaging, and the
+      legacy one uses the hard-coded 22:00-08:00 / 3-per-24h caps, not
+      Store.caps. Retire the legacy path.
+  R8. `LLM_API_KEY` unset -> every AI message is the same generic fallback
+      line ("You left something behind" / "We saved your cart"). The whole
+      "AI writes the message in your voice" value prop is off until the key
+      (and LLM_MODEL=claude-sonnet-5) is set in Render.
+  R9. Brain email sends: the poller's email branch looks up an AbandonedCustomer
+      by cartToken to get an address. A brain email job for a profile whose
+      email lives only in Profile.channels.email.address (no matching abandoned
+      cart) will `skip` with "No customer email for this cart". Brain email is
+      effectively non-functional for non-cart profiles.
+  R10. Push suppression is over-aggressive (§Phase F caveat): with outcome
+      never set to 'clicked', every brain-pushed profile is force-unsubscribed
+      after maxUnopenedPush sends + 7 days, and only a storefront page_view
+      brings it back. On a real store this will quietly shrink the push
+      audience.
+  R11. generateCopy's blocking fetch inside the 30s poll loop (§Phase E): a
+      slow Anthropic response stalls the whole scheduled-job poller.
+
+7c. Skipped, or interpreted differently from the plan
+  R12. Phase C did NOT delete AutomationRule / the trigger enum (only the admin
+       step editor). The backend legacy scheduler is fully intact.
+  R13. Brain ranking is "highest strength wins", not the plan's
+       EV = strength × baseValue × reachability × shopConversionRate. There are
+       no per-signal base values or per-shop conversion rates anywhere.
+  R14. Send-time re-validation re-checks only runAt, not "signal still true /
+       didn't buy / still in stock" (plan Part 3).
+  R15. Phase A did not turn AbandonedCustomer into a Profile view; it remains a
+       parallel primary table read by 5+ call sites.
+  R16. Phase E's file is services/aiService.js, not the CLAUDE.md-named
+       utils/ai.js (cosmetic, single-location respected).
+  R17. Phase G is missing the Insights screen entirely and the grouped
+       "What to act on" screen — the two places the plan says dwell/scroll and
+       per-signal economics get surfaced to the merchant.
+  R18. Phase H never started (no prompt issued).
+  R19. Storefront prompt events are logged via /api/events, not the
+       /cart-activity beacon the phase prompt named (functionally fine, lands
+       in StorefrontEvent either way).
+  R20. Nightly jobs (signals, brain, pushStats reset) all hang off ONE
+       self-rescheduling setTimeout at 02:00 server-local. If it throws or the
+       process restarts near 02:00, a whole night is skipped silently.
+
+================================================================================
+RECOMMENDED FIXES — IN PRIORITY ORDER  (recommendations only; nothing changed)
+================================================================================
+ 1. Make the signal engine actually run in production (R6). Replace the
+    in-process 02:00 setTimeout with a real scheduler (node-cron, or an
+    external cron hitting a protected endpoint) and/or move Render + Atlas off
+    the free tier so the dyno doesn't sleep. Add a manual "recompute signals
+    now" admin action for verification. Until Signal rows exist, phases B-C-E-H
+    are all effectively untested against real data.
+
+ 2. Scrub PII from logs (R1): remove customer email/name/phone from
+    webhooks.js:187, email.js:99, cod.js:50, proxy.js:362 (and the owner-email
+    lines if you want to be strict). Log an id or a hash instead. Blocker for
+    Protected Customer Data / App Store submission.
+
+ 3. Retire the legacy scheduler (R7, R12): delete AutomationRule,
+    routes/automation.js, utils/automationEngine.js, the automationEngine test,
+    the scheduleCartAbandonJobs call in webhooks.js, and the `ref:'AutomationRule'`
+    on ScheduledJob. Make the poller path use Store.caps / Store.quietHours
+    instead of the hard-coded 22-08 / 3-per-24h. One scheduler, one set of caps.
+
+ 4. Wire outcomes back onto Profile.messages (R10, and the Phase-H
+    prerequisite): on a PushClick -> set the matching message's
+    outcome='clicked'; on an attributed order -> outcome='converted'. Without
+    this, push suppression is half-blind and Phase H has no input.
+
+ 5. Delete the broken/legacy `stores.js GET /` route (R2) and any remaining
+    req.userEmail reference. Single-shop app — there is no "list my stores".
+
+ 6. Set LLM_API_KEY and LLM_MODEL=claude-sonnet-5 in Render (R8), then confirm
+    generateCopy produces in-voice copy (check the "[ai] generated copy" /
+    "[ai] cache hit" log lines and the cache hit rate).
+
+ 7. Move generateCopy out of the synchronous poll tick (R11): resolve copy in a
+    separate step / worker, or cap the fetch with a short timeout and fall
+    back, so one slow LLM call can't stall the 30s poller.
+
+ 8. Implement the real brain ranking formula (R13) — add per-signal baseValue
+    and a per-shop shopConversionRate[signalType] (this is also Phase H's
+    surface), and rank by expected value, not raw strength.
+
+ 9. Add send-time signal re-validation (R14): before sending a brain job,
+    re-query the signal (or re-run the one compute fn) and skip if it's gone
+    (bought / out of stock / price back up).
+
+10. Move Onboarding step-done state off localStorage (R5, §3c) into
+    Store.onboarding.steps via a small PATCH endpoint — satisfies the CLAUDE.md
+    hard rule.
+
+11. Fix brain email sends for non-cart profiles (R9): have the poller's email
+    branch fall back to Profile.channels.email.address when there's no
+    AbandonedCustomer for the cartToken.
+
+12. Build the missing admin screens (R17): the Insights screen (product /
+    collection dwell + scroll + cart-rate + exit-point tables) and the grouped
+    "What to act on" screen. These are the two places the product plan promised
+    the behavioural data would show up.
+
+13. Add HTTP-level tests for the profiles.js routes and a smoke test for the
+    poller (§4). At minimum: /messages, /profiles, /settings PATCH, and a
+    processScheduledJobs unit test with a mocked ScheduledJob + generateCopy.
+
+14. Declare the product webhooks (carts/*, checkouts/*, orders/create,
+    app_subscriptions/update, app/uninstalled) in shopify.app.toml, or verify
+    runtime registration on a fresh install (R3).
+
+15. Start Phase H once #1 and #4 are in place: compute per-signal /
+    per-channel / per-hour outcome rates from Profile.messages, persist
+    per-shop weights, and feed them into the #8 ranking formula.
+
+16. Housekeeping: remove `next-auth` + `jsonwebtoken` from
+    frontend/package.json (dead), delete the email.js:168 TODO stub or
+    implement it, and either implement or remove the price_drop / back_in_stock
+    stubs + the read_inventory scope plan.
+
+================================================================================
+END OF AUDIT
+================================================================================

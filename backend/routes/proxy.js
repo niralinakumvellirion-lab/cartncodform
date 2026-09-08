@@ -359,7 +359,7 @@ router.post('/cod-order', async (req, res) => {
       status: 'pending',
     });
 
-    console.log(`[proxy] New COD order for ${order.shopDomain} from ${order.name} (${order.phone})`);
+    console.log(`[proxy] New COD order for ${order.shopDomain} — orderId: ${order._id}`);
 
     // Phase D: link the captured email to the phone-anchored profile.
     const { upsertProfile } = require('../services/profileService');
@@ -376,7 +376,7 @@ router.post('/cod-order', async (req, res) => {
     const ownerEmail = (store && store.ownerEmail) || process.env.TEST_OWNER_EMAIL;
     if (ownerEmail) {
       sendNewCodOrderEmail(order, ownerEmail);
-      console.log(`[proxy] New COD order email triggered for owner: ${ownerEmail}`);
+      console.log(`[proxy] New COD order email triggered for owner`);
     } else {
       console.log('[proxy] No owner email available — skipping notification');
     }

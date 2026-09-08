@@ -1,0 +1,513 @@
+================================================================================
+PHASE C2 - PRE-WORK AUDIT (read-only capture, no modifications)
+Generated: 2026-09-08T11:43:14Z   Branch: main   HEAD: 8bba64c
+================================================================================
+
+================================================================================
+FILE: backend/server.js   [EXCERPT: automation poller + scheduleNightlySignals — lines 150-439]
+================================================================================
+  150  // --- Automation: scheduled job sender -----------------------------------
+  151  /**
+  152   * Returns true if sending a push right now would violate quiet
+  153   * hours (10pm-8am) in the given IANA timezone.
+  154   */
+  155  function isQuietHours(timezone) {
+  156    try {
+  157      const now = new Date();
+  158      const hour = parseInt(
+  159        new Intl.DateTimeFormat('en-US', {
+  160          hour: 'numeric',
+  161          hour12: false,
+  162          timeZone: timezone || 'Asia/Kolkata',
+  163        }).format(now),
+  164        10
+  165      );
+  166      return hour >= 22 || hour < 8;
+  167    } catch (err) {
+  168      console.error('[automation] isQuietHours error:', err.message);
+  169      return false; // fail open — don't block sends on a bad timezone
+  170    }
+  171  }
+  172  
+  173  /**
+  174   * Returns true if this cartToken/customerId has already received
+  175   * 3+ automation pushes in the last 24 hours.
+  176   */
+  177  async function isOverFrequencyCap(shopDomain, cartToken, customerId) {
+  178    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  179    const orClauses = [];
+  180    if (cartToken) orClauses.push({ cartToken });
+  181    if (customerId) orClauses.push({ customerId });
+  182    if (!orClauses.length) return false;
+  183  
+  184    const count = await ScheduledJob.countDocuments({
+  185      shopDomain,
+  186      status: 'sent',
+  187      sentAt: { $gte: since },
+  188      $or: orClauses,
+  189    });
+  190    return count >= 3;
+  191  }
+  192  
+  193  /**
+  194   * Phase C: append a "sent" entry to the profile's message log (kept to the
+  195   * last 20). Best-effort — a logging failure must not fail the send.
+  196   */
+  197  async function recordProfileMessage(job) {
+  198    if (!job.profileId) return;
+  199    await Profile.findByIdAndUpdate(job.profileId, {
+  200      $push: {
+  201        messages: {
+  202          $each: [{
+  203            channel: job.channel,
+  204            type: job.signalType || 'manual',
+  205            sentAt: new Date(),
+  206            outcome: 'sent',
+  207            jobId: job._id,
+  208          }],
+  209          $slice: -20, // keep last 20 only
+  210        },
+  211      },
+  212    });
+  213  }
+  214  
+  215  /**
+  216   * Polls for due ScheduledJob rows and sends them. Runs every 30s.
+  217   * Uses a claim-update (findOneAndUpdate with status:'pending' filter)
+  218   * so this is safe even if multiple instances ever run.
+  219   */
+  220  async function processScheduledJobs() {
+  221    try {
+  222      const now = new Date();
+  223      const dueJobs = await ScheduledJob.find({
+  224        status: 'pending',
+  225        runAt: { $lte: now },
+  226      }).limit(20);
+  227  
+  228      for (const job of dueJobs) {
+  229        // Check quiet hours + frequency cap BEFORE claiming — if
+  230        // blocked, leave the job pending and re-check next tick
+  231        // (quiet hours) or skip it permanently (frequency cap).
+  232        const Store = require('./models/Store');
+  233        const store = await Store.findOne({ shopDomain: job.shopDomain }).select('timezone').lean();
+  234        const timezone = store?.timezone || 'Asia/Kolkata';
+  235  
+  236        if (isQuietHours(timezone)) {
+  237          console.log(`[automation] Job ${job._id} deferred — quiet hours (${timezone})`);
+  238          continue; // leave pending, retry next tick
+  239        }
+  240  
+  241        const overCap = await isOverFrequencyCap(job.shopDomain, job.cartToken, job.customerId);
+  242        if (overCap) {
+  243          await ScheduledJob.findOneAndUpdate(
+  244            { _id: job._id, status: 'pending' },
+  245            { status: 'skipped', error: 'Frequency cap reached (3/24h)' }
+  246          );
+  247          console.log(`[automation] Job ${job._id} skipped — frequency cap reached`);
+  248          continue;
+  249        }
+  250  
+  251        // Claim the job — only proceed if we successfully flip it from pending.
+  252        const claimed = await ScheduledJob.findOneAndUpdate(
+  253          { _id: job._id, status: 'pending' },
+  254          { status: 'sent', sentAt: new Date() },
+  255          { new: true }
+  256        );
+  257        if (!claimed) continue; // another process already claimed it
+  258  
+  259        // Phase C send-time re-validation — if runAt somehow sits in the
+  260        // future (clock skew / rescheduled), release the claim and retry.
+  261        if (job.profileId && job.runAt > new Date()) {
+  262          await ScheduledJob.findByIdAndUpdate(job._id, { status: 'pending' });
+  263          continue;
+  264        }
+  265  
+  266        try {
+  267          const channel = job.channel || 'push';
+  268          const payload = job.payload || {};
+  269  
+  270          // Phase E — resolve copy at SEND time (cached per shop/signal/product/
+  271          // channel/voice). Load the store once and reuse it for both branches.
+  272          const jobStore = await Store.findOne({ shopDomain: job.shopDomain });
+  273          const voice = (jobStore && jobStore.voice) || {};
+  274          const product = {
+  275            title: payload.title || '',
+  276            price: '', // not stored on the job yet — blank for now
+  277            productId: (payload.url && payload.url.split('/products/')[1]) || null,
+  278          };
+  279  
+  280          if (channel === 'push') {
+  281            // Only brain-scheduled jobs (job.profileId set) get AI copy.
+  282            // Legacy AutomationRule jobs keep their merchant-authored payload.
+  283            if (job.profileId) {
+  284              const copy = await generateCopy(
+  285                { ...(jobStore && jobStore.toObject ? jobStore.toObject() : {}), voice },
+  286                job.signalType || 'cart_abandon',
+  287                product,
+  288                'push'
+  289              ).catch(() => ({
+  290                title: 'You left something behind',
+  291                body: 'Come back and complete your order.',
+  292              }));
+  293              payload.title = copy.title || payload.title;
+  294              payload.body = copy.body || payload.body;
+  295            }
+  296  
+  297            const baseUrl = payload.url || `https://${job.shopDomain}`;
+  298            const urlWithJob = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'ccf_job=' + job._id.toString();
+  299            const result = await sendPushToCustomers(
+  300              job.shopDomain,
+  301              payload.title || 'You left something behind!',
+  302              payload.body || 'Come back and check it out.',
+  303              urlWithJob,
+  304              payload.imageUrl || null,
+  305              false,
+  306              job.cartToken || null,
+  307              false
+  308            );
+  309  
+  310            if (!result.success || result.sent === 0) {
+  311              await ScheduledJob.findByIdAndUpdate(job._id, {
+  312                status: 'failed',
+  313                error: result.error || 'No active subscriber found',
+  314              });
+  315              console.log(`[automation] Job ${job._id} failed: no subscriber reached`);
+  316            } else {
+  317              console.log(`[automation] Job ${job._id} sent successfully`);
+  318              await recordProfileMessage(job).catch((e) =>
+  319                console.error('[brain] message log error:', e.message)
+  320              );
+  321  
+  322              // Phase F — push hygiene after a successful send.
+  323              if (job.profileId) {
+  324                await checkUnopenedThreshold(job.profileId, job.shopDomain)
+  325                  .catch((err) => console.error('[hygiene] threshold error:', err.message));
+  326              }
+  327              if (result && result.tokensFound >= 0) {
+  328                await updateDeliveredRate(
+  329                  job.shopDomain,
+  330                  result.sent || 0,
+  331                  result.tokensFound || 0
+  332                ).catch((err) => console.error('[hygiene] rate error:', err.message));
+  333              }
+  334            }
+  335          } else if (channel === 'email') {
+  336            const customer = await AbandonedCustomer.findOne({
+  337              shopDomain: job.shopDomain,
+  338              sessionId: job.cartToken,
+  339            });
+  340            if (!customer || !customer.email) {
+  341              await ScheduledJob.findByIdAndUpdate(job._id, {
+  342                status: 'skipped',
+  343                error: 'No customer email for this cart',
+  344              });
+  345              console.log(`[automation] Job ${job._id} skipped — no customer email`);
+  346            } else {
+  347              // Only brain-scheduled jobs (job.profileId set) get AI copy.
+  348              // Legacy AutomationRule jobs keep their merchant-authored payload.
+  349              let copy = {};
+  350              if (job.profileId) {
+  351                copy = await generateCopy(
+  352                  { ...(jobStore && jobStore.toObject ? jobStore.toObject() : {}), voice },
+  353                  job.signalType || 'cart_abandon',
+  354                  product,
+  355                  'email'
+  356                ).catch(() => ({
+  357                  subject: 'We saved your cart',
+  358                  body: 'Hi,\n\nYou left items in your cart.\n\nThanks',
+  359                }));
+  360              }
+  361  
+  362              const cartUrl = `https://${job.shopDomain}/cart`;
+  363              const sendResult = await sendAbandonedCartEmail(customer, {
+  364                subject: copy.subject || payload.subject || undefined,
+  365                body: copy.body || payload.body || undefined,
+  366                cartUrl,
+  367              });
+  368              if (!sendResult.success) {
+  369                await ScheduledJob.findByIdAndUpdate(job._id, {
+  370                  status: 'failed',
+  371                  error: sendResult.error || 'Email send failed',
+  372                });
+  373                console.log(`[automation] Job ${job._id} email failed: ${sendResult.error}`);
+  374              } else {
+  375                console.log(`[automation] Job ${job._id} email sent successfully`);
+  376                await recordProfileMessage(job).catch((e) =>
+  377                  console.error('[brain] message log error:', e.message)
+  378                );
+  379              }
+  380            }
+  381          }
+  382        } catch (err) {
+  383          await ScheduledJob.findByIdAndUpdate(job._id, {
+  384            status: 'failed',
+  385            error: err.message,
+  386          });
+  387          console.error(`[automation] Job ${job._id} error:`, err.message);
+  388        }
+  389      }
+  390    } catch (err) {
+  391      console.error('[automation] processScheduledJobs error:', err.message);
+  392    }
+  393  }
+  394  
+  395  // Poll every 30 seconds.
+  396  setInterval(processScheduledJobs, 30 * 1000);
+  397  console.log('[automation] Scheduled job poller started (30s interval)');
+  398  
+  399  // --- Nightly signal computation — runs at 02:00 server time ------------
+  400  function scheduleNightlySignals() {
+  401    const now = new Date();
+  402    const next2am = new Date();
+  403    next2am.setHours(2, 0, 0, 0);
+  404    if (next2am <= now) next2am.setDate(next2am.getDate() + 1);
+  405    const msUntil2am = next2am - now;
+  406    setTimeout(async () => {
+  407      try {
+  408        const shops = await Store.find({}, 'shopDomain');
+  409        for (const s of shops) {
+  410          await runNightlySignals(s.shopDomain);
+  411        }
+  412        // Brain runs after signals are fresh for every shop.
+  413        for (const s of shops) {
+  414          await runBrainForShop(s.shopDomain)
+  415            .catch((err) => console.error('[brain] run error:', err.message));
+  416        }
+  417  
+  418        // Phase F — reset the rolling 7-day push stats for shops whose window
+  419        // has aged out (accumulation approximates the window; this closes it).
+  420        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  421        await Store.updateMany(
+  422          { 'pushStats.lastComputedAt': { $lt: sevenDaysAgo } },
+  423          {
+  424            $set: {
+  425              'pushStats.deliveredLast7d': 0,
+  426              'pushStats.attemptedLast7d': 0,
+  427              'pushStats.rateLast7d': 0,
+  428            },
+  429          }
+  430        ).catch((err) => console.error('[hygiene] stats reset error:', err.message));
+  431      } catch (err) {
+  432        console.error('[signals] nightly run error:', err.message);
+  433      }
+  434      scheduleNightlySignals(); // reschedule for next night
+  435    }, msUntil2am);
+  436  }
+  437  scheduleNightlySignals();
+  438  console.log('[signals] Nightly signal job scheduled (02:00 server time)');
+  439  
+
+
+================================================================================
+FILE: backend/routes/stores.js   (106 lines)   [FULL]
+================================================================================
+    1  const express = require('express');
+    2  const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
+    3  const Store = require('../models/Store');
+    4  const AbandonedCustomer = require('../models/AbandonedCustomer');
+    5  const CodOrder = require('../models/CodOrder');
+    6  const PushSubscription = require('../models/PushSubscription');
+    7  
+    8  const router = express.Router();
+    9  
+   10  /**
+   11   * GET /api/stores
+   12   * List stores owned by the authenticated user (derived from the JWT,
+   13   * not a client-supplied query param).
+   14   */
+   15  router.get('/', requireAuth, async (req, res) => {
+   16    try {
+   17      const stores = await Store.find({ ownerEmail: req.userEmail })
+   18        .sort({ installedAt: -1 })
+   19        .select('-accessToken -__v')
+   20        .lean();
+   21  
+   22      const withCounts = await Promise.all(
+   23        stores.map(async (store) => {
+   24          const [abandonedCount, codCount] = await Promise.all([
+   25            AbandonedCustomer.countDocuments({ shopDomain: store.shopDomain, status: 'abandoned' }),
+   26            CodOrder.countDocuments({ shopDomain: store.shopDomain }),
+   27          ]);
+   28          return { ...store, abandonedCount, codCount };
+   29        })
+   30      );
+   31  
+   32      return res.json(withCounts);
+   33    } catch (err) {
+   34      console.error('[stores] GET / error:', err.message);
+   35      return res.status(500).json({ error: 'Failed to list stores' });
+   36    }
+   37  });
+   38  
+   39  /**
+   40   * GET /api/stores/:shopDomain/customers
+   41   */
+   42  router.get('/:shopDomain/customers', requireAuth, requireStoreOwner, async (req, res) => {
+   43    try {
+   44      const shopDomain = req.params.shopDomain.trim().toLowerCase();
+   45      const { status } = req.query;
+   46  
+   47      const filter = { shopDomain };
+   48      if (status) filter.status = status;
+   49  
+   50      const customers = await AbandonedCustomer.find(filter).sort({ createdAt: -1 }).lean();
+   51      return res.json(customers);
+   52    } catch (err) {
+   53      console.error('[stores] GET /:shopDomain/customers error:', err.message);
+   54      return res.status(500).json({ error: 'Failed to fetch abandoned customers' });
+   55    }
+   56  });
+   57  
+   58  /**
+   59   * GET /api/stores/:shopDomain/orders
+   60   */
+   61  router.get('/:shopDomain/orders', requireAuth, requireStoreOwner, async (req, res) => {
+   62    try {
+   63      const shopDomain = req.params.shopDomain.trim().toLowerCase();
+   64      const { status } = req.query;
+   65  
+   66      const filter = { shopDomain };
+   67      if (status) filter.status = status;
+   68  
+   69      const orders = await CodOrder.find(filter).sort({ createdAt: -1 }).lean();
+   70      return res.json(orders);
+   71    } catch (err) {
+   72      console.error('[stores] GET /:shopDomain/orders error:', err.message);
+   73      return res.status(500).json({ error: 'Failed to fetch COD orders' });
+   74    }
+   75  });
+   76  
+   77  /**
+   78   * DELETE /api/stores/:shopDomain
+   79   * Disconnect a store: remove the Store plus every record tied to that shop.
+   80   */
+   81  router.delete('/:shopDomain', requireAuth, requireStoreOwner, async (req, res) => {
+   82    try {
+   83      const shopDomain = req.params.shopDomain.trim().toLowerCase();
+   84  
+   85      await Store.findOneAndDelete({ shopDomain });
+   86  
+   87      const [abandoned, cod, push] = await Promise.all([
+   88        AbandonedCustomer.deleteMany({ shopDomain }),
+   89        CodOrder.deleteMany({ shopDomain }),
+   90        PushSubscription.deleteMany({ shopDomain }),
+   91      ]);
+   92  
+   93      console.log(
+   94        `[stores] Disconnected store: ${shopDomain} ` +
+   95          `(removed ${abandoned.deletedCount} abandoned, ${cod.deletedCount} COD, ` +
+   96          `${push.deletedCount} push)`
+   97      );
+   98  
+   99      return res.json({ success: true, message: 'Store disconnected' });
+  100    } catch (err) {
+  101      console.error('[stores] DELETE /:shopDomain error:', err.message);
+  102      return res.status(500).json({ error: 'Failed to disconnect store' });
+  103    }
+  104  });
+  105  
+  106  module.exports = router;
+
+
+================================================================================
+FILE: backend/routes/webhooks.js   [EXCERPT: lines 180-200]
+================================================================================
+  180            .catch((err) => console.error('[signals] compute error:', err.message));
+  181        }
+  182      }).catch((err) => console.error('[profile] upsert error:', err.message));
+  183  
+  184      // Fire the abandoned-cart reminder email if we have an address to send to.
+  185      if (savedCustomer && savedCustomer.email) {
+  186        sendAbandonedCartEmail(savedCustomer);
+  187        console.log(`Abandoned cart email triggered for: ${savedCustomer.email}`);
+  188      }
+  189  
+  190      // Push-notify the store owner only on new carts (not updates).
+  191      const isNewCart = !savedCustomer.createdAt ||
+  192        (new Date() - new Date(savedCustomer.createdAt)) < 10000;
+  193      if (isNewCart) {
+  194        sendPushToStore(
+  195          shopDomain,
+  196          '🛒 New Abandoned Cart',
+  197          `A customer left items worth ₹${doc.cartValue} in their cart`
+  198        );
+  199      }
+  200  
+
+
+================================================================================
+FILE: backend/utils/email.js   [EXCERPT: lines 90-110]
+================================================================================
+   90      const { error } = await resend.emails.send({
+   91        from: FROM,
+   92        to: customer.email,
+   93        subject: subject,
+   94        html,
+   95      });
+   96  
+   97      if (error) throw new Error(error.message || JSON.stringify(error));
+   98  
+   99      console.log(`Email sent: abandoned_cart to ${customer.email}`);
+  100      return { success: true };
+  101    } catch (err) {
+  102      console.error(`Email failed: ${err.message}`);
+  103      return { success: false, error: err.message };
+  104    }
+  105  }
+  106  
+  107  // ---------------------------------------------------------------------------
+  108  // 2. New COD order alert -> the store owner
+  109  // ---------------------------------------------------------------------------
+  110  
+
+
+================================================================================
+FILE: backend/routes/cod.js   [EXCERPT: lines 40-60]
+================================================================================
+   40        phone: phone.trim(),
+   41        address: address.trim(),
+   42        city: (city || '').trim(),
+   43        pincode: (pincode || '').trim(),
+   44        productName: (productName || '').trim(),
+   45        productPrice: Number(productPrice) || 0,
+   46        quantity: Number(quantity) || 1,
+   47        status: 'pending',
+   48      });
+   49  
+   50      console.log(`[cod] New COD order for ${order.shopDomain} from ${order.name} (${order.phone})`);
+   51  
+   52      // Identity resolution — the verified COD phone is the strongest identity
+   53      // anchor for an Indian D2C shopper. Fire-and-forget.
+   54      upsertProfile(order.shopDomain, {
+   55        phone: phone,
+   56        email: req.body.email || null,
+   57      }, {
+   58        'channels.email.address': req.body.email || undefined,
+   59        'channels.email.source': req.body.email ? 'cod' : undefined,
+   60        lastSeenAt: new Date(),
+
+
+================================================================================
+FILE: backend/routes/proxy.js   [EXCERPT: lines 355-375]
+================================================================================
+  355        pincode: String(pincode || '').trim(),
+  356        productName: String(productName || '').trim(),
+  357        productPrice: Number(productPrice) || 0,
+  358        quantity: Number(quantity) || 1,
+  359        status: 'pending',
+  360      });
+  361  
+  362      console.log(`[proxy] New COD order for ${order.shopDomain} from ${order.name} (${order.phone})`);
+  363  
+  364      // Phase D: link the captured email to the phone-anchored profile.
+  365      const { upsertProfile } = require('../services/profileService');
+  366      upsertProfile(shop, { phone: String(phone).trim(), email: cleanEmail || null }, {
+  367        ...(cleanEmail
+  368          ? { 'channels.email.address': cleanEmail, 'channels.email.source': 'cod' }
+  369          : {}),
+  370        lastSeenAt: new Date(),
+  371      }).catch((err) => console.error('[profile] cod-proxy upsert error:', err.message));
+  372  
+  373      // Notify the store owner — same fire-and-forget notifications as
+  374      // routes/cod.js POST /order.
+  375      const store = await Store.findOne({ shopDomain: order.shopDomain });

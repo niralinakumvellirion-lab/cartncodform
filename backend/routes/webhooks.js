@@ -11,6 +11,8 @@ const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const ProductImageCache = require('../models/ProductImageCache');
 const { upsertProfile } = require('../services/profileService');
 const { computeSignalsForProfile } = require('../services/signalEngine');
+const Profile = require('../models/Profile');
+const ScheduledJob = require('../models/ScheduledJob');
 
 const router = express.Router();
 
@@ -339,6 +341,24 @@ async function handleOrderWebhook(req, res) {
         `[webhook:order] Recovery recorded — revenue: ${revenueAmount || 'n/a'} ${revenueCurrency || ''} ` +
           `source: ${isTestOrder ? 'skipped(test)' : updateFields.attributionSource} test: ${isTestOrder}`
       );
+
+      // Phase C2 — mark the attributed job + its profile message as 'converted'.
+      if (attributedJobId && !isTestOrder) {
+        try {
+          const job = await ScheduledJob.findById(attributedJobId);
+          if (job) {
+            await ScheduledJob.findByIdAndUpdate(attributedJobId, { outcome: 'converted' });
+            if (job.profileId) {
+              await Profile.updateOne(
+                { _id: job.profileId, 'messages.jobId': job._id },
+                { $set: { 'messages.$.outcome': 'converted' } }
+              );
+            }
+          }
+        } catch (convErr) {
+          console.error('[webhook:order] outcome=converted update error:', convErr.message);
+        }
+      }
     }
 
     // Identity resolution — bump the profile's order stats. Fire-and-forget.

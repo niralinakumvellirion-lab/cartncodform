@@ -96,7 +96,7 @@ async function sendAbandonedCartEmail(customer, options = {}) {
 
     if (error) throw new Error(error.message || JSON.stringify(error));
 
-    console.log(`Email sent: abandoned_cart to ${customer.email}`);
+    console.log(`[email] abandoned_cart sent (profileId: ${customer._id})`);
     return { success: true };
   } catch (err) {
     console.error(`Email failed: ${err.message}`);

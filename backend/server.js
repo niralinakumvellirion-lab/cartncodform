@@ -219,6 +219,56 @@ async function recordProfileMessage(job) {
  */
 async function processScheduledJobs() {
   try {
+    // Phase C2 — run signals + brain once per shop per day, driven by this 30s
+    // tick instead of a one-shot setTimeout (which was lost on every Render
+    // restart / dyno sleep). A restart just means the next tick catches up.
+    try {
+      const shopsToCheck = await Store.find(
+        {},
+        'shopDomain lastSignalRunAt timezone'
+      ).lean();
+      for (const s of shopsToCheck) {
+        const tz = s.timezone || 'Asia/Kolkata';
+        const nowD = new Date();
+        // today's date in the store's timezone (YYYY-MM-DD)
+        const todayStr = new Intl.DateTimeFormat('en-CA', {
+          timeZone: tz,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(nowD);
+        const target2am = new Date(`${todayStr}T02:00:00`);
+        const alreadyRanToday = s.lastSignalRunAt && s.lastSignalRunAt >= target2am;
+
+        if (nowD >= target2am && !alreadyRanToday) {
+          // Claim first so overlapping ticks can't double-run.
+          await Store.findOneAndUpdate(
+            { shopDomain: s.shopDomain },
+            { lastSignalRunAt: nowD }
+          );
+
+          runNightlySignals(s.shopDomain)
+            .then(() => runBrainForShop(s.shopDomain))
+            .catch((err) => console.error('[signals] nightly error:', err.message));
+
+          // Reset the rolling 7-day push stats for shops whose window expired.
+          const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+          await Store.updateMany(
+            { 'pushStats.lastComputedAt': { $lt: sevenDaysAgo } },
+            {
+              $set: {
+                'pushStats.deliveredLast7d': 0,
+                'pushStats.attemptedLast7d': 0,
+                'pushStats.rateLast7d': 0,
+              },
+            }
+          ).catch((err) => console.error('[hygiene] stats reset error:', err.message));
+        }
+      }
+    } catch (gateErr) {
+      console.error('[signals] nightly gate error:', gateErr.message);
+    }
+
     const now = new Date();
     const dueJobs = await ScheduledJob.find({
       status: 'pending',
@@ -392,50 +442,10 @@ async function processScheduledJobs() {
   }
 }
 
-// Poll every 30 seconds.
+// Poll every 30 seconds. The nightly signals + brain run is gated inside this
+// same tick (see processScheduledJobs), so there is no separate scheduler.
 setInterval(processScheduledJobs, 30 * 1000);
-console.log('[automation] Scheduled job poller started (30s interval)');
-
-// --- Nightly signal computation — runs at 02:00 server time ------------
-function scheduleNightlySignals() {
-  const now = new Date();
-  const next2am = new Date();
-  next2am.setHours(2, 0, 0, 0);
-  if (next2am <= now) next2am.setDate(next2am.getDate() + 1);
-  const msUntil2am = next2am - now;
-  setTimeout(async () => {
-    try {
-      const shops = await Store.find({}, 'shopDomain');
-      for (const s of shops) {
-        await runNightlySignals(s.shopDomain);
-      }
-      // Brain runs after signals are fresh for every shop.
-      for (const s of shops) {
-        await runBrainForShop(s.shopDomain)
-          .catch((err) => console.error('[brain] run error:', err.message));
-      }
-
-      // Phase F — reset the rolling 7-day push stats for shops whose window
-      // has aged out (accumulation approximates the window; this closes it).
-      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      await Store.updateMany(
-        { 'pushStats.lastComputedAt': { $lt: sevenDaysAgo } },
-        {
-          $set: {
-            'pushStats.deliveredLast7d': 0,
-            'pushStats.attemptedLast7d': 0,
-            'pushStats.rateLast7d': 0,
-          },
-        }
-      ).catch((err) => console.error('[hygiene] stats reset error:', err.message));
-    } catch (err) {
-      console.error('[signals] nightly run error:', err.message);
-    }
-    scheduleNightlySignals(); // reschedule for next night
-  }, msUntil2am);
-}
-scheduleNightlySignals();
-console.log('[signals] Nightly signal job scheduled (02:00 server time)');
+console.log('[automation] Scheduled job poller started (30s interval; nightly signals gated inside)');
 
 // --- Boot ---------------------------------------------------------------
 async function start() {
