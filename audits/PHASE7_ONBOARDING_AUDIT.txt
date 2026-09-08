@@ -1,0 +1,233 @@
+================================================================================
+PHASE 7 — FIRST-RUN ONBOARDING CHECKLIST — SELF-AUDIT
+================================================================================
+Date: 2026-09-07
+File modified: frontend/app/admin/page.js   (only file changed)
+No new imports — Card, Text, Button, Box, Checkbox, BlockStack, InlineStack,
+useState, useEffect were all already imported.
+
+
+================================================================================
+1. OnboardingChecklist component — exists, all 4 steps
+================================================================================
+CONFIRMED. Added immediately before `function StoreView({ shop })`, after the
+new `ONBOARDING_STORAGE_KEY` const + `isOnboardingDismissed()` helper.
+
+Signature:
+  function OnboardingChecklist({ shop, customers = [], automationRules = [],
+                                 onDismiss, onTabChange })
+  (the task's "Props: { shop, onDismiss }" line was incomplete; the wiring
+   section passes customers / automationRules / onTabChange too — all five
+   are accepted.)
+
+State:
+  - dismissed   useState(isOnboardingDismissed)   — seeded from localStorage
+  - codCopied   useState(false)                   — 'cod' step local completion
+  - steps       useState(() => [ ...4 static step objects... ])
+                each { id, title, description, done, actionLabel, actionUrl }
+
+The 4 hard-coded steps (verbatim ids / actionLabels / actionUrls):
+
+  1. id: 'embed'
+     title:       'Enable App Embed block'
+     description: 'Turn on the CartnCodForm embed in your theme to start
+                  tracking carts and collecting push subscribers.'
+     actionLabel: 'Open Theme Editor'
+     actionUrl:   `https://${shop}/admin/themes/current/editor?context=apps`
+
+  2. id: 'automation'
+     title:       'Turn on your first automation'
+     description: 'Set up a cart abandonment rule to automatically remind
+                  customers who leave items behind.'
+     actionLabel: 'Go to Automations'
+     actionUrl:   null   (handled by onTabChange)
+
+  3. id: 'push'
+     title:       'Send a test push notification'
+     description: 'Use the Push button on any abandoned cart row to verify
+                  your push notifications are working.'
+     actionLabel: 'View Abandoned Carts'
+     actionUrl:   null   (handled by onTabChange)
+
+  4. id: 'cod'
+     title:       'Enable the COD form'
+     description: `Share your COD order form link with customers:
+                  https://${shop}/apps/cartncodform/cod-form`
+     actionLabel: 'Copy link'
+     actionUrl:   null   (copies to clipboard)
+
+
+================================================================================
+2. Step completion logic
+================================================================================
+  - 'embed'      : manual only. Checkbox is interactive ONLY for this id
+                   (disabled for the other three). toggleManual('embed', checked)
+                   sets steps[embed].done.
+  - 'automation' : auto — `automationRules.some(r => r && r.active)` (>= 1 active
+                   rule). Sticky-once-true.
+  - 'push'       : auto — `customers.some(c => c && c.status && c.status !== 'abandoned')`
+                   (>= 1 non-abandoned row = a recovery happened). Sticky-once-true.
+  - 'cod'        : `codCopied` local state — true once the link is copied.
+
+Recompute mechanism: `automationDone` and `pushDone` are computed as PRIMITIVE
+booleans on each render, and a useEffect keyed on
+[automationDone, pushDone, codCopied] patches steps[].done. Using primitives
+(not the arrays) as deps means the effect only fires when a signal actually
+flips — the inline `automationRules={[]}` prop (new ref every parent render)
+does NOT cause a render loop.
+"Checked on mount + on each tab change": the effect runs on mount; a tab
+change re-renders StoreView -> fresh props flow down -> effect re-evaluates
+(no-op unless a signal changed, which is the intended behaviour since the
+underlying data only changes on load()).
+
+
+================================================================================
+3. handleStepAction(id) — all 4 cases
+================================================================================
+  'embed'      : no handleStepAction case — it uses actionUrl (a real link),
+                 so the Button renders as a URL and onClick is undefined.
+  'automation' : onTabChange && onTabChange('automation')
+  'push'       : onTabChange && onTabChange('abandoned')
+  'cod'        : navigator.clipboard.writeText(`https://${shop}/apps/cartncodform/cod-form`)
+                 wrapped in try/catch -> setCodCopied(true) -> patches
+                 steps[cod].done = true. Button label flips to "Copied!".
+
+Button wiring per step (matches the task spec):
+  <Button size="slim"
+          url={step.actionUrl || undefined}
+          external={Boolean(step.actionUrl)}
+          onClick={step.actionUrl ? undefined : () => handleStepAction(step.id)}>
+    {step.id === 'cod' && codCopied ? 'Copied!' : step.actionLabel}
+  </Button>
+
+
+================================================================================
+4. Wired into StoreView above RevenueStats
+================================================================================
+CONFIRMED. Inside StoreView's <BlockStack gap="400"> (the Page body), the
+render order is now:
+    {/* TODO: port PushNotificationSetup */}
+    {showOnboarding && ( <OnboardingChecklist ... /> )}      <-- NEW
+    {!loading && <RevenueStats customers={customers} />}
+    ...error banner / spinner / <Tabs> ...
+
+Props passed:
+  shop={shop}
+  customers={customers}
+  automationRules={[]}          (StoreView does not load rules — empty for now;
+                                 the 'automation' step just stays unchecked
+                                 until the merchant marks... see deviation (c))
+  onDismiss={() => {
+    try { window.localStorage.setItem('ccf_onboarding_dismissed', 'true'); } catch (e) {}
+    setShowOnboarding(false);
+  }}
+  onTabChange={(tabId) => {
+    if (['abandoned', 'cod', 'automation'].includes(tabId)) setTab(tabId);
+  }}
+
+AdminHomeContent: no change needed — it already renders <StoreView shop={shop} />
+and all onboarding state/props live inside StoreView. (The task's "Wire into
+StoreView and AdminHomeContent" heading had no AdminHomeContent-specific items.)
+
+
+================================================================================
+5. showOnboarding state — initialized correctly
+================================================================================
+CONFIRMED. In StoreView:
+  const [showOnboarding, setShowOnboarding] =
+    useState(() => !isOnboardingDismissed());
+
+isOnboardingDismissed() (module-level helper):
+  try {
+    return typeof window !== 'undefined'
+      && window.localStorage.getItem('ccf_onboarding_dismissed') === 'true';
+  } catch { return false; }
+
+=> showOnboarding starts TRUE unless the key is exactly 'true'; a throwing /
+unavailable localStorage is treated as "not dismissed" (checklist shows).
+Lazy initializer so localStorage is read once, on the client, at mount.
+Belt-and-suspenders: the component ALSO holds its own `dismissed` state seeded
+the same way and returns null when dismissed, so both the parent gate and the
+component agree.
+
+Dismissal writes 'ccf_onboarding_dismissed' = 'true' in BOTH places (the
+component's own dismiss() and StoreView's onDismiss handler) — redundant but
+harmless, and matches the task's "sets localStorage + calls onDismiss()".
+
+
+================================================================================
+6. localStorage key
+================================================================================
+  Key:   'ccf_onboarding_dismissed'   (module const ONBOARDING_STORAGE_KEY)
+  Value: 'true' on dismissal
+  Read:  isOnboardingDismissed() — on mount, in StoreView init + component init
+  Write: OnboardingChecklist.dismiss()  and  StoreView onDismiss handler
+  All reads/writes wrapped in try/catch.
+
+
+================================================================================
+7. BUILD RESULT
+================================================================================
+cd frontend && npm run build
+  ✓ Compiled successfully
+  ✓ Linting and checking validity of types
+  ✓ Generating static pages (5/5)
+
+  Route (app)              Size      First Load JS
+  ┌ ○ /                    6.95 kB   94.1 kB
+  ├ ○ /_not-found          871 B     88 kB
+  ├ ○ /admin               81 kB     168 kB   (was 80 kB / 167 kB)
+  └ ƒ /cod-form/[shop]     5.17 kB   92.3 kB
+
+  Zero errors, zero warnings.
+
+
+================================================================================
+8. LINE COUNT
+================================================================================
+  frontend/app/admin/page.js:  1127  ->  1313   (+186)
+    +171  OnboardingChecklist component + ONBOARDING_STORAGE_KEY const +
+          isOnboardingDismissed() helper
+    + 1   StoreView: showOnboarding state
+    +14   StoreView: <OnboardingChecklist> render block above RevenueStats
+
+
+================================================================================
+9. DEVIATIONS FROM THE LITERAL SPEC (all deliberate)
+================================================================================
+(a) showOnboarding / dismissed init: the spec's inline expression
+    `typeof window !== 'undefined' && localStorage.getItem(...) !== 'true'`
+    would throw (uncaught) where localStorage access is blocked. Extracted to
+    isOnboardingDismissed() with try/catch; same result when storage works.
+
+(b) onTabChange handler: the spec used `setSelectedTab(idx)`, but StoreView has
+    no such setter — its tab state is `tab` (a string id) via `setTab`, and
+    `selectedTab` is derived (`tabs.findIndex(...)`). Implemented as
+    `if (['abandoned','cod','automation'].includes(tabId)) setTab(tabId)`,
+    which is the correct bridge for the real state model. Tab ids line up
+    exactly with what OnboardingChecklist requests ('automation','abandoned').
+
+(c) 'automation' step: automationRules is passed `[]` (StoreView doesn't fetch
+    rules), so this step never auto-completes. Its Checkbox is `disabled`
+    (auto step), so a merchant currently CANNOT tick it manually either — it
+    just stays open. Per the spec's own note this step is "empty for now";
+    wiring StoreView to the rules API (or enabling this one checkbox) is a
+    follow-up. Progress can still reach "3 of 4".
+
+(d) Action Button: added `external={Boolean(step.actionUrl)}` (not in the
+    spec's Button snippet). The only real actionUrl is the Shopify Theme
+    Editor; inside the embedded app iframe a same-frame navigation to
+    admin.shopify.com is blocked by frame-ancestors, so it must open in a new
+    tab.
+
+(e) Checkbox: `disabled={step.id !== 'embed'}` and toggleManual() early-returns
+    for non-'embed' ids — enforces the spec's "user marks manually" applying
+    to the embed step only (the other three are derived). Checkbox `label` is
+    the step title with `labelHidden` (Polaris requires a non-empty label for
+    a11y; the visible bold title sits beside it).
+
+(f) 'cod' step description is built as
+    `Share your COD order form link with customers: ${codLink}` where
+    codLink = `https://${shop}/apps/cartncodform/cod-form` — i.e. the live
+    shop domain is interpolated rather than left as a literal "{shop}".
+================================================================================

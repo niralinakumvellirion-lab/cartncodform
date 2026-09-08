@@ -1,0 +1,311 @@
+================================================================================
+PHASE 7 — PRE-WORK AUDIT (BILLING / PLAN GATING / ONBOARDING)
+================================================================================
+Date: 2026-09-07
+Read-only. No files modified.
+
+
+================================================================================
+1. backend/utils/billing.js   (93 lines)  — FULL
+================================================================================
+   1  const { shopifyGraphQL } = require('./shopifyGraphQL');
+   2
+   3  const PLAN_NAME = 'CartnCodForm Pro';
+   4  const PLAN_PRICE = 9.99;
+   5  const PLAN_CURRENCY = 'USD';
+   6  const TRIAL_DAYS = 7;
+   7
+   8  /**
+   9   * Query Shopify for this shop's currently active subscription(s).
+  10   * Returns the first ACTIVE subscription, or null.
+  11   */
+  12  async function getActiveSubscription(shop, accessToken) {
+  13    const query = `
+  14      query {
+  15        currentAppInstallation {
+  16          activeSubscriptions {
+  17            id
+  18            name
+  19            status
+  20            test
+  21          }
+  22        }
+  23      }
+  24    `;
+  25    const data = await shopifyGraphQL(shop, accessToken, query);
+  26    const subs = data?.currentAppInstallation?.activeSubscriptions || [];
+  27    return subs.find(s => s.status === 'ACTIVE') || null;
+  28  }
+  29
+  30  /**
+  31   * Create a new app subscription. Returns the Shopify-hosted
+  32   * confirmationUrl the merchant must visit to approve the charge.
+  33   */
+  34  async function createSubscription(shop, accessToken, returnUrl, isTest) {
+  35    const mutation = `
+  36      mutation AppSubscriptionCreate(
+  37        $name: String!
+  38        $lineItems: [AppSubscriptionLineItemInput!]!
+  39        $returnUrl: URL!
+  40        $trialDays: Int
+  41        $test: Boolean
+  42      ) {
+  43        appSubscriptionCreate(
+  44          name: $name
+  45          lineItems: $lineItems
+  46          returnUrl: $returnUrl
+  47          trialDays: $trialDays
+  48          test: $test
+  49        ) {
+  50          confirmationUrl
+  51          appSubscription {
+  52            id
+  53          }
+  54          userErrors {
+  55            field
+  56            message
+  57          }
+  58        }
+  59      }
+  60    `;
+  61
+  62    const variables = {
+  63      name: PLAN_NAME,
+  64      returnUrl,
+  65      trialDays: TRIAL_DAYS,
+  66      test: !!isTest,
+  67      lineItems: [
+  68        {
+  69          plan: {
+  70            appRecurringPricingDetails: {
+  71              price: { amount: PLAN_PRICE, currencyCode: PLAN_CURRENCY },
+  72              interval: 'EVERY_30_DAYS',
+  73            },
+  74          },
+  75        },
+  76      ],
+  77    };
+  78
+  79    const data = await shopifyGraphQL(shop, accessToken, mutation, variables);
+  80    const result = data?.appSubscriptionCreate;
+  81
+  82    if (result?.userErrors?.length > 0) {
+  83      throw new Error(`Billing error: ${JSON.stringify(result.userErrors)}`);
+  84    }
+  85
+  86    return {
+  87      confirmationUrl: result?.confirmationUrl || null,
+  88      subscriptionId: result?.appSubscription?.id || null,
+  89    };
+  90  }
+  91
+  92  module.exports = { getActiveSubscription, createSubscription, PLAN_NAME, PLAN_PRICE };
+  93
+
+
+================================================================================
+2. backend/middleware/requireOwner.js — requirePaidPlan
+================================================================================
+NOTE: lines 80–100 of this file are NOT requirePaidPlan — they are the tail of
+requireAuth (76–86) and the head of requireStoreOwner (94–100). requirePaidPlan
+is lines 113–128. Captured verbatim:
+
+ 113  /**
+ 114   * Requires requireStoreOwner to have run first (sets req.store).
+ 115   * Blocks access unless the store's plan is 'pro'.
+ 116   */
+ 117  function requirePaidPlan(req, res, next) {
+ 118    if (!req.store) {
+ 119      return res.status(500).json({ error: 'requirePaidPlan must run after requireStoreOwner' });
+ 120    }
+ 121    if (req.store.plan !== 'pro') {
+ 122      return res.status(402).json({
+ 123        error: 'This feature requires the Pro plan',
+ 124        upgradeRequired: true,
+ 125      });
+ 126    }
+ 127    next();
+ 128  }
+ 129
+ 130  module.exports = { requireAuth, requireStoreOwner, requirePaidPlan };
+
+For context — the two middlewares it depends on (same file):
+
+  requireStoreOwner (94–111): loads Store.findOne({ shopDomain: req.shopDomain })
+    -> 404 'Store not found' if none;
+    -> 403 'Not authorized for this store' if req.shopDomain !== req.params.shopDomain (IDOR);
+    -> sets req.store = store; next().
+    (500 'Authorization check failed' on a thrown error.)
+
+  requireAuth (10–86): verifies the Shopify App Bridge session token, sets
+    req.shopDomain. Does NOT set req.store or req.userEmail.
+
+  => requirePaidPlan chain order MUST be: requireAuth -> requireStoreOwner ->
+     requirePaidPlan. requireStoreOwner needs req.params.shopDomain, so the
+     route it guards must have a :shopDomain path param.
+
+Plan check: `req.store.plan !== 'pro'` -> 402 { error, upgradeRequired: true }.
+
+
+================================================================================
+3. backend/models/Store.js   (39 lines)  — FULL
+================================================================================
+   1  const mongoose = require('mongoose');
+   2
+   3  const storeSchema = new mongoose.Schema({
+   4    shopDomain: {
+   5      type: String,
+   6      required: true,
+   7      unique: true,
+   8      trim: true,
+   9      lowercase: true,
+  10    },
+  11    accessToken: {
+  12      type: String,
+  13      required: true,
+  14    },
+  15    ownerEmail: {
+  16      type: String,
+  17      lowercase: true,
+  18      trim: true,
+  19    },
+  20    timezone: {
+  21      type: String,
+  22      default: 'Asia/Kolkata',
+  23    },
+  24    plan: {
+  25      type: String,
+  26      enum: ['free', 'pro'],
+  27      default: 'free',
+  28    },
+  29    subscriptionId: { type: String },
+  30    subscriptionStatus: { type: String },
+  31    planUpdatedAt: { type: Date },
+  32    installedAt: {
+  33      type: Date,
+  34      default: Date.now,
+  35    },
+  36  });
+  37
+  38  module.exports = mongoose.model('Store', storeSchema);
+  39
+
+Billing-relevant fields already on the schema:
+  plan               enum ['free','pro'], default 'free'   (what requirePaidPlan reads)
+  subscriptionId     String   (Shopify appSubscription gid)
+  subscriptionStatus String   (e.g. 'ACTIVE')
+  planUpdatedAt      Date
+No trial-end / trialDays field. No per-feature flags.
+
+
+================================================================================
+4. frontend/app/admin/page.js — lines 1–30 (imports)  — FULL
+================================================================================
+   1  'use client';
+   2
+   3  import { Suspense, useState, useCallback, useEffect, useMemo } from 'react';
+   4  import {
+   5    AppProvider,
+   6    Page,
+   7    Card,
+   8    Text,
+   9    Badge,
+  10    Button,
+  11    Popover,
+  12    TextField,
+  13    FormLayout,
+  14    BlockStack,
+  15    Box,
+  16    InlineStack,
+  17    Checkbox,
+  18    Banner,
+  19    ResourceList,
+  20    ResourceItem,
+  21    Modal,
+  22    Grid,
+  23    SkeletonBodyText,
+  24    Thumbnail,
+  25    Tabs,
+  26    IndexTable,
+  27    Select,
+  28    Spinner,
+  29  } from '@shopify/polaris';
+  30  import { useSearchParams } from 'next/navigation';
+
+(Line 31: `import '@shopify/polaris/build/esm/styles.css';`
+ Line 32: `import { apiGet, apiSend } from '../../lib/api';`)
+No billing / plan / upgrade / onboarding import. grep of the whole file for
+requirePaidPlan | plan..pro | upgradeRequired | /upgrade -> no matches: the
+admin UI does not currently gate anything on plan or show an upgrade CTA.
+
+
+================================================================================
+5. EXISTENCE CHECKS
+================================================================================
+  backend/routes/billing.js .......................... NO
+      backend/routes/ contains: attribution.js, auth.js, automation.js,
+      cod.js, events.js, proxy.js, push.js, stores.js, webhooks.js.
+      Billing lives inside routes/auth.js, not a dedicated route file:
+        - auth.js:13   require('../utils/billing') -> { getActiveSubscription, createSubscription }
+        - auth.js:67   GET /callback           — on install, calls getActiveSubscription,
+                                                  sets store.plan accordingly
+        - auth.js:119  getActiveSubscription(shopDomain, accessToken) in /callback
+        - auth.js:158  GET /upgrade            — builds returnUrl, isTest =
+                                                  NODE_ENV !== 'production',
+                                                  createSubscription(...), redirects
+                                                  merchant to confirmationUrl
+        - auth.js:193  GET /billing/callback?shop=&charge_id=  — post-approval;
+                                                  getActiveSubscription again, flips
+                                                  store.plan to 'pro', redirects to
+                                                  admin.shopify.com/store/<shop>/apps/cartncodform
+
+  frontend/app/admin/onboarding.js .................. NO
+  any onboarding component anywhere in frontend/ ..... NO
+      - Glob  frontend/**/*onboard*                    -> no files
+      - Grep -i "onboard" in frontend SOURCE           -> no matches
+        (frontend/app, frontend/lib, frontend/components — the last dir does
+         not exist). The only "onboard" hits are in build output / deps:
+         frontend/.next/... and frontend/node_modules/@shopify/polaris/...
+         (Polaris IndexTable bundle) — not project source.
+      No onboarding UI, wizard, or first-run flow exists in the frontend.
+
+
+================================================================================
+6. OBSERVATIONS FOR PHASE 7 PLANNING
+================================================================================
+  A. requirePaidPlan is fully implemented, exported, and unit-tested
+     (backend/__tests__/requireOwner.test.js) but WIRED TO NOTHING — no route
+     in backend/routes/ references it (grep: 0 matches). Nothing is currently
+     plan-gated on the server.
+
+  B. The billing lifecycle already works end to end via auth.js:
+     install (/callback) -> plan detected; /upgrade -> Shopify confirmation
+     URL; /billing/callback -> plan flipped to 'pro'. There is NO
+     app_subscriptions/update webhook handler wired to keep Store.plan in sync
+     when a merchant cancels/downgrades outside the app — worth checking
+     routes/webhooks.js in Phase 7 (shopify.app.toml lists no
+     app_subscriptions/update subscription either; only compliance topics are
+     in the toml, other topics may be registered at runtime).
+
+  C. Store schema is billing-ready (plan / subscriptionId / subscriptionStatus
+     / planUpdatedAt). No trial metadata persisted — trialDays=7 is only sent
+     to Shopify at createSubscription time; the backend can't independently
+     tell "in trial" vs "paid" without re-querying Shopify (getActiveSubscription
+     returns status/test but not trial state).
+
+  D. Frontend has neither an upgrade CTA nor an onboarding flow. A Phase 7
+     that adds plan gating will need: (i) the admin page to read the store's
+     plan (new field on an existing stores API response, or a new endpoint),
+     (ii) an upgrade button that navigates the merchant to
+     `${BACKEND_URL}/api/auth/upgrade?shop=<shop>` (top-level redirect, not
+     fetch — it 302s to Shopify), (iii) handling of the 402
+     { upgradeRequired: true } response shape from any newly gated API call.
+
+  E. requireStoreOwner requires req.params.shopDomain. Most current API routes
+     (push.js, cod.js PATCH, automation.js) authorize via a manual
+     `req.shopDomain !== <body/param>` check and do NOT use requireStoreOwner,
+     so they also don't set req.store. Any route that adds requirePaidPlan
+     must first adopt the requireAuth -> requireStoreOwner chain (and thus a
+     :shopDomain path param), or requirePaidPlan needs a variant that loads
+     the store itself.
+================================================================================

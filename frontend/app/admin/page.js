@@ -820,6 +820,176 @@ function CustomerAnalytics({ open, shop, customer, onClose }) {
   );
 }
 
+// --- First-run onboarding checklist ---
+
+const ONBOARDING_STORAGE_KEY = 'ccf_onboarding_dismissed';
+
+// localStorage can throw (private mode / disabled storage) — never let that
+// break the first render. Treat "can't read" as "not dismissed".
+function isOnboardingDismissed() {
+  try {
+    return typeof window !== 'undefined'
+      && window.localStorage.getItem(ONBOARDING_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function OnboardingChecklist({ shop, customers = [], automationRules = [], onDismiss, onTabChange }) {
+  const codLink = `https://${shop}/apps/cartncodform/cod-form`;
+
+  const [dismissed, setDismissed] = useState(isOnboardingDismissed);
+  const [codCopied, setCodCopied] = useState(false);
+
+  // Static step definitions. `done` is seeded false and recomputed below for
+  // the auto-detectable steps; 'embed' stays manual-only.
+  const [steps, setSteps] = useState(() => [
+    {
+      id: 'embed',
+      title: 'Enable App Embed block',
+      description:
+        'Turn on the CartnCodForm embed in your theme to start tracking carts and collecting push subscribers.',
+      actionLabel: 'Open Theme Editor',
+      actionUrl: `https://${shop}/admin/themes/current/editor?context=apps`,
+      done: false,
+    },
+    {
+      id: 'automation',
+      title: 'Turn on your first automation',
+      description:
+        'Set up a cart abandonment rule to automatically remind customers who leave items behind.',
+      actionLabel: 'Go to Automations',
+      actionUrl: null,
+      done: false,
+    },
+    {
+      id: 'push',
+      title: 'Send a test push notification',
+      description:
+        'Use the Push button on any abandoned cart row to verify your push notifications are working.',
+      actionLabel: 'View Abandoned Carts',
+      actionUrl: null,
+      done: false,
+    },
+    {
+      id: 'cod',
+      title: 'Enable the COD form',
+      description: `Share your COD order form link with customers: ${codLink}`,
+      actionLabel: 'Copy link',
+      actionUrl: null,
+      done: false,
+    },
+  ]);
+
+  // Auto-completion signals — primitives so the effect only re-runs when a
+  // value actually flips (avoids a render loop on the inline [] prop).
+  const automationDone = automationRules.some((r) => r && r.active);
+  const pushDone = customers.some((c) => c && c.status && c.status !== 'abandoned');
+
+  // Recompute the auto steps on mount and whenever a signal changes. A tab
+  // change re-renders the parent, so fresh props flow down here too. Auto
+  // `done` is sticky-once-true; 'embed' is left untouched (manual only).
+  useEffect(() => {
+    setSteps((prev) =>
+      prev.map((s) => {
+        if (s.id === 'automation') return { ...s, done: s.done || automationDone };
+        if (s.id === 'push') return { ...s, done: s.done || pushDone };
+        if (s.id === 'cod') return { ...s, done: s.done || codCopied };
+        return s;
+      })
+    );
+  }, [automationDone, pushDone, codCopied]);
+
+  function toggleManual(id, checked) {
+    // Only the 'embed' step is user-toggle-able; the rest are derived.
+    if (id !== 'embed') return;
+    setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, done: checked } : s)));
+  }
+
+  function handleStepAction(id) {
+    if (id === 'automation') {
+      if (onTabChange) onTabChange('automation');
+    } else if (id === 'push') {
+      if (onTabChange) onTabChange('abandoned');
+    } else if (id === 'cod') {
+      try {
+        navigator.clipboard.writeText(codLink);
+      } catch (e) {
+        console.error('[onboarding] clipboard write failed:', e);
+      }
+      setCodCopied(true);
+      setSteps((prev) => prev.map((s) => (s.id === 'cod' ? { ...s, done: true } : s)));
+    }
+  }
+
+  function dismiss() {
+    try {
+      window.localStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
+    } catch (e) {
+      console.error('[onboarding] localStorage set failed:', e);
+    }
+    setDismissed(true);
+    if (onDismiss) onDismiss();
+  }
+
+  if (dismissed) return null;
+
+  const completedCount = steps.filter((s) => s.done).length;
+
+  return (
+    <Card>
+      <BlockStack gap="300">
+        <BlockStack gap="100">
+          <Text variant="headingMd" as="h2">Get started with CartnCodForm</Text>
+          <Text tone="subdued" as="p">Complete these steps to start recovering revenue.</Text>
+          <Text as="p" variant="bodySm">{completedCount} of 4 steps completed</Text>
+        </BlockStack>
+
+        <BlockStack gap="200">
+          {steps.map((step) => (
+            <Box
+              key={step.id}
+              background="bg-surface-secondary"
+              borderColor="border"
+              borderWidth="025"
+              borderRadius="200"
+              padding="300"
+            >
+              <InlineStack gap="300" blockAlign="start" wrap={false}>
+                <Checkbox
+                  label={step.title}
+                  labelHidden
+                  checked={step.done}
+                  disabled={step.id !== 'embed'}
+                  onChange={(checked) => toggleManual(step.id, checked)}
+                />
+                <BlockStack gap="100">
+                  <Text as="p" variant="bodyMd" fontWeight="bold">{step.title}</Text>
+                  <Text as="p" tone="subdued" variant="bodySm">{step.description}</Text>
+                  <InlineStack>
+                    <Button
+                      size="slim"
+                      url={step.actionUrl || undefined}
+                      external={Boolean(step.actionUrl)}
+                      onClick={step.actionUrl ? undefined : () => handleStepAction(step.id)}
+                    >
+                      {step.id === 'cod' && codCopied ? 'Copied!' : step.actionLabel}
+                    </Button>
+                  </InlineStack>
+                </BlockStack>
+              </InlineStack>
+            </Box>
+          ))}
+        </BlockStack>
+
+        <InlineStack>
+          <Button variant="plain" onClick={dismiss}>Dismiss checklist</Button>
+        </InlineStack>
+      </BlockStack>
+    </Card>
+  );
+}
+
 // --- Ported: the real embedded store view (Stage 2c) ---
 
 const COD_STATUS_OPTIONS = [
@@ -835,6 +1005,7 @@ function StoreView({ shop }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [analyticsCustomer, setAnalyticsCustomer] = useState(null);
+  const [showOnboarding, setShowOnboarding] = useState(() => !isOnboardingDismissed());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -892,6 +1063,21 @@ function StoreView({ shop }) {
       >
         <BlockStack gap="400">
           {/* TODO: port PushNotificationSetup */}
+
+          {showOnboarding && (
+            <OnboardingChecklist
+              shop={shop}
+              customers={customers}
+              automationRules={[]}
+              onDismiss={() => {
+                try { window.localStorage.setItem('ccf_onboarding_dismissed', 'true'); } catch (e) {}
+                setShowOnboarding(false);
+              }}
+              onTabChange={(tabId) => {
+                if (['abandoned', 'cod', 'automation'].includes(tabId)) setTab(tabId);
+              }}
+            />
+          )}
 
           {!loading && <RevenueStats customers={customers} />}
 
