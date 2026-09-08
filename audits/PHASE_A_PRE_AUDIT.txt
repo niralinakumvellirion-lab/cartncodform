@@ -1,0 +1,1063 @@
+================================================================================
+PHASE A - PRE-WORK AUDIT (read-only capture, no modifications)
+Generated: 2026-09-08T07:22:01Z
+Branch: main   HEAD: de61791
+================================================================================
+
+================================================================================
+FILE: backend/models/AbandonedCustomer.js   (67 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const abandonedCustomerSchema = new mongoose.Schema({
+    4    shopDomain: {
+    5      type: String,
+    6      required: true,
+    7      trim: true,
+    8      lowercase: true,
+    9      index: true,
+   10    },
+   11    email: {
+   12      type: String,
+   13      trim: true,
+   14      lowercase: true,
+   15    },
+   16    phone: {
+   17      type: String,
+   18      trim: true,
+   19    },
+   20    cartItems: [
+   21      {
+   22        title: String,
+   23        quantity: Number,
+   24        price: Number,
+   25        imageUrl: String,
+   26        productId: mongoose.Schema.Types.Mixed,
+   27        variantId: mongoose.Schema.Types.Mixed,
+   28      },
+   29    ],
+   30    // First available cart-item image, used as the push notification image.
+   31    productImageUrl: {
+   32      type: String,
+   33      trim: true,
+   34    },
+   35    cartValue: {
+   36      type: Number,
+   37      default: 0,
+   38    },
+   39    sessionId: {
+   40      type: String,
+   41      trim: true,
+   42    },
+   43    customerId: {
+   44      type: String,
+   45    },
+   46    status: {
+   47      type: String,
+   48      enum: ['abandoned', 'recovered'],
+   49      default: 'abandoned',
+   50    },
+   51    // --- Revenue attribution (set by handleOrderWebhook on orders/create) ---
+   52    recoveredAt: { type: Date },
+   53    recoveredOrderId: { type: String },
+   54    recoveredOrderName: { type: String },
+   55    recoveredRevenue: { type: Number },
+   56    recoveredCurrency: { type: String },
+   57    // 'push'  -> a CartnCodForm automated push led to this order
+   58    // 'organic' -> recovered without an attributable push click
+   59    attributionSource: { type: String, enum: ['push', 'organic', null], default: null },
+   60    attributedJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'ScheduledJob' },
+   61    createdAt: {
+   62      type: Date,
+   63      default: Date.now,
+   64    },
+   65  });
+   66  
+   67  module.exports = mongoose.model('AbandonedCustomer', abandonedCustomerSchema);
+
+
+================================================================================
+FILE: backend/models/CustomerPushSubscription.js   (18 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const CustomerPushSubscriptionSchema = new mongoose.Schema({
+    4    shopDomain: { type: String, required: true, lowercase: true },
+    5    token: { type: String, required: true, unique: true },
+    6    page: { type: String },
+    7    deviceType: { type: String, enum: ['mobile', 'desktop', 'unknown'], default: 'unknown' },
+    8    cartToken: { type: String, trim: true, index: true },
+    9    customerId: { type: String, index: true },
+   10    ccfSessionId: { type: String, index: true },
+   11    createdAt: { type: Date, default: Date.now },
+   12    // Last storefront activity recorded for this subscriber (POST /api/push/cart-activity).
+   13    lastEvent: { type: String },
+   14    lastActivityUrl: { type: String },
+   15    lastActivityAt: { type: Date },
+   16  });
+   17  
+   18  module.exports = mongoose.model('CustomerPushSubscription', CustomerPushSubscriptionSchema);
+
+
+================================================================================
+FILE: backend/models/StorefrontEvent.js   (18 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const storefrontEventSchema = new mongoose.Schema({
+    4    shopDomain: { type: String, required: true, lowercase: true, index: true },
+    5    sessionId:  { type: String, index: true },   // Shopify cart token
+    6    customerId: { type: String, index: true },   // Shopify customer id (logged-in only)
+    7    token:      { type: String },                // FCM push token (subscribed only)
+    8    type:       { type: String, required: true }, // event type
+    9    path:       { type: String },
+   10    pageType:   { type: String },
+   11    meta:       { type: mongoose.Schema.Types.Mixed }, // event-specific data
+   12    ts:         { type: Date, default: Date.now },
+   13  });
+   14  
+   15  // Auto-delete events older than 90 days.
+   16  storefrontEventSchema.index({ ts: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
+   17  
+   18  module.exports = mongoose.model('StorefrontEvent', storefrontEventSchema);
+
+
+================================================================================
+FILE: backend/models/CodOrder.js   (58 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const codOrderSchema = new mongoose.Schema({
+    4    shopDomain: {
+    5      type: String,
+    6      required: true,
+    7      trim: true,
+    8      lowercase: true,
+    9      index: true,
+   10    },
+   11    name: {
+   12      type: String,
+   13      required: true,
+   14      trim: true,
+   15    },
+   16    phone: {
+   17      type: String,
+   18      required: true,
+   19      trim: true,
+   20    },
+   21    address: {
+   22      type: String,
+   23      required: true,
+   24      trim: true,
+   25    },
+   26    city: {
+   27      type: String,
+   28      trim: true,
+   29    },
+   30    pincode: {
+   31      type: String,
+   32      trim: true,
+   33    },
+   34    productName: {
+   35      type: String,
+   36      trim: true,
+   37    },
+   38    productPrice: {
+   39      type: Number,
+   40      default: 0,
+   41    },
+   42    quantity: {
+   43      type: Number,
+   44      default: 1,
+   45      min: 1,
+   46    },
+   47    status: {
+   48      type: String,
+   49      enum: ['pending', 'confirmed', 'cancelled'],
+   50      default: 'pending',
+   51    },
+   52    createdAt: {
+   53      type: Date,
+   54      default: Date.now,
+   55    },
+   56  });
+   57  
+   58  module.exports = mongoose.model('CodOrder', codOrderSchema);
+
+
+================================================================================
+FILE: backend/routes/webhooks.js   (596 lines)   [FULL]
+================================================================================
+    1  const express = require('express');
+    2  const AbandonedCustomer = require('../models/AbandonedCustomer');
+    3  const Store = require('../models/Store');
+    4  const { verifyWebhookHmac } = require('../utils/shopify');
+    5  const { sendAbandonedCartEmail } = require('../utils/email');
+    6  const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
+    7  const { scheduleCartAbandonJobs, cancelJobsForOrder } = require('../utils/automationEngine');
+    8  const PushClick = require('../models/PushClick');
+    9  const StorefrontEvent = require('../models/StorefrontEvent');
+   10  const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+   11  const ProductImageCache = require('../models/ProductImageCache');
+   12  
+   13  const router = express.Router();
+   14  
+   15  /**
+   16   * Normalise a Shopify cart / checkout payload into an AbandonedCustomer document.
+   17   */
+   18  function mapPayloadToCustomer(shopDomain, payload) {
+   19    const lineItems = Array.isArray(payload.line_items) ? payload.line_items : [];
+   20  
+   21    const cartItems = lineItems.map((item) => ({
+   22      title: item.title || item.name || 'Unknown item',
+   23      quantity: item.quantity || 1,
+   24      price: Number(item.price) || 0,
+   25      imageUrl:
+   26        (item.image && item.image.src) ||
+   27        (Array.isArray(item.images) && item.images[0] && item.images[0].src) ||
+   28        (item.featured_image && item.featured_image.url) ||
+   29        null,
+   30      productId: item.product_id || (item.variant && item.variant.product_id) || null,
+   31      variantId: item.variant_id || null,
+   32    }));
+   33  
+   34    // First cart item that has an image — used as the notification image.
+   35    const firstImageUrl = (cartItems.find((i) => i.imageUrl) || {}).imageUrl || null;
+   36  
+   37    const cartValue =
+   38      Number(payload.total_price) ||
+   39      cartItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
+   40  
+   41    const customer = payload.customer || {};
+   42    const email = payload.email || customer.email || null;
+   43    const phone = payload.phone || customer.phone || (payload.billing_address || {}).phone || null;
+   44  
+   45    return {
+   46      shopDomain,
+   47      email: email || undefined,
+   48      phone: phone || undefined,
+   49      cartItems,
+   50      productImageUrl: firstImageUrl || undefined,
+   51      cartValue,
+   52      sessionId: (payload.token || payload.cart_token || payload.id || '').toString(),
+   53      customerId: payload.customer?.id ? String(payload.customer.id) : null,
+   54      status: 'abandoned',
+   55    };
+   56  }
+   57  
+   58  /**
+   59   * carts/* webhooks don't include product images in line_items. Fall back to the
+   60   * Shopify Admin API to fetch the product's primary image.
+   61   */
+   62  async function fetchProductImage(shop, accessToken, productId) {
+   63    try {
+   64      if (!productId || !accessToken) return null;
+   65  
+   66      const shopKey = String(shop || '').trim().toLowerCase();
+   67      const productKey = String(productId);
+   68  
+   69      // Check cache first — avoids a redundant Admin API call within 24h.
+   70      try {
+   71        const cached = await ProductImageCache.findOne({
+   72          shopDomain: shopKey,
+   73          productId: productKey,
+   74        });
+   75        if (cached) {
+   76          console.log(`[webhook] Product image for ${productId}: cache hit`);
+   77          return cached.imageUrl;
+   78        }
+   79      } catch (cacheErr) {
+   80        console.log('[webhook] Cache lookup error (proceeding to fetch):', cacheErr.message);
+   81      }
+   82  
+   83      console.log('[webhook] Fetching image for productId:', productId,
+   84        'shop:', shop,
+   85        'hasToken:', !!accessToken);
+   86      const res = await fetch(
+   87        `https://${shop}/admin/api/2025-01/products/${productId}.json`,
+   88        {
+   89          headers: {
+   90            'X-Shopify-Access-Token': accessToken,
+   91            'Content-Type': 'application/json'
+   92          }
+   93        }
+   94      );
+   95      const data = await res.json();
+   96      const imageUrl = data.product?.image?.src ||
+   97                       data.product?.images?.[0]?.src ||
+   98                       null;
+   99      console.log(`[webhook] Product image for ${productId}:`, imageUrl ? 'found' : 'not found');
+  100  
+  101      // Cache the result (even null, to avoid repeatedly hitting the API
+  102      // for a product with no image) for 24h.
+  103      try {
+  104        await ProductImageCache.findOneAndUpdate(
+  105          { shopDomain: shopKey, productId: productKey },
+  106          { imageUrl, cachedAt: new Date() },
+  107          { upsert: true }
+  108        );
+  109      } catch (cacheWriteErr) {
+  110        console.log('[webhook] Cache write error (non-fatal):', cacheWriteErr.message);
+  111      }
+  112  
+  113      return imageUrl;
+  114    } catch(err) {
+  115      console.log('[webhook] Image fetch error:', err.message);
+  116      return null;
+  117    }
+  118  }
+  119  
+  120  /**
+  121   * Shared handler for cart + checkout webhooks. Upserts on sessionId so repeated
+  122   * carts/update events for the same cart don't create duplicates.
+  123   */
+  124  async function handleWebhook(source, req, res) {
+  125    // --- Enforce Shopify webhook HMAC verification before anything else ---
+  126    const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  127    if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+  128      console.warn(
+  129        `[webhook:${source}] Rejected — invalid or missing X-Shopify-Hmac-Sha256 header`
+  130      );
+  131      return res.status(401).json({ error: 'Unauthorized: webhook HMAC verification failed' });
+  132    }
+  133  
+  134    try {
+  135      const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shopDomain || '')
+  136        .toString()
+  137        .trim()
+  138        .toLowerCase();
+  139      const topic = req.get('X-Shopify-Topic') || source;
+  140  
+  141      console.log(`\n[webhook:${source}] Received "${topic}" from ${shopDomain || 'unknown shop'}`);
+  142  
+  143      if (!shopDomain) {
+  144        // Still acknowledge so Shopify doesn't retry forever.
+  145        return res.status(200).json({ received: true, warning: 'no shop domain' });
+  146      }
+  147  
+  148      const doc = mapPayloadToCustomer(shopDomain, req.body);
+  149  
+  150      console.log('[webhook] Mapped customer productImageUrl:', doc.productImageUrl);
+  151      console.log('[webhook] Mapped customer cartItems[0]:',
+  152        JSON.stringify(doc.cartItems?.[0], null, 2)
+  153      );
+  154  
+  155      let savedCustomer;
+  156      if (doc.sessionId) {
+  157        savedCustomer = await AbandonedCustomer.findOneAndUpdate(
+  158          { shopDomain, sessionId: doc.sessionId },
+  159          doc,
+  160          { upsert: true, new: true, setDefaultsOnInsert: true }
+  161        );
+  162      } else {
+  163        savedCustomer = await AbandonedCustomer.create(doc);
+  164      }
+  165  
+  166      // Fire the abandoned-cart reminder email if we have an address to send to.
+  167      if (savedCustomer && savedCustomer.email) {
+  168        sendAbandonedCartEmail(savedCustomer);
+  169        console.log(`Abandoned cart email triggered for: ${savedCustomer.email}`);
+  170      }
+  171  
+  172      // Push-notify the store owner only on new carts (not updates).
+  173      const isNewCart = !savedCustomer.createdAt ||
+  174        (new Date() - new Date(savedCustomer.createdAt)) < 10000;
+  175      if (isNewCart) {
+  176        sendPushToStore(
+  177          shopDomain,
+  178          '🛒 New Abandoned Cart',
+  179          `A customer left items worth ₹${doc.cartValue} in their cart`
+  180        );
+  181      }
+  182  
+  183      // Resolve a product image for the customer notification. carts/* line_items
+  184      // have no image, so fall back to the Admin API using the first productId.
+  185      const store = await Store.findOne({ shopDomain });
+  186      const firstItem = savedCustomer.cartItems && savedCustomer.cartItems[0];
+  187      const productId = (firstItem && firstItem.productId)
+  188        ? String(firstItem.productId)
+  189        : null;
+  190  
+  191      // Always resolve the image for the CURRENT first cart item.
+  192      // The cached productImageUrl may belong to a different product if the
+  193      // customer updated their cart, so we re-fetch whenever the productId
+  194      // is available. fetchProductImage returns null on error (safe).
+  195      let productImageUrl = null;
+  196  
+  197      if (store && productId) {
+  198        productImageUrl = await fetchProductImage(
+  199          shopDomain,
+  200          store.accessToken,
+  201          productId
+  202        );
+  203        if (productImageUrl) {
+  204          await AbandonedCustomer.findByIdAndUpdate(
+  205            savedCustomer._id,
+  206            { productImageUrl }
+  207          );
+  208        }
+  209      }
+  210  
+  211      // Fallback: use whatever image is already stored if Admin API returned nothing
+  212      if (!productImageUrl) {
+  213        productImageUrl = savedCustomer.productImageUrl || null;
+  214      }
+  215  
+  216      console.log('[webhook] Final productImageUrl before push:', productImageUrl);
+  217  
+  218      // Manual push only — no automatic timer.
+  219      // Owner uses the dashboard "🔔 Push" button to send notifications.
+  220  
+  221      // Schedule automation jobs for cart_abandon rules, if this is a
+  222      // cart webhook (not checkout) and we have a normalized cart token.
+  223      if (source === 'cart' && doc.sessionId) {
+  224        const normalizedToken = doc.sessionId.split('?')[0].trim();
+  225        const firstItem = savedCustomer.cartItems && savedCustomer.cartItems[0];
+  226  
+  227        // Build a product URL from the first cart item, if we have a
+  228        // resolvable handle. Shopify doesn't give us the handle directly
+  229        // from cart webhooks, but we can link to /cart as a safe fallback
+  230        // that at least shows the actual cart contents.
+  231        const productUrl = `https://${shopDomain}/cart`;
+  232  
+  233        scheduleCartAbandonJobs(shopDomain, normalizedToken, savedCustomer.customerId || null, {
+  234          cartValue: doc.cartValue,
+  235          productImageUrl: productImageUrl,
+  236          firstItemTitle: firstItem ? firstItem.title : null,
+  237          productUrl: productUrl,
+  238        });
+  239      }
+  240  
+  241      return res.status(200).json({ received: true });
+  242    } catch (err) {
+  243      console.error(`[webhook:${source}] error:`, err.message);
+  244      // Acknowledge to avoid aggressive Shopify retries; error is logged for debugging.
+  245      return res.status(200).json({ received: true, error: err.message });
+  246    }
+  247  }
+  248  
+  249  /**
+  250   * Handles orders/create. For v1: just logs receipt and acknowledges.
+  251   * Cancellation of pending ScheduledJobs will be wired in a later stage
+  252   * once ScheduledJob sender logic exists.
+  253   */
+  254  async function handleOrderWebhook(req, res) {
+  255    const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  256    if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+  257      console.warn('[webhook:order] Rejected — invalid or missing HMAC header');
+  258      return res.status(401).json({ error: 'Unauthorized: webhook HMAC verification failed' });
+  259    }
+  260  
+  261    try {
+  262      const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shopDomain || '')
+  263        .toString().trim().toLowerCase();
+  264      const order = req.body;
+  265      const cartToken = order.cart_token || order.checkout_token || null;
+  266  
+  267      console.log(`[webhook:order] Received orders/create from ${shopDomain}, cart_token: ${cartToken || 'none'}`);
+  268  
+  269      const customerId = order.customer?.id ? String(order.customer.id) : null;
+  270      await cancelJobsForOrder(shopDomain, cartToken, customerId);
+  271  
+  272      const isTestOrder = order.test === true;
+  273  
+  274      // Preferred: current_total_price_set.shop_money (present money set);
+  275      // fall back to the legacy flat total_price / currency strings.
+  276      const revenueAmount =
+  277        order.current_total_price_set?.shop_money?.amount ||
+  278        order.total_price ||
+  279        null;
+  280      const revenueCurrency =
+  281        order.current_total_price_set?.shop_money?.currency_code ||
+  282        order.currency ||
+  283        null;
+  284  
+  285      // Mark the matching AbandonedCustomer as recovered + join attribution.
+  286      if (cartToken) {
+  287        const normalizedToken = cartToken.split('?')[0].trim();
+  288  
+  289        // 1. Clean signal — cart attribute _ccf_job re-emerges in
+  290        //    orders/create as a note_attributes entry.
+  291        let attributedJobId = null;
+  292        const noteAttrs = Array.isArray(order.note_attributes) ? order.note_attributes : [];
+  293        const jobAttr = noteAttrs.find((a) => a && a.name === '_ccf_job' && a.value);
+  294        if (jobAttr) {
+  295          attributedJobId = jobAttr.value;
+  296        } else if (!isTestOrder) {
+  297          // 2. Fallback — most recent PushClick for this cart/customer.
+  298          const orClauses = [{ cartToken: normalizedToken }];
+  299          if (customerId) orClauses.push({ customerId });
+  300          const click = await PushClick.findOne({ shopDomain, $or: orClauses }).sort({ clickedAt: -1 });
+  301          if (click) attributedJobId = click.jobId;
+  302        }
+  303  
+  304        const updateFields = { status: 'recovered' };
+  305        if (!isTestOrder) {
+  306          updateFields.recoveredAt = new Date();
+  307          updateFields.recoveredOrderId = order.id ? String(order.id) : null;
+  308          updateFields.recoveredOrderName = order.name || null;
+  309          updateFields.recoveredRevenue = revenueAmount != null ? Number(revenueAmount) : null;
+  310          updateFields.recoveredCurrency = revenueCurrency;
+  311          updateFields.attributionSource = attributedJobId ? 'push' : 'organic';
+  312          updateFields.attributedJobId = attributedJobId;
+  313        }
+  314  
+  315        await AbandonedCustomer.updateMany(
+  316          { shopDomain, sessionId: normalizedToken, status: 'abandoned' },
+  317          updateFields
+  318        );
+  319  
+  320        console.log(
+  321          `[webhook:order] Recovery recorded — revenue: ${revenueAmount || 'n/a'} ${revenueCurrency || ''} ` +
+  322            `source: ${isTestOrder ? 'skipped(test)' : updateFields.attributionSource} test: ${isTestOrder}`
+  323        );
+  324      }
+  325  
+  326      return res.status(200).json({ received: true });
+  327    } catch (err) {
+  328      console.error('[webhook:order] error:', err.message);
+  329      return res.status(200).json({ received: true, error: err.message });
+  330    }
+  331  }
+  332  
+  333  /**
+  334   * app_subscriptions/update — fires when a subscription changes
+  335   * status (active, cancelled, frozen, expired, declined).
+  336   */
+  337  async function handleAppSubscriptionUpdate(req, res) {
+  338    const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  339    if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+  340      console.warn('[billing] app_subscriptions/update — invalid HMAC');
+  341      return res.status(401).json({ error: 'Unauthorized' });
+  342    }
+  343  
+  344    try {
+  345      const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
+  346        .toString().trim().toLowerCase();
+  347      const subscription = req.body.app_subscription || {};
+  348      const status = subscription.admin_graphql_api_id ? subscription.status : req.body.status;
+  349      const subId = subscription.admin_graphql_api_id || null;
+  350  
+  351      console.log(`[billing] app_subscriptions/update for ${shopDomain}: status=${status}`);
+  352  
+  353      const isActive = status === 'ACTIVE' || status === 'active';
+  354  
+  355      await Store.findOneAndUpdate(
+  356        { shopDomain },
+  357        {
+  358          plan: isActive ? 'pro' : 'free',
+  359          subscriptionId: subId,
+  360          subscriptionStatus: status || null,
+  361          planUpdatedAt: new Date(),
+  362        }
+  363      );
+  364  
+  365      console.log(`[billing] Store ${shopDomain} plan updated to: ${isActive ? 'pro' : 'free'}`);
+  366      return res.status(200).json({ received: true });
+  367    } catch (err) {
+  368      console.error('[billing] app_subscriptions/update error:', err.message);
+  369      return res.status(200).json({ received: true, error: err.message });
+  370    }
+  371  }
+  372  
+  373  /**
+  374   * app/uninstalled — fires immediately when a merchant uninstalls
+  375   * the app. Downgrade to free locally (shop/redact will delete
+  376   * everything 48h later per GDPR).
+  377   */
+  378  async function handleAppUninstalled(req, res) {
+  379    const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  380    if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+  381      console.warn('[billing] app/uninstalled — invalid HMAC');
+  382      return res.status(401).json({ error: 'Unauthorized' });
+  383    }
+  384  
+  385    try {
+  386      const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
+  387        .toString().trim().toLowerCase();
+  388  
+  389      console.log(`[billing] app/uninstalled for ${shopDomain} — downgrading to free`);
+  390  
+  391      await Store.findOneAndUpdate(
+  392        { shopDomain },
+  393        {
+  394          plan: 'free',
+  395          subscriptionStatus: 'uninstalled',
+  396          planUpdatedAt: new Date(),
+  397        }
+  398      );
+  399  
+  400      return res.status(200).json({ received: true });
+  401    } catch (err) {
+  402      console.error('[billing] app/uninstalled error:', err.message);
+  403      return res.status(200).json({ received: true, error: err.message });
+  404    }
+  405  }
+  406  
+  407  /**
+  408   * GDPR: customers/data_request
+  409   * A customer has requested their data. Shopify sends this when a
+  410   * merchant uses the "Request customer data" feature. We must respond
+  411   * 200 and (per Shopify docs) the merchant is expected to independently
+  412   * fulfill the data request to the customer — but we log what we have
+  413   * so it can be manually retrieved if needed.
+  414   */
+  415  async function handleCustomersDataRequest(req, res) {
+  416    const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  417    if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+  418      console.warn('[gdpr] customers/data_request — invalid HMAC');
+  419      return res.status(401).json({ error: 'Unauthorized' });
+  420    }
+  421  
+  422    try {
+  423      const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
+  424        .toString().trim().toLowerCase();
+  425      const customerId = req.body.customer?.id ? String(req.body.customer.id) : null;
+  426      const customerEmail = req.body.customer?.email || null;
+  427  
+  428      console.log(`[gdpr] customers/data_request for shop ${shopDomain}, customer ${customerId || customerEmail || 'unknown'}`);
+  429  
+  430      // Log what data we hold for this customer, for manual fulfillment
+  431      // if the merchant needs it. We do not have a customer support
+  432      // channel to auto-deliver this, so we surface it in logs.
+  433      if (customerId || customerEmail) {
+  434        const query = { shopDomain };
+  435        if (customerId) query.customerId = customerId;
+  436        else if (customerEmail) query.email = customerEmail.toLowerCase();
+  437  
+  438        const carts = await AbandonedCustomer.find(query).lean();
+  439        const events = await StorefrontEvent.find(
+  440          customerId ? { shopDomain, customerId } : {}
+  441        ).limit(100).lean();
+  442  
+  443        console.log(`[gdpr] Data on file — AbandonedCustomer rows: ${carts.length}, StorefrontEvent rows: ${events.length}`);
+  444      }
+  445  
+  446      return res.status(200).json({ received: true });
+  447    } catch (err) {
+  448      console.error('[gdpr] customers/data_request error:', err.message);
+  449      return res.status(200).json({ received: true, error: err.message });
+  450    }
+  451  }
+  452  
+  453  /**
+  454   * GDPR: customers/redact
+  455   * A customer has requested deletion (or 6 months passed with no
+  456   * activity). Delete all data we hold that identifies this customer.
+  457   */
+  458  async function handleCustomersRedact(req, res) {
+  459    const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  460    if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+  461      console.warn('[gdpr] customers/redact — invalid HMAC');
+  462      return res.status(401).json({ error: 'Unauthorized' });
+  463    }
+  464  
+  465    try {
+  466      const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
+  467        .toString().trim().toLowerCase();
+  468      const customerId = req.body.customer?.id ? String(req.body.customer.id) : null;
+  469      const customerEmail = req.body.customer?.email || null;
+  470  
+  471      console.log(`[gdpr] customers/redact for shop ${shopDomain}, customer ${customerId || customerEmail || 'unknown'}`);
+  472  
+  473      if (!customerId && !customerEmail) {
+  474        console.warn('[gdpr] customers/redact — no customer identifier in payload, nothing to delete');
+  475        return res.status(200).json({ received: true });
+  476      }
+  477  
+  478      const orClauses = [];
+  479      if (customerId) orClauses.push({ customerId });
+  480      if (customerEmail) orClauses.push({ email: customerEmail.toLowerCase() });
+  481  
+  482      const cartResult = await AbandonedCustomer.deleteMany({ shopDomain, $or: orClauses });
+  483      const eventResult = customerId
+  484        ? await StorefrontEvent.deleteMany({ shopDomain, customerId })
+  485        : { deletedCount: 0 };
+  486      const subResult = customerId
+  487        ? await CustomerPushSubscription.deleteMany({ shopDomain, customerId })
+  488        : { deletedCount: 0 };
+  489  
+  490      console.log(`[gdpr] Redacted — carts: ${cartResult.deletedCount}, events: ${eventResult.deletedCount}, subscriptions: ${subResult.deletedCount}`);
+  491  
+  492      return res.status(200).json({ received: true });
+  493    } catch (err) {
+  494      console.error('[gdpr] customers/redact error:', err.message);
+  495      return res.status(200).json({ received: true, error: err.message });
+  496    }
+  497  }
+  498  
+  499  /**
+  500   * GDPR: shop/redact
+  501   * Fired 48h after a shop uninstalls the app. Delete ALL data for
+  502   * that shop across every collection.
+  503   */
+  504  async function handleShopRedact(req, res) {
+  505    const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+  506    if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+  507      console.warn('[gdpr] shop/redact — invalid HMAC');
+  508      return res.status(401).json({ error: 'Unauthorized' });
+  509    }
+  510  
+  511    try {
+  512      const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
+  513        .toString().trim().toLowerCase();
+  514  
+  515      if (!shopDomain) {
+  516        console.warn('[gdpr] shop/redact — no shop domain in payload');
+  517        return res.status(200).json({ received: true });
+  518      }
+  519  
+  520      console.log(`[gdpr] shop/redact for ${shopDomain} — deleting all data`);
+  521  
+  522      const AutomationRule = require('../models/AutomationRule');
+  523      const ScheduledJob = require('../models/ScheduledJob');
+  524      const PushClick = require('../models/PushClick');
+  525      const CodOrder = require('../models/CodOrder');
+  526      const PushSubscription = require('../models/PushSubscription');
+  527  
+  528      const results = await Promise.all([
+  529        AbandonedCustomer.deleteMany({ shopDomain }),
+  530        StorefrontEvent.deleteMany({ shopDomain }),
+  531        CustomerPushSubscription.deleteMany({ shopDomain }),
+  532        PushSubscription.deleteMany({ shopDomain }),
+  533        AutomationRule.deleteMany({ shopDomain }),
+  534        ScheduledJob.deleteMany({ shopDomain }),
+  535        PushClick.deleteMany({ shopDomain }),
+  536        CodOrder.deleteMany({ shopDomain }),
+  537        Store.deleteOne({ shopDomain }),
+  538      ]);
+  539  
+  540      console.log(`[gdpr] shop/redact complete for ${shopDomain} — collections cleared: ${results.map(r => r.deletedCount ?? (r.acknowledged ? 1 : 0)).join(', ')}`);
+  541  
+  542      return res.status(200).json({ received: true });
+  543    } catch (err) {
+  544      console.error('[gdpr] shop/redact error:', err.message);
+  545      return res.status(200).json({ received: true, error: err.message });
+  546    }
+  547  }
+  548  
+  549  /**
+  550   * POST /api/webhooks/cart
+  551   * Handles carts/create and carts/update.
+  552   */
+  553  router.post('/cart', (req, res) => handleWebhook('cart', req, res));
+  554  
+  555  /**
+  556   * POST /api/webhooks/checkout
+  557   * Handles checkouts/create and checkouts/update.
+  558   */
+  559  router.post('/checkout', (req, res) => handleWebhook('checkout', req, res));
+  560  
+  561  /**
+  562   * POST /api/webhooks/order
+  563   * Handles orders/create.
+  564   */
+  565  router.post('/order', (req, res) => handleOrderWebhook(req, res));
+  566  
+  567  /**
+  568   * Billing state webhooks.
+  569   */
+  570  router.post('/app-subscription', (req, res) => handleAppSubscriptionUpdate(req, res));
+  571  router.post('/app-uninstalled', (req, res) => handleAppUninstalled(req, res));
+  572  
+  573  /**
+  574   * GDPR mandatory compliance webhooks — Shopify delivers all three
+  575   * compliance topics to a single endpoint; dispatch by X-Shopify-Topic.
+  576   */
+  577  router.post('/compliance', (req, res) => {
+  578    const topic = req.get('X-Shopify-Topic') || '';
+  579    if (topic === 'customers/data_request') {
+  580      return handleCustomersDataRequest(req, res);
+  581    } else if (topic === 'customers/redact') {
+  582      return handleCustomersRedact(req, res);
+  583    } else if (topic === 'shop/redact') {
+  584      return handleShopRedact(req, res);
+  585    } else {
+  586      console.warn(`[gdpr] Unknown compliance topic: ${topic}`);
+  587      return res.status(200).json({ received: true, warning: 'unknown topic' });
+  588    }
+  589  });
+  590  
+  591  // fetchProductImage stays exported — the dashboard "🔔 Push" route
+  592  // (backend/routes/push.js) still uses it to resolve per-product images.
+  593  // Attached to `router` so it survives the `module.exports = router` assignment.
+  594  router.fetchProductImage = fetchProductImage;
+  595  
+  596  module.exports = router;
+
+
+================================================================================
+FILE: backend/routes/cod.js   (111 lines)   [FULL]
+================================================================================
+    1  const express = require('express');
+    2  const CodOrder = require('../models/CodOrder');
+    3  const Store = require('../models/Store');
+    4  const { sendNewCodOrderEmail } = require('../utils/email');
+    5  const { sendPushToStore } = require('../utils/pushNotification');
+    6  const { requireAuth } = require('../middleware/requireOwner');
+    7  
+    8  const router = express.Router();
+    9  
+   10  /**
+   11   * POST /api/cod/order
+   12   * Public endpoint — the customer-facing COD form posts here.
+   13   *
+   14   * Body: { shopDomain, name, phone, address, city, pincode, productName, productPrice, quantity }
+   15   */
+   16  router.post('/order', async (req, res) => {
+   17    try {
+   18      const {
+   19        shopDomain,
+   20        name,
+   21        phone,
+   22        address,
+   23        city,
+   24        pincode,
+   25        productName,
+   26        productPrice,
+   27        quantity,
+   28      } = req.body;
+   29  
+   30      if (!shopDomain || !name || !phone || !address) {
+   31        return res
+   32          .status(400)
+   33          .json({ error: 'shopDomain, name, phone and address are required' });
+   34      }
+   35  
+   36      const order = await CodOrder.create({
+   37        shopDomain: shopDomain.trim().toLowerCase(),
+   38        name: name.trim(),
+   39        phone: phone.trim(),
+   40        address: address.trim(),
+   41        city: (city || '').trim(),
+   42        pincode: (pincode || '').trim(),
+   43        productName: (productName || '').trim(),
+   44        productPrice: Number(productPrice) || 0,
+   45        quantity: Number(quantity) || 1,
+   46        status: 'pending',
+   47      });
+   48  
+   49      console.log(`[cod] New COD order for ${order.shopDomain} from ${order.name} (${order.phone})`);
+   50  
+   51      // Notify the store owner about the new COD order.
+   52      const store = await Store.findOne({ shopDomain: order.shopDomain });
+   53      const ownerEmail = (store && store.ownerEmail) || process.env.TEST_OWNER_EMAIL;
+   54      if (ownerEmail) {
+   55        sendNewCodOrderEmail(order, ownerEmail);
+   56        console.log(`[cod] New COD order email triggered for owner: ${ownerEmail}`);
+   57      } else {
+   58        console.log('[cod] No owner email available (set TEST_OWNER_EMAIL) — skipping notification');
+   59      }
+   60  
+   61      // Push-notify the store owner about the new COD order.
+   62      sendPushToStore(
+   63        order.shopDomain,
+   64        '📦 New COD Order',
+   65        `${order.name} placed a COD order for ${order.productName}`
+   66      );
+   67  
+   68      return res.status(201).json({ success: true, order });
+   69    } catch (err) {
+   70      console.error('[cod] POST /order error:', err.message);
+   71      return res.status(500).json({ error: 'Failed to save COD order' });
+   72    }
+   73  });
+   74  
+   75  /**
+   76   * PATCH /api/cod/order/:id
+   77   * Owner updates the status of a COD order (pending/confirmed/cancelled).
+   78   */
+   79  router.patch('/order/:id', requireAuth, async (req, res) => {
+   80    try {
+   81      const { status } = req.body;
+   82      const allowed = ['pending', 'confirmed', 'cancelled'];
+   83  
+   84      if (!allowed.includes(status)) {
+   85        return res.status(400).json({ error: `status must be one of ${allowed.join(', ')}` });
+   86      }
+   87  
+   88      const existingOrder = await CodOrder.findById(req.params.id);
+   89      if (!existingOrder) {
+   90        return res.status(404).json({ error: 'COD order not found' });
+   91      }
+   92  
+   93      if (req.shopDomain !== existingOrder.shopDomain) {
+   94        return res.status(403).json({ error: 'Forbidden' });
+   95      }
+   96  
+   97      const order = await CodOrder.findByIdAndUpdate(
+   98        req.params.id,
+   99        { status },
+  100        { new: true }
+  101      );
+  102  
+  103      console.log(`[cod] Order ${order._id} status -> ${status}`);
+  104      return res.json({ success: true, order });
+  105    } catch (err) {
+  106      console.error('[cod] PATCH /order/:id error:', err.message);
+  107      return res.status(500).json({ error: 'Failed to update COD order' });
+  108    }
+  109  });
+  110  
+  111  module.exports = router;
+
+
+================================================================================
+FILE: backend/routes/push.js   [EXCERPT: POST /subscribe-customer route, lines 70-131]
+================================================================================
+   70  /**
+   71   * POST /api/push/subscribe-customer
+   72   * Body: { shopDomain, token, oldToken, page }
+   73   * Upserts a storefront-customer FCM token (from the Shopify theme script) and
+   74   * cleans up a superseded token if one was supplied.
+   75   */
+   76  router.post('/subscribe-customer', async (req, res) => {
+   77    try {
+   78      const { shopDomain, token, oldToken, page, deviceType, cartToken, customerId, ccfSessionId } = req.body;
+   79  
+   80      // Normalize cartToken — strip ?key=... suffix that /cart.js appends.
+   81      const normalizedCartToken = cartToken
+   82        ? cartToken.split('?')[0].trim() || null
+   83        : null;
+   84  
+   85      if (!shopDomain || !token) {
+   86        return res.status(400).json({ error: 'shopDomain and token required' });
+   87      }
+   88  
+   89      const shop = shopDomain.trim().toLowerCase();
+   90  
+   91      // Remove old token if different from new token
+   92      if (oldToken && oldToken !== token) {
+   93        await CustomerPushSubscription.deleteOne({ token: oldToken });
+   94        console.log(`[subscribe-customer] Removed old token for: ${shop}`);
+   95      }
+   96  
+   97      // Upsert new token
+   98      const result = await CustomerPushSubscription.findOneAndUpdate(
+   99        { token },
+  100        {
+  101          shopDomain: shop,
+  102          token,
+  103          page: page || undefined,
+  104          deviceType: deviceType || 'unknown',
+  105          cartToken: normalizedCartToken || undefined,
+  106          customerId: customerId || undefined,
+  107          ccfSessionId: ccfSessionId || undefined,
+  108          lastActivityAt: new Date()
+  109        },
+  110        { upsert: true, new: true, setDefaultsOnInsert: true }
+  111      );
+  112  
+  113      // Remove any OTHER rows with the same cartToken but a different
+  114      // FCM token — prevents same-cart multi-row accumulation.
+  115      if (normalizedCartToken) {
+  116        await CustomerPushSubscription.deleteMany({
+  117          shopDomain: shop,
+  118          cartToken: normalizedCartToken,
+  119          token: { $ne: token }
+  120        });
+  121      }
+  122  
+  123      console.log(`[subscribe-customer] Token saved for: ${shop}`);
+  124      return res.status(200).json({ success: true });
+  125  
+  126    } catch (err) {
+  127      console.error('[subscribe-customer] Error:', err.message);
+  128      return res.status(500).json({ error: 'Failed to save subscription' });
+  129    }
+  130  });
+  131  /**
+
+  (context: POST /cart-activity route is at lines 204-238 in the same file;
+   captured here because Phase A step 5e also modifies it)
+  204  /**
+  205   * POST /api/push/cart-activity
+  206   * Body: { shopDomain, token, event, url }
+  207   * Records storefront cart activity on the customer subscription.
+  208   */
+  209  router.post('/cart-activity', async (req, res) => {
+  210    try {
+  211      const { shopDomain, token, event, url } = req.body;
+  212  
+  213      console.log(`[cart-activity] shopDomain: ${shopDomain}, event: ${event}`);
+  214  
+  215      if (!shopDomain || !token) {
+  216        return res.status(400).json({ error: 'shopDomain and token are required' });
+  217      }
+  218  
+  219      // Find the subscription by token and stamp its last activity.
+  220      const sub = await CustomerPushSubscription.findOneAndUpdate(
+  221        { token },
+  222        {
+  223          lastEvent: event || 'unknown',
+  224          lastActivityUrl: url || undefined,
+  225          lastActivityAt: new Date(),
+  226        },
+  227        { new: true }
+  228      );
+  229      if (!sub) {
+  230        console.log('[cart-activity] no CustomerPushSubscription matched this token');
+  231      }
+  232  
+  233      return res.status(200).json({ success: true });
+  234    } catch (err) {
+  235      console.error('[push] POST /cart-activity error:', err.message);
+  236      return res.status(500).json({ error: 'Failed to record cart activity' });
+  237    }
+  238  });
+
+
+================================================================================
+FILE: backend/server.js   [EXCERPT: lines 1-50]
+================================================================================
+    1  require('dotenv').config();
+    2  
+    3  const path = require('path');
+    4  const express = require('express');
+    5  const cors = require('cors');
+    6  const rateLimit = require('express-rate-limit');
+    7  
+    8  const connectDB = require('./config/db');
+    9  const authRoutes = require('./routes/auth');
+   10  const webhookRoutes = require('./routes/webhooks');
+   11  const storeRoutes = require('./routes/stores');
+   12  const codRoutes = require('./routes/cod');
+   13  const pushRouter = require('./routes/push');
+   14  const proxyRouter = require('./routes/proxy');
+   15  const ScheduledJob = require('./models/ScheduledJob');
+   16  const AutomationRule = require('./models/AutomationRule');
+   17  const { sendPushToCustomers } = require('./utils/pushNotification');
+   18  const { sendAbandonedCartEmail } = require('./utils/email');
+   19  const AbandonedCustomer = require('./models/AbandonedCustomer');
+   20  const CustomerPushSubscription = require('./models/CustomerPushSubscription');
+   21  
+   22  const app = express();
+   23  // Render sits behind a reverse proxy — trust the X-Forwarded-For
+   24  // header so rate limiting and req.ip key on the real client IP.
+   25  app.set('trust proxy', 1);
+   26  const PORT = process.env.PORT || 4000;
+   27  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+   28  
+   29  const allowedOrigins = [
+   30    process.env.FRONTEND_URL,
+   31    'https://cartncodform-beryl.vercel.app',
+   32    'https://admin.shopify.com',
+   33    'http://localhost:3000',
+   34  ].filter(Boolean);
+   35  
+   36  // --- Middleware ------------------------------------------------------------
+   37  app.use(
+   38    cors({
+   39      origin: function (origin, callback) {
+   40        if (!origin || allowedOrigins.includes(origin)) {
+   41          callback(null, true);
+   42        } else {
+   43          callback(new Error('Not allowed by CORS'));
+   44        }
+   45      },
+   46      credentials: true,
+   47    })
+   48  );
+   49  
+   50  // Capture the raw body so Shopify webhook HMAC can be verified if needed.
+

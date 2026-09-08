@@ -1,0 +1,262 @@
+================================================================================
+PHASE A — Profile model + identity resolution — SELF-AUDIT
+================================================================================
+Date: 2026-09-08
+Branch: phase-a-profile   (cut from main @ de61791)
+"Done when": every event / cart / order / COD order lands on a profile;
+AbandonedCustomer reads become profile queries; tests for merge priority.
+Status: model + service + backfill + ingest wiring + tests done. AbandonedCustomer
+is NOT yet rewritten as a view (see "Out of scope / open questions").
+
+================================================================================
+1. FILES CREATED
+================================================================================
+  backend/models/Profile.js                  (82 lines)
+  backend/services/profileService.js          (251 lines)   — exports { upsertProfile }
+  backend/scripts/backfillProfiles.js         (149 lines)   — run once: node backend/scripts/backfillProfiles.js
+  backend/__tests__/profileService.test.js    (310 lines)   — 13 tests
+  audits/PHASE_A_PRE_AUDIT.txt                (1063 lines)  — read-only capture (step 1)
+
+  New directory: backend/services/  (first file in it)
+
+================================================================================
+2. FILES MODIFIED  (exact hunks)
+================================================================================
+backend/routes/cod.js            111 -> 123  (+12)
+  @@ +7        require('../services/profileService')  -> { upsertProfile }
+  @@ +52..+62  POST /order: after CodOrder.create(), fire-and-forget upsertProfile
+               with { phone, email: req.body.email||null } and
+               channels.email.address/source (source 'cod' when email present),
+               lastSeenAt.
+
+backend/routes/push.js           281 -> 303  (+22)
+  @@ +8        require('../services/profileService')  -> { upsertProfile }
+  @@ +124..+135  POST /subscribe-customer: after the CustomerPushSubscription
+               upsert + same-cart dedup, fire-and-forget upsertProfile with
+               { sessionId: ccfSessionId, cartToken: normalizedCartToken,
+                 pushToken: token } and channels.push.{subscribed,lastToken,
+                 subscribedAt} + lastSeenAt.
+  @@ ~224      POST /cart-activity: destructure now also pulls ccfSessionId,
+               cartToken from req.body.
+  @@ +246..+254  POST /cart-activity: fire-and-forget upsertProfile with
+               { sessionId: ccfSessionId, cartToken: cartToken||null,
+                 pushToken: token||null } + lastSeenAt.
+
+backend/routes/webhooks.js       596 -> 631  (+35)
+  @@ +12       require('../services/profileService')  -> { upsertProfile }
+  @@ +167..+176  handleWebhook (carts/create + carts/update, and checkouts/*
+               via the same shared handler): after the AbandonedCustomer
+               upsert/create, fire-and-forget upsertProfile with
+               { customerId: req.body.customer?.id?.toString()||null,
+                 email: req.body.customer?.email||null,
+                 phone: req.body.customer?.phone||null,
+                 cartToken: doc.sessionId||null } + lastSeenAt.
+  @@ +337..+360  handleOrderWebhook (orders/create): after the recovery flip /
+               attribution join, fire-and-forget upsertProfile with
+               { customerId, email, phone from order.customer, cartToken } and
+               { $inc: {orders.count+1, orders.ltv+orderRevenue,
+                        orders.(cod|prepaid)Count+1},
+                 'orders.lastOrderAt', lastSeenAt }.
+
+No lines deleted from any file. No behaviour on the existing critical paths
+was changed — every new call is appended and unawaited.
+
+================================================================================
+3. CONFIRM: upsertProfile is fire-and-forget at every ingest point
+================================================================================
+All five call sites use the exact pattern:
+
+    upsertProfile(shop, {...ids}, {...updates})
+      .catch((err) => console.error('[profile] upsert error:', err.message));
+
+  - NOT awaited (no `await`, not returned into the response path).
+  - The route/webhook sends its response independently and immediately.
+  - upsertProfile itself wraps its whole body in try/catch and resolves
+    `null` on any internal error, so the `.catch` is only a belt.
+
+  Ingest points covered (spec 5a–5e):
+    5a  push.js   POST /subscribe-customer   ✓ fire-and-forget
+    5b  webhooks.js handleWebhook (cart+checkout) ✓ fire-and-forget
+    5c  webhooks.js handleOrderWebhook (order)    ✓ fire-and-forget
+    5d  cod.js    POST /order                 ✓ fire-and-forget
+    5e  push.js   POST /cart-activity         ✓ fire-and-forget
+
+================================================================================
+4. CONFIRM: no PII in any console.log added in this phase
+================================================================================
+Every log line added logs only shopDomain and/or a Mongo _id:
+
+  profileService.js:
+    `[profile] created ${result?._id} for ${shop}`
+    `[profile] merged ${losers.length} profile(s) into ${winner._id} for ${shop}`
+    `[profile] upsertProfile error: ${err.message}`   (Error.message only)
+  routes (the .catch in all 5 places):
+    `[profile] upsert error: ${err.message}`
+  backfillProfiles.js:
+    `[backfill] connected`
+    `[backfill] step N/4 done, X profiles upserted (<kind>: <count>)`
+    `[backfill] complete — <count> profiles now in the collection`
+    `[backfill] fatal: ${err.message}`
+
+  No email, phone, name, address, token value, or webhook/order body is logged.
+  (backfill logs raw counts of rows, never row contents.)
+  cleanIdentifiers lower-cases emails and trims values but never prints them.
+
+================================================================================
+5. TESTS
+================================================================================
+Existing suite BEFORE Phase A:   5 suites, 42 tests, all passing (baseline re-run
+confirmed on branch cut).
+
+Full suite AFTER Phase A  (cd backend && npm test):
+    Test Suites: 6 passed, 6 total
+    Tests:       55 passed, 55 total
+    Snapshots:   0 total
+  -> existing 42 still pass, +13 new (backend/__tests__/profileService.test.js).
+  (The "cancelJobsForOrder error: db down" console.error is the pre-existing
+   intentional error-path assertion in automationEngine.test.js:278.)
+
+New file: backend/__tests__/profileService.test.js — 13 tests, all pass
+(isolated run: `npx jest __tests__/profileService.test.js` -> 13 passed):
+
+  creation
+    1.  creates a new profile when no match exists
+        (+) no-op (returns null) when no usable identifier is supplied
+  single match
+    2.  returns the existing profile when cartToken matches
+    3.  returns the existing profile when email matches (case-insensitive)
+  merge
+    4.  merges two profiles when identifiers overlap; lower-priority deleted
+    5.  customerId takes priority over email during merge
+    10. messages[] is capped at 20 (most recent first) after merge
+  stage derivation
+    6.  stage = "customer" when customerId is present
+    7.  stage = "identified" when email present and no customerId
+    8.  stage = "anonymous" when only a pushToken is present
+    9.  never downgrades stage — "customer" stays "customer" after merge
+        (+) orders.count > 0 also yields stage "customer"
+  updates param
+    (+) applies $inc operators and dot-notation $set together
+
+  Test approach: jest.mock('../models/Profile') is replaced with a small
+  in-memory fake implementing find / create / findOneAndUpdate / deleteMany /
+  countDocuments with $set, $inc, $addToSet(+$each) and dot-notation paths —
+  the exact subset profileService uses. No live DB.
+
+================================================================================
+6. IMPLEMENTATION NOTES / DEVIATIONS FROM THE LITERAL SPEC
+================================================================================
+(a) Profile.js schema: implemented verbatim as given, including the
+    `identifiers.customerId` scalar (all other identifier fields are arrays),
+    `interests` as Map<String,Number>, `messages` sub-doc with outcome enum,
+    and all 7 indexes (6 sparse identifier indexes + { shopDomain, updatedAt:-1 }).
+
+(b) profileService.upsertProfile — algorithm matches steps 1–8:
+    - $or query built only from non-null/non-empty identifiers (+ shopDomain).
+      `cleanIdentifiers` trims, drops empties, lower-cases email.
+    - 0 matches -> Profile.create(seed) then applyToProfile (so $inc/$set/$addToSet
+      + stage + messagecap run through one code path).
+    - 1 match -> $addToSet new identifier values, $set scalar customerId only if
+      absent, apply updates, updatedAt.
+    - N matches -> rank each by the highest-priority identifier it already holds
+      (customerId=0 … pushToken=5), tie-break by createdAt asc (oldest wins);
+      $addToSet all identifier arrays from losers into the winner, set winner's
+      scalar customerId if it had none, concat+sort(desc by sentAt)+slice(20) the
+      messages, delete losers, then re-apply this call's own ids+updates.
+    - stage recomputed every call via nextStage(): customerId OR orders.count>0
+      -> 'customer'; else email/phone -> 'identified'; else 'anonymous'. Never
+      downgrades — STAGE_RANK {anonymous:0, identified:1, lapsed:2, customer:3},
+      keep current if its rank >= candidate's. ('lapsed' is never *set* here — it
+      is a Phase B/C nightly concern — but it is protected from downgrade.)
+    - messages capped to 20 (newest first) after every write.
+    - stage/messagecap applied in a second small findOneAndUpdate only when they
+      actually change (keeps the common path to one write).
+
+(c) DEVIATION — spec step 5c updates object had TWO `$inc` keys in one object
+    literal (`{ $inc: {count,ltv}, ...(isCod ? {$inc:{codCount}} : {$inc:{prepaidCount}}) }`).
+    JS collapses duplicate keys, so `orders.count`/`orders.ltv` would be lost.
+    Fixed in the caller (webhooks.js handleOrderWebhook): a single merged
+    `orderInc` object is built and passed once. splitUpdates() also defensively
+    merges repeated operator keys if they ever arrive separately.
+
+(d) DEVIATION — spec 5c/5b/5e reference local vars that don't exist verbatim
+    (`payload`, `sessionId`). Used the real equivalents: `req.body` for the
+    webhook payload, `doc.sessionId` for the cart handler's cart token,
+    `normalizedCartToken` in /subscribe-customer. /cart-activity's destructure
+    was widened to also read `ccfSessionId` and `cartToken` (the storefront
+    beacon may not send them yet — Phase D reworks the storefront; until then
+    that call resolves on pushToken alone, which is fine).
+
+(e) `isCod` in handleOrderWebhook is a heuristic:
+    order.payment_gateway_names[] + order.gateway, lower-cased, contains
+    "cash on delivery" or "cod". May need tuning per gateway naming.
+    `orderRevenue` = Number(revenueAmount) or 0 (reuses the existing
+    revenueAmount computed for attribution).
+
+(f) 5c call is placed AFTER the `if (cartToken) { … }` recovery block, so it
+    runs for EVERY order (carted or not) — an order with no cart_token still
+    bumps orders.count on a phone/email/customerId-matched profile.
+
+(g) backfill step 4 (StorefrontEvent): the model's `sessionId` field holds a
+    Shopify CART TOKEN (per its own comment), not a ccfSessionId. The spec said
+    "upsertProfile with sessionId"; implemented as `cartToken: <that value>`
+    (mapped to the cartTokens array) so it joins with AbandonedCustomer /
+    ScheduledJob which key on cart token. customerId and FCM token from the
+    grouped events are also passed. Grouping is one aggregate() call → one
+    upsert per unique (shopDomain, sessionId).
+
+================================================================================
+7. NOTICED BUT NOT TOUCHED  (out of scope for Phase A)
+================================================================================
+- AbandonedCustomer is still a first-class table. The "Done when" line says its
+  reads "become profile queries" — no read path was migrated in this phase
+  (the plan's Part-6 wording and the handover table both frame the *view*
+  rewrite as the follow-on; Phase B builds on Profile directly). Every place
+  that currently does AbandonedCustomer.find*/updateMany is unchanged:
+  webhooks.js (recovery flip, GDPR handlers), routes/stores.js, routes/push.js
+  /send-email-test, automationEngine.js. Flagging for a Phase A2 or Phase B
+  decision.
+- routes/events.js (the storefront event ingest → StorefrontEvent) was NOT
+  given an upsertProfile call. Spec step 5 lists only 5a–5e; the handover
+  Phase-A row says "events" should upsert. /cart-activity (5e) covers the push
+  beacon but not the raw /api/events POST. If every StorefrontEvent write
+  should touch a profile in real time (not just via backfill), events.js needs
+  the same 3-line addition. Left out because it wasn't in the step list.
+- checkouts/* webhooks share handleWebhook with carts/*, so 5b already covers
+  checkout_abandon ingest — but there is no distinct checkout identity data
+  beyond what carts give. Fine for now.
+- No index migration / createIndexes call is run anywhere; Mongo builds the new
+  Profile indexes lazily on first use. On a large existing collection the owner
+  may want to build them explicitly.
+- Merge does NOT deep-merge `orders`, `interests`, `channels`, or `activeHours`
+  from losing profiles — only `identifiers.*` arrays + `messages` (per the
+  literal spec). In practice losers are almost always anonymous shells with
+  empty orders/interests, but a real-time merge of two profiles that each have
+  order history would keep only the winner's counts. See open question 1.
+- CLAUDE.md rule "Move the existing *_AUDIT.txt files to /audits/" — already
+  done in commit de61791 (before this phase). Nothing to move.
+
+================================================================================
+8. OPEN QUESTIONS
+================================================================================
+1. Merge loss of orders/interests/channels from lower-priority profiles — should
+   upsertProfile sum `orders.count/ltv/codCount/prepaidCount`, take max of
+   `lastOrderAt`, and union `interests`/`activeHours` on merge? The spec says
+   only identifiers + messages. Recommend adding orders-sum + channel-fill in
+   Phase B when Signals start reading orders.
+2. StorefrontEvent.sessionId semantics — it is named "sessionId" but stores a
+   cart token. Backfill treats it as cartToken. If a stable ccfSessionId is
+   later added to StorefrontEvent (Phase D storefront rework), backfill/ingest
+   should map that to identifiers.sessionIds instead.
+3. Should routes/events.js (raw /api/events ingest) also upsert a profile in
+   real time, or is backfill + /cart-activity + webhooks enough? Not in the
+   step list; easy to add.
+4. `isCod` gateway heuristic — is there a canonical COD marker on the order
+   payload for this shop's checkout (e.g. a fixed gateway name), so it can be
+   an exact match instead of a substring test?
+5. When does AbandonedCustomer get rewritten as `Profile` (stage 'carter')
+   view — Phase A2, or folded into Phase B? No read path was changed here.
+
+================================================================================
+END — stopping after self-audit. Phase B not started.
+================================================================================

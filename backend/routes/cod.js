@@ -4,6 +4,7 @@ const Store = require('../models/Store');
 const { sendNewCodOrderEmail } = require('../utils/email');
 const { sendPushToStore } = require('../utils/pushNotification');
 const { requireAuth } = require('../middleware/requireOwner');
+const { upsertProfile } = require('../services/profileService');
 
 const router = express.Router();
 
@@ -47,6 +48,17 @@ router.post('/order', async (req, res) => {
     });
 
     console.log(`[cod] New COD order for ${order.shopDomain} from ${order.name} (${order.phone})`);
+
+    // Identity resolution — the verified COD phone is the strongest identity
+    // anchor for an Indian D2C shopper. Fire-and-forget.
+    upsertProfile(order.shopDomain, {
+      phone: phone,
+      email: req.body.email || null,
+    }, {
+      'channels.email.address': req.body.email || undefined,
+      'channels.email.source': req.body.email ? 'cod' : undefined,
+      lastSeenAt: new Date(),
+    }).catch((err) => console.error('[profile] upsert error:', err.message));
 
     // Notify the store owner about the new COD order.
     const store = await Store.findOne({ shopDomain: order.shopDomain });

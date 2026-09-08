@@ -5,6 +5,7 @@ const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotificat
 const { sendAbandonedCartEmail } = require('../utils/email');
 const { fetchProductImage } = require('./webhooks');
 const { requireAuth } = require('../middleware/requireOwner');
+const { upsertProfile } = require('../services/profileService');
 
 const router = express.Router();
 
@@ -120,6 +121,18 @@ router.post('/subscribe-customer', async (req, res) => {
       });
     }
 
+    // Identity resolution — fire-and-forget, never on the critical path.
+    upsertProfile(shop, {
+      sessionId: ccfSessionId,
+      cartToken: normalizedCartToken,
+      pushToken: token,
+    }, {
+      'channels.push.subscribed': true,
+      'channels.push.lastToken': token,
+      'channels.push.subscribedAt': new Date(),
+      lastSeenAt: new Date(),
+    }).catch((err) => console.error('[profile] upsert error:', err.message));
+
     console.log(`[subscribe-customer] Token saved for: ${shop}`);
     return res.status(200).json({ success: true });
 
@@ -208,7 +221,7 @@ router.post('/send-customer', requireAuth, async (req, res) => {
  */
 router.post('/cart-activity', async (req, res) => {
   try {
-    const { shopDomain, token, event, url } = req.body;
+    const { shopDomain, token, event, url, ccfSessionId, cartToken } = req.body;
 
     console.log(`[cart-activity] shopDomain: ${shopDomain}, event: ${event}`);
 
@@ -229,6 +242,15 @@ router.post('/cart-activity', async (req, res) => {
     if (!sub) {
       console.log('[cart-activity] no CustomerPushSubscription matched this token');
     }
+
+    // Identity resolution — fire-and-forget; this beacon fires on every event.
+    upsertProfile(shopDomain, {
+      sessionId: ccfSessionId,
+      cartToken: cartToken || null,
+      pushToken: token || null,
+    }, {
+      lastSeenAt: new Date(),
+    }).catch((err) => console.error('[profile] upsert error:', err.message));
 
     return res.status(200).json({ success: true });
   } catch (err) {

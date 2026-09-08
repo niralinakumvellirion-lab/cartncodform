@@ -9,6 +9,7 @@ const PushClick = require('../models/PushClick');
 const StorefrontEvent = require('../models/StorefrontEvent');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const ProductImageCache = require('../models/ProductImageCache');
+const { upsertProfile } = require('../services/profileService');
 
 const router = express.Router();
 
@@ -162,6 +163,16 @@ async function handleWebhook(source, req, res) {
     } else {
       savedCustomer = await AbandonedCustomer.create(doc);
     }
+
+    // Identity resolution — fire-and-forget, off the webhook critical path.
+    upsertProfile(shopDomain, {
+      customerId: req.body.customer?.id?.toString() || null,
+      email: req.body.customer?.email || null,
+      phone: req.body.customer?.phone || null,
+      cartToken: doc.sessionId || null,
+    }, {
+      lastSeenAt: new Date(),
+    }).catch((err) => console.error('[profile] upsert error:', err.message));
 
     // Fire the abandoned-cart reminder email if we have an address to send to.
     if (savedCustomer && savedCustomer.email) {
@@ -322,6 +333,30 @@ async function handleOrderWebhook(req, res) {
           `source: ${isTestOrder ? 'skipped(test)' : updateFields.attributionSource} test: ${isTestOrder}`
       );
     }
+
+    // Identity resolution — bump the profile's order stats. Fire-and-forget.
+    // (Spec's updates object had two `$inc` keys, which JS collapses — merged
+    //  into one `$inc` here so orders.count/ltv are not lost.)
+    const orderRevenue = revenueAmount != null ? Number(revenueAmount) : 0;
+    const gatewayText = (Array.isArray(order.payment_gateway_names) ? order.payment_gateway_names : [])
+      .concat(order.gateway ? [order.gateway] : [])
+      .join(' ')
+      .toLowerCase();
+    const isCod = gatewayText.includes('cash on delivery') || gatewayText.includes('cod');
+    const orderInc = { 'orders.count': 1, 'orders.ltv': orderRevenue };
+    if (isCod) orderInc['orders.codCount'] = 1;
+    else orderInc['orders.prepaidCount'] = 1;
+
+    upsertProfile(shopDomain, {
+      customerId: order.customer?.id?.toString() || null,
+      email: order.customer?.email || null,
+      phone: order.customer?.phone || null,
+      cartToken: cartToken || null,
+    }, {
+      $inc: orderInc,
+      'orders.lastOrderAt': new Date(),
+      lastSeenAt: new Date(),
+    }).catch((err) => console.error('[profile] upsert error:', err.message));
 
     return res.status(200).json({ received: true });
   } catch (err) {
