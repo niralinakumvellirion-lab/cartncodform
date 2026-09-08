@@ -3,7 +3,14 @@ const router = express.Router();
 
 const Profile = require('../models/Profile');
 const Signal = require('../models/Signal');
+const SignalConfig = require('../models/SignalConfig');
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
+
+const SIGNAL_TYPES = [
+  'cart_abandon', 'checkout_abandon', 'browse_abandon',
+  'high_intent', 'price_hesitation', 'price_drop', 'back_in_stock',
+  'post_purchase_d3', 'lapsing', 'winback', 'email_capture', 'cod_to_prepaid',
+];
 
 /**
  * GET /api/profiles/:shopDomain/signals
@@ -56,6 +63,56 @@ router.get('/:shopDomain/profiles/:profileId', requireAuth, requireStoreOwner, a
   } catch (err) {
     console.error('[profiles] GET profile error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+/**
+ * GET /api/profiles/:shopDomain/signal-configs
+ * -> { configs: [...] }  (rows that exist; a missing type means the default
+ *    enabled=true / no override / maxSteps=1)
+ */
+router.get('/:shopDomain/signal-configs', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const configs = await SignalConfig.find({ shopDomain: shop });
+    return res.json({ configs });
+  } catch (err) {
+    console.error('[profiles] GET signal-configs error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch signal configs' });
+  }
+});
+
+/**
+ * PATCH /api/profiles/:shopDomain/signal-configs/:signalType
+ * Body: { enabled?, channelOverride?, maxSteps? }
+ * Upserts the config for one signal type.
+ */
+router.patch('/:shopDomain/signal-configs/:signalType', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const { signalType } = req.params;
+
+    if (!SIGNAL_TYPES.includes(signalType)) {
+      return res.status(400).json({ error: `Unknown signal type: ${signalType}` });
+    }
+
+    const set = { updatedAt: new Date() };
+    if (typeof req.body.enabled === 'boolean') set.enabled = req.body.enabled;
+    if (req.body.channelOverride === 'push' || req.body.channelOverride === 'email' || req.body.channelOverride === null) {
+      set.channelOverride = req.body.channelOverride;
+    }
+    if (Number.isFinite(req.body.maxSteps)) set.maxSteps = req.body.maxSteps;
+
+    const config = await SignalConfig.findOneAndUpdate(
+      { shopDomain: shop, signalType },
+      { $set: set, $setOnInsert: { shopDomain: shop, signalType } },
+      { upsert: true, new: true }
+    );
+
+    return res.json({ config });
+  } catch (err) {
+    console.error('[profiles] PATCH signal-config error:', err.message);
+    return res.status(500).json({ error: 'Failed to update signal config' });
   }
 });
 

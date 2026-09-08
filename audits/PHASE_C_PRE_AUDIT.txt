@@ -1,0 +1,668 @@
+================================================================================
+PHASE C - PRE-WORK AUDIT (read-only capture, no modifications)
+Generated: 2026-09-08T08:06:17Z
+Branch at capture: main   HEAD: d322cbc
+================================================================================
+
+================================================================================
+FILE: backend/models/Signal.js   (41 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  const { Schema } = mongoose;
+    3  
+    4  /**
+    5   * A deterministic fact about a Profile, computed by
+    6   * backend/services/signalEngine.js on ingest and nightly.
+    7   *
+    8   * One active row per (shopDomain, profileId, type) — recompute upserts it.
+    9   * Rows self-expire via the TTL index on `expiresAt`.
+   10   */
+   11  const signalSchema = new Schema({
+   12    shopDomain: { type: String, required: true, lowercase: true, trim: true },
+   13    profileId: { type: Schema.Types.ObjectId, ref: 'Profile', required: true },
+   14    type: {
+   15      type: String,
+   16      required: true,
+   17      enum: [
+   18        'cart_abandon', 'checkout_abandon', 'browse_abandon',
+   19        'high_intent', 'price_hesitation', 'price_drop', 'back_in_stock',
+   20        'post_purchase_d3', 'lapsing', 'winback',
+   21        'email_capture', 'cod_to_prepaid',
+   22      ],
+   23    },
+   24    strength: { type: Number, min: 0, max: 1, required: true },
+   25    productId: { type: String, default: null },
+   26    evidence: [{ type: String }], // human-readable reasons, max 5
+   27    expiresAt: { type: Date, required: true },
+   28    createdAt: { type: Date, default: Date.now },
+   29    updatedAt: { type: Date, default: Date.now },
+   30  });
+   31  
+   32  // One active signal per type per profile — upsert on this key.
+   33  signalSchema.index({ shopDomain: 1, profileId: 1, type: 1 }, { unique: true });
+   34  
+   35  // Mongo auto-deletes a signal the moment it passes expiresAt.
+   36  signalSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+   37  
+   38  // Brain: strongest signals per shop per type.
+   39  signalSchema.index({ shopDomain: 1, type: 1, strength: -1 });
+   40  
+   41  module.exports = mongoose.model('Signal', signalSchema);
+
+
+================================================================================
+FILE: backend/models/Profile.js   (82 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  const { Schema } = mongoose;
+    3  
+    4  /**
+    5   * One record per human, per shop. Every ingest path (storefront events, carts,
+    6   * checkouts, orders, COD orders, push subscribe) resolves to a Profile via
+    7   * backend/services/profileService.js -> upsertProfile().
+    8   *
+    9   * Merge priority (identity resolution):
+   10   *   customerId -> email -> phone -> cartToken -> ccfSessionId -> pushToken
+   11   */
+   12  const profileSchema = new Schema({
+   13    shopDomain: { type: String, required: true, lowercase: true, trim: true },
+   14  
+   15    identifiers: {
+   16      customerId: { type: String, default: null },
+   17      emails: [{ type: String, lowercase: true, trim: true }],
+   18      phones: [{ type: String }],
+   19      sessionIds: [{ type: String }], // ccfSessionIds (stable UUIDs)
+   20      cartTokens: [{ type: String }],
+   21      pushTokens: [{ type: String }], // FCM tokens
+   22    },
+   23  
+   24    channels: {
+   25      push: { subscribed: Boolean, lastToken: String, subscribedAt: Date },
+   26      email: {
+   27        address: String,
+   28        source: { type: String, enum: ['cod', 'form', 'checkout'] },
+   29      },
+   30    },
+   31  
+   32    stage: {
+   33      type: String,
+   34      enum: ['anonymous', 'identified', 'customer', 'lapsed'],
+   35      default: 'anonymous',
+   36    },
+   37  
+   38    interests: { type: Map, of: Number, default: {} }, // productId -> score 0-1
+   39  
+   40    activeHours: { type: [Number], default: [] }, // hours 0-23 when active
+   41  
+   42    orders: {
+   43      count: { type: Number, default: 0 },
+   44      ltv: { type: Number, default: 0 },
+   45      lastOrderAt: { type: Date, default: null },
+   46      codCount: { type: Number, default: 0 },
+   47      prepaidCount: { type: Number, default: 0 },
+   48    },
+   49  
+   50    messages: [
+   51      {
+   52        // last 20 only, capped in profileService
+   53        channel: String,
+   54        type: String,
+   55        sentAt: Date,
+   56        outcome: {
+   57          type: String,
+   58          enum: ['sent', 'clicked', 'converted', 'unsubscribed'],
+   59          default: 'sent',
+   60        },
+   61        jobId: { type: Schema.Types.ObjectId, ref: 'ScheduledJob' },
+   62      },
+   63    ],
+   64  
+   65    suppressed: { type: Boolean, default: false },
+   66    lastSeenAt: { type: Date, default: null },
+   67    createdAt: { type: Date, default: Date.now },
+   68    updatedAt: { type: Date, default: Date.now },
+   69  });
+   70  
+   71  // Identity-resolution lookups — one per identifier field, all sparse.
+   72  profileSchema.index({ shopDomain: 1, 'identifiers.customerId': 1 }, { sparse: true });
+   73  profileSchema.index({ shopDomain: 1, 'identifiers.emails': 1 }, { sparse: true });
+   74  profileSchema.index({ shopDomain: 1, 'identifiers.phones': 1 }, { sparse: true });
+   75  profileSchema.index({ shopDomain: 1, 'identifiers.cartTokens': 1 }, { sparse: true });
+   76  profileSchema.index({ shopDomain: 1, 'identifiers.sessionIds': 1 }, { sparse: true });
+   77  profileSchema.index({ shopDomain: 1, 'identifiers.pushTokens': 1 }, { sparse: true });
+   78  
+   79  // Dashboard "most recently active" listing.
+   80  profileSchema.index({ shopDomain: 1, updatedAt: -1 });
+   81  
+   82  module.exports = mongoose.model('Profile', profileSchema);
+
+
+================================================================================
+FILE: backend/models/ScheduledJob.js   (39 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const scheduledJobSchema = new mongoose.Schema({
+    4    shopDomain: { type: String, required: true, lowercase: true, index: true },
+    5    ruleId: { type: mongoose.Schema.Types.ObjectId, ref: 'AutomationRule', required: true },
+    6    stepIndex: { type: Number, required: true, default: 0 },
+    7  
+    8    // Targeting — at least one of these should be present.
+    9    subscriptionToken: { type: String },  // FCM token, if already resolved
+   10    sessionId: { type: String, index: true },  // stable UUID (StorefrontEvent.sessionId)
+   11    cartToken: { type: String, index: true },  // Shopify cart token, for cancellation matching
+   12    customerId: { type: String, index: true },
+   13  
+   14    runAt: { type: Date, required: true, index: true },
+   15    status: {
+   16      type: String,
+   17      enum: ['pending', 'sent', 'cancelled', 'failed', 'skipped'],
+   18      default: 'pending',
+   19      index: true,
+   20    },
+   21    channel: { type: String, enum: ['push', 'email'], default: 'push' },
+   22    payload: { type: mongoose.Schema.Types.Mixed },  // resolved title/body/imageUrl at send time
+   23  
+   24    createdAt: { type: Date, default: Date.now },
+   25    sentAt: { type: Date },
+   26    error: { type: String },
+   27  });
+   28  
+   29  // Compound index for the sender's poll query.
+   30  scheduledJobSchema.index({ status: 1, runAt: 1 });
+   31  
+   32  // Prevent duplicate first-step scheduling for the same rule+cart+step
+   33  // when carts/create and carts/update fire near-simultaneously.
+   34  scheduledJobSchema.index(
+   35    { shopDomain: 1, ruleId: 1, cartToken: 1, stepIndex: 1 },
+   36    { unique: true, partialFilterExpression: { status: { $in: ['pending', 'sent'] } } }
+   37  );
+   38  
+   39  module.exports = mongoose.model('ScheduledJob', scheduledJobSchema);
+
+
+================================================================================
+FILE: backend/models/AutomationRule.js   (30 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const stepSchema = new mongoose.Schema({
+    4    delayMinutes: { type: Number, required: true },
+    5    channel: { type: String, enum: ['push', 'email'], default: 'push' },
+    6    subject: { type: String, default: '' },  // email subject line (ignored for push)
+    7    title: { type: String, required: true },
+    8    body: { type: String, required: true },
+    9    imageSource: {
+   10      type: String,
+   11      enum: ['product', 'none'],
+   12      default: 'product'
+   13    },
+   14  }, { _id: false });
+   15  
+   16  const automationRuleSchema = new mongoose.Schema({
+   17    shopDomain: { type: String, required: true, lowercase: true, index: true },
+   18    name: { type: String, required: true },
+   19    trigger: {
+   20      type: String,
+   21      required: true,
+   22      enum: ['browse_abandon', 'cart_abandon', 'checkout_abandon', 'back_in_interest'],
+   23    },
+   24    conditions: { type: mongoose.Schema.Types.Mixed, default: {} },
+   25    steps: { type: [stepSchema], default: [] },
+   26    active: { type: Boolean, default: true },
+   27    createdAt: { type: Date, default: Date.now },
+   28  });
+   29  
+   30  module.exports = mongoose.model('AutomationRule', automationRuleSchema);
+
+
+================================================================================
+FILE: backend/models/Store.js   (38 lines)   [FULL]
+================================================================================
+    1  const mongoose = require('mongoose');
+    2  
+    3  const storeSchema = new mongoose.Schema({
+    4    shopDomain: {
+    5      type: String,
+    6      required: true,
+    7      unique: true,
+    8      trim: true,
+    9      lowercase: true,
+   10    },
+   11    accessToken: {
+   12      type: String,
+   13      required: true,
+   14    },
+   15    ownerEmail: {
+   16      type: String,
+   17      lowercase: true,
+   18      trim: true,
+   19    },
+   20    timezone: {
+   21      type: String,
+   22      default: 'Asia/Kolkata',
+   23    },
+   24    plan: {
+   25      type: String,
+   26      enum: ['free', 'pro'],
+   27      default: 'free',
+   28    },
+   29    subscriptionId: { type: String },
+   30    subscriptionStatus: { type: String },
+   31    planUpdatedAt: { type: Date },
+   32    installedAt: {
+   33      type: Date,
+   34      default: Date.now,
+   35    },
+   36  });
+   37  
+   38  module.exports = mongoose.model('Store', storeSchema);
+
+
+================================================================================
+FILE: backend/server.js   (339 lines)   [FULL]
+================================================================================
+    1  require('dotenv').config();
+    2  
+    3  const path = require('path');
+    4  const express = require('express');
+    5  const cors = require('cors');
+    6  const rateLimit = require('express-rate-limit');
+    7  
+    8  const connectDB = require('./config/db');
+    9  const authRoutes = require('./routes/auth');
+   10  const webhookRoutes = require('./routes/webhooks');
+   11  const storeRoutes = require('./routes/stores');
+   12  const codRoutes = require('./routes/cod');
+   13  const pushRouter = require('./routes/push');
+   14  const proxyRouter = require('./routes/proxy');
+   15  const ScheduledJob = require('./models/ScheduledJob');
+   16  const AutomationRule = require('./models/AutomationRule');
+   17  const Store = require('./models/Store');
+   18  const { sendPushToCustomers } = require('./utils/pushNotification');
+   19  const { sendAbandonedCartEmail } = require('./utils/email');
+   20  const AbandonedCustomer = require('./models/AbandonedCustomer');
+   21  const CustomerPushSubscription = require('./models/CustomerPushSubscription');
+   22  const { runNightlySignals } = require('./services/signalEngine');
+   23  
+   24  const app = express();
+   25  // Render sits behind a reverse proxy — trust the X-Forwarded-For
+   26  // header so rate limiting and req.ip key on the real client IP.
+   27  app.set('trust proxy', 1);
+   28  const PORT = process.env.PORT || 4000;
+   29  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
+   30  
+   31  const allowedOrigins = [
+   32    process.env.FRONTEND_URL,
+   33    'https://cartncodform-beryl.vercel.app',
+   34    'https://admin.shopify.com',
+   35    'http://localhost:3000',
+   36  ].filter(Boolean);
+   37  
+   38  // --- Middleware ------------------------------------------------------------
+   39  app.use(
+   40    cors({
+   41      origin: function (origin, callback) {
+   42        if (!origin || allowedOrigins.includes(origin)) {
+   43          callback(null, true);
+   44        } else {
+   45          callback(new Error('Not allowed by CORS'));
+   46        }
+   47      },
+   48      credentials: true,
+   49    })
+   50  );
+   51  
+   52  // Capture the raw body so Shopify webhook HMAC can be verified if needed.
+   53  app.use(
+   54    express.json({
+   55      limit: '5mb',
+   56      verify: (req, _res, buf) => {
+   57        req.rawBody = buf.toString('utf8');
+   58      },
+   59    })
+   60  );
+   61  // Parse text/plain bodies (sent by navigator.sendBeacon).
+   62  app.use(express.text({ type: 'text/plain' }));
+   63  app.use(express.urlencoded({ extended: true }));
+   64  
+   65  // Simple request logger.
+   66  app.use((req, _res, next) => {
+   67    console.log(`[http] ${req.method} ${req.originalUrl}`);
+   68    next();
+   69  });
+   70  
+   71  // Allow the app to be embedded as an iframe inside Shopify Admin.
+   72  app.use((_req, res, next) => {
+   73    res.setHeader(
+   74      'Content-Security-Policy',
+   75      "frame-ancestors https://admin.shopify.com https://*.myshopify.com"
+   76    );
+   77    next();
+   78  });
+   79  
+   80  // --- Static (customer service worker) -----------------------------------
+   81  // Wide-open CORS on the service worker so any storefront can load it, and
+   82  // the Service-Worker-Allowed header so the SW may claim the root scope.
+   83  app.use('/cartncodform-sw.js', (req, res, next) => {
+   84    res.setHeader('Access-Control-Allow-Origin', '*');
+   85    res.setHeader('Service-Worker-Allowed', '/');
+   86    next();
+   87  });
+   88  app.use(express.static(path.join(__dirname, 'public')));
+   89  
+   90  // --- Routes --------------------------------------------------------------
+   91  app.get('/', (_req, res) => {
+   92    res.json({ service: 'CartnCodForm API', status: 'ok' });
+   93  });
+   94  
+   95  app.get('/api/health', (_req, res) => {
+   96    res.json({ status: 'ok', time: new Date().toISOString() });
+   97  });
+   98  
+   99  // Rate limiters for the high-volume / abusable public endpoints.
+  100  const eventsLimiter = rateLimit({
+  101    windowMs: 60 * 1000,
+  102    max: 60,
+  103    standardHeaders: true,
+  104    legacyHeaders: false,
+  105  });
+  106  
+  107  const pushLimiter = rateLimit({
+  108    windowMs: 60 * 1000,
+  109    max: 10,
+  110    standardHeaders: true,
+  111    legacyHeaders: false,
+  112  });
+  113  
+  114  const attributionLimiter = rateLimit({
+  115    windowMs: 60 * 1000,
+  116    max: 30,
+  117    standardHeaders: true,
+  118    legacyHeaders: false,
+  119  });
+  120  
+  121  app.use('/api/auth', authRoutes);
+  122  app.use('/api/webhooks', webhookRoutes);
+  123  app.use('/api/stores', storeRoutes);
+  124  app.use('/api/cod', codRoutes);
+  125  app.use('/api/push', pushLimiter, pushRouter);
+  126  const eventsRouter = require('./routes/events');
+  127  app.use('/api/events', eventsLimiter, eventsRouter);
+  128  const automationRouter = require('./routes/automation');
+  129  app.use('/api/automation', automationRouter);
+  130  const attributionRouter = require('./routes/attribution');
+  131  app.use('/api/attribution', attributionLimiter, attributionRouter);
+  132  const profilesRouter = require('./routes/profiles');
+  133  app.use('/api/profiles', profilesRouter);
+  134  app.use('/apps/cartncodform', proxyRouter);
+  135  
+  136  // --- 404 + error handlers ---------------------------------------------------
+  137  app.use((req, res) => {
+  138    res.status(404).json({ error: `Not found: ${req.method} ${req.originalUrl}` });
+  139  });
+  140  
+  141  app.use((err, _req, res, _next) => {
+  142    console.error('[error]', err.stack || err.message);
+  143    res.status(500).json({ error: 'Internal server error' });
+  144  });
+  145  
+  146  // --- Automation: scheduled job sender -----------------------------------
+  147  /**
+  148   * Returns true if sending a push right now would violate quiet
+  149   * hours (10pm-8am) in the given IANA timezone.
+  150   */
+  151  function isQuietHours(timezone) {
+  152    try {
+  153      const now = new Date();
+  154      const hour = parseInt(
+  155        new Intl.DateTimeFormat('en-US', {
+  156          hour: 'numeric',
+  157          hour12: false,
+  158          timeZone: timezone || 'Asia/Kolkata',
+  159        }).format(now),
+  160        10
+  161      );
+  162      return hour >= 22 || hour < 8;
+  163    } catch (err) {
+  164      console.error('[automation] isQuietHours error:', err.message);
+  165      return false; // fail open — don't block sends on a bad timezone
+  166    }
+  167  }
+  168  
+  169  /**
+  170   * Returns true if this cartToken/customerId has already received
+  171   * 3+ automation pushes in the last 24 hours.
+  172   */
+  173  async function isOverFrequencyCap(shopDomain, cartToken, customerId) {
+  174    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  175    const orClauses = [];
+  176    if (cartToken) orClauses.push({ cartToken });
+  177    if (customerId) orClauses.push({ customerId });
+  178    if (!orClauses.length) return false;
+  179  
+  180    const count = await ScheduledJob.countDocuments({
+  181      shopDomain,
+  182      status: 'sent',
+  183      sentAt: { $gte: since },
+  184      $or: orClauses,
+  185    });
+  186    return count >= 3;
+  187  }
+  188  
+  189  /**
+  190   * Polls for due ScheduledJob rows and sends them. Runs every 30s.
+  191   * Uses a claim-update (findOneAndUpdate with status:'pending' filter)
+  192   * so this is safe even if multiple instances ever run.
+  193   */
+  194  async function processScheduledJobs() {
+  195    try {
+  196      const now = new Date();
+  197      const dueJobs = await ScheduledJob.find({
+  198        status: 'pending',
+  199        runAt: { $lte: now },
+  200      }).limit(20);
+  201  
+  202      for (const job of dueJobs) {
+  203        // Check quiet hours + frequency cap BEFORE claiming — if
+  204        // blocked, leave the job pending and re-check next tick
+  205        // (quiet hours) or skip it permanently (frequency cap).
+  206        const Store = require('./models/Store');
+  207        const store = await Store.findOne({ shopDomain: job.shopDomain }).select('timezone').lean();
+  208        const timezone = store?.timezone || 'Asia/Kolkata';
+  209  
+  210        if (isQuietHours(timezone)) {
+  211          console.log(`[automation] Job ${job._id} deferred — quiet hours (${timezone})`);
+  212          continue; // leave pending, retry next tick
+  213        }
+  214  
+  215        const overCap = await isOverFrequencyCap(job.shopDomain, job.cartToken, job.customerId);
+  216        if (overCap) {
+  217          await ScheduledJob.findOneAndUpdate(
+  218            { _id: job._id, status: 'pending' },
+  219            { status: 'skipped', error: 'Frequency cap reached (3/24h)' }
+  220          );
+  221          console.log(`[automation] Job ${job._id} skipped — frequency cap reached`);
+  222          continue;
+  223        }
+  224  
+  225        // Claim the job — only proceed if we successfully flip it from pending.
+  226        const claimed = await ScheduledJob.findOneAndUpdate(
+  227          { _id: job._id, status: 'pending' },
+  228          { status: 'sent', sentAt: new Date() },
+  229          { new: true }
+  230        );
+  231        if (!claimed) continue; // another process already claimed it
+  232  
+  233        try {
+  234          const channel = job.channel || 'push';
+  235          const payload = job.payload || {};
+  236  
+  237          if (channel === 'push') {
+  238            const baseUrl = payload.url || `https://${job.shopDomain}`;
+  239            const urlWithJob = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'ccf_job=' + job._id.toString();
+  240            const result = await sendPushToCustomers(
+  241              job.shopDomain,
+  242              payload.title || 'You left something behind!',
+  243              payload.body || 'Come back and check it out.',
+  244              urlWithJob,
+  245              payload.imageUrl || null,
+  246              false,
+  247              job.cartToken || null,
+  248              false
+  249            );
+  250  
+  251            if (!result.success || result.sent === 0) {
+  252              await ScheduledJob.findByIdAndUpdate(job._id, {
+  253                status: 'failed',
+  254                error: result.error || 'No active subscriber found',
+  255              });
+  256              console.log(`[automation] Job ${job._id} failed: no subscriber reached`);
+  257            } else {
+  258              console.log(`[automation] Job ${job._id} sent successfully`);
+  259            }
+  260          } else if (channel === 'email') {
+  261            const customer = await AbandonedCustomer.findOne({
+  262              shopDomain: job.shopDomain,
+  263              sessionId: job.cartToken,
+  264            });
+  265            if (!customer || !customer.email) {
+  266              await ScheduledJob.findByIdAndUpdate(job._id, {
+  267                status: 'skipped',
+  268                error: 'No customer email for this cart',
+  269              });
+  270              console.log(`[automation] Job ${job._id} skipped — no customer email`);
+  271            } else {
+  272              const cartUrl = `https://${job.shopDomain}/cart`;
+  273              const sendResult = await sendAbandonedCartEmail(customer, {
+  274                subject: payload.subject || undefined,
+  275                body: payload.body || undefined,
+  276                cartUrl,
+  277              });
+  278              if (!sendResult.success) {
+  279                await ScheduledJob.findByIdAndUpdate(job._id, {
+  280                  status: 'failed',
+  281                  error: sendResult.error || 'Email send failed',
+  282                });
+  283                console.log(`[automation] Job ${job._id} email failed: ${sendResult.error}`);
+  284              } else {
+  285                console.log(`[automation] Job ${job._id} email sent successfully`);
+  286              }
+  287            }
+  288          }
+  289        } catch (err) {
+  290          await ScheduledJob.findByIdAndUpdate(job._id, {
+  291            status: 'failed',
+  292            error: err.message,
+  293          });
+  294          console.error(`[automation] Job ${job._id} error:`, err.message);
+  295        }
+  296      }
+  297    } catch (err) {
+  298      console.error('[automation] processScheduledJobs error:', err.message);
+  299    }
+  300  }
+  301  
+  302  // Poll every 30 seconds.
+  303  setInterval(processScheduledJobs, 30 * 1000);
+  304  console.log('[automation] Scheduled job poller started (30s interval)');
+  305  
+  306  // --- Nightly signal computation — runs at 02:00 server time ------------
+  307  function scheduleNightlySignals() {
+  308    const now = new Date();
+  309    const next2am = new Date();
+  310    next2am.setHours(2, 0, 0, 0);
+  311    if (next2am <= now) next2am.setDate(next2am.getDate() + 1);
+  312    const msUntil2am = next2am - now;
+  313    setTimeout(async () => {
+  314      try {
+  315        const shops = await Store.find({}, 'shopDomain');
+  316        for (const s of shops) {
+  317          await runNightlySignals(s.shopDomain);
+  318        }
+  319      } catch (err) {
+  320        console.error('[signals] nightly run error:', err.message);
+  321      }
+  322      scheduleNightlySignals(); // reschedule for next night
+  323    }, msUntil2am);
+  324  }
+  325  scheduleNightlySignals();
+  326  console.log('[signals] Nightly signal job scheduled (02:00 server time)');
+  327  
+  328  // --- Boot ---------------------------------------------------------------
+  329  async function start() {
+  330    await connectDB();
+  331    app.listen(PORT, () => {
+  332      console.log(`[server] CartnCodForm API listening on port ${PORT}`);
+  333      console.log(`[server] CORS allowed origins: ${allowedOrigins.join(', ')}`);
+  334    });
+  335  }
+  336  
+  337  start();
+  338  
+  339  module.exports = app;
+
+
+================================================================================
+FILE: backend/services/signalEngine.js   [EXCERPT: last 60 lines — orchestrator]
+================================================================================
+  364              productId: r.productId,
+  365              evidence: r.evidence,
+  366              expiresAt: r.expiresAt,
+  367              updatedAt: new Date(),
+  368            },
+  369          },
+  370          { upsert: true, new: true }
+  371        )
+  372      )
+  373    );
+  374  
+  375    // Drop signals that no longer apply.
+  376    await Signal.deleteMany({ shopDomain: shop, profileId, type: { $nin: activeTypes } });
+  377  
+  378    console.log(`[signals] profile ${profileId}: ${results.length} active`);
+  379    return results;
+  380  }
+  381  
+  382  async function runNightlySignals(shopDomain) {
+  383    const shop = String(shopDomain || '').trim().toLowerCase();
+  384    const profiles = await Profile.find(
+  385      { shopDomain: shop, suppressed: { $ne: true } },
+  386      '_id',
+  387      { lean: true }
+  388    );
+  389    const ids = (profiles || []).map((p) => p._id);
+  390  
+  391    let processed = 0;
+  392    for (let i = 0; i < ids.length; i += 100) {
+  393      const batch = ids.slice(i, i + 100);
+  394      await Promise.all(
+  395        batch.map((id) =>
+  396          computeSignalsForProfile(id, shop).catch((err) =>
+  397            console.error('[signals] nightly compute error:', err.message)
+  398          )
+  399        )
+  400      );
+  401      processed += batch.length;
+  402    }
+  403  
+  404    console.log(`[signals] nightly run complete: ${processed} profiles processed`);
+  405    return processed;
+  406  }
+  407  
+  408  module.exports = {
+  409    computeCartAbandon,
+  410    computeCheckoutAbandon,
+  411    computeBrowseAbandon,
+  412    computeHighIntent,
+  413    computePriceHesitation,
+  414    computePriceDrop,
+  415    computeBackInStock,
+  416    computePostPurchaseD3,
+  417    computeLapsing,
+  418    computeWinback,
+  419    computeEmailCapture,
+  420    computeCodToPrepaid,
+  421    computeSignalsForProfile,
+  422    runNightlySignals,
+  423  };

@@ -1,0 +1,272 @@
+================================================================================
+PHASE C — Brain: rank → fatigue → pick → channel → send time → schedule
+SELF-AUDIT
+================================================================================
+Date: 2026-09-08
+Branch: phase-c-brain   (cut from phase-b-signals; Phase A + Phase B present)
+"Done when": set a voice, walk away 24h, the Messages log shows sends each with
+a stored reason; tests for ranking and fatigue.
+Status: models + brain service + nightly wiring + poller re-validation +
+message-log + SignalConfig API + admin step-editor removal + 14 tests. Done.
+(The end-to-end "walk away 24h" check is an owner verification step — see §9.)
+
+================================================================================
+1. FILES CREATED
+================================================================================
+  backend/models/SignalConfig.js               (27 lines)
+      { shopDomain, signalType(enum 12), enabled, channelOverride(push|email|null),
+        maxSteps, updatedAt }  + unique index { shopDomain:1, signalType:1 }
+  backend/services/brain.js                     (248 lines)
+      exports { runBrainForProfile, runBrainForShop }
+  backend/__tests__/brain.test.js               (191 lines)  — 14 tests
+  audits/PHASE_C_PRE_AUDIT.txt                  (668 lines)  — read-only capture
+
+================================================================================
+2. FILES MODIFIED  (exact hunks)
+================================================================================
+backend/models/Store.js            38 -> 59  (+21)
+  @@ +32..+52  appended voice{tone,emoji,lang,signOff}, caps{perDay:2,perWeek:5},
+              quietHours{start:22,end:8}, onboarding{steps:[{id,done,doneAt}]}.
+  DEVIATION: `timezone` (default 'Asia/Kolkata') ALREADY existed on the schema
+  (lines 20-23) — NOT re-added; a comment notes this.
+
+backend/models/ScheduledJob.js     39 -> 65  (+26)
+  @@ +5        ruleId: `required: true`  ->  `default: null`
+              (DEVIATION from "append only" — brain jobs carry no ruleId, and
+              the schema would reject them otherwise. The old automation poller
+              always sets ruleId, so this is backward-safe.)
+  @@ +9..+13   appended profileId (ObjectId ref Profile), signalType (String),
+              reason (String) — all default null / ''.
+  @@ +40..+58  the existing partial-unique index
+              { shopDomain, ruleId, cartToken, stepIndex } gained
+              `ruleId: { $type: 'objectId' }` in its partialFilterExpression, so
+              brain jobs (ruleId null, shared cartToken/stepIndex) are NOT
+              deduped by it. A NEW partial-unique index
+              { shopDomain, profileId, signalType } (partial: status 'pending' +
+              profileId is an ObjectId) enforces one pending brain job per
+              (profile, signal). (DEVIATION: STEP 5 asked only for 3 fields; the
+              two index changes are the minimum needed to make brain jobs
+              insertable and self-deduped.)
+
+backend/server.js                  339 -> 381  (+42)
+  @@ +22       const Profile = require('./models/Profile');
+  @@ +24       const { runBrainForShop } = require('./services/brain');
+              (top-level import instead of the spec's inline require in the
+              nightly callback — consistent with runNightlySignals.)
+  @@ +191..+210  new helper recordProfileMessage(job): $push a {channel, type
+              (job.signalType || 'manual'), sentAt, outcome:'sent', jobId} onto
+              Profile.messages with $slice:-20. No-ops when job.profileId is unset.
+  @@ +257..+263  processScheduledJobs, right after the claim: send-time
+              re-validation — `if (job.profileId && job.runAt > new Date()) {
+              ScheduledJob.findByIdAndUpdate(_id, {status:'pending'}); continue; }`
+  @@ +290..+292  push success branch: `await recordProfileMessage(job).catch(...)`
+  @@ +320..+322  email success branch: same.
+  @@ +356..+360  nightly setTimeout callback: after the runNightlySignals loop,
+              a second loop `for (const s of shops) await runBrainForShop(s.shopDomain)
+              .catch(err => console.error('[brain] run error:', err.message))`.
+
+backend/routes/profiles.js         62 -> 119  (+57)
+  @@ +6        require('../models/SignalConfig')
+  @@ +9..+14   SIGNAL_TYPES enum array (route-level validation)
+  @@ +69..+118  GET  /:shopDomain/signal-configs   -> { configs: [...] }
+              PATCH /:shopDomain/signal-configs/:signalType  (enum-validated ->
+              400; upsert enabled/channelOverride/maxSteps; -> { config })
+              Both requireAuth + requireStoreOwner.
+
+frontend/app/admin/page.js         1313 -> 958  (-355)
+  @@ -241..-599 (deleted)  the "// --- Ported: automation rule editor" comment
+              and the StepEditor, RuleForm, AutomationRules component definitions
+              in full (359 source lines).
+  @@ ~922  StoreView Automations tab: `<AutomationRules shop={shop} />` replaced
+           with `<Box padding="400"><Text tone="subdued">Automation is now
+           signal-driven. Configuration will appear here in the next update.
+           </Text></Box>`.
+  Polaris imports: Checkbox / ResourceList / ResourceItem (and Box, Text, Card,
+  Banner, Badge, Modal, FormLayout, Select, TextField, BlockStack, InlineStack,
+  Button) are ALL still used elsewhere (Checkbox -> OnboardingChecklist;
+  ResourceList/Item -> CustomerAnalytics) — nothing removed. `npm run build`
+  passes; /admin bundle 81 kB -> 79.5 kB.
+
+  NOTE: AutomationRule.trigger enum was NOT deleted from the model. STEP 9 only
+  named the admin components. The AutomationRule model + /api/automation routes +
+  automationEngine.js + the old poller branch are all still live and untouched
+  (the spec's own STEP 5 note: "the old automation poller still reads them").
+  See §8.
+
+================================================================================
+3. CONFIRM — runBrainForShop wired into nightly cron AFTER signals
+================================================================================
+server.js scheduleNightlySignals() setTimeout callback now:
+  try {
+    const shops = await Store.find({}, 'shopDomain');
+    for (const s of shops) await runNightlySignals(s.shopDomain);   // signals first
+    for (const s of shops) await runBrainForShop(s.shopDomain)      // then brain
+      .catch(err => console.error('[brain] run error:', err.message));
+  } catch (err) { console.error('[signals] nightly run error:', err.message); }
+  scheduleNightlySignals();
+Brain runs only after every shop's signals are recomputed.
+
+================================================================================
+4. CONFIRM — poller writes to profile.messages after a successful send
+================================================================================
+recordProfileMessage(job) is awaited (with a .catch that only logs) in BOTH
+success branches of processScheduledJobs:
+  - push:  after `[automation] Job <id> sent successfully`
+  - email: after `[automation] Job <id> email sent successfully`
+It is NOT called on the failed / skipped paths. It $push'es one entry
+{channel: job.channel, type: job.signalType || 'manual', sentAt: now,
+ outcome: 'sent', jobId: job._id} with $slice:-20, and no-ops if
+job.profileId is falsy (so legacy rule jobs are unaffected).
+
+================================================================================
+5. CONFIRM — send-time re-validation added to the poller
+================================================================================
+Immediately after `if (!claimed) continue;` (claim succeeded):
+  if (job.profileId && job.runAt > new Date()) {
+    await ScheduledJob.findByIdAndUpdate(job._id, { status: 'pending' });
+    continue;
+  }
+Only brain jobs (job.profileId set) are re-validated; a future runAt releases
+the claim back to 'pending' for a later tick. (The poll query already filters
+runAt <= now, so this is a clock-skew / reschedule guard.)
+Copy re-resolution at send time (re-check the signal is still true, ask AI for
+copy) is Phase E — this phase only adds the runAt guard + message log.
+
+================================================================================
+6. CONFIRM — AutomationRules / StepEditor / RuleForm deleted, placeholder,
+   build passes
+================================================================================
+  - grep for `function StepEditor` / `function RuleForm` / `function AutomationRules`
+    in frontend/app/admin/page.js  -> 0 matches.
+  - grep for `<AutomationRules`  -> 0 matches.
+  - Automations tab renders the <Box><Text tone="subdued">…</Text></Box>
+    placeholder verbatim from the spec.
+  - `cd frontend && npm run build`  -> ✓ Compiled successfully, ✓ types,
+    ✓ Generating static pages (5/5), zero errors/warnings.
+    Route /admin: 79.5 kB (was 81 kB).
+  - File shrank 1313 -> 958 lines.
+
+================================================================================
+7. CONFIRM — no PII in any new console.log
+================================================================================
+brain.js:
+  `[brain] profile ${profileId}: scheduled ${winner.type} on ${channel}`
+  `[brain] profile error: ${err.message}`
+  `[brain] shop done: ${scheduled} scheduled, ${skipped} skipped`
+server.js (added):
+  `[brain] message log error: ${e.message}`
+  `[brain] run error: ${err.message}`
+routes/profiles.js (added):
+  `[profiles] GET signal-configs error: ${err.message}`
+  `[profiles] PATCH signal-config error: ${err.message}`
+No email, phone, name, token, product title, message body, or reason string is
+logged. (`reason` = "<type> strength=<n>" — no PII even if it were logged; it is
+not.)
+
+================================================================================
+8. TESTS
+================================================================================
+BEFORE Phase C (baseline re-run on branch cut):
+  Test Suites: 7 passed, 7 total
+  Tests:       75 passed, 75 total
+
+AFTER Phase C  (cd backend && npm test):
+  Test Suites: 8 passed, 8 total
+  Tests:       89 passed, 89 total
+  Snapshots:   0 total
+  Time:        ~3.6 s
+  -> existing 75 unchanged, +14 new (backend/__tests__/brain.test.js).
+  (The "cancelJobsForOrder error: db down" console.error is the pre-existing
+   intentional error-path assertion in automationEngine.test.js:278.)
+
+New file backend/__tests__/brain.test.js — 14 tests, all pass
+(isolated: `npx jest __tests__/brain.test.js`):
+   1.  returns null when the profile is not found
+   2.  returns null when the profile is suppressed
+   3.  returns null when there are no active signals
+   4.  returns null when the daily cap is reached
+   4b. returns null when the weekly cap is reached
+   5.  skips a disabled signal and picks the next strongest
+   6.  skips a signal messaged < 6h ago and picks the next
+   7.  selects push when the profile has push and the signal prefers push
+   8.  falls back to email when push is unavailable but email exists
+   9.  returns null when neither channel is available
+   10. does not create a duplicate pending job for the same profile+signal
+   11. runAt lands outside quiet hours
+   12. stores a human-readable reason on the ScheduledJob
+   13. SignalConfig.channelOverride wins over the signal-type default
+
+  Approach: jest.mock() auto-mocks Profile / Signal / SignalConfig /
+  ScheduledJob / Store. beforeEach sets a happy path (one cart_abandon signal,
+  push+email available, no fatigue, no existing job); each test perturbs one
+  input. brain.js queries with (filter, projection, options) so every call is a
+  plain thenable — mockResolvedValue / mockImplementation is enough. No live DB.
+
+================================================================================
+9. NOTICED BUT NOT TOUCHED  (out of scope for Phase C)
+================================================================================
+- AutomationRule model, routes/automation.js, utils/automationEngine.js, and
+  the old scheduleCartAbandonJobs -> ScheduledJob(ruleId) path in
+  webhooks.js/handleWebhook are ALL still live. The handover says "Delete
+  AutomationRule.steps editor and the trigger enum" in Phase C, but this prompt's
+  STEP 9 only removed the ADMIN components and STEP 5 explicitly says the old
+  poller still reads ScheduledJob's rule fields. So: model + trigger enum +
+  backend automation code are untouched, still scheduling cart_abandon jobs in
+  parallel with the brain. This means for a shop with an active AutomationRule,
+  a cart can get BOTH an old rule job and a brain job. Flagged for a Phase C2 or
+  the Phase G rebuild to fully retire.
+- Brain-scheduled EMAIL jobs have no working send path yet. The poller's email
+  branch looks up AbandonedCustomer by { shopDomain, sessionId: job.cartToken }
+  and needs customer.email; a brain email job for a profile whose address lives
+  only in Profile.channels.email.address (no matching abandoned-cart row) will
+  hit `status:'skipped', error:'No customer email for this cart'`. Wiring the
+  email sender to read the profile is Phase E (copy resolution) territory.
+- Brain PUSH jobs reuse sendPushToCustomers(shopDomain, ..., cartToken) which
+  targets by cartToken; a profile with a stale/rotated cartToken (or none) will
+  not be reached even though channels.push.subscribed is true. A
+  profile-/pushToken-targeted send path is needed (Phase E/F).
+- computeRunAt: `profile.activeHours` is treated as a LIST of hour values whose
+  mode is the preferred hour. Phase A never populates activeHours, so this
+  branch is dead until a later phase writes it. If it is meant to be a
+  fixed 24-length histogram, the "mode" logic needs to become argmax.
+- Nightly job is still an in-process setTimeout (per the existing poller style);
+  a sleeping free-tier dyno misses 02:00. Handover already flags this.
+- No index build is forced; Mongo builds the new SignalConfig unique index and
+  the two revised ScheduledJob partial indexes lazily. On an existing
+  ScheduledJob collection the OLD partial index must be dropped and rebuilt for
+  the `ruleId: {$type:'objectId'}` filter change to take effect — `syncIndexes()`
+  or a manual drop is an owner deploy step.
+- The 12 SignalConfig rows are never seeded; GET returns only rows that exist
+  and the brain treats "no row" as enabled=true. The admin (Phase G) is
+  expected to render all 12 with defaults filled client-side.
+- STEP 5 snippet used `Schema.Types.ObjectId`; ScheduledJob.js uses
+  `mongoose.Schema.Types.ObjectId` throughout, so the new fields match that.
+
+================================================================================
+10. OPEN QUESTIONS
+================================================================================
+1. Should Phase C fully retire AutomationRule (delete the model, the trigger
+   enum, routes/automation.js, the scheduleCartAbandonJobs call in webhooks.js,
+   and the automationEngine.test.js suite), or is that deliberately deferred to
+   the Phase G admin rebuild? Right now old + new schedulers run side by side.
+2. Brain email/push send paths (see §9) — confirm these are Phase E work and
+   that a brain job landing on `skipped`/no-subscriber in the meantime is
+   acceptable.
+3. ScheduledJob old partial index: is an owner-run `ScheduledJob.syncIndexes()`
+   (or manual index drop/rebuild) on deploy acceptable, or should Phase C ship a
+   migration script?
+4. activeHours shape — list of hour occurrences (current assumption) or a fixed
+   24-bucket histogram? Nothing populates it yet; decide before the phase that
+   does.
+5. caps default perDay=2 / perWeek=5 (from this prompt) vs the plan's "default
+   cap one per day, three per week". The prompt's numbers were used. Confirm.
+6. runBrainForProfile picks exactly ONE signal and schedules ONE job per run.
+   SignalConfig.maxSteps is stored but not yet consumed (multi-step sequences
+   are a later concern). OK?
+7. computeRunAt aligns to the top of an hour via runAt.setMinutes(0,0,0) in
+   SERVER local time after adding whole hours — fine for Asia/Kolkata / UTC
+   (no DST). Any shop tz with DST could drift by an hour twice a year. Accept?
+
+================================================================================
+END — stopping after self-audit. Phase D not started.
+================================================================================

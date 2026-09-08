@@ -19,7 +19,9 @@ const { sendPushToCustomers } = require('./utils/pushNotification');
 const { sendAbandonedCartEmail } = require('./utils/email');
 const AbandonedCustomer = require('./models/AbandonedCustomer');
 const CustomerPushSubscription = require('./models/CustomerPushSubscription');
+const Profile = require('./models/Profile');
 const { runNightlySignals } = require('./services/signalEngine');
+const { runBrainForShop } = require('./services/brain');
 
 const app = express();
 // Render sits behind a reverse proxy — trust the X-Forwarded-For
@@ -187,6 +189,28 @@ async function isOverFrequencyCap(shopDomain, cartToken, customerId) {
 }
 
 /**
+ * Phase C: append a "sent" entry to the profile's message log (kept to the
+ * last 20). Best-effort — a logging failure must not fail the send.
+ */
+async function recordProfileMessage(job) {
+  if (!job.profileId) return;
+  await Profile.findByIdAndUpdate(job.profileId, {
+    $push: {
+      messages: {
+        $each: [{
+          channel: job.channel,
+          type: job.signalType || 'manual',
+          sentAt: new Date(),
+          outcome: 'sent',
+          jobId: job._id,
+        }],
+        $slice: -20, // keep last 20 only
+      },
+    },
+  });
+}
+
+/**
  * Polls for due ScheduledJob rows and sends them. Runs every 30s.
  * Uses a claim-update (findOneAndUpdate with status:'pending' filter)
  * so this is safe even if multiple instances ever run.
@@ -230,6 +254,13 @@ async function processScheduledJobs() {
       );
       if (!claimed) continue; // another process already claimed it
 
+      // Phase C send-time re-validation — if runAt somehow sits in the
+      // future (clock skew / rescheduled), release the claim and retry.
+      if (job.profileId && job.runAt > new Date()) {
+        await ScheduledJob.findByIdAndUpdate(job._id, { status: 'pending' });
+        continue;
+      }
+
       try {
         const channel = job.channel || 'push';
         const payload = job.payload || {};
@@ -256,6 +287,9 @@ async function processScheduledJobs() {
             console.log(`[automation] Job ${job._id} failed: no subscriber reached`);
           } else {
             console.log(`[automation] Job ${job._id} sent successfully`);
+            await recordProfileMessage(job).catch((e) =>
+              console.error('[brain] message log error:', e.message)
+            );
           }
         } else if (channel === 'email') {
           const customer = await AbandonedCustomer.findOne({
@@ -283,6 +317,9 @@ async function processScheduledJobs() {
               console.log(`[automation] Job ${job._id} email failed: ${sendResult.error}`);
             } else {
               console.log(`[automation] Job ${job._id} email sent successfully`);
+              await recordProfileMessage(job).catch((e) =>
+                console.error('[brain] message log error:', e.message)
+              );
             }
           }
         }
@@ -315,6 +352,11 @@ function scheduleNightlySignals() {
       const shops = await Store.find({}, 'shopDomain');
       for (const s of shops) {
         await runNightlySignals(s.shopDomain);
+      }
+      // Brain runs after signals are fresh for every shop.
+      for (const s of shops) {
+        await runBrainForShop(s.shopDomain)
+          .catch((err) => console.error('[brain] run error:', err.message));
       }
     } catch (err) {
       console.error('[signals] nightly run error:', err.message);
