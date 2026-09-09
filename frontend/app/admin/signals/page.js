@@ -3,7 +3,7 @@ import { Suspense } from 'react';
 import { AppProvider } from '@shopify/polaris';
 import { NavMenu } from '@shopify/app-bridge-react';
 import { useSearchParams } from 'next/navigation';
-import TodayScreen from '../screens/Today';
+import WhatToActOnScreen from '../screens/WhatToActOn';
 import '@shopify/polaris/build/esm/styles.css';
 
 function SignalsContent() {
@@ -20,8 +20,7 @@ function SignalsContent() {
         <a href="/admin/cod" rel="cod">Cash on delivery</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
       </NavMenu>
-      {/* placeholder — dedicated signals screen later */}
-      <TodayScreen shop={shop} />
+      <WhatToActOnScreen shop={shop} />
     </AppProvider>
   );
 }
