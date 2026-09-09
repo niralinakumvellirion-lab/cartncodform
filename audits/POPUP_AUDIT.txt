@@ -1,0 +1,309 @@
+POPUP_AUDIT — read-only capture
+================================
+Date: 2026-09-09
+Scope: the soft push prompt (storefront) + the Store schema (backend).
+No files were modified.
+
+
+==========================================================================
+1. extensions/cartncodform-embed/blocks/push-notifications.liquid
+==========================================================================
+
+--- 1a. Prompt gating / helpers (context for showSoftPrompt) -------------
+
+ 42  var VIEWED_KEY = 'ccf_viewed_products';
+ 43  var PROMPT_SHOWN_KEY = 'ccf_prompt_shown'; // sessionStorage
+ 44
+ 45  function ccfProductTitle() {
+ 46    var el = document.getElementById('ccf-embed-root');
+ 47    var fromAttr = el ? (el.getAttribute('data-product-title') || '') : '';
+ 48    if (fromAttr) return fromAttr;
+ 49    var m = getProductMeta();
+ 50    return (m && m.title) || '';
+ 51  }
+ 52
+ 53  function promptAlreadyShown() {
+ 54    try { return sessionStorage.getItem(PROMPT_SHOWN_KEY) === 'true'; } catch (e) { return false; }
+ 55  }
+ 56  function markPromptShown() {
+ 57    try { sessionStorage.setItem(PROMPT_SHOWN_KEY, 'true'); } catch (e) {}
+ 58  }
+ 59
+ 60  function canPrompt() {
+ 61    if (!('Notification' in window)) return false;
+ 62    if (Notification.permission !== 'default') return false; // already granted or denied
+ 63    if (promptAlreadyShown()) return false;
+ 64    if (localStorage.getItem(SUBSCRIBED_KEY) === '1') return false;
+ 65    try { if (sessionStorage.getItem('ccf_denied_session')) return false; } catch (e) {}
+ 66    return true;
+ 67  }
+ 68
+ 69  var PROMPT_COPY = {
+ 70    dwell: function (t) { return 'Get notified if ' + (t || 'this product') + ' goes on sale or comes back in stock.'; },
+ 71    return_visit: function () { return "You've looked at this before. Want a reminder if the price drops?"; },
+ 72    add_to_cart: function () { return 'Want a reminder if you leave something behind?'; },
+ 73    exit_intent: function () { return 'Before you go — get notified about deals from this store?'; }
+ 74  };
+ 75
+ 76  var promptAutoDismissTimer = null;
+
+
+--- 1b. showSoftPrompt (full function) --------------------------------------
+
+ 78  function showSoftPrompt(trigger, productId) {
+ 79    if (!canPrompt()) return;
+ 80    if (document.getElementById('ccf-push-prompt')) return;
+ 81    markPromptShown();
+ 82
+ 83    // Log push_prompt_shown via the existing event pipe (-> StorefrontEvent).
+ 84    try { trackEvent('push_prompt_shown', { trigger: trigger, productId: productId || null }); } catch (e) {}
+ 85
+ 86    var wrap = document.createElement('div');
+ 87    wrap.id = 'ccf-push-prompt';
+ 88    wrap.setAttribute('style',
+ 89      'position:fixed;bottom:20px;right:20px;z-index:999999;background:#fff;' +
+ 90      'border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.18);padding:16px;' +
+ 91      'max-width:300px;font-family:inherit;font-size:14px;color:#111;line-height:1.5;');
+ 92
+ 93    var p = document.createElement('p');
+ 94    p.id = 'ccf-prompt-text';
+ 95    p.setAttribute('style', 'margin:0 0 12px;');
+ 96    p.textContent = (PROMPT_COPY[trigger] || PROMPT_COPY.dwell)(
+ 97      trigger === 'dwell' ? ccfProductTitle() : null
+ 98    );
+ 99
+100    var allow = document.createElement('button');
+101    allow.id = 'ccf-allow-btn';
+102    allow.type = 'button';
+103    allow.textContent = 'Allow';
+104    allow.setAttribute('style',
+105      'background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:8px 14px;' +
+106      'font-size:13px;font-weight:700;cursor:pointer;margin-right:8px;');
+107
+108    var deny = document.createElement('button');
+109    deny.id = 'ccf-deny-btn';
+110    deny.type = 'button';
+111    deny.textContent = 'No thanks';
+112    deny.setAttribute('style',
+113      'background:none;border:0;color:#888;font-size:13px;cursor:pointer;');
+114
+115    wrap.appendChild(p);
+116    wrap.appendChild(allow);
+117    wrap.appendChild(deny);
+118    document.body.appendChild(wrap);
+119
+120    function cleanup() {
+121      if (promptAutoDismissTimer) { clearTimeout(promptAutoDismissTimer); promptAutoDismissTimer = null; }
+122      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+123    }
+124
+125    allow.addEventListener('click', function () {
+126      cleanup();
+127      Notification.requestPermission().then(function (permission) {
+128        var granted = permission === 'granted';
+129        try { trackEvent('push_prompt_accepted', { trigger: trigger, granted: granted }); } catch (e) {}
+130        if (granted) {
+131          registerSW()
+132            .then(function (reg) { return getToken(reg); })
+133            .then(function (token) { return saveToken(token); })
+134            .then(function () { setupForegroundMessages(); })
+135            .catch(function (err) { console.error('[CCF] subscribe after prompt failed:', err.message); });
+136        } else {
+137          try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+138        }
+139      });
+140    });
+141
+142    deny.addEventListener('click', function () {
+143      cleanup();
+144      try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+145    });
+146
+147    // Auto-dismiss silently after 8s of no interaction (no event logged).
+148    promptAutoDismissTimer = setTimeout(cleanup, 8000);
+149  }
+
+
+--- 1c. Intent triggers that call showSoftPrompt --------------------------
+
+151  // Wire the four intent triggers. First one to fire wins (session guard).
+152  var ccfExitIntentBound = false;
+153  function initIntentTriggers() {
+154    if (!canPrompt()) return;
+155
+156    var pageType = getPageType();
+157    var meta = pageType === 'product' ? getProductMeta() : null;
+158    var pid = meta && meta.productId ? String(meta.productId) : null;
+159
+160    // Trigger 2 — RETURN VISIT: this productId seen in a previous session.
+161    if (pageType === 'product' && pid) {
+162      var viewed = [];
+163      try { viewed = JSON.parse(localStorage.getItem(VIEWED_KEY) || '[]'); } catch (e) { viewed = []; }
+164      if (!Array.isArray(viewed)) viewed = [];
+165      if (viewed.indexOf(pid) !== -1) {
+166        showSoftPrompt('return_visit', pid);
+167      } else {
+168        viewed.push(pid);
+169        if (viewed.length > 200) viewed = viewed.slice(-200);
+170        try { localStorage.setItem(VIEWED_KEY, JSON.stringify(viewed)); } catch (e) {}
+171      }
+172    }
+173
+174    // Trigger 1 — DWELL: 45s continuous on a product page (pauses when hidden).
+175    if (pageType === 'product') {
+176      var dwellRemaining = 10000;
+177      var dwellStartedAt = 0;
+178      var dwellTimer = null;
+179      function startDwell() {
+180        if (dwellTimer || dwellRemaining <= 0) return;
+181        dwellStartedAt = Date.now();
+182        dwellTimer = setTimeout(function () {
+183          dwellTimer = null;
+184          dwellRemaining = 0;
+185          showSoftPrompt('dwell', pid);
+186        }, dwellRemaining);
+187      }
+188      function pauseDwell() {
+189        if (!dwellTimer) return;
+190        clearTimeout(dwellTimer);
+191        dwellTimer = null;
+192        dwellRemaining -= (Date.now() - dwellStartedAt);
+193        if (dwellRemaining < 0) dwellRemaining = 0;
+194      }
+195      document.addEventListener('visibilitychange', function () {
+196        if (document.visibilityState === 'hidden') pauseDwell();
+197        else startDwell();
+198      });
+199      if (document.visibilityState === 'visible') startDwell();
+200    }
+201
+202    // Trigger 4 — EXIT INTENT: desktop only, mouse toward the browser chrome.
+203    if (window.innerWidth > 768 && !ccfExitIntentBound) {
+204      ccfExitIntentBound = true;
+205      var onExitMove = function (e) {
+206        if (e.clientY < 20) {
+207          document.removeEventListener('mousemove', onExitMove);
+208          showSoftPrompt('exit_intent', null);
+209        }
+210      };
+211      document.addEventListener('mousemove', onExitMove);
+212    }
+213    // Trigger 3 — ADD TO CART: fired from the cart-add hooks (see trackCart /
+214    // the /cart/add.js fetch interceptor), which call showSoftPrompt('add_to_cart').
+215  }
+
+  Other showSoftPrompt('add_to_cart', ...) call sites:
+    - line 505  (trackCart click handler)
+    - line 785  (window.fetch monkey-patch, /cart/add.js interception)
+
+
+--- 1d. Notes on the current prompt (observations only, no changes) --------
+
+  * The card is built entirely in JS with inline `style` attributes — there is
+    no <style> block / CSS class. Container id = `ccf-push-prompt`, text id =
+    `ccf-prompt-text`, buttons `ccf-allow-btn` / `ccf-deny-btn`.
+  * Visual: fixed bottom-right, white, 12px radius, soft shadow, max-width 300px,
+    padding 16px, 14px inherit font. Allow = filled indigo (#4f46e5) bold;
+    "No thanks" = borderless grey text button.
+  * Lifecycle: shows once per session (`ccf_prompt_shown` in sessionStorage via
+    markPromptShown / promptAlreadyShown). Auto-dismisses after 8s with no event.
+    "No thanks" and a denied native permission both set `ccf_denied_session`.
+  * Gate `canPrompt()` requires: Notification API present, permission === 'default',
+    not already shown this session, `SUBSCRIBED_KEY` !== '1', no `ccf_denied_session`.
+  * DWELL comment on line 174 still says "45s" but the timer constant
+    (line 176 `dwellRemaining = 10000`) is 10s — comment is stale after the
+    dwell-timeout tweak.
+  * The native `Notification.requestPermission()` is only invoked on Allow click
+    (line 127) — never on display.
+
+
+==========================================================================
+2. backend/models/Store.js  (full schema)
+==========================================================================
+
+  1  const mongoose = require('mongoose');
+  2
+  3  const storeSchema = new mongoose.Schema({
+  4    shopDomain: {
+  5      type: String,
+  6      required: true,
+  7      unique: true,
+  8      trim: true,
+  9      lowercase: true,
+ 10    },
+ 11    accessToken: {
+ 12      type: String,
+ 13      required: true,
+ 14    },
+ 15    ownerEmail: {
+ 16      type: String,
+ 17      lowercase: true,
+ 18      trim: true,
+ 19    },
+ 20    timezone: {
+ 21      type: String,
+ 22      default: 'Asia/Kolkata',
+ 23    },
+ 24    plan: {
+ 25      type: String,
+ 26      enum: ['free', 'pro'],
+ 27      default: 'free',
+ 28    },
+ 29    subscriptionId: { type: String },
+ 30    subscriptionStatus: { type: String },
+ 31    planUpdatedAt: { type: Date },
+ 32
+ 33    // --- Phase C: brain configuration ---
+ 34    voice: {
+ 35      tone: { type: String, default: 'friendly' },
+ 36      emoji: { type: Boolean, default: true },
+ 37      lang: { type: String, default: 'en' },
+ 38      signOff: { type: String, default: '' },
+ 39    },
+ 40    caps: {
+ 41      perDay: { type: Number, default: 2 },
+ 42      perWeek: { type: Number, default: 5 },
+ 43      maxUnopenedPush: { type: Number, default: 5 }, // Phase F: suppress push after N unopened
+ 44    },
+ 45    quietHours: {
+ 46      start: { type: Number, default: 22 }, // hour 0-23
+ 47      end: { type: Number, default: 8 },
+ 48    },
+ 49    onboarding: {
+ 50      steps: [{ id: String, done: Boolean, doneAt: Date }],
+ 51    },
+ 52    // NOTE: `timezone` already exists above (default 'Asia/Kolkata') — not re-added.
+ 53
+ 54    // --- Phase F: rolling 7-day push delivery health ---
+ 55    pushStats: {
+ 56      deliveredLast7d: { type: Number, default: 0 },
+ 57      attemptedLast7d: { type: Number, default: 0 },
+ 58      rateLast7d: { type: Number, default: 0 },
+ 59      lastComputedAt: { type: Date, default: null },
+ 60    },
+ 61
+ 62    // --- Phase C2: last time the nightly signals+brain gate ran for this shop ---
+ 63    lastSignalRunAt: { type: Date, default: null },
+ 64
+ 65    installedAt: {
+ 66      type: Date,
+ 67      default: Date.now,
+ 68    },
+ 69  });
+ 70
+ 71  module.exports = mongoose.model('Store', storeSchema);
+
+
+--- 2a. Notes on the Store schema (observations only) ---------------------
+
+  * No timestamps option — `installedAt` is the only creation marker; no updatedAt.
+  * There is NO field controlling the storefront soft prompt (no copy override,
+    no enable/disable, no trigger toggles, no delay). The prompt is governed
+    entirely client-side by the liquid block + its Shopify block setting
+    `enable_push` (schema lines 878-885 of the liquid file).
+  * `voice` (34-39) feeds AI copy for sent messages, not the storefront prompt.
+  * `caps.maxUnopenedPush` (43) + `pushStats` (55-60) are send-side hygiene,
+    unrelated to the opt-in prompt.
+
+
+END OF CAPTURE — no modifications made.

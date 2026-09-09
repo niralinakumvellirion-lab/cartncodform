@@ -75,6 +75,10 @@
 
   var promptAutoDismissTimer = null;
 
+  // popup-customizer: appearance config, fetched once from the App Proxy.
+  // Stays {} (defaults below) until fetchPopupConfig() resolves.
+  var popupConfig = {};
+
   function showSoftPrompt(trigger, productId) {
     if (!canPrompt()) return;
     if (document.getElementById('ccf-push-prompt')) return;
@@ -83,12 +87,48 @@
     // Log push_prompt_shown via the existing event pipe (-> StorefrontEvent).
     try { trackEvent('push_prompt_shown', { trigger: trigger, productId: productId || null }); } catch (e) {}
 
+    // popup-customizer: resolve appearance from popupConfig (falls back to
+    // the original bottom-right light theme when nothing is configured).
+    var POS = {
+      'bottom-right': 'bottom:20px;right:20px;',
+      'bottom-left':  'bottom:20px;left:20px;',
+      'center':       'top:50%;left:50%;transform:translate(-50%,-50%);',
+      'top-right':    'top:20px;right:20px;',
+      'top-left':     'top:20px;left:20px;'
+    };
+    var posStyle = POS[popupConfig.position] || POS['bottom-right'];
+    var bg = popupConfig.bgColor || '#ffffff';
+    var fg = popupConfig.textColor || '#111827';
+    var radius = (popupConfig.borderRadius != null ? popupConfig.borderRadius : 12) + 'px';
+    var font = popupConfig.fontFamily || 'inherit';
+    var accent = popupConfig.accentColor || '#4f46e5';
+
     var wrap = document.createElement('div');
     wrap.id = 'ccf-push-prompt';
     wrap.setAttribute('style',
-      'position:fixed;bottom:20px;right:20px;z-index:999999;background:#fff;' +
-      'border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,0.18);padding:16px;' +
-      'max-width:300px;font-family:inherit;font-size:14px;color:#111;line-height:1.5;');
+      'position:fixed;' + posStyle + 'z-index:999999;' +
+      'background:' + bg + ';color:' + fg + ';' +
+      'border-radius:' + radius + ';box-shadow:0 8px 30px rgba(0,0,0,0.18);' +
+      'padding:16px;max-width:300px;font-family:' + font + ';font-size:14px;line-height:1.5;');
+
+    // Optional image, above the text.
+    if (popupConfig.imageUrl) {
+      var img = document.createElement('img');
+      img.src = popupConfig.imageUrl;
+      img.alt = '';
+      img.setAttribute('style',
+        'width:100%;border-radius:8px;margin-bottom:8px;object-fit:cover;max-height:120px;');
+      wrap.appendChild(img);
+    }
+
+    // Optional custom title, above the text.
+    if (popupConfig.customTitle) {
+      var title = document.createElement('strong');
+      title.id = 'ccf-prompt-title';
+      title.setAttribute('style', 'display:block;margin:0 0 6px;font-size:15px;');
+      title.textContent = popupConfig.customTitle;
+      wrap.appendChild(title);
+    }
 
     var p = document.createElement('p');
     p.id = 'ccf-prompt-text';
@@ -96,25 +136,34 @@
     p.textContent = (PROMPT_COPY[trigger] || PROMPT_COPY.dwell)(
       trigger === 'dwell' ? ccfProductTitle() : null
     );
+    wrap.appendChild(p);
 
     var allow = document.createElement('button');
     allow.id = 'ccf-allow-btn';
     allow.type = 'button';
-    allow.textContent = 'Allow';
+    allow.textContent = popupConfig.allowText || 'Allow';
     allow.setAttribute('style',
-      'background:#4f46e5;color:#fff;border:0;border-radius:8px;padding:8px 14px;' +
+      'background:' + accent + ';color:#fff;border:0;border-radius:8px;padding:8px 14px;' +
       'font-size:13px;font-weight:700;cursor:pointer;margin-right:8px;');
 
     var deny = document.createElement('button');
     deny.id = 'ccf-deny-btn';
     deny.type = 'button';
-    deny.textContent = 'No thanks';
+    deny.textContent = popupConfig.denyText || 'No thanks';
     deny.setAttribute('style',
       'background:none;border:0;color:#888;font-size:13px;cursor:pointer;');
 
-    wrap.appendChild(p);
     wrap.appendChild(allow);
     wrap.appendChild(deny);
+
+    // Optional branding line, at the bottom.
+    if (popupConfig.showBranding) {
+      var brand = document.createElement('div');
+      brand.setAttribute('style', 'margin-top:10px;font-size:10px;color:#9ca3af;');
+      brand.textContent = 'Powered by CartnCodForm';
+      wrap.appendChild(brand);
+    }
+
     document.body.appendChild(wrap);
 
     function cleanup() {
@@ -146,6 +195,21 @@
 
     // Auto-dismiss silently after 8s of no interaction (no event logged).
     promptAutoDismissTimer = setTimeout(cleanup, 8000);
+  }
+
+  // popup-customizer: pull the merchant's appearance config from the App Proxy
+  // (same origin as the store — Shopify signs & appends `shop` automatically).
+  // Any failure leaves popupConfig = {} so showSoftPrompt uses its defaults.
+  function fetchPopupConfig() {
+    var url = window.location.origin + '/apps/cartncodform/popup-config';
+    return fetch(url)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (data && data.popup && typeof data.popup === 'object') {
+          popupConfig = data.popup;
+        }
+      })
+      .catch(function () { /* keep defaults */ });
   }
 
   // Wire the four intent triggers. First one to fire wins (session guard).
@@ -850,7 +914,12 @@
     trackCart();
     checkAndInit();
     initTracking();
-    initIntentTriggers();
+
+    // popup-customizer: load appearance config first, then wire the intent
+    // triggers (which is where the dwell timer starts).
+    fetchPopupConfig().then(function () {
+      initIntentTriggers();
+    });
 
     if (Notification.permission === 'granted') {
       setupForegroundMessages();

@@ -29,6 +29,7 @@ export default function Settings({ shop }) {
   const [quietHours, setQuietHours] = useState({});
   const [timezone, setTimezone] = useState('Asia/Kolkata');
   const [configs, setConfigs] = useState([]);
+  const [popup, setPopup] = useState({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -39,7 +40,8 @@ export default function Settings({ shop }) {
     Promise.allSettled([
       apiGet(`/api/profiles/${encodeURIComponent(shop)}/settings`),
       apiGet(`/api/profiles/${encodeURIComponent(shop)}/signal-configs`),
-    ]).then(([s, c]) => {
+      apiGet(`/api/profiles/${encodeURIComponent(shop)}/popup`),
+    ]).then(([s, c, pop]) => {
       if (cancelled) return;
       if (s.status === 'fulfilled') {
         setVoice(s.value?.voice || {});
@@ -51,6 +53,9 @@ export default function Settings({ shop }) {
       }
       if (c.status === 'fulfilled') {
         setConfigs(Array.isArray(c.value?.configs) ? c.value.configs : []);
+      }
+      if (pop.status === 'fulfilled') {
+        setPopup(pop.value?.popup || {});
       }
     });
     return () => {
@@ -69,6 +74,7 @@ export default function Settings({ shop }) {
         quietHours,
         timezone,
       });
+      await apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', popup);
       setSuccess(true);
     } catch (e) {
       setError(e.message || 'Save failed');
@@ -261,6 +267,108 @@ export default function Settings({ shop }) {
                   </Box>
                 );
               })}
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+
+        {/* Section 4 — Push notification popup */}
+        <Layout.Section>
+          <Card>
+            <BlockStack gap="400">
+              <Text variant="headingMd">Push notification popup</Text>
+
+              <Select
+                label="Position"
+                options={[
+                  { label: 'Bottom right', value: 'bottom-right' },
+                  { label: 'Bottom left', value: 'bottom-left' },
+                  { label: 'Center', value: 'center' },
+                  { label: 'Top right', value: 'top-right' },
+                  { label: 'Top left', value: 'top-left' },
+                ]}
+                value={popup.position || 'bottom-right'}
+                onChange={(v) => setPopup((p) => ({ ...p, position: v }))}
+              />
+
+              <Select
+                label="Theme"
+                options={[
+                  { label: 'Light', value: 'light' },
+                  { label: 'Dark', value: 'dark' },
+                ]}
+                value={popup.theme || 'light'}
+                onChange={(v) => {
+                  const isDark = v === 'dark';
+                  setPopup((p) => ({
+                    ...p,
+                    theme: v,
+                    bgColor: isDark ? '#1f2937' : '#ffffff',
+                    textColor: isDark ? '#f9fafb' : '#111827',
+                  }));
+                }}
+              />
+
+              <TextField
+                label="Accent color (hex)"
+                value={popup.accentColor || '#4f46e5'}
+                onChange={(v) => setPopup((p) => ({ ...p, accentColor: v }))}
+                placeholder="#4f46e5"
+                autoComplete="off"
+              />
+
+              <TextField
+                label="Font family"
+                value={popup.fontFamily || ''}
+                onChange={(v) => setPopup((p) => ({ ...p, fontFamily: v }))}
+                placeholder="inherit"
+                helpText="e.g. 'Arial', 'Georgia', or leave blank for store default"
+                autoComplete="off"
+              />
+
+              <TextField
+                label="Border radius (px)"
+                type="number"
+                value={String(popup.borderRadius ?? 12)}
+                onChange={(v) => setPopup((p) => ({ ...p, borderRadius: Number(v) }))}
+                autoComplete="off"
+              />
+
+              <TextField
+                label="Image URL (optional)"
+                value={popup.imageUrl || ''}
+                onChange={(v) => setPopup((p) => ({ ...p, imageUrl: v }))}
+                placeholder="https://..."
+                helpText="Shows above the prompt text. Use a product or brand image."
+                autoComplete="off"
+              />
+
+              <TextField
+                label="Custom title (optional)"
+                value={popup.customTitle || ''}
+                onChange={(v) => setPopup((p) => ({ ...p, customTitle: v }))}
+                placeholder="e.g. Don't miss out!"
+                autoComplete="off"
+              />
+
+              <TextField
+                label="Allow button text"
+                value={popup.allowText || 'Allow'}
+                onChange={(v) => setPopup((p) => ({ ...p, allowText: v }))}
+                autoComplete="off"
+              />
+
+              <TextField
+                label="Deny button text"
+                value={popup.denyText || 'No thanks'}
+                onChange={(v) => setPopup((p) => ({ ...p, denyText: v }))}
+                autoComplete="off"
+              />
+
+              <Checkbox
+                label="Show 'Powered by CartnCodForm' branding"
+                checked={popup.showBranding ?? true}
+                onChange={(v) => setPopup((p) => ({ ...p, showBranding: v }))}
+              />
             </BlockStack>
           </Card>
         </Layout.Section>

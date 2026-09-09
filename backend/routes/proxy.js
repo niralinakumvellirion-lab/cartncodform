@@ -96,6 +96,34 @@ router.get('/health', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// popup-customizer: the storefront push prompt fetches its appearance config
+// from here (same origin as the store, via the App Proxy).
+//   https://{shop}/apps/cartncodform/popup-config?shop={shop}
+// Signature is HARD-enforced, same as /cod-form.
+// ---------------------------------------------------------------------------
+router.get('/popup-config', async (req, res) => {
+  if (!verifyProxySignature(req.query)) {
+    console.warn('[proxy] Invalid or missing App Proxy signature on /popup-config — rejecting');
+    return res.status(403).json({ error: 'Invalid signature' });
+  }
+
+  try {
+    const shop = String(req.query.shop || '').trim().toLowerCase();
+    const store = await Store.findOne({ shopDomain: shop }).select('popup');
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({ popup: (store && store.popup) || {} });
+  } catch (err) {
+    console.error('[proxy] GET /popup-config error:', err.message);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.status(500).json({ popup: {} });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // COD order form — served from the merchant's own storefront domain via the
 // App Proxy:  https://{shop}/apps/cartncodform/cod-form?productName=..&price=..
 // Customer-facing HTML, so the App Proxy signature is HARD-enforced here.

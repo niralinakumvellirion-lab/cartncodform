@@ -1,0 +1,167 @@
+POPUP_CUSTOMIZER — SELF-AUDIT
+============================
+Branch:  popup-customizer
+Base:    dc6e018 (main)
+Date:    2026-09-09
+Goal:    Let the merchant customise the storefront soft push prompt
+         (position, theme, colours, image, button text, title, branding)
+         from Settings. Config is stored on Store.popup, served to the
+         storefront through the App Proxy, applied in push-notifications.liquid.
+
+
+1. STORE.POPUP FIELDS ADDED  (backend/models/Store.js)
+-----------------------------------------------------
+  Appended a `popup` subdocument after `lastSignalRunAt`, before `installedAt`.
+  Nothing removed.
+
+    popup.position      String enum ['bottom-right','bottom-left','center','top-right','top-left']  default 'bottom-right'
+    popup.theme         String enum ['light','dark','custom']                                       default 'light'
+    popup.accentColor   String   default '#4f46e5'
+    popup.bgColor       String   default '#ffffff'
+    popup.textColor     String   default '#111827'
+    popup.fontFamily    String   default 'inherit'
+    popup.borderRadius  Number   default 12
+    popup.imageUrl      String   default ''
+    popup.allowText     String   default 'Allow'
+    popup.denyText      String   default 'No thanks'
+    popup.customTitle   String   default ''
+    popup.showBranding  Boolean  default true
+
+  node --check models/Store.js -> OK
+
+
+2. GET /popup-config PROXY ROUTE  (backend/routes/proxy.js)
+---------------------------------------------------------
+  New route: router.get('/popup-config', ...)  (mounted at /apps/cartncodform)
+    - verifyProxySignature(req.query) HARD-enforced (403 on failure), same as /cod-form.
+    - shop = String(req.query.shop||'').trim().toLowerCase()
+    - Store.findOne({ shopDomain: shop }).select('popup')
+    - Content-Type: application/json
+    - Access-Control-Allow-Origin: *
+    - Cache-Control: no-store
+    - Body: { popup: (store && store.popup) || {} }
+    - catch -> 500 { popup: {} } with the same JSON + CORS headers so the
+      storefront still parses a valid body and falls back to defaults.
+  node --check routes/proxy.js -> OK
+
+
+3. GET / PATCH /api/profiles/:shopDomain/popup  (backend/routes/profiles.js)
+------------------------------------------------------------------------
+  Added a POPUP_FIELDS whitelist (the 12 field names above) and two routes,
+  placed before the /weights route.
+
+  GET  /:shopDomain/popup
+    - requireAuth + requireStoreOwner
+    - Store.findOne({ shopDomain: shop }, 'popup'); 404 if no store
+    - Response: { popup: store.popup || {} }
+
+  PATCH /:shopDomain/popup
+    - requireAuth + requireStoreOwner
+    - Iterates POPUP_FIELDS; for each key present in req.body, sets
+      set['popup.' + key] = req.body[key]  (dot-notation partial merge,
+      unknown keys ignored — no arbitrary $set injection)
+    - 400 { error } when no known field supplied
+    - Store.updateOne({ shopDomain: shop }, { $set: set })
+    - Response: { updated: true }
+  Scoped by shopDomain (from the URL param), never by email. node --check -> OK
+
+
+4. LIQUID  (extensions/cartncodform-embed/blocks/push-notifications.liquid)
+---------------------------------------------------------------------
+  a) Module-level `var popupConfig = {};` added next to promptAutoDismissTimer.
+
+  b) fetchPopupConfig() added (just before initIntentTriggers):
+       - fetch(window.location.origin + '/apps/cartncodform/popup-config')
+       - r.ok ? r.json() : null ; on {popup:{}} object -> popupConfig = data.popup
+       - .catch() swallows errors -> popupConfig stays {} (defaults)
+       - returns the promise
+
+  c) start() now calls:
+       fetchPopupConfig().then(function () { initIntentTriggers(); });
+     (initIntentTriggers is where the dwell timer starts — there is no separate
+      startDwellTimer function in this file, so only initIntentTriggers moved
+      into the .then()). trackCart / checkAndInit / initTracking unchanged.
+
+  d) showSoftPrompt() now resolves appearance from popupConfig, all with
+     `|| default` fallbacks so an empty config renders exactly the old prompt:
+       POSITION  -> POS map: bottom-right {bottom:20px;right:20px} (default),
+                    bottom-left, center {top:50%;left:50%;transform:translate(-50%,-50%)},
+                    top-right, top-left
+       THEME     -> #ccf-push-prompt: background = bgColor||#ffffff,
+                    color = textColor||#111827, border-radius = (borderRadius??12)+px,
+                    font-family = fontFamily||inherit
+       ACCENT    -> #ccf-allow-btn: background = accentColor||#4f46e5
+       IMAGE     -> if imageUrl: <img> prepended inside #ccf-push-prompt above the
+                    text, style width:100%;border-radius:8px;margin-bottom:8px;
+                    object-fit:cover;max-height:120px
+       TITLE     -> if customTitle: <strong id="ccf-prompt-title"> above the text
+       BUTTONS   -> allow.textContent = allowText||'Allow',
+                    deny.textContent  = denyText||'No thanks'
+       BRANDING  -> if showBranding: <div> "Powered by CartnCodForm", 10px #9ca3af,
+                    appended at the bottom of #ccf-push-prompt
+     Append order is now inline (img, title, p, allow, deny, brand) then
+     document.body.appendChild(wrap) once.
+  node --check n/a (liquid); JS body is ES5, matches file style (var, no arrows
+  except the existing callback idiom).
+
+
+5. SETTINGS.JSX  (frontend/app/admin/screens/Settings.jsx)
+-------------------------------------------------------
+  - New state:  const [popup, setPopup] = useState({});
+  - Mount fetch: added apiGet(`/api/profiles/${shop}/popup`) as the 3rd entry in
+    the existing Promise.allSettled; on fulfilled -> setPopup(pop.value?.popup || {}).
+  - New <Layout.Section> "Section 4 — Push notification popup" inserted after the
+    Signals section, before Save + feedback. Card title "Push notification popup".
+    Controls (all Polaris, already imported): Select Position (5 opts),
+    Select Theme (Light/Dark — Dark also sets bgColor #1f2937 / textColor #f9fafb),
+    TextField Accent color, Font family, Border radius (number),
+    Image URL, Custom title, Allow button text, Deny button text,
+    Checkbox "Show 'Powered by CartnCodForm' branding" (checked={popup.showBranding ?? true}).
+    (autoComplete="off" added to each TextField to match the rest of the file /
+     avoid the Polaris console warning; not in the spec snippet but consistent.)
+  - saveSettings(): after the existing settings PATCH, added
+      await apiSend(`/api/profiles/${shop}/popup`, 'PATCH', popup);
+    so one "Save settings" click persists both.
+
+
+6. TESTS / BUILD / CHECKS
+------------------------
+  cd backend  && npm test           -> Test Suites: 13 passed, 13 total
+                                       Tests:       116 passed, 116 total   ✅
+  cd frontend && npm run build      -> ✓ Compiled successfully, 5/5 static
+                                       pages, /admin 79.1 kB               ✅
+  node --check backend/routes/proxy.js     -> OK
+  node --check backend/routes/profiles.js  -> OK
+  node --check backend/models/Store.js     -> OK
+
+  No new backend tests added: the two new profile routes are thin
+  Store.findOne / Store.updateOne wrappers with the standard
+  requireAuth+requireStoreOwner guard already covered by requireOwner.test.js;
+  the proxy route mirrors the existing signature-enforced pattern. Flag for a
+  follow-up if route-level coverage is wanted.
+
+
+7. LINE COUNTS (before -> after)
+-------------------------------
+  backend/models/Store.js                              71  -> 95    (+24, -0)
+  backend/routes/proxy.js                             397  -> 425   (+28, -0)
+  backend/routes/profiles.js                          363  -> 410   (+47, -0)
+  extensions/.../push-notifications.liquid            887  -> 956   (+77, -8)
+  frontend/app/admin/screens/Settings.jsx            283  -> 391   (+109, -1)
+
+
+8. OWNER DEPLOY INSTRUCTIONS
+--------------------------
+  Backend (Render): auto-deploys on push to main — no manual step.
+  Storefront extension (liquid change):
+      shopify app deploy --allow-updates
+  Frontend (admin Settings screen):
+      cd frontend && npx vercel --prod
+
+  After deploy: open Admin -> Settings -> "Push notification popup", set the
+  options, Save. The storefront prompt picks up the new config on the next
+  page load (fetched once per session from /apps/cartncodform/popup-config).
+
+
+STATUS: COMPLETE. 116/116 backend tests green, frontend build green.
+Stopping here — no further phase started.

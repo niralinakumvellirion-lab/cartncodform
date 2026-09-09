@@ -344,6 +344,53 @@ router.patch('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req
 });
 
 /**
+ * GET /api/profiles/:shopDomain/popup   -> { popup }
+ * Storefront soft-prompt appearance config (popup-customizer).
+ */
+const POPUP_FIELDS = [
+  'position', 'theme', 'accentColor', 'bgColor', 'textColor', 'fontFamily',
+  'borderRadius', 'imageUrl', 'allowText', 'denyText', 'customTitle', 'showBranding',
+];
+
+router.get('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const store = await Store.findOne({ shopDomain: shop }, 'popup');
+    if (!store) return res.status(404).json({ error: 'Store not found' });
+    return res.json({ popup: store.popup || {} });
+  } catch (err) {
+    console.error('[profiles] GET popup error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch popup config' });
+  }
+});
+
+/**
+ * PATCH /api/profiles/:shopDomain/popup
+ * Body: any subset of popup fields. Dot-notation $set on popup.* keys.
+ */
+router.patch('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const set = {};
+    for (const key of POPUP_FIELDS) {
+      if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+        set[`popup.${key}`] = req.body[key];
+      }
+    }
+
+    if (Object.keys(set).length === 0) {
+      return res.status(400).json({ error: 'No popup fields provided' });
+    }
+
+    await Store.updateOne({ shopDomain: shop }, { $set: set });
+    return res.json({ updated: true });
+  } catch (err) {
+    console.error('[profiles] PATCH popup error:', err.message);
+    return res.status(500).json({ error: 'Failed to update popup config' });
+  }
+});
+
+/**
  * GET /api/profiles/:shopDomain/weights
  * The shop's learned Brain weights (Phase H). null until the first nightly
  * compute has run.
