@@ -109,12 +109,15 @@ router.get('/popup-config', async (req, res) => {
 
   try {
     const shop = String(req.query.shop || '').trim().toLowerCase();
-    const store = await Store.findOne({ shopDomain: shop }).select('popup');
+    const store = await Store.findOne({ shopDomain: shop }).select('popup mobilePopup');
 
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'no-store');
-    return res.json({ popup: (store && store.popup) || {} });
+    return res.json({
+      popup: (store && store.popup) || {},
+      mobilePopup: (store && store.mobilePopup) || {},
+    });
   } catch (err) {
     console.error('[proxy] GET /popup-config error:', err.message);
     res.setHeader('Content-Type', 'application/json');

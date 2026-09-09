@@ -383,15 +383,21 @@ router.patch('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req
  */
 const POPUP_FIELDS = [
   'position', 'theme', 'accentColor', 'bgColor', 'textColor', 'fontFamily',
-  'borderRadius', 'imageUrl', 'allowText', 'denyText', 'customTitle', 'showBranding',
+  'borderRadius', 'imageUrl', 'imagePosition', 'allowText', 'denyText',
+  'customTitle', 'showBranding',
+  // popup-redesign fields:
+  'layout', 'headline', 'subtext', 'brandName', 'ctaStyle', 'overlayOpacity', 'showOverlay',
 ];
 
 router.get('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, res) => {
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
-    const store = await Store.findOne({ shopDomain: shop }, 'popup');
+    const store = await Store.findOne({ shopDomain: shop }, 'popup mobilePopup');
     if (!store) return res.status(404).json({ error: 'Store not found' });
-    return res.json({ popup: store.popup || {} });
+    return res.json({
+      popup: store.popup || {},
+      mobilePopup: store.mobilePopup || {},
+    });
   } catch (err) {
     console.error('[profiles] GET popup error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch popup config' });
@@ -410,6 +416,11 @@ router.patch('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, r
       if (Object.prototype.hasOwnProperty.call(req.body, key)) {
         set[`popup.${key}`] = req.body[key];
       }
+    }
+
+    // popup-responsive: the whole mobile-override object is replaced wholesale.
+    if (req.body.mobilePopup && typeof req.body.mobilePopup === 'object') {
+      set.mobilePopup = req.body.mobilePopup;
     }
 
     if (Object.keys(set).length === 0) {

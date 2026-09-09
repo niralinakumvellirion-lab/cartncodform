@@ -1,0 +1,125 @@
+POPUP_RESPONSIVE_AUDIT2 — self-audit
+====================================
+Branch:  popup-responsive
+Date:    2026-09-09
+Files:   backend/models/Store.js
+         backend/routes/profiles.js          (STEP 1 + STEP 5)
+         backend/routes/proxy.js             (necessary support — see NOTES)
+         frontend/app/admin/screens/Settings.jsx
+         extensions/cartncodform-embed/blocks/push-notifications.liquid
+
+
+1. Store.js — mobilePopup subdoc
+--------------------------------
+  Added a `mobilePopup` subdoc directly after `popup` (before `installedAt`),
+  18 fields with mobile-first defaults exactly per spec:
+    layout        enum ['card','banner']              default 'card'  (no split)
+    headline / subtext / brandName / imageUrl          default ''
+    imagePosition                                       default '50% 50%'
+    accentColor '#4f46e5' / bgColor '#ffffff' / textColor '#111827'
+    fontFamily 'inherit'
+    borderRadius  Number                               default 16
+    allowText 'Allow' / denyText 'No thanks'
+    showBranding  Boolean                              default true
+    ctaStyle      enum ['rounded','square','pill']     default 'pill'
+    position      enum ['bottom-right','bottom-left','center']  default 'center'
+    showOverlay   Boolean                              default true
+  node --check backend/models/Store.js -> OK
+
+
+2. profiles.js — GET returns both, PATCH saves mobilePopup
+---------------------------------------------------------
+  * GET /:shopDomain/popup: `.select('popup mobilePopup')`, response now
+      { popup: store.popup||{}, mobilePopup: store.mobilePopup||{} }
+  * PATCH /:shopDomain/popup: after the POPUP_FIELDS loop, added
+      if (req.body.mobilePopup && typeof req.body.mobilePopup === 'object')
+        set.mobilePopup = req.body.mobilePopup;
+    (the whole object is replaced wholesale; the desktop `popup.*` keys still
+    go through the whitelist loop). node --check -> OK
+
+
+3. proxy.js — storefront config (NOTES: not in the named list)
+------------------------------------------------------------
+  The App-Proxy route GET /apps/cartncodform/popup-config only returned
+  `popup`. STEP 4 requires the storefront to receive `{ popup, mobilePopup }`,
+  so this 2-line change was made:
+    `.select('popup mobilePopup')` and
+    res.json({ popup: ..., mobilePopup: (store && store.mobilePopup) || {} })
+  Without it the liquid's mobilePopupConfig would always be {} and the whole
+  feature is inert. node --check -> OK.
+
+
+4. Settings.jsx — device tabs / activePopup / phone frame / responsive grid
+------------------------------------------------------------------------
+  * State: added `mobilePopup`/`setMobilePopup` and
+    `popupDevice`/`setPopupDevice` ('desktop' default).
+  * Fetch: `setMobilePopup(pop.value?.mobilePopup || {})` alongside setPopup.
+  * saveSettings: PATCH body is now `{ ...popup, mobilePopup }`.
+  * Helper (component scope, before `previews`):
+      const activePopup    = popupDevice === 'desktop' ? popup : mobilePopup;
+      const setActivePopup = popupDevice === 'desktop' ? setPopup : setMobilePopup;
+  * Device tab switcher: a segmented `🖥 Desktop / 📱 Mobile` control inserted
+    right after the customizer's back-button header; below it, an indigo note
+    "Mobile layout: image stacks above content automatically." shows only when
+    popupDevice === 'mobile'.
+  * Shared field JSX: the entire customizer field block is wrapped in
+      {(() => { const popup = activePopup; const setPopup = setActivePopup;
+                return (<> ...all existing fields unchanged... </>); })()}
+    i.e. `popup` / `setPopup` are shadowed to the active-device config, so every
+    field edits desktop or mobile state with zero per-field rewrites.
+  * Layout field: options are `[card, banner]` when popupDevice === 'mobile',
+    `[split, card, banner]` otherwise.
+  * Preview card (right column): title switches "Desktop preview" /
+    "Mobile preview"; the existing split/card/banner preview IIFE now renders
+    only for `popupDevice === 'desktop'` (still reads `popup`); a new
+    `popupDevice === 'mobile'` branch renders a 200x360 phone frame (notch +
+    simulated store skeleton) with a bottom-anchored card-layout popup preview
+    driven by `mobilePopup` (bg/text/accent/ctaStyle→radius/image+objectPosition/
+    headline/allow/deny).
+  * Responsive admin grid: main grid gained `className="ccf-settings-grid"` and
+    `gridTemplateColumns: 'minmax(0, 1fr) 380px'`; a module-level guarded
+    `<style id="ccf-settings-style">` injection adds
+    `@media (max-width:768px){ .ccf-settings-grid{grid-template-columns:1fr!important}
+     .ccf-settings-grid>div:last-child{order:-1} }`.
+
+
+5. liquid — mobilePopupConfig + isMobile cfg switch
+--------------------------------------------------
+  * Module-level `var mobilePopupConfig = {};` added beside `var popupConfig`.
+  * fetchPopupConfig(): also sets `mobilePopupConfig = data.mobilePopup` when
+    the proxy response includes it.
+  * showSoftPrompt(): the config the rest of the function already uses via
+    `cfg` is now chosen by device:
+      var cfg = isMobile ? (mobilePopupConfig || {}) : (popupConfig || {});
+      if (isMobile && !cfg.layout) cfg = popupConfig || {};   // fallback
+    Everything downstream (layout, headline, subtext, brandName, imageUrl,
+    imagePosition, colors, fontFamily, borderRadius, allow/deny text,
+    showBranding, ctaStyle, position, showOverlay) already reads from `cfg`,
+    so no further edits were needed. `isMobile` was already declared here from
+    the earlier popup-mobile task. node --check on the extracted <script> -> OK.
+  * Did NOT run `shopify app deploy` (owner task).
+
+
+6. TEST + BUILD
+---------------
+  cd backend  && npm test        -> 13 suites / 116 tests pass ✅
+  cd frontend && npm run build   -> ✓ Compiled successfully, zero warnings.
+                                    /admin/settings-page 6.8 -> 7.7 kB
+  node --check: Store.js, profiles.js, proxy.js, extracted liquid JS -> all OK
+
+
+7. NOTES
+--------
+  (a) proxy.js was edited though not in the "files to modify" list — the
+      storefront cannot get mobilePopup otherwise. Minimal (2 lines).
+  (b) The field JSX uses `const popup`/`const setPopup` shadowing inside an
+      IIFE. Next's default ESLint config has no `no-shadow` rule so the build
+      is clean; if a stricter config is added later this would warn.
+  (c) The desktop preview IIFE still reads `popup` (the real desktop state) —
+      intentional; mobile edits are shown only in the phone-frame preview.
+  (d) mobilePopup has no `customTitle` / `overlayOpacity` (spec's field list
+      omits them); the storefront `cfg` falls back to defaults for those on
+      mobile.
+
+
+STATUS: COMPLETE. 116/116 backend tests green, frontend build green.

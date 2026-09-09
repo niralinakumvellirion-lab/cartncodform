@@ -77,7 +77,9 @@
 
   // popup-customizer: appearance config, fetched once from the App Proxy.
   // Stays {} (defaults below) until fetchPopupConfig() resolves.
+  // popup-responsive: mobilePopupConfig holds the <=600px overrides.
   var popupConfig = {};
+  var mobilePopupConfig = {};
 
   function showSoftPrompt(trigger, productId) {
     if (!canPrompt()) return;
@@ -87,17 +89,24 @@
     // Log push_prompt_shown via the existing event pipe (-> StorefrontEvent).
     try { trackEvent('push_prompt_shown', { trigger: trigger, productId: productId || null }); } catch (e) {}
 
+    // popup-mobile: sub-600px phones get a stacked layout, set inline.
+    var isMobile = window.innerWidth <= 600;
+
     // ================================================================
     // popup-redesign: three layouts (split / card / banner) driven by
-    // popupConfig.layout. Everything falls back to sensible defaults so an
+    // cfg.layout. Everything falls back to sensible defaults so an
     // empty config still renders a usable prompt.
+    // popup-responsive: on phones use mobilePopupConfig; fall back to the
+    // desktop config when the merchant hasn't set a mobile one.
     // ================================================================
-    var cfg = popupConfig || {};
+    var cfg = isMobile ? (mobilePopupConfig || {}) : (popupConfig || {});
+    if (isMobile && !cfg.layout) cfg = popupConfig || {};
     var layout = cfg.layout || 'split';
     var bg = cfg.bgColor || '#ffffff';
     var fg = cfg.textColor || '#111827';
     var font = cfg.fontFamily || 'inherit';
     var accent = cfg.accentColor || '#4f46e5';
+    var imagePosition = cfg.imagePosition || 'center center';
     var allowLabel = cfg.allowText || 'Allow';
     var denyLabel = cfg.denyText || 'No thanks';
     var promptText = (PROMPT_COPY[trigger] || PROMPT_COPY.dwell)(
@@ -140,21 +149,25 @@
       // ---------- LAYOUT 3: full-width banner bar ----------
       var atTop = /^top/.test(cfg.position || '');
       wrap.setAttribute('style',
-        'position:fixed;left:0;right:0;' + (atTop ? 'top:0;' : 'bottom:0;') +
-        'z-index:999999;padding:12px 24px;display:flex;align-items:center;' +
-        'justify-content:space-between;background:' + accent + ';color:#fff;' +
+        'position:fixed;left:0;right:0;width:100%;' + (atTop ? 'top:0;' : 'bottom:0;') +
+        'z-index:999999;padding:12px ' + (isMobile ? '16px' : '24px') + ';display:flex;align-items:center;' +
+        'justify-content:space-between;' + (isMobile ? 'flex-wrap:wrap;gap:8px;' : '') +
+        'background:' + accent + ';color:#fff;' +
         'font-size:14px;font-family:' + font + ';box-shadow:0 2px 10px rgba(0,0,0,0.2);');
 
       var bnText = document.createElement('span');
       bnText.id = 'ccf-prompt-text';
-      bnText.setAttribute('style', 'flex:1;margin-right:16px;');
+      bnText.setAttribute('style', 'flex:1;min-width:60%;' + (isMobile ? '' : 'margin-right:16px;'));
       bnText.textContent = headline;
 
       var bnRight = document.createElement('span');
-      bnRight.setAttribute('style', 'display:flex;align-items:center;gap:12px;flex-shrink:0;');
+      bnRight.setAttribute('style',
+        'display:flex;align-items:center;gap:12px;flex-shrink:0;' +
+        (isMobile ? 'flex:1;justify-content:flex-end;' : ''));
       allow = buildAllowBtn(
         'background:#fff;color:' + accent + ';border:none;border-radius:' + ctaRadius + ';' +
-        'padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;');
+        'padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;' +
+        (isMobile ? 'flex:1;min-width:80px;' : ''));
       closeBtn = document.createElement('button');
       closeBtn.id = 'ccf-close-btn';
       closeBtn.type = 'button';
@@ -170,26 +183,31 @@
     } else if (layout === 'card') {
       // ---------- LAYOUT 2: small card (the original) ----------
       var POS = {
-        'bottom-right': 'bottom:20px;right:20px;',
-        'bottom-left':  'bottom:20px;left:20px;',
+        'bottom-right': 'bottom:16px;right:20px;',
+        'bottom-left':  'bottom:16px;left:20px;',
         'center':       'top:50%;left:50%;transform:translate(-50%,-50%);',
         'top-right':    'top:20px;right:20px;',
         'top-left':     'top:20px;left:20px;'
       };
-      var posStyle = POS[cfg.position] || POS['bottom-right'];
+      // On phones the card is always bottom-centered so it never runs off-screen.
+      var posStyle = isMobile
+        ? 'bottom:16px;left:50%;transform:translateX(-50%);'
+        : (POS[cfg.position] || POS['bottom-right']);
       var radius = (cfg.borderRadius != null ? cfg.borderRadius : 12) + 'px';
       wrap.setAttribute('style',
         'position:fixed;' + posStyle + 'z-index:999999;' +
         'background:' + bg + ';color:' + fg + ';' +
         'border-radius:' + radius + ';box-shadow:0 8px 30px rgba(0,0,0,0.18);' +
-        'padding:16px;max-width:300px;font-family:' + font + ';font-size:14px;line-height:1.5;');
+        'padding:16px;max-width:' + (isMobile ? 'min(320px,88vw)' : 'min(300px,88vw)') +
+        ';font-family:' + font + ';font-size:14px;line-height:1.5;');
 
       if (cfg.imageUrl) {
         var cardImg = document.createElement('img');
         cardImg.src = cfg.imageUrl;
         cardImg.alt = '';
         cardImg.setAttribute('style',
-          'width:100%;border-radius:8px;margin-bottom:8px;object-fit:cover;max-height:120px;');
+          'width:100%;border-radius:8px;margin-bottom:8px;object-fit:cover;' +
+          'object-position:' + imagePosition + ';max-height:120px;');
         wrap.appendChild(cardImg);
       }
       if (cfg.customTitle) {
@@ -218,75 +236,148 @@
 
     } else {
       // ---------- LAYOUT 1: split (image + content), the default ----------
-      wrap.setAttribute('style',
-        'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:999999;' +
-        'max-width:680px;width:90%;display:flex;border-radius:12px;overflow:hidden;' +
-        'box-shadow:0 20px 60px rgba(0,0,0,0.3);');
-
-      var leftPanel = document.createElement('div');
-      leftPanel.setAttribute('style',
-        'width:45%;min-height:380px;background:linear-gradient(135deg,#667eea,#764ba2);');
+      // One <img> element, appended to whichever container the branch builds.
+      var splitImgEl = null;
       if (cfg.imageUrl) {
-        var splitImg = document.createElement('img');
-        splitImg.src = cfg.imageUrl;
-        splitImg.alt = '';
-        splitImg.setAttribute('style', 'width:100%;height:100%;object-fit:cover;display:block;');
-        leftPanel.appendChild(splitImg);
-      }
-
-      var rightPanel = document.createElement('div');
-      rightPanel.setAttribute('style',
-        'width:55%;padding:32px 28px;display:flex;flex-direction:column;justify-content:center;' +
-        'background:' + bg + ';color:' + fg + ';font-family:' + font + ';');
-
-      if (cfg.brandName) {
-        var splitBrand = document.createElement('div');
-        splitBrand.setAttribute('style',
-          'letter-spacing:3px;font-size:11px;font-weight:600;text-transform:uppercase;' +
-          'color:#9ca3af;margin-bottom:12px;');
-        splitBrand.textContent = cfg.brandName;
-        rightPanel.appendChild(splitBrand);
-      }
-
-      var splitHead = document.createElement('div');
-      splitHead.id = 'ccf-prompt-text';
-      splitHead.setAttribute('style',
-        'font-size:26px;font-weight:700;line-height:1.2;margin-bottom:12px;');
-      splitHead.textContent = headline;
-      rightPanel.appendChild(splitHead);
-
-      if (cfg.subtext) {
-        var splitSub = document.createElement('div');
-        splitSub.setAttribute('style', 'font-size:14px;color:#6b7280;margin-bottom:24px;');
-        splitSub.textContent = cfg.subtext;
-        rightPanel.appendChild(splitSub);
-      }
-
-      allow = buildAllowBtn(
-        'background:' + accent + ';color:#fff;border:none;border-radius:' + ctaRadius + ';' +
-        'padding:14px 24px;font-size:15px;font-weight:700;cursor:pointer;width:100%;margin-bottom:12px;');
-      rightPanel.appendChild(allow);
-
-      deny = buildDenyBtn(
-        'background:none;border:none;color:#9ca3af;font-size:13px;cursor:pointer;text-decoration:underline;');
-      rightPanel.appendChild(deny);
-
-      if (cfg.showBranding) {
-        rightPanel.appendChild(buildBranding('margin-top:16px;font-size:10px;color:#d1d5db;'));
+        splitImgEl = document.createElement('img');
+        splitImgEl.src = cfg.imageUrl;
+        splitImgEl.alt = '';
+        splitImgEl.setAttribute('style',
+          'width:100%;height:100%;object-fit:cover;object-position:' + imagePosition + ';display:block;');
       }
 
       closeBtn = document.createElement('button');
       closeBtn.id = 'ccf-close-btn';
       closeBtn.type = 'button';
       closeBtn.textContent = '×';
-      closeBtn.setAttribute('style',
-        'position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.4);color:#fff;' +
-        'border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;' +
-        'font-size:16px;line-height:28px;text-align:center;z-index:10;');
 
-      wrap.appendChild(leftPanel);
-      wrap.appendChild(rightPanel);
-      wrap.appendChild(closeBtn);
+      if (isMobile) {
+        // ----- MOBILE: image on top, content below -----
+        wrap.setAttribute('style',
+          'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
+          'width:88vw;max-width:360px;border-radius:16px;overflow:hidden;' +
+          'background:' + bg + ';box-shadow:0 20px 60px rgba(0,0,0,0.35);z-index:999999;');
+
+        var mImg = document.createElement('div');
+        mImg.setAttribute('style',
+          'width:100%;height:200px;position:relative;overflow:hidden;background:' +
+          (cfg.imageUrl ? 'none' : 'linear-gradient(135deg,#667eea,#764ba2)') + ';');
+        if (splitImgEl) mImg.appendChild(splitImgEl);
+
+        var mContent = document.createElement('div');
+        mContent.setAttribute('style',
+          'padding:20px 18px;background:' + bg + ';color:' + fg + ';font-family:' + font + ';');
+
+        if (cfg.brandName) {
+          var mBrand = document.createElement('div');
+          mBrand.setAttribute('style',
+            'font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;' +
+            'color:#9ca3af;margin-bottom:8px;');
+          mBrand.textContent = cfg.brandName;
+          mContent.appendChild(mBrand);
+        }
+
+        var mHead = document.createElement('div');
+        mHead.id = 'ccf-prompt-text';
+        mHead.setAttribute('style',
+          'font-size:20px;font-weight:700;line-height:1.25;margin-bottom:8px;color:' + fg + ';');
+        mHead.textContent = headline;
+        mContent.appendChild(mHead);
+
+        if (cfg.subtext) {
+          var mSub = document.createElement('div');
+          mSub.setAttribute('style',
+            'font-size:13px;color:#6b7280;margin-bottom:16px;line-height:1.4;');
+          mSub.textContent = cfg.subtext;
+          mContent.appendChild(mSub);
+        }
+
+        allow = buildAllowBtn(
+          'width:100%;padding:14px;font-size:15px;font-weight:700;background:' + accent + ';' +
+          'color:#fff;border:none;border-radius:' + ctaRadius + ';margin-bottom:10px;cursor:pointer;');
+        mContent.appendChild(allow);
+
+        deny = buildDenyBtn(
+          'text-align:center;font-size:13px;color:#9ca3af;text-decoration:underline;' +
+          'cursor:pointer;display:block;');
+        mContent.appendChild(deny);
+
+        if (cfg.showBranding) {
+          mContent.appendChild(buildBranding(
+            'margin-top:12px;font-size:10px;color:#d1d5db;text-align:center;'));
+        }
+
+        closeBtn.setAttribute('style',
+          'position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.4);color:#fff;' +
+          'border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;' +
+          'font-size:16px;line-height:28px;text-align:center;z-index:10;');
+
+        wrap.appendChild(mImg);
+        wrap.appendChild(mContent);
+        wrap.appendChild(closeBtn);
+
+      } else {
+        // ----- DESKTOP: side-by-side (unchanged) -----
+        wrap.setAttribute('style',
+          'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:999999;' +
+          'max-width:680px;width:90%;display:flex;border-radius:12px;overflow:hidden;' +
+          'box-shadow:0 20px 60px rgba(0,0,0,0.3);');
+
+        var leftPanel = document.createElement('div');
+        leftPanel.setAttribute('style',
+          'width:45%;min-height:380px;background:linear-gradient(135deg,#667eea,#764ba2);');
+        if (splitImgEl) leftPanel.appendChild(splitImgEl);
+
+        var rightPanel = document.createElement('div');
+        rightPanel.setAttribute('style',
+          'width:55%;padding:32px 28px;display:flex;flex-direction:column;justify-content:center;' +
+          'background:' + bg + ';color:' + fg + ';font-family:' + font + ';');
+
+        if (cfg.brandName) {
+          var splitBrand = document.createElement('div');
+          splitBrand.setAttribute('style',
+            'letter-spacing:3px;font-size:11px;font-weight:600;text-transform:uppercase;' +
+            'color:#9ca3af;margin-bottom:12px;');
+          splitBrand.textContent = cfg.brandName;
+          rightPanel.appendChild(splitBrand);
+        }
+
+        var splitHead = document.createElement('div');
+        splitHead.id = 'ccf-prompt-text';
+        splitHead.setAttribute('style',
+          'font-size:26px;font-weight:700;line-height:1.2;margin-bottom:12px;');
+        splitHead.textContent = headline;
+        rightPanel.appendChild(splitHead);
+
+        if (cfg.subtext) {
+          var splitSub = document.createElement('div');
+          splitSub.setAttribute('style', 'font-size:14px;color:#6b7280;margin-bottom:24px;');
+          splitSub.textContent = cfg.subtext;
+          rightPanel.appendChild(splitSub);
+        }
+
+        allow = buildAllowBtn(
+          'background:' + accent + ';color:#fff;border:none;border-radius:' + ctaRadius + ';' +
+          'padding:14px 24px;font-size:15px;font-weight:700;cursor:pointer;width:100%;margin-bottom:12px;');
+        rightPanel.appendChild(allow);
+
+        deny = buildDenyBtn(
+          'background:none;border:none;color:#9ca3af;font-size:13px;cursor:pointer;text-decoration:underline;');
+        rightPanel.appendChild(deny);
+
+        if (cfg.showBranding) {
+          rightPanel.appendChild(buildBranding('margin-top:16px;font-size:10px;color:#d1d5db;'));
+        }
+
+        closeBtn.setAttribute('style',
+          'position:absolute;top:12px;right:12px;background:rgba(0,0,0,0.4);color:#fff;' +
+          'border:none;border-radius:50%;width:28px;height:28px;cursor:pointer;' +
+          'font-size:16px;line-height:28px;text-align:center;z-index:10;');
+
+        wrap.appendChild(leftPanel);
+        wrap.appendChild(rightPanel);
+        wrap.appendChild(closeBtn);
+      }
 
       // Dark overlay behind the popup (split layout only, unless disabled).
       if (cfg.showOverlay !== false) {
@@ -337,9 +428,6 @@
         try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
       });
     }
-
-    // Auto-dismiss silently after 8s of no interaction (no event logged).
-    promptAutoDismissTimer = setTimeout(cleanup, 8000);
   }
 
   // popup-customizer: pull the merchant's appearance config from the App Proxy
@@ -352,6 +440,9 @@
       .then(function (data) {
         if (data && data.popup && typeof data.popup === 'object') {
           popupConfig = data.popup;
+        }
+        if (data && data.mobilePopup && typeof data.mobilePopup === 'object') {
+          mobilePopupConfig = data.mobilePopup;
         }
       })
       .catch(function () { /* keep defaults */ });

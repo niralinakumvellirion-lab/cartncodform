@@ -1,0 +1,198 @@
+POPUP_RESPONSIVE_AUDIT — read-only capture
+==========================================
+Date: 2026-09-09
+Scope: Settings.jsx head + popup state/fetch/save; Store.js popup subdoc.
+No files were modified.
+
+
+==========================================================================
+1. frontend/app/admin/screens/Settings.jsx
+==========================================================================
+
+--- 1a. Lines 1–50 -----------------------------------------------------
+
+  1	'use client';
+  2
+  3	import { useState, useEffect } from 'react';
+  4	import { apiGet, apiSend } from '../../../lib/api';
+  5
+  6	const TONES = ['friendly', 'direct', 'playful'];
+  7	const LANGS = [
+  8	  { value: 'en', label: 'English' },
+  9	  { value: 'hinglish', label: 'Hinglish' },
+ 10	  { value: 'hi', label: 'Hindi' },
+ 11	  { value: 'gu', label: 'Gujarati' },
+ 12	];
+ 13
+ 14	export default function Settings({ shop }) {
+ 15	  const [voice, setVoice] = useState({});
+ 16	  const [caps, setCaps] = useState({});
+ 17	  const [quietHours, setQuietHours] = useState({});
+ 18	  const [timezone, setTimezone] = useState('Asia/Kolkata');
+ 19	  // configs + popup are still loaded so nothing downstream breaks, but the
+ 20	  // Signals grid moved to "What to act on" and the popup customizer lives
+ 21	  // elsewhere now — neither is rendered here.
+ 22	  const [configs, setConfigs] = useState([]);
+ 23	  const [popup, setPopup] = useState({});
+ 24	  const [pushCount, setPushCount] = useState(0);
+ 25	  const [emailCount, setEmailCount] = useState(0);
+ 26	  const [showPopupCustomizer, setShowPopupCustomizer] = useState(false);
+ 27	  const [saving, setSaving] = useState(false);
+ 28	  const [error, setError] = useState('');
+ 29	  const [success, setSuccess] = useState(false);
+ 30
+ 31	  useEffect(() => {
+ 32	    if (!shop) return;
+ 33	    let cancelled = false;
+ 34	    Promise.allSettled([
+ 35	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/settings`),
+ 36	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/signal-configs`),
+ 37	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/popup`),
+ 38	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/push-stats`),
+ 39	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/profiles?limit=1`),
+ 40	    ]).then(([s, c, pop, ps, prof]) => {
+ 41	      if (cancelled) return;
+ 42	      if (s.status === 'fulfilled') {
+ 43	        setVoice(s.value?.voice || {});
+ 44	        setCaps(s.value?.caps || {});
+ 45	        setQuietHours(s.value?.quietHours || {});
+ 46	        setTimezone(s.value?.timezone || 'Asia/Kolkata');
+ 47	      } else {
+ 48	        setError(s.reason?.message || 'Failed to load settings');
+ 49	      }
+ 50	      if (c.status === 'fulfilled') {
+
+--- 1b. popup state / fetch / save (lines 50–86) ----------------------
+
+ 50	      if (c.status === 'fulfilled') {
+ 51	        setConfigs(Array.isArray(c.value?.configs) ? c.value.configs : []);
+ 52	      }
+ 53	      if (pop.status === 'fulfilled') {
+ 54	        setPopup(pop.value?.popup || {});
+ 55	      }
+ 56	      if (ps.status === 'fulfilled') {
+ 57	        setPushCount(ps.value?.attemptedLast7d || 0);
+ 58	      }
+ 59	      if (prof.status === 'fulfilled') {
+ 60	        setEmailCount(prof.value?.total || 0);
+ 61	      }
+ 62	    });
+ 63	    return () => {
+ 64	      cancelled = true;
+ 65	    };
+ 66	  }, [shop]);
+ 67
+ 68	  async function saveSettings() {
+ 69	    setSaving(true);
+ 70	    setError('');
+ 71	    setSuccess(false);
+ 72	    try {
+ 73	      await apiSend(`/api/profiles/${encodeURIComponent(shop)}/settings`, 'PATCH', {
+ 74	        voice,
+ 75	        caps,
+ 76	        quietHours,
+ 77	        timezone,
+ 78	      });
+ 79	      await apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', popup);
+ 80	      setSuccess(true);
+ 81	    } catch (e) {
+ 82	      setError(e.message || 'Save failed');
+ 83	    } finally {
+ 84	      setSaving(false);
+ 85	    }
+ 86	  }
+
+  Notes (observations only):
+  * popup state: `const [popup, setPopup] = useState({})` (line 23). Hydrated
+    on mount from GET /api/profiles/:shop/popup -> `pop.value?.popup || {}`
+    (lines 53-55), the 3rd of five parallel Promise.allSettled requests.
+  * The head comment (19-21) is now STALE: it says "the popup customizer lives
+    elsewhere now — neither is rendered here", but the popup customizer IS
+    rendered here (behind the `showPopupCustomizer` toggle, state on line 26)
+    and its fields all bind to `setPopup`.
+  * saveSettings() PATCHes twice, sequentially: first `.../settings` with
+    { voice, caps, quietHours, timezone }, then `.../popup` with the whole
+    `popup` object (line 79). A failure on the first PATCH means the popup
+    PATCH never runs (both inside one try).
+  * The popup PATCH sends the ENTIRE popup object; the backend
+    routes/profiles.js POPUP_FIELDS whitelist is what decides which keys
+    actually persist (now includes imagePosition + the redesign fields).
+  * `imagePosition` is not initialised client-side — it only exists on `popup`
+    once the fetch returns it (schema default 'center center') or the user
+    drags the focus control. All read sites use `popup.imagePosition ||
+    'center center'` / `|| '50% 50%'` fallbacks.
+  * No dedicated popup fetch/save beyond the above — `.../popup` GET on mount,
+    `.../popup` PATCH inside saveSettings.
+
+
+==========================================================================
+2. backend/models/Store.js — popup subdoc (lines 65–107)
+==========================================================================
+
+ 65	  // --- popup-customizer: storefront soft push prompt appearance ---
+ 66	  popup: {
+ 67	    position: {
+ 68	      type: String,
+ 69	      enum: ['bottom-right', 'bottom-left', 'center', 'top-right', 'top-left'],
+ 70	      default: 'bottom-right',
+ 71	    },
+ 72	    theme: {
+ 73	      type: String,
+ 74	      enum: ['light', 'dark', 'custom'],
+ 75	      default: 'light',
+ 76	    },
+ 77	    accentColor: { type: String, default: '#4f46e5' },
+ 78	    bgColor: { type: String, default: '#ffffff' },
+ 79	    textColor: { type: String, default: '#111827' },
+ 80	    fontFamily: { type: String, default: 'inherit' },
+ 81	    borderRadius: { type: Number, default: 12 },
+ 82	    imageUrl: { type: String, default: '' },
+ 83	    // CSS object-position / background-position value: 'top left',
+ 84	    // 'center center', 'bottom right', etc.
+ 85	    imagePosition: { type: String, default: 'center center' },
+ 86	    allowText: { type: String, default: 'Allow' },
+ 87	    denyText: { type: String, default: 'No thanks' },
+ 88	    customTitle: { type: String, default: '' },
+ 89	    showBranding: { type: Boolean, default: true },
+ 90
+ 91	    // --- popup-redesign: layout system + split-layout content ---
+ 92	    layout: {
+ 93	      type: String,
+ 94	      enum: ['split', 'card', 'banner'],
+ 95	      default: 'split',
+ 96	    },
+ 97	    headline: { type: String, default: '' },
+ 98	    subtext: { type: String, default: '' },
+ 99	    brandName: { type: String, default: '' },
+100	    ctaStyle: {
+101	      type: String,
+102	      enum: ['rounded', 'square', 'pill'],
+103	      default: 'rounded',
+104	    },
+105	    overlayOpacity: { type: Number, default: 0.5 },
+106	    showOverlay: { type: Boolean, default: true },
+107	  },
+
+  Notes (observations only):
+  * 19 fields total, in two comment-marked groups:
+    - popup-customizer (original): position (enum, 5), theme (enum: light/
+      dark/custom — the Settings UI only offers light/dark), accentColor,
+      bgColor, textColor, fontFamily, borderRadius (Number, 12), imageUrl,
+      imagePosition (String, 'center center'), allowText, denyText,
+      customTitle, showBranding.
+    - popup-redesign: layout (enum split/card/banner), headline, subtext,
+      brandName, ctaStyle (enum rounded/square/pill), overlayOpacity
+      (Number, 0.5), showOverlay (Boolean, true).
+  * imagePosition (line 85) is a plain String with NO enum — accepts both
+    keyword pairs ('top left', 'center center') and the percentage pairs the
+    drag control now writes ('37% 62%'). Default 'center center'.
+  * `customTitle` is legacy (used only by the card layout's old code path);
+    the redesign uses `headline` / `subtext` instead.
+  * No `_id: false` on the subdoc, no per-field validation beyond the enums,
+    no min/max on borderRadius or overlayOpacity.
+  * Mongoose applies these defaults when a Store doc is hydrated without a
+    `popup` (or without a given sub-key), so GET /popup returns a fully
+    populated object even for stores created before the field existed.
+
+
+END OF CAPTURE — no modifications made.

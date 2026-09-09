@@ -3,6 +3,26 @@
 import { useState, useEffect } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
 
+// popup-responsive: collapse the 2-column layout on narrow admin viewports.
+if (typeof document !== 'undefined') {
+  const id = 'ccf-settings-style';
+  if (!document.getElementById(id)) {
+    const s = document.createElement('style');
+    s.id = id;
+    s.textContent = `
+      @media (max-width: 768px) {
+        .ccf-settings-grid {
+          grid-template-columns: 1fr !important;
+        }
+        .ccf-settings-grid > div:last-child {
+          order: -1;
+        }
+      }
+    `;
+    document.head.appendChild(s);
+  }
+}
+
 const TONES = ['friendly', 'direct', 'playful'];
 const LANGS = [
   { value: 'en', label: 'English' },
@@ -21,8 +41,12 @@ export default function Settings({ shop }) {
   // elsewhere now — neither is rendered here.
   const [configs, setConfigs] = useState([]);
   const [popup, setPopup] = useState({});
+  // popup-responsive: separate mobile (<=600px) override config + device tab.
+  const [mobilePopup, setMobilePopup] = useState({});
+  const [popupDevice, setPopupDevice] = useState('desktop');
   const [pushCount, setPushCount] = useState(0);
   const [emailCount, setEmailCount] = useState(0);
+  const [showPopupCustomizer, setShowPopupCustomizer] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -51,6 +75,7 @@ export default function Settings({ shop }) {
       }
       if (pop.status === 'fulfilled') {
         setPopup(pop.value?.popup || {});
+        setMobilePopup(pop.value?.mobilePopup || {});
       }
       if (ps.status === 'fulfilled') {
         setPushCount(ps.value?.attemptedLast7d || 0);
@@ -75,7 +100,10 @@ export default function Settings({ shop }) {
         quietHours,
         timezone,
       });
-      await apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', popup);
+      await apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', {
+        ...popup,
+        mobilePopup,
+      });
       setSuccess(true);
     } catch (e) {
       setError(e.message || 'Save failed');
@@ -83,6 +111,11 @@ export default function Settings({ shop }) {
       setSaving(false);
     }
   }
+
+  // popup-responsive: the customizer UI edits whichever config the device tab
+  // selects — same fields, different state.
+  const activePopup = popupDevice === 'desktop' ? popup : mobilePopup;
+  const setActivePopup = popupDevice === 'desktop' ? setPopup : setMobilePopup;
 
   const previews = [
     {
@@ -238,9 +271,10 @@ export default function Settings({ shop }) {
       </div>
 
       <div
+        className="ccf-settings-grid"
         style={{
           display: 'grid',
-          gridTemplateColumns: '1fr 380px',
+          gridTemplateColumns: 'minmax(0, 1fr) 380px',
           gap: '16px',
           alignItems: 'start',
         }}
@@ -523,24 +557,168 @@ export default function Settings({ shop }) {
             </div>
           </div>
 
-          {/* POPUP CUSTOMIZATION card */}
-          <div style={card}>
-            <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
-              Popup customization
+          {/* POPUP CUSTOMIZATION — behind a "Customize popup" button.
+              order:-1 keeps this first in the left column, above "Your voice". */}
+          {!showPopupCustomizer ? (
+            <div
+              style={{
+                order: -1,
+                background: '#fff',
+                border: '1px solid #e5e7eb',
+                borderRadius: '10px',
+                padding: '20px 24px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: '15px',
+                    fontWeight: '600',
+                    color: '#111827',
+                    marginBottom: '4px',
+                  }}
+                >
+                  Popup customization
+                </div>
+                <div style={{ fontSize: '13px', color: '#9ca3af' }}>
+                  Control how the notification prompt looks on your store.
+                </div>
+              </div>
+              <button
+                onClick={() => setShowPopupCustomizer(true)}
+                style={{
+                  padding: '8px 18px',
+                  fontSize: '13px',
+                  fontWeight: '600',
+                  color: '#fff',
+                  background: '#111827',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  flexShrink: 0,
+                  marginLeft: '16px',
+                }}
+              >
+                Customize popup
+              </button>
             </div>
-            <div style={{ fontSize: '13px', color: '#9ca3af', marginBottom: '20px' }}>
-              Control how the notification prompt looks on your store.
-            </div>
+          ) : (
+            <div style={{ ...card, order: -1 }}>
+              {/* Header with back button */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  marginBottom: '20px',
+                }}
+              >
+                <button
+                  onClick={() => setShowPopupCustomizer(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontSize: '18px',
+                    color: '#9ca3af',
+                    padding: '0',
+                    lineHeight: 1,
+                  }}
+                >
+                  ←
+                </button>
+                <div>
+                  <div
+                    style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}
+                  >
+                    Popup customization
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+                    Changes save with the main Save settings button
+                  </div>
+                </div>
+              </div>
 
+              {/* Device tab switcher */}
+              <div
+                style={{
+                  display: 'flex',
+                  gap: '8px',
+                  marginBottom: '20px',
+                  background: '#f3f4f6',
+                  borderRadius: '10px',
+                  padding: '4px',
+                }}
+              >
+                {[
+                  { key: 'desktop', label: '🖥 Desktop' },
+                  { key: 'mobile', label: '📱 Mobile' },
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setPopupDevice(tab.key)}
+                    style={{
+                      flex: 1,
+                      padding: '8px',
+                      fontSize: '13px',
+                      fontWeight: popupDevice === tab.key ? '600' : '400',
+                      color: popupDevice === tab.key ? '#111827' : '#6b7280',
+                      background: popupDevice === tab.key ? '#fff' : 'transparent',
+                      border: 'none',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      boxShadow:
+                        popupDevice === tab.key
+                          ? '0 1px 3px rgba(0,0,0,0.1)'
+                          : 'none',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {popupDevice === 'mobile' && (
+                <div
+                  style={{
+                    fontSize: '12px',
+                    color: '#6366f1',
+                    background: '#eef2ff',
+                    borderRadius: '8px',
+                    padding: '10px 12px',
+                    marginBottom: '16px',
+                  }}
+                >
+                  Mobile layout: image stacks above content automatically.
+                </div>
+              )}
+
+            {/* activePopup === popup on desktop, mobilePopup on mobile —
+                the field JSX below is shared by both devices. */}
+            {(() => {
+              const popup = activePopup;
+              const setPopup = setActivePopup;
+              return (
+            <>
             {/* Layout */}
             <div style={popRow}>
               <div style={popLabel}>Layout</div>
               <div style={{ display: 'flex', gap: '8px' }}>
-                {[
-                  { value: 'split', label: '⬜ Split' },
-                  { value: 'card', label: '▭ Card' },
-                  { value: 'banner', label: '▬ Banner' },
-                ].map((opt) => (
+                {(popupDevice === 'mobile'
+                  ? [
+                      { value: 'card', label: '▭ Card' },
+                      { value: 'banner', label: '▬ Banner' },
+                    ]
+                  : [
+                      { value: 'split', label: '⬜ Split' },
+                      { value: 'card', label: '▭ Card' },
+                      { value: 'banner', label: '▬ Banner' },
+                    ]
+                ).map((opt) => (
                   <button
                     key={opt.value}
                     onClick={() => setPopup((p) => ({ ...p, layout: opt.value }))}
@@ -552,16 +730,220 @@ export default function Settings({ shop }) {
               </div>
             </div>
 
-            {/* Image URL */}
-            <div style={popRow}>
-              <div style={popLabel}>Image URL</div>
-              <input
-                value={popup.imageUrl || ''}
-                onChange={(e) => setPopup((p) => ({ ...p, imageUrl: e.target.value }))}
-                placeholder="https://cdn.shopify.com/..."
-                style={popInput}
-              />
+            {/* Image */}
+            <div style={{ ...popRow, alignItems: 'flex-start' }}>
+              <div style={{ ...popLabel, marginTop: '8px' }}>Image</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
+                {/* Upload button */}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <label
+                    style={{
+                      padding: '8px 16px',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      color: '#374151',
+                      background: '#f9fafb',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      display: 'inline-block',
+                    }}
+                  >
+                    📁 Upload image
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          setPopup((p) => ({ ...p, imageUrl: ev.target.result }));
+                        };
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </label>
+                  {popup.imageUrl && (
+                    <button
+                      onClick={() => setPopup((p) => ({ ...p, imageUrl: '' }))}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#dc2626',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                      }}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+
+                {/* OR paste URL */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>
+                    or paste URL:
+                  </span>
+                  <input
+                    value={
+                      popup.imageUrl?.startsWith('data:')
+                        ? ''
+                        : popup.imageUrl || ''
+                    }
+                    onChange={(e) =>
+                      setPopup((p) => ({ ...p, imageUrl: e.target.value }))
+                    }
+                    placeholder="https://cdn.shopify.com/..."
+                    style={{
+                      flex: 1,
+                      padding: '6px 10px',
+                      fontSize: '12px',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '6px',
+                      outline: 'none',
+                      color: '#374151',
+                    }}
+                  />
+                </div>
+
+                {/* Image preview thumbnail */}
+                {popup.imageUrl && (
+                  <img
+                    src={popup.imageUrl}
+                    alt="preview"
+                    style={{
+                      width: '80px',
+                      height: '60px',
+                      objectFit: 'cover',
+                      objectPosition: popup.imagePosition || 'center center',
+                      borderRadius: '6px',
+                      border: '1px solid #e5e7eb',
+                    }}
+                  />
+                )}
+              </div>
             </div>
+
+            {/* Image focus — drag to set the crop focus point */}
+            {popup.imageUrl && (
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '16px',
+                  marginBottom: '16px',
+                }}
+              >
+                <div style={{ ...popLabel, paddingTop: '4px' }}>Image focus</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {/* Drag-to-focus control */}
+                  <div
+                    style={{
+                      width: '160px',
+                      height: '100px',
+                      borderRadius: '8px',
+                      border: '1px solid #e5e7eb',
+                      overflow: 'hidden',
+                      position: 'relative',
+                      cursor: 'crosshair',
+                      backgroundImage: `url(${popup.imageUrl})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: popup.imagePosition || 'center center',
+                      userSelect: 'none',
+                    }}
+                    onMouseDown={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const updatePos = (clientX, clientY) => {
+                        const x = Math.round(
+                          ((clientX - rect.left) / rect.width) * 100
+                        );
+                        const y = Math.round(
+                          ((clientY - rect.top) / rect.height) * 100
+                        );
+                        const xClamped = Math.max(0, Math.min(100, x));
+                        const yClamped = Math.max(0, Math.min(100, y));
+                        setPopup((p) => ({
+                          ...p,
+                          imagePosition: `${xClamped}% ${yClamped}%`,
+                        }));
+                      };
+                      updatePos(e.clientX, e.clientY);
+                      const onMove = (ev) => updatePos(ev.clientX, ev.clientY);
+                      const onUp = () => {
+                        window.removeEventListener('mousemove', onMove);
+                        window.removeEventListener('mouseup', onUp);
+                      };
+                      window.addEventListener('mousemove', onMove);
+                      window.addEventListener('mouseup', onUp);
+                    }}
+                    onTouchStart={(e) => {
+                      e.preventDefault();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const updatePos = (clientX, clientY) => {
+                        const x = Math.round(
+                          ((clientX - rect.left) / rect.width) * 100
+                        );
+                        const y = Math.round(
+                          ((clientY - rect.top) / rect.height) * 100
+                        );
+                        const xClamped = Math.max(0, Math.min(100, x));
+                        const yClamped = Math.max(0, Math.min(100, y));
+                        setPopup((p) => ({
+                          ...p,
+                          imagePosition: `${xClamped}% ${yClamped}%`,
+                        }));
+                      };
+                      const touch = e.touches[0];
+                      updatePos(touch.clientX, touch.clientY);
+                      const onMove = (ev) => {
+                        const t = ev.touches[0];
+                        updatePos(t.clientX, t.clientY);
+                      };
+                      const onEnd = () => {
+                        window.removeEventListener('touchmove', onMove);
+                        window.removeEventListener('touchend', onEnd);
+                      };
+                      window.addEventListener('touchmove', onMove, {
+                        passive: false,
+                      });
+                      window.addEventListener('touchend', onEnd);
+                    }}
+                  >
+                    {/* Focus dot indicator */}
+                    {(() => {
+                      const pos = popup.imagePosition || '50% 50%';
+                      const parts = pos.split(' ');
+                      const x = parseFloat(parts[0]) || 50;
+                      const y = parseFloat(parts[1]) || 50;
+                      return (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: `${x}%`,
+                            top: `${y}%`,
+                            transform: 'translate(-50%, -50%)',
+                            width: '20px',
+                            height: '20px',
+                            borderRadius: '50%',
+                            background: 'rgba(255,255,255,0.9)',
+                            border: '2px solid rgba(0,0,0,0.4)',
+                            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                            pointerEvents: 'none',
+                          }}
+                        />
+                      );
+                    })()}
+                  </div>
+
+                  {/* Helper text */}
+                  <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+                    Click or drag on the image to set focus point
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Headline */}
             <div style={popRow}>
@@ -782,12 +1164,17 @@ export default function Settings({ shop }) {
                 </span>
               </div>
             </div>
-          </div>
+            </>
+              );
+            })()}
+            </div>
+          )}
         </div>
 
         {/* RIGHT COLUMN */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* PREVIEW card */}
+          {/* PREVIEW card — hidden while the popup customizer is open */}
+          {!showPopupCustomizer && (
           <div style={card}>
             <div
               style={{
@@ -854,6 +1241,7 @@ export default function Settings({ shop }) {
               </div>
             ))}
           </div>
+          )}
 
           {/* CHANNELS card */}
           <div style={card}>
@@ -912,16 +1300,19 @@ export default function Settings({ shop }) {
             ))}
           </div>
 
-          {/* POPUP PREVIEW card */}
-          <div style={card}>
+          {/* POPUP PREVIEW card — only while the customizer is open.
+              order:-1 + sticky keeps it at the top of the right column
+              (above Channels) while you scroll the options on the left. */}
+          {showPopupCustomizer && (
+          <div style={{ ...card, order: -1, position: 'sticky', top: '16px' }}>
             <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
-              Popup preview
+              {popupDevice === 'mobile' ? 'Mobile preview' : 'Desktop preview'}
             </div>
             <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '16px' }}>
               Updates live as you edit
             </div>
 
-            {(() => {
+            {popupDevice === 'desktop' && (() => {
               const bg = popup.bgColor || '#ffffff';
               const fg = popup.textColor || '#111827';
               const accent = popup.accentColor || '#4f46e5';
@@ -933,6 +1324,7 @@ export default function Settings({ shop }) {
               const subtext = popup.subtext || '';
               const brandName = popup.brandName || '';
               const imageUrl = popup.imageUrl || '';
+              const imagePosition = popup.imagePosition || 'center center';
               const ctaStyle = popup.ctaStyle || 'rounded';
               const ctaRadius =
                 ctaStyle === 'pill' ? '50px' : ctaStyle === 'square' ? '0' : '6px';
@@ -955,7 +1347,7 @@ export default function Settings({ shop }) {
                         width: '40%',
                         flexShrink: 0,
                         background: imageUrl
-                          ? 'none'
+                          ? `#f9fafb url(${JSON.stringify(imageUrl)}) ${imagePosition}/cover no-repeat`
                           : 'linear-gradient(135deg, #667eea, #764ba2)',
                         position: 'relative',
                         overflow: 'hidden',
@@ -969,6 +1361,7 @@ export default function Settings({ shop }) {
                             width: '100%',
                             height: '100%',
                             objectFit: 'cover',
+                            objectPosition: imagePosition,
                             display: 'block',
                             position: 'absolute',
                             top: 0,
@@ -1092,6 +1485,7 @@ export default function Settings({ shop }) {
                           borderRadius: '8px',
                           marginBottom: '10px',
                           objectFit: 'cover',
+                          objectPosition: imagePosition,
                           maxHeight: '80px',
                           display: 'block',
                         }}
@@ -1201,7 +1595,160 @@ export default function Settings({ shop }) {
 
               return null;
             })()}
+
+            {popupDevice === 'mobile' && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <div
+                  style={{
+                    width: '200px',
+                    height: '360px',
+                    border: '8px solid #111827',
+                    borderRadius: '28px',
+                    overflow: 'hidden',
+                    background: '#f3f4f6',
+                    position: 'relative',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+                  }}
+                >
+                  {/* Notch */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      width: '60px',
+                      height: '16px',
+                      background: '#111827',
+                      borderRadius: '0 0 12px 12px',
+                      zIndex: 10,
+                    }}
+                  />
+
+                  {/* Screen content — simulated store page */}
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      background: '#fff',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'flex-end',
+                      paddingBottom: '16px',
+                      position: 'relative',
+                    }}
+                  >
+                    {/* Simulated store background */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        background: '#f9fafb',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        paddingTop: '24px',
+                        gap: '8px',
+                      }}
+                    >
+                      <div style={{ width: '80%', height: '80px', background: '#e5e7eb', borderRadius: '8px' }} />
+                      <div style={{ width: '60%', height: '12px', background: '#e5e7eb', borderRadius: '4px' }} />
+                      <div style={{ width: '40%', height: '12px', background: '#e5e7eb', borderRadius: '4px' }} />
+                    </div>
+
+                    {/* Mobile popup preview — card layout */}
+                    {(() => {
+                      const mp = mobilePopup;
+                      const bg = mp.bgColor || '#ffffff';
+                      const fg = mp.textColor || '#111827';
+                      const accent = mp.accentColor || '#4f46e5';
+                      const ctaR =
+                        (mp.ctaStyle || 'pill') === 'pill'
+                          ? '50px'
+                          : mp.ctaStyle === 'square'
+                          ? '0'
+                          : '8px';
+                      const imageUrl = mp.imageUrl || '';
+                      const headline = mp.headline || 'Get notified about deals';
+
+                      return (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            bottom: '12px',
+                            left: '8px',
+                            right: '8px',
+                            background: bg,
+                            borderRadius: '12px',
+                            overflow: 'hidden',
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+                            zIndex: 5,
+                          }}
+                        >
+                          {imageUrl && (
+                            <img
+                              src={imageUrl}
+                              alt=""
+                              style={{
+                                width: '100%',
+                                height: '70px',
+                                objectFit: 'cover',
+                                display: 'block',
+                                objectPosition: mp.imagePosition || '50% 50%',
+                              }}
+                            />
+                          )}
+                          <div style={{ padding: '10px 12px' }}>
+                            <div
+                              style={{
+                                fontSize: '11px',
+                                fontWeight: '600',
+                                color: fg,
+                                marginBottom: '6px',
+                                lineHeight: 1.3,
+                              }}
+                            >
+                              {headline}
+                            </div>
+                            <button
+                              style={{
+                                width: '100%',
+                                padding: '7px',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                background: accent,
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: ctaR,
+                                marginBottom: '4px',
+                              }}
+                            >
+                              {mp.allowText || 'Allow'}
+                            </button>
+                            <div style={{ fontSize: '9px', color: '#9ca3af', textAlign: 'center' }}>
+                              {mp.denyText || 'No thanks'}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
+          )}
         </div>
       </div>
     </div>

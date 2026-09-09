@@ -80,6 +80,9 @@ const storeSchema = new mongoose.Schema({
     fontFamily: { type: String, default: 'inherit' },
     borderRadius: { type: Number, default: 12 },
     imageUrl: { type: String, default: '' },
+    // CSS object-position / background-position value: 'top left',
+    // 'center center', 'bottom right', etc.
+    imagePosition: { type: String, default: 'center center' },
     allowText: { type: String, default: 'Allow' },
     denyText: { type: String, default: 'No thanks' },
     customTitle: { type: String, default: '' },
@@ -100,6 +103,33 @@ const storeSchema = new mongoose.Schema({
       default: 'rounded',
     },
     overlayOpacity: { type: Number, default: 0.5 },
+    showOverlay: { type: Boolean, default: true },
+  },
+
+  // --- popup-responsive: mobile-specific overrides (screen width <= 600px).
+  // Mobile only supports card + banner (split is too wide); when a mobile
+  // config is empty the storefront falls back to the desktop `popup` above.
+  mobilePopup: {
+    layout: { type: String, enum: ['card', 'banner'], default: 'card' },
+    headline: { type: String, default: '' },
+    subtext: { type: String, default: '' },
+    brandName: { type: String, default: '' },
+    imageUrl: { type: String, default: '' },
+    imagePosition: { type: String, default: '50% 50%' },
+    accentColor: { type: String, default: '#4f46e5' },
+    bgColor: { type: String, default: '#ffffff' },
+    textColor: { type: String, default: '#111827' },
+    fontFamily: { type: String, default: 'inherit' },
+    borderRadius: { type: Number, default: 16 },
+    allowText: { type: String, default: 'Allow' },
+    denyText: { type: String, default: 'No thanks' },
+    showBranding: { type: Boolean, default: true },
+    ctaStyle: { type: String, enum: ['rounded', 'square', 'pill'], default: 'pill' },
+    position: {
+      type: String,
+      enum: ['bottom-right', 'bottom-left', 'center'],
+      default: 'center',
+    },
     showOverlay: { type: Boolean, default: true },
   },
 
