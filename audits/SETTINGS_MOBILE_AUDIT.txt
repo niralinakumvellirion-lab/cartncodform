@@ -1,0 +1,108 @@
+SETTINGS_MOBILE_AUDIT — self-audit
+==================================
+Branch:  popup-responsive (continued)
+Date:    2026-09-10
+File:    frontend/app/admin/screens/Settings.jsx
+
+
+1. isMobileView state + resize listener
+---------------------------------------
+  CONFIRMED. Added near the other state:
+    const [isMobileView, setIsMobileView] = useState(false);
+    useEffect(() => {
+      const check = () => setIsMobileView(window.innerWidth <= 768);
+      check();
+      window.addEventListener('resize', check);
+      return () => window.removeEventListener('resize', check);
+    }, []);
+  SSR-safe: initial state false, `check()` runs only after mount.
+
+
+2. Order-based approach removed
+------------------------------
+  CONFIRMED. Deleted the module-level `<style id="ccf-settings-style">`
+  injection entirely. Removed every `className="ccf-settings-grid"` (1) and
+  `className="ccf-popup-card"` (2). A repo grep for ccf-settings-grid /
+  ccf-popup-card / ccf-settings-style now returns nothing.
+
+
+3. Card variables extracted
+---------------------------
+  CONFIRMED. Six consts declared before `return`, each holding the existing
+  card JSX verbatim:
+    voiceCard         (<div style={card}> ... </div>)
+    howOftenCard      (<div style={card}> ... incl. Save button ... </div>)
+    popupCard         (!showPopupCustomizer ? <trigger card> : <full panel>)
+                      — the two `className="ccf-popup-card"` and `order:-1`
+                        removed; trigger padding uses isMobileView
+    pushPreviewCard   (<div style={card}> ... push "Preview" ... </div>)
+    channelsCard      (<div style={card}> ... Channels ... </div>)
+    popupPreviewCard  (<div style={{ ...card, position:
+                        isMobileView ? 'static' : 'sticky', top: '16px' }}>
+                        ... Desktop/Mobile preview + phone frame ... </div>)
+  The customizer field IIFE (const popup = activePopup / setPopup =
+  setActivePopup shadowing) is preserved inside popupCard's panel branch.
+
+
+4. Mobile layout — single column, popup first
+--------------------------------------------
+  CONFIRMED. When isMobileView:
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {popupCard}
+      {showPopupCustomizer && popupPreviewCard}
+      {voiceCard}
+      {howOftenCard}
+      {channelsCard}
+    </div>
+  Exactly the spec's order. No grid, no nested columns, so nothing to
+  re-order — DOM order === visual order. pushPreviewCard is NOT rendered on
+  mobile (only the live popup preview when the customizer is open).
+
+
+5. Desktop layout — 2-column grid unchanged
+------------------------------------------
+  CONFIRMED. When !isMobileView:
+    <div style={{ display: 'grid',
+                  gridTemplateColumns: 'minmax(0, 1fr) 380px',
+                  gap: '16px', alignItems: 'start' }}>
+      <div flex-column>{popupCard}{voiceCard}{howOftenCard}</div>
+      <div flex-column>
+        {showPopupCustomizer ? popupPreviewCard : pushPreviewCard}
+        {channelsCard}
+      </div>
+    </div>
+  Same structure/behaviour as before (popup card first in the left column,
+  preview swaps in the right column, channels below it).
+
+
+6. Mobile card improvements
+---------------------------
+  - card padding: `padding: isMobileView ? '16px' : '20px 24px'` on the shared
+    `card` style object AND on the popupCard trigger's inline style.
+  - Tone pill row: `flexWrap: isMobileView ? 'wrap' : 'nowrap'`. Language row
+    already had `flexWrap: 'wrap'`.
+  - Number buttons (per day/week): unchanged size (spec: keep same).
+  - Sign-off input: keeps `flex: 1` (fills the row); on the single-column
+    mobile card that is effectively full width.
+  - popupPreviewCard: `position` switches to `static` on mobile so it doesn't
+    try to stick inside the flat column.
+  (Colour-picker rows were left as-is — they already wrap within the narrow
+   mobile card; a dedicated <400px column stack was judged unnecessary and
+   is noted here as a possible follow-up.)
+
+
+7. BUILD
+--------
+  cd frontend && npm run build  ->  ✓ Compiled successfully, zero warnings.
+                                    /admin/settings-page 7.7 -> 7.6 kB
+
+
+8. LINE COUNT
+-------------
+  Before: 1746
+  After:  1759   (+13 net: -22 style block, +11 resize effect, +~40 new
+                  render tree, minus removed column-wrapper/grid boilerplate)
+
+
+STATUS: COMPLETE. Build green, mobile renders single-column popup-first,
+desktop 2-column grid unchanged.

@@ -3,26 +3,6 @@
 import { useState, useEffect } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
 
-// popup-responsive: collapse the 2-column layout on narrow admin viewports.
-if (typeof document !== 'undefined') {
-  const id = 'ccf-settings-style';
-  if (!document.getElementById(id)) {
-    const s = document.createElement('style');
-    s.id = id;
-    s.textContent = `
-      @media (max-width: 768px) {
-        .ccf-settings-grid {
-          grid-template-columns: 1fr !important;
-        }
-        .ccf-settings-grid > div:last-child {
-          order: -1;
-        }
-      }
-    `;
-    document.head.appendChild(s);
-  }
-}
-
 const TONES = ['friendly', 'direct', 'playful'];
 const LANGS = [
   { value: 'en', label: 'English' },
@@ -50,6 +30,15 @@ export default function Settings({ shop }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+
+  // popup-responsive: mobile-first layout switch (admin viewport <= 768px).
+  const [isMobileView, setIsMobileView] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobileView(window.innerWidth <= 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   useEffect(() => {
     if (!shop) return;
@@ -196,7 +185,7 @@ export default function Settings({ shop }) {
     background: '#fff',
     border: '1px solid #e5e7eb',
     borderRadius: '10px',
-    padding: '20px 24px',
+    padding: isMobileView ? '16px' : '20px 24px',
   };
 
   // --- popup customization row styles ---
@@ -251,38 +240,10 @@ export default function Settings({ shop }) {
     cursor: 'pointer',
   });
 
-  return (
-    <div style={{ padding: '0 24px 24px', maxWidth: '1100px', margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '20px' }}>
-        <h1
-          style={{
-            fontSize: '24px',
-            fontWeight: '700',
-            color: '#111827',
-            margin: '0 0 6px',
-          }}
-        >
-          Settings
-        </h1>
-        <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
-          Two minutes here shapes every message.
-        </p>
-      </div>
-
-      <div
-        className="ccf-settings-grid"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) 380px',
-          gap: '16px',
-          alignItems: 'start',
-        }}
-      >
-        {/* LEFT COLUMN */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* YOUR VOICE card */}
-          <div style={card}>
+  // popup-responsive: each card is a variable so the mobile (single-column)
+  // and desktop (2-column) layouts can arrange them without duplicating JSX.
+  const voiceCard = (
+    <div style={card}>
             <div
               style={{
                 fontSize: '16px',
@@ -310,7 +271,7 @@ export default function Settings({ shop }) {
               }}
             >
               <div style={rowLabel}>Tone</div>
-              <div style={{ display: 'flex', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: isMobileView ? 'wrap' : 'nowrap' }}>
                 {TONES.map((t) => (
                   <button
                     key={t}
@@ -417,9 +378,10 @@ export default function Settings({ shop }) {
               />
             </div>
           </div>
+  );
 
-          {/* HOW OFTEN card */}
-          <div style={card}>
+  const howOftenCard = (
+    <div style={card}>
             <div
               style={{
                 fontSize: '16px',
@@ -556,22 +518,22 @@ export default function Settings({ shop }) {
               )}
             </div>
           </div>
+  );
 
-          {/* POPUP CUSTOMIZATION — behind a "Customize popup" button.
-              order:-1 keeps this first in the left column, above "Your voice". */}
-          {!showPopupCustomizer ? (
-            <div
-              style={{
-                order: -1,
-                background: '#fff',
-                border: '1px solid #e5e7eb',
-                borderRadius: '10px',
-                padding: '20px 24px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
-            >
+  // The popup card is either the compact "Customize popup" trigger or the
+  // full customizer panel, depending on showPopupCustomizer.
+  const popupCard = !showPopupCustomizer ? (
+    <div
+      style={{
+        background: '#fff',
+        border: '1px solid #e5e7eb',
+        borderRadius: '10px',
+        padding: isMobileView ? '16px' : '20px 24px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}
+    >
               <div>
                 <div
                   style={{
@@ -605,8 +567,8 @@ export default function Settings({ shop }) {
                 Customize popup
               </button>
             </div>
-          ) : (
-            <div style={{ ...card, order: -1 }}>
+  ) : (
+    <div style={{ ...card }}>
               {/* Header with back button */}
               <div
                 style={{
@@ -1168,14 +1130,10 @@ export default function Settings({ shop }) {
               );
             })()}
             </div>
-          )}
-        </div>
+  );
 
-        {/* RIGHT COLUMN */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* PREVIEW card — hidden while the popup customizer is open */}
-          {!showPopupCustomizer && (
-          <div style={card}>
+  const pushPreviewCard = (
+    <div style={card}>
             <div
               style={{
                 fontSize: '14px',
@@ -1240,11 +1198,11 @@ export default function Settings({ shop }) {
                 </div>
               </div>
             ))}
-          </div>
-          )}
+    </div>
+  );
 
-          {/* CHANNELS card */}
-          <div style={card}>
+  const channelsCard = (
+    <div style={card}>
             <div
               style={{
                 fontSize: '14px',
@@ -1298,13 +1256,12 @@ export default function Settings({ shop }) {
                 </div>
               </div>
             ))}
-          </div>
+    </div>
+  );
 
-          {/* POPUP PREVIEW card — only while the customizer is open.
-              order:-1 + sticky keeps it at the top of the right column
-              (above Channels) while you scroll the options on the left. */}
-          {showPopupCustomizer && (
-          <div style={{ ...card, order: -1, position: 'sticky', top: '16px' }}>
+  // Sticky on desktop so it stays visible while scrolling the options.
+  const popupPreviewCard = (
+    <div style={{ ...card, position: isMobileView ? 'static' : 'sticky', top: '16px' }}>
             <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
               {popupDevice === 'mobile' ? 'Mobile preview' : 'Desktop preview'}
             </div>
@@ -1747,10 +1704,56 @@ export default function Settings({ shop }) {
                 </div>
               </div>
             )}
-          </div>
-          )}
-        </div>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: '0 24px 24px', maxWidth: '1100px', margin: '0 auto' }}>
+      {/* Header */}
+      <div style={{ marginBottom: '20px' }}>
+        <h1
+          style={{
+            fontSize: '24px',
+            fontWeight: '700',
+            color: '#111827',
+            margin: '0 0 6px',
+          }}
+        >
+          Settings
+        </h1>
+        <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
+          Two minutes here shapes every message.
+        </p>
       </div>
+
+      {isMobileView ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {popupCard}
+          {showPopupCustomizer && popupPreviewCard}
+          {voiceCard}
+          {howOftenCard}
+          {channelsCard}
+        </div>
+      ) : (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'minmax(0, 1fr) 380px',
+            gap: '16px',
+            alignItems: 'start',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {popupCard}
+            {voiceCard}
+            {howOftenCard}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {showPopupCustomizer ? popupPreviewCard : pushPreviewCard}
+            {channelsCard}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
