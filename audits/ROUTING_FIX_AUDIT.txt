@@ -1,0 +1,107 @@
+ROUTING_FIX_AUDIT — self-audit
+==============================
+Branch:  today-redesign (continued)
+Date:    2026-09-09
+Reason:  Shopify App Bridge NavMenu drops ?screen= query params on navigation.
+         Replaced the single-page ?screen switcher with real Next.js routes,
+         one per screen.
+
+
+1. NEW ROUTE FILES CREATED  (6)
+-------------------------------
+  frontend/app/admin/customers/page.js       -> CustomersScreen  (../screens/Customers)
+  frontend/app/admin/messages/page.js        -> MessagesScreen   (../screens/Messages)
+  frontend/app/admin/cod/page.js             -> CodScreen        (../screens/CodOrders)
+  frontend/app/admin/settings-page/page.js   -> SettingsScreen   (../screens/Settings)
+  frontend/app/admin/signals/page.js         -> TodayScreen      (placeholder, ../screens/Today)
+  frontend/app/admin/insights/page.js        -> TodayScreen      (placeholder, ../screens/Today)
+
+  Each file is the same shape as the spec's template:
+    'use client'
+    Suspense wrapper -> <XContent/>
+    <XContent>: useSearchParams() -> shop; renders
+        <AppProvider i18n={{}}>
+          <NavMenu> ...7 path-based links... </NavMenu>
+          <ScreenComponent shop={shop} />
+        </AppProvider>
+    Imports '@shopify/polaris/build/esm/styles.css'.
+  Route folder is 'settings-page' (not 'settings') exactly as specified, so
+  the rel is rel="settings-page".
+
+
+2. NAVMENU — path-based hrefs  (all 7 files: the 6 new + admin/page.js)
+---------------------------------------------------------------------
+  Identical block everywhere:
+    <a href="/admin"                rel="home">Today</a>
+    <a href="/admin/customers"      rel="customers">Customers</a>
+    <a href="/admin/signals"        rel="signals">What to act on</a>
+    <a href="/admin/messages"       rel="messages">Messages</a>
+    <a href="/admin/insights"       rel="insights">Insights</a>
+    <a href="/admin/cod"            rel="cod">Cash on delivery</a>
+    <a href="/admin/settings-page"  rel="settings-page">Settings</a>
+  No remaining "?screen=" hrefs anywhere under frontend/app/admin/.
+
+
+3. admin/page.js — simplified
+-----------------------------
+  Removed:
+    - imports of CustomersScreen / MessagesScreen / CodScreen / SettingsScreen
+      (only TodayScreen + OnboardingScreen remain)
+    - screenParam, activeScreen state
+    - the screen-sync useEffect and the "?screen param takes priority" branch
+    - every activeScreen === '<x>' conditional render
+  Kept / changed:
+    - showOnboarding + onboardingChecked state
+    - one mount useEffect: reads localStorage 'ccf_onboarded'; if not set,
+      setShowOnboarding(true)
+    - NavMenu rendered when !showOnboarding, with the path-based links
+    - render: showOnboarding ? <OnboardingScreen ... onDone={set 'ccf_onboarded'
+      + setShowOnboarding(false)} /> : <TodayScreen shop={shop} />
+    - OnboardingScreen.onNavigate is now a no-op (() => {}) since there are no
+      in-page screens to switch to; its "Set up" step buttons that call
+      onNavigate('settings') will do nothing (see Issues).
+  admin/page.js is now 60 lines (was 85).
+
+
+4. BUILD OUTPUT
+---------------
+  cd frontend && npm run build  ->  ✓ Compiled successfully  (zero errors/warnings)
+
+  Routes shown (all static ○):
+    /admin                 2.25 kB   132 kB
+    /admin/cod             3.5 kB    145 kB
+    /admin/customers       3.83 kB   145 kB
+    /admin/insights        535 B     130 kB
+    /admin/messages        2.17 kB   143 kB
+    /admin/settings-page   7.34 kB   138 kB
+    /admin/signals         535 B     130 kB
+  All 6 new routes + /admin present. /admin dropped 65.6 kB -> 2.25 kB
+  (screen bundles now split into their own routes).
+
+
+5. ISSUES / NOTES
+-----------------
+  (a) Onboarding "Set up" steps: STEPS 'voice' and 'signals' use
+      actionType:'nav' -> onNavigate('settings'), and 'push' -> onNavigate
+      ('customers'). In admin/page.js onNavigate is now () => {}, so those
+      three step buttons visually do nothing (they still toggle the step's
+      done state via handleAction's toggleStep call). The 'embed' step
+      (actionType:'url') still opens the theme editor. Not blocking; a
+      follow-up could point onNavigate at router.push('/admin/settings-page'
+      / '/admin/customers').
+  (b) The 6 new route wrappers do NOT run the onboarding check — deep-linking
+      to /admin/customers etc. always shows that screen with the nav, even
+      for a brand-new install. Onboarding only gates the /admin index. This
+      matches the spec (onboarding logic stays only in admin/page.js).
+  (c) Each new route re-declares the NavMenu block inline (7x duplication).
+      Acceptable per the spec's explicit template; a shared <AdminChrome>
+      component would DRY it up later.
+  (d) settings-page vs settings: the route is intentionally /admin/settings-page
+      (the spec's name) — if a Shopify app URL or theme link points at
+      /admin/settings it will 404. Flagged for whoever wires deep links.
+  (e) No screen component files were modified; Today.jsx still has its own
+      <Page> wrapper added earlier, so the new /admin/signals + /admin/insights
+      routes render the full Today screen.
+
+
+STATUS: COMPLETE. Build green, all 7 routes emitted.

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { Page } from '@shopify/polaris';
 import { apiGet } from '../../../lib/api';
 
 const SIGNAL_LABELS = {
@@ -64,14 +65,32 @@ export default function Today({ shop }) {
     };
   }, [shop]);
 
+  const groupedSignals = signals
+    ? Object.values(
+        signals.reduce((acc, sig) => {
+          if (!acc[sig.type]) {
+            acc[sig.type] = { ...sig, count: 1 };
+          } else {
+            acc[sig.type].count += 1;
+            // Keep highest strength
+            if (sig.strength > acc[sig.type].strength) {
+              acc[sig.type].strength = sig.strength;
+            }
+          }
+          return acc;
+        }, {})
+      ).sort((a, b) => b.strength - a.strength)
+    : [];
+
   return (
-    <div style={{ padding: '24px', maxWidth: '1100px', margin: '0 auto' }}>
+    <Page>
+    <div style={{ maxWidth: '1100px', margin: '0 auto', paddingBottom: '24px' }}>
       {/* Header */}
-      <div style={{ marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: 0 }}>
+      <div style={{ marginBottom: '16px' }}>
+        <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 4px' }}>
           Today
         </h1>
-        <p style={{ fontSize: '13px', color: '#9ca3af', margin: '4px 0 0' }}>
+        <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
           {new Date().toLocaleDateString('en-IN', {
             weekday: 'long',
             day: 'numeric',
@@ -158,7 +177,7 @@ export default function Today({ shop }) {
               Planned for today
             </span>
             <span style={{ fontSize: '12px', color: '#9ca3af' }}>
-              {signals?.length || 0} customers, one message each
+              {groupedSignals.length} signal types, one message each
             </span>
           </div>
 
@@ -175,10 +194,10 @@ export default function Today({ shop }) {
                 }}
               />
             ))
-          ) : signals?.length ? (
-            signals.map((sig) => (
+          ) : groupedSignals.length ? (
+            groupedSignals.map((sig) => (
               <div
-                key={sig._id}
+                key={sig.type}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -211,7 +230,7 @@ export default function Today({ shop }) {
                       textAlign: 'right',
                     }}
                   >
-                    {Math.round((sig.strength || 0) * 10)}
+                    {sig.count}
                   </span>
                 </div>
               </div>
@@ -489,5 +508,6 @@ export default function Today({ shop }) {
         </div>
       </div>
     </div>
+    </Page>
   );
 }
