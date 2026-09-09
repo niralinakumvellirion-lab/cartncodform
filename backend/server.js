@@ -13,7 +13,6 @@ const codRoutes = require('./routes/cod');
 const pushRouter = require('./routes/push');
 const proxyRouter = require('./routes/proxy');
 const ScheduledJob = require('./models/ScheduledJob');
-const AutomationRule = require('./models/AutomationRule');
 const Store = require('./models/Store');
 const { sendPushToCustomers } = require('./utils/pushNotification');
 const { sendAbandonedCartEmail } = require('./utils/email');
@@ -130,8 +129,6 @@ app.use('/api/cod', codRoutes);
 app.use('/api/push', pushLimiter, pushRouter);
 const eventsRouter = require('./routes/events');
 app.use('/api/events', eventsLimiter, eventsRouter);
-const automationRouter = require('./routes/automation');
-app.use('/api/automation', automationRouter);
 const attributionRouter = require('./routes/attribution');
 app.use('/api/attribution', attributionLimiter, attributionRouter);
 const profilesRouter = require('./routes/profiles');
@@ -331,7 +328,7 @@ async function processScheduledJobs() {
 
         if (channel === 'push') {
           // Only brain-scheduled jobs (job.profileId set) get AI copy.
-          // Legacy AutomationRule jobs keep their merchant-authored payload.
+          // Legacy rule-scheduled jobs (profileId unset) keep their frozen payload.
           if (job.profileId) {
             const copy = await generateCopy(
               { ...(jobStore && jobStore.toObject ? jobStore.toObject() : {}), voice },
@@ -397,7 +394,7 @@ async function processScheduledJobs() {
             console.log(`[automation] Job ${job._id} skipped — no customer email`);
           } else {
             // Only brain-scheduled jobs (job.profileId set) get AI copy.
-            // Legacy AutomationRule jobs keep their merchant-authored payload.
+            // Legacy rule-scheduled jobs (profileId unset) keep their frozen payload.
             let copy = {};
             if (job.profileId) {
               copy = await generateCopy(

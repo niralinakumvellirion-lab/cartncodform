@@ -4,7 +4,6 @@ const Store = require('../models/Store');
 const { verifyWebhookHmac } = require('../utils/shopify');
 const { sendAbandonedCartEmail } = require('../utils/email');
 const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
-const { scheduleCartAbandonJobs, cancelJobsForOrder } = require('../utils/automationEngine');
 const PushClick = require('../models/PushClick');
 const StorefrontEvent = require('../models/StorefrontEvent');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
@@ -237,26 +236,8 @@ async function handleWebhook(source, req, res) {
 
     // Manual push only — no automatic timer.
     // Owner uses the dashboard "🔔 Push" button to send notifications.
-
-    // Schedule automation jobs for cart_abandon rules, if this is a
-    // cart webhook (not checkout) and we have a normalized cart token.
-    if (source === 'cart' && doc.sessionId) {
-      const normalizedToken = doc.sessionId.split('?')[0].trim();
-      const firstItem = savedCustomer.cartItems && savedCustomer.cartItems[0];
-
-      // Build a product URL from the first cart item, if we have a
-      // resolvable handle. Shopify doesn't give us the handle directly
-      // from cart webhooks, but we can link to /cart as a safe fallback
-      // that at least shows the actual cart contents.
-      const productUrl = `https://${shopDomain}/cart`;
-
-      scheduleCartAbandonJobs(shopDomain, normalizedToken, savedCustomer.customerId || null, {
-        cartValue: doc.cartValue,
-        productImageUrl: productImageUrl,
-        firstItemTitle: firstItem ? firstItem.title : null,
-        productUrl: productUrl,
-      });
-    }
+    // (Automated cart-abandon scheduling is handled by the Brain now — the
+    //  legacy AutomationRule scheduler was retired.)
 
     return res.status(200).json({ received: true });
   } catch (err) {
@@ -287,7 +268,22 @@ async function handleOrderWebhook(req, res) {
     console.log(`[webhook:order] Received orders/create from ${shopDomain}, cart_token: ${cartToken || 'none'}`);
 
     const customerId = order.customer?.id ? String(order.customer.id) : null;
-    await cancelJobsForOrder(shopDomain, cartToken, customerId);
+
+    // A converted shopper should stop getting reminders — cancel any pending
+    // job tied to this cart or customer. (Inlined here after the legacy
+    // automationEngine.cancelJobsForOrder was retired; works on brain jobs too.)
+    {
+      const cancelOr = [];
+      const nCart = cartToken ? cartToken.split('?')[0].trim() : null;
+      if (nCart) cancelOr.push({ cartToken: nCart });
+      if (customerId) cancelOr.push({ customerId });
+      if (cancelOr.length) {
+        await ScheduledJob.updateMany(
+          { shopDomain, status: 'pending', $or: cancelOr },
+          { status: 'cancelled', error: 'order placed' }
+        ).catch((err) => console.error('[webhook:order] cancel-on-order error:', err.message));
+      }
+    }
 
     const isTestOrder = order.test === true;
 
@@ -581,8 +577,6 @@ async function handleShopRedact(req, res) {
 
     console.log(`[gdpr] shop/redact for ${shopDomain} — deleting all data`);
 
-    const AutomationRule = require('../models/AutomationRule');
-    const ScheduledJob = require('../models/ScheduledJob');
     const PushClick = require('../models/PushClick');
     const CodOrder = require('../models/CodOrder');
     const PushSubscription = require('../models/PushSubscription');
@@ -592,7 +586,6 @@ async function handleShopRedact(req, res) {
       StorefrontEvent.deleteMany({ shopDomain }),
       CustomerPushSubscription.deleteMany({ shopDomain }),
       PushSubscription.deleteMany({ shopDomain }),
-      AutomationRule.deleteMany({ shopDomain }),
       ScheduledJob.deleteMany({ shopDomain }),
       PushClick.deleteMany({ shopDomain }),
       CodOrder.deleteMany({ shopDomain }),

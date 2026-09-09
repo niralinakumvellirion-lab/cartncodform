@@ -1,9 +1,9 @@
 const mongoose = require('mongoose');
 
 /**
- * Per-shop, per-signal-type configuration for the Brain (Phase C).
- * Replaces AutomationRule. A missing row means the defaults below:
- * enabled = true, no channel override, one step.
+ * Per-shop, per-signal-type configuration for the Brain (Phase C). This is the
+ * shop-facing control that replaced the old rule editor. A missing row means
+ * the defaults below: enabled = true, no channel override, one step.
  */
 const signalConfigSchema = new mongoose.Schema({
   shopDomain: { type: String, required: true, lowercase: true },

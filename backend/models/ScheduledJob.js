@@ -2,8 +2,9 @@ const mongoose = require('mongoose');
 
 const scheduledJobSchema = new mongoose.Schema({
   shopDomain: { type: String, required: true, lowercase: true, index: true },
-  // Phase C: brain-scheduled jobs carry no ruleId — relaxed from `required`.
-  ruleId: { type: mongoose.Schema.Types.ObjectId, ref: 'AutomationRule', default: null },
+  // Legacy field. The AutomationRule model was retired; kept so historical
+  // rows (and the "is this a brain job?" test `ruleId == null`) still work.
+  ruleId: { type: mongoose.Schema.Types.ObjectId, default: null },
   stepIndex: { type: Number, required: true, default: 0 },
 
   // --- Phase C: brain targeting / explainability ---
