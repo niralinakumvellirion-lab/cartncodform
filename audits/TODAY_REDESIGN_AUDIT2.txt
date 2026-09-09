@@ -1,0 +1,113 @@
+TODAY_REDESIGN_AUDIT2 — self-audit
+==================================
+Branch:  today-redesign
+Base:    onboarding-redesign chain (git checkout -b today-redesign)
+Date:    2026-09-09
+Files:   frontend/app/admin/screens/Today.jsx  (full rewrite)
+         frontend/app/admin/page.js            (NavMenu labels + 2 placeholder renders)
+
+
+1. SIGNAL_LABELS
+----------------
+  CONFIRMED. Added as a module-level const at the top of Today.jsx (before the
+  component), 12 entries exactly as specified:
+    cart_abandon, checkout_abandon, browse_abandon, high_intent,
+    price_hesitation, price_drop, back_in_stock, post_purchase_d3,
+    lapsing, email_capture, cod_to_prepaid, winback
+  Used in the "Planned for today" signal rows:
+    {SIGNAL_LABELS[sig.type] || sig.type.replace(/_/g, ' ')}
+
+
+2. LAYOUT — all four sections render
+-----------------------------------
+  The Polaris <Page> + <Layout> structure was removed entirely. New root is a
+  bare <div style={{ padding:'24px', maxWidth:'1100px', margin:'0 auto' }}>.
+
+  (a) HEADER            — <h1>Today</h1> + today's date via
+                          new Date().toLocaleDateString('en-IN',
+                          { weekday:'long', day:'numeric', month:'long' }).
+  (b) NARRATIVE CARD    — "✨ This week, in plain words" (orange #f97316 label);
+                          grey 60px skeleton while loading, else <p>{narrative ||
+                          'Not enough data yet.'}</p>.
+  (c) 2-COL GRID        — gridTemplateColumns:'1fr 1fr':
+                          LEFT  "Planned for today" — count line
+                                "{signals.length} customers, one message each";
+                                5 grey skeleton rows while loading; else one row
+                                per signal: label + channel pill ({sig.channel ||
+                                'push'}) + score Math.round(sig.strength*10);
+                                empty → "No signals right now."
+                          RIGHT "Yesterday" — nested 2x2 grid of stat blocks:
+                                Sent (stats.messagesSent, push/email split line),
+                                Opened or clicked (pushStats.deliveredLast7d + rate),
+                                Came back and bought (stats.conversions + % of sends),
+                                Recovered (₹stats.revenueRecovered, green #16a34a,
+                                "↑ this week").
+  (d) BOTTOM 2-COL GRID — gridTemplateColumns:'1fr 1fr':
+                          LEFT  "Recovered this week" — ₹revenueRecovered "from N
+                                messages" + a 7-bar div chart (Mon–Sun). Bars are
+                                a placeholder distribution (Math.random()*0.3 of
+                                total for days before new Date().getDay(), 0
+                                after) — flagged inline as placeholder-until-
+                                per-day-data, per the spec's own comment.
+                          RIGHT "Worth knowing" — 3 grey skeletons while loading;
+                                else insights.map with a per-index icon
+                                (↗ / 🔔 / ♻️) + text + "›" chevron; empty →
+                                "Not enough data yet."
+
+  Extra (not in the spec JSX, kept to honor the retained `error` state):
+    a small red error banner div renders above the narrative card when all
+    three profile fetches reject. Without it, `error` would be set-but-never-
+    shown. No other deviation from the provided JSX.
+
+
+3. DATA FETCHING
+----------------
+  Promise.allSettled now has FOUR entries (was three):
+    1. GET /api/profiles/:shop/weekly-narrative   (kept)  -> narrative, insights, stats
+    2. GET /api/profiles/:shop/push-stats          (kept)  -> pushStats
+    3. GET /api/profiles/:shop/signals?limit=20    (CHANGED from ?limit=3) -> signals (all)
+    4. GET /api/stores/:shop/orders                (ADDED)
+
+  Note on #4: the request is issued per the instruction, but its settled result
+  is NOT destructured/consumed. The provided layout derives every "Yesterday"
+  number from `stats` + `pushStats` (the instruction states this explicitly:
+  "derive 'yesterday' stats from existing data"). Adding an `orders` state var
+  that nothing renders would only produce an unused-var lint warning, so the
+  4th promise is fired-and-ignored. `GET /api/stores/:shopDomain/orders` is a
+  real route (routes/stores.js:36, requireAuth+requireStoreOwner, returns a
+  CodOrder array).
+
+  State: narrative, insights, stats, pushStats, signals, loading, error.
+  (Removed the old `topSignals` — `signals` now holds the full list.)
+  Imports: dropped all @shopify/polaris imports; only `apiGet` remains.
+
+
+4. page.js — NavMenu + renders
+------------------------------
+  CONFIRMED. NavMenu links updated to the prototype labels/screens:
+    today "Today" · customers "Customers" · signals "What to act on" ·
+    messages "Messages" · insights "Insights" · cod "Cash on delivery" ·
+    settings "Settings"
+  The onboarding "Setup" <a> was removed from NavMenu (per spec).
+  Added screen renders in AdminHomeContent:
+    activeScreen === 'signals'  -> <TodayScreen shop={shop} />  (placeholder)
+    activeScreen === 'insights' -> <TodayScreen shop={shop} />  (placeholder)
+  Left intact: the onboarding screen render + the first-open localStorage
+  ('ccf_onboarded') check + NavMenu still hidden while activeScreen ===
+  'onboarding'. Only the Setup *link* was removed, not the flow.
+
+
+5. BUILD
+--------
+  cd frontend && npm run build  ->  ✓ Compiled successfully
+  Zero errors, zero warnings.  /admin route: 65.5 kB (was 64.6 kB).
+
+
+6. LINE COUNT — Today.jsx
+-------------------------
+  Before:  196 lines  (wc -l: 195, no trailing newline on last line)
+  After:   494 lines  (wc -l: 493)
+  Delta:   +298
+
+
+STATUS: COMPLETE. Build green. Stopping here.

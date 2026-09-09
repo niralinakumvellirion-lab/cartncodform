@@ -1,0 +1,328 @@
+TODAY_REDESIGN_AUDIT — read-only capture
+========================================
+Date: 2026-09-09
+Scope: the current Today admin screen, plus the two backend routes it depends
+       on (weekly-narrative and signals).
+No files were modified.
+
+
+==========================================================================
+1. frontend/app/admin/screens/Today.jsx   (full file, 196 lines)
+==========================================================================
+
+  1	'use client';
+  2
+  3	import { useState, useEffect } from 'react';
+  4	import {
+  5	  Page,
+  6	  Layout,
+  7	  Card,
+  8	  BlockStack,
+  9	  InlineStack,
+ 10	  Text,
+ 11	  Badge,
+ 12	  Box,
+ 13	  Grid,
+ 14	  SkeletonBodyText,
+ 15	} from '@shopify/polaris';
+ 16	import { apiGet } from '../../../lib/api';
+ 17
+ 18	export default function Today({ shop }) {
+ 19	  const [narrative, setNarrative] = useState('');
+ 20	  const [insights, setInsights] = useState([]);
+ 21	  const [stats, setStats] = useState(null);
+ 22	  const [pushStats, setPushStats] = useState(null);
+ 23	  const [topSignals, setTopSignals] = useState([]);
+ 24	  const [loading, setLoading] = useState(true);
+ 25	  const [error, setError] = useState('');
+ 26
+ 27	  useEffect(() => {
+ 28	    if (!shop) return;
+ 29	    let cancelled = false;
+ 30	    setLoading(true);
+ 31	    setError('');
+ 32
+ 33	    Promise.allSettled([
+ 34	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/weekly-narrative`),
+ 35	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/push-stats`),
+ 36	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/signals?limit=3`),
+ 37	    ]).then(([wn, ps, sg]) => {
+ 38	      if (cancelled) return;
+ 39	      if (wn.status === 'fulfilled') {
+ 40	        setNarrative(wn.value?.narrative || '');
+ 41	        setInsights(Array.isArray(wn.value?.insights) ? wn.value.insights : []);
+ 42	        setStats(wn.value?.stats || null);
+ 43	      }
+ 44	      if (ps.status === 'fulfilled') setPushStats(ps.value || null);
+ 45	      if (sg.status === 'fulfilled') {
+ 46	        setTopSignals(Array.isArray(sg.value?.signals) ? sg.value.signals : []);
+ 47	      }
+ 48	      if (wn.status === 'rejected' && ps.status === 'rejected' && sg.status === 'rejected') {
+ 49	        setError(wn.reason?.message || 'Failed to load Today');
+ 50	      }
+ 51	      setLoading(false);
+ 52	    });
+ 53
+ 54	    return () => {
+ 55	      cancelled = true;
+ 56	    };
+ 57	  }, [shop]);
+ 58
+ 59	  return (
+ 60	    <Page title="Today">
+ 61	      <Layout>
+ 62	        {/* Weekly narrative */}
+ 63	        <Layout.Section>
+ 64	          <Card>
+ 65	            <BlockStack gap="200">
+ 66	              <Text variant="headingMd">This week</Text>
+ 67	              {loading ? (
+ 68	                <SkeletonBodyText lines={3} />
+ 69	              ) : error ? (
+ 70	                <Text tone="critical">{error}</Text>
+ 71	              ) : (
+ 72	                <Text>{narrative || 'Not enough data yet.'}</Text>
+ 73	              )}
+ 74	            </BlockStack>
+ 75	          </Card>
+ 76	        </Layout.Section>
+ 77
+ 78	        {/* Stats row — 4 tiles */}
+ 79	        <Layout.Section>
+ 80	          <Grid>
+ 81	            <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 3, xl: 3 }}>
+ 82	              <Card>
+ 83	                <BlockStack gap="100">
+ 84	                  <Text variant="headingSm" tone="subdued">Profiles seen</Text>
+ 85	                  <Text variant="headingLg">{stats?.profilesLookedAt ?? '—'}</Text>
+ 86	                </BlockStack>
+ 87	              </Card>
+ 88	            </Grid.Cell>
+ 89	            <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 3, xl: 3 }}>
+ 90	              <Card>
+ 91	                <BlockStack gap="100">
+ 92	                  <Text variant="headingSm" tone="subdued">Messages sent</Text>
+ 93	                  <Text variant="headingLg">{stats?.messagesSent ?? '—'}</Text>
+ 94	                </BlockStack>
+ 95	              </Card>
+ 96	            </Grid.Cell>
+ 97	            <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 3, xl: 3 }}>
+ 98	              <Card>
+ 99	                <BlockStack gap="100">
+100	                  <Text variant="headingSm" tone="subdued">Recovered</Text>
+101	                  <Text variant="headingLg">{stats?.conversions ?? '—'}</Text>
+102	                </BlockStack>
+103	              </Card>
+104	            </Grid.Cell>
+105	            <Grid.Cell columnSpan={{ xs: 6, sm: 3, md: 3, lg: 3, xl: 3 }}>
+106	              <Card>
+107	                <BlockStack gap="100">
+108	                  <Text variant="headingSm" tone="subdued">Revenue</Text>
+109	                  <Text variant="headingLg">
+110	                    ₹{stats?.revenueRecovered?.toLocaleString('en-IN') ?? '—'}
+111	                  </Text>
+112	                </BlockStack>
+113	              </Card>
+114	            </Grid.Cell>
+115	          </Grid>
+116	        </Layout.Section>
+117
+118	        {/* Push delivered rate */}
+119	        <Layout.Section variant="oneThird">
+120	          <Card>
+121	            <BlockStack gap="200">
+122	              <Text variant="headingMd">Push delivery</Text>
+123	              <Text variant="headingLg">
+124	                {pushStats?.rateLast7d != null
+125	                  ? `${(pushStats.rateLast7d * 100).toFixed(1)}%`
+126	                  : '—'}
+127	              </Text>
+128	              <Text tone="subdued">
+129	                {pushStats?.deliveredLast7d ?? 0} delivered of{' '}
+130	                {pushStats?.attemptedLast7d ?? 0} attempted (7d)
+131	              </Text>
+132	            </BlockStack>
+133	          </Card>
+134	        </Layout.Section>
+135
+136	        {/* What to act on — top signals */}
+137	        <Layout.Section>
+138	          <Card>
+139	            <BlockStack gap="300">
+140	              <Text variant="headingMd">What to act on</Text>
+141	              {loading ? (
+142	                <SkeletonBodyText lines={3} />
+143	              ) : topSignals?.length ? (
+144	                topSignals.map((sig) => (
+145	                  <Box
+146	                    key={sig._id}
+147	                    padding="200"
+148	                    background="bg-surface-secondary"
+149	                    borderRadius="200"
+150	                  >
+151	                    <InlineStack align="space-between" blockAlign="center">
+152	                      <BlockStack gap="100">
+153	                        <Text fontWeight="bold">{sig.type.replace(/_/g, ' ')}</Text>
+154	                        <Text tone="subdued">{sig.evidence?.[0] ?? ''}</Text>
+155	                      </BlockStack>
+156	                      <Badge
+157	                        tone={
+158	                          sig.strength > 0.7
+159	                            ? 'critical'
+160	                            : sig.strength > 0.4
+161	                            ? 'warning'
+162	                            : 'info'
+163	                        }
+164	                      >
+165	                        {`${(sig.strength * 100).toFixed(0)}%`}
+166	                      </Badge>
+167	                    </InlineStack>
+168	                  </Box>
+169	                ))
+170	              ) : (
+171	                <Text tone="subdued">No active signals right now.</Text>
+172	              )}
+173	            </BlockStack>
+174	          </Card>
+175	        </Layout.Section>
+176
+177	        {/* AI insights */}
+178	        <Layout.Section>
+179	          <Card>
+180	            <BlockStack gap="200">
+181	              <Text variant="headingMd">Insights</Text>
+182	              {loading ? (
+183	                <SkeletonBodyText lines={3} />
+184	              ) : insights?.length ? (
+185	                insights.map((ins, i) => <Text key={i}>{`• ${ins}`}</Text>)
+186	              ) : (
+187	                <Text tone="subdued">Not enough data yet.</Text>
+188	              )}
+189	            </BlockStack>
+190	          </Card>
+191	        </Layout.Section>
+192	      </Layout>
+193	    </Page>
+194	  );
+195	}
+196
+
+  Notes (observations only):
+  * Uses <Page title="Today"> + <Layout> — a Polaris page wrapper. Since the
+    admin shell dropped the Frame (page.js), this renders bare, no app chrome.
+  * Fetches 3 endpoints in parallel via Promise.allSettled:
+      GET /api/profiles/:shop/weekly-narrative   -> narrative, insights[], stats
+      GET /api/profiles/:shop/push-stats         -> pushStats tile
+      GET /api/profiles/:shop/signals?limit=3    -> "What to act on" list
+    Error is only surfaced when ALL THREE reject; a partial failure shows
+    em-dashes / empty states silently.
+  * 6 sections: This week (narrative) · 4 stat tiles · Push delivery
+    (oneThird) · What to act on (top 3 signals) · Insights (bulleted).
+  * Stat tiles read stats.profilesLookedAt / messagesSent / conversions /
+    revenueRecovered — these match analyticsService.computeWeeklyStats()'s
+    return keys exactly (profilesLookedAt, messagesSent, conversions,
+    revenueRecovered, topProduct, bestChannel). topProduct / bestChannel are
+    returned but NOT shown on this screen.
+  * Signal rows key on sig._id and render sig.type, sig.evidence[0],
+    sig.strength (0..1, shown as %). Badge tone thresholds: >0.7 critical,
+    >0.4 warning, else info.
+  * "Recovered" tile label vs. value: labelled "Recovered", shows
+    stats.conversions (recovered-cart count).
+  * No refresh control, no date-range control, no auto-poll — one fetch per
+    shop change.
+
+
+==========================================================================
+2. backend/routes/profiles.js — signals + weekly-narrative routes
+==========================================================================
+
+--- 2a. GET /:shopDomain/signals  (lines 21-47) ------------------------
+
+ 21	/**
+ 22	 * GET /api/profiles/:shopDomain/signals
+ 23	 * Query: type (optional), limit (default 20, max 100)
+ 24	 * -> { signals: [...] }  strongest first
+ 25	 */
+ 26	router.get('/:shopDomain/signals', requireAuth, requireStoreOwner, async (req, res) => {
+ 27	  try {
+ 28	    const shop = req.params.shopDomain.trim().toLowerCase();
+ 29
+ 30	    let limit = parseInt(req.query.limit, 10);
+ 31	    if (!Number.isFinite(limit) || limit < 1) limit = 20;
+ 32	    if (limit > 100) limit = 100;
+ 33
+ 34	    const filter = { shopDomain: shop };
+ 35	    if (req.query.type) filter.type = req.query.type;
+ 36
+ 37	    const signals = await Signal.find(filter)
+ 38	      .sort({ strength: -1 })
+ 39	      .limit(limit)
+ 40	      .populate('profileId', 'identifiers stage');
+ 41
+ 42	    return res.json({ signals });
+ 43	  } catch (err) {
+ 44	    console.error('[profiles] GET signals error:', err.message);
+ 45	    return res.status(500).json({ error: 'Failed to fetch signals' });
+ 46	  }
+ 47	});
+
+--- 2b. GET /:shopDomain/weekly-narrative  (lines 254-286) -------------
+
+254	/**
+255	 * GET /api/profiles/:shopDomain/weekly-narrative
+256	 * -> { narrative, insights: [string], stats }
+257	 * The full computation is cached in-process for 1 hour per shop so an admin
+258	 * page load does not re-run aggregations + LLM calls every time.
+259	 */
+260	const narrativeCache = new Map(); // shopDomain -> { at: ms, data }
+261	const NARRATIVE_TTL = 60 * 60 * 1000;
+262
+263	router.get('/:shopDomain/weekly-narrative', requireAuth, requireStoreOwner, async (req, res) => {
+264	  try {
+265	    const shop = req.params.shopDomain.trim().toLowerCase();
+266
+267	    const cached = narrativeCache.get(shop);
+268	    if (cached && Date.now() - cached.at < NARRATIVE_TTL) {
+269	      return res.json(cached.data);
+270	    }
+271
+272	    const stats = await computeWeeklyStats(shop);
+273	    const rawInsights = await computeInsights(shop);
+274	    const [narrative, insights] = await Promise.all([
+275	      generateWeeklyNarrative(shop, stats),
+276	      generateInsights(shop, rawInsights),
+277	    ]);
+278
+279	    const data = { narrative, insights, stats };
+280	    narrativeCache.set(shop, { at: Date.now(), data });
+281	    return res.json(data);
+282	  } catch (err) {
+283	    console.error('[profiles] GET weekly-narrative error:', err.message);
+284	    return res.status(500).json({ error: 'Failed to build weekly narrative' });
+285	  }
+286	});
+
+  Notes (observations only):
+  * Both routes: requireAuth + requireStoreOwner, scoped by :shopDomain
+    (trimmed + lowercased), never by email.
+  * signals: Signal model queried with `(filter)` then chained
+    `.sort({ strength: -1 }).limit(limit).populate('profileId', ...)`.
+    Response is `{ signals }` — the raw docs (with populated profileId).
+    Today.jsx reads sig._id / sig.type / sig.strength / sig.evidence[]
+    from these; it does NOT use the populated profileId.
+  * weekly-narrative: in-process Map cache, 1-hour TTL, per shopDomain.
+    Cache is module-level → shared across requests, lost on process restart,
+    and NOT invalidated here (PATCH /settings elsewhere does
+    `narrativeCache.delete(shop)` on a voice change).
+  * `stats` in the response is computeWeeklyStats(shop) verbatim
+    (deterministic; the LLM only narrates). Keys: profilesLookedAt,
+    messagesSent, conversions, revenueRecovered, topProduct, bestChannel.
+  * `insights` is generateInsights(shop, computeInsights(shop)) — an array
+    of strings. computeInsights uses a 30-day window; computeWeeklyStats
+    uses 7 days.
+  * generateWeeklyNarrative / generateInsights come from aiService; they
+    fall back to deterministic text when LLM_API_KEY is unset (per earlier
+    audits, it is unset in Render).
+
+
+END OF CAPTURE — no modifications made.

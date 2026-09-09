@@ -1,0 +1,371 @@
+ONBOARDING_REDESIGN_AUDIT — read-only capture
+=============================================
+Date: 2026-09-09
+Scope: current admin shell, current Onboarding screen, and the prototype's
+       Welcome/Onboarding screen for reference.
+No files were modified.
+
+
+==========================================================================
+1. frontend/app/admin/page.js   (full file, 62 lines)
+==========================================================================
+
+  1	'use client';
+  2
+  3	import { Suspense, useState, useEffect } from 'react';
+  4	import { AppProvider } from '@shopify/polaris';
+  5	import { NavMenu } from '@shopify/app-bridge-react';
+  6	import { useSearchParams } from 'next/navigation';
+  7	import '@shopify/polaris/build/esm/styles.css';
+  8
+  9	import TodayScreen from './screens/Today';
+ 10	import CustomersScreen from './screens/Customers';
+ 11	import MessagesScreen from './screens/Messages';
+ 12	import CodScreen from './screens/CodOrders';
+ 13	import SettingsScreen from './screens/Settings';
+ 14	import OnboardingScreen from './screens/Onboarding';
+ 15
+ 16	function AdminHomeContent() {
+ 17	  const searchParams = useSearchParams();
+ 18	  const shop = searchParams.get('shop') || '';
+ 19	  const screenParam = searchParams.get('screen') || 'today';
+ 20	  const [activeScreen, setActiveScreen] = useState(screenParam);
+ 21
+ 22	  // Sync activeScreen when URL screen param changes
+ 23	  useEffect(() => {
+ 24	    if (screenParam && screenParam !== activeScreen) {
+ 25	      setActiveScreen(screenParam);
+ 26	    }
+ 27	  }, [screenParam]);
+ 28
+ 29	  return (
+ 30	    <AppProvider i18n={{}}>
+ 31	      <NavMenu>
+ 32	        <a href="?screen=today" rel="today">Today</a>
+ 33	        <a href="?screen=customers" rel="customers">Customers</a>
+ 34	        <a href="?screen=messages" rel="messages">Messages</a>
+ 35	        <a href="?screen=cod" rel="cod">COD Orders</a>
+ 36	        <a href="?screen=settings" rel="settings">Settings</a>
+ 37	        <a href="?screen=onboarding" rel="onboarding">Setup</a>
+ 38	      </NavMenu>
+ 39
+ 40	      {activeScreen === 'today' && <TodayScreen shop={shop} />}
+ 41	      {activeScreen === 'customers' && <CustomersScreen shop={shop} />}
+ 42	      {activeScreen === 'messages' && <MessagesScreen shop={shop} />}
+ 43	      {activeScreen === 'cod' && <CodScreen shop={shop} />}
+ 44	      {activeScreen === 'settings' && <SettingsScreen shop={shop} />}
+ 45	      {activeScreen === 'onboarding' && (
+ 46	        <OnboardingScreen
+ 47	          shop={shop}
+ 48	          onNavigate={(screen) => setActiveScreen(screen)}
+ 49	        />
+ 50	      )}
+ 51	    </AppProvider>
+ 52	  );
+ 53	}
+ 54
+ 55	export default function AdminHome() {
+ 56	  return (
+ 57	    <Suspense fallback={null}>
+ 58	      <AdminHomeContent />
+ 59	    </Suspense>
+ 60	  );
+ 61	}
+ 62
+
+  Notes (observations only):
+  * NavMenu ("Setup" link, rel="onboarding") is the only entry point to the
+    Onboarding screen. There is no auto-redirect to onboarding on first load —
+    default screen is 'today'.
+  * The Onboarding screen is rendered inline in the AppProvider (no Frame /
+    Polaris Navigation wrapper anymore).
+  * `onNavigate` is passed to OnboardingScreen so its in-screen buttons can
+    switch `activeScreen` (used by the "Go to Settings" step).
+  * `shop` comes from the `?shop=` query param; empty string if absent.
+
+
+==========================================================================
+2. frontend/app/admin/screens/Onboarding.jsx   (full file, 135 lines)
+==========================================================================
+
+  1	'use client';
+  2
+  3	import { useState, useCallback } from 'react';
+  4	import {
+  5	  Page,
+  6	  Layout,
+  7	  Card,
+  8	  BlockStack,
+  9	  InlineStack,
+ 10	  Text,
+ 11	  Button,
+ 12	  Checkbox,
+ 13	} from '@shopify/polaris';
+ 14
+ 15	// Manual per-step "done" state — one localStorage flag per step.
+ 16	// (See PHASE_G3_AUDIT open questions re: CLAUDE.md "no localStorage in admin".)
+ 17	function readDone(id) {
+ 18	  try {
+ 19	    return (
+ 20	      typeof window !== 'undefined' &&
+ 21	      window.localStorage.getItem(`ccf_step_${id}_done`) === 'true'
+ 22	    );
+ 23	  } catch {
+ 24	    return false;
+ 25	  }
+ 26	}
+ 27	function writeDone(id, done) {
+ 28	  try {
+ 29	    window.localStorage.setItem(`ccf_step_${id}_done`, done ? 'true' : 'false');
+ 30	  } catch (e) {
+ 31	    /* storage unavailable — the checkbox still updates in-memory */
+ 32	  }
+ 33	}
+ 34
+ 35	export default function Onboarding({ shop, onNavigate }) {
+ 36	  const codLink = `https://${shop}/apps/cartncodform/cod-form`;
+ 37
+ 38	  const STEPS = [
+ 39	    {
+ 40	      id: 'embed',
+ 41	      title: 'Enable App Embed block',
+ 42	      description: 'Turn on the CartnCodForm embed in your theme.',
+ 43	      action: 'Open Theme Editor',
+ 44	      url: `https://${shop}/admin/themes/current/editor?context=apps`,
+ 45	    },
+ 46	    {
+ 47	      id: 'automation',
+ 48	      title: 'Configure your first signal',
+ 49	      description: 'Go to Settings → Signals and enable cart abandonment.',
+ 50	      action: 'Go to Settings',
+ 51	      url: null,
+ 52	      onAction: () => onNavigate && onNavigate('settings'),
+ 53	    },
+ 54	    {
+ 55	      id: 'push',
+ 56	      title: 'Verify push notifications',
+ 57	      description: 'Add a product to cart on your store and wait for a push.',
+ 58	      action: 'Open store',
+ 59	      url: `https://${shop}`,
+ 60	    },
+ 61	    {
+ 62	      id: 'cod',
+ 63	      title: 'Share the COD form',
+ 64	      description: `Your COD form: ${codLink}`,
+ 65	      action: 'Copy link',
+ 66	      url: null,
+ 67	      onAction: () => {
+ 68	        try {
+ 69	          navigator.clipboard.writeText(codLink);
+ 70	        } catch (e) {
+ 71	          /* clipboard blocked */
+ 72	        }
+ 73	      },
+ 74	    },
+ 75	  ];
+ 76
+ 77	  const [done, setDone] = useState(() => {
+ 78	    const map = {};
+ 79	    for (const s of STEPS) map[s.id] = readDone(s.id);
+ 80	    return map;
+ 81	  });
+ 82
+ 83	  const toggle = useCallback((id, checked) => {
+ 84	    writeDone(id, checked);
+ 85	    setDone((prev) => ({ ...prev, [id]: checked }));
+ 86	  }, []);
+ 87
+ 88	  const completed = STEPS.filter((s) => done[s.id]).length;
+ 89
+ 90	  return (
+ 91	    <Page title="Setup">
+ 92	      <Layout>
+ 93	        <Layout.Section>
+ 94	          <Text variant="headingMd">
+ 95	            {completed} of {STEPS.length} steps done
+ 96	          </Text>
+ 97	        </Layout.Section>
+ 98
+ 99	        {STEPS.map((step) => (
+100	          <Layout.Section key={step.id}>
+101	            <Card>
+102	              <InlineStack gap="300" blockAlign="start" wrap={false}>
+103	                <Checkbox
+104	                  label={step.title}
+105	                  labelHidden
+106	                  checked={!!done[step.id]}
+107	                  onChange={(checked) => toggle(step.id, checked)}
+108	                />
+109	                <BlockStack gap="200">
+110	                  <BlockStack gap="100">
+111	                    <Text variant="bodyMd" fontWeight="bold">
+112	                      {step.title}
+113	                    </Text>
+114	                    <Text tone="subdued">{step.description}</Text>
+115	                  </BlockStack>
+116	                  <InlineStack>
+117	                    <Button
+118	                      size="slim"
+119	                      url={step.url || undefined}
+120	                      external={Boolean(step.url)}
+121	                      onClick={step.url ? undefined : step.onAction}
+122	                    >
+123	                      {step.action}
+124	                    </Button>
+125	                  </InlineStack>
+126	                </BlockStack>
+127	              </InlineStack>
+128	            </Card>
+129	          </Layout.Section>
+130	        ))}
+131	      </Layout>
+132	    </Page>
+133	  );
+134	}
+135
+
+  Notes (observations only):
+  * Per-step "done" is persisted ONLY in localStorage (`ccf_step_<id>_done`),
+    keyed per browser. The file's own comment (lines 15-16) flags this as a
+    CLAUDE.md violation ("No localStorage in the admin (iframe)"). Nothing is
+    written to the backend (`Store.onboarding.steps` exists in the schema but
+    is not used here).
+  * 4 steps: embed / automation / push / cod. Two open external URLs
+    (`url` set → Button renders as an external link), two run an `onAction`
+    (Settings navigation via `onNavigate`, and `navigator.clipboard` copy).
+  * No progress bar — just a "{n} of 4 steps done" heading.
+  * Uses `<Page title="Setup">` — since the Polaris Frame was removed from
+    page.js this is a bare Page with no app chrome around it.
+  * `shop` is interpolated straight into template-literal URLs with no
+    encodeURIComponent.
+
+
+==========================================================================
+3. docs/cartncodform-v2-prototype.jsx — Onboarding / Welcome screen
+==========================================================================
+(file is 827 lines; the onboarding-relevant sections are reproduced below)
+
+--- 3a. The Onboarding screen component (lines 248-287) ------------------
+
+248	/* ---------- Screens ---------- */
+249	function Onboarding({ steps, setSteps, onFinish, voice }) {
+250	  const done = steps.filter(Boolean).length;
+251	  const items = [
+252	    { t: "Turn on the storefront block", d: "Adds tracking and the notification prompt to your theme. One click in the theme editor." },
+253	    { t: "Set your voice", d: `Tone, emoji, language. Every message gets written in it. Currently: ${voice.tone}, ${voice.emoji ? "emoji on" : "no emoji"}, ${voice.lang}.` },
+254	    { t: "Choose what to act on", d: "Ten signals are on by default. Turn off any you don't want." },
+255	    { t: "Send yourself a test", d: "A push to this browser so you can see what customers will see." },
+256	  ];
+257	  return (
+258	    <div style={{ maxWidth: 720, margin: "40px auto" }}>
+259	      <div style={{ marginBottom: 24 }}>
+260	        <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>Welcome to CartnCodForm</h1>
+261	        <p style={{ color: T.sub, margin: "6px 0 0", fontSize: 14, lineHeight: 1.5 }}>Four steps. After this, it runs on its own — you'll open it to see what happened, not to do work.</p>
+262	      </div>
+263	      <Card pad={false}>
+264	        <div style={{ padding: "14px 20px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+265	          <span style={{ fontSize: 13, fontWeight: 500 }}>{done} of 4 done</span>
+266	          <div style={{ width: 160, height: 6, background: T.neutralBg, borderRadius: 3 }}><div style={{ width: `${done * 25}%`, height: 6, background: T.successText, borderRadius: 3, transition: "width .2s" }} /></div>
+267	        </div>
+268	        {items.map((it, i) => (
+269	          <div key={i} style={{ display: "flex", gap: 14, padding: "16px 20px", borderBottom: i < 3 ? `1px solid ${T.border}` : "none", alignItems: "flex-start" }}>
+270	            <button onClick={() => setSteps(steps.map((s, j) => (j === i ? !s : s)))} aria-label={steps[i] ? "Mark not done" : "Mark done"} style={{ width: 22, height: 22, borderRadius: 11, border: `2px solid ${steps[i] ? T.successText : "#BABABA"}`, background: steps[i] ? T.successText : "#FFF", display: "grid", placeItems: "center", cursor: "pointer", flexShrink: 0, marginTop: 1 }}>
+271	              {steps[i] && <Check size={13} color="#FFF" strokeWidth={3} />}
+272	            </button>
+273	            <div style={{ flex: 1 }}>
+274	              <div style={{ fontWeight: 500, fontSize: 14, textDecoration: steps[i] ? "line-through" : "none", color: steps[i] ? T.faint : T.text }}>{it.t}</div>
+275	              <div style={{ fontSize: 13, color: T.sub, marginTop: 2, lineHeight: 1.5 }}>{it.d}</div>
+276	            </div>
+277	            {!steps[i] && <Btn small onClick={() => setSteps(steps.map((s, j) => (j === i ? true : s)))}>{i === 3 ? "Send test" : i === 0 ? "Open theme editor" : "Set up"}</Btn>}
+278	          </div>
+279	        ))}
+280	      </Card>
+281	      <div style={{ marginTop: 16, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+282	        <Btn onClick={onFinish}>Skip for now</Btn>
+283	        <Btn primary disabled={done < 4} onClick={onFinish}>Go to Today</Btn>
+284	      </div>
+285	    </div>
+286	  );
+287	}
+
+--- 3b. App shell wiring for onboarding (lines 769-819) -----------------
+
+769	/* ---------- App shell ---------- */
+770	export default function App() {
+771	  const [onboarded, setOnboarded] = useState(false);
+772	  const [steps, setSteps] = useState([true, false, false, false]);
+773	  const [view, setView] = useState("today");
+774	  const [customer, setCustomer] = useState(null);
+775	  const [voice, setVoice] = useState({ tone: "warm", emoji: true, lang: "en" });
+776	  const [caps, setCaps] = useState({ day: 1, week: 3 });
+777	  const [signalsOn, setSignalsOn] = useState(Object.fromEntries(SIGNAL_DEFS.map((s) => [s.id, !["winback", "checkout_abandon"].includes(s.id)])));
+778	  const [orders, setOrders] = useState(COD_ORDERS);
+779	  const [toast, setToast] = useState(null);
+780
+781	  const nav = [
+782	    ["today", "Today", Home], ["customers", "Customers", Users], ["signals", "What to act on", Radio],
+783	    ["messages", "Messages", MessageSquare], ["insights", "Insights", BarChart3], ["cod", "Cash on delivery", Package], ["settings", "Settings", SettingsIcon],
+784	  ];
+785	  const go = (v) => { setView(v); setCustomer(null); };
+786
+787	  return (
+788	    <div style={{ fontFamily: T.font, color: T.text, background: T.pageBg, minHeight: "100vh", fontSize: 14 }}>
+789	      {/* Shopify admin chrome (context only) */}
+790	      <div style={{ background: "#1A1A1A", color: "#E3E3E3", height: 44, display: "flex", alignItems: "center", padding: "0 16px", gap: 16, fontSize: 13 }}>
+791	        <span style={{ fontWeight: 600, color: "#FFF" }}>shopify</span>
+792	        <div style={{ flex: 1, maxWidth: 480, background: "#303030", borderRadius: 8, height: 28, display: "flex", alignItems: "center", padding: "0 10px", color: "#8A8A8A", gap: 8 }}><Search size={13} /> Search</div>
+793	        <span style={{ marginLeft: "auto", color: "#8A8A8A" }}>Shree Sarees</span>
+794	      </div>
+795
+796	      <div style={{ display: "flex" }}>
+797	        {/* Shopify left nav with the app section */}
+798	        <aside style={{ width: 232, padding: "12px 8px", borderRight: `1px solid ${T.border}`, minHeight: "calc(100vh - 44px)", background: "#EBEBEB" }}>
+799	          {["Home", "Orders", "Products", "Customers", "Marketing", "Discounts", "Content", "Analytics"].map((x) => <div key={x} style={{ padding: "6px 10px", fontSize: 13, color: T.sub, borderRadius: 8 }}>{x}</div>)}
+800	          <div style={{ fontSize: 11, color: T.faint, padding: "14px 10px 4px", fontWeight: 500 }}>Apps</div>
+801	          <div style={{ padding: "6px 10px", fontSize: 13, fontWeight: 600, display: "flex", gap: 8, alignItems: "center" }}><span style={{ width: 18, height: 18, borderRadius: 4, background: T.magicText, display: "inline-block" }} />CartnCodForm</div>
+802	          {onboarded && nav.map(([k, l, I]) => (
+803	            <button key={k} onClick={() => go(k)} style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "6px 10px 6px 24px", fontSize: 13, borderRadius: 8, border: "none", cursor: "pointer", fontFamily: T.font, background: view === k ? "#FFF" : "transparent", color: view === k ? T.text : T.sub, fontWeight: view === k ? 500 : 400 }}>
+803a	              <I size={14} /> {l}
+804	            </button>
+805	          ))}
+806	        </aside>
+807
+808	        <main style={{ flex: 1, padding: "24px 32px", maxWidth: 1080, boxSizing: "border-box" }}>
+809	          {!onboarded ? (
+810	            <Onboarding steps={steps} setSteps={setSteps} voice={voice} onFinish={() => { setOnboarded(true); setToast("You're set. I'll take it from here."); setTimeout(() => setToast(null), 2500); }} />
+811	          ) : view === "today" ? <Today signalsOn={signalsOn} voice={voice} setView={setView} setCustomer={setCustomer} />
+812	            : view === "customers" ? <Customers customer={customer} setCustomer={setCustomer} voice={voice} />
+813	            : view === "signals" ? <Signals signalsOn={signalsOn} setSignalsOn={setSignalsOn} voice={voice} />
+814	            : view === "messages" ? <Messages />
+815	            : view === "insights" ? <Insights />
+816	            : view === "cod" ? <COD orders={orders} setOrders={setOrders} />
+817	            : <Settings voice={voice} setVoice={setVoice} caps={caps} setCaps={setCaps} />}
+818	        </main>
+819	      </div>
+
+    (line numbers 802-805 above: the JSX inside the map spans prototype
+     source lines 802-806; "803a" marks the wrapped inner line for clarity.)
+
+  Notes (observations only) — prototype vs. current implementation:
+  * Prototype gates the ENTIRE app behind onboarding: `!onboarded` shows only
+    the Onboarding screen and the left-nav items are hidden until `onboarded`
+    is true. Current build has no such gate — onboarding is just one nav item
+    ("Setup"), always skippable, never forced.
+  * Prototype Onboarding has: a "Welcome to CartnCodForm" H1 + one-line
+    explainer, a header row with "{done} of 4 done" + a 160px progress bar,
+    circular check toggles (not Polaris Checkbox), per-row "Set up" / "Open
+    theme editor" / "Send test" buttons that also mark the step done, and a
+    footer with "Skip for now" + "Go to Today" (primary, disabled until
+    done === 4).
+  * Prototype's 4 steps differ from the current file:
+      prototype: storefront block · set your voice · choose what to act on · send yourself a test
+      current:   enable embed block · configure first signal (Settings) · verify push (add to cart) · share COD form
+  * Prototype step 2 ("Set your voice") shows live current voice settings in
+    its description; current step 2 just links to Settings.
+  * Prototype has NO persistence at all (steps live in App useState);
+    current file persists to localStorage. Neither writes to the backend.
+  * Prototype `steps` initial state is [true,false,false,false] (step 1
+    pre-checked); current file reads all four from localStorage.
+
+
+END OF CAPTURE — no modifications made.

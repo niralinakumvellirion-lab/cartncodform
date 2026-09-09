@@ -24,268 +24,289 @@ const SIGNAL_TYPES = [
   'post_purchase_d3', 'lapsing', 'winback', 'email_capture', 'cod_to_prepaid',
 ];
 
-const POSITION_LABELS = {
-  'bottom-right': 'Bottom right',
-  'bottom-left': 'Bottom left',
-  'center': 'Center',
-  'top-right': 'Top right',
-  'top-left': 'Top left',
-};
-
-const CTA_RADIUS = { rounded: '8px', square: '0px', pill: '9999px' };
-
-const SAMPLE_TEXT =
-  'Get notified if your favourite product goes on sale or comes back in stock.';
-
 function PopupPreview({ popup }) {
-  const layout = popup.layout || 'split';
   const bg = popup.bgColor || '#ffffff';
   const fg = popup.textColor || '#111827';
   const accent = popup.accentColor || '#4f46e5';
-  const radius = (popup.borderRadius ?? 12) + 'px';
   const font = popup.fontFamily || 'inherit';
   const allowText = popup.allowText || 'Allow';
   const denyText = popup.denyText || 'No thanks';
   const customTitle = popup.customTitle || '';
   const imageUrl = popup.imageUrl || '';
   const showBranding = popup.showBranding ?? true;
-  const position = popup.position || 'bottom-right';
+  const layout = popup.layout || 'split';
   const brandName = popup.brandName || '';
-  const headline = popup.headline || SAMPLE_TEXT;
+  const headline = popup.headline || 'Get notified about deals';
   const subtext = popup.subtext || '';
-  const ctaRadius = CTA_RADIUS[popup.ctaStyle] || CTA_RADIUS.rounded;
+  const ctaStyle = popup.ctaStyle || 'rounded';
+  const ctaRadius = ctaStyle === 'pill' ? '50px' : ctaStyle === 'square' ? '0' : '6px';
 
-  // Clip heights are per-layout so the scaled-down preview isn't cut off.
-  const clipHeight =
-    layout === 'banner' ? 90 : layout === 'card' ? 210 : 280;
+  const POSITION_LABELS = {
+    'bottom-right': 'Bottom right',
+    'bottom-left': 'Bottom left',
+    'center': 'Center',
+    'top-right': 'Top right',
+    'top-left': 'Top left',
+  };
 
-  let inner;
-  if (layout === 'banner') {
-    inner = (
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '12px',
-          background: accent,
-          color: '#fff',
-          fontFamily: font,
-          fontSize: '13px',
-          padding: '12px 18px',
-          width: '380px',
-          boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
-        }}
-      >
-        <span style={{ flex: 1 }}>{headline}</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
-          <button
-            style={{
+  return (
+    <Box background="bg-surface-secondary" borderRadius="200" padding="400">
+      <BlockStack gap="300">
+        <BlockStack gap="100">
+          <Text variant="headingSm" fontWeight="bold">Preview</Text>
+          <Text tone="subdued" variant="bodySm">
+            Layout: {layout} · Position: {POSITION_LABELS[popup.position || 'bottom-right']}
+          </Text>
+        </BlockStack>
+
+        {/* SPLIT LAYOUT PREVIEW */}
+        {layout === 'split' && (
+          <div style={{
+            border: '1px solid #e5e7eb',
+            borderRadius: '10px',
+            overflow: 'hidden',
+            display: 'flex',
+            width: '100%',
+            minHeight: '220px',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
+            background: bg,
+          }}>
+            {/* Left image panel */}
+            <div style={{
+              width: '42%',
+              minHeight: '220px',
+              flexShrink: 0,
+              background: imageUrl
+                ? 'none'
+                : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              position: 'relative',
+              overflow: 'hidden',
+            }}>
+              {imageUrl ? (
+                <img
+                  src={imageUrl}
+                  alt=""
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                    display: 'block',
+                    position: 'absolute',
+                    top: 0, left: 0,
+                  }}
+                />
+              ) : (
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%,-50%)',
+                  color: 'rgba(255,255,255,0.6)',
+                  fontSize: '11px',
+                  textAlign: 'center',
+                  padding: '8px',
+                }}>
+                  Add image URL →
+                </div>
+              )}
+            </div>
+
+            {/* Right content panel */}
+            <div style={{
+              flex: 1,
+              padding: '18px 16px',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              background: bg,
+              color: fg,
+              fontFamily: font,
+            }}>
+              {brandName && (
+                <div style={{
+                  fontSize: '9px',
+                  fontWeight: '700',
+                  letterSpacing: '2px',
+                  textTransform: 'uppercase',
+                  color: '#9ca3af',
+                  marginBottom: '6px',
+                }}>
+                  {brandName}
+                </div>
+              )}
+              <div style={{
+                fontSize: '14px',
+                fontWeight: '700',
+                lineHeight: '1.3',
+                marginBottom: subtext ? '6px' : '12px',
+                color: fg,
+              }}>
+                {headline}
+              </div>
+              {subtext && (
+                <div style={{
+                  fontSize: '11px',
+                  color: '#6b7280',
+                  marginBottom: '12px',
+                  lineHeight: '1.4',
+                }}>
+                  {subtext}
+                </div>
+              )}
+              <button style={{
+                background: accent,
+                color: '#fff',
+                border: 'none',
+                borderRadius: ctaRadius,
+                padding: '8px 12px',
+                fontSize: '12px',
+                fontWeight: '700',
+                cursor: 'pointer',
+                marginBottom: '8px',
+                width: '100%',
+              }}>
+                {allowText}
+              </button>
+              <div style={{
+                fontSize: '10px',
+                color: '#9ca3af',
+                textDecoration: 'underline',
+                cursor: 'pointer',
+                textAlign: 'center',
+              }}>
+                {denyText}
+              </div>
+              {showBranding && (
+                <div style={{
+                  marginTop: '10px',
+                  fontSize: '9px',
+                  color: '#d1d5db',
+                  textAlign: 'center',
+                }}>
+                  Powered by CartnCodForm
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* CARD LAYOUT PREVIEW */}
+        {layout === 'card' && (
+          <div style={{
+            border: '1px solid #e5e7eb',
+            borderRadius: (popup.borderRadius ?? 12) + 'px',
+            overflow: 'hidden',
+            width: '100%',
+            maxWidth: '260px',
+            margin: '0 auto',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
+            background: bg,
+            color: fg,
+            fontFamily: font,
+            padding: '16px',
+          }}>
+            {imageUrl && (
+              <img src={imageUrl} alt="" style={{
+                width: '100%',
+                borderRadius: '8px',
+                marginBottom: '10px',
+                objectFit: 'cover',
+                maxHeight: '100px',
+                display: 'block',
+              }} />
+            )}
+            {customTitle && (
+              <div style={{
+                fontWeight: '700',
+                fontSize: '14px',
+                marginBottom: '6px',
+              }}>
+                {customTitle}
+              </div>
+            )}
+            <div style={{
+              fontSize: '13px',
+              marginBottom: '12px',
+              color: fg,
+              lineHeight: '1.4',
+            }}>
+              {headline || 'Get notified about deals from this store.'}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button style={{
+                background: accent,
+                color: '#fff',
+                border: 'none',
+                borderRadius: ctaRadius,
+                padding: '7px 14px',
+                fontSize: '12px',
+                fontWeight: '700',
+                cursor: 'pointer',
+              }}>
+                {allowText}
+              </button>
+              <span style={{
+                fontSize: '11px',
+                color: '#9ca3af',
+                cursor: 'pointer',
+              }}>
+                {denyText}
+              </span>
+            </div>
+            {showBranding && (
+              <div style={{
+                marginTop: '10px',
+                fontSize: '9px',
+                color: '#d1d5db',
+              }}>
+                Powered by CartnCodForm
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* BANNER LAYOUT PREVIEW */}
+        {layout === 'banner' && (
+          <div style={{
+            border: '1px solid #e5e7eb',
+            borderRadius: '8px',
+            overflow: 'hidden',
+            width: '100%',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+            background: accent,
+            color: '#fff',
+            padding: '12px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            fontFamily: font,
+          }}>
+            <div style={{ fontSize: '13px', fontWeight: '600', flex: 1 }}>
+              {headline || 'Get notified about deals'}
+            </div>
+            <button style={{
               background: '#fff',
               color: accent,
               border: 'none',
               borderRadius: ctaRadius,
               padding: '6px 14px',
               fontSize: '12px',
-              fontWeight: 700,
+              fontWeight: '700',
               cursor: 'pointer',
-            }}
-          >
-            {allowText}
-          </button>
-          <span style={{ fontSize: '16px', lineHeight: 1 }}>×</span>
-        </span>
-      </div>
-    );
-  } else if (layout === 'card') {
-    inner = (
-      <div
-        style={{
-          background: bg,
-          color: fg,
-          borderRadius: radius,
-          fontFamily: font,
-          fontSize: '14px',
-          lineHeight: '1.5',
-          padding: '16px',
-          width: '280px',
-          boxShadow: '0 8px 30px rgba(0,0,0,0.18)',
-        }}
-      >
-        {imageUrl && (
-          <img
-            src={imageUrl}
-            alt=""
-            style={{
-              width: '100%',
-              borderRadius: '8px',
-              marginBottom: '8px',
-              objectFit: 'cover',
-              maxHeight: '100px',
-              display: 'block',
-            }}
-          />
-        )}
-        {customTitle && (
-          <strong style={{ display: 'block', marginBottom: '6px', fontSize: '15px' }}>
-            {customTitle}
-          </strong>
-        )}
-        <p style={{ margin: '0 0 12px', color: fg }}>{headline}</p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button
-            style={{
-              background: accent,
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              padding: '8px 14px',
-              fontSize: '13px',
-              fontWeight: 700,
+              flexShrink: 0,
+            }}>
+              {allowText}
+            </button>
+            <span style={{
+              fontSize: '16px',
+              color: 'rgba(255,255,255,0.7)',
               cursor: 'pointer',
-            }}
-          >
-            {allowText}
-          </button>
-          <button
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#888',
-              fontSize: '13px',
-              cursor: 'pointer',
-            }}
-          >
-            {denyText}
-          </button>
-        </div>
-        {showBranding && (
-          <div style={{ marginTop: '10px', fontSize: '10px', color: '#9ca3af' }}>
-            Powered by CartnCodForm
+              flexShrink: 0,
+            }}>×</span>
           </div>
         )}
-      </div>
-    );
-  } else {
-    // split
-    inner = (
-      <div
-        style={{
-          display: 'flex',
-          width: '400px',
-          borderRadius: '12px',
-          overflow: 'hidden',
-          boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
-        }}
-      >
-        <div
-          style={{
-            width: '45%',
-            minHeight: '230px',
-            background: 'linear-gradient(135deg,#667eea,#764ba2)',
-          }}
-        >
-          {imageUrl && (
-            <img
-              src={imageUrl}
-              alt=""
-              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-            />
-          )}
-        </div>
-        <div
-          style={{
-            width: '55%',
-            padding: '22px 20px',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'center',
-            background: bg,
-            color: fg,
-            fontFamily: font,
-          }}
-        >
-          {brandName && (
-            <div
-              style={{
-                letterSpacing: '3px',
-                fontSize: '10px',
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                color: '#9ca3af',
-                marginBottom: '10px',
-              }}
-            >
-              {brandName}
-            </div>
-          )}
-          <div style={{ fontSize: '19px', fontWeight: 700, lineHeight: 1.2, marginBottom: '10px' }}>
-            {headline}
-          </div>
-          {subtext && (
-            <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '18px' }}>
-              {subtext}
-            </div>
-          )}
-          <button
-            style={{
-              background: accent,
-              color: '#fff',
-              border: 'none',
-              borderRadius: ctaRadius,
-              padding: '10px 18px',
-              fontSize: '13px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              width: '100%',
-              marginBottom: '10px',
-            }}
-          >
-            {allowText}
-          </button>
-          <button
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#9ca3af',
-              fontSize: '12px',
-              cursor: 'pointer',
-              textDecoration: 'underline',
-            }}
-          >
-            {denyText}
-          </button>
-          {showBranding && (
-            <div style={{ marginTop: '14px', fontSize: '10px', color: '#d1d5db' }}>
-              Powered by CartnCodForm
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
 
-  return (
-    <Box background="bg-surface-secondary" borderRadius="200" padding="400">
-      <BlockStack gap="200">
-        <Text variant="headingSm">Preview</Text>
-        <Text tone="subdued" variant="bodySm">
-          Layout: {layout} · Position: {POSITION_LABELS[position]}
-        </Text>
-
-        {/* Clipping wrapper — the inner preview is scaled to 0.7 */}
-        <div style={{ overflow: 'hidden', height: `${clipHeight}px` }}>
-          <div
-            style={{
-              transform: 'scale(0.7)',
-              transformOrigin: 'top center',
-              display: 'flex',
-              justifyContent: 'center',
-            }}
-          >
-            {inner}
-          </div>
-        </div>
       </BlockStack>
     </Box>
   );
