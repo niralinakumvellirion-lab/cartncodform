@@ -75,6 +75,7 @@ export default function Settings({ shop }) {
         quietHours,
         timezone,
       });
+      await apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', popup);
       setSuccess(true);
     } catch (e) {
       setError(e.message || 'Save failed');
@@ -164,6 +165,58 @@ export default function Settings({ shop }) {
     borderRadius: '10px',
     padding: '20px 24px',
   };
+
+  // --- popup customization row styles ---
+  const popRow = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '16px',
+    marginBottom: '16px',
+  };
+  const popLabel = {
+    width: '140px',
+    fontSize: '13px',
+    color: '#374151',
+    fontWeight: '500',
+  };
+  const popInput = {
+    flex: 1,
+    padding: '8px 12px',
+    fontSize: '13px',
+    border: '1px solid #e5e7eb',
+    borderRadius: '8px',
+    outline: 'none',
+    color: '#374151',
+  };
+  const popSelect = {
+    padding: '8px 12px',
+    fontSize: '13px',
+    border: '1px solid #e5e7eb',
+    borderRadius: '8px',
+    outline: 'none',
+    color: '#374151',
+    background: '#fff',
+    cursor: 'pointer',
+  };
+  const popSwatch = {
+    width: '36px',
+    height: '36px',
+    padding: '2px',
+    border: '1px solid #e5e7eb',
+    borderRadius: '6px',
+    cursor: 'pointer',
+  };
+  const popPill = (active) => ({
+    padding: '6px 14px',
+    fontSize: '12px',
+    fontWeight: active ? '600' : '400',
+    color: active ? '#fff' : '#374151',
+    background: active ? '#111827' : '#f9fafb',
+    border: '1px solid',
+    borderColor: active ? '#111827' : '#e5e7eb',
+    borderRadius: '20px',
+    cursor: 'pointer',
+  });
 
   return (
     <div style={{ padding: '0 24px 24px', maxWidth: '1100px', margin: '0 auto' }}>
@@ -469,6 +522,267 @@ export default function Settings({ shop }) {
               )}
             </div>
           </div>
+
+          {/* POPUP CUSTOMIZATION card */}
+          <div style={card}>
+            <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
+              Popup customization
+            </div>
+            <div style={{ fontSize: '13px', color: '#9ca3af', marginBottom: '20px' }}>
+              Control how the notification prompt looks on your store.
+            </div>
+
+            {/* Layout */}
+            <div style={popRow}>
+              <div style={popLabel}>Layout</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {[
+                  { value: 'split', label: '⬜ Split' },
+                  { value: 'card', label: '▭ Card' },
+                  { value: 'banner', label: '▬ Banner' },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setPopup((p) => ({ ...p, layout: opt.value }))}
+                    style={popPill(popup.layout === opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Image URL */}
+            <div style={popRow}>
+              <div style={popLabel}>Image URL</div>
+              <input
+                value={popup.imageUrl || ''}
+                onChange={(e) => setPopup((p) => ({ ...p, imageUrl: e.target.value }))}
+                placeholder="https://cdn.shopify.com/..."
+                style={popInput}
+              />
+            </div>
+
+            {/* Headline */}
+            <div style={popRow}>
+              <div style={popLabel}>Headline</div>
+              <input
+                value={popup.headline || ''}
+                onChange={(e) => setPopup((p) => ({ ...p, headline: e.target.value }))}
+                placeholder="e.g. Don't miss out on this offer"
+                style={popInput}
+              />
+            </div>
+
+            {/* Subtext */}
+            <div style={popRow}>
+              <div style={popLabel}>Subtext</div>
+              <input
+                value={popup.subtext || ''}
+                onChange={(e) => setPopup((p) => ({ ...p, subtext: e.target.value }))}
+                placeholder="e.g. Get notified when prices drop"
+                style={popInput}
+              />
+            </div>
+
+            {/* Brand name */}
+            <div style={popRow}>
+              <div style={popLabel}>Brand name</div>
+              <input
+                value={popup.brandName || ''}
+                onChange={(e) => setPopup((p) => ({ ...p, brandName: e.target.value }))}
+                placeholder="e.g. SILK HOUSE"
+                style={popInput}
+              />
+            </div>
+
+            {/* Allow button text */}
+            <div style={popRow}>
+              <div style={popLabel}>Allow button</div>
+              <input
+                value={popup.allowText || 'Allow'}
+                onChange={(e) => setPopup((p) => ({ ...p, allowText: e.target.value }))}
+                style={{ ...popInput, flex: 'none', width: '160px' }}
+              />
+            </div>
+
+            {/* Deny button text */}
+            <div style={popRow}>
+              <div style={popLabel}>Deny button</div>
+              <input
+                value={popup.denyText || 'No thanks'}
+                onChange={(e) => setPopup((p) => ({ ...p, denyText: e.target.value }))}
+                style={{ ...popInput, flex: 'none', width: '160px' }}
+              />
+            </div>
+
+            {/* Accent color */}
+            <div style={popRow}>
+              <div style={popLabel}>Accent color</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="color"
+                  value={popup.accentColor || '#4f46e5'}
+                  onChange={(e) => setPopup((p) => ({ ...p, accentColor: e.target.value }))}
+                  style={popSwatch}
+                />
+                <input
+                  value={popup.accentColor || '#4f46e5'}
+                  onChange={(e) => setPopup((p) => ({ ...p, accentColor: e.target.value }))}
+                  style={{ ...popInput, flex: 'none', width: '100px' }}
+                />
+              </div>
+            </div>
+
+            {/* Background color */}
+            <div style={popRow}>
+              <div style={popLabel}>Background</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="color"
+                  value={popup.bgColor || '#ffffff'}
+                  onChange={(e) => setPopup((p) => ({ ...p, bgColor: e.target.value }))}
+                  style={popSwatch}
+                />
+                <input
+                  value={popup.bgColor || '#ffffff'}
+                  onChange={(e) => setPopup((p) => ({ ...p, bgColor: e.target.value }))}
+                  style={{ ...popInput, flex: 'none', width: '100px' }}
+                />
+              </div>
+            </div>
+
+            {/* Text color */}
+            <div style={popRow}>
+              <div style={popLabel}>Text color</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="color"
+                  value={popup.textColor || '#111827'}
+                  onChange={(e) => setPopup((p) => ({ ...p, textColor: e.target.value }))}
+                  style={popSwatch}
+                />
+                <input
+                  value={popup.textColor || '#111827'}
+                  onChange={(e) => setPopup((p) => ({ ...p, textColor: e.target.value }))}
+                  style={{ ...popInput, flex: 'none', width: '100px' }}
+                />
+              </div>
+            </div>
+
+            {/* Font family */}
+            <div style={popRow}>
+              <div style={popLabel}>Font</div>
+              <select
+                value={popup.fontFamily || 'inherit'}
+                onChange={(e) => setPopup((p) => ({ ...p, fontFamily: e.target.value }))}
+                style={popSelect}
+              >
+                <option value="inherit">Store default</option>
+                <option value="'Arial', sans-serif">Arial</option>
+                <option value="'Georgia', serif">Georgia</option>
+                <option value="'Helvetica Neue', sans-serif">Helvetica</option>
+                <option value="'Times New Roman', serif">Times New Roman</option>
+                <option value="'Courier New', monospace">Courier New</option>
+                <option value="'Playfair Display', serif">Playfair Display</option>
+                <option value="'Montserrat', sans-serif">Montserrat</option>
+              </select>
+            </div>
+
+            {/* Border radius */}
+            <div style={popRow}>
+              <div style={popLabel}>Border radius</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <input
+                  type="range"
+                  min="0"
+                  max="24"
+                  value={popup.borderRadius ?? 12}
+                  onChange={(e) =>
+                    setPopup((p) => ({ ...p, borderRadius: Number(e.target.value) }))
+                  }
+                  style={{ width: '120px', cursor: 'pointer' }}
+                />
+                <span style={{ fontSize: '13px', color: '#374151', minWidth: '30px' }}>
+                  {popup.borderRadius ?? 12}px
+                </span>
+              </div>
+            </div>
+
+            {/* Button style */}
+            <div style={popRow}>
+              <div style={popLabel}>Button style</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {[
+                  { value: 'rounded', label: 'Rounded' },
+                  { value: 'square', label: 'Square' },
+                  { value: 'pill', label: 'Pill' },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setPopup((p) => ({ ...p, ctaStyle: opt.value }))}
+                    style={popPill(popup.ctaStyle === opt.value)}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Position */}
+            <div style={popRow}>
+              <div style={popLabel}>Position</div>
+              <select
+                value={popup.position || 'bottom-right'}
+                onChange={(e) => setPopup((p) => ({ ...p, position: e.target.value }))}
+                style={popSelect}
+              >
+                <option value="bottom-right">Bottom right</option>
+                <option value="bottom-left">Bottom left</option>
+                <option value="center">Center</option>
+                <option value="top-right">Top right</option>
+                <option value="top-left">Top left</option>
+              </select>
+            </div>
+
+            {/* Dark overlay toggle */}
+            <div style={{ ...popRow, marginBottom: 0 }}>
+              <div style={popLabel}>Dark overlay</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  onClick={() =>
+                    setPopup((p) => ({ ...p, showOverlay: !p.showOverlay }))
+                  }
+                  style={{
+                    width: '44px',
+                    height: '24px',
+                    borderRadius: '12px',
+                    background: popup.showOverlay !== false ? '#111827' : '#d1d5db',
+                    position: 'relative',
+                    cursor: 'pointer',
+                    transition: 'background 0.2s',
+                  }}
+                >
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '3px',
+                      left: popup.showOverlay !== false ? '23px' : '3px',
+                      width: '18px',
+                      height: '18px',
+                      borderRadius: '50%',
+                      background: '#fff',
+                      transition: 'left 0.2s',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                    }}
+                  />
+                </div>
+                <span style={{ fontSize: '13px', color: '#9ca3af' }}>
+                  {popup.showOverlay !== false ? 'On' : 'Off'}
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* RIGHT COLUMN */}
@@ -596,6 +910,297 @@ export default function Settings({ shop }) {
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* POPUP PREVIEW card */}
+          <div style={card}>
+            <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
+              Popup preview
+            </div>
+            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '16px' }}>
+              Updates live as you edit
+            </div>
+
+            {(() => {
+              const bg = popup.bgColor || '#ffffff';
+              const fg = popup.textColor || '#111827';
+              const accent = popup.accentColor || '#4f46e5';
+              const radius = (popup.borderRadius ?? 12) + 'px';
+              const font = popup.fontFamily || 'inherit';
+              const allowText = popup.allowText || 'Allow';
+              const denyText = popup.denyText || 'No thanks';
+              const headline = popup.headline || 'Get notified about deals';
+              const subtext = popup.subtext || '';
+              const brandName = popup.brandName || '';
+              const imageUrl = popup.imageUrl || '';
+              const ctaStyle = popup.ctaStyle || 'rounded';
+              const ctaRadius =
+                ctaStyle === 'pill' ? '50px' : ctaStyle === 'square' ? '0' : '6px';
+              const layout = popup.layout || 'split';
+
+              if (layout === 'split')
+                return (
+                  <div
+                    style={{
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '10px',
+                      overflow: 'hidden',
+                      display: 'flex',
+                      minHeight: '200px',
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '40%',
+                        flexShrink: 0,
+                        background: imageUrl
+                          ? 'none'
+                          : 'linear-gradient(135deg, #667eea, #764ba2)',
+                        position: 'relative',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {imageUrl && (
+                        <img
+                          src={imageUrl}
+                          alt=""
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            display: 'block',
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                          }}
+                        />
+                      )}
+                      {!imageUrl && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: '50%',
+                            left: '50%',
+                            transform: 'translate(-50%,-50%)',
+                            color: 'rgba(255,255,255,0.6)',
+                            fontSize: '11px',
+                            textAlign: 'center',
+                            padding: '8px',
+                          }}
+                        >
+                          Add image URL
+                        </div>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        flex: 1,
+                        padding: '16px 14px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                        background: bg,
+                        color: fg,
+                        fontFamily: font,
+                      }}
+                    >
+                      {brandName && (
+                        <div
+                          style={{
+                            fontSize: '9px',
+                            fontWeight: '700',
+                            letterSpacing: '2px',
+                            textTransform: 'uppercase',
+                            color: '#9ca3af',
+                            marginBottom: '6px',
+                          }}
+                        >
+                          {brandName}
+                        </div>
+                      )}
+                      <div
+                        style={{
+                          fontSize: '13px',
+                          fontWeight: '700',
+                          lineHeight: '1.3',
+                          marginBottom: '8px',
+                          color: fg,
+                        }}
+                      >
+                        {headline}
+                      </div>
+                      {subtext && (
+                        <div
+                          style={{
+                            fontSize: '11px',
+                            color: '#6b7280',
+                            marginBottom: '10px',
+                          }}
+                        >
+                          {subtext}
+                        </div>
+                      )}
+                      <button
+                        style={{
+                          background: accent,
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: ctaRadius,
+                          padding: '7px 12px',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          marginBottom: '6px',
+                          width: '100%',
+                        }}
+                      >
+                        {allowText}
+                      </button>
+                      <div
+                        style={{
+                          fontSize: '10px',
+                          color: '#9ca3af',
+                          textAlign: 'center',
+                          textDecoration: 'underline',
+                        }}
+                      >
+                        {denyText}
+                      </div>
+                    </div>
+                  </div>
+                );
+
+              if (layout === 'card')
+                return (
+                  <div
+                    style={{
+                      border: '1px solid #e5e7eb',
+                      borderRadius: radius,
+                      padding: '16px',
+                      background: bg,
+                      color: fg,
+                      fontFamily: font,
+                      boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
+                    }}
+                  >
+                    {imageUrl && (
+                      <img
+                        src={imageUrl}
+                        alt=""
+                        style={{
+                          width: '100%',
+                          borderRadius: '8px',
+                          marginBottom: '10px',
+                          objectFit: 'cover',
+                          maxHeight: '80px',
+                          display: 'block',
+                        }}
+                      />
+                    )}
+                    {brandName && (
+                      <div
+                        style={{
+                          fontSize: '9px',
+                          fontWeight: '700',
+                          letterSpacing: '2px',
+                          textTransform: 'uppercase',
+                          color: '#9ca3af',
+                          marginBottom: '4px',
+                        }}
+                      >
+                        {brandName}
+                      </div>
+                    )}
+                    <div
+                      style={{
+                        fontSize: '13px',
+                        fontWeight: '600',
+                        marginBottom: '8px',
+                        color: fg,
+                      }}
+                    >
+                      {headline}
+                    </div>
+                    {subtext && (
+                      <div
+                        style={{
+                          fontSize: '11px',
+                          color: '#6b7280',
+                          marginBottom: '10px',
+                        }}
+                      >
+                        {subtext}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <button
+                        style={{
+                          background: accent,
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: ctaRadius,
+                          padding: '6px 14px',
+                          fontSize: '12px',
+                          fontWeight: '700',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {allowText}
+                      </button>
+                      <span style={{ fontSize: '11px', color: '#9ca3af' }}>
+                        {denyText}
+                      </span>
+                    </div>
+                  </div>
+                );
+
+              if (layout === 'banner')
+                return (
+                  <div
+                    style={{
+                      borderRadius: '8px',
+                      overflow: 'hidden',
+                      background: accent,
+                      color: '#fff',
+                      padding: '12px 16px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                      fontFamily: font,
+                    }}
+                  >
+                    <div style={{ fontSize: '13px', fontWeight: '600', flex: 1 }}>
+                      {headline}
+                    </div>
+                    <button
+                      style={{
+                        background: '#fff',
+                        color: accent,
+                        border: 'none',
+                        borderRadius: ctaRadius,
+                        padding: '6px 14px',
+                        fontSize: '12px',
+                        fontWeight: '700',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {allowText}
+                    </button>
+                    <span
+                      style={{
+                        color: 'rgba(255,255,255,0.7)',
+                        fontSize: '18px',
+                        flexShrink: 0,
+                      }}
+                    >
+                      ×
+                    </span>
+                  </div>
+                );
+
+              return null;
+            })()}
           </div>
         </div>
       </div>
