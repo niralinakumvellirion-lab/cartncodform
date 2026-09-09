@@ -89,10 +89,20 @@ router.get('/:shopDomain/messages', requireAuth, requireStoreOwner, async (req, 
   }
 });
 
+// Escape user input before it goes into a $regex so a stray "(" or "*"
+// can't throw or trigger catastrophic backtracking.
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * GET /api/profiles/:shopDomain/profiles
- * Query: limit (default 50, max 200), page (default 0)
- * -> { profiles, total }  (most recently active first)
+ * Query:
+ *   limit  (default 50, max 200)
+ *   page   (default 0)
+ *   filter (optional) — has_cart | bought_once | repeat_buyer | going_quiet
+ *   search (optional) — case-insensitive substring match on email / phone
+ * -> { profiles, total }  (most recently active first; total honours filter+search)
  */
 router.get('/:shopDomain/profiles', requireAuth, requireStoreOwner, async (req, res) => {
   try {
@@ -105,13 +115,37 @@ router.get('/:shopDomain/profiles', requireAuth, requireStoreOwner, async (req, 
     let page = parseInt(req.query.page, 10);
     if (!Number.isFinite(page) || page < 0) page = 0;
 
+    const query = { shopDomain: shop };
+
+    const filter = req.query.filter;
+    if (filter === 'has_cart') {
+      query['identifiers.cartTokens.0'] = { $exists: true };
+      query['orders.count'] = 0;
+    } else if (filter === 'bought_once') {
+      query['orders.count'] = 1;
+    } else if (filter === 'repeat_buyer') {
+      query['orders.count'] = { $gte: 2 };
+    } else if (filter === 'going_quiet') {
+      const twentyOneDaysAgo = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000);
+      query['lastSeenAt'] = { $lt: twentyOneDaysAgo };
+    }
+
+    const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+    if (search) {
+      const rx = escapeRegex(search);
+      query.$or = [
+        { 'identifiers.emails': { $regex: rx, $options: 'i' } },
+        { 'identifiers.phones': { $regex: rx, $options: 'i' } },
+      ];
+    }
+
     const [profiles, total] = await Promise.all([
-      Profile.find({ shopDomain: shop })
+      Profile.find(query)
         .sort({ updatedAt: -1 })
         .skip(page * limit)
         .limit(limit)
-        .select('identifiers stage orders channels lastSeenAt updatedAt'),
-      Profile.countDocuments({ shopDomain: shop }),
+        .select('identifiers stage orders channels lastSeenAt updatedAt messages interests'),
+      Profile.countDocuments(query),
     ]);
 
     return res.json({ profiles, total });

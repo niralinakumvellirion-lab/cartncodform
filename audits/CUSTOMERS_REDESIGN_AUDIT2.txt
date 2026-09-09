@@ -1,0 +1,128 @@
+CUSTOMERS_REDESIGN_AUDIT2 — self-audit
+======================================
+Branch:  customers-redesign
+Date:    2026-09-09
+Files:   backend/routes/profiles.js            (GET /:shopDomain/profiles enhanced)
+         frontend/app/admin/screens/Customers.jsx  (full rewrite)
+
+
+1. BACKEND — filter + search params
+-----------------------------------
+  GET /api/profiles/:shopDomain/profiles  (requireAuth + requireStoreOwner, shop-scoped)
+
+  * New: builds a `query` object (was an inline `{ shopDomain: shop }`).
+  * filter (optional): exactly the spec's 4 branches
+      has_cart      -> query['identifiers.cartTokens.0'] = { $exists: true }
+                       query['orders.count'] = 0
+      bought_once   -> query['orders.count'] = 1
+      repeat_buyer  -> query['orders.count'] = { $gte: 2 }
+      going_quiet   -> query['lastSeenAt'] = { $lt: <now - 21d> }
+    Unknown / 'everyone' -> no branch, unfiltered.
+  * search (optional): trimmed; when non-empty adds
+      query.$or = [
+        { 'identifiers.emails': { $regex: <esc>, $options: 'i' } },
+        { 'identifiers.phones': { $regex: <esc>, $options: 'i' } },
+      ]
+    DEVIATION: the raw search string is run through a new escapeRegex()
+    helper ( /[.*+?^${}()|[\]\\]/g -> \\$& ) before going into $regex, so a
+    stray "(" or "*" can't throw or cause ReDoS. Behaviour for normal
+    alphanumeric searches is unchanged.
+  * .select() gained 'messages interests' (now:
+      'identifiers stage orders channels lastSeenAt updatedAt messages interests')
+  * BOTH Profile.find(query) and Profile.countDocuments(query) use the same
+    `query`, so `total` reflects the active filter + search (matches the
+    frontend header copy "{total} people. {n} shown here as a sample.").
+  * node --check backend/routes/profiles.js -> OK
+  * cd backend && npm test -> 13 suites / 116 tests pass (unchanged;
+    profiles route has no dedicated test).
+
+
+2. FRONTEND — 6 columns render
+------------------------------
+  Polaris <Page>/<Card>/<IndexTable>/<Badge>/<Banner>/<InlineStack> all
+  removed; only apiGet + ProfileScreen imports remain. Div-grid layout,
+  gridTemplateColumns '2fr 1fr 2fr 1fr 1.5fr 1fr' shared by header + rows
+  (GRID_COLS const).
+
+  Column-by-column (header label -> cell content):
+    1. Customer          displayName = emails[0] || phones[0] ||
+                         "Anonymous shopper · #<last5 of _id>"; + "seen <rel>"
+                         subline when lastSeenAt set.
+    2. Stage             pill; base from STAGE_CONFIG[p.stage], then overridden:
+                         orders.count>=2 -> "Repeat buyer" (#dbeafe/#1d4ed8);
+                         ==1 -> "Bought once" (#dcfce7/#16a34a);
+                         cartTokens.length>0 && count===0 -> "Has a cart"
+                         (#fef9c3/#ca8a04).
+    3. Most interested   when a signal exists for the profile: topInterest key
+                         from Object.entries(p.interests) sorted desc, plus
+                         SIGNAL_LABELS[sig.type]; else "—".
+    4. Reach             🔔 / ✉️ / 📱, opacity 1 vs 0.2 by
+                         channels.push.subscribed / channels.email.address /
+                         identifiers.phones.length.
+    5. Last messaged     getRelativeTime(messages[last].sentAt) or "Never".
+    6. Spent             ₹orders.ltv (en-IN) when >0, else "—".
+
+  Helpers added before the component: SIGNAL_LABELS (12 keys, spec verbatim),
+  getRelativeTime(date) (m/h ago, "yesterday", "N days ago"), STAGE_CONFIG
+  (4 stages), plus FILTER_TABS + GRID_COLS consts.
+
+  Loading -> 5 grey skeleton rows. Empty (post-load) -> centered
+  "No customers match this view." Error -> red banner div above the controls.
+
+  Master/detail preserved: selectedProfileId set -> early return
+  <ProfileScreen shop profileId onBack>. Row onClick sets it.
+
+
+3. FILTER TABS — state change triggers refetch
+----------------------------------------------
+  CONFIRMED. `filter` is in loadData's useCallback deps
+  [shop, filter, search]; the effect re-runs loadData whenever loadData's
+  identity changes. Clicking a tab -> setFilter(tab.key) -> new loadData ->
+  effect fires -> GET /profiles?...&filter=<key> (filter param omitted when
+  key === 'everyone'). Active tab styled (600 weight, white bg, border).
+
+
+4. SEARCH INPUT — triggers refetch
+----------------------------------
+  CONFIRMED. Controlled <input value={search} onChange={setSearch}>; `search`
+  is in the same deps array. DEVIATION (sane default): the effect wraps
+  loadData in a 300 ms setTimeout (cleared on change) so typing debounces to
+  one request instead of one-per-keystroke; it still refetches on every
+  settled change. An abort flag (`controller.aborted`) drops stale responses.
+  search is sent as ?search=<trimmed> (omitted when empty).
+
+
+5. BUILD + TEST
+---------------
+  cd frontend && npm run build  ->  ✓ Compiled successfully, zero warnings.
+                                     /admin/customers 8.75 kB (was 3.83 kB).
+  cd backend  && npm test       ->  13 suites / 116 tests pass.
+  node --check backend/routes/profiles.js -> OK
+
+
+6. LINE COUNT — Customers.jsx
+-----------------------------
+  Before: 159 lines
+  After:  468 lines
+  Delta:  +309
+
+
+7. NOTES / OPEN ITEMS
+---------------------
+  (a) No <Page> wrapper (spec: "remove Polaris Page entirely"). If the
+      Shopify iframe clips the top like it did for Today.jsx pre-fix, a
+      follow-up may need to re-add <Page> or a top offset. Outer padding is
+      the spec's '0 24px 24px'.
+  (b) `interests` is a Mongoose Map; res.json() serialises it to a plain
+      object, so Object.entries(p.interests) works client-side. topInterest
+      is shown only when a signal also exists (per the spec's `sig ? (...)`).
+  (c) messages[] is capped at 20 by profileService, so "last messaged" =
+      messages[length-1].sentAt is the most recent of the retained 20.
+  (d) going_quiet uses server time for the 21-day cutoff (no shop-tz
+      adjustment) — consistent with other date math in this codebase.
+  (e) `page` query param still supported by the backend but the redesigned
+      screen never sends it (fixed limit=50, no pagination UI) — same as
+      before.
+
+
+STATUS: COMPLETE. Build green, 116/116 backend tests green.

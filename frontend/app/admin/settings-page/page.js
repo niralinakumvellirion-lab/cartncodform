@@ -12,7 +12,7 @@ function SettingsContent() {
   return (
     <AppProvider i18n={{}}>
       <NavMenu>
-        <a href="/admin" rel="home">Today</a>
+        <a href="/admin" rel="today">Today</a>
         <a href="/admin/customers" rel="customers">Customers</a>
         <a href="/admin/signals" rel="signals">What to act on</a>
         <a href="/admin/messages" rel="messages">Messages</a>
