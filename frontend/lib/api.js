@@ -49,19 +49,28 @@ export async function apiGet(path) {
     throw new Error(describeNetworkError(err, 'GET', url));
   }
 
-  // Retry once with a fresh token on 401 (expired token).
-  if (res.status === 401 && token) {
-    const freshToken = await getAuthToken(true);
-    if (freshToken) {
-      try {
-        res = await fetch(url, {
-          cache: 'no-store',
-          headers: { Authorization: `Bearer ${freshToken}` },
-        });
-      } catch (err) {
-        throw new Error(describeNetworkError(err, 'GET', url));
-      }
+  // App Bridge session tokens live ~1 minute. On a 401, wait briefly (App
+  // Bridge needs a moment to mint a new one) then retry ONCE with a fresh token.
+  if (res.status === 401) {
+    await new Promise((r) => setTimeout(r, 500));
+    const freshToken = await getAuthToken();
+    let retryRes;
+    try {
+      retryRes = await fetch(url, {
+        cache: 'no-store',
+        headers: {
+          Authorization: `Bearer ${freshToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+    } catch (err) {
+      throw new Error(describeNetworkError(err, 'GET', url));
     }
+    if (!retryRes.ok) {
+      const err = await retryRes.json().catch(() => ({}));
+      throw new Error(err.error || `${path} failed (${retryRes.status})`);
+    }
+    return retryRes.json();
   }
 
   if (!res.ok) {
@@ -90,23 +99,29 @@ export async function apiSend(path, method, body) {
     throw new Error(describeNetworkError(err, method, url));
   }
 
-  // Retry once with a fresh token on 401 (expired token).
-  if (res.status === 401 && token) {
-    const freshToken = await getAuthToken(true);
-    if (freshToken) {
-      try {
-        res = await fetch(url, {
-          method,
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${freshToken}`,
-          },
-          body: JSON.stringify(body),
-        });
-      } catch (err) {
-        throw new Error(describeNetworkError(err, method, url));
-      }
+  // App Bridge session tokens live ~1 minute. On a 401, wait briefly then
+  // retry ONCE with a fresh token.
+  if (res.status === 401) {
+    await new Promise((r) => setTimeout(r, 500));
+    const freshToken = await getAuthToken();
+    let retryRes;
+    try {
+      retryRes = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${freshToken}`,
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      throw new Error(describeNetworkError(err, method, url));
     }
+    if (!retryRes.ok) {
+      const err = await retryRes.json().catch(() => ({}));
+      throw new Error(err.error || `${method} ${path} failed (${retryRes.status})`);
+    }
+    return retryRes.json().catch(() => ({}));
   }
 
   const data = await res.json().catch(() => ({}));

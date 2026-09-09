@@ -102,6 +102,14 @@ export default function Messages({ shop }) {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('all');
 
+  const [isMobileView, setIsMobileView] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobileView(window.innerWidth <= 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
   const load = useCallback(async () => {
     if (!shop) return;
     setLoading(true);
@@ -131,7 +139,13 @@ export default function Messages({ shop }) {
   });
 
   return (
-    <div style={{ padding: '0 24px 24px', maxWidth: '1000px', margin: '0 auto' }}>
+    <div
+      style={{
+        padding: isMobileView ? '0 12px 24px' : '0 24px 24px',
+        maxWidth: '1000px',
+        margin: '0 auto',
+      }}
+    >
       {/* Header */}
       <div style={{ marginBottom: '16px' }}>
         <h1
@@ -165,8 +179,17 @@ export default function Messages({ shop }) {
         </div>
       )}
 
-      {/* Filter tabs */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+      {/* Filter tabs — horizontally scrollable on mobile */}
+      <div
+        style={{
+          display: 'flex',
+          gap: '8px',
+          marginBottom: '16px',
+          overflowX: 'auto',
+          paddingBottom: '4px',
+          WebkitOverflowScrolling: 'touch',
+        }}
+      >
         {FILTER_TABS.map((tab) => (
           <button
             key={tab.key}
@@ -181,6 +204,8 @@ export default function Messages({ shop }) {
                 filter === tab.key ? '2px solid #111827' : '1px solid #e5e7eb',
               borderRadius: '20px',
               cursor: 'pointer',
+              flexShrink: 0,
+              whiteSpace: 'nowrap',
             }}
           >
             {tab.label}
@@ -264,6 +289,86 @@ export default function Messages({ shop }) {
               m.outcome,
               m.recoveredRevenue || 0
             );
+
+            if (isMobileView) {
+              return (
+                <div
+                  key={m._id}
+                  style={{
+                    padding: '14px 16px',
+                    borderBottom:
+                      i < filteredMessages.length - 1
+                        ? '1px solid #f9fafb'
+                        : 'none',
+                  }}
+                >
+                  {/* Row 1: time + status */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '6px',
+                    }}
+                  >
+                    <span style={{ fontSize: '11px', color: '#9ca3af' }}>
+                      {timeStr}
+                    </span>
+                    <span
+                      style={{
+                        padding: '2px 8px',
+                        borderRadius: '20px',
+                        fontSize: '11px',
+                        fontWeight: statusCfg.bold ? '600' : '400',
+                        fontStyle: statusCfg.italic ? 'italic' : 'normal',
+                        background: statusCfg.bg,
+                        color: statusCfg.color,
+                      }}
+                    >
+                      {statusCfg.scheduled && m.runAt
+                        ? `scheduled · ${formatMessageTime(m.runAt)}`
+                        : statusCfg.label}
+                    </span>
+                  </div>
+                  {/* Row 2: customer + signal */}
+                  <div style={{ marginBottom: '4px' }}>
+                    <span
+                      style={{
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        color: '#111827',
+                      }}
+                    >
+                      {identifier}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        color: '#6366f1',
+                        marginLeft: '8px',
+                      }}
+                    >
+                      {signalLabel}
+                    </span>
+                  </div>
+                  {/* Row 3: channel icon + message copy */}
+                  <div
+                    style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}
+                  >
+                    <span
+                      style={{ fontSize: '13px', color: '#9ca3af', flexShrink: 0 }}
+                    >
+                      {m.channel === 'email' ? '✉️' : '🔔'}
+                    </span>
+                    <span
+                      style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.4' }}
+                    >
+                      {m.payload?.body || m.payload?.title || '—'}
+                    </span>
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div

@@ -28,6 +28,14 @@ export default function Today({ shop }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const [isMobileView, setIsMobileView] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobileView(window.innerWidth <= 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
   useEffect(() => {
     if (!shop) return;
     let cancelled = false;
@@ -84,7 +92,13 @@ export default function Today({ shop }) {
 
   return (
     <Page>
-    <div style={{ maxWidth: '1100px', margin: '0 auto', paddingBottom: '24px' }}>
+    <div
+      style={{
+        maxWidth: '1100px',
+        margin: '0 auto',
+        padding: isMobileView ? '0 12px 24px' : '0 0 24px',
+      }}
+    >
       {/* Header */}
       <div style={{ marginBottom: '16px' }}>
         <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 4px' }}>
@@ -151,7 +165,7 @@ export default function Today({ shop }) {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
+          gridTemplateColumns: isMobileView ? '1fr' : '1fr 1fr',
           gap: '16px',
           marginBottom: '16px',
         }}
@@ -362,7 +376,13 @@ export default function Today({ shop }) {
       </div>
 
       {/* Bottom row: Recovered this week chart (left) + Worth knowing (right) */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: isMobileView ? '1fr' : '1fr 1fr',
+          gap: '16px',
+        }}
+      >
         {/* LEFT — Recovered this week bar chart */}
         <div
           style={{

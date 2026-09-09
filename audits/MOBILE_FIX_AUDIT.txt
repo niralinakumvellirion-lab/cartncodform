@@ -1,0 +1,78 @@
+MOBILE_FIX_AUDIT — self-audit
+=============================
+Branch:  popup-responsive (continued)
+Date:    2026-09-10
+Files:   frontend/app/admin/screens/Today.jsx
+         frontend/app/admin/screens/CodOrders.jsx
+         frontend/app/admin/screens/Messages.jsx
+         frontend/lib/api.js
+
+
+1. lib/api.js — 401 retry with a fresh token
+-------------------------------------------
+  Both apiGet and apiSend: the old "retry once on 401" block (which called the
+  non-existent `getAuthToken(true)` and retried immediately) is replaced with:
+    if (res.status === 401) {
+      await new Promise((r) => setTimeout(r, 500));   // let App Bridge mint one
+      const freshToken = await getAuthToken();
+      // fetch again with Bearer freshToken (+ Content-Type)
+      if (!retryRes.ok) { const err = await retryRes.json().catch(()=>({}));
+        throw new Error(err.error || `${path} failed (${retryRes.status})`); }
+      return retryRes.json();   // apiSend: .catch(() => ({}))
+    }
+  Network errors on the retry still go through describeNetworkError. Only one
+  retry; a second 401 now throws the backend's error message.
+
+
+2. Today.jsx — isMobileView + 2 grids stack
+------------------------------------------
+  * Added isMobileView state + mount/resize effect (window.innerWidth <= 768).
+  * "Planned for today" + "Yesterday" grid:
+      gridTemplateColumns: isMobileView ? '1fr' : '1fr 1fr'
+  * "Recovered this week" + "Worth knowing" grid: same conditional (the inline
+    grid style was expanded to a style object to hold it).
+  * Outer inner-div padding: `isMobileView ? '0 12px 24px' : '0 0 24px'`
+    (this screen is inside a Polaris <Page> which supplies the desktop gutter,
+    so desktop keeps 0 horizontal; mobile gets 12px). The spec's literal
+    '0 24px 24px' base doesn't exist here — adapted to the <Page> wrapper.
+  * The inner Yesterday 2x2 stat grid was left as-is (spec named only the two
+    outer grids).
+
+
+3. CodOrders.jsx — card layout on mobile + 2-col stat tiles
+--------------------------------------------------------
+  * Added isMobileView state + effect.
+  * Outer padding: `isMobileView ? '0 12px 24px' : '0 24px 24px'`.
+  * Stat tiles grid: `isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)'`.
+  * Table column-header row wrapped in `{!isMobileView && ( ... )}`.
+  * Rows section: `loading ? skeletons : orders.length === 0 ? empty :
+    isMobileView ? (<stacked order cards>) : (<6-col grid rows>)`.
+    The mobile card is the spec's exact 4-row layout: Order # + status pill /
+    name + maskPhone + city / product×qty + ₹value / date + Cancel/Confirm
+    (pending only). Grid-row branch unchanged.
+
+
+4. Messages.jsx — card layout + scrollable tabs
+---------------------------------------------
+  * Added isMobileView state + effect.
+  * Outer padding: `isMobileView ? '0 12px 24px' : '0 24px 24px'`.
+  * Filter tabs container: added overflowX: 'auto', paddingBottom: '4px',
+    WebkitOverflowScrolling: 'touch'; each tab button got flexShrink: 0 +
+    whiteSpace: 'nowrap' so they scroll rather than squish.
+  * Inside filteredMessages.map: `if (isMobileView) return (<stacked card>)`
+    before the existing 5-col grid return. The card is the spec's 3-row layout
+    (time + status pill / identifier + signalLabel / channel icon + copy);
+    the status pill reuses the `scheduled · <runAt>` special case.
+
+
+5. BUILD
+--------
+  cd frontend && npm run build  ->  ✓ Compiled successfully, zero warnings.
+    /admin/cod            3.5  -> 3.46 kB
+    /admin/messages       3.58 kB
+    /admin/settings-page  7.64 kB   (unchanged this pass)
+  (Today.jsx lives at /admin, /admin/signals, /admin/insights — all still build.)
+
+
+STATUS: COMPLETE. Build green, all three screens stack / re-card on mobile,
+api.js retries once with a fresh token after a 500 ms pause on 401.

@@ -42,6 +42,14 @@ export default function CodOrders({ shop }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const [isMobileView, setIsMobileView] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobileView(window.innerWidth <= 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
   const loadOrders = useCallback(async () => {
     if (!shop) return;
     setLoading(true);
@@ -95,7 +103,13 @@ export default function CodOrders({ shop }) {
   }, [orders]);
 
   return (
-    <div style={{ padding: '0 24px 24px', maxWidth: '1100px', margin: '0 auto' }}>
+    <div
+      style={{
+        padding: isMobileView ? '0 12px 24px' : '0 24px 24px',
+        maxWidth: '1100px',
+        margin: '0 auto',
+      }}
+    >
       {/* Header */}
       <div style={{ marginBottom: '16px' }}>
         <h1
@@ -135,7 +149,7 @@ export default function CodOrders({ shop }) {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
           gap: '12px',
           marginBottom: '20px',
         }}
@@ -290,31 +304,33 @@ export default function CodOrders({ shop }) {
           overflow: 'hidden',
         }}
       >
-        {/* Column headers */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: GRID_COLS,
-            padding: '10px 20px',
-            background: '#f9fafb',
-            borderBottom: '1px solid #f3f4f6',
-          }}
-        >
-          {['Order', 'Customer', 'Product', 'Placed', 'Status', ''].map((h, idx) => (
-            <div
-              key={h || `col-${idx}`}
-              style={{
-                fontSize: '11px',
-                fontWeight: '600',
-                color: '#9ca3af',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-              }}
-            >
-              {h}
-            </div>
-          ))}
-        </div>
+        {/* Column headers — desktop table only */}
+        {!isMobileView && (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: GRID_COLS,
+              padding: '10px 20px',
+              background: '#f9fafb',
+              borderBottom: '1px solid #f3f4f6',
+            }}
+          >
+            {['Order', 'Customer', 'Product', 'Placed', 'Status', ''].map((h, idx) => (
+              <div
+                key={h || `col-${idx}`}
+                style={{
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  color: '#9ca3af',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
+                }}
+              >
+                {h}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Rows */}
         {loading ? (
@@ -350,6 +366,127 @@ export default function CodOrders({ shop }) {
           >
             No COD orders yet.
           </div>
+        ) : isMobileView ? (
+          orders.map((o, i) => (
+            <div
+              key={o._id}
+              style={{
+                padding: '16px',
+                borderBottom:
+                  i < orders.length - 1 ? '1px solid #f3f4f6' : 'none',
+              }}
+            >
+              {/* Row 1: Order # + Status */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '8px',
+                }}
+              >
+                <span
+                  style={{ fontSize: '13px', fontWeight: '700', color: '#374151' }}
+                >
+                  #{String(i + 1091).padStart(4, '0')}
+                </span>
+                <span
+                  style={{
+                    padding: '3px 10px',
+                    borderRadius: '20px',
+                    fontSize: '12px',
+                    fontWeight: '500',
+                    background: STATUS_CONFIG[o.status]?.bg || '#f3f4f6',
+                    color: STATUS_CONFIG[o.status]?.color || '#9ca3af',
+                  }}
+                >
+                  {STATUS_CONFIG[o.status]?.label || o.status}
+                </span>
+              </div>
+
+              {/* Row 2: Customer */}
+              <div style={{ marginBottom: '6px' }}>
+                <div
+                  style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}
+                >
+                  {o.name}
+                </div>
+                <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+                  {maskPhone(o.phone)}
+                  {o.city ? ` · ${o.city}` : ''}
+                </div>
+              </div>
+
+              {/* Row 3: Product + value */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '6px',
+                }}
+              >
+                <div style={{ fontSize: '13px', color: '#374151' }}>
+                  {o.productName} × {o.quantity}
+                </div>
+                <div
+                  style={{ fontSize: '13px', fontWeight: '600', color: '#111827' }}
+                >
+                  ₹
+                  {(
+                    (Number(o.productPrice) || 0) * (Number(o.quantity) || 1)
+                  ).toLocaleString('en-IN')}
+                </div>
+              </div>
+
+              {/* Row 4: Date + Actions */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+                  {formatOrderTime(o.createdAt)}
+                </div>
+                {o.status === 'pending' && (
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      onClick={() => updateStatus(o._id, 'cancelled')}
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        color: '#374151',
+                        background: '#fff',
+                        border: '1px solid #d1d5db',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => updateStatus(o._id, 'confirmed')}
+                      style={{
+                        padding: '6px 14px',
+                        fontSize: '12px',
+                        fontWeight: '600',
+                        color: '#fff',
+                        background: '#111827',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Confirm
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
         ) : (
           orders.map((o, i) => {
             const statusCfg = STATUS_CONFIG[o.status] || STATUS_CONFIG.pending;
