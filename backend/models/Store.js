@@ -84,6 +84,23 @@ const storeSchema = new mongoose.Schema({
     denyText: { type: String, default: 'No thanks' },
     customTitle: { type: String, default: '' },
     showBranding: { type: Boolean, default: true },
+
+    // --- popup-redesign: layout system + split-layout content ---
+    layout: {
+      type: String,
+      enum: ['split', 'card', 'banner'],
+      default: 'split',
+    },
+    headline: { type: String, default: '' },
+    subtext: { type: String, default: '' },
+    brandName: { type: String, default: '' },
+    ctaStyle: {
+      type: String,
+      enum: ['rounded', 'square', 'pill'],
+      default: 'rounded',
+    },
+    overlayOpacity: { type: Number, default: 0.5 },
+    showOverlay: { type: Boolean, default: true },
   },
 
   installedAt: {
