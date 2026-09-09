@@ -3,7 +3,7 @@ import { Suspense } from 'react';
 import { AppProvider } from '@shopify/polaris';
 import { NavMenu } from '@shopify/app-bridge-react';
 import { useSearchParams } from 'next/navigation';
-import TodayScreen from '../screens/Today';
+import InsightsScreen from '../screens/Insights';
 import '@shopify/polaris/build/esm/styles.css';
 
 function InsightsContent() {
@@ -20,8 +20,7 @@ function InsightsContent() {
         <a href="/admin/cod" rel="cod">Cash on delivery</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
       </NavMenu>
-      {/* placeholder — dedicated insights screen later */}
-      <TodayScreen shop={shop} />
+      <InsightsScreen shop={shop} />
     </AppProvider>
   );
 }

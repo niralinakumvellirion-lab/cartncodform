@@ -1,0 +1,108 @@
+INSIGHTS_AUDIT2 — self-audit
+============================
+Branch:  insights-screen
+Date:    2026-09-09
+Files:   backend/routes/events.js                  (+ product-analytics route)
+         frontend/app/admin/screens/Insights.jsx   (new)
+         frontend/app/admin/insights/page.js       (placeholder -> Insights screen)
+
+
+1. BACKEND — product-analytics route
+------------------------------------
+  Added to backend/routes/events.js, immediately before module.exports:
+    GET /api/events/:shopDomain/product-analytics
+      - requireAuth + requireStoreOwner
+      - shopDomain trimmed + lowercased into `shopDomain` const
+      - 30-day $match/$group/$project/$sort/$limit-20 pipeline over
+        StorefrontEvent, grouping by meta.productId; per product:
+        productTitle ($last), productPrice ($last), views (product_view count),
+        uniqueViewers ($size of $addToSet sessionId), addToCarts, pageExits,
+        totalDwell ($sum of meta.dwellSeconds on product_view rows),
+        cartRate ($round(addToCarts/views*100, 1)),
+        avgDwell ($round(totalDwell/views, 0))
+      - store-level (7-day) via Promise.all of 4 countDocuments +
+        1 distinct('sessionId'):
+          productViewsThisWeek = product_view count
+          sessionCount         = distinct sessionId length
+          addToCartRate        = (add_to_cart / sessionCount * 100).toFixed(1)
+          allowedNotifications = (push_prompt_accepted /
+                                  push_prompt_shown * 100).toFixed(1)
+      - res.json({ stats: { productViewsThisWeek, allowedNotifications,
+        addToCartRate, sessionCount }, products })
+      - try/catch -> 500 { error }
+    Pipeline implemented VERBATIM from the spec (the two loose bits — an
+    undeclared `shopDomain` in the store-stats block and `req.params.shopDomain`
+    used raw in $match — were normalised to the trimmed/lowercased `shopDomain`
+    const for consistency with the rest of the file).
+  node --check backend/routes/events.js -> OK
+
+  FIELD-NAME NOTE (observation, not a change): the pipeline reads
+  meta.productTitle / meta.productPrice / meta.dwellSeconds. The current
+  storefront block (extensions/.../push-notifications.liquid) emits
+  product_view meta as { productId, title, price, vendor, type, variantId,
+  imageUrl } and puts dwellSeconds on page_exit, not product_view. So with
+  today's data productTitle/productPrice come back null and avgDwell is 0
+  until either the pipeline field names or the storefront meta keys are
+  aligned. views / uniqueViewers / addToCarts / cartRate work as-is
+  (productId + type are present). Left exactly as the spec dictates.
+
+
+2. FRONTEND — Insights.jsx (new, 365 lines)
+------------------------------------------
+  Props { shop }. State: stats, products, insights, loading, error, sortBy
+  ('views' | 'avgDwell' | 'cartRate', default 'views').
+  Fetch on mount via Promise.allSettled:
+    GET /api/events/:shop/product-analytics     -> stats, products
+    GET /api/profiles/:shop/weekly-narrative    -> insights[]
+  (product-analytics rejection -> error banner; narrative rejection is silent.)
+
+  CONFIRMED — 4 stat tiles (repeat(4,1fr) grid):
+    "Product views this week" (stats.productViewsThisWeek, en-IN),
+    "Allowed notifications" (stats.allowedNotifications + "%"),
+    "Add-to-cart rate" (stats.addToCartRate + "%"),
+    "Sessions tracked" (stats.sessionCount, en-IN).
+    Each shows "—" while loading; sub-caption per the spec.
+
+  CONFIRMED — Products table with sort:
+    Header row "Products" + 3 sort buttons (Views / Time on page / Cart rate)
+    calling setSortBy; active tab styled (600, #f3f4f6 bg, border).
+    Column headers: Product | Views | Avg time | Avg scroll | Cart rate
+    (grid 2fr 80px 80px 100px 80px).
+    Loading -> 4 skeleton rows. Empty -> "No product view data yet. Make sure
+    the storefront block is enabled."
+    Row: product title (|| productId || 'Unknown') + ₹price when set; views +
+    "<uniqueViewers> people"; avgDwell "Ns" or "—"; a progress bar whose width
+    = min(cartRate,100)% (green if cartRate>15 else grey) + "<cartRate>%";
+    trailing cartRate cell.
+    sortedProducts = [...products].sort by sortBy (avgDwell / cartRate / views
+    desc) — computed before return, exactly as specified.
+
+  CONFIRMED — AI insight at bottom: rendered only when insights.length > 0;
+    amber card (#fffbeb / #fde68a) with a "✨" and insights[0].
+
+
+3. insights/page.js
+-------------------
+  import TodayScreen -> import InsightsScreen from '../screens/Insights'
+  <TodayScreen shop={shop} /> (+ placeholder comment) -> <InsightsScreen shop={shop} />
+  NavMenu / AppProvider / Suspense wrapper unchanged. Now 34 lines (was 36).
+
+
+4. TEST + BUILD
+---------------
+  cd backend  && npm test        -> 13 suites / 116 tests pass (unchanged;
+                                    no dedicated test for the new route).
+  cd frontend && npm run build   -> ✓ Compiled successfully, zero warnings.
+                                    /admin/insights 3.15 kB (was 535 B —
+                                    no longer pulling the Today bundle).
+  node --check backend/routes/events.js -> OK
+
+
+5. LINE COUNTS
+--------------
+  backend/routes/events.js               178 -> 297   (+119)
+  frontend/app/admin/screens/Insights.jsx  (new)  365
+  frontend/app/admin/insights/page.js     36 -> 34   (-2)
+
+
+STATUS: COMPLETE. 116/116 backend tests green, frontend build green.

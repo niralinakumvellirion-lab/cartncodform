@@ -174,4 +174,124 @@ router.get('/:shopDomain/resolve/:cartToken', requireAuth, requireStoreOwner, as
   }
 });
 
+/**
+ * GET /api/events/:shopDomain/product-analytics
+ * Deterministic storefront analytics for the Insights screen.
+ *  - per-product stats over the last 30 days (top 20 by views)
+ *  - store-level stats over the last 7 days
+ * No PII: everything is derived from anonymous StorefrontEvent rows.
+ */
+router.get('/:shopDomain/product-analytics', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shopDomain = req.params.shopDomain.trim().toLowerCase();
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const pipeline = [
+      {
+        $match: {
+          shopDomain,
+          ts: { $gte: thirtyDaysAgo },
+          'meta.productId': { $exists: true, $ne: null },
+        },
+      },
+      {
+        $group: {
+          _id: '$meta.productId',
+          productTitle: { $last: '$meta.productTitle' },
+          productPrice: { $last: '$meta.productPrice' },
+          views: { $sum: { $cond: [{ $eq: ['$type', 'product_view'] }, 1, 0] } },
+          uniqueViewers: { $addToSet: '$sessionId' },
+          addToCarts: { $sum: { $cond: [{ $eq: ['$type', 'add_to_cart'] }, 1, 0] } },
+          pageExits: { $sum: { $cond: [{ $eq: ['$type', 'page_exit'] }, 1, 0] } },
+          totalDwell: {
+            $sum: {
+              $cond: [
+                { $eq: ['$type', 'product_view'] },
+                { $ifNull: ['$meta.dwellSeconds', 0] },
+                0,
+              ],
+            },
+          },
+        },
+      },
+      {
+        $project: {
+          productId: '$_id',
+          productTitle: 1,
+          productPrice: 1,
+          views: 1,
+          uniqueViewers: { $size: '$uniqueViewers' },
+          addToCarts: 1,
+          cartRate: {
+            $cond: [
+              { $gt: ['$views', 0] },
+              { $round: [{ $multiply: [{ $divide: ['$addToCarts', '$views'] }, 100] }, 1] },
+              0,
+            ],
+          },
+          avgDwell: {
+            $cond: [
+              { $gt: ['$views', 0] },
+              { $round: [{ $divide: ['$totalDwell', '$views'] }, 0] },
+              0,
+            ],
+          },
+        },
+      },
+      { $sort: { views: -1 } },
+      { $limit: 20 },
+    ];
+
+    const products = await StorefrontEvent.aggregate(pipeline);
+
+    const [totalViews, totalSessions, cartEvents, promptShown, promptAccepted] =
+      await Promise.all([
+        StorefrontEvent.countDocuments({
+          shopDomain,
+          ts: { $gte: sevenDaysAgo },
+          type: 'product_view',
+        }),
+        StorefrontEvent.distinct('sessionId', {
+          shopDomain,
+          ts: { $gte: sevenDaysAgo },
+        }),
+        StorefrontEvent.countDocuments({
+          shopDomain,
+          ts: { $gte: sevenDaysAgo },
+          type: 'add_to_cart',
+        }),
+        StorefrontEvent.countDocuments({
+          shopDomain,
+          ts: { $gte: sevenDaysAgo },
+          type: 'push_prompt_shown',
+        }),
+        StorefrontEvent.countDocuments({
+          shopDomain,
+          ts: { $gte: sevenDaysAgo },
+          type: 'push_prompt_accepted',
+        }),
+      ]);
+
+    const sessionCount = totalSessions.length;
+    const cartRate =
+      sessionCount > 0 ? ((cartEvents / sessionCount) * 100).toFixed(1) : 0;
+    const optinRate =
+      promptShown > 0 ? ((promptAccepted / promptShown) * 100).toFixed(1) : 0;
+
+    return res.json({
+      stats: {
+        productViewsThisWeek: totalViews,
+        allowedNotifications: optinRate,
+        addToCartRate: cartRate,
+        sessionCount,
+      },
+      products,
+    });
+  } catch (err) {
+    console.error('[events] product-analytics error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch product analytics' });
+  }
+});
+
 module.exports = router;
