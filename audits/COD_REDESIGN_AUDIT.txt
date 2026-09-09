@@ -1,0 +1,448 @@
+COD_REDESIGN_AUDIT — read-only capture
+======================================
+Date: 2026-09-09
+Scope: the COD Orders admin screen, its route wrapper, and the backend cod.js
+       routes (order intake + status update).
+No files were modified.
+
+
+==========================================================================
+1. frontend/app/admin/screens/CodOrders.jsx   (full file, 199 lines)
+==========================================================================
+
+  1	'use client';
+  2
+  3	import { useState, useEffect, useCallback, useMemo } from 'react';
+  4	import {
+  5	  Page,
+  6	  Layout,
+  7	  Card,
+  8	  Grid,
+  9	  BlockStack,
+ 10	  InlineStack,
+ 11	  Text,
+ 12	  Badge,
+ 13	  Button,
+ 14	  IndexTable,
+ 15	  Banner,
+ 16	} from '@shopify/polaris';
+ 17	import { apiGet, apiSend } from '../../../lib/api';
+ 18
+ 19	export default function CodOrders({ shop }) {
+ 20	  const [orders, setOrders] = useState([]);
+ 21	  const [loading, setLoading] = useState(true);
+ 22	  const [error, setError] = useState('');
+ 23
+ 24	  const loadOrders = useCallback(async () => {
+ 25	    if (!shop) return;
+ 26	    setLoading(true);
+ 27	    setError('');
+ 28	    try {
+ 29	      const data = await apiGet(`/api/stores/${encodeURIComponent(shop)}/orders`);
+ 30	      // The endpoint returns a bare array; tolerate { orders: [...] } too.
+ 31	      setOrders(Array.isArray(data) ? data : Array.isArray(data?.orders) ? data.orders : []);
+ 32	    } catch (err) {
+ 33	      setError(err.message || 'Failed to load COD orders');
+ 34	    } finally {
+ 35	      setLoading(false);
+ 36	    }
+ 37	  }, [shop]);
+ 38
+ 39	  useEffect(() => {
+ 40	    loadOrders();
+ 41	  }, [loadOrders]);
+ 42
+ 43	  async function updateStatus(orderId, status) {
+ 44	    try {
+ 45	      await apiSend(`/api/cod/order/${orderId}`, 'PATCH', { status });
+ 46	      loadOrders();
+ 47	    } catch (err) {
+ 48	      setError(err.message || 'Failed to update order');
+ 49	    }
+ 50	  }
+ 51
+ 52	  const { total, pending, confirmedRevenue } = useMemo(() => {
+ 53	    return {
+ 54	      total: orders.length,
+ 55	      pending: orders.filter((o) => o.status === 'pending').length,
+ 56	      confirmedRevenue: orders
+ 57	        .filter((o) => o.status === 'confirmed')
+ 58	        .reduce((sum, o) => sum + (Number(o.productPrice) || 0) * (Number(o.quantity) || 1), 0),
+ 59	    };
+ 60	  }, [orders]);
+ 61
+ 62	  return (
+ 63	    <Page
+ 64	      title="COD Orders"
+ 65	      secondaryActions={[{ content: 'Refresh', onAction: loadOrders }]}
+ 66	    >
+ 67	      {error && (
+ 68	        <Banner tone="critical" title="Couldn't load COD orders">
+ 69	          <Text as="p">{error}</Text>
+ 70	        </Banner>
+ 71	      )}
+ 72	      <Layout>
+ 73	        {/* Stats row */}
+ 74	        <Layout.Section>
+ 75	          <Grid>
+ 76	            <Grid.Cell columnSpan={{ xs: 6, sm: 4, md: 4, lg: 4, xl: 4 }}>
+ 77	              <Card>
+ 78	                <BlockStack gap="100">
+ 79	                  <Text variant="headingSm" tone="subdued">Total orders</Text>
+ 80	                  <Text variant="headingLg">{total}</Text>
+ 81	                </BlockStack>
+ 82	              </Card>
+ 83	            </Grid.Cell>
+ 84	            <Grid.Cell columnSpan={{ xs: 6, sm: 4, md: 4, lg: 4, xl: 4 }}>
+ 85	              <Card>
+ 86	                <BlockStack gap="100">
+ 87	                  <Text variant="headingSm" tone="subdued">Pending</Text>
+ 88	                  <Text variant="headingLg">{pending}</Text>
+ 89	                </BlockStack>
+ 90	              </Card>
+ 91	            </Grid.Cell>
+ 92	            <Grid.Cell columnSpan={{ xs: 6, sm: 4, md: 4, lg: 4, xl: 4 }}>
+ 93	              <Card>
+ 94	                <BlockStack gap="100">
+ 95	                  <Text variant="headingSm" tone="subdued">Confirmed revenue</Text>
+ 96	                  <Text variant="headingLg">
+ 97	                    [rupee]{confirmedRevenue.toLocaleString('en-IN')}
+ 98	                  </Text>
+ 99	                </BlockStack>
+ 100	              </Card>
+101	            </Grid.Cell>
+102	          </Grid>
+103	        </Layout.Section>
+104
+105	        {/* Orders table */}
+106	        <Layout.Section>
+107	          <Card>
+108	            <IndexTable
+109	              resourceName={{ singular: 'order', plural: 'orders' }}
+110	              itemCount={orders.length}
+111	              loading={loading}
+112	              selectable={false}
+113	              headings={[
+114	                { title: 'Customer' },
+115	                { title: 'Phone' },
+116	                { title: 'Product' },
+117	                { title: 'Value' },
+118	                { title: 'Email' },
+119	                { title: 'Status' },
+120	                { title: 'Date' },
+121	                { title: 'Action' },
+122	              ]}
+123	              emptyState={
+124	                <Text as="p" alignment="center" tone="subdued">
+125	                  No COD orders yet.
+126	                </Text>
+127	              }
+128	            >
+129	              {orders.map((o, i) => (
+130	                <IndexTable.Row id={o._id} key={o._id} position={i}>
+131	                  <IndexTable.Cell>
+132	                    <BlockStack gap="050">
+133	                      <Text fontWeight="bold">{o.name}</Text>
+134	                      <Text tone="subdued" variant="bodySm">{o.address}</Text>
+135	                    </BlockStack>
+136	                  </IndexTable.Cell>
+137	                  <IndexTable.Cell>{o.phone}</IndexTable.Cell>
+138	                  <IndexTable.Cell>
+139	                    <BlockStack gap="050">
+140	                      <Text>{o.productName}</Text>
+141	                      <Text tone="subdued" variant="bodySm">Qty: {o.quantity}</Text>
+142	                    </BlockStack>
+143	                  </IndexTable.Cell>
+144	                  <IndexTable.Cell>
+145	                    [rupee]{((Number(o.productPrice) || 0) * (Number(o.quantity) || 1)).toLocaleString('en-IN')}
+146	                  </IndexTable.Cell>
+147	                  <IndexTable.Cell>
+148	                    {o.email || <Text tone="subdued">[em-dash]</Text>}
+149	                  </IndexTable.Cell>
+150	                  <IndexTable.Cell>
+151	                    <Badge
+152	                      tone={
+153	                        o.status === 'confirmed'
+154	                          ? 'success'
+155	                          : o.status === 'cancelled'
+156	                          ? 'critical'
+157	                          : undefined
+158	                      }
+159	                    >
+160	                      {o.status}
+161	                    </Badge>
+162	                  </IndexTable.Cell>
+163	                  <IndexTable.Cell>
+164	                    <Text tone="subdued" variant="bodySm">
+165	                      {o.createdAt
+166	                        ? new Date(o.createdAt).toLocaleDateString('en-IN')
+167	                        : '[em-dash]'}
+168	                    </Text>
+169	                  </IndexTable.Cell>
+170	                  <IndexTable.Cell>
+171	                    {o.status === 'pending' && (
+172	                      <InlineStack gap="200">
+173	                        <Button
+174	                          size="slim"
+175	                          variant="primary"
+176	                          onClick={() => updateStatus(o._id, 'confirmed')}
+177	                        >
+178	                          Confirm
+179	                        </Button>
+180	                        <Button
+181	                          size="slim"
+182	                          tone="critical"
+183	                          onClick={() => updateStatus(o._id, 'cancelled')}
+184	                        >
+185	                          Cancel
+186	                        </Button>
+187	                      </InlineStack>
+188	                    )}
+189	                  </IndexTable.Cell>
+190	                </IndexTable.Row>
+191	              ))}
+192	            </IndexTable>
+193	          </Card>
+194	        </Layout.Section>
+195	      </Layout>
+196	    </Page>
+197	  );
+198	}
+199
+
+  (Lines 97 & 145 use a literal "₹" (rupee), shown here as "[rupee]".
+   Lines 148 & 167 use a literal "—" (em-dash), shown here as "[em-dash]".
+   Everything else is verbatim.)
+
+  Notes (observations only):
+  * Still a Polaris <Page title="COD Orders"> + <Layout> + <Grid> + <IndexTable>
+    screen (NOT the div-based redesign Today/Customers/Messages/Insights got).
+    One "Refresh" secondaryAction -> loadOrders.
+  * Data: GET /api/stores/:shop/orders on mount / refresh. The endpoint returns
+    a BARE ARRAY (see routes/stores.js); line 31 also tolerates { orders: [...] }.
+  * 3 stat tiles (useMemo over `orders`):
+      Total orders      = orders.length
+      Pending           = count where status === 'pending'
+      Confirmed revenue = sum of productPrice*quantity where status === 'confirmed'
+    NOTE the stat computes "confirmed" but the CodOrder default status from
+    intake is 'pending' and updateStatus sends 'confirmed' | 'cancelled'.
+  * IndexTable, selectable=false, 8 columns:
+      Customer  o.name (bold) + o.address (subdued)
+      Phone     o.phone
+      Product   o.productName + "Qty: {o.quantity}"
+      Value     rupee + productPrice*quantity (en-IN)
+      Email     o.email or em-dash
+      Status    Badge, tone confirmed=success / cancelled=critical / else default
+      Date      o.createdAt -> toLocaleDateString('en-IN') or em-dash
+      Action    only when status === 'pending': "Confirm" (primary) and
+                "Cancel" (critical) buttons -> updateStatus(o._id, ...)
+  * updateStatus -> PATCH /api/cod/order/:id { status }, then reload. No
+    optimistic update; errors set the top banner.
+  * No filter / search / pagination. Whole list rendered.
+  * "Customer" column prints o.name + o.address in plain view (PII visible in
+    the admin UI — expected for an order-management screen; not logged).
+
+
+==========================================================================
+2. frontend/app/admin/cod/page.js   (full file, 35 lines)
+==========================================================================
+
+  1	'use client';
+  2	import { Suspense } from 'react';
+  3	import { AppProvider } from '@shopify/polaris';
+  4	import { NavMenu } from '@shopify/app-bridge-react';
+  5	import { useSearchParams } from 'next/navigation';
+  6	import CodScreen from '../screens/CodOrders';
+  7	import '@shopify/polaris/build/esm/styles.css';
+  8
+  9	function CodContent() {
+ 10	  const searchParams = useSearchParams();
+ 11	  const shop = searchParams.get('shop') || '';
+ 12	  return (
+ 13	    <AppProvider i18n={{}}>
+ 14	      <NavMenu>
+ 15	        <a href="/admin" rel="today">Today</a>
+ 16	        <a href="/admin/customers" rel="customers">Customers</a>
+ 17	        <a href="/admin/signals" rel="signals">What to act on</a>
+ 18	        <a href="/admin/messages" rel="messages">Messages</a>
+ 19	        <a href="/admin/insights" rel="insights">Insights</a>
+ 20	        <a href="/admin/cod" rel="cod">Cash on delivery</a>
+ 21	        <a href="/admin/settings-page" rel="settings-page">Settings</a>
+ 22	      </NavMenu>
+ 23	      <CodScreen shop={shop} />
+ 24	    </AppProvider>
+ 25	  );
+ 26	}
+ 27
+ 28	export default function CodPage() {
+ 29	  return (
+ 30	    <Suspense fallback={null}>
+ 31	      <CodContent />
+ 32	    </Suspense>
+ 33	  );
+ 34	}
+ 35
+
+  Notes (observations only):
+  * Thin route wrapper — identical shape to the other 6 admin routes:
+    Suspense -> CodContent -> AppProvider + the shared 7-link NavMenu +
+    <CodScreen shop={shop} />. shop from ?shop=.
+  * Imports the screen as `CodScreen` (file exports `CodOrders`).
+  * NavMenu Today link rel="today"; "Cash on delivery" is the /admin/cod entry.
+
+
+==========================================================================
+3. backend/routes/cod.js   (full file, 123 lines)
+==========================================================================
+
+  1	const express = require('express');
+  2	const CodOrder = require('../models/CodOrder');
+  3	const Store = require('../models/Store');
+  4	const { sendNewCodOrderEmail } = require('../utils/email');
+  5	const { sendPushToStore } = require('../utils/pushNotification');
+  6	const { requireAuth } = require('../middleware/requireOwner');
+  7	const { upsertProfile } = require('../services/profileService');
+  8
+  9	const router = express.Router();
+ 10
+ 11	/**
+ 12	 * POST /api/cod/order
+ 13	 * Public endpoint — the customer-facing COD form posts here.
+ 14	 *
+ 15	 * Body: { shopDomain, name, phone, address, city, pincode, productName, productPrice, quantity }
+ 16	 */
+ 17	router.post('/order', async (req, res) => {
+ 18	  try {
+ 19	    const {
+ 20	      shopDomain,
+ 21	      name,
+ 22	      phone,
+ 23	      address,
+ 24	      city,
+ 25	      pincode,
+ 26	      productName,
+ 27	      productPrice,
+ 28	      quantity,
+ 29	    } = req.body;
+ 30
+ 31	    if (!shopDomain || !name || !phone || !address) {
+ 32	      return res
+ 33	        .status(400)
+ 34	        .json({ error: 'shopDomain, name, phone and address are required' });
+ 35	    }
+ 36
+ 37	    const order = await CodOrder.create({
+ 38	      shopDomain: shopDomain.trim().toLowerCase(),
+ 39	      name: name.trim(),
+ 40	      phone: phone.trim(),
+ 41	      address: address.trim(),
+ 42	      city: (city || '').trim(),
+ 43	      pincode: (pincode || '').trim(),
+ 44	      productName: (productName || '').trim(),
+ 45	      productPrice: Number(productPrice) || 0,
+ 46	      quantity: Number(quantity) || 1,
+ 47	      status: 'pending',
+ 48	    });
+ 49
+ 50	    console.log(`[cod] New COD order for ${order.shopDomain} — orderId: ${order._id}`);
+ 51
+ 52	    // Identity resolution — the verified COD phone is the strongest identity
+ 53	    // anchor for an Indian D2C shopper. Fire-and-forget.
+ 54	    upsertProfile(order.shopDomain, {
+ 55	      phone: phone,
+ 56	      email: req.body.email || null,
+ 57	    }, {
+ 58	      'channels.email.address': req.body.email || undefined,
+ 59	      'channels.email.source': req.body.email ? 'cod' : undefined,
+ 60	      lastSeenAt: new Date(),
+ 61	    }).catch((err) => console.error('[profile] upsert error:', err.message));
+ 62
+ 63	    // Notify the store owner about the new COD order.
+ 64	    const store = await Store.findOne({ shopDomain: order.shopDomain });
+ 65	    const ownerEmail = (store && store.ownerEmail) || process.env.TEST_OWNER_EMAIL;
+ 66	    if (ownerEmail) {
+ 67	      sendNewCodOrderEmail(order, ownerEmail);
+ 68	      console.log(`[cod] New COD order email triggered for owner: ${ownerEmail}`);
+ 69	    } else {
+ 70	      console.log('[cod] No owner email available (set TEST_OWNER_EMAIL) — skipping notification');
+ 71	    }
+ 72
+ 73	    // Push-notify the store owner about the new COD order.
+ 74	    sendPushToStore(
+ 75	      order.shopDomain,
+ 76	      '📦 New COD Order',
+ 77	      `${order.name} placed a COD order for ${order.productName}`
+ 78	    );
+ 79
+ 80	    return res.status(201).json({ success: true, order });
+ 81	  } catch (err) {
+ 82	    console.error('[cod] POST /order error:', err.message);
+ 83	    return res.status(500).json({ error: 'Failed to save COD order' });
+ 84	  }
+ 85	});
+ 86
+ 87	/**
+ 88	 * PATCH /api/cod/order/:id
+ 89	 * Owner updates the status of a COD order (pending/confirmed/cancelled).
+ 90	 */
+ 91	router.patch('/order/:id', requireAuth, async (req, res) => {
+ 92	  try {
+ 93	    const { status } = req.body;
+ 94	    const allowed = ['pending', 'confirmed', 'cancelled'];
+ 95
+ 96	    if (!allowed.includes(status)) {
+ 97	      return res.status(400).json({ error: `status must be one of ${allowed.join(', ')}` });
+ 98	    }
+ 99
+100	    const existingOrder = await CodOrder.findById(req.params.id);
+101	    if (!existingOrder) {
+102	      return res.status(404).json({ error: 'COD order not found' });
+103	    }
+104
+105	    if (req.shopDomain !== existingOrder.shopDomain) {
+106	      return res.status(403).json({ error: 'Forbidden' });
+107	    }
+108
+109	    const order = await CodOrder.findByIdAndUpdate(
+110	      req.params.id,
+111	      { status },
+112	      { new: true }
+113	    );
+114
+115	    console.log(`[cod] Order ${order._id} status -> ${status}`);
+116	    return res.json({ success: true, order });
+117	  } catch (err) {
+118	    console.error('[cod] PATCH /order/:id error:', err.message);
+119	    return res.status(500).json({ error: 'Failed to update COD order' });
+120	  }
+121	});
+122
+123	module.exports = router;
+
+  Notes (observations only):
+  * TWO routes here. (The customer-facing COD *form/page* and its
+    submit-through-App-Proxy live in routes/proxy.js — /cod-form and
+    /cod-order — NOT here. This file's POST /order is the direct
+    backend-domain intake.)
+  * POST /api/cod/order — PUBLIC (no requireAuth). Requires shopDomain, name,
+    phone, address. Creates a CodOrder (status 'pending'), fire-and-forget
+    upsertProfile keyed on phone (+ optional email, source 'cod'), then
+    sends the owner an email (Store.ownerEmail || TEST_OWNER_EMAIL) and a
+    push (sendPushToStore). Returns 201 { success, order } — the FULL order
+    doc (name/phone/address included) in the response body.
+    - `email`, `city`, `pincode` are read from req.body but `email` is not in
+      the destructure on lines 19-29 (pulled via req.body.email on 56/58/59).
+  * PATCH /api/cod/order/:id — requireAuth ONLY (no requireStoreOwner
+    middleware). IDOR guard is inline: loads the order, then
+    `if (req.shopDomain !== existingOrder.shopDomain) return 403`. status must
+    be pending | confirmed | cancelled. Returns { success, order }.
+  * console.log line 50 logs shopDomain + orderId (no PII). Line 68 logs the
+    OWNER's email address (owner, not customer). Line 77's push body contains
+    the customer name + product but is a push payload, not a console.log.
+  * The frontend calls PATCH /api/cod/order/:id (matches) and
+    GET /api/stores/:shop/orders (defined in routes/stores.js, not here).
+  * CodOrder status values in play: 'pending' (default) <-> 'confirmed' /
+    'cancelled'. The frontend "Confirmed revenue" tile keys on 'confirmed'.
+
+
+END OF CAPTURE — no modifications made.

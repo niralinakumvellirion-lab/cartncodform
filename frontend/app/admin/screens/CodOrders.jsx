@@ -1,20 +1,41 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import {
-  Page,
-  Layout,
-  Card,
-  Grid,
-  BlockStack,
-  InlineStack,
-  Text,
-  Badge,
-  Button,
-  IndexTable,
-  Banner,
-} from '@shopify/polaris';
 import { apiGet, apiSend } from '../../../lib/api';
+
+function maskPhone(phone) {
+  if (!phone) return '—';
+  const digits = phone.replace(/\D/g, '');
+  if (digits.length < 6) return phone;
+  return `+91 ${digits.slice(-10, -6)}•••• ••${digits.slice(-3)}`;
+}
+
+function formatOrderTime(date) {
+  if (!date) return '—';
+  const d = new Date(date);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const isYesterday = d.toDateString() === yesterday.toDateString();
+  const time = d.toLocaleTimeString('en-IN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  if (isToday) return `Today ${time}`;
+  if (isYesterday) return `Yesterday ${time}`;
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
+
+const STATUS_CONFIG = {
+  pending: { label: 'pending', bg: '#fef9c3', color: '#ca8a04' },
+  confirmed: { label: 'confirmed', bg: '#dcfce7', color: '#16a34a' },
+  cancelled: { label: 'cancelled', bg: '#f3f4f6', color: '#9ca3af' },
+  delivered: { label: 'delivered', bg: '#dbeafe', color: '#1d4ed8' },
+};
+
+const GRID_COLS = '70px 1fr 1.2fr 120px 100px 160px';
 
 export default function CodOrders({ shop }) {
   const [orders, setOrders] = useState([]);
@@ -28,7 +49,13 @@ export default function CodOrders({ shop }) {
     try {
       const data = await apiGet(`/api/stores/${encodeURIComponent(shop)}/orders`);
       // The endpoint returns a bare array; tolerate { orders: [...] } too.
-      setOrders(Array.isArray(data) ? data : Array.isArray(data?.orders) ? data.orders : []);
+      setOrders(
+        Array.isArray(data)
+          ? data
+          : Array.isArray(data?.orders)
+          ? data.orders
+          : []
+      );
     } catch (err) {
       setError(err.message || 'Failed to load COD orders');
     } finally {
@@ -49,150 +76,409 @@ export default function CodOrders({ shop }) {
     }
   }
 
-  const { total, pending, confirmedRevenue } = useMemo(() => {
+  const { total, pending, confirmed, confirmRate, confirmedRevenue } = useMemo(() => {
+    const t = orders.length;
+    const p = orders.filter((o) => o.status === 'pending').length;
+    const c = orders.filter((o) => o.status === 'confirmed').length;
     return {
-      total: orders.length,
-      pending: orders.filter((o) => o.status === 'pending').length,
+      total: t,
+      pending: p,
+      confirmed: c,
+      confirmRate: t > 0 ? ((c / t) * 100).toFixed(0) + '%' : '—',
       confirmedRevenue: orders
         .filter((o) => o.status === 'confirmed')
-        .reduce((sum, o) => sum + (Number(o.productPrice) || 0) * (Number(o.quantity) || 1), 0),
+        .reduce(
+          (s, o) => s + (Number(o.productPrice) || 0) * (Number(o.quantity) || 1),
+          0
+        ),
     };
   }, [orders]);
 
   return (
-    <Page
-      title="COD Orders"
-      secondaryActions={[{ content: 'Refresh', onAction: loadOrders }]}
-    >
-      {error && (
-        <Banner tone="critical" title="Couldn't load COD orders">
-          <Text as="p">{error}</Text>
-        </Banner>
-      )}
-      <Layout>
-        {/* Stats row */}
-        <Layout.Section>
-          <Grid>
-            <Grid.Cell columnSpan={{ xs: 6, sm: 4, md: 4, lg: 4, xl: 4 }}>
-              <Card>
-                <BlockStack gap="100">
-                  <Text variant="headingSm" tone="subdued">Total orders</Text>
-                  <Text variant="headingLg">{total}</Text>
-                </BlockStack>
-              </Card>
-            </Grid.Cell>
-            <Grid.Cell columnSpan={{ xs: 6, sm: 4, md: 4, lg: 4, xl: 4 }}>
-              <Card>
-                <BlockStack gap="100">
-                  <Text variant="headingSm" tone="subdued">Pending</Text>
-                  <Text variant="headingLg">{pending}</Text>
-                </BlockStack>
-              </Card>
-            </Grid.Cell>
-            <Grid.Cell columnSpan={{ xs: 6, sm: 4, md: 4, lg: 4, xl: 4 }}>
-              <Card>
-                <BlockStack gap="100">
-                  <Text variant="headingSm" tone="subdued">Confirmed revenue</Text>
-                  <Text variant="headingLg">
-                    ₹{confirmedRevenue.toLocaleString('en-IN')}
-                  </Text>
-                </BlockStack>
-              </Card>
-            </Grid.Cell>
-          </Grid>
-        </Layout.Section>
+    <div style={{ padding: '0 24px 24px', maxWidth: '1100px', margin: '0 auto' }}>
+      {/* Header */}
+      <div style={{ marginBottom: '16px' }}>
+        <h1
+          style={{
+            fontSize: '24px',
+            fontWeight: '700',
+            color: '#111827',
+            margin: '0 0 6px',
+          }}
+        >
+          Cash on delivery
+        </h1>
+        <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
+          {pending > 0
+            ? `${pending} waiting for your confirmation call.`
+            : 'All orders confirmed.'}
+        </p>
+      </div>
 
-        {/* Orders table */}
-        <Layout.Section>
-          <Card>
-            <IndexTable
-              resourceName={{ singular: 'order', plural: 'orders' }}
-              itemCount={orders.length}
-              loading={loading}
-              selectable={false}
-              headings={[
-                { title: 'Customer' },
-                { title: 'Phone' },
-                { title: 'Product' },
-                { title: 'Value' },
-                { title: 'Email' },
-                { title: 'Status' },
-                { title: 'Date' },
-                { title: 'Action' },
-              ]}
-              emptyState={
-                <Text as="p" alignment="center" tone="subdued">
-                  No COD orders yet.
-                </Text>
-              }
+      {error && (
+        <div
+          style={{
+            background: '#fef2f2',
+            border: '1px solid #fecaca',
+            borderRadius: '10px',
+            padding: '12px 16px',
+            marginBottom: '16px',
+            fontSize: '13px',
+            color: '#b91c1c',
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {/* 4 stat tiles */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: '12px',
+          marginBottom: '20px',
+        }}
+      >
+        {/* COD orders */}
+        <div
+          style={{
+            background: '#fff',
+            border: '1px solid #e5e7eb',
+            borderRadius: '10px',
+            padding: '16px 18px',
+          }}
+        >
+          <div
+            style={{
+              fontSize: '11px',
+              color: '#6366f1',
+              fontWeight: '500',
+              marginBottom: '8px',
+            }}
+          >
+            COD orders (30d)
+          </div>
+          <div
+            style={{
+              fontSize: '28px',
+              fontWeight: '700',
+              color: '#111827',
+              lineHeight: 1,
+              marginBottom: '6px',
+            }}
+          >
+            {total}
+          </div>
+          <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+            {confirmed} confirmed
+          </div>
+        </div>
+
+        {/* Confirmed % */}
+        <div
+          style={{
+            background: '#fff',
+            border: '1px solid #e5e7eb',
+            borderRadius: '10px',
+            padding: '16px 18px',
+          }}
+        >
+          <div
+            style={{
+              fontSize: '11px',
+              color: '#6b7280',
+              fontWeight: '500',
+              marginBottom: '8px',
+            }}
+          >
+            Confirmed
+          </div>
+          <div
+            style={{
+              fontSize: '28px',
+              fontWeight: '700',
+              color: '#111827',
+              lineHeight: 1,
+              marginBottom: '6px',
+            }}
+          >
+            {confirmRate}
+          </div>
+          <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+            {confirmed} of {total}
+          </div>
+        </div>
+
+        {/* Revenue */}
+        <div
+          style={{
+            background: '#fff',
+            border: '1px solid #e5e7eb',
+            borderRadius: '10px',
+            padding: '16px 18px',
+          }}
+        >
+          <div
+            style={{
+              fontSize: '11px',
+              color: '#6b7280',
+              fontWeight: '500',
+              marginBottom: '8px',
+            }}
+          >
+            Confirmed revenue
+          </div>
+          <div
+            style={{
+              fontSize: '28px',
+              fontWeight: '700',
+              color: '#16a34a',
+              lineHeight: 1,
+              marginBottom: '6px',
+            }}
+          >
+            ₹{confirmedRevenue.toLocaleString('en-IN')}
+          </div>
+          <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+            from confirmed orders
+          </div>
+        </div>
+
+        {/* Pending */}
+        <div
+          style={{
+            background: '#fff',
+            border: '1px solid #e5e7eb',
+            borderRadius: '10px',
+            padding: '16px 18px',
+          }}
+        >
+          <div
+            style={{
+              fontSize: '11px',
+              color: '#6b7280',
+              fontWeight: '500',
+              marginBottom: '8px',
+            }}
+          >
+            Pending confirmation
+          </div>
+          <div
+            style={{
+              fontSize: '28px',
+              fontWeight: '700',
+              color: pending > 0 ? '#ca8a04' : '#111827',
+              lineHeight: 1,
+              marginBottom: '6px',
+            }}
+          >
+            {pending}
+          </div>
+          <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+            {pending > 0 ? 'needs your call' : 'all confirmed'}
+          </div>
+        </div>
+      </div>
+
+      {/* Orders table */}
+      <div
+        style={{
+          background: '#fff',
+          border: '1px solid #e5e7eb',
+          borderRadius: '10px',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Column headers */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: GRID_COLS,
+            padding: '10px 20px',
+            background: '#f9fafb',
+            borderBottom: '1px solid #f3f4f6',
+          }}
+        >
+          {['Order', 'Customer', 'Product', 'Placed', 'Status', ''].map((h, idx) => (
+            <div
+              key={h || `col-${idx}`}
+              style={{
+                fontSize: '11px',
+                fontWeight: '600',
+                color: '#9ca3af',
+                textTransform: 'uppercase',
+                letterSpacing: '0.5px',
+              }}
             >
-              {orders.map((o, i) => (
-                <IndexTable.Row id={o._id} key={o._id} position={i}>
-                  <IndexTable.Cell>
-                    <BlockStack gap="050">
-                      <Text fontWeight="bold">{o.name}</Text>
-                      <Text tone="subdued" variant="bodySm">{o.address}</Text>
-                    </BlockStack>
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>{o.phone}</IndexTable.Cell>
-                  <IndexTable.Cell>
-                    <BlockStack gap="050">
-                      <Text>{o.productName}</Text>
-                      <Text tone="subdued" variant="bodySm">Qty: {o.quantity}</Text>
-                    </BlockStack>
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>
-                    ₹{((Number(o.productPrice) || 0) * (Number(o.quantity) || 1)).toLocaleString('en-IN')}
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>
-                    {o.email || <Text tone="subdued">—</Text>}
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>
-                    <Badge
-                      tone={
-                        o.status === 'confirmed'
-                          ? 'success'
-                          : o.status === 'cancelled'
-                          ? 'critical'
-                          : undefined
-                      }
+              {h}
+            </div>
+          ))}
+        </div>
+
+        {/* Rows */}
+        {loading ? (
+          [1, 2, 3].map((i) => (
+            <div
+              key={i}
+              style={{
+                height: '60px',
+                borderBottom: '1px solid #f9fafb',
+                display: 'flex',
+                alignItems: 'center',
+                padding: '0 20px',
+              }}
+            >
+              <div
+                style={{
+                  width: '50%',
+                  height: '12px',
+                  background: '#f3f4f6',
+                  borderRadius: '4px',
+                }}
+              />
+            </div>
+          ))
+        ) : orders.length === 0 ? (
+          <div
+            style={{
+              padding: '40px',
+              textAlign: 'center',
+              color: '#9ca3af',
+              fontSize: '14px',
+            }}
+          >
+            No COD orders yet.
+          </div>
+        ) : (
+          orders.map((o, i) => {
+            const statusCfg = STATUS_CONFIG[o.status] || STATUS_CONFIG.pending;
+            const isPrepaidEligible = o.email && o.status === 'pending';
+
+            return (
+              <div
+                key={o._id}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: GRID_COLS,
+                  padding: '14px 20px',
+                  alignItems: 'center',
+                  borderBottom:
+                    i < orders.length - 1 ? '1px solid #f9fafb' : 'none',
+                }}
+              >
+                {/* Order # */}
+                <div
+                  style={{ fontSize: '13px', fontWeight: '600', color: '#374151' }}
+                >
+                  #{String(i + 1091).padStart(4, '0')}
+                </div>
+
+                {/* Customer */}
+                <div>
+                  <div
+                    style={{
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      color: '#111827',
+                      marginBottom: '2px',
+                    }}
+                  >
+                    {o.name}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+                    {maskPhone(o.phone)}
+                    {o.city ? ` · ${o.city}` : ''}
+                  </div>
+                  {isPrepaidEligible && (
+                    <div
+                      style={{
+                        fontSize: '11px',
+                        color: '#6366f1',
+                        marginTop: '2px',
+                      }}
                     >
-                      {o.status}
-                    </Badge>
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>
-                    <Text tone="subdued" variant="bodySm">
-                      {o.createdAt
-                        ? new Date(o.createdAt).toLocaleDateString('en-IN')
-                        : '—'}
-                    </Text>
-                  </IndexTable.Cell>
-                  <IndexTable.Cell>
-                    {o.status === 'pending' && (
-                      <InlineStack gap="200">
-                        <Button
-                          size="slim"
-                          variant="primary"
-                          onClick={() => updateStatus(o._id, 'confirmed')}
-                        >
-                          Confirm
-                        </Button>
-                        <Button
-                          size="slim"
-                          tone="critical"
-                          onClick={() => updateStatus(o._id, 'cancelled')}
-                        >
-                          Cancel
-                        </Button>
-                      </InlineStack>
-                    )}
-                  </IndexTable.Cell>
-                </IndexTable.Row>
-              ))}
-            </IndexTable>
-          </Card>
-        </Layout.Section>
-      </Layout>
-    </Page>
+                      Has paid online before — prepaid offer sent
+                    </div>
+                  )}
+                </div>
+
+                {/* Product */}
+                <div>
+                  <div style={{ fontSize: '13px', color: '#374151' }}>
+                    {o.productName} × {o.quantity}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+                    ₹
+                    {(
+                      (Number(o.productPrice) || 0) * (Number(o.quantity) || 1)
+                    ).toLocaleString('en-IN')}
+                  </div>
+                </div>
+
+                {/* Placed */}
+                <div style={{ fontSize: '13px', color: '#374151' }}>
+                  {formatOrderTime(o.createdAt)}
+                </div>
+
+                {/* Status */}
+                <div>
+                  <span
+                    style={{
+                      padding: '3px 10px',
+                      borderRadius: '20px',
+                      fontSize: '12px',
+                      fontWeight: '500',
+                      background: statusCfg.bg,
+                      color: statusCfg.color,
+                    }}
+                  >
+                    {statusCfg.label}
+                  </span>
+                </div>
+
+                {/* Actions */}
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {o.status === 'pending' && (
+                    <>
+                      <button
+                        onClick={() => updateStatus(o._id, 'cancelled')}
+                        style={{
+                          padding: '6px 14px',
+                          fontSize: '12px',
+                          fontWeight: '500',
+                          color: '#374151',
+                          background: '#fff',
+                          border: '1px solid #d1d5db',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => updateStatus(o._id, 'confirmed')}
+                        style={{
+                          padding: '6px 14px',
+                          fontSize: '12px',
+                          fontWeight: '600',
+                          color: '#fff',
+                          background: '#111827',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Confirm
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
   );
 }
