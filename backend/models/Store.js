@@ -97,9 +97,14 @@ const storeSchema = new mongoose.Schema({
     headline: { type: String, default: '' },
     subtext: { type: String, default: '' },
     brandName: { type: String, default: '' },
+    textAlign: {
+      type: String,
+      enum: ['left', 'center', 'right'],
+      default: 'left',
+    },
     ctaStyle: {
       type: String,
-      enum: ['rounded', 'square', 'pill'],
+      enum: ['rounded', 'square', 'pill', 'outlined', 'soft'],
       default: 'rounded',
     },
     overlayOpacity: { type: Number, default: 0.5 },
@@ -124,7 +129,16 @@ const storeSchema = new mongoose.Schema({
     allowText: { type: String, default: 'Allow' },
     denyText: { type: String, default: 'No thanks' },
     showBranding: { type: Boolean, default: true },
-    ctaStyle: { type: String, enum: ['rounded', 'square', 'pill'], default: 'pill' },
+    textAlign: {
+      type: String,
+      enum: ['left', 'center', 'right'],
+      default: 'left',
+    },
+    ctaStyle: {
+      type: String,
+      enum: ['rounded', 'square', 'pill', 'outlined', 'soft'],
+      default: 'pill',
+    },
     position: {
       type: String,
       enum: ['bottom-right', 'bottom-left', 'center'],

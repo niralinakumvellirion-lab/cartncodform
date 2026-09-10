@@ -154,10 +154,29 @@
       var atTop = /^top/.test(cfg.position || '');
       wrap.setAttribute('style',
         'position:fixed;left:0;right:0;width:100%;' + (atTop ? 'top:0;' : 'bottom:0;') +
-        'z-index:999999;padding:12px ' + (isMobile ? '16px' : '24px') + ';display:flex;align-items:center;' +
+        'z-index:999999;padding:12px ' + (isMobile ? '16px' : '24px') + ';display:flex;align-items:center;gap:10px;' +
         'justify-content:space-between;' + (isMobile ? 'flex-wrap:wrap;gap:8px;' : '') +
         'background:' + accent + ';color:#fff;' +
         'font-size:14px;font-family:' + font + ';box-shadow:0 2px 10px rgba(0,0,0,0.2);');
+
+      // Optional 44x44 thumbnail on the left of the banner.
+      if (cfg.imageUrl) {
+        var bannerImg = document.createElement('img');
+        bannerImg.src = cfg.imageUrl;
+        bannerImg.alt = '';
+        bannerImg.style.cssText = [
+          'width:44px',
+          'height:44px',
+          'border-radius:8px',
+          'object-fit:cover',
+          'flex-shrink:0',
+          'object-position:' + (cfg.imagePosition || '50% 50%')
+        ].join(';');
+        bannerImg.onerror = function () {
+          bannerImg.style.display = 'none';
+        };
+        wrap.appendChild(bannerImg);
+      }
 
       var bnText = document.createElement('span');
       bnText.id = 'ccf-prompt-text';
@@ -184,8 +203,131 @@
       wrap.appendChild(bnRight);
       deny = closeBtn; // the × is the dismiss control for this layout
 
+    } else if (layout === 'card' && isMobile) {
+      // ---------- LAYOUT 2 (mobile): compact screen-centered card,
+      // matched pixel-for-pixel to the admin mobile preview. ----------
+      // cssText (not setAttribute) so nothing — a leftover margin or a
+      // stray transform — can be inherited from another layout.
+      wrap.style.cssText = [
+        'position:fixed',
+        'top:50%',
+        'left:50%',
+        'transform:translate(-50%,-50%)',
+        'width:280px',
+        'max-width:90vw',
+        'border-radius:16px',
+        'overflow:hidden',
+        'box-shadow:0 8px 32px rgba(0,0,0,0.25)',
+        'z-index:2147483647',
+        'background:' + (cfg.bgColor || '#ffffff'),
+        'font-family:' + (cfg.fontFamily || 'inherit')
+      ].join(';');
+
+      if (cfg.imageUrl) {
+        var mcImg = document.createElement('img');
+        mcImg.src = cfg.imageUrl;
+        mcImg.alt = '';
+        mcImg.style.cssText = [
+          'width:100%',
+          'height:140px',
+          'object-fit:cover',
+          'display:block',
+          'object-position:' + (cfg.imagePosition || '50% 50%')
+        ].join(';');
+        mcImg.onerror = function () { mcImg.style.display = 'none'; };
+        wrap.appendChild(mcImg);
+      }
+
+      var mcContent = document.createElement('div');
+      mcContent.style.cssText = 'padding:12px 14px 14px;';
+
+      var mcAlign = cfg.textAlign || 'left';
+
+      var mcHead = document.createElement('div');
+      mcHead.id = 'ccf-prompt-text';
+      mcHead.style.cssText = [
+        'font-size:13px',
+        'font-weight:500',
+        'color:' + fg,
+        'margin:0 0 10px',
+        'line-height:1.4',
+        'text-align:' + mcAlign
+      ].join(';');
+      mcHead.textContent = headline;
+      mcContent.appendChild(mcHead);
+
+      if (cfg.subtext) {
+        var mcSub = document.createElement('div');
+        mcSub.style.cssText = [
+          'font-size:12px',
+          'color:#6b7280',
+          'margin:0 0 10px',
+          'line-height:1.4',
+          'text-align:' + mcAlign
+        ].join(';');
+        mcSub.textContent = cfg.subtext;
+        mcContent.appendChild(mcSub);
+      }
+
+      allow = buildAllowBtn([
+        'width:100%',
+        'padding:10px',
+        'font-size:14px',
+        'font-weight:700',
+        'background:' + accent,
+        'color:#fff',
+        'border:none',
+        'border-radius:' + ctaRadius,
+        'margin-bottom:8px',
+        'cursor:pointer'
+      ].join(';'));
+      mcContent.appendChild(allow);
+
+      // Plain text dismiss — no border/box, not a <button>.
+      var denyEl = document.createElement('div');
+      denyEl.id = 'ccf-deny-btn';
+      denyEl.style.cssText = [
+        'text-align:center',
+        'font-size:12px',
+        'color:#9ca3af',
+        'cursor:pointer',
+        'padding:4px 0',
+        'text-decoration:none',
+        'font-family:inherit'
+      ].join(';');
+      denyEl.textContent = denyLabel;
+      deny = denyEl;
+      mcContent.appendChild(denyEl);
+
+      if (cfg.showBranding) {
+        mcContent.appendChild(buildBranding([
+          'margin-top:8px',
+          'font-size:10px',
+          'color:#d1d5db',
+          'text-align:center'
+        ].join(';')));
+      }
+
+      wrap.appendChild(mcContent);
+
+      // Dark overlay behind the screen-centered card (shared append + cleanup
+      // below handle #ccf-overlay).
+      if (cfg.showOverlay !== false) {
+        overlay = document.createElement('div');
+        overlay.id = 'ccf-overlay';
+        overlay.style.cssText = [
+          'position:fixed',
+          'top:0',
+          'left:0',
+          'width:100%',
+          'height:100%',
+          'background:rgba(0,0,0,0.5)',
+          'z-index:2147483646'
+        ].join(';');
+      }
+
     } else if (layout === 'card') {
-      // ---------- LAYOUT 2: small card (the original) ----------
+      // ---------- LAYOUT 2 (desktop): small card (the original) ----------
       var POS = {
         'bottom-right': 'bottom:16px;right:20px;',
         'bottom-left':  'bottom:16px;left:20px;',
@@ -193,17 +335,14 @@
         'top-right':    'top:20px;right:20px;',
         'top-left':     'top:20px;left:20px;'
       };
-      // On phones the card is always bottom-centered so it never runs off-screen.
-      var posStyle = isMobile
-        ? 'bottom:16px;left:50%;transform:translateX(-50%);'
-        : (POS[cfg.position] || POS['bottom-right']);
+      var posStyle = POS[cfg.position] || POS['bottom-right'];
       var radius = (cfg.borderRadius != null ? cfg.borderRadius : 12) + 'px';
       wrap.setAttribute('style',
         'position:fixed;' + posStyle + 'z-index:999999;' +
         'background:' + bg + ';color:' + fg + ';' +
         'border-radius:' + radius + ';box-shadow:0 8px 30px rgba(0,0,0,0.18);' +
-        'padding:16px;max-width:' + (isMobile ? 'min(320px,88vw)' : 'min(300px,88vw)') +
-        ';font-family:' + font + ';font-size:14px;line-height:1.5;');
+        'padding:16px;max-width:min(300px,88vw);' +
+        'font-family:' + font + ';font-size:14px;line-height:1.5;');
 
       if (cfg.imageUrl) {
         var cardImg = document.createElement('img');

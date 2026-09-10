@@ -1,0 +1,126 @@
+POPUP MOBILE FIXES — SELF AUDIT
+================================
+Branch: main (continuation of popup customizer work)
+Scope: FIX 1 text alignment, FIX 2 duplicate image removal, FIX 3 subtext
+       in preview, FIX 4 enhanced button styling, FIX 4b border radius
+       target, plus liquid textAlign on the mobile card.
+
+Files touched
+-------------
+1. backend/models/Store.js
+2. backend/routes/profiles.js
+3. frontend/app/admin/screens/Settings.jsx
+4. extensions/cartncodform-embed/blocks/push-notifications.liquid
+
+
+FIX 1 — Text alignment control
+------------------------------
+Store.js:
+  - popup subdoc       -> added textAlign { enum ['left','center','right'],
+                          default 'left' }                 (lines 100-104)
+  - mobilePopup subdoc -> added textAlign, same enum/default (lines 132-136)
+profiles.js:
+  - 'textAlign' added to POPUP_FIELDS whitelist so PATCH /:shopDomain/popup
+    persists popup.textAlign (dot-notation $set). mobilePopup.textAlign
+    rides along in the wholesale `set.mobilePopup` assignment.
+Settings.jsx:
+  - New "Text position" selector rendered after the Subtext field: three
+    pill buttons (Left / Center / Right) calling
+    setActivePopup((p) => ({ ...p, textAlign: opt.value })). Active state
+    keyed on (activePopup.textAlign || 'left') === opt.value, so it edits
+    popup on the Desktop tab and mobilePopup on the Mobile tab.
+
+FIX 2 — Duplicate image in Image Focus
+--------------------------------------
+Settings.jsx:
+  - Removed the standalone 80x60 `{activePopup.imageUrl && (<img
+    alt="preview" width:'80px' height:'60px' .../>)}` thumbnail that sat
+    directly under the image URL input. The drag-to-focus imagePosition
+    control below it already shows the image, so the small thumbnail was a
+    redundant second copy.
+
+FIX 3 — Subtext in preview + textAlign applied
+---------------------------------------------
+Settings.jsx desktop preview IIFE ({popupDevice === 'desktop' && (() => {...})()}):
+  - Added `const textAlign = popup.textAlign || 'left';`
+  - split layout : textAlign applied to headline div and subtext div
+  - card layout  : textAlign applied to headline div and subtext div
+    (subtext div already existed and rendered {subtext}; it now honours
+    alignment)
+Settings.jsx phone-frame preview ({popupDevice === 'mobile' ... const mp = mobilePopup}):
+  - Added `const textAlign = mp.textAlign || 'left';`
+  - headline div gets textAlign
+  - NEW subtext block added right after the headline:
+      {mp.subtext && (<div style={{ fontSize:'10px', color:'#6b7280',
+        marginBottom:'6px', lineHeight:'1.3', textAlign }}>{mp.subtext}</div>)}
+    (the mobile phone preview previously had no subtext element at all)
+
+FIX 4 — Enhanced button styling
+-------------------------------
+Store.js:
+  - popup.ctaStyle and mobilePopup.ctaStyle enums expanded from
+    ['rounded','square','pill'] to
+    ['rounded','square','pill','outlined','soft'].
+    Defaults unchanged (popup 'rounded', mobilePopup 'pill').
+Settings.jsx:
+  - Module-level helper added after LANGS:
+      function getCtaStyle(ctaStyle, accent) -> { borderRadius, background,
+        color, border } for pill / square / outlined / soft / (default)
+        rounded. 'outlined' = transparent bg + 2px accent border + accent
+        text; 'soft' = accent+'22' bg + accent text, no border.
+  - Button style option list expanded to 5:
+      Rounded / Square / Pill / Outlined / Soft
+  - Container `<div style={{ display:'flex', gap:'8px' }}>` -> added
+    flexWrap:'wrap' (+ row alignItems:'flex-start', label marginTop:'6px')
+    so five chips wrap cleanly.
+  - Desktop preview IIFE: `const ctaCss = getCtaStyle(ctaStyle, accent);`
+    spread into the split Allow button and the card Allow button in place
+    of the old hardcoded {background:accent,color:'#fff',border:'none',
+    borderRadius:ctaRadius}. Banner Allow button keeps its inverted
+    white-on-accent look but takes its corner from ctaCss.borderRadius.
+  - Phone-frame preview: `const ctaCss = getCtaStyle(mp.ctaStyle || 'pill',
+    accent);` spread into the Allow button (replaces old ctaR ternary).
+  - Removed now-unused `ctaRadius` / `ctaR` locals (grep confirms zero
+    remaining references).
+
+FIX 4b — Border radius applies to the card, not the button
+---------------------------------------------------------
+Settings.jsx desktop preview IIFE:
+  - split layout container borderRadius: '10px' -> `radius`
+    (= (popup.borderRadius ?? 12) + 'px')
+  - card layout container already used `radius` (unchanged)
+Settings.jsx phone-frame preview:
+  - `const cardRadius = (mp.borderRadius ?? 16) + 'px';` now drives the
+    popup container borderRadius (was hardcoded '12px')
+  - The Allow button radius now comes only from getCtaStyle, so the
+    borderRadius slider no longer bleeds onto the button.
+
+Liquid — textAlign on the mobile card
+-------------------------------------
+push-notifications.liquid, `layout === 'card' && isMobile` branch:
+  - Added `var mcAlign = cfg.textAlign || 'left';`
+  - mcHead.style.cssText -> appended 'text-align:' + mcAlign
+  - NEW subtext element mcSub built when cfg.subtext is present
+    (font-size:12px; color:#6b7280; margin:0 0 10px; line-height:1.4;
+    text-align: mcAlign), inserted between mcHead and the Allow button.
+  - ES5 only: var, string concat, array.join(';'), no arrow functions.
+
+Verification
+------------
+- node --check backend/models/Store.js        -> STORE OK
+- node --check backend/routes/profiles.js      -> PROFILES OK
+- liquid <script> extracted via awk, node --check -> LIQUID OK
+- cd frontend && npm run build                 -> Compiled successfully,
+  11/11 static pages, /admin/settings-page 8.01 kB, no errors
+- cd backend && npm test                       -> 13 suites, 116 tests,
+  all passing (pre-existing [auth] console.error noise only)
+
+Notes / not done
+----------------
+- Desktop liquid branches (layout 'card' and 'split' on desktop) were NOT
+  given textAlign; the task scoped the liquid change to the mobile card
+  headline + subtext. Their existing hardcoded alignment is unchanged.
+- getCtaStyle lives in Settings.jsx only (preview). The storefront liquid
+  still maps ctaStyle -> border-radius via CTA_RADIUS and does not yet
+  render 'outlined'/'soft' as distinct button treatments — follow-up if
+  those styles need to reach the live popup.

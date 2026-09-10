@@ -11,6 +11,33 @@ const LANGS = [
   { value: 'gu', label: 'Gujarati' },
 ];
 
+// The Allow-button look for each ctaStyle. borderRadius here is the BUTTON's
+// radius — the card container radius is a separate control.
+function getCtaStyle(ctaStyle, accent) {
+  switch (ctaStyle) {
+    case 'pill':
+      return { borderRadius: '50px', background: accent, color: '#fff', border: 'none' };
+    case 'square':
+      return { borderRadius: '0', background: accent, color: '#fff', border: 'none' };
+    case 'outlined':
+      return {
+        borderRadius: '8px',
+        background: 'transparent',
+        color: accent,
+        border: `2px solid ${accent}`,
+      };
+    case 'soft':
+      return {
+        borderRadius: '12px',
+        background: accent + '22', // ~13% opacity
+        color: accent,
+        border: 'none',
+      };
+    default: // rounded
+      return { borderRadius: '8px', background: accent, color: '#fff', border: 'none' };
+  }
+}
+
 export default function Settings({ shop }) {
   const [voice, setVoice] = useState({});
   const [caps, setCaps] = useState({});
@@ -89,6 +116,11 @@ export default function Settings({ shop }) {
         quietHours,
         timezone,
       });
+      console.log(
+        '[settings] saving popup device:', popupDevice,
+        'mobilePopup.layout:', mobilePopup.layout,
+        'mobilePopup.imageUrl:', mobilePopup.imageUrl ? 'SET' : 'EMPTY'
+      );
       await apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', {
         ...popup,
         mobilePopup,
@@ -482,42 +514,51 @@ export default function Settings({ shop }) {
                 </span>
               </div>
             </div>
-
-            {/* Save button */}
-            <div
-              style={{
-                marginTop: '20px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-              }}
-            >
-              <button
-                onClick={saveSettings}
-                disabled={saving}
-                style={{
-                  padding: '10px 24px',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  color: '#fff',
-                  background: saving ? '#9ca3af' : '#111827',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: saving ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {saving ? 'Saving…' : 'Save settings'}
-              </button>
-              {success && (
-                <span style={{ fontSize: '13px', color: '#16a34a' }}>
-                  ✓ Saved
-                </span>
-              )}
-              {error && (
-                <span style={{ fontSize: '13px', color: '#dc2626' }}>{error}</span>
-              )}
-            </div>
           </div>
+  );
+
+  // Standalone Save card — always the last thing in the right column (or
+  // straight after the popup preview while the customizer is open).
+  const saveCard = (
+    <div
+      style={{
+        background: '#fff',
+        border: '1px solid #e5e7eb',
+        borderRadius: '10px',
+        padding: '16px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+      }}
+    >
+      <button
+        onClick={saveSettings}
+        disabled={saving}
+        style={{
+          padding: '10px 24px',
+          fontSize: '14px',
+          fontWeight: '600',
+          color: '#fff',
+          background: saving ? '#9ca3af' : '#111827',
+          border: 'none',
+          borderRadius: '8px',
+          cursor: saving ? 'not-allowed' : 'pointer',
+          flex: 1,
+        }}
+      >
+        {saving ? 'Saving…' : 'Save settings'}
+      </button>
+      {success && (
+        <span
+          style={{ fontSize: '13px', color: '#16a34a', whiteSpace: 'nowrap' }}
+        >
+          ✓ Saved
+        </span>
+      )}
+      {error && (
+        <span style={{ fontSize: '13px', color: '#dc2626' }}>{error}</span>
+      )}
+    </div>
   );
 
   // The popup card is either the compact "Customize popup" trigger or the
@@ -659,12 +700,8 @@ export default function Settings({ shop }) {
                 </div>
               )}
 
-            {/* activePopup === popup on desktop, mobilePopup on mobile —
-                the field JSX below is shared by both devices. */}
-            {(() => {
-              const popup = activePopup;
-              const setPopup = setActivePopup;
-              return (
+            {/* Fields edit activePopup / setActivePopup — the desktop `popup`
+                state on the Desktop tab, `mobilePopup` on the Mobile tab. */}
             <>
             {/* Layout */}
             <div style={popRow}>
@@ -683,8 +720,8 @@ export default function Settings({ shop }) {
                 ).map((opt) => (
                   <button
                     key={opt.value}
-                    onClick={() => setPopup((p) => ({ ...p, layout: opt.value }))}
-                    style={popPill(popup.layout === opt.value)}
+                    onClick={() => setActivePopup((p) => ({ ...p, layout: opt.value }))}
+                    style={popPill(activePopup.layout === opt.value)}
                   >
                     {opt.label}
                   </button>
@@ -721,15 +758,15 @@ export default function Settings({ shop }) {
                         if (!file) return;
                         const reader = new FileReader();
                         reader.onload = (ev) => {
-                          setPopup((p) => ({ ...p, imageUrl: ev.target.result }));
+                          setActivePopup((p) => ({ ...p, imageUrl: ev.target.result }));
                         };
                         reader.readAsDataURL(file);
                       }}
                     />
                   </label>
-                  {popup.imageUrl && (
+                  {activePopup.imageUrl && (
                     <button
-                      onClick={() => setPopup((p) => ({ ...p, imageUrl: '' }))}
+                      onClick={() => setActivePopup((p) => ({ ...p, imageUrl: '' }))}
                       style={{
                         background: 'none',
                         border: 'none',
@@ -750,12 +787,12 @@ export default function Settings({ shop }) {
                   </span>
                   <input
                     value={
-                      popup.imageUrl?.startsWith('data:')
+                      activePopup.imageUrl?.startsWith('data:')
                         ? ''
-                        : popup.imageUrl || ''
+                        : activePopup.imageUrl || ''
                     }
                     onChange={(e) =>
-                      setPopup((p) => ({ ...p, imageUrl: e.target.value }))
+                      setActivePopup((p) => ({ ...p, imageUrl: e.target.value }))
                     }
                     placeholder="https://cdn.shopify.com/..."
                     style={{
@@ -770,26 +807,11 @@ export default function Settings({ shop }) {
                   />
                 </div>
 
-                {/* Image preview thumbnail */}
-                {popup.imageUrl && (
-                  <img
-                    src={popup.imageUrl}
-                    alt="preview"
-                    style={{
-                      width: '80px',
-                      height: '60px',
-                      objectFit: 'cover',
-                      objectPosition: popup.imagePosition || 'center center',
-                      borderRadius: '6px',
-                      border: '1px solid #e5e7eb',
-                    }}
-                  />
-                )}
               </div>
             </div>
 
             {/* Image focus — drag to set the crop focus point */}
-            {popup.imageUrl && (
+            {activePopup.imageUrl && (
               <div
                 style={{
                   display: 'flex',
@@ -810,9 +832,9 @@ export default function Settings({ shop }) {
                       overflow: 'hidden',
                       position: 'relative',
                       cursor: 'crosshair',
-                      backgroundImage: `url(${popup.imageUrl})`,
+                      backgroundImage: `url(${activePopup.imageUrl})`,
                       backgroundSize: 'cover',
-                      backgroundPosition: popup.imagePosition || 'center center',
+                      backgroundPosition: activePopup.imagePosition || 'center center',
                       userSelect: 'none',
                     }}
                     onMouseDown={(e) => {
@@ -826,7 +848,7 @@ export default function Settings({ shop }) {
                         );
                         const xClamped = Math.max(0, Math.min(100, x));
                         const yClamped = Math.max(0, Math.min(100, y));
-                        setPopup((p) => ({
+                        setActivePopup((p) => ({
                           ...p,
                           imagePosition: `${xClamped}% ${yClamped}%`,
                         }));
@@ -852,7 +874,7 @@ export default function Settings({ shop }) {
                         );
                         const xClamped = Math.max(0, Math.min(100, x));
                         const yClamped = Math.max(0, Math.min(100, y));
-                        setPopup((p) => ({
+                        setActivePopup((p) => ({
                           ...p,
                           imagePosition: `${xClamped}% ${yClamped}%`,
                         }));
@@ -875,7 +897,7 @@ export default function Settings({ shop }) {
                   >
                     {/* Focus dot indicator */}
                     {(() => {
-                      const pos = popup.imagePosition || '50% 50%';
+                      const pos = activePopup.imagePosition || '50% 50%';
                       const parts = pos.split(' ');
                       const x = parseFloat(parts[0]) || 50;
                       const y = parseFloat(parts[1]) || 50;
@@ -911,8 +933,8 @@ export default function Settings({ shop }) {
             <div style={popRow}>
               <div style={popLabel}>Headline</div>
               <input
-                value={popup.headline || ''}
-                onChange={(e) => setPopup((p) => ({ ...p, headline: e.target.value }))}
+                value={activePopup.headline || ''}
+                onChange={(e) => setActivePopup((p) => ({ ...p, headline: e.target.value }))}
                 placeholder="e.g. Don't miss out on this offer"
                 style={popInput}
               />
@@ -922,19 +944,63 @@ export default function Settings({ shop }) {
             <div style={popRow}>
               <div style={popLabel}>Subtext</div>
               <input
-                value={popup.subtext || ''}
-                onChange={(e) => setPopup((p) => ({ ...p, subtext: e.target.value }))}
+                value={activePopup.subtext || ''}
+                onChange={(e) => setActivePopup((p) => ({ ...p, subtext: e.target.value }))}
                 placeholder="e.g. Get notified when prices drop"
                 style={popInput}
               />
+            </div>
+
+            {/* Text position */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
+              <div style={{ width: '140px', fontSize: '13px', color: '#374151', fontWeight: '500' }}>
+                Text position
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {[
+                  { value: 'left', label: '⬛ Left' },
+                  { value: 'center', label: '⬛ Center' },
+                  { value: 'right', label: '⬛ Right' },
+                ].map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() =>
+                      setActivePopup((p) => ({ ...p, textAlign: opt.value }))
+                    }
+                    style={{
+                      padding: '6px 14px',
+                      fontSize: '12px',
+                      fontWeight:
+                        (activePopup.textAlign || 'left') === opt.value ? '600' : '400',
+                      color:
+                        (activePopup.textAlign || 'left') === opt.value
+                          ? '#fff'
+                          : '#374151',
+                      background:
+                        (activePopup.textAlign || 'left') === opt.value
+                          ? '#111827'
+                          : '#f9fafb',
+                      border: '1px solid',
+                      borderColor:
+                        (activePopup.textAlign || 'left') === opt.value
+                          ? '#111827'
+                          : '#e5e7eb',
+                      borderRadius: '20px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {opt.value.charAt(0).toUpperCase() + opt.value.slice(1)}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Brand name */}
             <div style={popRow}>
               <div style={popLabel}>Brand name</div>
               <input
-                value={popup.brandName || ''}
-                onChange={(e) => setPopup((p) => ({ ...p, brandName: e.target.value }))}
+                value={activePopup.brandName || ''}
+                onChange={(e) => setActivePopup((p) => ({ ...p, brandName: e.target.value }))}
                 placeholder="e.g. SILK HOUSE"
                 style={popInput}
               />
@@ -944,8 +1010,8 @@ export default function Settings({ shop }) {
             <div style={popRow}>
               <div style={popLabel}>Allow button</div>
               <input
-                value={popup.allowText || 'Allow'}
-                onChange={(e) => setPopup((p) => ({ ...p, allowText: e.target.value }))}
+                value={activePopup.allowText || 'Allow'}
+                onChange={(e) => setActivePopup((p) => ({ ...p, allowText: e.target.value }))}
                 style={{ ...popInput, flex: 'none', width: '160px' }}
               />
             </div>
@@ -954,8 +1020,8 @@ export default function Settings({ shop }) {
             <div style={popRow}>
               <div style={popLabel}>Deny button</div>
               <input
-                value={popup.denyText || 'No thanks'}
-                onChange={(e) => setPopup((p) => ({ ...p, denyText: e.target.value }))}
+                value={activePopup.denyText || 'No thanks'}
+                onChange={(e) => setActivePopup((p) => ({ ...p, denyText: e.target.value }))}
                 style={{ ...popInput, flex: 'none', width: '160px' }}
               />
             </div>
@@ -966,13 +1032,13 @@ export default function Settings({ shop }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <input
                   type="color"
-                  value={popup.accentColor || '#4f46e5'}
-                  onChange={(e) => setPopup((p) => ({ ...p, accentColor: e.target.value }))}
+                  value={activePopup.accentColor || '#4f46e5'}
+                  onChange={(e) => setActivePopup((p) => ({ ...p, accentColor: e.target.value }))}
                   style={popSwatch}
                 />
                 <input
-                  value={popup.accentColor || '#4f46e5'}
-                  onChange={(e) => setPopup((p) => ({ ...p, accentColor: e.target.value }))}
+                  value={activePopup.accentColor || '#4f46e5'}
+                  onChange={(e) => setActivePopup((p) => ({ ...p, accentColor: e.target.value }))}
                   style={{ ...popInput, flex: 'none', width: '100px' }}
                 />
               </div>
@@ -984,13 +1050,13 @@ export default function Settings({ shop }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <input
                   type="color"
-                  value={popup.bgColor || '#ffffff'}
-                  onChange={(e) => setPopup((p) => ({ ...p, bgColor: e.target.value }))}
+                  value={activePopup.bgColor || '#ffffff'}
+                  onChange={(e) => setActivePopup((p) => ({ ...p, bgColor: e.target.value }))}
                   style={popSwatch}
                 />
                 <input
-                  value={popup.bgColor || '#ffffff'}
-                  onChange={(e) => setPopup((p) => ({ ...p, bgColor: e.target.value }))}
+                  value={activePopup.bgColor || '#ffffff'}
+                  onChange={(e) => setActivePopup((p) => ({ ...p, bgColor: e.target.value }))}
                   style={{ ...popInput, flex: 'none', width: '100px' }}
                 />
               </div>
@@ -1002,13 +1068,13 @@ export default function Settings({ shop }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <input
                   type="color"
-                  value={popup.textColor || '#111827'}
-                  onChange={(e) => setPopup((p) => ({ ...p, textColor: e.target.value }))}
+                  value={activePopup.textColor || '#111827'}
+                  onChange={(e) => setActivePopup((p) => ({ ...p, textColor: e.target.value }))}
                   style={popSwatch}
                 />
                 <input
-                  value={popup.textColor || '#111827'}
-                  onChange={(e) => setPopup((p) => ({ ...p, textColor: e.target.value }))}
+                  value={activePopup.textColor || '#111827'}
+                  onChange={(e) => setActivePopup((p) => ({ ...p, textColor: e.target.value }))}
                   style={{ ...popInput, flex: 'none', width: '100px' }}
                 />
               </div>
@@ -1018,8 +1084,8 @@ export default function Settings({ shop }) {
             <div style={popRow}>
               <div style={popLabel}>Font</div>
               <select
-                value={popup.fontFamily || 'inherit'}
-                onChange={(e) => setPopup((p) => ({ ...p, fontFamily: e.target.value }))}
+                value={activePopup.fontFamily || 'inherit'}
+                onChange={(e) => setActivePopup((p) => ({ ...p, fontFamily: e.target.value }))}
                 style={popSelect}
               >
                 <option value="inherit">Store default</option>
@@ -1041,31 +1107,33 @@ export default function Settings({ shop }) {
                   type="range"
                   min="0"
                   max="24"
-                  value={popup.borderRadius ?? 12}
+                  value={activePopup.borderRadius ?? 12}
                   onChange={(e) =>
-                    setPopup((p) => ({ ...p, borderRadius: Number(e.target.value) }))
+                    setActivePopup((p) => ({ ...p, borderRadius: Number(e.target.value) }))
                   }
                   style={{ width: '120px', cursor: 'pointer' }}
                 />
                 <span style={{ fontSize: '13px', color: '#374151', minWidth: '30px' }}>
-                  {popup.borderRadius ?? 12}px
+                  {activePopup.borderRadius ?? 12}px
                 </span>
               </div>
             </div>
 
             {/* Button style */}
-            <div style={popRow}>
-              <div style={popLabel}>Button style</div>
-              <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ ...popRow, alignItems: 'flex-start' }}>
+              <div style={{ ...popLabel, marginTop: '6px' }}>Button style</div>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                 {[
                   { value: 'rounded', label: 'Rounded' },
                   { value: 'square', label: 'Square' },
                   { value: 'pill', label: 'Pill' },
+                  { value: 'outlined', label: 'Outlined' },
+                  { value: 'soft', label: 'Soft' },
                 ].map((opt) => (
                   <button
                     key={opt.value}
-                    onClick={() => setPopup((p) => ({ ...p, ctaStyle: opt.value }))}
-                    style={popPill(popup.ctaStyle === opt.value)}
+                    onClick={() => setActivePopup((p) => ({ ...p, ctaStyle: opt.value }))}
+                    style={popPill(activePopup.ctaStyle === opt.value)}
                   >
                     {opt.label}
                   </button>
@@ -1077,8 +1145,8 @@ export default function Settings({ shop }) {
             <div style={popRow}>
               <div style={popLabel}>Position</div>
               <select
-                value={popup.position || 'bottom-right'}
-                onChange={(e) => setPopup((p) => ({ ...p, position: e.target.value }))}
+                value={activePopup.position || 'bottom-right'}
+                onChange={(e) => setActivePopup((p) => ({ ...p, position: e.target.value }))}
                 style={popSelect}
               >
                 <option value="bottom-right">Bottom right</option>
@@ -1095,13 +1163,13 @@ export default function Settings({ shop }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div
                   onClick={() =>
-                    setPopup((p) => ({ ...p, showOverlay: !p.showOverlay }))
+                    setActivePopup((p) => ({ ...p, showOverlay: !p.showOverlay }))
                   }
                   style={{
                     width: '44px',
                     height: '24px',
                     borderRadius: '12px',
-                    background: popup.showOverlay !== false ? '#111827' : '#d1d5db',
+                    background: activePopup.showOverlay !== false ? '#111827' : '#d1d5db',
                     position: 'relative',
                     cursor: 'pointer',
                     transition: 'background 0.2s',
@@ -1111,7 +1179,7 @@ export default function Settings({ shop }) {
                     style={{
                       position: 'absolute',
                       top: '3px',
-                      left: popup.showOverlay !== false ? '23px' : '3px',
+                      left: activePopup.showOverlay !== false ? '23px' : '3px',
                       width: '18px',
                       height: '18px',
                       borderRadius: '50%',
@@ -1122,13 +1190,11 @@ export default function Settings({ shop }) {
                   />
                 </div>
                 <span style={{ fontSize: '13px', color: '#9ca3af' }}>
-                  {popup.showOverlay !== false ? 'On' : 'Off'}
+                  {activePopup.showOverlay !== false ? 'On' : 'Off'}
                 </span>
               </div>
             </div>
             </>
-              );
-            })()}
             </div>
   );
 
@@ -1261,7 +1327,7 @@ export default function Settings({ shop }) {
 
   // Sticky on desktop so it stays visible while scrolling the options.
   const popupPreviewCard = (
-    <div style={{ ...card, position: isMobileView ? 'static' : 'sticky', top: '16px' }}>
+    <div style={{ ...card }}>
             <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
               {popupDevice === 'mobile' ? 'Mobile preview' : 'Desktop preview'}
             </div>
@@ -1283,8 +1349,8 @@ export default function Settings({ shop }) {
               const imageUrl = popup.imageUrl || '';
               const imagePosition = popup.imagePosition || 'center center';
               const ctaStyle = popup.ctaStyle || 'rounded';
-              const ctaRadius =
-                ctaStyle === 'pill' ? '50px' : ctaStyle === 'square' ? '0' : '6px';
+              const ctaCss = getCtaStyle(ctaStyle, accent);
+              const textAlign = popup.textAlign || 'left';
               const layout = popup.layout || 'split';
 
               if (layout === 'split')
@@ -1292,7 +1358,7 @@ export default function Settings({ shop }) {
                   <div
                     style={{
                       border: '1px solid #e5e7eb',
-                      borderRadius: '10px',
+                      borderRadius: radius,
                       overflow: 'hidden',
                       display: 'flex',
                       minHeight: '200px',
@@ -1376,6 +1442,7 @@ export default function Settings({ shop }) {
                           lineHeight: '1.3',
                           marginBottom: '8px',
                           color: fg,
+                          textAlign,
                         }}
                       >
                         {headline}
@@ -1386,6 +1453,7 @@ export default function Settings({ shop }) {
                             fontSize: '11px',
                             color: '#6b7280',
                             marginBottom: '10px',
+                            textAlign,
                           }}
                         >
                           {subtext}
@@ -1393,10 +1461,7 @@ export default function Settings({ shop }) {
                       )}
                       <button
                         style={{
-                          background: accent,
-                          color: '#fff',
-                          border: 'none',
-                          borderRadius: ctaRadius,
+                          ...ctaCss,
                           padding: '7px 12px',
                           fontSize: '12px',
                           fontWeight: '700',
@@ -1468,6 +1533,7 @@ export default function Settings({ shop }) {
                         fontWeight: '600',
                         marginBottom: '8px',
                         color: fg,
+                        textAlign,
                       }}
                     >
                       {headline}
@@ -1478,6 +1544,7 @@ export default function Settings({ shop }) {
                           fontSize: '11px',
                           color: '#6b7280',
                           marginBottom: '10px',
+                          textAlign,
                         }}
                       >
                         {subtext}
@@ -1486,10 +1553,7 @@ export default function Settings({ shop }) {
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                       <button
                         style={{
-                          background: accent,
-                          color: '#fff',
-                          border: 'none',
-                          borderRadius: ctaRadius,
+                          ...ctaCss,
                           padding: '6px 14px',
                           fontSize: '12px',
                           fontWeight: '700',
@@ -1529,7 +1593,7 @@ export default function Settings({ shop }) {
                         background: '#fff',
                         color: accent,
                         border: 'none',
-                        borderRadius: ctaRadius,
+                        borderRadius: ctaCss.borderRadius,
                         padding: '6px 14px',
                         fontSize: '12px',
                         fontWeight: '700',
@@ -1630,12 +1694,9 @@ export default function Settings({ shop }) {
                       const bg = mp.bgColor || '#ffffff';
                       const fg = mp.textColor || '#111827';
                       const accent = mp.accentColor || '#4f46e5';
-                      const ctaR =
-                        (mp.ctaStyle || 'pill') === 'pill'
-                          ? '50px'
-                          : mp.ctaStyle === 'square'
-                          ? '0'
-                          : '8px';
+                      const ctaCss = getCtaStyle(mp.ctaStyle || 'pill', accent);
+                      const textAlign = mp.textAlign || 'left';
+                      const cardRadius = (mp.borderRadius ?? 16) + 'px';
                       const imageUrl = mp.imageUrl || '';
                       const headline = mp.headline || 'Get notified about deals';
 
@@ -1647,7 +1708,7 @@ export default function Settings({ shop }) {
                             left: '8px',
                             right: '8px',
                             background: bg,
-                            borderRadius: '12px',
+                            borderRadius: cardRadius,
                             overflow: 'hidden',
                             boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
                             zIndex: 5,
@@ -1674,20 +1735,31 @@ export default function Settings({ shop }) {
                                 color: fg,
                                 marginBottom: '6px',
                                 lineHeight: 1.3,
+                                textAlign,
                               }}
                             >
                               {headline}
                             </div>
+                            {mp.subtext && (
+                              <div
+                                style={{
+                                  fontSize: '10px',
+                                  color: '#6b7280',
+                                  marginBottom: '6px',
+                                  lineHeight: '1.3',
+                                  textAlign,
+                                }}
+                              >
+                                {mp.subtext}
+                              </div>
+                            )}
                             <button
                               style={{
+                                ...ctaCss,
                                 width: '100%',
                                 padding: '7px',
                                 fontSize: '11px',
                                 fontWeight: '700',
-                                background: accent,
-                                color: '#fff',
-                                border: 'none',
-                                borderRadius: ctaR,
                                 marginBottom: '4px',
                               }}
                             >
@@ -1704,6 +1776,51 @@ export default function Settings({ shop }) {
                 </div>
               </div>
             )}
+
+            {/* The one Save button while the customizer is open — pinned to
+                the bottom of the sticky right column. */}
+            <div
+              style={{
+                marginTop: '20px',
+                paddingTop: '16px',
+                borderTop: '1px solid #f3f4f6',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+              }}
+            >
+              <button
+                onClick={saveSettings}
+                disabled={saving}
+                style={{
+                  flex: 1,
+                  padding: '12px 24px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  color: '#fff',
+                  background: saving ? '#9ca3af' : '#111827',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {saving ? 'Saving…' : 'Save settings'}
+              </button>
+              {success && (
+                <span
+                  style={{
+                    fontSize: '13px',
+                    color: '#16a34a',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  ✓ Saved
+                </span>
+              )}
+              {error && (
+                <span style={{ fontSize: '13px', color: '#dc2626' }}>{error}</span>
+              )}
+            </div>
     </div>
   );
 
@@ -1730,9 +1847,10 @@ export default function Settings({ shop }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {popupCard}
           {showPopupCustomizer && popupPreviewCard}
-          {voiceCard}
-          {howOftenCard}
-          {channelsCard}
+          {!showPopupCustomizer && voiceCard}
+          {!showPopupCustomizer && howOftenCard}
+          {!showPopupCustomizer && saveCard}
+          {!showPopupCustomizer && channelsCard}
         </div>
       ) : (
         <div
@@ -1745,12 +1863,24 @@ export default function Settings({ shop }) {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {popupCard}
-            {voiceCard}
-            {howOftenCard}
+            {!showPopupCustomizer && voiceCard}
+            {!showPopupCustomizer && howOftenCard}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div
+            style={{
+              position: 'sticky',
+              top: '16px',
+              alignSelf: 'flex-start',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              maxHeight: 'calc(100vh - 32px)',
+              overflowY: 'auto',
+            }}
+          >
             {showPopupCustomizer ? popupPreviewCard : pushPreviewCard}
-            {channelsCard}
+            {!showPopupCustomizer && channelsCard}
+            {!showPopupCustomizer && saveCard}
           </div>
         </div>
       )}

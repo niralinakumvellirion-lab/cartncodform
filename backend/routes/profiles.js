@@ -386,7 +386,8 @@ const POPUP_FIELDS = [
   'borderRadius', 'imageUrl', 'imagePosition', 'allowText', 'denyText',
   'customTitle', 'showBranding',
   // popup-redesign fields:
-  'layout', 'headline', 'subtext', 'brandName', 'ctaStyle', 'overlayOpacity', 'showOverlay',
+  'layout', 'headline', 'subtext', 'brandName', 'textAlign', 'ctaStyle',
+  'overlayOpacity', 'showOverlay',
 ];
 
 router.get('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, res) => {
