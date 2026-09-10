@@ -150,6 +150,11 @@ const storeSchema = new mongoose.Schema({
   // --- discount-feature: per-shop automatic discount codes live in their own
   // collection (models/DiscountConfig.js, keyed by shopDomain) — same pattern
   // as SignalConfig. Nothing discount-related is stored on Store itself.
+  //
+  // Exception: set true when a Shopify Admin API call is rejected with
+  // ACCESS_DENIED (the installed token predates a scope we now need, e.g.
+  // write_discounts). The admin surfaces a "reconnect" banner; OAuth clears it.
+  needsReauth: { type: Boolean, default: false },
 
   installedAt: {
     type: Date,

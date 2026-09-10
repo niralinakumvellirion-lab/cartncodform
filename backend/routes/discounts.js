@@ -86,7 +86,9 @@ async function generateDiscount(shopDomain, body = {}) {
     '_' +
     Math.random().toString(36).slice(2, 8).toUpperCase();
 
-  const startsAt = new Date();
+  // Back-date startsAt by a minute so a small client/server clock skew can't
+  // make Shopify reject the code as "starts in the future".
+  const startsAt = new Date(Date.now() - 60 * 1000);
   const endsAt = new Date();
   endsAt.setDate(endsAt.getDate() + (cfg.expiryDays || 7));
 
@@ -133,6 +135,22 @@ async function generateDiscount(shopDomain, body = {}) {
     return { code: null, error: 'Discount service unavailable' };
   }
 
+  // 1. Top-level GraphQL errors (auth / throttling / schema) — the mutation
+  //    never ran. This is the ACCESS_DENIED case when the installed token
+  //    predates the write_discounts scope. Do NOT log the token or any PII.
+  if (Array.isArray(data && data.errors) && data.errors.length) {
+    const gqlCode =
+      (data.errors[0].extensions && data.errors[0].extensions.code) ||
+      data.errors[0].message;
+    console.error('[discounts] GraphQL error: ' + gqlCode);
+    if (gqlCode === 'ACCESS_DENIED') {
+      // Flag the store so the admin can prompt the merchant to reconnect.
+      Store.updateOne({ shopDomain: shop }, { $set: { needsReauth: true } }).catch(() => {});
+    }
+    return { code: null, error: 'Discount creation failed' };
+  }
+
+  // 2. Field-level userErrors from the mutation itself (bad input, limits).
   const errors =
     data &&
     data.data &&
@@ -141,6 +159,18 @@ async function generateDiscount(shopDomain, body = {}) {
   if (errors && errors.length) {
     console.error('[discounts] discountCodeBasicCreate userErrors:', errors[0].message);
     return { code: null, error: errors[0].message };
+  }
+
+  // 3. Success requires a real node id. Anything else means the code was NOT
+  //    created in Shopify — never hand back a code Shopify doesn't know.
+  const node =
+    data &&
+    data.data &&
+    data.data.discountCodeBasicCreate &&
+    data.data.discountCodeBasicCreate.codeDiscountNode;
+  if (!node || !node.id) {
+    console.error('[discounts] discountCodeBasicCreate returned no codeDiscountNode.id');
+    return { code: null, error: 'Discount creation failed' };
   }
 
   // Best-effort: attach the captured email/phone to a profile. Never blocks
@@ -178,7 +208,11 @@ router.get('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, re
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
     const doc = await DiscountConfig.findOne({ shopDomain: shop }).lean();
-    return res.json({ config: doc || defaultConfig(shop) });
+    return res.json({
+      config: doc || defaultConfig(shop),
+      // Surfaces the "reconnect to enable discounts" banner in the admin.
+      needsReauth: !!(req.store && req.store.needsReauth),
+    });
   } catch (err) {
     console.error('[discounts] GET config error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch discount config' });

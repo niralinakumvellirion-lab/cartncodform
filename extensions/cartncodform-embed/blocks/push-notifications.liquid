@@ -179,7 +179,8 @@
 
     var discBtn = document.createElement('a');
     discBtn.id = 'ccf-product-disc-btn';
-    discBtn.href = '/discount/' + d.code + '?redirect=/products/' + productHandle;
+    discBtn.href = '/discount/' + d.code +
+      '?redirect=' + encodeURIComponent('/products/' + productHandle);
     discBtn.style.cssText = [
       'display:block',
       'width:100%',
@@ -206,9 +207,20 @@
     var popup = document.getElementById('ccf-push-prompt');
     if (!popup) return;
 
-    var redirectUrl = (productHandle && action === 'both')
-      ? '/discount/' + d.code + '?redirect=/products/' + productHandle
-      : '/discount/' + d.code;
+    // Always include a ?redirect= target so Shopify lands the shopper on a
+    // real page after applying the discount session — never a bare
+    // /discount/<code> (which Shopify drops to the homepage when the code is
+    // unknown or the redirect is missing).
+    var redirectPath;
+    if (productHandle) {
+      redirectPath = '/products/' + productHandle;
+    } else if (window.location.pathname && window.location.pathname !== '/') {
+      redirectPath = window.location.pathname;
+    } else {
+      redirectPath = '/collections/all';
+    }
+    var redirectUrl = '/discount/' + d.code +
+      '?redirect=' + encodeURIComponent(redirectPath);
 
     var box = document.createElement('div');
     box.style.cssText = [
@@ -221,41 +233,57 @@
     ].join(';');
 
     box.innerHTML =
-      '<div style="font-size:11px;color:#16a34a;margin-bottom:4px">' +
-      '🎉 Your discount is ready!</div>' +
-      '<div style="font-size:20px;font-weight:700;color:#111827;' +
-      'letter-spacing:2px;font-family:monospace;margin-bottom:4px">' +
+      '<div style="font-size:12px;color:#16a34a;' +
+      'margin-bottom:6px;text-align:center;font-weight:600">' +
+      '🎉 ' + d.percentage + '% discount unlocked!</div>' +
+      '<div style="font-size:16px;font-weight:700;' +
+      'color:#111827;letter-spacing:2px;font-family:monospace;' +
+      'text-align:center;background:#f0fdf4;padding:8px;' +
+      'border-radius:6px;margin-bottom:8px">' +
       d.code + '</div>' +
-      '<div style="font-size:11px;color:#6b7280;margin-bottom:12px">' +
-      d.percentage + '% off · expires in ' + d.expiryDays + ' days</div>' +
-      '<div style="display:flex;gap:8px">' +
-      '<button id="ccf-copy-btn" style="flex:1;padding:10px;font-size:13px;' +
-      'font-weight:600;color:#16a34a;background:#fff;border:2px solid #16a34a;' +
-      'border-radius:8px;cursor:pointer">Copy code</button>' +
-      '<a href="' + redirectUrl + '" style="flex:1;padding:10px;font-size:13px;' +
-      'font-weight:700;color:#fff;background:#16a34a;border-radius:8px;' +
-      'text-decoration:none;display:flex;align-items:center;' +
-      'justify-content:center;gap:4px">Shop now →</a>' +
-      '</div>';
+      '<div style="font-size:11px;color:#6b7280;' +
+      'text-align:center;margin-bottom:10px">' +
+      'Expires in ' + d.expiryDays + ' days · ' +
+      'Applying automatically...</div>' +
+      '<div style="background:#16a34a;color:#fff;' +
+      'text-align:center;padding:10px;border-radius:8px;' +
+      'font-size:13px;font-weight:600" id="ccf-redirect-msg">' +
+      'Taking you to the store... →</div>';
 
     popup.appendChild(box);
 
-    setTimeout(function () {
-      var btn = document.getElementById('ccf-copy-btn');
-      if (!btn) return;
-      btn.addEventListener('click', function () {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(d.code)
-            .then(function () {
-              btn.textContent = '✓ Copied!';
-              setTimeout(function () { btn.textContent = 'Copy code'; }, 2000);
-            })
-            .catch(function () { btn.textContent = d.code; });
-        } else {
-          btn.textContent = d.code;
-        }
+    console.log('[CCF] discount code:', d.code);
+    console.log('[CCF] redirect URL:', redirectUrl);
+    console.log('[CCF] action:', action);
+    console.log('[CCF] productHandle:', productHandle);
+
+    // Auto-redirect after 2 seconds to apply discount
+    setTimeout(function() {
+      // Stash the code for cross-page badges —
+      // FIRST, immediately before navigating, so no earlier code path can
+      // leave a stale ccf_active_discount that blocks a later attempt.
+      try {
+        sessionStorage.setItem('ccf_active_discount', d.code);
+        sessionStorage.setItem('ccf_active_pct', String(d.percentage));
+      } catch (e) {}
+      console.log('[CCF] redirecting to:', redirectUrl);
+      window.location.href = redirectUrl;
+    }, 2000);
+
+    // Also wire copy on code click
+    var codeEl = box.querySelector('[style*="monospace"]');
+    if (codeEl) {
+      codeEl.style.cursor = 'pointer';
+      codeEl.title = 'Click to copy';
+      codeEl.addEventListener('click', function() {
+        navigator.clipboard.writeText(d.code)
+          .catch(function() {});
+        codeEl.textContent = '✓ Copied!';
+        setTimeout(function() {
+          codeEl.textContent = d.code;
+        }, 1500);
       });
-    }, 100);
+    }
   }
 
   // discount-feature: once a CCF discount is active (code minted this session),
@@ -803,16 +831,19 @@
     // popup, stash the code for cross-page badges, then hand off to the
     // module-level handleDiscount (product button + in-popup code block).
     function finishDiscount(d, action) {
+      console.log('[CCF] d object:', JSON.stringify(d));
+      // Guard: only render/inject the discount UI when Shopify actually
+      // created a code. On { code: null } just close the popup — the
+      // subscribe already succeeded, so nothing else is blocked.
       if (!d || !d.code) { cleanup(); return; }
 
       var fields = document.getElementById('ccf-discount-fields');
       if (fields && fields.parentNode) fields.parentNode.removeChild(fields);
       if (allow) allow.style.display = 'none';
 
-      try {
-        sessionStorage.setItem('ccf_active_discount', d.code);
-        sessionStorage.setItem('ccf_active_pct', String(d.percentage));
-      } catch (e) {}
+      // NOTE: ccf_active_discount / ccf_active_pct are stashed by
+      // renderDiscountCode() immediately before it redirects — NOT here —
+      // so the redirected page load never finds a stale code and skips.
 
       var productHandle = null;
       var pathParts = window.location.pathname.split('/');
@@ -1200,6 +1231,56 @@
           localStorage.removeItem(SUBSCRIBED_KEY);
           console.warn('[CCF] Token save failed — will retry on next visit');
         }
+
+        // discount-feature: mint + apply the push discount for BOTH new and
+        // existing subscribers. When permission was already 'granted' the soft
+        // prompt (and finishDiscount) never runs, and subscribe-customer
+        // returns success:false for an already-known token — so this must run
+        // regardless of data.success. Guard is a dedicated "already redirected
+        // this session" flag, NOT ccf_active_discount (which the redirect
+        // itself sets, so using it here would always skip after the first pass).
+        var redirectDone = false;
+        try {
+          redirectDone = sessionStorage.getItem('ccf_disc_redirected') === '1';
+        } catch (e) {}
+
+        console.log('[CCF] discount check - redirectDone:', redirectDone);
+
+        if (!redirectDone) {
+          console.log('[CCF] auto-triggering discount...');
+          fetch('/apps/cartncodform/generate-discount?shop=' +
+            encodeURIComponent(SHOP_DOMAIN), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'push',
+              sessionId: getSessionId()
+            })
+          })
+            .then(function (r) { return r.json(); })
+            .then(function (d) {
+              console.log('[CCF] discount result:', JSON.stringify(d));
+              if (d && d.code) {
+                // Mark redirect as done FIRST.
+                try {
+                  sessionStorage.setItem('ccf_disc_redirected', '1');
+                  sessionStorage.setItem('ccf_active_discount', d.code);
+                  sessionStorage.setItem('ccf_active_pct', String(d.percentage));
+                } catch (e) {}
+                var currentPath = window.location.pathname + window.location.search;
+                var discountUrl = '/discount/' + d.code +
+                  '?redirect=' + encodeURIComponent(currentPath);
+                console.log('[CCF] redirecting to:', discountUrl);
+                window.location.href = discountUrl;
+              }
+            })
+            .catch(function (e) {
+              console.log('[CCF] discount error:', e.message);
+            });
+        } else {
+          console.log('[CCF] discount redirect already done');
+        }
+
         return data;
       })
       .catch(function(err) {

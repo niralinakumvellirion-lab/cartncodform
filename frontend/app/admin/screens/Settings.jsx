@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { apiGet, apiSend } from '../../../lib/api';
+import { Banner, Button } from '@shopify/polaris';
+import { apiGet, apiSend, BACKEND_URL } from '../../../lib/api';
 
 const TONES = ['friendly', 'direct', 'playful'];
 const LANGS = [
@@ -57,6 +58,9 @@ export default function Settings({ shop }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
+  // discount-feature: true when a Shopify Admin API call was rejected with
+  // ACCESS_DENIED (installed token predates write_discounts). Prompt reconnect.
+  const [needsReauth, setNeedsReauth] = useState(false);
 
   // popup-responsive: mobile-first layout switch (admin viewport <= 768px).
   const [isMobileView, setIsMobileView] = useState(false);
@@ -76,8 +80,12 @@ export default function Settings({ shop }) {
       apiGet(`/api/profiles/${encodeURIComponent(shop)}/popup`),
       apiGet(`/api/profiles/${encodeURIComponent(shop)}/push-stats`),
       apiGet(`/api/profiles/${encodeURIComponent(shop)}/profiles?limit=1`),
-    ]).then(([s, c, pop, ps, prof]) => {
+      apiGet(`/api/discounts/${encodeURIComponent(shop)}/config`),
+    ]).then(([s, c, pop, ps, prof, disc]) => {
       if (cancelled) return;
+      if (disc.status === 'fulfilled') {
+        setNeedsReauth(!!disc.value?.needsReauth);
+      }
       if (s.status === 'fulfilled') {
         setVoice(s.value?.voice || {});
         setCaps(s.value?.caps || {});
@@ -1838,6 +1846,30 @@ export default function Settings({ shop }) {
           Two minutes here shapes every message.
         </p>
       </div>
+
+      {needsReauth && (
+        <div style={{ marginBottom: '16px' }}>
+          <Banner tone="warning" title="Reconnect to enable discounts">
+            <p>
+              Automatic discount codes need an updated permission. Reconnect the
+              app to grant it.
+            </p>
+            <div style={{ marginTop: '10px' }}>
+              <Button
+                onClick={() => {
+                  const url = `${BACKEND_URL}/api/auth/install?shop=${encodeURIComponent(
+                    shop
+                  )}`;
+                  if (window.top) window.top.location.href = url;
+                  else window.location.href = url;
+                }}
+              >
+                Reconnect
+              </Button>
+            </div>
+          </Banner>
+        </div>
+      )}
 
       {isMobileView ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>

@@ -1,0 +1,368 @@
+DISCOUNT REDIRECT AUDIT — read-only trace
+=========================================
+File: extensions/cartncodform-embed/blocks/push-notifications.liquid
+Total: 1753 lines. Branch: discount-storefront. No modifications made.
+
+
+═══════════════════════════════════════════════════════════════════════
+1. READS of sessionStorage.getItem('ccf_disc_redirected')
+═══════════════════════════════════════════════════════════════════════
+ONE read only — line 1226, inside saveToken()'s data.success block.
+
+Context (lines 1216–1231):
+1216	          console.log('[CCF] Token saved successfully!');
+1217
+1218	          // discount-feature: when permission was already 'granted' the soft
+1219	          // prompt (and finishDiscount) never runs — so mint + apply the
+1220	          // push discount right here after the token is saved.
+1221	          // Guard is a dedicated "did we already redirect this session" flag,
+1222	          // NOT ccf_active_discount (which the redirect itself sets, so using
+1223	          // it here would always skip after the first pass).
+1224	          var redirectDone = false;
+1225	          try {
+1226	            redirectDone = sessionStorage.getItem('ccf_disc_redirected') === '1';
+1227	          } catch (e) {}
+1228
+1229	          if (!redirectDone) {
+1230	            console.log('[CCF] auto-triggering discount...');
+1231	            fetch('/apps/cartncodform/generate-discount?shop=' +
+
+(No other read of 'ccf_disc_redirected' anywhere in the file.)
+
+
+═══════════════════════════════════════════════════════════════════════
+2. WRITES of sessionStorage.setItem('ccf_disc_redirected', '1')
+═══════════════════════════════════════════════════════════════════════
+ONE write only — line 1246, inside saveToken()'s auto-discount block,
+in the .then(d) success callback, immediately before the redirect.
+
+Context (lines 1240–1255):
+1240	              .then(function (r) { return r.json(); })
+1241	              .then(function (d) {
+1242	                console.log('[CCF] discount result:', JSON.stringify(d));
+1243	                if (d && d.code) {
+1244	                  // Mark redirect as done FIRST.
+1245	                  try {
+1246	                    sessionStorage.setItem('ccf_disc_redirected', '1');
+1247	                    sessionStorage.setItem('ccf_active_discount', d.code);
+1248	                    sessionStorage.setItem('ccf_active_pct', String(d.percentage));
+1249	                  } catch (e) {}
+1250	                  var currentPath = window.location.pathname + window.location.search;
+1251	                  var discountUrl = '/discount/' + d.code +
+1252	                    '?redirect=' + encodeURIComponent(currentPath);
+1253	                  console.log('[CCF] redirecting to:', discountUrl);
+1254	                  window.location.href = discountUrl;
+1255	                }
+1256	              })
+
+(No other write of 'ccf_disc_redirected' anywhere in the file.
+ renderDiscountCode()'s redirect timeout at lines 249–263 writes
+ 'ccf_active_discount' + 'ccf_active_pct' only — NOT 'ccf_disc_redirected'.)
+
+
+═══════════════════════════════════════════════════════════════════════
+3. COMPLETE saveToken() FUNCTION  (lines 1176–1277)
+═══════════════════════════════════════════════════════════════════════
+1176	  function saveToken(token) {
+1177	    var oldToken = localStorage.getItem(TOKEN_KEY);
+1178	    var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+1179	    var deviceType = isMobile ? 'mobile' : 'desktop';
+1180
+1181	    var customerId = (window.Shopify && window.Shopify.customerId)
+1182	      ? String(window.Shopify.customerId)
+1183	      : null;
+1184
+1185	    // Fetch Shopify cart token to link this subscription to the cart.
+1186	    fetch('/cart.js')
+1187	      .then(function(r) { return r.json(); })
+1188	      .then(function(cart) {
+1189	        // Normalize: strip ?key=... suffix so it matches the webhook token.
+1190	        var rawCartToken = cart.token || null;
+1191	        var cartToken = rawCartToken ? rawCartToken.split('?')[0].trim() || null : null;
+1192	        console.log('[CCF] Cart token:', cartToken ? cartToken.substring(0,10)+'...' : 'none');
+1193
+1194	        return fetch(BACKEND_URL + '/api/push/subscribe-customer', {
+1195	          method: 'POST',
+1196	          headers: { 'Content-Type': 'application/json' },
+1197	          body: JSON.stringify({
+1198	            shopDomain: SHOP_DOMAIN,
+1199	            token: token,
+1200	            oldToken: oldToken,
+1201	            page: window.location.pathname,
+1202	            deviceType: deviceType,
+1203	            cartToken: cartToken,
+1204	            customerId: customerId,
+1205	            ccfSessionId: getSessionId()
+1206	          })
+1207	        });
+1208	      })
+1209	      .then(function(r) { return r.json(); })
+1210	      .then(function(data) {
+1211	        if (data.success) {
+1212	          localStorage.setItem(TOKEN_KEY, token);
+1213	          localStorage.setItem(SUBSCRIBED_KEY, '1');
+1214	          // Latch so the PAGE_LOAD trigger never re-prompts this browser.
+1215	          try { localStorage.setItem(PAGE_LOAD_TOKEN_KEY, '1'); } catch (e) {}
+1216	          console.log('[CCF] Token saved successfully!');
+1217
+1218	          // discount-feature: when permission was already 'granted' the soft
+1219	          // prompt (and finishDiscount) never runs — so mint + apply the
+1220	          // push discount right here after the token is saved.
+1221	          // Guard is a dedicated "did we already redirect this session" flag,
+1222	          // NOT ccf_active_discount (which the redirect itself sets, so using
+1223	          // it here would always skip after the first pass).
+1224	          var redirectDone = false;
+1225	          try {
+1226	            redirectDone = sessionStorage.getItem('ccf_disc_redirected') === '1';
+1227	          } catch (e) {}
+1228
+1229	          if (!redirectDone) {
+1230	            console.log('[CCF] auto-triggering discount...');
+1231	            fetch('/apps/cartncodform/generate-discount?shop=' +
+1232	              encodeURIComponent(SHOP_DOMAIN), {
+1233	              method: 'POST',
+1234	              headers: { 'Content-Type': 'application/json' },
+1235	              body: JSON.stringify({
+1236	                action: 'push',
+1237	                sessionId: getSessionId()
+1238	              })
+1239	            })
+1240	              .then(function (r) { return r.json(); })
+1241	              .then(function (d) {
+1242	                console.log('[CCF] discount result:', JSON.stringify(d));
+1243	                if (d && d.code) {
+1244	                  // Mark redirect as done FIRST.
+1245	                  try {
+1246	                    sessionStorage.setItem('ccf_disc_redirected', '1');
+1247	                    sessionStorage.setItem('ccf_active_discount', d.code);
+1248	                    sessionStorage.setItem('ccf_active_pct', String(d.percentage));
+1249	                  } catch (e) {}
+1250	                  var currentPath = window.location.pathname + window.location.search;
+1251	                  var discountUrl = '/discount/' + d.code +
+1252	                    '?redirect=' + encodeURIComponent(currentPath);
+1253	                  console.log('[CCF] redirecting to:', discountUrl);
+1254	                  window.location.href = discountUrl;
+1255	                }
+1256	              })
+1257	              .catch(function (e) {
+1258	                console.log('[CCF] discount error:', e.message);
+1259	              });
+1260	          } else {
+1261	            console.log('[CCF] discount redirect already done');
+1262	          }
+1263	        } else {
+1264	          // Backend rejected the token — clear latch so next visit
+1265	          // triggers a fresh getToken() instead of re-saving this one.
+1266	          localStorage.removeItem(SUBSCRIBED_KEY);
+1267	          console.warn('[CCF] Token save failed — will retry on next visit');
+1268	        }
+1269	        return data;
+1270	      })
+1271	      .catch(function(err) {
+1272	        console.error('[CCF] saveToken error:', err.message);
+1273	      });
+1274
+1275	    // Return a resolved promise so the caller chain doesn't break.
+1276	    return Promise.resolve({ success: true });
+1277	  }
+
+
+═══════════════════════════════════════════════════════════════════════
+4. THE AUTO-DISCOUNT BLOCK INSIDE saveToken  (lines 1218–1262)
+═══════════════════════════════════════════════════════════════════════
+Location: inside  .then(function(data) { if (data.success) { ... } })
+          i.e. it runs ONLY after /api/push/subscribe-customer responds
+          with { success: true }.
+
+1218	          // discount-feature: when permission was already 'granted' the soft
+1219	          // prompt (and finishDiscount) never runs — so mint + apply the
+1220	          // push discount right here after the token is saved.
+1221	          // Guard is a dedicated "did we already redirect this session" flag,
+1222	          // NOT ccf_active_discount (which the redirect itself sets, so using
+1223	          // it here would always skip after the first pass).
+1224	          var redirectDone = false;
+1225	          try {
+1226	            redirectDone = sessionStorage.getItem('ccf_disc_redirected') === '1';
+1227	          } catch (e) {}
+1228
+1229	          if (!redirectDone) {
+1230	            console.log('[CCF] auto-triggering discount...');
+1231	            fetch('/apps/cartncodform/generate-discount?shop=' +
+1232	              encodeURIComponent(SHOP_DOMAIN), {
+1233	              method: 'POST',
+1234	              headers: { 'Content-Type': 'application/json' },
+1235	              body: JSON.stringify({
+1236	                action: 'push',
+1237	                sessionId: getSessionId()
+1238	              })
+1239	            })
+1240	              .then(function (r) { return r.json(); })
+1241	              .then(function (d) {
+1242	                console.log('[CCF] discount result:', JSON.stringify(d));
+1243	                if (d && d.code) {
+1244	                  // Mark redirect as done FIRST.
+1245	                  try {
+1246	                    sessionStorage.setItem('ccf_disc_redirected', '1');
+1247	                    sessionStorage.setItem('ccf_active_discount', d.code);
+1248	                    sessionStorage.setItem('ccf_active_pct', String(d.percentage));
+1249	                  } catch (e) {}
+1250	                  var currentPath = window.location.pathname + window.location.search;
+1251	                  var discountUrl = '/discount/' + d.code +
+1252	                    '?redirect=' + encodeURIComponent(currentPath);
+1253	                  console.log('[CCF] redirecting to:', discountUrl);
+1254	                  window.location.href = discountUrl;
+1255	                }
+1256	              })
+1257	              .catch(function (e) {
+1258	                console.log('[CCF] discount error:', e.message);
+1259	              });
+1260	          } else {
+1261	            console.log('[CCF] discount redirect already done');
+1262	          }
+
+
+═══════════════════════════════════════════════════════════════════════
+5. SEQUENCE OF EVENTS WHEN Notification.permission IS ALREADY 'granted'
+═══════════════════════════════════════════════════════════════════════
+
+ENTRY: start()  (lines 1701–1723), fired on DOMContentLoaded (1726) or
+       window 'load' (1731), guarded by ccfStarted.
+
+  start() calls, in order:
+    1706  trackCart()
+    1707  checkAndInit()          <-- the granted-path work happens here
+    1708  initTracking()
+    1712  checkActiveDiscount()   (badges only; reads ccf_active_discount)
+    1716  Promise.all([fetchPopupConfig(), fetchDiscountConfig()])
+              .then(initIntentTriggers)
+    1720  if (Notification.permission === 'granted') setupForegroundMessages()
+
+  checkAndInit()  (lines 1283–1325):
+    1284  if (!('Notification' in window)) return
+    1291  if (Notification.permission === 'denied') return
+    1292  if (sessionStorage.getItem('ccf_denied_session')) return
+    1294  if (Notification.permission === 'granted') {
+    1297    registerSW()
+    1298      .then(function(reg) { return getToken(reg); })
+    1299      .then(function(currentToken) {
+    1300        var storedToken = localStorage.getItem(TOKEN_KEY);
+    1301        if (currentToken !== storedToken) { ...update localStorage... }
+    1309        return saveToken(currentToken);         <-- saveToken CALLED
+    1310      })
+    1311      .then(function() { setupForegroundMessages(); })
+    1312      .catch(function(err) {
+    1315        var fallback = localStorage.getItem(TOKEN_KEY);
+    1317        if (fallback) { saveToken(fallback); }   <-- saveToken CALLED (fallback)
+    1318      });
+    1320    return;
+    1294  }
+
+  DOES saveToken GET CALLED?  YES.
+    - via checkAndInit granted branch, line 1309 (normal), OR
+    - line 1317 (fallback, when getToken() rejects and a stored token exists).
+
+  INSIDE saveToken (1176):
+    - synchronously returns Promise.resolve({ success:true }) at 1276
+      (callers do not await the real work).
+    - fires fetch('/cart.js') -> .then builds body ->
+      fetch(BACKEND_URL + '/api/push/subscribe-customer') -> .then(r.json()) ->
+      .then(function(data) { if (data.success) { <AUTO-DISCOUNT BLOCK> } }).
+
+  DOES THE AUTO-DISCOUNT BLOCK GET REACHED?
+    - YES, conditionally: ONLY if /api/push/subscribe-customer returns
+      { success: true } (line 1211). If data.success is falsy, control goes
+      to the else at line 1263 and the block is skipped.
+    - When reached, it runs unless sessionStorage['ccf_disc_redirected'] === '1'
+      (line 1226/1229). On a fresh session that key is unset -> block runs ->
+      POST /apps/cartncodform/generate-discount { action:'push', sessionId } ->
+      if response has d.code: set ccf_disc_redirected='1' + ccf_active_discount
+      + ccf_active_pct (1246–1248), then window.location.href = '/discount/'
+      + d.code + '?redirect=' + encodeURIComponent(pathname+search) (1250–1254).
+
+  DOES THE SOFT PROMPT / finishDiscount RUN IN THIS PATH?  NO.
+    - initIntentTriggers() (line 944) begins `if (!canPrompt()) return;`
+    - canPrompt() (lines 62–69) returns false because line 64:
+      `if (Notification.permission !== 'default') return false;`
+    - So showSoftPrompt() never fires, the popup is never built, and its
+      inner finishDiscount()/renderDiscountCode() never execute. The
+      granted-path discount comes ENTIRELY from the saveToken block.
+
+
+═══════════════════════════════════════════════════════════════════════
+6. IS ANYTHING SET ccf_disc_redirected BEFORE saveToken's BLOCK RUNS?
+═══════════════════════════════════════════════════════════════════════
+NO. The only setter in the whole file is line 1246, which is INSIDE the
+auto-discount block's own success callback (after /generate-discount
+returns d.code). There is no earlier writer:
+
+  - renderDiscountCode() redirect timeout (lines 249–263): sets
+    'ccf_active_discount' + 'ccf_active_pct' ONLY (lines 254–255). Does
+    NOT set 'ccf_disc_redirected'.
+  - finishDiscount() (lines 825–845): sets nothing in sessionStorage
+    (the old pre-redirect set was removed; see NOTE comment lines 833–835).
+  - checkActiveDiscount() (283–316): read-only.
+  - No module-level init sets it.
+
+CONSEQUENCES (behavioural, not a syntax problem):
+  a) First saveToken() of a fresh session: redirectDone === false ->
+     block always runs.
+  b) The guard flag is set ONLY on the happy path (d.code present, line
+     1246). If /generate-discount returns { code: null } (no push
+     discount configured, backend race, or fetch error), 'ccf_disc_redirected'
+     is never written, so any later saveToken() this session (the fallback
+     at 1317, a token-rotation re-save, or a duplicate call) will re-enter
+     the block and re-POST /generate-discount.
+  c) Concurrency: saveToken() can be invoked more than once close together
+     (e.g. checkAndInit 1309, plus resync paths / trackCart). Two in-flight
+     calls can both read redirectDone === false before either writes line
+     1246 -> two /generate-discount POSTs / two redirect attempts.
+  d) Loop prevention on the bounced-back page works ONLY when the prior
+     pass reached line 1246: after '/discount/CODE?redirect=...' returns,
+     start() -> checkAndInit granted -> saveToken -> reads
+     'ccf_disc_redirected' === '1' -> logs "discount redirect already done"
+     (line 1261) and skips.
+
+
+═══════════════════════════════════════════════════════════════════════
+7. SHOP_DOMAIN and getSessionId() — defined & accessible in saveToken?
+═══════════════════════════════════════════════════════════════════════
+
+SHOP_DOMAIN
+  - Declared lines 25–27 (module / IIFE top-level):
+      25  var SHOP_DOMAIN = window.Shopify && window.Shopify.shop
+      26    ? window.Shopify.shop
+      27    : window.location.hostname;
+  - In scope for the entire IIFE. Used inside saveToken at:
+      line 1198  shopDomain: SHOP_DOMAIN            (subscribe-customer body)
+      line 1232  encodeURIComponent(SHOP_DOMAIN)    (auto-discount fetch URL)
+  - ACCESSIBLE. ✓  (Value can be a *.myshopify.com shop, or falls back to
+    window.location.hostname if window.Shopify.shop is absent.)
+
+getSessionId()
+  - Declared lines 1382–1388 (module-level function declaration, hoisted):
+      1382  function getSessionId() {
+      1383    var existing = localStorage.getItem(CCF_SESSION_KEY);
+      1384    if (existing) return existing;
+      1385    var newId = generateUUID();
+      1386    localStorage.setItem(CCF_SESSION_KEY, newId);
+      1387    return newId;
+      1388  }
+  - Depends on CCF_SESSION_KEY (line 1368) and generateUUID (line 1374).
+  - Textually defined AFTER saveToken (1176), but function declarations
+    hoist within the IIFE, so it is fully callable when saveToken executes.
+  - Used inside saveToken at:
+      line 1205  ccfSessionId: getSessionId()   (pre-existing, subscribe body)
+      line 1237  sessionId: getSessionId()      (auto-discount fetch body)
+  - ACCESSIBLE. ✓
+
+
+═══════════════════════════════════════════════════════════════════════
+OTHER sessionStorage discount-key usages (for completeness)
+═══════════════════════════════════════════════════════════════════════
+WRITE 'ccf_active_discount' / 'ccf_active_pct':
+  - line 254–255  renderDiscountCode() redirect timeout (manual-Allow path),
+                  immediately before window.location.href (line 262).
+  - line 1247–1248 saveToken auto-discount block (granted path), before
+                   window.location.href (line 1254).
+READ 'ccf_active_discount' / 'ccf_active_pct':
+  - line 286–287  checkActiveDiscount() — for the "% OFF" price badges only.

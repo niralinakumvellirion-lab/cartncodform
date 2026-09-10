@@ -1,0 +1,146 @@
+FIX: discount code never created in Shopify -> /discount/CODE drops to homepage
+==============================================================================
+Branch: fix-discount-create
+Date: 2026-09-10
+
+ROOT CAUSE
+----------
+generateDiscount() in backend/routes/discounts.js only inspected
+  data.data.discountCodeBasicCreate.userErrors
+and never the TOP-LEVEL data.errors array. When the mutation is rejected at
+the API layer — ACCESS_DENIED, because the store's installed access token
+predates the write_discounts scope — data.errors is set and
+data.data.discountCodeBasicCreate is null. The old code fell straight
+through and returned the locally-generated random string as if the code
+had been created. Shopify then treats /discount/<that-code> as unknown and
+silently drops the redirect to the homepage.
+
+Secondary: renderDiscountCode() in the liquid only appended ?redirect= for
+action === 'both'; every other case emitted a bare /discount/<code>, which
+also lands on the homepage.
+
+
+CHANGES
+=======
+
+1. backend/models/Store.js
+   - Added  needsReauth: { type: Boolean, default: false }
+     Set true on ACCESS_DENIED so the admin can surface a reconnect prompt;
+     cleared by a fresh OAuth (token exchange overwrites the Store on
+     /api/auth/callback).
+
+2. backend/routes/discounts.js — generateDiscount()
+   (c) startsAt is now  new Date(Date.now() - 60 * 1000)  (was new Date()).
+       Back-dated one minute so client/server clock skew can't trigger a
+       "starts in the future" rejection.
+   (a) After  data = await shopifyRes.json():
+         if (Array.isArray(data && data.errors) && data.errors.length) {
+           const gqlCode = (data.errors[0].extensions && data.errors[0].extensions.code)
+             || data.errors[0].message;
+           console.error('[discounts] GraphQL error: ' + gqlCode);
+           if (gqlCode === 'ACCESS_DENIED') Store.updateOne(...needsReauth:true...).catch(()=>{});
+           return { code: null, error: 'Discount creation failed' };
+         }
+       Only the error CODE is logged — never store.accessToken, never any
+       email/phone/PII.
+   (b) After the userErrors check, require a real node id:
+         const node = data && data.data && data.data.discountCodeBasicCreate
+           && data.data.discountCodeBasicCreate.codeDiscountNode;
+         if (!node || !node.id) {
+           console.error('[discounts] discountCodeBasicCreate returned no codeDiscountNode.id');
+           return { code: null, error: 'Discount creation failed' };
+         }
+       A code is now returned ONLY when Shopify confirms creation.
+   (d) ACCESS_DENIED also sets Store.needsReauth = true (best-effort,
+       .catch(()=>{}) — never blocks the response).
+   - GET /:shopDomain/config now also returns
+       needsReauth: !!(req.store && req.store.needsReauth)
+     (req.store is already loaded by requireStoreOwner).
+
+3. extensions/cartncodform-embed/blocks/push-notifications.liquid
+   - renderDiscountCode(): redirectUrl is always
+       '/discount/' + d.code + '?redirect=' + encodeURIComponent(redirectPath)
+     where redirectPath is:
+       - '/products/' + productHandle           when on a product page
+       - window.location.pathname               when it is not '/'
+       - '/collections/all'                     otherwise
+     No path can now emit a bare '/discount/' + code.
+   - The 2s auto-redirect setTimeout now navigates to that same redirectUrl
+     (it previously rebuilt its own URL from window.location.pathname +
+     search, which sent shoppers on '/' back to the homepage).
+   - injectProductDiscountButton(): href now uses
+       '?redirect=' + encodeURIComponent('/products/' + productHandle).
+   - finishDiscount() guard clarified: on { code: null } the popup just
+     closes (subscribe already succeeded) — renderDiscountCode /
+     injectProductDiscountButton are only reached via handleDiscount(), which
+     already returns early unless d.code is truthy. Nothing else in the
+     popup flow is blocked.
+
+4. frontend/app/admin/screens/Settings.jsx
+   - Imports Banner + Button from '@shopify/polaris' and BACKEND_URL from
+     '../../../lib/api'.
+   - New state  needsReauth; mount effect adds a 6th call to
+       GET /api/discounts/<shop>/config  and sets it from response.needsReauth.
+   - When needsReauth, renders a Polaris <Banner tone="warning"
+     title="Reconnect to enable discounts"> with a <Button> that navigates
+     the top frame to  ${BACKEND_URL}/api/auth/install?shop=<shop>
+     (the OAuth begin URL). window.top.location.href, falling back to
+     window.location.href.
+
+5. Tests — backend/__tests__/discounts.test.js  (new, 6 tests)
+   Store + DiscountConfig mocked, global.fetch stubbed:
+   (a)  top-level errors + ACCESS_DENIED -> code null, Store.updateOne called
+        with { $set: { needsReauth: true } }
+   (a2) top-level errors without ACCESS_DENIED -> code null, no reauth flag
+   (b)  codeDiscountNode: null -> code null
+   (c)  happy path -> code matches /^PUSH_[A-Z0-9]{6}$/, percentage 10, expiry 7,
+        Store.updateOne NOT called
+   (d)  mutation userErrors -> code null, error = the userError message
+   (e)  action disabled in config -> code null, no Shopify fetch
+
+
+VERIFICATION
+------------
+- node --check backend/routes/discounts.js          -> OK
+- node --check backend/models/Store.js              -> OK
+- liquid <script> extracted + node --check          -> LIQUID OK
+- cd backend && npm test                            -> 14 suites, 122 tests, all passing
+                                                       (was 116; +6 new)
+- cd frontend && npm run build                      -> success, 11/11 pages;
+                                                       /admin/settings-page 10.8 kB
+                                                       (was 8.0 kB — Polaris Banner/Button)
+
+
+OWNER STEPS — NOT PERFORMED (do these to finish the fix in the live store)
+-------------------------------------------------------------------------
+1. shopify app deploy
+   Pushes the updated access_scopes (write_discounts, read_discounts —
+   already in shopify.app.toml) to Shopify's app configuration.
+
+2. Open the app in the store admin (Shopify admin -> Apps -> CartnCodForm).
+   This runs token exchange / re-auth and grants the new scopes to the
+   installed token. If the merchant is not auto-prompted, the Settings
+   screen now shows a "Reconnect to enable discounts" banner whose button
+   goes to /api/auth/install?shop=<shop>.
+   Confirm the grant:
+     GET https://<shop>/admin/oauth/access_scopes.json
+       -> the "access_scopes" array must include  write_discounts
+   (Once a real discount is created, generateDiscount stops hitting
+    ACCESS_DENIED and Store.needsReauth stays/returns false; the banner
+    clears on next Settings load. If it lingers, it can be cleared manually
+    by unsetting Store.needsReauth.)
+
+3. End-to-end check:
+   - Trigger the popup on the storefront, allow notifications.
+   - Confirm the generated code appears under Shopify admin -> Discounts.
+   - Click "Shop now" (or wait for the 2s auto-redirect).
+   - Confirm you land on the product / current page (NOT the homepage) with
+     the discount session applied (cart shows the % off).
+
+
+NOTES
+-----
+- CLAUDE.md says branch "phase-<x>-<slug>"; this prompt specified
+  "fix-discount-create", which was used.
+- No shopify app deploy was run (owner step, listed above).
+- Nothing was committed; changes are on the fix-discount-create working tree.
