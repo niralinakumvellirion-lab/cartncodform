@@ -1,0 +1,393 @@
+DISCOUNT STOREFRONT AUDIT — read-only file dump
+===============================================
+Generated: 2026-09-10
+Branch: discount-feature
+No modifications made.
+
+File: extensions/cartncodform-embed/blocks/push-notifications.liquid
+Total length: 1535 lines.
+
+NOTE ON SCOPE: the request asked for "last 100 lines only (the Allow
+handler + discount code section)". Those are two different regions —
+the Allow handler + discount code live around lines 87-149 and 636-741,
+NOT in the last 100 lines (1436-1535, which is initTracking tail +
+start() + {% schema %}). Both regions are reproduced below.
+
+
+═══════════════════════════════════════════════════════════════════════
+PART A — LITERAL LAST 100 LINES (1436–1535)
+═══════════════════════════════════════════════════════════════════════
+1436	          trackEvent(qty === 0 ? 'remove_from_cart' : 'cart_update', {
+1437	            line: cparsed && cparsed.line || null,
+1438	            id: cparsed && cparsed.id || null,
+1439	            quantity: qty
+1440	          });
+1441	        } catch(e) {}
+1442	      }
+1443
+1444	      var fetchPromise = origFetch.apply(this, arguments);
+1445
+1446	      // After a cart add/change completes, re-sync the subscription's
+1447	      // cartToken so it reflects the POST-rotation cart state — this
+1448	      // keeps the Customer Journey resolve() lookup working.
+1449	      // Uses sendBeacon (via resyncCartTokenBeacon) so the write
+1450	      // survives immediate page unload/navigation.
+1451	      if (isCartAdd || isCartChange) {
+1452	        fetchPromise.then(function() {
+1453	          var existingToken = localStorage.getItem(TOKEN_KEY);
+1454	          if (existingToken && Notification.permission === 'granted') {
+1455	            resyncCartTokenBeacon(existingToken);
+1456	          }
+1457	        }).catch(function() {});
+1458	      }
+1459
+1460	      return fetchPromise;
+1461	    };
+1462
+1463	    // PAGE EXIT — dwell time + scroll depth
+1464	    var pageLoadTime = Date.now();
+1465	    var maxScroll = 0;
+1466	    window.addEventListener('scroll', function() {
+1467	      var scrollPct = Math.round(
+1468	        (window.scrollY / (document.body.scrollHeight - window.innerHeight)) * 100
+1469	      );
+1470	      if (scrollPct > maxScroll) maxScroll = scrollPct;
+1471	    }, { passive: true });
+1472
+1473	    document.addEventListener('visibilitychange', function() {
+1474	      if (document.visibilityState === 'hidden') {
+1475	        trackEvent('page_exit', {
+1476	          dwellSeconds: Math.round((Date.now() - pageLoadTime) / 1000),
+1477	          scrollDepth: maxScroll,
+1478	          pageType: pageType
+1479	        });
+1480	      }
+1481	    });
+1482	  }
+1483
+1484	  // ============================================
+1485	  // START
+1486	  // ============================================
+1487
+1488	  var ccfStarted = false;
+1489	  function start() {
+1490	    if (ccfStarted) return;
+1491	    ccfStarted = true;
+1492	    console.log('[CCF] Starting...');
+1493	    trackCart();
+1494	    checkAndInit();
+1495	    initTracking();
+1496
+1497	    // popup-customizer + discount-feature: load appearance + discount config
+1498	    // first, then wire the intent triggers (which is where the dwell timer starts).
+1499	    Promise.all([fetchPopupConfig(), fetchDiscountConfig()]).then(function () {
+1500	      initIntentTriggers();
+1501	    });
+1502
+1503	    if (Notification.permission === 'granted') {
+1504	      setupForegroundMessages();
+1505	    }
+1506	  }
+1507
+1508	  if (document.readyState === 'loading') {
+1509	    document.addEventListener('DOMContentLoaded', start);
+1510	  } else {
+1511	    start();
+1512	  }
+1513
+1514	  window.addEventListener('load', function() {
+1515	    if (!ccfStarted) start();
+1516	  });
+1517
+1518	})();
+1519	</script>
+1520	{% endif %}
+1521
+1522	{% schema %}
+1523	{
+1524	  "name": "CartnCodForm Push",
+1525	  "target": "body",
+1526	  "settings": [
+1527	    {
+1528	      "type": "checkbox",
+1529	      "id": "enable_push",
+1530	      "label": "Enable Push Notifications",
+1531	      "default": true
+1532	    }
+1533	  ]
+1534	}
+1535	{% endschema %}
+
+
+═══════════════════════════════════════════════════════════════════════
+PART B — DISCOUNT HELPER BLOCK (module scope, lines 86–149)
+═══════════════════════════════════════════════════════════════════════
+  86
+  87	  // discount-feature: which subscribe actions earn a Shopify discount code,
+  88	  // their percentages, and the offer headline. Fetched once (fetchDiscountConfig).
+  89	  var discountConfig = {};
+  90
+  91	  function ccfRuleOn(key) {
+  92	    var r = discountConfig && discountConfig[key];
+  93	    return !!(r && r.enabled);
+  94	  }
+  95	  function ccfDiscountEnabled() {
+  96	    return ccfRuleOn('pushDiscount') || ccfRuleOn('emailDiscount') ||
+  97	      ccfRuleOn('phoneDiscount') || ccfRuleOn('bothDiscount');
+  98	  }
+  99	  function ccfShowEmailField() {
+ 100	    return ccfRuleOn('emailDiscount') || ccfRuleOn('bothDiscount');
+ 101	  }
+ 102	  function ccfShowPhoneField() {
+ 103	    return ccfRuleOn('phoneDiscount') || ccfRuleOn('bothDiscount');
+ 104	  }
+ 105	  function ccfPct(key) {
+ 106	    var r = discountConfig && discountConfig[key];
+ 107	    return (r && r.enabled && r.percentage) ? r.percentage : 0;
+ 108	  }
+ 109	  function ccfFieldPct(singleKey) {
+ 110	    return Math.max(ccfPct(singleKey), ccfPct('bothDiscount')) || 0;
+ 111	  }
+ 112
+ 113	  // Build the offer headline + email/phone inputs shown inside the popup.
+ 114	  // Returns a <div id="ccf-discount-fields"> or null when no discount is on.
+ 115	  function ccfBuildDiscountFields() {
+ 116	    if (!ccfDiscountEnabled()) return null;
+ 117	    var INPUT_CSS = 'width:100%;padding:8px 10px;font-size:13px;border:1px solid #e5e7eb;' +
+ 118	      'border-radius:8px;box-sizing:border-box;margin-bottom:8px;';
+ 119
+ 120	    var box = document.createElement('div');
+ 121	    box.id = 'ccf-discount-fields';
+ 122	    box.style.cssText = 'margin-top:10px;';
+ 123
+ 124	    var head = document.createElement('div');
+ 125	    head.style.cssText = 'font-size:13px;color:#6b7280;margin-bottom:10px;text-align:center;';
+ 126	    head.textContent = (discountConfig && discountConfig.offerHeadline) ||
+ 127	      'Get a discount on your first order!';
+ 128	    box.appendChild(head);
+ 129
+ 130	    if (ccfShowEmailField()) {
+ 131	      var ei = document.createElement('input');
+ 132	      ei.type = 'email';
+ 133	      ei.id = 'ccf-email-input';
+ 134	      var ep = ccfFieldPct('emailDiscount');
+ 135	      ei.placeholder = 'Your email' + (ep ? ' (get ' + ep + '% off)' : '');
+ 136	      ei.style.cssText = INPUT_CSS;
+ 137	      box.appendChild(ei);
+ 138	    }
+ 139	    if (ccfShowPhoneField()) {
+ 140	      var pi = document.createElement('input');
+ 141	      pi.type = 'tel';
+ 142	      pi.id = 'ccf-phone-input';
+ 143	      var pp = ccfFieldPct('phoneDiscount');
+ 144	      pi.placeholder = 'Your phone' + (pp ? ' (get ' + pp + '% off)' : '');
+ 145	      pi.style.cssText = INPUT_CSS;
+ 146	      box.appendChild(pi);
+ 147	    }
+ 148	    return box;
+ 149	  }
+ 150
+
+
+═══════════════════════════════════════════════════════════════════════
+PART C — ALLOW HANDLER + DISCOUNT CODE SECTION (inside showSoftPrompt,
+lines 636–741)
+═══════════════════════════════════════════════════════════════════════
+ 636	    if (overlay) document.body.appendChild(overlay);
+ 637	    document.body.appendChild(wrap);
+ 638
+ 639	    // discount-feature: inject the offer headline + email/phone inputs right
+ 640	    // after the deny control (every layout except the thin banner bar).
+ 641	    var discountFields = layout !== 'banner' ? ccfBuildDiscountFields() : null;
+ 642	    if (discountFields && deny && deny.parentNode) {
+ 643	      if (deny.nextSibling) deny.parentNode.insertBefore(discountFields, deny.nextSibling);
+ 644	      else deny.parentNode.appendChild(discountFields);
+ 645	    }
+ 646	    var wantsDiscount = !!discountFields;
+ 647
+ 648	    function cleanup() {
+ 649	      if (promptAutoDismissTimer) { clearTimeout(promptAutoDismissTimer); promptAutoDismissTimer = null; }
+ 650	      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+ 651	      var ov = document.getElementById('ccf-overlay');
+ 652	      if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+ 653	    }
+ 654
+ 655	    // discount-feature: once the code comes back, drop the inputs + Allow
+ 656	    // button and show the code in place. Any failure just closes the popup.
+ 657	    function renderDiscountCode(d) {
+ 658	      if (!d || !d.code) { cleanup(); return; }
+ 659	      var fields = document.getElementById('ccf-discount-fields');
+ 660	      if (fields && fields.parentNode) fields.parentNode.removeChild(fields);
+ 661	      if (allow) allow.style.display = 'none';
+ 662	      if (deny && deny.id === 'ccf-deny-btn') deny.textContent = 'Close';
+ 663
+ 664	      var codeBox = document.createElement('div');
+ 665	      codeBox.style.cssText = [
+ 666	        'margin-top:12px', 'padding:12px', 'background:#f0fdf4',
+ 667	        'border:1px dashed #16a34a', 'border-radius:8px', 'text-align:center'
+ 668	      ].join(';');
+ 669	      codeBox.innerHTML =
+ 670	        '<div style="font-size:11px;color:#16a34a;margin-bottom:4px">Your discount code</div>' +
+ 671	        '<div style="font-size:18px;font-weight:700;color:#111827;letter-spacing:2px;font-family:monospace">' +
+ 672	        d.code + '</div>' +
+ 673	        '<div style="font-size:11px;color:#6b7280;margin-top:4px">' +
+ 674	        d.percentage + '% off · expires in ' + d.expiryDays + ' days</div>';
+ 675
+ 676	      var host = (deny && deny.parentNode) || wrap;
+ 677	      host.appendChild(codeBox);
+ 678	    }
+ 679
+ 680	    allow.addEventListener('click', function () {
+ 681	      // Read the discount inputs BEFORE any teardown.
+ 682	      var emailEl = document.getElementById('ccf-email-input');
+ 683	      var phoneEl = document.getElementById('ccf-phone-input');
+ 684	      var email = emailEl && emailEl.value ? emailEl.value.trim() : '';
+ 685	      var phone = phoneEl && phoneEl.value ? phoneEl.value.trim() : '';
+ 686
+ 687	      if (wantsDiscount) {
+ 688	        allow.disabled = true;
+ 689	        allow.textContent = 'Setting up…';
+ 690	      } else {
+ 691	        cleanup();
+ 692	      }
+ 693
+ 694	      Notification.requestPermission().then(function (permission) {
+ 695	        var granted = permission === 'granted';
+ 696	        try { trackEvent('push_prompt_accepted', { trigger: trigger, granted: granted }); } catch (e) {}
+ 697	        if (!granted) {
+ 698	          try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+ 699	          if (wantsDiscount) cleanup();
+ 700	          return;
+ 701	        }
+ 702	        registerSW()
+ 703	          .then(function (reg) { return getToken(reg); })
+ 704	          .then(function (token) { return saveToken(token); })
+ 705	          .then(function () { setupForegroundMessages(); })
+ 706	          .then(function () {
+ 707	            if (!wantsDiscount) return;
+ 708	            var action = 'push';
+ 709	            if (email && phone) action = 'both';
+ 710	            else if (email) action = 'email';
+ 711	            else if (phone) action = 'phone';
+ 712	            return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
+ 713	              method: 'POST',
+ 714	              headers: { 'Content-Type': 'application/json' },
+ 715	              body: JSON.stringify({
+ 716	                action: action, email: email, phone: phone, sessionId: getSessionId()
+ 717	              })
+ 718	            })
+ 719	              .then(function (r) { return r.json(); })
+ 720	              .then(function (d) { renderDiscountCode(d); })
+ 721	              .catch(function () { cleanup(); });
+ 722	          })
+ 723	          .catch(function (err) {
+ 724	            console.error('[CCF] subscribe after prompt failed:', err.message);
+ 725	            if (wantsDiscount) cleanup();
+ 726	          });
+ 727	      });
+ 728	    });
+ 729
+ 730	    deny.addEventListener('click', function () {
+ 731	      cleanup();
+ 732	      try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+ 733	    });
+ 734
+ 735	    if (closeBtn && closeBtn !== deny) {
+ 736	      closeBtn.addEventListener('click', function () {
+ 737	        cleanup();
+ 738	        try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+ 739	      });
+ 740	    }
+ 741	  }
+
+
+═══════════════════════════════════════════════════════════════════════
+PART D — fetchDiscountConfig() (lines 761–772)
+═══════════════════════════════════════════════════════════════════════
+ 761	  // discount-feature: pull the shop's discount rules (enabled flags + %) and
+ 762	  // offer headline from the App Proxy. Failure leaves discountConfig = {} so
+ 763	  // no email/phone fields render.
+ 764	  function fetchDiscountConfig() {
+ 765	    var url = window.location.origin + '/apps/cartncodform/discount-config?shop=' +
+ 766	      encodeURIComponent(SHOP_DOMAIN);
+ 767	    return fetch(url)
+ 768	      .then(function (r) { return r.ok ? r.json() : null; })
+ 769	      .then(function (data) {
+ 770	        if (data && typeof data === 'object') discountConfig = data;
+ 771	      })
+ 772	      .catch(function () { /* keep defaults */ });
+ 773	  }
+
+
+═══════════════════════════════════════════════════════════════════════
+PART E — ls extensions/  (recursive)
+═══════════════════════════════════════════════════════════════════════
+extensions/
+└── cartncodform-embed/
+    ├── package.json                 57 bytes
+    ├── shopify.extension.toml      292 bytes
+    ├── blocks/
+    │   └── push-notifications.liquid   59269 bytes  (1535 lines)
+    └── locales/
+        └── en.default.json          {}  (empty object)
+
+Full recursive find:
+  extensions
+  extensions/cartncodform-embed
+  extensions/cartncodform-embed/blocks
+  extensions/cartncodform-embed/blocks/push-notifications.liquid
+  extensions/cartncodform-embed/locales
+  extensions/cartncodform-embed/locales/en.default.json
+  extensions/cartncodform-embed/package.json
+  extensions/cartncodform-embed/shopify.extension.toml
+
+--- extensions/cartncodform-embed/shopify.extension.toml ---
+api_version = "2025-01"
+
+[[extensions]]
+type = "theme"
+name = "CartnCodForm Push Notifications"
+handle = "cartncodform-push"
+uid = "e2630ac7-9265-b3d5-71ef-d64f962abc628015aec1"
+
+  [[extensions.settings.fields]]
+  key = "enable_push"
+  type = "checkbox"
+  label = "Enable Push Notifications"
+
+--- extensions/cartncodform-embed/package.json ---
+{
+  "name": "cartncodform-embed",
+  "version": "1.0.0"
+}
+
+--- extensions/cartncodform-embed/locales/en.default.json ---
+{}
+
+
+═══════════════════════════════════════════════════════════════════════
+OBSERVATIONS (read-only)
+═══════════════════════════════════════════════════════════════════════
+- Only ONE theme app-embed extension exists (cartncodform-embed), one
+  block: push-notifications.liquid. No app-proxy or checkout-ui
+  extensions in this repo (the App Proxy is a plain Express router on the
+  backend, configured in shopify.app.toml [app_proxy]).
+- shopify.extension.toml api_version = "2025-01" matches the API_VERSION
+  used by the discount GraphQL call in backend/utils/shopify.js.
+- The discount storefront flow is entirely inside push-notifications.liquid:
+  fetchDiscountConfig() (line 764) is fired in Promise.all alongside
+  fetchPopupConfig() in start() (line 1499); ccfBuildDiscountFields()
+  (line 115) renders the headline + #ccf-email-input / #ccf-phone-input;
+  the Allow handler (line 680) reads those inputs before teardown, keeps
+  the popup open when wantsDiscount, POSTs
+  /apps/cartncodform/generate-discount, and renderDiscountCode() (line 657)
+  swaps the UI for the green dashed code box.
+- deny/close still call cleanup(); on !d.code or fetch failure the popup
+  is closed via cleanup().
+- Banner layout is deliberately excluded from the discount fields
+  (line 641: `layout !== 'banner'`).
+- No auto-dismiss timer involved (promptAutoDismissTimer stays null;
+  only cleared in cleanup()).
+- 'page_load' trigger + PAGE_LOAD_TOKEN_KEY ('ccf_push_token') and
+  DWELL_MS = 1500 (added in the prior task) are unchanged by the
+  discount work.

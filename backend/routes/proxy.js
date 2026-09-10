@@ -157,7 +157,9 @@ router.post('/generate-discount', async (req, res) => {
     const result = await generateDiscount(shop, req.body || {});
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'no-store');
-    return res.json(result);
+    // Always echo the shop domain so the storefront can build /discount/<code>
+    // redirect URLs client-side (result.shop wins when generateDiscount set it).
+    return res.json({ shop, ...result });
   } catch (err) {
     console.error('[proxy] POST /generate-discount error:', err.message);
     return res.status(500).json({ code: null, error: 'Failed to generate discount' });

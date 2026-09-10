@@ -148,6 +148,153 @@
     return box;
   }
 
+  // discount-feature: after a code is minted, decide how to surface it.
+  //   push / email / phone            -> store-wide code, popup only
+  //   both (email+phone) on a PDP     -> product-specific: also inject a
+  //                                      "Buy with X% OFF" button under Buy Now
+  function handleDiscount(d, action, productHandle) {
+    if (!d || !d.code) return;
+
+    var isProductSpecific = (action === 'both') && productHandle;
+    if (isProductSpecific) {
+      injectProductDiscountButton(d, productHandle);
+    }
+
+    // Always show the code inside the popup.
+    renderDiscountCode(d, action, productHandle);
+  }
+
+  // Inject a discount CTA directly under the product page's Buy Now / Add to
+  // Cart button. Links to Shopify's /discount/<code> apply URL, which sets the
+  // cart discount and then bounces back to the product.
+  function injectProductDiscountButton(d, productHandle) {
+    if (document.getElementById('ccf-product-disc-btn')) return;
+
+    var buyBtn = document.querySelector(
+      '[name="add"], .shopify-payment-button__button, ' +
+      'button[data-testid="Checkout-button"], ' +
+      '.product-form__submit'
+    );
+    if (!buyBtn || !buyBtn.parentNode) return;
+
+    var discBtn = document.createElement('a');
+    discBtn.id = 'ccf-product-disc-btn';
+    discBtn.href = '/discount/' + d.code + '?redirect=/products/' + productHandle;
+    discBtn.style.cssText = [
+      'display:block',
+      'width:100%',
+      'padding:14px',
+      'margin-top:10px',
+      'background:linear-gradient(135deg,#16a34a,#15803d)',
+      'color:#fff',
+      'font-size:15px',
+      'font-weight:700',
+      'text-align:center',
+      'border-radius:8px',
+      'text-decoration:none',
+      'box-shadow:0 4px 12px rgba(22,163,74,0.3)',
+      'cursor:pointer'
+    ].join(';');
+    discBtn.innerHTML = '🎉 Buy with ' + d.percentage +
+      '% OFF — Use code ' + d.code;
+
+    buyBtn.parentNode.insertBefore(discBtn, buyBtn.nextSibling);
+  }
+
+  // Render the discount code block inside the open popup, with Copy + Shop now.
+  function renderDiscountCode(d, action, productHandle) {
+    var popup = document.getElementById('ccf-push-prompt');
+    if (!popup) return;
+
+    var redirectUrl = (productHandle && action === 'both')
+      ? '/discount/' + d.code + '?redirect=/products/' + productHandle
+      : '/discount/' + d.code;
+
+    var box = document.createElement('div');
+    box.style.cssText = [
+      'margin-top:12px',
+      'padding:14px',
+      'background:#f0fdf4',
+      'border:1px dashed #16a34a',
+      'border-radius:10px',
+      'text-align:center'
+    ].join(';');
+
+    box.innerHTML =
+      '<div style="font-size:11px;color:#16a34a;margin-bottom:4px">' +
+      '🎉 Your discount is ready!</div>' +
+      '<div style="font-size:20px;font-weight:700;color:#111827;' +
+      'letter-spacing:2px;font-family:monospace;margin-bottom:4px">' +
+      d.code + '</div>' +
+      '<div style="font-size:11px;color:#6b7280;margin-bottom:12px">' +
+      d.percentage + '% off · expires in ' + d.expiryDays + ' days</div>' +
+      '<div style="display:flex;gap:8px">' +
+      '<button id="ccf-copy-btn" style="flex:1;padding:10px;font-size:13px;' +
+      'font-weight:600;color:#16a34a;background:#fff;border:2px solid #16a34a;' +
+      'border-radius:8px;cursor:pointer">Copy code</button>' +
+      '<a href="' + redirectUrl + '" style="flex:1;padding:10px;font-size:13px;' +
+      'font-weight:700;color:#fff;background:#16a34a;border-radius:8px;' +
+      'text-decoration:none;display:flex;align-items:center;' +
+      'justify-content:center;gap:4px">Shop now →</a>' +
+      '</div>';
+
+    popup.appendChild(box);
+
+    setTimeout(function () {
+      var btn = document.getElementById('ccf-copy-btn');
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(d.code)
+            .then(function () {
+              btn.textContent = '✓ Copied!';
+              setTimeout(function () { btn.textContent = 'Copy code'; }, 2000);
+            })
+            .catch(function () { btn.textContent = d.code; });
+        } else {
+          btn.textContent = d.code;
+        }
+      });
+    }, 100);
+  }
+
+  // discount-feature: once a CCF discount is active (code minted this session),
+  // badge every product price on collection / home / search pages.
+  function checkActiveDiscount() {
+    var activeCode, activePct;
+    try {
+      activeCode = sessionStorage.getItem('ccf_active_discount');
+      activePct = sessionStorage.getItem('ccf_active_pct');
+    } catch (e) { return; }
+    if (!activeCode || !activePct) return;
+
+    var priceEls = document.querySelectorAll(
+      '.price, .product-item__price, .price__regular, ' +
+      '[class*="price"], .money'
+    );
+
+    for (var i = 0; i < priceEls.length; i++) {
+      var el = priceEls[i];
+      if (el.dataset.ccfBadged || !el.parentNode) continue;
+      el.dataset.ccfBadged = '1';
+
+      var badge = document.createElement('span');
+      badge.style.cssText = [
+        'display:inline-block',
+        'background:#16a34a',
+        'color:#fff',
+        'font-size:11px',
+        'font-weight:700',
+        'padding:2px 6px',
+        'border-radius:4px',
+        'margin-left:6px',
+        'vertical-align:middle'
+      ].join(';');
+      badge.textContent = activePct + '% OFF';
+      el.parentNode.insertBefore(badge, el.nextSibling);
+    }
+  }
+
   function showSoftPrompt(trigger, productId) {
     if (!canPrompt()) return;
     if (document.getElementById('ccf-push-prompt')) return;
@@ -652,29 +799,29 @@
       if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
     }
 
-    // discount-feature: once the code comes back, drop the inputs + Allow
-    // button and show the code in place. Any failure just closes the popup.
-    function renderDiscountCode(d) {
+    // discount-feature: consume the /generate-discount response — tidy the
+    // popup, stash the code for cross-page badges, then hand off to the
+    // module-level handleDiscount (product button + in-popup code block).
+    function finishDiscount(d, action) {
       if (!d || !d.code) { cleanup(); return; }
+
       var fields = document.getElementById('ccf-discount-fields');
       if (fields && fields.parentNode) fields.parentNode.removeChild(fields);
       if (allow) allow.style.display = 'none';
-      if (deny && deny.id === 'ccf-deny-btn') deny.textContent = 'Close';
 
-      var codeBox = document.createElement('div');
-      codeBox.style.cssText = [
-        'margin-top:12px', 'padding:12px', 'background:#f0fdf4',
-        'border:1px dashed #16a34a', 'border-radius:8px', 'text-align:center'
-      ].join(';');
-      codeBox.innerHTML =
-        '<div style="font-size:11px;color:#16a34a;margin-bottom:4px">Your discount code</div>' +
-        '<div style="font-size:18px;font-weight:700;color:#111827;letter-spacing:2px;font-family:monospace">' +
-        d.code + '</div>' +
-        '<div style="font-size:11px;color:#6b7280;margin-top:4px">' +
-        d.percentage + '% off · expires in ' + d.expiryDays + ' days</div>';
+      try {
+        sessionStorage.setItem('ccf_active_discount', d.code);
+        sessionStorage.setItem('ccf_active_pct', String(d.percentage));
+      } catch (e) {}
 
-      var host = (deny && deny.parentNode) || wrap;
-      host.appendChild(codeBox);
+      var productHandle = null;
+      var pathParts = window.location.pathname.split('/');
+      var prodIdx = pathParts.indexOf('products');
+      if (prodIdx !== -1 && pathParts[prodIdx + 1]) {
+        productHandle = pathParts[prodIdx + 1].split('?')[0].split('#')[0];
+      }
+
+      handleDiscount(d, action, productHandle);
     }
 
     allow.addEventListener('click', function () {
@@ -717,7 +864,7 @@
               })
             })
               .then(function (r) { return r.json(); })
-              .then(function (d) { renderDiscountCode(d); })
+              .then(function (d) { finishDiscount(d, action); })
               .catch(function () { cleanup(); });
           })
           .catch(function (err) {
@@ -1493,6 +1640,10 @@
     trackCart();
     checkAndInit();
     initTracking();
+
+    // discount-feature: if a CCF discount was minted earlier this session,
+    // badge every product price on this page (collection / home / search / PDP).
+    checkActiveDiscount();
 
     // popup-customizer + discount-feature: load appearance + discount config
     // first, then wire the intent triggers (which is where the dwell timer starts).

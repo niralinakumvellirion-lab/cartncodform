@@ -1,0 +1,134 @@
+DISCOUNT STOREFRONT — SELF AUDIT (part 2)
+=========================================
+Branch: discount-storefront
+Date: 2026-09-10
+
+Goal: scenario-aware surfacing of the minted discount code —
+  push / email / phone  -> store-wide code, shown in popup only
+  email + phone on a PDP -> product-specific: also inject a
+    "Buy with X% OFF" button under Buy Now, plus a
+    /discount/CODE?redirect=/products/<handle> link
+
+
+FILES MODIFIED (3)
+------------------
+
+1. extensions/cartncodform-embed/blocks/push-notifications.liquid
+   NEW module-level functions (added just before showSoftPrompt):
+
+   - handleDiscount(d, action, productHandle)
+       * no-op if !d.code
+       * isProductSpecific = action === 'both' && productHandle
+       * if isProductSpecific -> injectProductDiscountButton(d, productHandle)
+       * always -> renderDiscountCode(d, action, productHandle)
+
+   - injectProductDiscountButton(d, productHandle)   (email+phone scenario)
+       * guard: bail if #ccf-product-disc-btn already exists
+       * finds the Buy Now / Add to Cart control via
+         '[name="add"], .shopify-payment-button__button,
+          button[data-testid="Checkout-button"], .product-form__submit'
+       * builds an <a id="ccf-product-disc-btn"
+         href="/discount/<code>?redirect=/products/<handle>">
+         green gradient, full-width, "🎉 Buy with X% OFF — Use code CODE"
+       * inserted immediately after the buy button (buyBtn.nextSibling)
+
+   - renderDiscountCode(d, action, productHandle)   (replaces the old
+     local single-arg renderDiscountCode inside showSoftPrompt)
+       * appends a green dashed box to #ccf-push-prompt
+       * "🎉 Your discount is ready!" / CODE (monospace) /
+         "X% off · expires in N days"
+       * two buttons: [Copy code] (#ccf-copy-btn) + [Shop now →] (<a>)
+       * redirectUrl = (productHandle && action === 'both')
+           ? '/discount/<code>?redirect=/products/<handle>'
+           : '/discount/<code>'
+       * Copy button wired after a 100ms setTimeout; uses
+         navigator.clipboard.writeText with a "✓ Copied!" -> "Copy code"
+         flip; falls back to showing the raw code if clipboard is
+         unavailable / denied
+
+   - checkActiveDiscount()                          (cross-page price badges)
+       * reads sessionStorage ccf_active_discount + ccf_active_pct
+         (wrapped in try/catch — returns silently if storage throws)
+       * querySelectorAll('.price, .product-item__price, .price__regular,
+         [class*="price"], .money')
+       * for each element not already data-ccf-badged: sets the flag and
+         inserts a green "<pct>% OFF" <span> right after it
+       * NOTE: [class*="price"] is deliberately broad (per spec); the
+         per-element data-ccfBadged guard prevents double-badging
+
+   CHANGES to the Allow-click flow inside showSoftPrompt:
+   - The old local `function renderDiscountCode(d)` (which relabelled deny
+     to "Close" and appended a plain code box) was REMOVED.
+   - New local glue `finishDiscount(d, action)`:
+       * on !d.code -> cleanup() (popup closes on failure, unchanged behaviour)
+       * removes #ccf-discount-fields, hides the Allow button
+       * stashes sessionStorage.ccf_active_discount = d.code
+         and ccf_active_pct = String(d.percentage)   (STEP 2)
+       * extracts productHandle from window.location.pathname:
+           split('/'), indexOf('products'), take next segment,
+           strip ?query and #hash                     (STEP 1)
+       * calls handleDiscount(d, action, productHandle)
+   - The generate-discount .then() now calls `finishDiscount(d, action)`
+     instead of `renderDiscountCode(d)`.
+
+   CHANGE to start():
+   - Added `checkActiveDiscount();` right after initTracking() so price
+     badges render on every page load (collection / home / search / PDP)
+     when a discount is active for the session.                (STEP 2)
+
+2. backend/routes/discounts.js
+   - generateDiscount() now returns `shop` in its result:
+       * success  -> { code, percentage, expiryDays, shop }
+       * disabled -> { code: null, shop }
+   - Added a comment documenting the action->sub-doc mapping
+     (push->pushDiscount, email->emailDiscount, phone->phoneDiscount,
+      both->bothDiscount) — mapping itself was already correct
+     (config[action + 'Discount']).                             (STEP 3)
+
+3. backend/routes/proxy.js
+   - POST /generate-discount now responds `res.json({ shop, ...result })`
+     so the shop domain is always present client-side even on
+     generateDiscount early-error paths (result.shop wins when set). (STEP 3)
+   - action->config mapping verified: unchanged, correct — the proxy route
+     just forwards req.body to generateDiscount which does the mapping.
+
+
+SCENARIO COVERAGE
+-----------------
+  push  only  -> action='push'  -> handleDiscount: not product-specific
+                 -> renderDiscountCode redirect = /discount/CODE
+  email only  -> action='email' -> same, /discount/CODE
+  phone only  -> action='phone' -> same, /discount/CODE
+  email+phone -> action='both'
+     - on /products/<handle>: injectProductDiscountButton adds the CTA
+       under Buy Now (href /discount/CODE?redirect=/products/<handle>);
+       renderDiscountCode redirect also carries ?redirect=/products/<handle>
+     - not on a PDP (productHandle null): no product button; popup code
+       with plain /discount/CODE redirect
+
+
+NOTE / KNOWN LIMITATIONS
+------------------------
+- d.shop is returned by the API but the liquid redirects are all
+  relative storefront paths (/discount/..., /products/...), which is the
+  correct form for same-origin storefront navigation — d.shop is
+  forward-looking (absolute-URL building) and not consumed by this liquid.
+- checkActiveDiscount runs once at start(); lazy-loaded / infinite-scroll
+  collection items added later are not badged (no MutationObserver — out
+  of scope for this task).
+- The old behaviour of relabelling the deny button to "Close" after a
+  successful mint is gone; the deny/"No thanks" control still calls
+  cleanup(), and the new code box carries its own "Shop now →" CTA.
+
+
+VERIFICATION
+------------
+- awk-extracted <script> from push-notifications.liquid + `node --check`  -> LIQUID OK
+- node --check backend/routes/proxy.js                                    -> PROXY OK
+- node --check backend/routes/discounts.js                                -> DISCOUNTS OK
+- grep of function names: single module-level renderDiscountCode(d,action,
+  productHandle); handleDiscount / injectProductDiscountButton /
+  checkActiveDiscount defined once; finishDiscount glue calls handleDiscount;
+  no stale single-arg renderDiscountCode references remain
+- cd backend && npm test  -> 13 suites, 116 tests, all passing
+- No `shopify app deploy` run.

@@ -73,10 +73,12 @@ async function generateDiscount(shopDomain, body = {}) {
     return { code: null, error: 'Store not connected' };
   }
 
+  // action -> config sub-doc: push->pushDiscount, email->emailDiscount,
+  // phone->phoneDiscount, both->bothDiscount.
   const cfg = config && config[action + 'Discount'];
   if (!cfg || !cfg.enabled) {
     // This action's discount is switched off — nothing to hand out.
-    return { code: null };
+    return { code: null, shop };
   }
 
   const code =
@@ -163,7 +165,9 @@ async function generateDiscount(shopDomain, body = {}) {
     }
   }
 
-  return { code, percentage: cfg.percentage, expiryDays: cfg.expiryDays };
+  // `shop` is included so the storefront can build /discount/<code> redirect
+  // URLs (and absolute links) client-side without a second round-trip.
+  return { code, percentage: cfg.percentage, expiryDays: cfg.expiryDays, shop };
 }
 
 /**
