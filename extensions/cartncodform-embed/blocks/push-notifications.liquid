@@ -101,6 +101,10 @@
     // ================================================================
     var cfg = isMobile ? (mobilePopupConfig || {}) : (popupConfig || {});
     if (isMobile && !cfg.layout) cfg = popupConfig || {};
+    // popup-mobile debug: which config are we using and does it carry an image?
+    console.log('[CCF] device:', isMobile ? 'mobile' : 'desktop',
+      '| layout:', cfg.layout,
+      '| hasImage:', !!(cfg.imageUrl));
     var layout = cfg.layout || 'split';
     var bg = cfg.bgColor || '#ffffff';
     var fg = cfg.textColor || '#111827';
@@ -236,11 +240,14 @@
 
     } else {
       // ---------- LAYOUT 1: split (image + content), the default ----------
-      // One <img> element, appended to whichever container the branch builds.
+      var imageUrl = cfg.imageUrl || '';
+      console.log('[CCF] imageUrl:', imageUrl ? 'set' : 'empty');
+
+      // Desktop reuses this single <img>; mobile builds its own below.
       var splitImgEl = null;
-      if (cfg.imageUrl) {
+      if (imageUrl) {
         splitImgEl = document.createElement('img');
-        splitImgEl.src = cfg.imageUrl;
+        splitImgEl.src = imageUrl;
         splitImgEl.alt = '';
         splitImgEl.setAttribute('style',
           'width:100%;height:100%;object-fit:cover;object-position:' + imagePosition + ';display:block;');
@@ -258,11 +265,41 @@
           'width:88vw;max-width:360px;border-radius:16px;overflow:hidden;' +
           'background:' + bg + ';box-shadow:0 20px 60px rgba(0,0,0,0.35);z-index:999999;');
 
+        // Image section — always a fixed 200px tall box; if an image is set,
+        // an absolutely-positioned <img> fills it, with a gradient fallback
+        // both when there's no image and when the image fails to load.
         var mImg = document.createElement('div');
-        mImg.setAttribute('style',
-          'width:100%;height:200px;position:relative;overflow:hidden;background:' +
-          (cfg.imageUrl ? 'none' : 'linear-gradient(135deg,#667eea,#764ba2)') + ';');
-        if (splitImgEl) mImg.appendChild(splitImgEl);
+        mImg.style.cssText = [
+          'width:100%',
+          'height:200px',
+          'flex-shrink:0',
+          'position:relative',
+          'overflow:hidden',
+          imageUrl
+            ? 'background:none'
+            : 'background:linear-gradient(135deg,#667eea,#764ba2)'
+        ].join(';');
+
+        if (imageUrl) {
+          var imgEl = document.createElement('img');
+          imgEl.src = imageUrl;
+          imgEl.alt = '';
+          imgEl.style.cssText = [
+            'width:100%',
+            'height:100%',
+            'object-fit:cover',
+            'display:block',
+            'position:absolute',
+            'top:0',
+            'left:0',
+            'object-position:' + (cfg.imagePosition || '50% 50%')
+          ].join(';');
+          imgEl.onerror = function () {
+            mImg.style.background = 'linear-gradient(135deg,#667eea,#764ba2)';
+            imgEl.style.display = 'none';
+          };
+          mImg.appendChild(imgEl);
+        }
 
         var mContent = document.createElement('div');
         mContent.setAttribute('style',

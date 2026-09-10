@@ -122,7 +122,7 @@ router.get('/popup-config', async (req, res) => {
     console.error('[proxy] GET /popup-config error:', err.message);
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    return res.status(500).json({ popup: {} });
+    return res.status(500).json({ popup: {}, mobilePopup: {} });
   }
 });
 

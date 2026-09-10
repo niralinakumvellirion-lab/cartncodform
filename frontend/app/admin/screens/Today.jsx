@@ -20,8 +20,6 @@ const SIGNAL_LABELS = {
 };
 
 export default function Today({ shop }) {
-  const [narrative, setNarrative] = useState('');
-  const [insights, setInsights] = useState([]);
   const [stats, setStats] = useState(null);
   const [pushStats, setPushStats] = useState(null);
   const [signals, setSignals] = useState([]);
@@ -43,27 +41,17 @@ export default function Today({ shop }) {
     setError('');
 
     Promise.allSettled([
-      apiGet(`/api/profiles/${encodeURIComponent(shop)}/weekly-narrative`),
       apiGet(`/api/profiles/${encodeURIComponent(shop)}/push-stats`),
       apiGet(`/api/profiles/${encodeURIComponent(shop)}/signals?limit=20`),
       apiGet(`/api/stores/${encodeURIComponent(shop)}/orders`),
-    ]).then(([wn, ps, sg]) => {
+    ]).then(([ps, sg]) => {
       if (cancelled) return;
-      if (wn.status === 'fulfilled') {
-        setNarrative(wn.value?.narrative || '');
-        setInsights(Array.isArray(wn.value?.insights) ? wn.value.insights : []);
-        setStats(wn.value?.stats || null);
-      }
       if (ps.status === 'fulfilled') setPushStats(ps.value || null);
       if (sg.status === 'fulfilled') {
         setSignals(Array.isArray(sg.value?.signals) ? sg.value.signals : []);
       }
-      if (
-        wn.status === 'rejected' &&
-        ps.status === 'rejected' &&
-        sg.status === 'rejected'
-      ) {
-        setError(wn.reason?.message || 'Failed to load Today');
+      if (ps.status === 'rejected' && sg.status === 'rejected') {
+        setError(ps.reason?.message || 'Failed to load Today');
       }
       setLoading(false);
     });
@@ -128,38 +116,6 @@ export default function Today({ shop }) {
           {error}
         </div>
       )}
-
-      {/* This week in plain words */}
-      <div
-        style={{
-          background: '#fff',
-          border: '1px solid #e5e7eb',
-          borderRadius: '10px',
-          padding: '18px 20px',
-          marginBottom: '16px',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            marginBottom: '10px',
-          }}
-        >
-          <span style={{ fontSize: '18px' }}>✨</span>
-          <span style={{ fontSize: '13px', fontWeight: '600', color: '#f97316' }}>
-            This week, in plain words
-          </span>
-        </div>
-        {loading ? (
-          <div style={{ height: '60px', background: '#f3f4f6', borderRadius: '6px' }} />
-        ) : (
-          <p style={{ fontSize: '14px', color: '#374151', lineHeight: '1.6', margin: 0 }}>
-            {narrative || 'Not enough data yet.'}
-          </p>
-        )}
-      </div>
 
       {/* Two column layout: Planned for today (left) + Yesterday (right) */}
       <div
@@ -375,15 +331,8 @@ export default function Today({ shop }) {
         </div>
       </div>
 
-      {/* Bottom row: Recovered this week chart (left) + Worth knowing (right) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: isMobileView ? '1fr' : '1fr 1fr',
-          gap: '16px',
-        }}
-      >
-        {/* LEFT — Recovered this week bar chart */}
+      {/* Recovered this week chart */}
+      <div>
         <div
           style={{
             background: '#fff',
@@ -456,75 +405,6 @@ export default function Today({ shop }) {
               </div>
             );
           })()}
-        </div>
-
-        {/* RIGHT — Worth knowing */}
-        <div
-          style={{
-            background: '#fff',
-            border: '1px solid #e5e7eb',
-            borderRadius: '10px',
-            padding: '18px 20px',
-          }}
-        >
-          <div
-            style={{
-              fontSize: '14px',
-              fontWeight: '600',
-              color: '#111827',
-              marginBottom: '14px',
-            }}
-          >
-            Worth knowing
-          </div>
-
-          {loading ? (
-            [1, 2, 3].map((i) => (
-              <div
-                key={i}
-                style={{
-                  height: '40px',
-                  background: '#f3f4f6',
-                  borderRadius: '6px',
-                  marginBottom: '8px',
-                }}
-              />
-            ))
-          ) : insights?.length ? (
-            insights.map((ins, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '12px',
-                  padding: '10px 0',
-                  borderBottom:
-                    i < insights.length - 1 ? '1px solid #f3f4f6' : 'none',
-                  cursor: 'pointer',
-                }}
-              >
-                <span style={{ fontSize: '16px', flexShrink: 0, marginTop: '1px' }}>
-                  {i === 0 ? '↗' : i === 1 ? '🔔' : '♻️'}
-                </span>
-                <span
-                  style={{
-                    fontSize: '13px',
-                    color: '#374151',
-                    lineHeight: '1.5',
-                    flex: 1,
-                  }}
-                >
-                  {ins}
-                </span>
-                <span style={{ color: '#d1d5db', flexShrink: 0 }}>›</span>
-              </div>
-            ))
-          ) : (
-            <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
-              Not enough data yet.
-            </p>
-          )}
         </div>
       </div>
     </div>

@@ -37,6 +37,49 @@ function getRelativeTime(date) {
   return `${days} days ago`;
 }
 
+// Stage badge — shared by the desktop table and the mobile cards.
+function getStageLabel(p) {
+  if (p.orders?.count >= 2) return 'Repeat buyer';
+  if (p.orders?.count === 1) return 'Bought once';
+  if (p.identifiers?.cartTokens?.length > 0 && p.orders?.count === 0)
+    return 'Has a cart';
+  const labels = {
+    customer: 'Bought once',
+    identified: 'Has a cart',
+    anonymous: 'Visitor',
+    lapsed: 'Going quiet',
+  };
+  return labels[p.stage] || p.stage;
+}
+
+function getStageBg(p) {
+  if (p.orders?.count >= 2) return '#dbeafe';
+  if (p.orders?.count === 1) return '#dcfce7';
+  if (p.identifiers?.cartTokens?.length > 0 && p.orders?.count === 0)
+    return '#fef9c3';
+  const bgs = {
+    customer: '#dcfce7',
+    identified: '#fef9c3',
+    anonymous: '#f3f4f6',
+    lapsed: '#fee2e2',
+  };
+  return bgs[p.stage] || '#f3f4f6';
+}
+
+function getStageColor(p) {
+  if (p.orders?.count >= 2) return '#1d4ed8';
+  if (p.orders?.count === 1) return '#16a34a';
+  if (p.identifiers?.cartTokens?.length > 0 && p.orders?.count === 0)
+    return '#ca8a04';
+  const colors = {
+    customer: '#16a34a',
+    identified: '#ca8a04',
+    anonymous: '#6b7280',
+    lapsed: '#dc2626',
+  };
+  return colors[p.stage] || '#6b7280';
+}
+
 const GRID_COLS = '2fr 1fr 2fr 1fr 1.5fr 1fr';
 
 const FILTER_TABS = [
@@ -50,12 +93,21 @@ const FILTER_TABS = [
 export default function Customers({ shop }) {
   const [profiles, setProfiles] = useState([]);
   const [signalMap, setSignalMap] = useState({});
+  const [signalCountMap, setSignalCountMap] = useState({});
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('everyone');
   const [search, setSearch] = useState('');
   const [selectedProfileId, setSelectedProfileId] = useState(null);
+
+  const [isMobileView, setIsMobileView] = useState(false);
+  useEffect(() => {
+    const check = () => setIsMobileView(window.innerWidth <= 768);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   const loadData = useCallback(
     async (signal) => {
@@ -76,8 +128,9 @@ export default function Customers({ shop }) {
         setProfiles(Array.isArray(profRes?.profiles) ? profRes.profiles : []);
         setTotal(Number.isFinite(profRes?.total) ? profRes.total : 0);
 
-        // strongest signal per profile
+        // strongest signal per profile + a per-profile signal count
         const map = {};
+        const countMap = {};
         for (const sig of Array.isArray(sigRes?.signals) ? sigRes.signals : []) {
           const pid =
             typeof sig.profileId === 'object' && sig.profileId
@@ -85,11 +138,13 @@ export default function Customers({ shop }) {
               : sig.profileId;
           if (!pid) continue;
           const key = String(pid);
+          countMap[key] = (countMap[key] || 0) + 1;
           if (!map[key] || (sig.strength || 0) > (map[key].strength || 0)) {
             map[key] = { type: sig.type, strength: sig.strength || 0 };
           }
         }
         setSignalMap(map);
+        setSignalCountMap(countMap);
       } catch (err) {
         if (signal?.aborted) return;
         setError(err.message || 'Failed to load customers');
@@ -121,7 +176,13 @@ export default function Customers({ shop }) {
   }
 
   return (
-    <div style={{ padding: '0 24px 24px', maxWidth: '1200px', margin: '0 auto' }}>
+    <div
+      style={{
+        padding: isMobileView ? '0 12px 24px' : '0 24px 24px',
+        maxWidth: '1200px',
+        margin: '0 auto',
+      }}
+    >
       {/* Header */}
       <div style={{ marginBottom: '16px' }}>
         <h1
@@ -158,14 +219,14 @@ export default function Customers({ shop }) {
         </div>
       )}
 
-      {/* Search + Filter row */}
+      {/* Search + Filter row — stacks on mobile */}
       <div
         style={{
           display: 'flex',
           gap: '12px',
           marginBottom: '16px',
           alignItems: 'center',
-          flexWrap: 'wrap',
+          flexDirection: isMobileView ? 'column' : 'row',
         }}
       >
         <input
@@ -174,39 +235,58 @@ export default function Customers({ shop }) {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{
-            flex: '1',
-            minWidth: '200px',
-            maxWidth: '400px',
+            flex: isMobileView ? 'none' : '1',
+            width: isMobileView ? '100%' : undefined,
+            minWidth: isMobileView ? 0 : '200px',
+            maxWidth: isMobileView ? '100%' : '400px',
             padding: '8px 12px',
             fontSize: '13px',
             border: '1px solid #d1d5db',
             borderRadius: '8px',
             outline: 'none',
             background: '#fff',
+            boxSizing: 'border-box',
           }}
         />
 
-        {FILTER_TABS.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setFilter(tab.key)}
-            style={{
-              padding: '7px 14px',
-              fontSize: '13px',
-              fontWeight: filter === tab.key ? '600' : '400',
-              color: filter === tab.key ? '#111827' : '#6b7280',
-              background: filter === tab.key ? '#fff' : 'transparent',
-              border:
-                filter === tab.key
-                  ? '1px solid #d1d5db'
-                  : '1px solid transparent',
-              borderRadius: '8px',
-              cursor: 'pointer',
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
+        {/* Filter tabs — horizontal scroll on mobile */}
+        <div
+          style={{
+            display: 'flex',
+            gap: '8px',
+            alignItems: 'center',
+            width: isMobileView ? '100%' : 'auto',
+            overflowX: 'auto',
+            paddingBottom: '4px',
+            WebkitOverflowScrolling: 'touch',
+            msOverflowStyle: 'none',
+            scrollbarWidth: 'none',
+          }}
+        >
+          {FILTER_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setFilter(tab.key)}
+              style={{
+                padding: '7px 14px',
+                fontSize: '13px',
+                fontWeight: filter === tab.key ? '600' : '400',
+                color: filter === tab.key ? '#111827' : '#6b7280',
+                background: filter === tab.key ? '#fff' : 'transparent',
+                border:
+                  filter === tab.key
+                    ? '1px solid #d1d5db'
+                    : '1px solid transparent',
+                borderRadius: '8px',
+                cursor: 'pointer',
+                flexShrink: 0,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Table */}
@@ -218,33 +298,35 @@ export default function Customers({ shop }) {
           overflow: 'hidden',
         }}
       >
-        {/* Table header */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: GRID_COLS,
-            padding: '10px 16px',
-            borderBottom: '1px solid #f3f4f6',
-            background: '#f9fafb',
-          }}
-        >
-          {['Customer', 'Stage', 'Most interested in', 'Reach', 'Last messaged', 'Spent'].map(
-            (h) => (
-              <div
-                key={h}
-                style={{
-                  fontSize: '11px',
-                  fontWeight: '600',
-                  color: '#9ca3af',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
-                }}
-              >
-                {h}
-              </div>
-            )
-          )}
-        </div>
+        {/* Table header — desktop only */}
+        {!isMobileView && (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: GRID_COLS,
+              padding: '10px 16px',
+              borderBottom: '1px solid #f3f4f6',
+              background: '#f9fafb',
+            }}
+          >
+            {['Customer', 'Stage', 'Most interested in', 'Reach', 'Last messaged', 'Spent'].map(
+              (h) => (
+                <div
+                  key={h}
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: '600',
+                    color: '#9ca3af',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                  }}
+                >
+                  {h}
+                </div>
+              )
+            )}
+          </div>
+        )}
 
         {/* Rows */}
         {loading ? (
@@ -310,6 +392,138 @@ export default function Customers({ shop }) {
 
             const interests = p.interests ? Object.entries(p.interests) : [];
             const topInterest = interests.sort((a, b) => b[1] - a[1])[0];
+
+            if (isMobileView) {
+              const sigN = signalCountMap[p._id] || 0;
+              return (
+                <div
+                  key={p._id}
+                  onClick={() => setSelectedProfileId(p._id)}
+                  style={{
+                    padding: '14px 16px',
+                    borderBottom:
+                      i < profiles.length - 1 ? '1px solid #f9fafb' : 'none',
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#f9fafb';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#fff';
+                  }}
+                >
+                  {/* Row 1: Name + Stage badge */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '6px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        color: '#111827',
+                      }}
+                    >
+                      {p.identifiers?.emails?.[0] ||
+                        p.identifiers?.phones?.[0] ||
+                        `Anonymous #${p._id?.toString().slice(-5)}`}
+                    </div>
+                    <span
+                      style={{
+                        padding: '3px 10px',
+                        borderRadius: '20px',
+                        fontSize: '11px',
+                        fontWeight: '500',
+                        background: getStageBg(p),
+                        color: getStageColor(p),
+                        flexShrink: 0,
+                        marginLeft: '8px',
+                      }}
+                    >
+                      {getStageLabel(p)}
+                    </span>
+                  </div>
+
+                  {/* Row 2: Last seen + Signal */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      marginBottom: '4px',
+                    }}
+                  >
+                    <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+                      {p.lastSeenAt
+                        ? `seen ${getRelativeTime(new Date(p.lastSeenAt))}`
+                        : ''}
+                    </div>
+                    {sigN > 0 && (
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          color: '#f97316',
+                          fontWeight: '500',
+                        }}
+                      >
+                        {sigN} signal{sigN > 1 ? 's' : ''}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Row 3: Channels + LTV */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <div style={{ display: 'flex', gap: '6px' }}>
+                      <span
+                        style={{
+                          fontSize: '14px',
+                          opacity: p.channels?.push?.subscribed ? 1 : 0.2,
+                        }}
+                      >
+                        🔔
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '14px',
+                          opacity: p.channels?.email?.address ? 1 : 0.2,
+                        }}
+                      >
+                        ✉️
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '14px',
+                          opacity: p.identifiers?.phones?.length > 0 ? 1 : 0.2,
+                        }}
+                      >
+                        📱
+                      </span>
+                    </div>
+                    {p.orders?.ltv > 0 && (
+                      <div
+                        style={{
+                          fontSize: '13px',
+                          fontWeight: '600',
+                          color: '#111827',
+                        }}
+                      >
+                        ₹{p.orders.ltv.toLocaleString('en-IN')}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div
