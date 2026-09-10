@@ -5,7 +5,7 @@ const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
 const SCOPES =
   'read_orders,read_customers,write_customers,read_products,write_discounts,read_discounts';
-const API_VERSION = '2025-01';
+const API_VERSION = '2025-07';
 
 /**
  * Build the Shopify OAuth authorization URL the merchant is redirected to.
@@ -16,6 +16,7 @@ function buildAuthUrl(shop, redirectUri, state) {
     scope: SCOPES,
     redirect_uri: redirectUri,
     state,
+    access_mode: 'offline',
   });
   return `https://${shop}/admin/oauth/authorize?${params.toString()}`;
 }
