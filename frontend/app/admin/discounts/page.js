@@ -3,10 +3,10 @@ import { Suspense } from 'react';
 import { AppProvider } from '@shopify/polaris';
 import { NavMenu } from '@shopify/app-bridge-react';
 import { useSearchParams } from 'next/navigation';
-import CodScreen from '../screens/CodOrders';
+import DiscountsScreen from '../screens/Discounts';
 import '@shopify/polaris/build/esm/styles.css';
 
-function CodContent() {
+function DiscountsContent() {
   const searchParams = useSearchParams();
   const shop = searchParams.get('shop') || '';
   return (
@@ -21,15 +21,15 @@ function CodContent() {
         <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
       </NavMenu>
-      <CodScreen shop={shop} />
+      <DiscountsScreen shop={shop} />
     </AppProvider>
   );
 }
 
-export default function CodPage() {
+export default function DiscountsPage() {
   return (
     <Suspense fallback={null}>
-      <CodContent />
+      <DiscountsContent />
     </Suspense>
   );
 }

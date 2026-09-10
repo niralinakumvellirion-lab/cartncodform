@@ -3,7 +3,8 @@ const axios = require('axios');
 
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
-const SCOPES = 'read_orders,read_customers,write_customers';
+const SCOPES =
+  'read_orders,read_customers,write_customers,read_products,write_discounts,read_discounts';
 const API_VERSION = '2025-01';
 
 /**
@@ -41,6 +42,44 @@ function verifyHmac(query) {
   try {
     return crypto.timingSafeEqual(Buffer.from(generated), Buffer.from(hmac));
   } catch (err) {
+    return false;
+  }
+}
+
+/**
+ * Verify Shopify's App Proxy request signature.
+ * Shopify appends ?signature=<hmac>&<other signed params> to every
+ * App Proxy request; the HMAC is SHA256 of the remaining params sorted by
+ * key and concatenated as key=value (no separator), keyed with the app's
+ * shared secret (SHOPIFY_API_SECRET).
+ *
+ * `query` is the parsed query object (req.query).
+ */
+function verifyProxySignature(query) {
+  try {
+    const { signature, ...rest } = query;
+    if (!signature) return false;
+    if (!SHOPIFY_API_SECRET) {
+      console.error('[proxy] SHOPIFY_API_SECRET not configured — cannot verify signature');
+      return false;
+    }
+
+    const sorted = Object.keys(rest)
+      .sort()
+      .map((key) => {
+        const val = Array.isArray(rest[key]) ? rest[key].join(',') : rest[key];
+        return `${key}=${val}`;
+      })
+      .join('');
+
+    const hash = crypto
+      .createHmac('sha256', SHOPIFY_API_SECRET)
+      .update(sorted)
+      .digest('hex');
+
+    return hash === signature;
+  } catch (err) {
+    console.error('[proxy] Signature verification error:', err.message);
     return false;
   }
 }
@@ -144,6 +183,7 @@ module.exports = {
   API_VERSION,
   buildAuthUrl,
   verifyHmac,
+  verifyProxySignature,
   verifyWebhookHmac,
   exchangeCodeForToken,
   fetchShopEmail,

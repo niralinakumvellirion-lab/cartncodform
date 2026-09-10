@@ -18,6 +18,7 @@ function SettingsContent() {
         <a href="/admin/messages" rel="messages">Messages</a>
         <a href="/admin/insights" rel="insights">Insights</a>
         <a href="/admin/cod" rel="cod">Cash on delivery</a>
+        <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
       </NavMenu>
       <SettingsScreen shop={shop} />

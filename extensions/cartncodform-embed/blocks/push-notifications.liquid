@@ -41,6 +41,8 @@
 
   var VIEWED_KEY = 'ccf_viewed_products';
   var PROMPT_SHOWN_KEY = 'ccf_prompt_shown'; // sessionStorage
+  var PAGE_LOAD_TOKEN_KEY = 'ccf_push_token'; // set to '1' once subscribed
+  var DWELL_MS = 1500; // all intent triggers fire within 1-2s
 
   function ccfProductTitle() {
     var el = document.getElementById('ccf-embed-root');
@@ -70,7 +72,8 @@
     dwell: function (t) { return 'Get notified if ' + (t || 'this product') + ' goes on sale or comes back in stock.'; },
     return_visit: function () { return "You've looked at this before. Want a reminder if the price drops?"; },
     add_to_cart: function () { return 'Want a reminder if you leave something behind?'; },
-    exit_intent: function () { return 'Before you go — get notified about deals from this store?'; }
+    exit_intent: function () { return 'Before you go — get notified about deals from this store?'; },
+    page_load: function () { return 'Get notified about deals and restocks from this store.'; }
   };
 
   var promptAutoDismissTimer = null;
@@ -80,6 +83,70 @@
   // popup-responsive: mobilePopupConfig holds the <=600px overrides.
   var popupConfig = {};
   var mobilePopupConfig = {};
+
+  // discount-feature: which subscribe actions earn a Shopify discount code,
+  // their percentages, and the offer headline. Fetched once (fetchDiscountConfig).
+  var discountConfig = {};
+
+  function ccfRuleOn(key) {
+    var r = discountConfig && discountConfig[key];
+    return !!(r && r.enabled);
+  }
+  function ccfDiscountEnabled() {
+    return ccfRuleOn('pushDiscount') || ccfRuleOn('emailDiscount') ||
+      ccfRuleOn('phoneDiscount') || ccfRuleOn('bothDiscount');
+  }
+  function ccfShowEmailField() {
+    return ccfRuleOn('emailDiscount') || ccfRuleOn('bothDiscount');
+  }
+  function ccfShowPhoneField() {
+    return ccfRuleOn('phoneDiscount') || ccfRuleOn('bothDiscount');
+  }
+  function ccfPct(key) {
+    var r = discountConfig && discountConfig[key];
+    return (r && r.enabled && r.percentage) ? r.percentage : 0;
+  }
+  function ccfFieldPct(singleKey) {
+    return Math.max(ccfPct(singleKey), ccfPct('bothDiscount')) || 0;
+  }
+
+  // Build the offer headline + email/phone inputs shown inside the popup.
+  // Returns a <div id="ccf-discount-fields"> or null when no discount is on.
+  function ccfBuildDiscountFields() {
+    if (!ccfDiscountEnabled()) return null;
+    var INPUT_CSS = 'width:100%;padding:8px 10px;font-size:13px;border:1px solid #e5e7eb;' +
+      'border-radius:8px;box-sizing:border-box;margin-bottom:8px;';
+
+    var box = document.createElement('div');
+    box.id = 'ccf-discount-fields';
+    box.style.cssText = 'margin-top:10px;';
+
+    var head = document.createElement('div');
+    head.style.cssText = 'font-size:13px;color:#6b7280;margin-bottom:10px;text-align:center;';
+    head.textContent = (discountConfig && discountConfig.offerHeadline) ||
+      'Get a discount on your first order!';
+    box.appendChild(head);
+
+    if (ccfShowEmailField()) {
+      var ei = document.createElement('input');
+      ei.type = 'email';
+      ei.id = 'ccf-email-input';
+      var ep = ccfFieldPct('emailDiscount');
+      ei.placeholder = 'Your email' + (ep ? ' (get ' + ep + '% off)' : '');
+      ei.style.cssText = INPUT_CSS;
+      box.appendChild(ei);
+    }
+    if (ccfShowPhoneField()) {
+      var pi = document.createElement('input');
+      pi.type = 'tel';
+      pi.id = 'ccf-phone-input';
+      var pp = ccfFieldPct('phoneDiscount');
+      pi.placeholder = 'Your phone' + (pp ? ' (get ' + pp + '% off)' : '');
+      pi.style.cssText = INPUT_CSS;
+      box.appendChild(pi);
+    }
+    return box;
+  }
 
   function showSoftPrompt(trigger, productId) {
     if (!canPrompt()) return;
@@ -569,6 +636,15 @@
     if (overlay) document.body.appendChild(overlay);
     document.body.appendChild(wrap);
 
+    // discount-feature: inject the offer headline + email/phone inputs right
+    // after the deny control (every layout except the thin banner bar).
+    var discountFields = layout !== 'banner' ? ccfBuildDiscountFields() : null;
+    if (discountFields && deny && deny.parentNode) {
+      if (deny.nextSibling) deny.parentNode.insertBefore(discountFields, deny.nextSibling);
+      else deny.parentNode.appendChild(discountFields);
+    }
+    var wantsDiscount = !!discountFields;
+
     function cleanup() {
       if (promptAutoDismissTimer) { clearTimeout(promptAutoDismissTimer); promptAutoDismissTimer = null; }
       if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
@@ -576,20 +652,78 @@
       if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
     }
 
+    // discount-feature: once the code comes back, drop the inputs + Allow
+    // button and show the code in place. Any failure just closes the popup.
+    function renderDiscountCode(d) {
+      if (!d || !d.code) { cleanup(); return; }
+      var fields = document.getElementById('ccf-discount-fields');
+      if (fields && fields.parentNode) fields.parentNode.removeChild(fields);
+      if (allow) allow.style.display = 'none';
+      if (deny && deny.id === 'ccf-deny-btn') deny.textContent = 'Close';
+
+      var codeBox = document.createElement('div');
+      codeBox.style.cssText = [
+        'margin-top:12px', 'padding:12px', 'background:#f0fdf4',
+        'border:1px dashed #16a34a', 'border-radius:8px', 'text-align:center'
+      ].join(';');
+      codeBox.innerHTML =
+        '<div style="font-size:11px;color:#16a34a;margin-bottom:4px">Your discount code</div>' +
+        '<div style="font-size:18px;font-weight:700;color:#111827;letter-spacing:2px;font-family:monospace">' +
+        d.code + '</div>' +
+        '<div style="font-size:11px;color:#6b7280;margin-top:4px">' +
+        d.percentage + '% off · expires in ' + d.expiryDays + ' days</div>';
+
+      var host = (deny && deny.parentNode) || wrap;
+      host.appendChild(codeBox);
+    }
+
     allow.addEventListener('click', function () {
-      cleanup();
+      // Read the discount inputs BEFORE any teardown.
+      var emailEl = document.getElementById('ccf-email-input');
+      var phoneEl = document.getElementById('ccf-phone-input');
+      var email = emailEl && emailEl.value ? emailEl.value.trim() : '';
+      var phone = phoneEl && phoneEl.value ? phoneEl.value.trim() : '';
+
+      if (wantsDiscount) {
+        allow.disabled = true;
+        allow.textContent = 'Setting up…';
+      } else {
+        cleanup();
+      }
+
       Notification.requestPermission().then(function (permission) {
         var granted = permission === 'granted';
         try { trackEvent('push_prompt_accepted', { trigger: trigger, granted: granted }); } catch (e) {}
-        if (granted) {
-          registerSW()
-            .then(function (reg) { return getToken(reg); })
-            .then(function (token) { return saveToken(token); })
-            .then(function () { setupForegroundMessages(); })
-            .catch(function (err) { console.error('[CCF] subscribe after prompt failed:', err.message); });
-        } else {
+        if (!granted) {
           try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+          if (wantsDiscount) cleanup();
+          return;
         }
+        registerSW()
+          .then(function (reg) { return getToken(reg); })
+          .then(function (token) { return saveToken(token); })
+          .then(function () { setupForegroundMessages(); })
+          .then(function () {
+            if (!wantsDiscount) return;
+            var action = 'push';
+            if (email && phone) action = 'both';
+            else if (email) action = 'email';
+            else if (phone) action = 'phone';
+            return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: action, email: email, phone: phone, sessionId: getSessionId()
+              })
+            })
+              .then(function (r) { return r.json(); })
+              .then(function (d) { renderDiscountCode(d); })
+              .catch(function () { cleanup(); });
+          })
+          .catch(function (err) {
+            console.error('[CCF] subscribe after prompt failed:', err.message);
+            if (wantsDiscount) cleanup();
+          });
       });
     });
 
@@ -624,10 +758,41 @@
       .catch(function () { /* keep defaults */ });
   }
 
+  // discount-feature: pull the shop's discount rules (enabled flags + %) and
+  // offer headline from the App Proxy. Failure leaves discountConfig = {} so
+  // no email/phone fields render.
+  function fetchDiscountConfig() {
+    var url = window.location.origin + '/apps/cartncodform/discount-config?shop=' +
+      encodeURIComponent(SHOP_DOMAIN);
+    return fetch(url)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (data && typeof data === 'object') discountConfig = data;
+      })
+      .catch(function () { /* keep defaults */ });
+  }
+
   // Wire the four intent triggers. First one to fire wins (session guard).
   var ccfExitIntentBound = false;
   function initIntentTriggers() {
     if (!canPrompt()) return;
+
+    // PAGE_LOAD trigger — fires on ANY page after DWELL_MS (1.5s) if the
+    // customer has no existing push subscription. When it's in play we don't
+    // wire the other (page-restricted) intent triggers.
+    var hasToken = false;
+    try {
+      hasToken = !!localStorage.getItem(PAGE_LOAD_TOKEN_KEY);
+    } catch (e) {}
+
+    if (!hasToken && canPrompt()) {
+      setTimeout(function () {
+        if (canPrompt()) {
+          showSoftPrompt('page_load', null);
+        }
+      }, DWELL_MS);
+      return; // Don't set up other triggers if we show on load
+    }
 
     var pageType = getPageType();
     var meta = pageType === 'product' ? getProductMeta() : null;
@@ -647,9 +812,9 @@
       }
     }
 
-    // Trigger 1 — DWELL: 45s continuous on a product page (pauses when hidden).
+    // Trigger 1 — DWELL: continuous dwell on a product page (pauses when hidden).
     if (pageType === 'product') {
-      var dwellRemaining = 3000;
+      var dwellRemaining = DWELL_MS;
       var dwellStartedAt = 0;
       var dwellTimer = null;
       function startDwell() {
@@ -879,6 +1044,8 @@
         if (data.success) {
           localStorage.setItem(TOKEN_KEY, token);
           localStorage.setItem(SUBSCRIBED_KEY, '1');
+          // Latch so the PAGE_LOAD trigger never re-prompts this browser.
+          try { localStorage.setItem(PAGE_LOAD_TOKEN_KEY, '1'); } catch (e) {}
           console.log('[CCF] Token saved successfully!');
         } else {
           // Backend rejected the token — clear latch so next visit
@@ -1327,9 +1494,9 @@
     checkAndInit();
     initTracking();
 
-    // popup-customizer: load appearance config first, then wire the intent
-    // triggers (which is where the dwell timer starts).
-    fetchPopupConfig().then(function () {
+    // popup-customizer + discount-feature: load appearance + discount config
+    // first, then wire the intent triggers (which is where the dwell timer starts).
+    Promise.all([fetchPopupConfig(), fetchDiscountConfig()]).then(function () {
       initIntentTriggers();
     });
 

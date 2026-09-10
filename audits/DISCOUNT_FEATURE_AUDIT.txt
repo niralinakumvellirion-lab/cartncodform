@@ -1,0 +1,180 @@
+DISCOUNT FEATURE — SELF AUDIT
+=============================
+Branch: discount-feature
+Date: 2026-09-10
+Feature: reward storefront visitors who subscribe (push / email / phone /
+both) with an auto-generated single-use Shopify discount code, shown
+inline in the push prompt.
+
+
+FILES CREATED (4)
+-----------------
+1. backend/models/DiscountConfig.js
+   - Mongoose model, one row per shop (keyed by shopDomain, like SignalConfig).
+   - Four rule sub-docs: pushDiscount, emailDiscount, phoneDiscount, bothDiscount.
+     Each: { enabled:Boolean(false), percentage:Number(min0/max100),
+             maxUses:Number(100), expiryDays:Number(7), prefix:String }.
+   - offerHeadline:String (default 'Get a discount on your first order!').
+   - updatedAt:Date.
+   - discountConfigSchema.index({ shopDomain: 1 }, { unique: true }).
+     (field-level `unique:true` dropped to avoid Mongoose duplicate-index
+     warning — matches SignalConfig.js convention; unique index still enforced.)
+
+2. backend/routes/discounts.js
+   - Exports the router PLUS generateDiscount() and defaultConfig() helpers
+     (proxy.js requires them; no circular dep — discounts.js never requires proxy.js).
+   - GET  /api/discounts/:shopDomain/config   (requireAuth + requireStoreOwner)
+       -> { config }  (full defaults object when no row exists)
+   - PATCH /api/discounts/:shopDomain/config  (requireAuth + requireStoreOwner)
+       -> upsert; each rule sub-doc replaced wholesale and clamped
+          (percentage 0-100, maxUses 1-100000, expiryDays 1-365,
+           prefix uppercased, [A-Z0-9] only, <=10 chars); offerHeadline <=200 chars
+       -> { updated: true, config }
+   - POST /api/discounts/:shopDomain/generate  (App Proxy signature hard-enforced)
+       -> body { action, email?, phone?, sessionId } -> generateDiscount()
+   - generateDiscount(shopDomain, body):
+       * validates action in [push,email,phone,both]
+       * loads DiscountConfig + Store(accessToken)
+       * if rule missing/disabled -> { code: null }
+       * code = <prefix>_<6 rand base36 upper>
+       * Shopify Admin GraphQL discountCodeBasicCreate:
+           percentage = cfg.percentage/100, items.all, appliesOncePerCustomer,
+           usageLimit = cfg.maxUses, startsAt now, endsAt now+expiryDays
+       * userErrors -> { code: null, error }
+       * best-effort upsertProfile(email/phone, sessionId) — never blocks, no PII logged
+       * -> { code, percentage, expiryDays }
+
+3. frontend/app/admin/screens/Discounts.jsx
+   - Props { shop }. State: config, loading, saving, success, error.
+   - GET /api/discounts/${shop}/config on mount (reads data.config).
+   - "Popup offer text" card (offerHeadline input).
+   - 4 toggle cards (Push / Email / Phone / Email+Phone); when enabled shows a
+     2-col grid: Discount % slider (5-50), Max uses, Expires after (days),
+     Code prefix (monospace, uppercased). Div-based inline styles, no Polaris.
+   - saveConfig(): PATCH the whole config object; re-hydrates from res.config.
+
+4. frontend/app/admin/discounts/page.js
+   - Suspense + AppProvider + NavMenu + <DiscountsScreen shop=.. />, same
+     pattern as customers/page.js. NavMenu includes the new Discounts link.
+
+
+FILES MODIFIED (10)
+-------------------
+5. shopify.app.toml
+   - scopes: added write_discounts,read_discounts
+     -> "read_orders,read_customers,write_customers,read_products,write_discounts,read_discounts"
+
+6. backend/utils/shopify.js   (this is where scopes are actually built — auth.js
+   only imports buildAuthUrl)
+   - SCOPES const updated to the same 6-scope string (it was also missing
+     read_products, which the toml already had — now aligned).
+   - Added verifyProxySignature(query) (moved here from proxy.js so
+     routes/discounts.js can share it) + exported it.
+
+7. backend/routes/proxy.js
+   - Removed local verifyProxySignature (+ now-unused `crypto` require);
+     imports it from utils/shopify.
+   - New requires: models/DiscountConfig, { generateDiscount, defaultConfig } from ./discounts.
+   - GET  /discount-config  (proxy sig) -> slim { pushDiscount, emailDiscount,
+     phoneDiscount, bothDiscount } (each {enabled,percentage}) + offerHeadline.
+   - POST /generate-discount (proxy sig) -> shop from req.query.shop ->
+     generateDiscount(shop, req.body) -> { code, percentage, expiryDays } | { code:null }.
+
+8. backend/server.js
+   - require('./routes/discounts') + app.use('/api/discounts', discountRouter)
+     (mounted before the proxy router).
+
+9. backend/models/Store.js
+   - Comment-only pointer noting discount config lives in its own collection
+     (DiscountConfig). No schema fields added — nothing discount-related is
+     stored on Store, same as SignalConfig.
+
+10. frontend/app/admin/page.js  + the 6 route page.js files
+    (cod, customers, insights, messages, settings-page, signals)
+   - Added <a href="/admin/discounts" rel="discounts">Discounts</a> to every
+     NavMenu, after "Cash on delivery".
+
+11. extensions/cartncodform-embed/blocks/push-notifications.liquid
+   - var discountConfig = {} (module level) + ccfRuleOn / ccfDiscountEnabled /
+     ccfShowEmailField / ccfShowPhoneField / ccfPct / ccfFieldPct helpers.
+   - ccfBuildDiscountFields(): builds <div id="ccf-discount-fields"> with the
+     offer headline, an <input type=email id=ccf-email-input> (when email or
+     both enabled), an <input type=tel id=ccf-phone-input> (when phone or both
+     enabled). Placeholders show "(get X% off)" using the higher of the
+     single-action % and the both-action %.
+   - In showSoftPrompt(): after append, the fields are inserted right after the
+     deny control for every layout except 'banner'. wantsDiscount = fields built.
+   - fetchDiscountConfig(): GET /apps/cartncodform/discount-config?shop=..;
+     start() now does Promise.all([fetchPopupConfig(), fetchDiscountConfig()])
+     before initIntentTriggers().
+   - Allow-button handler rewritten:
+       * reads #ccf-email-input / #ccf-phone-input values BEFORE any teardown
+       * if wantsDiscount: keep popup open, disable Allow ("Setting up…");
+         else: cleanup() immediately (unchanged behavior)
+       * after requestPermission granted -> registerSW -> getToken -> saveToken
+         -> setupForegroundMessages -> (if wantsDiscount) POST
+         /apps/cartncodform/generate-discount { action, email, phone, sessionId }
+         where action = both|email|phone|push based on which fields were filled
+       * renderDiscountCode(d): on d.code -> remove #ccf-discount-fields, hide
+         Allow, relabel deny "Close", append a green dashed box:
+         "Your discount code" / <CODE monospace> / "X% off · expires in N days".
+         On !d.code or any failure -> cleanup().
+   - ES5 only (var, function expressions, string concat, style.cssText/array.join).
+
+
+SCOPE CHANGE CONFIRMED
+---------------------
+- shopify.app.toml  [access_scopes] scopes  -> includes write_discounts,read_discounts  ✓
+- backend/utils/shopify.js  SCOPES const    -> same 6-scope string               ✓
+- NOTE: existing installed stores must re-run GET /api/auth/install to widen
+  their granted token before generate-discount will succeed for them.
+
+
+DISCOUNTCONFIG MODEL — DEFAULT PERCENTAGES
+-----------------------------------------
+  pushDiscount   10%   prefix PUSH
+  emailDiscount  15%   prefix EMAIL
+  phoneDiscount  15%   prefix PHONE
+  bothDiscount   20%   prefix VIP
+  (all enabled:false, maxUses 100, expiryDays 7 by default)
+  offerHeadline: "Get a discount on your first order!"
+
+
+PROXY ROUTES ADDED
+------------------
+  GET  /apps/cartncodform/discount-config      -> enabled flags + % + headline
+  POST /apps/cartncodform/generate-discount    -> mints the Shopify code
+  (both: App Proxy signature hard-enforced via shared verifyProxySignature)
+  Plus the API twin: POST /api/discounts/:shopDomain/generate (also proxy-signed).
+
+
+LIQUID — EMAIL + PHONE FIELDS + CODE DISPLAY
+-------------------------------------------
+  - Email field shows when emailDiscount OR bothDiscount enabled.
+  - Phone field shows when phoneDiscount OR bothDiscount enabled.
+  - With only pushDiscount enabled: offer headline shows, no inputs; action='push'.
+  - Discount code rendered in-place after successful subscribe (green dashed box).
+  - Not shown on the 'banner' layout (too small); shown on split + card (mobile & desktop).
+
+
+VERIFICATION
+------------
+- node --check: routes/discounts.js, routes/proxy.js, utils/shopify.js,
+  server.js, models/DiscountConfig.js  -> all OK
+- liquid <script> extracted + node --check                       -> OK
+- module wiring smoke test (require proxy + discounts, no circular break;
+  generateDiscount/defaultConfig are functions; model registers with no
+  duplicate-index warning)                                       -> OK
+- cd backend && npm test    -> 13 suites, 116 tests, all passing
+- cd frontend && npm run build -> success, 12/12 pages,
+  /admin/discounts route emitted (2.84 kB)
+
+NOT DONE / NOTES
+----------------
+- No `shopify app deploy` run (scope change reaches Shopify only on next deploy;
+  merchants then re-consent).
+- generateDiscount does not read the code back from Shopify's response (we set
+  it deterministically); it returns 400-ish { code:null, error } on userErrors.
+- No new Jest tests added for discounts.js (no DB/HTTP harness exists in this
+  repo's test suite for route-level tests; existing suites are unit-level).
+  The 116 existing tests still pass.

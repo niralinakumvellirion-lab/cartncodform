@@ -12,6 +12,7 @@ const storeRoutes = require('./routes/stores');
 const codRoutes = require('./routes/cod');
 const pushRouter = require('./routes/push');
 const proxyRouter = require('./routes/proxy');
+const discountRouter = require('./routes/discounts');
 const ScheduledJob = require('./models/ScheduledJob');
 const Store = require('./models/Store');
 const { sendPushToCustomers } = require('./utils/pushNotification');
@@ -133,6 +134,7 @@ const attributionRouter = require('./routes/attribution');
 app.use('/api/attribution', attributionLimiter, attributionRouter);
 const profilesRouter = require('./routes/profiles');
 app.use('/api/profiles', profilesRouter);
+app.use('/api/discounts', discountRouter);
 app.use('/apps/cartncodform', proxyRouter);
 
 // --- 404 + error handlers ---------------------------------------------------

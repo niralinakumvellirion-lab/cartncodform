@@ -2,12 +2,14 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
-const crypto = require('crypto');
 
 const CodOrder = require('../models/CodOrder');
 const Store = require('../models/Store');
+const DiscountConfig = require('../models/DiscountConfig');
 const { sendNewCodOrderEmail } = require('../utils/email');
 const { sendPushToStore } = require('../utils/pushNotification');
+const { verifyProxySignature } = require('../utils/shopify');
+const { generateDiscount, defaultConfig } = require('./discounts');
 
 /**
  * Escape a string for safe interpolation into HTML text / attribute context.
@@ -21,41 +23,7 @@ function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-/**
- * Verify Shopify's App Proxy request signature.
- * Shopify appends ?signature=<hmac>&<other signed params> to every
- * App Proxy request; the HMAC is SHA256 of the remaining params
- * sorted by key and concatenated as key=value (no separator),
- * keyed with the app's shared secret (SHOPIFY_API_SECRET).
- */
-function verifyProxySignature(query) {
-  try {
-    const { signature, ...rest } = query;
-    if (!signature) return false;
-    if (!process.env.SHOPIFY_API_SECRET) {
-      console.error('[proxy] SHOPIFY_API_SECRET not configured — cannot verify signature');
-      return false;
-    }
-
-    const sorted = Object.keys(rest)
-      .sort()
-      .map(key => {
-        const val = Array.isArray(rest[key]) ? rest[key].join(',') : rest[key];
-        return `${key}=${val}`;
-      })
-      .join('');
-
-    const hash = crypto
-      .createHmac('sha256', process.env.SHOPIFY_API_SECRET)
-      .update(sorted)
-      .digest('hex');
-
-    return hash === signature;
-  } catch (err) {
-    console.error('[proxy] Signature verification error:', err.message);
-    return false;
-  }
-}
+// verifyProxySignature now lives in utils/shopify.js (shared with routes/discounts.js).
 
 // Serve Firebase SW via App Proxy
 // URL: https://cartncod-form.myshopify.com/apps/cartncodform/sw.js
@@ -123,6 +91,76 @@ router.get('/popup-config', async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(500).json({ popup: {}, mobilePopup: {} });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// discount-feature: the storefront popup fetches which subscribe actions earn
+// a discount (enabled flags + %), plus the offer headline.
+//   https://{shop}/apps/cartncodform/discount-config?shop={shop}
+// Public — the App Proxy signature is the auth (hard-enforced).
+// ---------------------------------------------------------------------------
+router.get('/discount-config', async (req, res) => {
+  if (!verifyProxySignature(req.query)) {
+    console.warn('[proxy] Invalid or missing App Proxy signature on /discount-config — rejecting');
+    return res.status(403).json({ error: 'Invalid signature' });
+  }
+
+  try {
+    const shop = String(req.query.shop || '').trim().toLowerCase();
+    const doc = (await DiscountConfig.findOne({ shopDomain: shop }).lean()) || defaultConfig(shop);
+
+    const slim = (r) => ({
+      enabled: !!(r && r.enabled),
+      percentage: (r && r.percentage) || 0,
+    });
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json({
+      pushDiscount: slim(doc.pushDiscount),
+      emailDiscount: slim(doc.emailDiscount),
+      phoneDiscount: slim(doc.phoneDiscount),
+      bothDiscount: slim(doc.bothDiscount),
+      offerHeadline: doc.offerHeadline || 'Get a discount on your first order!',
+    });
+  } catch (err) {
+    console.error('[proxy] GET /discount-config error:', err.message);
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.status(500).json({
+      pushDiscount: { enabled: false, percentage: 0 },
+      emailDiscount: { enabled: false, percentage: 0 },
+      phoneDiscount: { enabled: false, percentage: 0 },
+      bothDiscount: { enabled: false, percentage: 0 },
+      offerHeadline: 'Get a discount on your first order!',
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// discount-feature: the popup's Allow handler POSTs here after a successful
+// subscribe to mint a Shopify discount code.
+//   https://{shop}/apps/cartncodform/generate-discount?shop={shop}
+// Body: { action, email?, phone?, sessionId }
+// Public — App Proxy signature hard-enforced.
+// ---------------------------------------------------------------------------
+router.post('/generate-discount', async (req, res) => {
+  if (!verifyProxySignature(req.query)) {
+    console.warn('[proxy] Invalid or missing App Proxy signature on /generate-discount — rejecting');
+    return res.status(403).json({ code: null, error: 'Invalid signature' });
+  }
+
+  try {
+    const shop = String(req.query.shop || req.body.shop || '').trim().toLowerCase();
+    const result = await generateDiscount(shop, req.body || {});
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.json(result);
+  } catch (err) {
+    console.error('[proxy] POST /generate-discount error:', err.message);
+    return res.status(500).json({ code: null, error: 'Failed to generate discount' });
   }
 });
 

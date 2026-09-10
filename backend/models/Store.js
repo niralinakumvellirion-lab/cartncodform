@@ -147,6 +147,10 @@ const storeSchema = new mongoose.Schema({
     showOverlay: { type: Boolean, default: true },
   },
 
+  // --- discount-feature: per-shop automatic discount codes live in their own
+  // collection (models/DiscountConfig.js, keyed by shopDomain) — same pattern
+  // as SignalConfig. Nothing discount-related is stored on Store itself.
+
   installedAt: {
     type: Date,
     default: Date.now,

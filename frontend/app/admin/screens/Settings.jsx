@@ -703,31 +703,27 @@ export default function Settings({ shop }) {
             {/* Fields edit activePopup / setActivePopup — the desktop `popup`
                 state on the Desktop tab, `mobilePopup` on the Mobile tab. */}
             <>
-            {/* Layout */}
-            <div style={popRow}>
-              <div style={popLabel}>Layout</div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                {(popupDevice === 'mobile'
-                  ? [
-                      { value: 'card', label: '▭ Card' },
-                      { value: 'banner', label: '▬ Banner' },
-                    ]
-                  : [
-                      { value: 'split', label: '⬜ Split' },
-                      { value: 'card', label: '▭ Card' },
-                      { value: 'banner', label: '▬ Banner' },
-                    ]
-                ).map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => setActivePopup((p) => ({ ...p, layout: opt.value }))}
-                    style={popPill(activePopup.layout === opt.value)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
+            {/* Layout — desktop only; mobile is always the Card layout */}
+            {popupDevice === 'desktop' && (
+              <div style={popRow}>
+                <div style={popLabel}>Layout</div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {[
+                    { value: 'split', label: '⬜ Split' },
+                    { value: 'card', label: '▭ Card' },
+                    { value: 'banner', label: '▬ Banner' },
+                  ].map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setActivePopup((p) => ({ ...p, layout: opt.value }))}
+                      style={popPill(activePopup.layout === opt.value)}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Image */}
             <div style={{ ...popRow, alignItems: 'flex-start' }}>

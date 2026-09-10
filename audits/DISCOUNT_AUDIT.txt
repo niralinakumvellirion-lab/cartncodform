@@ -1,0 +1,303 @@
+DISCOUNT AUDIT — read-only file dump
+====================================
+Generated: 2026-09-10
+Purpose: capture current OAuth scopes + Store schema ahead of any
+         discount-code feature work. No files modified.
+
+
+════════════════════════════════════════════════════════════════════
+1. shopify.app.toml  (full file, 30 lines)
+════════════════════════════════════════════════════════════════════
+   1  name = "CartnCodForm"
+   2  client_id = "b2cafd271c21b90a630528234402b0a1"
+   3  application_url = "https://cartncodform-beryl.vercel.app/admin"
+   4  embedded = true
+   5
+   6  [auth]
+   7  redirect_urls = [
+   8    "https://cartncodform-backend.onrender.com/api/auth/callback"
+   9  ]
+  10
+  11  [webhooks]
+  12  api_version = "2025-01"
+  13
+  14    [[webhooks.subscriptions]]
+  15    compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+  16    uri = "https://cartncodform-backend.onrender.com/api/webhooks/compliance"
+  17
+  18  [access_scopes]
+  19  scopes = "read_orders,read_customers,write_customers,read_products"
+  20
+  21  [app_proxy]
+  22  url = "https://cartncodform-backend.onrender.com/apps/cartncodform"
+  23  subpath = "cartncodform"
+  24  prefix = "apps"
+  25
+  26  [extensions]
+  27    [[extensions.theme]]
+  28    handle = "cartncodform-push"
+  29    path = "extensions/cartncodform-embed"
+  30
+
+NOTES (toml):
+  - Line 19: current scopes = read_orders, read_customers, write_customers,
+    read_products.
+  - NO discount scopes present. Creating/reading Shopify discount codes
+    (price rules / discount codes / discountCodeBasicCreate) would require
+    adding `write_discounts` (and `read_discounts` if only reading) here,
+    which forces a merchant re-consent / re-auth.
+  - api_version pinned at 2025-01 (line 12).
+
+
+════════════════════════════════════════════════════════════════════
+2. backend/routes/auth.js  (lines 1–50 — scopes / OAuth kickoff)
+════════════════════════════════════════════════════════════════════
+   1  const express = require('express');
+   2  const crypto = require('crypto');
+   3  const Store = require('../models/Store');
+   4  const OAuthState = require('../models/OAuthState');
+   5  const {
+   6    SHOPIFY_API_KEY,
+   7    buildAuthUrl,
+   8    verifyHmac,
+   9    exchangeCodeForToken,
+  10    fetchShopEmail,
+  11    registerAllWebhooks,
+  12  } = require('../utils/shopify');
+  13  const { getActiveSubscription, createSubscription } = require('../utils/billing');
+  14
+  15  const router = express.Router();
+  16
+  17  // Build the public base URL of THIS backend. In production BACKEND_URL must be
+  18  // set (e.g. https://cartncodform-backend.onrender.com) so the OAuth redirect_uri
+  19  // exactly matches the one registered in the Shopify app. Only when it is unset
+  20  // do we fall back to the incoming request's protocol + host.
+  21  function getBackendUrl(req) {
+  22    return (
+  23      process.env.BACKEND_URL || `${req.protocol}://${req.headers.host}`
+  24    );
+  25  }
+  26
+  27  /**
+  28   * GET /api/auth/install?shop=example.myshopify.com
+  29   * Kicks off the Shopify OAuth flow by redirecting to the merchant's consent screen.
+  30   */
+  31  router.get('/install', async (req, res) => {
+  32    try {
+  33      const shop = (req.query.shop || process.env.SHOP_DOMAIN || '').toString().trim().toLowerCase();
+  34
+  35      if (!shop || !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop)) {
+  36        return res.status(400).json({ error: 'Missing or invalid ?shop=your-store.myshopify.com' });
+  37      }
+  38
+  39      if (!SHOPIFY_API_KEY) {
+  40        return res.status(500).json({ error: 'SHOPIFY_API_KEY is not configured on the backend' });
+  41      }
+  42
+  43      // Optional: link the store to the dashboard account that started the install.
+  44      const ownerEmail =
+  45        (req.query.owner_email || '').toString().trim().toLowerCase() || undefined;
+  46
+  47      const state = crypto.randomBytes(16).toString('hex');
+  48      await OAuthState.create({ nonce: state, ownerEmail });
+  49
+  50      const redirectUri = `${getBackendUrl(req)}/api/auth/callback`;
+
+NOTES (auth.js 1–50):
+  - No scopes string is defined in this slice. The install redirect is
+    built by `buildAuthUrl` (imported line 7 from ../utils/shopify) and
+    `redirectUri` is assembled at line 50; the actual `scope=` param is
+    inside utils/shopify.buildAuthUrl (NOT shown here — check there for the
+    real scope list the consent screen requests, and confirm it matches
+    shopify.app.toml line 19).
+  - `exchangeCodeForToken` (line 9) and `registerAllWebhooks` (line 11)
+    also live in utils/shopify.
+  - For discount support: adding a scope in shopify.app.toml is not enough
+    if buildAuthUrl hard-codes its own list — both must be updated, then
+    every existing store must re-run /api/auth/install to widen its
+    accessToken grant.
+
+
+════════════════════════════════════════════════════════════════════
+3. backend/models/Store.js  (full file, 157 lines)
+════════════════════════════════════════════════════════════════════
+   1  const mongoose = require('mongoose');
+   2
+   3  const storeSchema = new mongoose.Schema({
+   4    shopDomain: {
+   5      type: String,
+   6      required: true,
+   7      unique: true,
+   8      trim: true,
+   9      lowercase: true,
+  10    },
+  11    accessToken: {
+  12      type: String,
+  13      required: true,
+  14    },
+  15    ownerEmail: {
+  16      type: String,
+  17      lowercase: true,
+  18      trim: true,
+  19    },
+  20    timezone: {
+  21      type: String,
+  22      default: 'Asia/Kolkata',
+  23    },
+  24    plan: {
+  25      type: String,
+  26      enum: ['free', 'pro'],
+  27      default: 'free',
+  28    },
+  29    subscriptionId: { type: String },
+  30    subscriptionStatus: { type: String },
+  31    planUpdatedAt: { type: Date },
+  32
+  33    // --- Phase C: brain configuration ---
+  34    voice: {
+  35      tone: { type: String, default: 'friendly' },
+  36      emoji: { type: Boolean, default: true },
+  37      lang: { type: String, default: 'en' },
+  38      signOff: { type: String, default: '' },
+  39    },
+  40    caps: {
+  41      perDay: { type: Number, default: 2 },
+  42      perWeek: { type: Number, default: 5 },
+  43      maxUnopenedPush: { type: Number, default: 5 }, // Phase F: suppress push after N unopened
+  44    },
+  45    quietHours: {
+  46      start: { type: Number, default: 22 }, // hour 0-23
+  47      end: { type: Number, default: 8 },
+  48    },
+  49    onboarding: {
+  50      steps: [{ id: String, done: Boolean, doneAt: Date }],
+  51    },
+  52    // NOTE: `timezone` already exists above (default 'Asia/Kolkata') — not re-added.
+  53
+  54    // --- Phase F: rolling 7-day push delivery health ---
+  55    pushStats: {
+  56      deliveredLast7d: { type: Number, default: 0 },
+  57      attemptedLast7d: { type: Number, default: 0 },
+  58      rateLast7d: { type: Number, default: 0 },
+  59      lastComputedAt: { type: Date, default: null },
+  60    },
+  61
+  62    // --- Phase C2: last time the nightly signals+brain gate ran for this shop ---
+  63    lastSignalRunAt: { type: Date, default: null },
+  64
+  65    // --- popup-customizer: storefront soft push prompt appearance ---
+  66    popup: {
+  67      position: {
+  68        type: String,
+  69        enum: ['bottom-right', 'bottom-left', 'center', 'top-right', 'top-left'],
+  70        default: 'bottom-right',
+  71      },
+  72      theme: {
+  73        type: String,
+  74        enum: ['light', 'dark', 'custom'],
+  75        default: 'light',
+  76      },
+  77      accentColor: { type: String, default: '#4f46e5' },
+  78      bgColor: { type: String, default: '#ffffff' },
+  79      textColor: { type: String, default: '#111827' },
+  80      fontFamily: { type: String, default: 'inherit' },
+  81      borderRadius: { type: Number, default: 12 },
+  82      imageUrl: { type: String, default: '' },
+  83      // CSS object-position / background-position value: 'top left',
+  84      // 'center center', 'bottom right', etc.
+  85      imagePosition: { type: String, default: 'center center' },
+  86      allowText: { type: String, default: 'Allow' },
+  87      denyText: { type: String, default: 'No thanks' },
+  88      customTitle: { type: String, default: '' },
+  89      showBranding: { type: Boolean, default: true },
+  90
+  91      // --- popup-redesign: layout system + split-layout content ---
+  92      layout: {
+  93        type: String,
+  94        enum: ['split', 'card', 'banner'],
+  95        default: 'split',
+  96      },
+  97      headline: { type: String, default: '' },
+  98      subtext: { type: String, default: '' },
+  99      brandName: { type: String, default: '' },
+ 100      textAlign: {
+ 101        type: String,
+ 102        enum: ['left', 'center', 'right'],
+ 103        default: 'left',
+ 104      },
+ 105      ctaStyle: {
+ 106        type: String,
+ 107        enum: ['rounded', 'square', 'pill', 'outlined', 'soft'],
+ 108        default: 'rounded',
+ 109      },
+ 110      overlayOpacity: { type: Number, default: 0.5 },
+ 111      showOverlay: { type: Boolean, default: true },
+ 112    },
+ 113
+ 114    // --- popup-responsive: mobile-specific overrides (screen width <= 600px).
+ 115    // Mobile only supports card + banner (split is too wide); when a mobile
+ 116    // config is empty the storefront falls back to the desktop `popup` above.
+ 117    mobilePopup: {
+ 118      layout: { type: String, enum: ['card', 'banner'], default: 'card' },
+ 119      headline: { type: String, default: '' },
+ 120      subtext: { type: String, default: '' },
+ 121      brandName: { type: String, default: '' },
+ 122      imageUrl: { type: String, default: '' },
+ 123      imagePosition: { type: String, default: '50% 50%' },
+ 124      accentColor: { type: String, default: '#4f46e5' },
+ 125      bgColor: { type: String, default: '#ffffff' },
+ 126      textColor: { type: String, default: '#111827' },
+ 127      fontFamily: { type: String, default: 'inherit' },
+ 128      borderRadius: { type: Number, default: 16 },
+ 129      allowText: { type: String, default: 'Allow' },
+ 130      denyText: { type: String, default: 'No thanks' },
+ 131      showBranding: { type: Boolean, default: true },
+ 132      textAlign: {
+ 133        type: String,
+ 134        enum: ['left', 'center', 'right'],
+ 135        default: 'left',
+ 136      },
+ 137      ctaStyle: {
+ 138        type: String,
+ 139        enum: ['rounded', 'square', 'pill', 'outlined', 'soft'],
+ 140        default: 'pill',
+ 141      },
+ 142      position: {
+ 143        type: String,
+ 144        enum: ['bottom-right', 'bottom-left', 'center'],
+ 145        default: 'center',
+ 146      },
+ 147      showOverlay: { type: Boolean, default: true },
+ 148    },
+ 149
+ 150    installedAt: {
+ 151      type: Date,
+ 152      default: Date.now,
+ 153    },
+ 154  });
+ 155
+ 156  module.exports = mongoose.model('Store', storeSchema);
+ 157
+
+NOTES (Store.js):
+  - NO discount-related fields anywhere in the schema. Nothing stores a
+    discount code, a price-rule id, a percentage/amount, an expiry, or a
+    per-customer redemption record.
+  - `plan` / `subscriptionId` / `subscriptionStatus` (lines 24-31) are for
+    the app's OWN billing (Shopify app subscription), unrelated to merchant
+    storefront discounts.
+  - If a discount feature is added, likely new surface here: a `discount`
+    subdoc on Store (default code prefix, type, value, active flag,
+    generated price-rule id) mirroring how `popup` was added; per-customer
+    codes would more likely belong on the Profile model (not shown).
+  - accessToken (line 11-14) is the single Shopify token per store; its
+    granted scopes are fixed at install time — see auth.js note above.
+
+SUMMARY
+-------
+  - Scopes today (toml line 19): read_orders, read_customers,
+    write_customers, read_products. No write_discounts / read_discounts.
+  - Store schema has zero discount fields.
+  - Any discount work needs: (a) scope addition in shopify.app.toml AND in
+    utils/shopify.buildAuthUrl, (b) forced merchant re-auth for existing
+    installs, (c) a new schema field/subdoc to persist discount config.
