@@ -20,6 +20,13 @@ export default function Discounts({ shop }) {
   useEffect(() => {
     if (!shop) return;
     let cancelled = false;
+
+    // Silently trade the current App Bridge session token for a fresh offline
+    // Admin API token (OAuth Token Exchange). Picks up newly-added scopes
+    // (write_discounts) without a re-install. Best-effort — failure is fine,
+    // the reconnect banner on Settings is the fallback.
+    apiSend('/api/auth/refresh-token', 'POST', {}).catch(() => {});
+
     apiGet(`/api/discounts/${encodeURIComponent(shop)}/config`)
       .then((data) => {
         if (cancelled) return;

@@ -115,6 +115,29 @@ async function exchangeCodeForToken(shop, code) {
 }
 
 /**
+ * OAuth Token Exchange: trade a valid App Bridge session token (id_token) for a
+ * fresh OFFLINE Admin API access token, without a browser redirect. The
+ * returned token carries whatever scopes the merchant has approved for the
+ * current app version, so this is how an install picks up newly-added scopes.
+ *
+ * @param {string} shop         the *.myshopify.com domain
+ * @param {string} sessionToken the App Bridge session token from the request
+ * @returns {Promise<string|undefined>} the new offline access token
+ */
+async function exchangeSessionToken(shop, sessionToken) {
+  const url = `https://${shop}/admin/oauth/access_token`;
+  const { data } = await axios.post(url, {
+    client_id: SHOPIFY_API_KEY,
+    client_secret: SHOPIFY_API_SECRET,
+    grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+    subject_token: sessionToken,
+    subject_token_type: 'urn:ietf:params:oauth:token-type:id_token',
+    requested_token_type: 'urn:shopify:params:oauth:token-type:offline-access-token',
+  });
+  return data.access_token;
+}
+
+/**
  * Fetch the shop record from the Admin API and return its contact email.
  * Used to link a connected store to an owner when no owner_email was supplied.
  */
@@ -186,6 +209,7 @@ module.exports = {
   verifyProxySignature,
   verifyWebhookHmac,
   exchangeCodeForToken,
+  exchangeSessionToken,
   fetchShopEmail,
   registerWebhook,
   registerAllWebhooks,
