@@ -94,7 +94,14 @@ router.get('/callback', async (req, res) => {
       ownerEmail = await fetchShopEmail(shopDomain, accessToken);
     }
 
-    const update = { shopDomain, accessToken, installedAt: new Date() };
+    const update = {
+      shopDomain,
+      accessToken,
+      installedAt: new Date(),
+      // Fresh grant — clear the "reconnect to enable discounts" flag that a
+      // prior ACCESS_DENIED (token predating write_discounts) may have set.
+      needsReauth: false,
+    };
     if (ownerEmail) update.ownerEmail = ownerEmail;
 
     const store = await Store.findOneAndUpdate(
