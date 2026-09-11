@@ -1,0 +1,144 @@
+POPUP UI REDESIGN — SELF AUDIT
+==============================
+File: extensions/cartncodform-embed/blocks/push-notifications.liquid
+Date: 2026-09-11
+Do NOT deploy — not run.
+
+
+STEP 1 — CSS animation + premium card design
+---------------------------------------------
+- ccfInjectPopupStyles() added (module scope, near the other discount-
+  feature helpers): injects the exact CSS given, once per page
+  (#ccf-popup-styles guard), PLUS two small additions needed for it to
+  work safely across all three layouts:
+    * '#ccf-push-prompt, #ccf-disc-capture' both get the base ccfSlideUp
+      animation (the given CSS only named #ccf-push-prompt; the capture
+      popup uses a different id, so it needed adding to actually animate).
+    * '#ccf-push-prompt.layout-banner { animation: none; }' — the given
+      ccfSlideUp keyframe assumes translateX(-50%)-centering; applying it
+      unmodified to the full-width banner bar (no such transform) would
+      have visibly shifted it sideways on every show. Banner opts out via
+      a 'layout-banner' class added where it's built.
+    * 'layout-center' class (already in the given CSS as the fadeIn
+      trigger) is added in JS to every screen-centered
+      (translate(-50%,-50%)) branch: split-mobile, split-desktop.
+  Called from both showSoftPrompt() (STEP 1) and showDiscountCapture()
+  (STEP 4, since it can run independently of showSoftPrompt).
+- Card layout (mobile + desktop) was MERGED into one unified branch
+  (previously two: a screen-centered mobile card with a dark overlay, and
+  a 5-position desktop card). New branch matches STEP 1's spec exactly:
+  bottom:24px, left:50%, translateX(-50%), width 300px (mobile) /
+  min(340px,90vw) (desktop), radius/shadow/z-index/font-family as given.
+  Content div carries id="ccf-content-section" (STEP 3 dependency).
+  Image (150px, object-fit cover), brand, headline, subtext, a new green
+  gradient "discount offer" box (shown when ccfDiscountEnabled(), text via
+  the new ccfDiscountOfferText() helper), inline email/phone ccf-input
+  fields, the Allow/Deny buttons, branding, and a new close (×) button —
+  all per the given specs.
+- Split layout: kept its existing side-by-side structure (STEP 1 said to);
+  restyled its Allow buttons (ccfAllowButtonStyle), Deny buttons (no
+  underline, button chrome reset, hover handled by the injected CSS), and
+  gave its content divs (mContent, rightPanel) id="ccf-content-section" so
+  STEP 3's in-place update works there too. Still uses the shared
+  ccfBuildDiscountFields() (also restyled: ccf-input class + new input
+  style) for its email/phone fields — card no longer does (it builds its
+  own inline fields to match its own layout).
+
+
+DELIBERATE DEVIATIONS from configurable behaviour (flagging, not hiding)
+--------------------------------------------------------------------------
+- Card layout's dark overlay (mobile-only cfg.showOverlay) was DROPPED.
+  The old mobile card was screen-centered and needed an overlay to
+  separate it from the page; the new card is a bottom-anchored toast (like
+  split/banner already are without an overlay), so a full-screen dark
+  backdrop no longer fits the design. cfg.showOverlay still works for the
+  split layout (unchanged there).
+- Desktop card's 5-way Position dropdown (bottom-right/bottom-left/
+  center/top-right/top-left, cfg.position) is no longer honored for card —
+  it's now always bottom-center, per STEP 1's explicit container spec.
+  This is a real, existing admin-configurable setting that becomes inert
+  for card layout specifically (still works for banner, which keeps its
+  own top/bottom cfg.position switch).
+- cfg.borderRadius / cfg.bgColor / cfg.fontFamily are still honored for
+  card (fall back to the new premium defaults: 20px / #ffffff /
+  -apple-system…) — I kept these configurable since STEP 1 gave them as
+  the new DEFAULTS, not fixed values, and split's existing customization
+  should keep working for card too.
+- showDiscountCapture()'s container background/headline color are now
+  hardcoded #fff / #111827 (STEP 4's literal spec) rather than reading
+  cfg.bgColor/cfg.textColor as the old version did — accentColor is still
+  honored (drives the Claim button via ccfAllowButtonStyle).
+
+
+STEP 2 — Allow button loading states (4 stages, not 3 — error is its own)
+----------------------------------------------------------------------------
+1. On click (always, not just when a discount is configured — closing the
+   popup instantly on every click felt abrupt; a brief "Setting up..."
+   acknowledgement is smoother even for a plain push subscribe):
+   disabled=true, '⏳ Setting up...', opacity 0.8, cursor not-allowed.
+2. After permission granted + subscribe completes: '✓ Subscribed! Getting
+   your discount...' (or plain '✓ Subscribed!' when no discount is
+   configured — background turns #16a34a either way. The no-discount case
+   auto-closes 900ms later so the confirmation is actually visible instead
+   of vanishing instantly.
+3. After the discount fetch resolves with a code: '🎉 Redirecting...'
+   (brief — renderDiscountCode() immediately replaces the whole content
+   section right after, per STEP 3).
+4. On error (subscribe chain fails, OR the discount fetch fails): the
+   button now RESETS (disabled=false, original text, opacity 1, cursor
+   pointer, original background) instead of silently closing the popup —
+   lets the customer retry Allow. Permission explicitly denied still
+   closes the popup (retrying just re-shows a no-op native prompt once
+   denied, so there's nothing useful to retry there).
+
+
+STEP 3 — renderDiscountCode updates content in place
+-------------------------------------------------------
+Replaced the old "append a second box below everything" with exactly the
+given innerHTML, written into #ccf-content-section (falls back to
+appending a standalone box if that id isn't present in some future
+layout). Kept the existing pieces the given snippet dropped but that are
+worth keeping: the four [CCF] debug console.logs, the copy-on-click wiring
+for the code (now queries within the replaced section), and — critically —
+the existing 2-second auto-redirect timer + sessionStorage stashing
+(ccf_active_discount/ccf_active_pct, set immediately before navigating).
+Without the redirect timer the "Applying automatically..." / "Taking you
+to the store..." copy would be a lie — nothing would actually redirect.
+finishDiscount() was simplified: it no longer explicitly hides the Allow
+button or removes #ccf-discount-fields, since renderDiscountCode() now
+replaces the whole content section (those elements live inside it and go
+with it automatically).
+
+
+STEP 4 — showDiscountCapture() redesign
+------------------------------------------
+Container: white, radius 20px, padding 24px 20px 20px, same shadow +
+z-index, now animated via the shared ccfSlideUp (added to the CSS
+selector — see STEP 1 notes). 🎁 icon added. Headline/subtext per spec;
+subtext text now comes from the shared ccfDiscountOfferText() helper
+(previously duplicated inline — refactored into one function used by both
+this popup and the card layout's discount-offer box, so the two stay in
+sync). Inputs switched to ccf-input class + ccfInputStyle(). Claim button
+reuses ccfAllowButtonStyle(accent) (same visual language as the main
+popup's Allow button, per spec). Loading state '⏳ Claiming...' with
+opacity/cursor changes; success state '✓ Redirecting...' + green
+background right before the redirect; error state resets the button
+(disabled/text/opacity/cursor) instead of just closing, matching STEP 2's
+retry-friendly pattern. Close button restyled to match the main popup's
+new circular × button for visual consistency (not explicitly requested,
+small extension of "same design language").
+
+
+VERIFICATION
+------------
+- Extracted the <script> block and ran `node --check` -> LIQUID OK
+- grep sweep for orphaned identifiers from the removed old mobile/desktop
+  card branches (mcHead, mcSub, mcContent, mcImg, denyEl, posStyle, POS,
+  the old local `radius` var) -> none found, clean removal
+- Confirmed single definitions of the 4 new shared helpers
+  (ccfInjectPopupStyles/ccfAllowButtonStyle/ccfInputStyle/
+  ccfDiscountOfferText) and correct call sites (ccfInjectPopupStyles from
+  both showSoftPrompt and showDiscountCapture; #ccf-content-section
+  present on card + both split branches)
+
+Not deployed (shopify app deploy not run).

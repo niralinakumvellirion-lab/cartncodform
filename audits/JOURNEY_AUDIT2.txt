@@ -1,0 +1,160 @@
+JOURNEY SCREEN — SELF AUDIT
+============================
+Branch: journey-screen
+Date: 2026-09-11
+
+
+STEP 1 — Backend: journey endpoint
+------------------------------------
+Added to backend/routes/events.js:
+  - getJourneyData(shopDomain, { limit, page }) — exported alongside the
+    router (module.exports.getJourneyData = getJourneyData;), same pattern
+    as discounts.generateDiscount, so it's unit-testable without an HTTP
+    layer.
+  - GET /:shopDomain/journey (requireAuth + requireStoreOwner) — parses
+    limit (default 50, clamped to max 200, min 1) and page (default 0,
+    floored at 0) from query params, calls getJourneyData, returns
+    { customers, total }.
+Implemented the given pipeline as specified: Signal.find({shopDomain})
+sorted by strength desc, limit 200, populated with
+'identifiers stage orders channels lastSeenAt'; grouped into profileMap
+keyed by profileId, keeping the strongest signal + a signals[] array per
+profile; paginated profile IDs resolved in parallel against
+StorefrontEvent (by sessionIds + cartTokens), each producing topProducts
+(top 3 by view count) from product_view events.
+
+Two small, deliberate simplifications from the literal snippet (behavior
+unchanged, noted for transparency):
+  - The given `$or: [{ sessionId: { $in: [...] } }]` was collapsed to a
+    plain `sessionId: { $in: [...] }` — a single-clause $or is equivalent,
+    just more verbose.
+  - The inner `const pid = e.meta.productId;` (inside the product-view
+    forEach) was renamed to `productId` — it shadowed the outer `pid`
+    (the profile id) from the enclosing map callback. Not a functional bug
+    (separate block scope), but confusing to read next to a same-named
+    outer variable that means something else entirely.
+
+
+DEVIATION FLAGGED, NOT FIXED (fragility, verified safe as given)
+---------------------------------------------------------------------
+profileMap's "keep strongest signal" logic only resets `signal` (and would
+reset `signals: []` if it did) when a *later* signal in the array has
+higher strength than the one currently stored. Because Signal.find(...)
+is sorted `{ strength: -1 }` before grouping, the first occurrence of any
+given profileId in that array is *already* guaranteed to be its strongest
+— so the reset branch is dead code in practice, and `signals[]` is safe
+from ever being silently discarded. This only holds because of the sort;
+if a future change ever grouped signals without that sort first, this
+logic would start dropping entries. Left as given as it's fine now, but
+worth knowing about (the tests below lock in the current guarantee with a
+two-signals-same-profile case).
+
+
+STEP 2 — Backend: manual push send
+--------------------------------------
+Added to backend/routes/push.js:
+  - sendJourneyPush(shopDomain, { profileId, title, body, url }) — exported
+    the same way as getJourneyData, for unit testing.
+  - POST /send-journey (requireAuth only — see deviation below).
+
+DEVIATION FROM THE LITERAL SPEC (verified, not guessed) — real bug avoided
+---------------------------------------------------------------------------
+The spec said "requireAuth + requireStoreOwner" for this route, matching
+CLAUDE.md's "every new /api route uses requireAuth + requireStoreOwner"
+rule. But requireStoreOwner (backend/middleware/requireOwner.js) asserts
+`req.shopDomain === req.params.shopDomain` — and this route has no
+:shopDomain in its path (the spec's own URL is POST /send-journey, and the
+spec's frontend call passes no shopDomain in the body either). Chaining
+requireStoreOwner here would make req.params.shopDomain always undefined,
+so the check `req.shopDomain !== undefined` would be true on every single
+request — the route would 403 unconditionally and never work.
+This is the same class of bug this project has repeatedly caught before
+(a check whose precondition doesn't actually hold at the point it runs).
+Fixed by using requireAuth only (same pattern as the existing /send and
+/send-customer routes in this file, which also take no :shopDomain path
+param) and doing the real authorization inside sendJourneyPush(): the
+Profile lookup is scoped by `{ _id: profileId, shopDomain: req.shopDomain }`
+— req.shopDomain comes from the verified session-token JWT, never from
+client input — so a profileId belonging to a different shop simply won't
+match and falls through to the existing "No push subscription" response.
+This satisfies CLAUDE.md's actual intent ("scope by shopDomain") more
+strictly than a client-supplied shopDomain field would have, and needed no
+change to the given route path or the given frontend apiSend() call.
+
+sendPushToCustomers is called positionally exactly as given:
+  (shop, title, body, url, null, false, cartToken)
+— confirmed against its real signature in utils/pushNotification.js
+  (shopDomain, title, body, url, imageUrl, mobileOnly, cartToken,
+  skipStaleCleanup) — the omitted skipStaleCleanup defaults to false,
+  which matches how the existing /send-customer route already calls it
+  whenever a cartToken is present.
+
+
+STEP 3 & 4 — Journey.jsx + NotificationComposer
+---------------------------------------------------
+Created frontend/app/admin/screens/Journey.jsx with the given layout,
+filter tabs, two-panel grid, journey timeline, and NotificationComposer
+verbatim, plus:
+  - A data-fetch effect (not spelled out in the task) following the same
+    apiGet/loading/error/useCallback pattern already used by
+    WhatToActOn.jsx: GET /api/events/${encodeURIComponent(shop)}/journey?limit=50,
+    populating customers/total, with an error banner on failure.
+  - filteredCustomers computed exactly as specified.
+  - NotificationComposer's suggestion logic was refactored into a
+    module-scope SUGGESTIONS map of {title(product), body(product)}
+    functions instead of rebuilding the same inline object literal on
+    every render inside the effect — same behavior and copy, less
+    allocation, easier to extend with a new signal type later.
+
+DEVIATION FROM THE LITERAL SPEC (verified against the actual API response
+shape built in Step 1) — real bug avoided
+---------------------------------------------------------------------------
+The given row-selection code compared `c._id` (`key={c._id || i}`,
+`isSelected = selectedCustomer?._id === c._id`). But the objects in
+`customers` (as returned by getJourneyData / the /journey endpoint) have
+no `_id` field of their own — only `.profile._id` does. Since `c._id` is
+undefined on every row, and `selectedCustomer?._id` is also undefined once
+any row is selected, `undefined === undefined` evaluates to true for every
+row simultaneously — every row in the list would render as selected
+(highlighted background) the moment any single row was clicked, not just
+the clicked one.
+Fixed by comparing `selectedCustomer?.profile?._id === profile?._id` (a
+real, unique Mongo ObjectId string) and using `profile?._id` for the React
+`key` as well, instead of the always-undefined `c._id` / `i` fallback for
+every row.
+
+
+STEP 5 — Route file + NavMenu
+----------------------------------
+Created frontend/app/admin/journey/page.js — identical Suspense +
+AppProvider + NavMenu + <JourneyScreen shop={shop} /> pattern used by all
+7 existing route files (cod, customers, discounts, insights, messages,
+settings-page, signals).
+Added <a href="/admin/journey" rel="journey">Journey</a> immediately after
+the Customers link, in this exact position, in all 8 places that render a
+NavMenu: frontend/app/admin/page.js (the Today/home screen) plus the 7
+route files above. grep confirms 9 total matches for rel="journey" across
+frontend/app/admin/**/page.js — 8 pre-existing nav files + the new
+journey/page.js's own NavMenu.
+
+
+STEP 6 — Verification
+--------------------------
+- node --check backend/routes/events.js -> OK
+- node --check backend/routes/push.js -> OK
+- Added backend/__tests__/journeyEndpoint.test.js (4 tests: empty signals,
+  single profile with product-interest extraction + sorting, two signals
+  on one profile confirming strongest-kept/signals[] preserved, and
+  pagination only resolving the requested page against StorefrontEvent).
+- Added backend/__tests__/sendJourneyPush.test.js (5 tests: missing-field
+  guard, unmatched/cross-shop profileId -> "No push subscription"
+  [confirms the IDOR fix, asserts Profile.findOne was called with
+  { _id, shopDomain } together], not-subscribed profile, happy path
+  [asserts sendPushToCustomers positional args], Firebase-failure path).
+- cd backend && npm test -> Test Suites: 16 passed, 16 total.
+  Tests: 131 passed, 131 total (122 baseline + 9 new). No failures.
+- cd frontend && npm run build -> Compiled successfully, all 13 routes
+  generated including the new /admin/journey (4.87 kB, 104 kB First Load
+  JS) with no type/lint errors.
+
+Not deployed (shopify app deploy not run; this branch was not merged).

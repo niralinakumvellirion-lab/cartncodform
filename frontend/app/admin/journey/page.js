@@ -3,10 +3,10 @@ import { Suspense } from 'react';
 import { AppProvider } from '@shopify/polaris';
 import { NavMenu } from '@shopify/app-bridge-react';
 import { useSearchParams } from 'next/navigation';
-import SettingsScreen from '../screens/Settings';
+import JourneyScreen from '../screens/Journey';
 import '@shopify/polaris/build/esm/styles.css';
 
-function SettingsContent() {
+function JourneyContent() {
   const searchParams = useSearchParams();
   const shop = searchParams.get('shop') || '';
   return (
@@ -22,15 +22,15 @@ function SettingsContent() {
         <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
       </NavMenu>
-      <SettingsScreen shop={shop} />
+      <JourneyScreen shop={shop} />
     </AppProvider>
   );
 }
 
-export default function SettingsPage() {
+export default function JourneyPage() {
   return (
     <Suspense fallback={null}>
-      <SettingsContent />
+      <JourneyContent />
     </Suspense>
   );
 }

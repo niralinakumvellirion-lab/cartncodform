@@ -68,6 +68,22 @@
     return true;
   }
 
+  // discount-feature: lets showSoftPrompt run for an ALREADY-subscribed
+  // customer (Notification.permission === 'granted') purely to capture
+  // email/phone for a bigger discount — canPrompt() above hard-blocks that
+  // case since there's no push permission left to ask for. Reuses
+  // promptAlreadyShown() (NOT a raw sessionStorage read) so this stays in
+  // sync with the same once-per-session guard every other trigger uses.
+  function canPromptForDiscount() {
+    if (!('Notification' in window)) return false;
+    if (Notification.permission === 'denied') return false;
+    try {
+      if (sessionStorage.getItem('ccf_disc_redirected') === '1') return false;
+    } catch (e) {}
+    if (promptAlreadyShown()) return false;
+    return true;
+  }
+
   var PROMPT_COPY = {
     dwell: function (t) { return 'Get notified if ' + (t || 'this product') + ' goes on sale or comes back in stock.'; },
     return_visit: function () { return "You've looked at this before. Want a reminder if the price drops?"; },
@@ -110,12 +126,227 @@
     return Math.max(ccfPct(singleKey), ccfPct('bothDiscount')) || 0;
   }
 
+  // popup-redesign-2: shared style builders so the main popup, the
+  // discount-capture popup, and the split layout all match the same
+  // premium visual language.
+  function ccfInputStyle() {
+    return 'width:100%;padding:11px 14px;font-size:13px;' +
+      'border:1.5px solid #e5e7eb;border-radius:12px;box-sizing:border-box;' +
+      'margin-bottom:8px;color:#111827;background:#f9fafb;font-family:inherit;';
+  }
+  function ccfAllowButtonStyle(accentColor) {
+    return 'width:100%;padding:14px;font-size:15px;font-weight:700;color:#fff;' +
+      'background:linear-gradient(135deg,' + accentColor + ',' + accentColor + 'dd);' +
+      'border:none;border-radius:14px;cursor:pointer;margin-bottom:10px;' +
+      'letter-spacing:0.3px;box-shadow:0 4px 15px ' + accentColor + '44;';
+  }
+  function ccfDenyButtonStyle() {
+    return 'display:block;width:100%;text-align:center;font-size:12px;' +
+      'color:#9ca3af;cursor:pointer;padding:6px 0;background:none;border:none;' +
+      'font-family:inherit;letter-spacing:0.3px;';
+  }
+  // The percentage-aware line used in the main popup's discount-offer box.
+  function ccfDiscountOfferText() {
+    var emailPct = (discountConfig.emailDiscount && discountConfig.emailDiscount.percentage) || 0;
+    var phonePct = (discountConfig.phoneDiscount && discountConfig.phoneDiscount.percentage) || 0;
+    var bothPct = (discountConfig.bothDiscount && discountConfig.bothDiscount.percentage) || 0;
+    var pushPct = (discountConfig.pushDiscount && discountConfig.pushDiscount.percentage) || 0;
+    if (ccfShowEmailField() && ccfShowPhoneField()) return 'Add email + phone to get ' + bothPct + '% off';
+    if (ccfShowEmailField()) return 'Add your email to get ' + emailPct + '% off';
+    if (ccfShowPhoneField()) return 'Add your phone to get ' + phonePct + '% off';
+    return 'You get ' + pushPct + '% off as a subscriber';
+  }
+  // Injects the popup's animation/hover/focus CSS once per page.
+  // #ccf-push-prompt (main popup, any layout) gets the bottom-anchored
+  // slide-up by default; layouts positioned screen-center (split) opt into
+  // a scale+fade via the 'layout-center' class instead, and the full-width
+  // banner opts OUT of animation entirely via 'layout-banner' — both
+  // classes are added where the wrap is built in showSoftPrompt().
+  function ccfInjectPopupStyles() {
+    var styleId = 'ccf-popup-styles';
+    if (document.getElementById(styleId)) return;
+    var s = document.createElement('style');
+    s.id = styleId;
+    s.textContent = `
+      #ccf-push-prompt {
+        animation: ccfSlideUp 0.4s cubic-bezier(0.34,1.56,0.64,1);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+      }
+      #ccf-push-prompt:hover {
+        transform: translateX(-50%) translateY(-2px);
+        box-shadow: 0 24px 60px rgba(0,0,0,0.22), 0 8px 20px rgba(0,0,0,0.1) !important;
+      }
+      @keyframes ccfSlideUp {
+        from { opacity:0; transform:translateX(-50%) translateY(30px) scale(0.95); }
+        to   { opacity:1; transform:translateX(-50%) translateY(0) scale(1); }
+      }
+      @keyframes ccfPulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+      }
+      @keyframes ccfShimmer {
+        0% { background-position: -200% center; }
+        100% { background-position: 200% center; }
+      }
+      #ccf-allow-btn {
+        transition: all 0.25s cubic-bezier(0.34,1.56,0.64,1);
+        position: relative;
+        overflow: hidden;
+      }
+      #ccf-allow-btn::after {
+        content: '';
+        position: absolute;
+        top: 0; left: -100%;
+        width: 100%; height: 100%;
+        background: linear-gradient(90deg,
+          transparent, rgba(255,255,255,0.2), transparent);
+        transition: left 0.5s ease;
+      }
+      #ccf-allow-btn:hover::after {
+        left: 100%;
+      }
+      #ccf-allow-btn:hover {
+        transform: translateY(-3px) scale(1.02);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.25) !important;
+        filter: brightness(1.08);
+      }
+      #ccf-allow-btn:active {
+        transform: translateY(-1px) scale(0.99);
+        filter: brightness(0.95);
+      }
+      #ccf-deny-btn {
+        transition: all 0.2s ease;
+        position: relative;
+      }
+      #ccf-deny-btn:hover {
+        color: #374151 !important;
+        letter-spacing: 0.5px;
+      }
+      .ccf-input {
+        transition: all 0.2s ease !important;
+      }
+      .ccf-input:focus {
+        border-color: var(--ccf-accent, #4f46e5) !important;
+        box-shadow: 0 0 0 4px rgba(79,70,229,0.08) !important;
+        outline: none !important;
+        background: #fff !important;
+        transform: translateY(-1px);
+      }
+      .ccf-input:hover {
+        border-color: #9ca3af !important;
+      }
+      #ccf-close-btn {
+        transition: all 0.2s ease;
+      }
+      #ccf-close-btn:hover {
+        background: rgba(0,0,0,0.6) !important;
+        transform: rotate(90deg) scale(1.1);
+      }
+      @keyframes ccfBounce {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-4px); }
+      }
+      .ccf-discount-badge {
+        animation: ccfBounce 2s ease infinite;
+      }
+
+      /* Image section effects */
+      .ccf-img-wrap {
+        position: relative;
+        overflow: hidden;
+      }
+      .ccf-img-wrap::after {
+        content: '';
+        position: absolute;
+        bottom: 0; left: 0; right: 0;
+        height: 60%;
+        background: linear-gradient(to top,
+          rgba(0,0,0,0.4) 0%, transparent 100%);
+        pointer-events: none;
+      }
+      .ccf-img-wrap::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: linear-gradient(135deg,
+          rgba(255,255,255,0.08) 0%, transparent 50%);
+        pointer-events: none;
+        z-index: 1;
+      }
+      .ccf-popup-img {
+        transition: transform 0.6s cubic-bezier(0.25,0.46,0.45,0.94);
+      }
+      #ccf-push-prompt:hover .ccf-popup-img {
+        transform: scale(1.05);
+      }
+      .ccf-corner-dots::before {
+        content: '';
+        position: absolute;
+        top: 8px; right: 8px;
+        width: 60px; height: 60px;
+        background-image: radial-gradient(circle,
+          rgba(255,255,255,0.4) 1px, transparent 1px);
+        background-size: 8px 8px;
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 2;
+      }
+
+      /* Product page discount nudge — a normal in-flow block (inserted
+         after the Buy button, not position:fixed like the popup), so it
+         gets its own vertical-only entrance rather than reusing ccfSlideUp
+         (which assumes translateX(-50%) fixed-centering and would visibly
+         jump sideways then snap back here). */
+      #ccf-product-nudge {
+        animation: ccfNudgeSlideUp 0.4s cubic-bezier(0.34,1.56,0.64,1);
+      }
+      @keyframes ccfNudgeSlideUp {
+        from { opacity:0; transform:translateY(12px); }
+        to   { opacity:1; transform:translateY(0); }
+      }
+      #ccf-nudge-btn {
+        transition: all 0.25s cubic-bezier(0.34,1.56,0.64,1);
+      }
+      #ccf-nudge-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.2) !important;
+        filter: brightness(1.08);
+      }
+      #ccf-nudge-btn:active {
+        transform: translateY(0);
+      }
+
+      /* Safety overrides — NOT part of the requested design, kept from the
+         prior redesign pass. Split (translate(-50%,-50%) centering) and the
+         full-width banner (no transform at all) don't rest at
+         translateX(-50%), which every rule above assumes; without these
+         they visibly glitch on open and on hover. */
+      #ccf-push-prompt.layout-center {
+        animation: ccfFadeIn 0.4s cubic-bezier(0.34,1.56,0.64,1);
+      }
+      @keyframes ccfFadeIn {
+        from { opacity:0; transform:translate(-50%,-50%) scale(0.95); }
+        to   { opacity:1; transform:translate(-50%,-50%) scale(1); }
+      }
+      #ccf-push-prompt.layout-center:hover {
+        transform: translate(-50%,-50%);
+      }
+      #ccf-push-prompt.layout-banner {
+        animation: none;
+      }
+      #ccf-push-prompt.layout-banner:hover {
+        transform: none;
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
   // Build the offer headline + email/phone inputs shown inside the popup.
+  // Used by the SPLIT layout only (card builds its own inline fields to
+  // match its own content-section design — see showSoftPrompt()).
   // Returns a <div id="ccf-discount-fields"> or null when no discount is on.
   function ccfBuildDiscountFields() {
     if (!ccfDiscountEnabled()) return null;
-    var INPUT_CSS = 'width:100%;padding:8px 10px;font-size:13px;border:1px solid #e5e7eb;' +
-      'border-radius:8px;box-sizing:border-box;margin-bottom:8px;';
 
     var box = document.createElement('div');
     box.id = 'ccf-discount-fields';
@@ -131,18 +362,20 @@
       var ei = document.createElement('input');
       ei.type = 'email';
       ei.id = 'ccf-email-input';
+      ei.className = 'ccf-input';
       var ep = ccfFieldPct('emailDiscount');
       ei.placeholder = 'Your email' + (ep ? ' (get ' + ep + '% off)' : '');
-      ei.style.cssText = INPUT_CSS;
+      ei.style.cssText = ccfInputStyle();
       box.appendChild(ei);
     }
     if (ccfShowPhoneField()) {
       var pi = document.createElement('input');
       pi.type = 'tel';
       pi.id = 'ccf-phone-input';
+      pi.className = 'ccf-input';
       var pp = ccfFieldPct('phoneDiscount');
       pi.placeholder = 'Your phone' + (pp ? ' (get ' + pp + '% off)' : '');
-      pi.style.cssText = INPUT_CSS;
+      pi.style.cssText = ccfInputStyle();
       box.appendChild(pi);
     }
     return box;
@@ -222,40 +455,61 @@
     var redirectUrl = '/discount/' + d.code +
       '?redirect=' + encodeURIComponent(redirectPath);
 
-    var box = document.createElement('div');
-    box.style.cssText = [
-      'margin-top:12px',
-      'padding:14px',
-      'background:#f0fdf4',
-      'border:1px dashed #16a34a',
-      'border-radius:10px',
-      'text-align:center'
-    ].join(';');
-
-    box.innerHTML =
-      '<div style="font-size:12px;color:#16a34a;' +
-      'margin-bottom:6px;text-align:center;font-weight:600">' +
-      '🎉 ' + d.percentage + '% discount unlocked!</div>' +
-      '<div style="font-size:16px;font-weight:700;' +
-      'color:#111827;letter-spacing:2px;font-family:monospace;' +
-      'text-align:center;background:#f0fdf4;padding:8px;' +
-      'border-radius:6px;margin-bottom:8px">' +
-      d.code + '</div>' +
-      '<div style="font-size:11px;color:#6b7280;' +
-      'text-align:center;margin-bottom:10px">' +
-      'Expires in ' + d.expiryDays + ' days · ' +
-      'Applying automatically...</div>' +
-      '<div style="background:#16a34a;color:#fff;' +
-      'text-align:center;padding:10px;border-radius:8px;' +
-      'font-size:13px;font-weight:600" id="ccf-redirect-msg">' +
-      'Taking you to the store... →</div>';
-
-    popup.appendChild(box);
-
     console.log('[CCF] discount code:', d.code);
     console.log('[CCF] redirect URL:', redirectUrl);
     console.log('[CCF] action:', action);
     console.log('[CCF] productHandle:', productHandle);
+
+    // popup-redesign-2: update the popup's own content section IN PLACE
+    // (headline/inputs/buttons swap for the "unlocked" state) instead of
+    // appending a second box below them — no more flash-then-redirect.
+    var html =
+      '<div style="text-align:center;padding:8px 0 4px">' +
+      '<div style="font-size:40px;margin-bottom:10px;' +
+      'animation:ccfBounce 1s ease 3">🎉</div>' +
+      '<div style="font-size:18px;font-weight:800;color:#111827;' +
+      'margin-bottom:4px">' + d.percentage + '% OFF Unlocked!</div>' +
+      '<div style="font-size:12px;color:#6b7280;margin-bottom:14px">' +
+      'Expires in ' + d.expiryDays + ' days</div>' +
+      '<div style="background:linear-gradient(135deg,#f0f4ff,#e8edff);' +
+      'border:1.5px dashed #818cf8;border-radius:14px;' +
+      'padding:14px;margin-bottom:14px">' +
+      '<div style="font-size:11px;color:#6366f1;font-weight:600;' +
+      'letter-spacing:2px;margin-bottom:6px">YOUR DISCOUNT CODE</div>' +
+      '<div style="font-size:22px;font-weight:800;letter-spacing:4px;' +
+      'font-family:monospace;color:#4338ca">' + d.code + '</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;justify-content:center;' +
+      'gap:6px;font-size:13px;color:#16a34a;font-weight:500">' +
+      '<span style="animation:ccfPulse 1.5s ease infinite;display:inline-block">✓</span>' +
+      ' Applying your discount automatically...</div>' +
+      '</div>';
+
+    var contentEl = document.getElementById('ccf-content-section');
+    if (contentEl) {
+      contentEl.innerHTML = html;
+    } else {
+      // Fallback for a layout without #ccf-content-section — append as before.
+      var box = document.createElement('div');
+      box.style.cssText = 'margin-top:12px;';
+      box.innerHTML = html;
+      popup.appendChild(box);
+    }
+
+    // Wire copy-on-click for the code, wherever it landed.
+    var codeEl = (contentEl || popup).querySelector('[style*="monospace"]');
+    if (codeEl) {
+      codeEl.style.cursor = 'pointer';
+      codeEl.title = 'Click to copy';
+      codeEl.addEventListener('click', function() {
+        navigator.clipboard.writeText(d.code)
+          .catch(function() {});
+        codeEl.textContent = '✓ Copied!';
+        setTimeout(function() {
+          codeEl.textContent = d.code;
+        }, 1500);
+      });
+    }
 
     // Auto-redirect after 2 seconds to apply discount
     setTimeout(function() {
@@ -269,21 +523,6 @@
       console.log('[CCF] redirecting to:', redirectUrl);
       window.location.href = redirectUrl;
     }, 2000);
-
-    // Also wire copy on code click
-    var codeEl = box.querySelector('[style*="monospace"]');
-    if (codeEl) {
-      codeEl.style.cursor = 'pointer';
-      codeEl.title = 'Click to copy';
-      codeEl.addEventListener('click', function() {
-        navigator.clipboard.writeText(d.code)
-          .catch(function() {});
-        codeEl.textContent = '✓ Copied!';
-        setTimeout(function() {
-          codeEl.textContent = d.code;
-        }, 1500);
-      });
-    }
   }
 
   // discount-feature: once a CCF discount is active (code minted this session),
@@ -324,9 +563,17 @@
   }
 
   function showSoftPrompt(trigger, productId) {
-    if (!canPrompt()) return;
+    // discount-capture path: an already-subscribed customer, shown purely
+    // to collect email/phone for a bigger discount — bypasses canPrompt()'s
+    // permission-state gate (there's no push permission left to ask for).
+    // Feature-detect Notification first — canPrompt() does the same before
+    // touching .permission, since it throws on browsers without support.
+    var isDiscountCapture = ccfDiscountEnabled() &&
+      ('Notification' in window) && Notification.permission === 'granted';
+    if (!isDiscountCapture && !canPrompt()) return;
     if (document.getElementById('ccf-push-prompt')) return;
     markPromptShown();
+    ccfInjectPopupStyles();
 
     // Log push_prompt_shown via the existing event pipe (-> StorefrontEvent).
     try { trackEvent('push_prompt_shown', { trigger: trigger, productId: productId || null }); } catch (e) {}
@@ -400,6 +647,10 @@
         'justify-content:space-between;' + (isMobile ? 'flex-wrap:wrap;gap:8px;' : '') +
         'background:' + accent + ';color:#fff;' +
         'font-size:14px;font-family:' + font + ';box-shadow:0 2px 10px rgba(0,0,0,0.2);');
+      // The injected slide-up keyframe assumes translateX(-50%)-based
+      // centering; the banner has no such transform (full-width top/bottom
+      // bar), so it opts out of the shared #ccf-push-prompt animation.
+      wrap.classList.add('layout-banner');
 
       // Optional 44x44 thumbnail on the left of the banner.
       if (cfg.imageUrl) {
@@ -445,179 +696,257 @@
       wrap.appendChild(bnRight);
       deny = closeBtn; // the × is the dismiss control for this layout
 
-    } else if (layout === 'card' && isMobile) {
-      // ---------- LAYOUT 2 (mobile): compact screen-centered card,
-      // matched pixel-for-pixel to the admin mobile preview. ----------
-      // cssText (not setAttribute) so nothing — a leftover margin or a
-      // stray transform — can be inherited from another layout.
+    } else if (layout === 'card') {
+      // ---------- LAYOUT 2: premium card — a bottom-center "toast", same
+      // design on mobile and desktop (width is the only thing that
+      // differs by device). cssText (not setAttribute) so nothing — a
+      // leftover margin or stray transform — can be inherited. ----------
+      var cardRadius = (cfg.borderRadius != null ? cfg.borderRadius : 22) + 'px';
       wrap.style.cssText = [
         'position:fixed',
-        'top:50%',
+        'bottom:24px',
         'left:50%',
-        'transform:translate(-50%,-50%)',
-        'width:280px',
-        'max-width:90vw',
-        'border-radius:16px',
+        'transform:translateX(-50%)',
+        'width:' + (isMobile ? '300px' : 'min(340px,90vw)'),
+        'background:linear-gradient(145deg,#ffffff,#f8f9ff)',
+        'border-radius:' + cardRadius,
         'overflow:hidden',
-        'box-shadow:0 8px 32px rgba(0,0,0,0.25)',
+        'box-shadow:0 20px 60px rgba(0,0,0,0.18),0 4px 12px rgba(0,0,0,0.08),inset 0 1px 0 rgba(255,255,255,0.8)',
         'z-index:2147483647',
-        'background:' + (cfg.bgColor || '#ffffff'),
-        'font-family:' + (cfg.fontFamily || 'inherit')
+        'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif'),
+        'border:1px solid rgba(255,255,255,0.8)',
+        'max-width:90vw'
       ].join(';');
 
       if (cfg.imageUrl) {
-        var mcImg = document.createElement('img');
-        mcImg.src = cfg.imageUrl;
-        mcImg.alt = '';
-        mcImg.style.cssText = [
+        // Image wrapper with effects (dark bottom gradient, diagonal sheen,
+        // corner dot pattern) — see ccfInjectPopupStyles for the CSS.
+        var imgWrap = document.createElement('div');
+        imgWrap.className = 'ccf-img-wrap ccf-corner-dots';
+        imgWrap.style.cssText = [
           'width:100%',
-          'height:140px',
+          'height:' + (isMobile ? '160px' : '170px'),
+          'position:relative',
+          'overflow:hidden',
+          'flex-shrink:0'
+        ].join(';');
+
+        // Main image with zoom-on-hover (CSS: #ccf-push-prompt:hover .ccf-popup-img).
+        var cardImgEl = document.createElement('img');
+        cardImgEl.src = cfg.imageUrl;
+        cardImgEl.alt = '';
+        cardImgEl.className = 'ccf-popup-img';
+        cardImgEl.style.cssText = [
+          'width:100%',
+          'height:100%',
           'object-fit:cover',
           'display:block',
           'object-position:' + (cfg.imagePosition || '50% 50%')
         ].join(';');
-        mcImg.onerror = function () { mcImg.style.display = 'none'; };
-        wrap.appendChild(mcImg);
+        cardImgEl.onerror = function () {
+          imgWrap.style.background = 'linear-gradient(135deg,' + accent + ',' + accent + '88)';
+          cardImgEl.style.display = 'none';
+        };
+        imgWrap.appendChild(cardImgEl);
+
+        // Decorative accent circles (bottom-right).
+        var imgShape1 = document.createElement('div');
+        imgShape1.style.cssText = [
+          'position:absolute',
+          'bottom:-20px',
+          'right:-20px',
+          'width:80px',
+          'height:80px',
+          'border-radius:50%',
+          'background:rgba(255,255,255,0.12)',
+          'z-index:2',
+          'pointer-events:none'
+        ].join(';');
+        imgWrap.appendChild(imgShape1);
+
+        var imgShape2 = document.createElement('div');
+        imgShape2.style.cssText = [
+          'position:absolute',
+          'bottom:20px',
+          'right:20px',
+          'width:40px',
+          'height:40px',
+          'border-radius:50%',
+          'background:rgba(255,255,255,0.1)',
+          'z-index:2',
+          'pointer-events:none'
+        ].join(';');
+        imgWrap.appendChild(imgShape2);
+
+        wrap.appendChild(imgWrap);
+      } else {
+        // No image — premium gradient placeholder instead of nothing.
+        var gradientWrap = document.createElement('div');
+        gradientWrap.style.cssText = [
+          'width:100%',
+          'height:' + (isMobile ? '120px' : '130px'),
+          'background:linear-gradient(135deg,' +
+            accent + ' 0%,' + accent + 'aa 50%,' + accent + '44 100%)',
+          'display:flex',
+          'align-items:center',
+          'justify-content:center',
+          'position:relative',
+          'overflow:hidden',
+          'flex-shrink:0'
+        ].join(';');
+
+        // Animated circles in the gradient.
+        ['70px 70px rgba(255,255,255,0.08)',
+         '120px 120px rgba(255,255,255,0.05)'].forEach(function (c, i) {
+          var circle = document.createElement('div');
+          var parts = c.split(' ');
+          circle.style.cssText = [
+            'position:absolute',
+            i === 0 ? 'top:-20px;right:-20px' : 'bottom:-40px;left:-40px',
+            'width:' + parts[0],
+            'height:' + parts[1],
+            'border-radius:50%',
+            'background:' + parts[2]
+          ].join(';');
+          gradientWrap.appendChild(circle);
+        });
+
+        // Store icon in the center.
+        var gradientIcon = document.createElement('div');
+        gradientIcon.style.cssText = 'font-size:36px;z-index:1;' +
+          'animation:ccfBounce 2s ease infinite';
+        gradientIcon.textContent = '🛍️';
+        gradientWrap.appendChild(gradientIcon);
+        wrap.appendChild(gradientWrap);
       }
 
-      var mcContent = document.createElement('div');
-      mcContent.style.cssText = 'padding:12px 14px 14px;';
-
-      var mcAlign = cfg.textAlign || 'left';
-
-      var mcHead = document.createElement('div');
-      mcHead.id = 'ccf-prompt-text';
-      mcHead.style.cssText = [
-        'font-size:13px',
-        'font-weight:500',
-        'color:' + fg,
-        'margin:0 0 10px',
-        'line-height:1.4',
-        'text-align:' + mcAlign
+      // Subtle top accent line — right after the image, or at the very top
+      // when there's no image. `accent` is already in scope (cfg.accentColor).
+      var accentLine = document.createElement('div');
+      accentLine.style.cssText = [
+        'height:3px',
+        'background:linear-gradient(90deg,' + accent + ',' + accent + '88,transparent)',
+        'width:100%'
       ].join(';');
-      mcHead.textContent = headline;
-      mcContent.appendChild(mcHead);
+      wrap.appendChild(accentLine);
+
+      var cardContent = document.createElement('div');
+      cardContent.id = 'ccf-content-section';
+      cardContent.style.cssText = 'padding:20px 18px 18px;';
+
+      var cardAlign = cfg.textAlign || 'left';
+
+      if (cfg.brandName) {
+        var cardBrand = document.createElement('div');
+        cardBrand.style.cssText = [
+          'font-size:10px',
+          'font-weight:700',
+          'letter-spacing:3px',
+          'text-transform:uppercase',
+          'color:#9ca3af',
+          'margin-bottom:8px'
+        ].join(';');
+        cardBrand.textContent = cfg.brandName;
+        cardContent.appendChild(cardBrand);
+      }
+
+      var cardHead = document.createElement('div');
+      cardHead.id = 'ccf-prompt-text';
+      cardHead.style.cssText = [
+        'font-size:16px',
+        'font-weight:700',
+        'line-height:1.3',
+        'color:' + fg,
+        'margin-bottom:6px',
+        'text-align:' + cardAlign
+      ].join(';');
+      cardHead.textContent = headline;
+      cardContent.appendChild(cardHead);
 
       if (cfg.subtext) {
-        var mcSub = document.createElement('div');
-        mcSub.style.cssText = [
-          'font-size:12px',
+        var cardSub = document.createElement('div');
+        cardSub.style.cssText = [
+          'font-size:13px',
           'color:#6b7280',
-          'margin:0 0 10px',
-          'line-height:1.4',
-          'text-align:' + mcAlign
+          'margin-bottom:16px',
+          'line-height:1.5',
+          'text-align:' + cardAlign
         ].join(';');
-        mcSub.textContent = cfg.subtext;
-        mcContent.appendChild(mcSub);
+        cardSub.textContent = cfg.subtext;
+        cardContent.appendChild(cardSub);
       }
 
-      allow = buildAllowBtn([
-        'width:100%',
-        'padding:10px',
-        'font-size:14px',
-        'font-weight:700',
-        'background:' + accent,
-        'color:#fff',
-        'border:none',
-        'border-radius:' + ctaRadius,
-        'margin-bottom:8px',
-        'cursor:pointer'
-      ].join(';'));
-      mcContent.appendChild(allow);
+      // Highlighted discount offer, when any discount action is configured
+      // — a gently bouncing badge (see .ccf-discount-badge / ccfBounce).
+      if (ccfDiscountEnabled()) {
+        var offerBox = document.createElement('div');
+        offerBox.className = 'ccf-discount-badge';
+        offerBox.style.cssText = [
+          'background:linear-gradient(135deg,#f0fdf4,#dcfce7)',
+          'border:1px solid #86efac',
+          'border-radius:12px',
+          'padding:10px 14px',
+          'margin-bottom:14px',
+          'display:flex',
+          'align-items:center',
+          'gap:8px',
+          'justify-content:center'
+        ].join(';');
+        offerBox.innerHTML =
+          '<span style="font-size:16px">🏷️</span>' +
+          '<span style="font-size:13px;color:#16a34a;font-weight:600">' +
+          ccfDiscountOfferText() + '</span>';
+        cardContent.appendChild(offerBox);
+      }
 
-      // Plain text dismiss — no border/box, not a <button>.
-      var denyEl = document.createElement('div');
-      denyEl.id = 'ccf-deny-btn';
-      denyEl.style.cssText = [
-        'text-align:center',
-        'font-size:12px',
-        'color:#9ca3af',
-        'cursor:pointer',
-        'padding:4px 0',
-        'text-decoration:none',
-        'font-family:inherit'
-      ].join(';');
-      denyEl.textContent = denyLabel;
-      deny = denyEl;
-      mcContent.appendChild(denyEl);
+      // Card builds its own inline email/phone inputs (matching its own
+      // content-section design) instead of the shared
+      // ccfBuildDiscountFields()+append path split still uses below.
+      if (ccfShowEmailField()) {
+        var cardEmailInput = document.createElement('input');
+        cardEmailInput.type = 'email';
+        cardEmailInput.id = 'ccf-email-input';
+        cardEmailInput.className = 'ccf-input';
+        var cardEp = ccfFieldPct('emailDiscount');
+        cardEmailInput.placeholder = 'Your email' + (cardEp ? ' (get ' + cardEp + '% off)' : '');
+        cardEmailInput.style.cssText = ccfInputStyle();
+        cardContent.appendChild(cardEmailInput);
+      }
+      if (ccfShowPhoneField()) {
+        var cardPhoneInput = document.createElement('input');
+        cardPhoneInput.type = 'tel';
+        cardPhoneInput.id = 'ccf-phone-input';
+        cardPhoneInput.className = 'ccf-input';
+        var cardPp = ccfFieldPct('phoneDiscount');
+        cardPhoneInput.placeholder = 'Your phone' + (cardPp ? ' (get ' + cardPp + '% off)' : '');
+        cardPhoneInput.style.cssText = ccfInputStyle();
+        cardContent.appendChild(cardPhoneInput);
+      }
+
+      allow = buildAllowBtn(ccfAllowButtonStyle(accent));
+      cardContent.appendChild(allow);
+
+      // Plain text dismiss — no border/box, not underlined by default
+      // (CSS handles the subtle hover color, see ccfInjectPopupStyles).
+      deny = buildDenyBtn(ccfDenyButtonStyle());
+      cardContent.appendChild(deny);
 
       if (cfg.showBranding) {
-        mcContent.appendChild(buildBranding([
-          'margin-top:8px',
-          'font-size:10px',
-          'color:#d1d5db',
-          'text-align:center'
-        ].join(';')));
+        cardContent.appendChild(buildBranding(
+          'margin-top:12px;font-size:10px;color:#d1d5db;text-align:center;letter-spacing:0.5px;'));
       }
 
-      wrap.appendChild(mcContent);
+      wrap.appendChild(cardContent);
 
-      // Dark overlay behind the screen-centered card (shared append + cleanup
-      // below handle #ccf-overlay).
-      if (cfg.showOverlay !== false) {
-        overlay = document.createElement('div');
-        overlay.id = 'ccf-overlay';
-        overlay.style.cssText = [
-          'position:fixed',
-          'top:0',
-          'left:0',
-          'width:100%',
-          'height:100%',
-          'background:rgba(0,0,0,0.5)',
-          'z-index:2147483646'
-        ].join(';');
-      }
-
-    } else if (layout === 'card') {
-      // ---------- LAYOUT 2 (desktop): small card (the original) ----------
-      var POS = {
-        'bottom-right': 'bottom:16px;right:20px;',
-        'bottom-left':  'bottom:16px;left:20px;',
-        'center':       'top:50%;left:50%;transform:translate(-50%,-50%);',
-        'top-right':    'top:20px;right:20px;',
-        'top-left':     'top:20px;left:20px;'
-      };
-      var posStyle = POS[cfg.position] || POS['bottom-right'];
-      var radius = (cfg.borderRadius != null ? cfg.borderRadius : 12) + 'px';
-      wrap.setAttribute('style',
-        'position:fixed;' + posStyle + 'z-index:999999;' +
-        'background:' + bg + ';color:' + fg + ';' +
-        'border-radius:' + radius + ';box-shadow:0 8px 30px rgba(0,0,0,0.18);' +
-        'padding:16px;max-width:min(300px,88vw);' +
-        'font-family:' + font + ';font-size:14px;line-height:1.5;');
-
-      if (cfg.imageUrl) {
-        var cardImg = document.createElement('img');
-        cardImg.src = cfg.imageUrl;
-        cardImg.alt = '';
-        cardImg.setAttribute('style',
-          'width:100%;border-radius:8px;margin-bottom:8px;object-fit:cover;' +
-          'object-position:' + imagePosition + ';max-height:120px;');
-        wrap.appendChild(cardImg);
-      }
-      if (cfg.customTitle) {
-        var cardTitle = document.createElement('strong');
-        cardTitle.id = 'ccf-prompt-title';
-        cardTitle.setAttribute('style', 'display:block;margin:0 0 6px;font-size:15px;');
-        cardTitle.textContent = cfg.customTitle;
-        wrap.appendChild(cardTitle);
-      }
-      var cardP = document.createElement('p');
-      cardP.id = 'ccf-prompt-text';
-      cardP.setAttribute('style', 'margin:0 0 12px;');
-      cardP.textContent = promptText;
-      wrap.appendChild(cardP);
-
-      allow = buildAllowBtn(
-        'background:' + accent + ';color:#fff;border:0;border-radius:8px;padding:8px 14px;' +
-        'font-size:13px;font-weight:700;cursor:pointer;margin-right:8px;');
-      deny = buildDenyBtn('background:none;border:0;color:#888;font-size:13px;cursor:pointer;');
-      wrap.appendChild(allow);
-      wrap.appendChild(deny);
-
-      if (cfg.showBranding) {
-        wrap.appendChild(buildBranding('margin-top:10px;font-size:10px;color:#9ca3af;'));
-      }
+      closeBtn = document.createElement('button');
+      closeBtn.id = 'ccf-close-btn';
+      closeBtn.type = 'button';
+      closeBtn.textContent = '×';
+      closeBtn.style.cssText = 'position:absolute;top:12px;right:12px;' +
+        'background:rgba(0,0,0,0.35);color:#fff;border:none;border-radius:50%;' +
+        'width:26px;height:26px;font-size:14px;line-height:26px;text-align:center;' +
+        'cursor:pointer;z-index:10;';
+      wrap.appendChild(closeBtn);
 
     } else {
       // ---------- LAYOUT 1: split (image + content), the default ----------
@@ -645,6 +974,9 @@
           'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
           'width:88vw;max-width:360px;border-radius:16px;overflow:hidden;' +
           'background:' + bg + ';box-shadow:0 20px 60px rgba(0,0,0,0.35);z-index:999999;');
+        // Screen-centered (translate(-50%,-50%)) — use the fade+scale
+        // animation instead of the bottom-anchored default slide-up.
+        wrap.classList.add('layout-center');
 
         // Image section — always a fixed 200px tall box; if an image is set,
         // an absolutely-positioned <img> fills it, with a gradient fallback
@@ -683,6 +1015,7 @@
         }
 
         var mContent = document.createElement('div');
+        mContent.id = 'ccf-content-section';
         mContent.setAttribute('style',
           'padding:20px 18px;background:' + bg + ';color:' + fg + ';font-family:' + font + ';');
 
@@ -710,14 +1043,10 @@
           mContent.appendChild(mSub);
         }
 
-        allow = buildAllowBtn(
-          'width:100%;padding:14px;font-size:15px;font-weight:700;background:' + accent + ';' +
-          'color:#fff;border:none;border-radius:' + ctaRadius + ';margin-bottom:10px;cursor:pointer;');
+        allow = buildAllowBtn(ccfAllowButtonStyle(accent));
         mContent.appendChild(allow);
 
-        deny = buildDenyBtn(
-          'text-align:center;font-size:13px;color:#9ca3af;text-decoration:underline;' +
-          'cursor:pointer;display:block;');
+        deny = buildDenyBtn(ccfDenyButtonStyle());
         mContent.appendChild(deny);
 
         if (cfg.showBranding) {
@@ -740,13 +1069,20 @@
           'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:999999;' +
           'max-width:680px;width:90%;display:flex;border-radius:12px;overflow:hidden;' +
           'box-shadow:0 20px 60px rgba(0,0,0,0.3);');
+        // Screen-centered — same reasoning as the mobile-split branch above.
+        wrap.classList.add('layout-center');
 
         var leftPanel = document.createElement('div');
+        leftPanel.className = 'ccf-img-wrap ccf-corner-dots';
         leftPanel.setAttribute('style',
           'width:45%;min-height:380px;background:linear-gradient(135deg,#667eea,#764ba2);');
-        if (splitImgEl) leftPanel.appendChild(splitImgEl);
+        if (splitImgEl) {
+          splitImgEl.className = 'ccf-popup-img';
+          leftPanel.appendChild(splitImgEl);
+        }
 
         var rightPanel = document.createElement('div');
+        rightPanel.id = 'ccf-content-section';
         rightPanel.setAttribute('style',
           'width:55%;padding:32px 28px;display:flex;flex-direction:column;justify-content:center;' +
           'background:' + bg + ';color:' + fg + ';font-family:' + font + ';');
@@ -774,13 +1110,10 @@
           rightPanel.appendChild(splitSub);
         }
 
-        allow = buildAllowBtn(
-          'background:' + accent + ';color:#fff;border:none;border-radius:' + ctaRadius + ';' +
-          'padding:14px 24px;font-size:15px;font-weight:700;cursor:pointer;width:100%;margin-bottom:12px;');
+        allow = buildAllowBtn(ccfAllowButtonStyle(accent));
         rightPanel.appendChild(allow);
 
-        deny = buildDenyBtn(
-          'background:none;border:none;color:#9ca3af;font-size:13px;cursor:pointer;text-decoration:underline;');
+        deny = buildDenyBtn(ccfDenyButtonStyle());
         rightPanel.appendChild(deny);
 
         if (cfg.showBranding) {
@@ -811,14 +1144,17 @@
     if (overlay) document.body.appendChild(overlay);
     document.body.appendChild(wrap);
 
-    // discount-feature: inject the offer headline + email/phone inputs right
-    // after the deny control (every layout except the thin banner bar).
-    var discountFields = layout !== 'banner' ? ccfBuildDiscountFields() : null;
-    if (discountFields && deny && deny.parentNode) {
-      if (deny.nextSibling) deny.parentNode.insertBefore(discountFields, deny.nextSibling);
-      else deny.parentNode.appendChild(discountFields);
+    // discount-feature: the split layout still uses the shared field-builder,
+    // inserted right after the deny control. Card builds its own inline
+    // fields above (see the card branch); banner never shows a discount.
+    if (layout === 'split') {
+      var discountFields = ccfBuildDiscountFields();
+      if (discountFields && deny && deny.parentNode) {
+        if (deny.nextSibling) deny.parentNode.insertBefore(discountFields, deny.nextSibling);
+        else deny.parentNode.appendChild(discountFields);
+      }
     }
-    var wantsDiscount = !!discountFields;
+    var wantsDiscount = layout !== 'banner' && ccfDiscountEnabled();
 
     function cleanup() {
       if (promptAutoDismissTimer) { clearTimeout(promptAutoDismissTimer); promptAutoDismissTimer = null; }
@@ -837,13 +1173,12 @@
       // subscribe already succeeded, so nothing else is blocked.
       if (!d || !d.code) { cleanup(); return; }
 
-      var fields = document.getElementById('ccf-discount-fields');
-      if (fields && fields.parentNode) fields.parentNode.removeChild(fields);
-      if (allow) allow.style.display = 'none';
-
       // NOTE: ccf_active_discount / ccf_active_pct are stashed by
       // renderDiscountCode() immediately before it redirects — NOT here —
       // so the redirected page load never finds a stale code and skips.
+      // renderDiscountCode() replaces #ccf-content-section wholesale, so
+      // there's no separate need to hide the Allow button or the discount
+      // fields here — they live inside that same section and go with it.
 
       var productHandle = null;
       var pathParts = window.location.pathname.split('/');
@@ -861,20 +1196,58 @@
       var phoneEl = document.getElementById('ccf-phone-input');
       var email = emailEl && emailEl.value ? emailEl.value.trim() : '';
       var phone = phoneEl && phoneEl.value ? phoneEl.value.trim() : '';
+      var originalButtonText = allow.textContent;
+      var originalButtonBg = allow.style.background;
 
-      if (wantsDiscount) {
-        allow.disabled = true;
-        allow.textContent = 'Setting up…';
-      } else {
-        cleanup();
+      function resetButton() {
+        allow.disabled = false;
+        allow.textContent = originalButtonText;
+        allow.style.opacity = '1';
+        allow.style.cursor = 'pointer';
+        allow.style.background = originalButtonBg;
       }
 
+      // Stage 1: immediate feedback — keep the popup open while we work.
+      allow.disabled = true;
+      allow.textContent = '⏳ Setting up...';
+      allow.style.opacity = '0.8';
+      allow.style.cursor = 'not-allowed';
+
+      // Already-subscribed customer (discount-capture path) — there's no
+      // native permission prompt to show, so skip requestPermission()
+      // entirely and go straight to generating the discount.
+      if (Notification.permission === 'granted') {
+        var capAction = 'push';
+        if (email && phone) capAction = 'both';
+        else if (email) capAction = 'email';
+        else if (phone) capAction = 'phone';
+
+        allow.textContent = '✓ Getting your discount...';
+        allow.style.background = '#16a34a';
+
+        fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: capAction, email: email, phone: phone, sessionId: getSessionId()
+          })
+        })
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d && d.code) allow.textContent = '🎉 Redirecting...';
+            finishDiscount(d, capAction);
+          })
+          .catch(function () { resetButton(); });
+        return;
+      }
+
+      // Normal flow for new subscribers.
       Notification.requestPermission().then(function (permission) {
         var granted = permission === 'granted';
         try { trackEvent('push_prompt_accepted', { trigger: trigger, granted: granted }); } catch (e) {}
         if (!granted) {
           try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
-          if (wantsDiscount) cleanup();
+          cleanup();
           return;
         }
         registerSW()
@@ -882,7 +1255,16 @@
           .then(function (token) { return saveToken(token); })
           .then(function () { setupForegroundMessages(); })
           .then(function () {
-            if (!wantsDiscount) return;
+            // Stage 2: subscribed.
+            allow.textContent = wantsDiscount
+              ? '✓ Subscribed! Getting your discount...'
+              : '✓ Subscribed!';
+            allow.style.background = '#16a34a';
+
+            if (!wantsDiscount) {
+              setTimeout(cleanup, 900);
+              return;
+            }
             var action = 'push';
             if (email && phone) action = 'both';
             else if (email) action = 'email';
@@ -895,12 +1277,21 @@
               })
             })
               .then(function (r) { return r.json(); })
-              .then(function (d) { finishDiscount(d, action); })
-              .catch(function () { cleanup(); });
+              .then(function (d) {
+                // Stage 3: discount generated — renderDiscountCode swaps the
+                // content section right after this, via finishDiscount().
+                if (d && d.code) allow.textContent = '🎉 Redirecting...';
+                finishDiscount(d, action);
+              })
+              .catch(function () {
+                // Stage 4: error — reset so the customer can retry, rather
+                // than silently closing the popup.
+                resetButton();
+              });
           })
           .catch(function (err) {
             console.error('[CCF] subscribe after prompt failed:', err.message);
-            if (wantsDiscount) cleanup();
+            resetButton();
           });
       });
     });
@@ -950,14 +1341,219 @@
       .catch(function () { /* keep defaults */ });
   }
 
+  // discount-feature: a standalone "unlock discount" component injected
+  // right under the Buy It Now button on product pages. No notification
+  // permission needed — the customer just enters email/phone to claim it.
+  // Independent of the popup — its own form, its own discount-generate call.
+  function injectProductNudge() {
+    if (getPageType() !== 'product') return;
+    if (document.getElementById('ccf-product-nudge')) return;
+    if (!ccfDiscountEnabled()) return;
+
+    // Don't show if this session already claimed a discount.
+    var discAlreadyClaimed = false;
+    try {
+      discAlreadyClaimed = sessionStorage.getItem('ccf_disc_redirected') === '1';
+    } catch(e) {}
+    if (discAlreadyClaimed) return;
+
+    // Same stylesheet the main popup uses (hover/focus states, the
+    // ccfNudgeSlideUp keyframe below) — the main popup never runs on
+    // product pages, so nothing else would inject it here.
+    ccfInjectPopupStyles();
+
+    var emailPct = (discountConfig.emailDiscount &&
+      discountConfig.emailDiscount.percentage) || 15;
+    var phonePct = (discountConfig.phoneDiscount &&
+      discountConfig.phoneDiscount.percentage) || 15;
+    var bothPct = (discountConfig.bothDiscount &&
+      discountConfig.bothDiscount.percentage) || 20;
+    var pushPct = (discountConfig.pushDiscount &&
+      discountConfig.pushDiscount.percentage) || 10;
+
+    var accent = popupConfig.accentColor || '#4f46e5';
+    var showEmail = ccfShowEmailField();
+    var showPhone = ccfShowPhoneField();
+
+    // Determine best discount to show.
+    var bestPct = pushPct;
+    var bestAction = 'push';
+    if (showEmail && showPhone) {
+      bestPct = bothPct; bestAction = 'both';
+    } else if (showEmail) {
+      bestPct = emailPct; bestAction = 'email';
+    } else if (showPhone) {
+      bestPct = phonePct; bestAction = 'phone';
+    }
+
+    // Find Buy It Now button.
+    var buyBtn = document.querySelector(
+      '.shopify-payment-button__button, ' +
+      '[data-testid="Checkout-button"], ' +
+      '.product-form__submit, button[name="add"]'
+    );
+    if (!buyBtn) return;
+
+    var nudge = document.createElement('div');
+    nudge.id = 'ccf-product-nudge';
+    nudge.style.cssText = [
+      'margin-top:12px',
+      'border-radius:16px',
+      'border:1.5px solid ' + accent + '33',
+      'background:linear-gradient(135deg,#f8f9ff,#f0f4ff)',
+      'box-shadow:0 4px 16px rgba(79,70,229,0.08)',
+      'overflow:hidden',
+      'animation:ccfNudgeSlideUp 0.4s cubic-bezier(0.34,1.56,0.64,1)'
+    ].join(';');
+
+    var formHTML =
+      '<div style="padding:16px">' +
+      '<div style="display:flex;align-items:center;gap:10px;' +
+      'margin-bottom:12px">' +
+      '<div style="font-size:24px">🏷️</div>' +
+      '<div>' +
+      '<div style="font-size:14px;font-weight:700;color:#111827">' +
+      'Unlock ' + bestPct + '% off this order</div>' +
+      '<div style="font-size:12px;color:#6b7280">' +
+      (showEmail || showPhone
+        ? 'Enter your details below to claim'
+        : 'Subscribe to notifications to claim') +
+      '</div></div></div>';
+
+    if (showEmail) {
+      formHTML +=
+        '<input type="email" id="ccf-nudge-email" ' +
+        'placeholder="Your email address" ' +
+        'style="width:100%;padding:10px 14px;font-size:13px;' +
+        'border:1.5px solid #e5e7eb;border-radius:10px;' +
+        'box-sizing:border-box;margin-bottom:8px;' +
+        'background:#fff;font-family:inherit"/>';
+    }
+
+    if (showPhone) {
+      formHTML +=
+        '<input type="tel" id="ccf-nudge-phone" ' +
+        'placeholder="Your phone number" ' +
+        'style="width:100%;padding:10px 14px;font-size:13px;' +
+        'border:1.5px solid #e5e7eb;border-radius:10px;' +
+        'box-sizing:border-box;margin-bottom:8px;' +
+        'background:#fff;font-family:inherit"/>';
+    }
+
+    formHTML +=
+      '<button id="ccf-nudge-btn" ' +
+      'style="width:100%;padding:12px;font-size:14px;' +
+      'font-weight:700;color:#fff;' +
+      'background:linear-gradient(135deg,' + accent + ',' +
+      accent + 'dd);border:none;border-radius:12px;' +
+      'cursor:pointer;box-shadow:0 4px 12px ' + accent + '44;' +
+      'margin-bottom:8px;letter-spacing:0.3px;' +
+      'transition:all 0.2s ease">' +
+      '🏷️ Unlock ' + bestPct + '% off</button>' +
+      '<div style="text-align:center">' +
+      '<button onclick="document.getElementById(' +
+      '\'ccf-product-nudge\').style.display=\'none\'" ' +
+      'style="font-size:11px;color:#9ca3af;background:none;' +
+      'border:none;cursor:pointer">' +
+      'No thanks, skip discount</button></div>' +
+      '</div>';
+
+    nudge.innerHTML = formHTML;
+
+    var insertTarget = buyBtn.closest('form') || buyBtn.parentNode;
+    if (insertTarget && insertTarget.parentNode) {
+      insertTarget.parentNode.insertBefore(nudge, insertTarget.nextSibling);
+    }
+
+    var nudgeBtn = document.getElementById('ccf-nudge-btn');
+    if (!nudgeBtn) return;
+
+    nudgeBtn.addEventListener('click', function() {
+      var email = document.getElementById('ccf-nudge-email');
+      var phone = document.getElementById('ccf-nudge-phone');
+      var emailVal = email ? email.value.trim() : '';
+      var phoneVal = phone ? phone.value.trim() : '';
+
+      // Determine action based on what was entered.
+      var action = 'push';
+      if (emailVal && phoneVal) action = 'both';
+      else if (emailVal) action = 'email';
+      else if (phoneVal) action = 'phone';
+
+      nudgeBtn.textContent = '⏳ Getting your discount...';
+      nudgeBtn.disabled = true;
+
+      fetch('/apps/cartncodform/generate-discount?shop=' +
+        encodeURIComponent(SHOP_DOMAIN), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: action,
+          email: emailVal || null,
+          phone: phoneVal || null,
+          sessionId: getSessionId()
+        })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d && d.code) {
+          nudge.innerHTML =
+            '<div style="padding:16px;text-align:center">' +
+            '<div style="font-size:32px;margin-bottom:8px">🎉</div>' +
+            '<div style="font-size:16px;font-weight:700;' +
+            'color:#111827;margin-bottom:6px">' +
+            d.percentage + '% off unlocked!</div>' +
+            '<div style="background:linear-gradient(135deg,' +
+            '#f0f4ff,#e8edff);border:1.5px dashed #818cf8;' +
+            'border-radius:12px;padding:12px;margin:10px 0">' +
+            '<div style="font-size:10px;color:#6366f1;' +
+            'font-weight:700;letter-spacing:2px;margin-bottom:4px">' +
+            'YOUR DISCOUNT CODE</div>' +
+            '<div style="font-size:22px;font-weight:800;' +
+            'letter-spacing:3px;font-family:monospace;color:#4338ca">' +
+            d.code + '</div>' +
+            '</div>' +
+            '<a href="/discount/' + d.code +
+            '?redirect=' + encodeURIComponent(window.location.pathname) +
+            '" style="display:block;padding:12px;' +
+            'background:linear-gradient(135deg,#16a34a,#15803d);' +
+            'color:#fff;border-radius:12px;font-weight:700;' +
+            'font-size:14px;text-decoration:none;margin-top:8px">' +
+            'Shop now with ' + d.percentage + '% off →</a>' +
+            '</div>';
+          try {
+            sessionStorage.setItem('ccf_disc_redirected', '1');
+            sessionStorage.setItem('ccf_active_discount', d.code);
+            sessionStorage.setItem('ccf_active_pct', String(d.percentage));
+          } catch(e) {}
+        } else {
+          nudgeBtn.disabled = false;
+          nudgeBtn.textContent = '🏷️ Unlock ' + bestPct + '% off';
+        }
+      })
+      .catch(function() {
+        nudgeBtn.disabled = false;
+        nudgeBtn.textContent = '🏷️ Unlock ' + bestPct + '% off';
+      });
+    });
+  }
+
   // Wire the four intent triggers. First one to fire wins (session guard).
   var ccfExitIntentBound = false;
   function initIntentTriggers() {
     if (!canPrompt()) return;
 
-    // PAGE_LOAD trigger — fires on ANY page after DWELL_MS (1.5s) if the
-    // customer has no existing push subscription. When it's in play we don't
-    // wire the other (page-restricted) intent triggers.
+    // Do not show the popup on product pages — home/collection/etc only.
+    // Computed here (not the `var pageType = getPageType()` further down)
+    // so this actually gates the PAGE_LOAD trigger below too, not just the
+    // return-visit/dwell triggers that come after it.
+    var pageType = getPageType();
+    if (pageType === 'product') return;
+
+    // PAGE_LOAD trigger — fires on ANY [remaining, non-product] page after
+    // DWELL_MS (1.5s) if the customer has no existing push subscription.
+    // When it's in play we don't wire the other (page-restricted) intent
+    // triggers.
     var hasToken = false;
     try {
       hasToken = !!localStorage.getItem(PAGE_LOAD_TOKEN_KEY);
@@ -972,7 +1568,11 @@
       return; // Don't set up other triggers if we show on load
     }
 
-    var pageType = getPageType();
+    // pageType is already computed above (and is guaranteed not 'product'
+    // here, since we returned early if it was) — meta/pid below is now
+    // effectively always null; the return-visit and dwell triggers that
+    // reference it are unreachable dead code as a direct consequence of
+    // this change, kept as-is in case product pages are ever re-enabled.
     var meta = pageType === 'product' ? getProductMeta() : null;
     var pid = meta && meta.productId ? String(meta.productId) : null;
 
@@ -1232,53 +1832,21 @@
           console.warn('[CCF] Token save failed — will retry on next visit');
         }
 
-        // discount-feature: mint + apply the push discount for BOTH new and
-        // existing subscribers. When permission was already 'granted' the soft
-        // prompt (and finishDiscount) never runs, and subscribe-customer
-        // returns success:false for an already-known token — so this must run
-        // regardless of data.success. Guard is a dedicated "already redirected
-        // this session" flag, NOT ccf_active_discount (which the redirect
-        // itself sets, so using it here would always skip after the first pass).
-        var redirectDone = false;
-        try {
-          redirectDone = sessionStorage.getItem('ccf_disc_redirected') === '1';
-        } catch (e) {}
+        // Discount is handled by the Allow button click handler
+        // which correctly detects email/phone action type.
 
-        console.log('[CCF] discount check - redirectDone:', redirectDone);
-
-        if (!redirectDone) {
-          console.log('[CCF] auto-triggering discount...');
-          fetch('/apps/cartncodform/generate-discount?shop=' +
-            encodeURIComponent(SHOP_DOMAIN), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              action: 'push',
-              sessionId: getSessionId()
-            })
-          })
-            .then(function (r) { return r.json(); })
-            .then(function (d) {
-              console.log('[CCF] discount result:', JSON.stringify(d));
-              if (d && d.code) {
-                // Mark redirect as done FIRST.
-                try {
-                  sessionStorage.setItem('ccf_disc_redirected', '1');
-                  sessionStorage.setItem('ccf_active_discount', d.code);
-                  sessionStorage.setItem('ccf_active_pct', String(d.percentage));
-                } catch (e) {}
-                var currentPath = window.location.pathname + window.location.search;
-                var discountUrl = '/discount/' + d.code +
-                  '?redirect=' + encodeURIComponent(currentPath);
-                console.log('[CCF] redirecting to:', discountUrl);
-                window.location.href = discountUrl;
-              }
-            })
-            .catch(function (e) {
-              console.log('[CCF] discount error:', e.message);
-            });
-        } else {
-          console.log('[CCF] discount redirect already done');
+        // discount-feature: saveToken() also runs when permission was
+        // ALREADY 'granted' (checkAndInit's returning-customer path), where
+        // showSoftPrompt/finishDiscount never ran on this page load. Show
+        // the main popup (email/phone fields) for discount capture there —
+        // canPromptForDiscount() guards against showing it twice.
+        // getPageType() (not a bare `pageType` var — saveToken() has no such
+        // variable in scope; that'd throw a ReferenceError and silently kill
+        // this whole discount-capture branch via the outer .catch below).
+        if (ccfDiscountEnabled() && canPromptForDiscount() && getPageType() !== 'product') {
+          setTimeout(function() {
+            showSoftPrompt('page_load', null);
+          }, 1500);
         }
 
         return data;
@@ -1324,6 +1892,9 @@
         return saveToken(currentToken);
       }).then(function() {
         setupForegroundMessages();
+        // discount-feature: saveToken()'s own success handler (above) is
+        // what schedules the discount-capture showSoftPrompt() call for
+        // this already-granted path — nothing extra needed here.
       }).catch(function(err) {
         console.error('[CCF] Token verify failed:', err.message);
         // If getToken fails entirely, fall back to saving the stored token.
@@ -1373,7 +1944,12 @@
       // token has actually rotated — see fetchPromise.then() there.
 
       // Trigger 3 — ADD TO CART soft prompt (session-guarded internally).
-      try { showSoftPrompt('add_to_cart', null); } catch (e) {}
+      // Do not show on product pages, even when add-to-cart fires there.
+      try {
+        if (getPageType() !== 'product') {
+          showSoftPrompt('add_to_cart', null);
+        }
+      } catch (e) {}
     });
   }
 
@@ -1653,7 +2229,12 @@
             url: window.location.href
           });
           // Trigger 3 — ADD TO CART soft prompt (session-guarded internally).
-          try { showSoftPrompt('add_to_cart', addedPid ? String(addedPid) : null); } catch (e) {}
+          // Do not show on product pages, even when add-to-cart fires there.
+          try {
+            if (getPageType() !== 'product') {
+              showSoftPrompt('add_to_cart', addedPid ? String(addedPid) : null);
+            }
+          } catch (e) {}
         } catch(e) {}
       }
       if (isCartChange) {
@@ -1727,9 +2308,18 @@
     checkActiveDiscount();
 
     // popup-customizer + discount-feature: load appearance + discount config
-    // first, then wire the intent triggers (which is where the dwell timer starts).
+    // first, then wire the intent triggers (which is where the dwell timer
+    // starts) and the product-page nudge — both read popupConfig/
+    // discountConfig, so both wait on this same Promise.all rather than a
+    // bare setTimeout racing the config fetch (which can lose on a cold
+    // backend and silently never show the nudge).
     Promise.all([fetchPopupConfig(), fetchDiscountConfig()]).then(function () {
       initIntentTriggers();
+
+      // Inject product page discount nudge.
+      setTimeout(function() {
+        injectProductNudge();
+      }, 1000);
     });
 
     if (Notification.permission === 'granted') {

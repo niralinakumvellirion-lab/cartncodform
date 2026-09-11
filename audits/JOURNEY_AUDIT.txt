@@ -1,0 +1,408 @@
+JOURNEY AUDIT — read-only file dump
+===================================
+Generated: 2026-09-11
+No modifications made.
+
+
+════════════════════════════════════════════════════════════════════
+1. backend/routes/events.js  (full file, 298 lines — GET /:shopDomain/customer/:sessionId is at lines 85-103)
+════════════════════════════════════════════════════════════════════
+  1	const express = require('express');
+  2	const router = express.Router();
+  3	const StorefrontEvent = require('../models/StorefrontEvent');
+  4	const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
+  5
+  6	/**
+  7	 * POST /api/events
+  8	 * Body: { shopDomain, sessionId?, customerId?, token?, events: [...] }
+  9	 * Each event: { type, path, pageType, meta, ts }
+ 10	 * Accepts a batch of events from the storefront JS.
+ 11	 * Also callable via navigator.sendBeacon (text/plain body).
+ 12	 */
+ 13	router.post('/', async (req, res) => {
+ 14	  try {
+ 15	    let body = req.body;
+ 16
+ 17	    // sendBeacon sends text/plain — parse it manually if needed.
+ 18	    if (typeof body === 'string') {
+ 19	      try { body = JSON.parse(body); } catch { return res.status(400).end(); }
+ 20	    }
+ 21
+ 22	    const { shopDomain, sessionId, customerId, token, events } = body;
+ 23
+ 24	    if (!shopDomain || !Array.isArray(events) || events.length === 0) {
+ 25	      return res.status(400).json({ error: 'shopDomain and events[] required' });
+ 26	    }
+ 27
+ 28	    const shop = shopDomain.trim().toLowerCase();
+ 29	    const docs = events.map(e => ({
+ 30	      shopDomain: shop,
+ 31	      sessionId:  sessionId  || undefined,
+ 32	      customerId: customerId || undefined,
+ 33	      token:      token      || undefined,
+ 34	      type:       e.type     || 'unknown',
+ 35	      path:       e.path     || undefined,
+ 36	      pageType:   e.pageType || undefined,
+ 37	      meta:       e.meta     || undefined,
+ 38	      ts:         e.ts ? new Date(e.ts) : new Date(),
+ 39	    }));
+ 40
+ 41	    await StorefrontEvent.insertMany(docs, { ordered: false });
+ 42	    console.log(`[events] Saved ${docs.length} event(s) for ${shop}`);
+ 43
+ 44	    // Phase C2 — on-ingest identity resolution + signal recompute. Fire-and-
+ 45	    // forget: the beacon response must not wait on this.
+ 46	    {
+ 47	      const { upsertProfile } = require('../services/profileService');
+ 48	      const { computeSignalsForProfile } = require('../services/signalEngine');
+ 49	      upsertProfile(shop, {
+ 50	        sessionId: sessionId || null,
+ 51	        customerId: customerId || null,
+ 52	        pushToken: token || null,
+ 53	      }, { lastSeenAt: new Date() })
+ 54	        .then((profile) => {
+ 55	          if (profile?._id) {
+ 56	            computeSignalsForProfile(profile._id, shop)
+ 57	              .catch((err) => console.error('[signals] events ingest error:', err.message));
+ 58	          }
+ 59	        })
+ 60	        .catch((err) => console.error('[profile] events upsert error:', err.message));
+ 61	    }
+ 62
+ 63	    // Phase F — a page_view from a suppressed profile lifts push suppression.
+ 64	    // Fully fire-and-forget: the beacon response goes out immediately.
+ 65	    if (sessionId && events.some((e) => e.type === 'page_view')) {
+ 66	      const { clearPushSuppression } = require('../services/pushHygiene');
+ 67	      const Profile = require('../models/Profile');
+ 68	      Profile.findOne({ shopDomain: shop, 'identifiers.sessionIds': sessionId })
+ 69	        .then((profile) => {
+ 70	          if (profile) {
+ 71	            clearPushSuppression(profile._id, shop)
+ 72	              .catch((err) => console.error('[hygiene] resubscribe error:', err.message));
+ 73	          }
+ 74	        })
+ 75	        .catch((err) => console.error('[hygiene] resubscribe lookup error:', err.message));
+ 76	    }
+ 77
+ 78	    return res.status(200).json({ success: true });
+ 79	  } catch (err) {
+ 80	    console.error('[events] POST /api/events error:', err.message);
+ 81	    return res.status(500).json({ error: 'Failed to save events' });
+ 82	  }
+ 83	});
+ 84
+ 85	/**
+ 86	 * GET /api/events/:shopDomain/customer/:sessionId
+ 87	 * Returns all events for a customer session, sorted newest first.
+ 88	 */
+ 89	router.get('/:shopDomain/customer/:sessionId', requireAuth, requireStoreOwner, async (req, res) => {
+ 90	  try {
+ 91	    const shop = req.params.shopDomain.trim().toLowerCase();
+ 92	    const sessionId = req.params.sessionId;
+ 93
+ 94	    const events = await StorefrontEvent.find({ shopDomain: shop, sessionId })
+ 95	      .sort({ ts: -1 })
+ 96	      .limit(200);
+ 97
+ 98	    return res.json(events);
+ 99	  } catch (err) {
+100	    console.error('[events] GET error:', err.message);
+101	    return res.status(500).json({ error: 'Failed to fetch events' });
+102	  }
+103	});
+104
+105	/**
+106	 * GET /api/events/:shopDomain/summary
+107	 * Returns event counts by type for the shop (last 30 days).
+108	 */
+109	router.get('/:shopDomain/summary', requireAuth, requireStoreOwner, async (req, res) => {
+110	  try {
+111	    const shop = req.params.shopDomain.trim().toLowerCase();
+112	    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+113
+114	    const summary = await StorefrontEvent.aggregate([
+115	      { $match: { shopDomain: shop, ts: { $gte: since } } },
+116	      { $group: { _id: '$type', count: { $sum: 1 } } },
+117	      { $sort: { count: -1 } }
+118	    ]);
+119
+120	    return res.json(summary);
+121	  } catch (err) {
+122	    console.error('[events] summary error:', err.message);
+123	    return res.status(500).json({ error: 'Failed to fetch summary' });
+124	  }
+125	});
+126
+127	/**
+128	 * GET /api/events/:shopDomain/ccfsession/:ccfSessionId
+129	 * Returns all events for a stable analytics session UUID, newest first.
+130	 */
+131	router.get('/:shopDomain/ccfsession/:ccfSessionId', requireAuth, requireStoreOwner, async (req, res) => {
+132	  try {
+133	    const shop = req.params.shopDomain.trim().toLowerCase();
+134	    const ccfSessionId = req.params.ccfSessionId;
+135
+136	    const events = await StorefrontEvent.find({
+137	      shopDomain: shop,
+138	      sessionId: ccfSessionId  // stored as sessionId in the model
+139	    })
+140	      .sort({ ts: -1 })
+141	      .limit(200);
+142
+143	    return res.json(events);
+144	  } catch (err) {
+145	    console.error('[events] GET ccfsession error:', err.message);
+146	    return res.status(500).json({ error: 'Failed to fetch events' });
+147	  }
+148	});
+149
+150	/**
+151	 * GET /api/events/:shopDomain/resolve/:cartToken
+152	 * Given a Shopify cart token, return the ccfSessionId (stable analytics
+153	 * session UUID) + customerId of the most recently active subscription
+154	 * for that cart, so the dashboard can then query events by ccfSessionId.
+155	 */
+156	router.get('/:shopDomain/resolve/:cartToken', requireAuth, requireStoreOwner, async (req, res) => {
+157	  try {
+158	    const shop = req.params.shopDomain.trim().toLowerCase();
+159	    const cartToken = req.params.cartToken;
+160	    const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+161
+162	    const sub = await CustomerPushSubscription.findOne({
+163	      shopDomain: shop,
+164	      cartToken: cartToken
+165	    }).sort({ lastActivityAt: -1 });
+166
+167	    return res.json({
+168	      ccfSessionId: sub?.ccfSessionId || null,
+169	      customerId: sub?.customerId || null
+170	    });
+171	  } catch (err) {
+172	    console.error('[events] GET resolve error:', err.message);
+173	    return res.status(500).json({ error: 'Failed to resolve session' });
+174	  }
+175	});
+176
+177	/**
+178	 * GET /api/events/:shopDomain/product-analytics
+179	 * Deterministic storefront analytics for the Insights screen.
+180	 *  - per-product stats over the last 30 days (top 20 by views)
+181	 *  - store-level stats over the last 7 days
+182	 * No PII: everything is derived from anonymous StorefrontEvent rows.
+183	 */
+184	router.get('/:shopDomain/product-analytics', requireAuth, requireStoreOwner, async (req, res) => {
+185	  try {
+186	    const shopDomain = req.params.shopDomain.trim().toLowerCase();
+187	    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+188	    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+189
+190	    const pipeline = [
+191	      {
+192	        $match: {
+193	          shopDomain,
+194	          ts: { $gte: thirtyDaysAgo },
+195	          'meta.productId': { $exists: true, $ne: null },
+196	        },
+197	      },
+198	      {
+199	        $group: {
+200	          _id: '$meta.productId',
+201	          productTitle: { $last: '$meta.productTitle' },
+202	          productPrice: { $last: '$meta.productPrice' },
+203	          views: { $sum: { $cond: [{ $eq: ['$type', 'product_view'] }, 1, 0] } },
+204	          uniqueViewers: { $addToSet: '$sessionId' },
+205	          addToCarts: { $sum: { $cond: [{ $eq: ['$type', 'add_to_cart'] }, 1, 0] } },
+206	          pageExits: { $sum: { $cond: [{ $eq: ['$type', 'page_exit'] }, 1, 0] } },
+207	          totalDwell: {
+208	            $sum: {
+209	              $cond: [
+210	                { $eq: ['$type', 'product_view'] },
+211	                { $ifNull: ['$meta.dwellSeconds', 0] },
+212	                0,
+213	              ],
+214	            },
+215	          },
+216	        },
+217	      },
+218	      {
+219	        $project: {
+220	          productId: '$_id',
+221	          productTitle: 1,
+222	          productPrice: 1,
+223	          views: 1,
+224	          uniqueViewers: { $size: '$uniqueViewers' },
+225	          addToCarts: 1,
+226	          cartRate: {
+227	            $cond: [
+228	              { $gt: ['$views', 0] },
+229	              { $round: [{ $multiply: [{ $divide: ['$addToCarts', '$views'] }, 100] }, 1] },
+230	              0,
+231	            ],
+232	          },
+233	          avgDwell: {
+234	            $cond: [
+235	              { $gt: ['$views', 0] },
+236	              { $round: [{ $divide: ['$totalDwell', '$views'] }, 0] },
+237	              0,
+238	            ],
+239	          },
+240	        },
+241	      },
+242	      { $sort: { views: -1 } },
+243	      { $limit: 20 },
+244	    ];
+245
+246	    const products = await StorefrontEvent.aggregate(pipeline);
+247
+248	    const [totalViews, totalSessions, cartEvents, promptShown, promptAccepted] =
+249	      await Promise.all([
+250	        StorefrontEvent.countDocuments({
+251	          shopDomain,
+252	          ts: { $gte: sevenDaysAgo },
+253	          type: 'product_view',
+254	        }),
+255	        StorefrontEvent.distinct('sessionId', {
+256	          shopDomain,
+257	          ts: { $gte: sevenDaysAgo },
+258	        }),
+259	        StorefrontEvent.countDocuments({
+260	          shopDomain,
+261	          ts: { $gte: sevenDaysAgo },
+262	          type: 'add_to_cart',
+263	        }),
+264	        StorefrontEvent.countDocuments({
+265	          shopDomain,
+266	          ts: { $gte: sevenDaysAgo },
+267	          type: 'push_prompt_shown',
+268	        }),
+269	        StorefrontEvent.countDocuments({
+270	          shopDomain,
+271	          ts: { $gte: sevenDaysAgo },
+272	          type: 'push_prompt_accepted',
+273	        }),
+274	      ]);
+275
+276	    const sessionCount = totalSessions.length;
+277	    const cartRate =
+278	      sessionCount > 0 ? ((cartEvents / sessionCount) * 100).toFixed(1) : 0;
+279	    const optinRate =
+280	      promptShown > 0 ? ((promptAccepted / promptShown) * 100).toFixed(1) : 0;
+281
+282	    return res.json({
+283	      stats: {
+284	        productViewsThisWeek: totalViews,
+285	        allowedNotifications: optinRate,
+286	        addToCartRate: cartRate,
+287	        sessionCount,
+288	      },
+289	      products,
+290	    });
+291	  } catch (err) {
+292	    console.error('[events] product-analytics error:', err.message);
+293	    return res.status(500).json({ error: 'Failed to fetch product analytics' });
+294	  }
+295	});
+296
+297	module.exports = router;
+298
+
+
+════════════════════════════════════════════════════════════════════
+2. backend/models/StorefrontEvent.js  (full file, 19 lines)
+════════════════════════════════════════════════════════════════════
+ 1	const mongoose = require('mongoose');
+ 2
+ 3	const storefrontEventSchema = new mongoose.Schema({
+ 4	  shopDomain: { type: String, required: true, lowercase: true, index: true },
+ 5	  sessionId:  { type: String, index: true },   // Shopify cart token
+ 6	  customerId: { type: String, index: true },   // Shopify customer id (logged-in only)
+ 7	  token:      { type: String },                // FCM push token (subscribed only)
+ 8	  type:       { type: String, required: true }, // event type
+ 9	  path:       { type: String },
+10	  pageType:   { type: String },
+11	  meta:       { type: mongoose.Schema.Types.Mixed }, // event-specific data
+12	  ts:         { type: Date, default: Date.now },
+13	});
+14
+15	// Auto-delete events older than 90 days.
+16	storefrontEventSchema.index({ ts: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
+17
+18	module.exports = mongoose.model('StorefrontEvent', storefrontEventSchema);
+19
+
+
+════════════════════════════════════════════════════════════════════
+3. frontend/app/admin/screens/Customers.jsx  (lines 1-50 only)
+════════════════════════════════════════════════════════════════════
+ 1	'use client';
+ 2
+ 3	import { useState, useEffect, useCallback } from 'react';
+ 4	import { apiGet } from '../../../lib/api';
+ 5	import ProfileScreen from './Profile';
+ 6
+ 7	const SIGNAL_LABELS = {
+ 8	  cart_abandon: 'Cart left behind',
+ 9	  checkout_abandon: 'Reached checkout',
+10	  browse_abandon: "Looked, didn't add",
+11	  high_intent: 'Keeps coming back',
+12	  price_hesitation: 'Stopped at the price',
+13	  price_drop: 'Price dropped',
+14	  back_in_stock: 'Back in stock',
+15	  post_purchase_d3: 'Three days after buying',
+16	  lapsing: 'Going quiet',
+17	  email_capture: 'Ask for an email',
+18	  cod_to_prepaid: 'Offer prepaid on COD',
+19	  winback: 'Win back',
+20	};
+21
+22	const STAGE_CONFIG = {
+23	  customer: { label: 'Bought once', bg: '#dcfce7', color: '#16a34a' },
+24	  identified: { label: 'Has a cart', bg: '#fef9c3', color: '#ca8a04' },
+25	  anonymous: { label: 'Visitor', bg: '#f3f4f6', color: '#6b7280' },
+26	  lapsed: { label: 'Going quiet', bg: '#fee2e2', color: '#dc2626' },
+27	};
+28
+29	function getRelativeTime(date) {
+30	  const diff = Date.now() - date.getTime();
+31	  const mins = Math.floor(diff / 60000);
+32	  const hours = Math.floor(diff / 3600000);
+33	  const days = Math.floor(diff / 86400000);
+34	  if (mins < 60) return `${mins}m ago`;
+35	  if (hours < 24) return `${hours}h ago`;
+36	  if (days === 1) return 'yesterday';
+37	  return `${days} days ago`;
+38	}
+39
+40	// Stage badge — shared by the desktop table and the mobile cards.
+41	function getStageLabel(p) {
+42	  if (p.orders?.count >= 2) return 'Repeat buyer';
+43	  if (p.orders?.count === 1) return 'Bought once';
+44	  if (p.identifiers?.cartTokens?.length > 0 && p.orders?.count === 0)
+45	    return 'Has a cart';
+46	  const labels = {
+47	    customer: 'Bought once',
+48	    identified: 'Has a cart',
+49	    anonymous: 'Visitor',
+50	    lapsed: 'Going quiet',
+
+
+NOTES (read-only observations)
+-------------------------------
+- events.js: the target route (GET /:shopDomain/customer/:sessionId,
+  lines 85-103) queries StorefrontEvent by { shopDomain, sessionId } where
+  `sessionId` is documented in the route's own JSDoc comment as a
+  "customer session" — but the model (StorefrontEvent.js line 5) comments
+  the SAME field as "Shopify cart token". The SEPARATE /ccfsession route
+  (lines 131-148) queries that identical `sessionId` field but treats it
+  as the stable analytics ccfSessionId UUID instead ("stored as sessionId
+  in the model", line 138 comment). So this one Mongo field is overloaded
+  to mean either a Shopify cart token or a ccfSessionId UUID depending on
+  which route populated/queries it — worth confirming which value the
+  caller (Customers.jsx / Profile screen) actually passes to
+  /customer/:sessionId before relying on it for a journey view.
+- StorefrontEvent has a 90-day TTL index (line 16) — any customer-journey
+  view built on this route only ever shows up to 90 days of history.
+- Customers.jsx lines 1-50 don't show any fetch call to the events routes
+  above — just imports, two constant maps (SIGNAL_LABELS, STAGE_CONFIG),
+  and two helpers (getRelativeTime, getStageLabel). Any journey-fetching
+  code lives further down the file, outside the requested 1-50 range.

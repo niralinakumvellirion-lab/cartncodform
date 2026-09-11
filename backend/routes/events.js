@@ -294,4 +294,117 @@ router.get('/:shopDomain/product-analytics', requireAuth, requireStoreOwner, asy
   }
 });
 
+/**
+ * Customers with active signals, joined with their recent storefront
+ * activity — powers the Journey admin screen. Exported separately so it's
+ * testable without an HTTP layer (same pattern as discounts.generateDiscount).
+ *
+ * Grouping relies on Signal.find(...).sort({ strength: -1 }): the FIRST
+ * signal seen per profile in that sorted list is guaranteed to already be
+ * that profile's strongest, so profileMap[pid] is only ever created once
+ * per profile and its `signals` array is never reset after being populated.
+ */
+async function getJourneyData(shopDomain, { limit = 50, page = 0 } = {}) {
+  const Signal = require('../models/Signal');
+  const Profile = require('../models/Profile');
+
+  const shop = String(shopDomain || '').trim().toLowerCase();
+
+  const signals = await Signal.find({ shopDomain: shop })
+    .sort({ strength: -1 })
+    .limit(200)
+    .populate('profileId', 'identifiers stage orders channels lastSeenAt');
+
+  // Group by profile, keeping the strongest signal per profile.
+  const profileMap = {};
+  signals.forEach((sig) => {
+    const pid = sig.profileId?._id?.toString();
+    if (!pid) return;
+    if (!profileMap[pid] || sig.strength > profileMap[pid].signal.strength) {
+      profileMap[pid] = {
+        profile: sig.profileId,
+        signal: sig,
+        signals: [],
+      };
+    }
+    profileMap[pid].signals.push(sig);
+  });
+
+  const profileIds = Object.keys(profileMap);
+  const pageIds = profileIds.slice(page * limit, (page + 1) * limit);
+
+  const results = await Promise.all(
+    pageIds.map(async (pid) => {
+      const entry = profileMap[pid];
+      const profile = entry.profile;
+
+      // sessionId is overloaded in this collection — POST /api/events
+      // stores the storefront's ccfSessionId there, while cartToken is a
+      // separate identifier on some rows. Matching both catches events
+      // recorded under either convention.
+      const sessionIds = profile?.identifiers?.sessionIds || [];
+      const cartTokens = profile?.identifiers?.cartTokens || [];
+
+      const events = await StorefrontEvent.find({
+        shopDomain: shop,
+        sessionId: { $in: [...sessionIds, ...cartTokens] },
+      })
+        .sort({ ts: -1 })
+        .limit(20)
+        .select('type path pageType meta ts');
+
+      // Extract product interests from events.
+      const productViews = {};
+      events.forEach((e) => {
+        if (e.type === 'product_view' && e.meta?.productId) {
+          const productId = e.meta.productId;
+          if (!productViews[productId]) {
+            productViews[productId] = {
+              productId,
+              title: e.meta.productTitle || productId,
+              count: 0,
+              lastSeen: e.ts,
+            };
+          }
+          productViews[productId].count++;
+        }
+      });
+
+      return {
+        profile,
+        topSignal: entry.signal,
+        signals: entry.signals,
+        recentEvents: events,
+        topProducts: Object.values(productViews)
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 3),
+      };
+    })
+  );
+
+  return { customers: results, total: profileIds.length };
+}
+
+/**
+ * GET /api/events/:shopDomain/journey
+ * Query params: limit (default 50, max 200), page (default 0).
+ */
+router.get('/:shopDomain/journey', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    let limit = parseInt(req.query.limit, 10);
+    if (!Number.isFinite(limit) || limit <= 0) limit = 50;
+    limit = Math.min(limit, 200);
+
+    let page = parseInt(req.query.page, 10);
+    if (!Number.isFinite(page) || page < 0) page = 0;
+
+    const data = await getJourneyData(req.params.shopDomain, { limit, page });
+    return res.json(data);
+  } catch (err) {
+    console.error('[events] journey error:', err.message);
+    return res.status(500).json({ error: 'Failed to fetch journey data' });
+  }
+});
+
 module.exports = router;
+module.exports.getJourneyData = getJourneyData;

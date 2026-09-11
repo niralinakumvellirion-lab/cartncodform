@@ -315,4 +315,53 @@ router.post('/send-email-test', requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/push/send-journey
+ * Body: { profileId, title, body, url }
+ * Sends a one-off push to a single customer from the Journey screen.
+ *
+ * There is no :shopDomain in this route's path, so requireStoreOwner (which
+ * compares req.shopDomain to req.params.shopDomain) doesn't apply here — the
+ * route uses requireAuth only and scopes the Profile lookup by the verified
+ * shopDomain from the session token itself (never a client-supplied value),
+ * which is what actually prevents one shop from pushing to another shop's
+ * customer via a guessed/leaked profileId.
+ */
+async function sendJourneyPush(shopDomain, { profileId, title, body, url }) {
+  const Profile = require('../models/Profile');
+
+  if (!profileId || !title || !body) {
+    return { status: 400, payload: { error: 'profileId, title and body are required' } };
+  }
+
+  const shop = String(shopDomain || '').trim().toLowerCase();
+  const profile = await Profile.findOne({ _id: profileId, shopDomain: shop });
+
+  if (!profile || !profile.channels?.push?.subscribed) {
+    return { status: 400, payload: { error: 'No push subscription' } };
+  }
+
+  const cartToken = profile.identifiers?.cartTokens?.[0] || null;
+  const result = await sendPushToCustomers(
+    shop, title, body, url, null, false, cartToken
+  );
+
+  if (!result.success) {
+    return { status: 500, payload: { success: false, error: result.error } };
+  }
+  return { status: 200, payload: result };
+}
+
+router.post('/send-journey', requireAuth, async (req, res) => {
+  try {
+    const { profileId, title, body, url } = req.body;
+    const { status, payload } = await sendJourneyPush(req.shopDomain, { profileId, title, body, url });
+    return res.status(status).json(payload);
+  } catch (err) {
+    console.error('[push] POST /send-journey error:', err.message);
+    return res.status(500).json({ error: 'Failed to send journey notification' });
+  }
+});
+
 module.exports = router;
+module.exports.sendJourneyPush = sendJourneyPush;

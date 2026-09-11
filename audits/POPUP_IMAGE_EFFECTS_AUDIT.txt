@@ -1,0 +1,72 @@
+POPUP IMAGE EFFECTS — SELF AUDIT
+=================================
+File: extensions/cartncodform-embed/blocks/push-notifications.liquid
+Date: 2026-09-11
+Do NOT deploy — not run.
+
+
+STEP 1 — Image effects CSS
+---------------------------
+Added to ccfInjectPopupStyles() verbatim, inserted right before the
+existing "safety overrides" section (kept from prior passes):
+  .ccf-img-wrap (relative/overflow hidden), its ::after (bottom dark
+  gradient scrim) and ::before (diagonal white sheen), .ccf-popup-img
+  (0.6s zoom transition) + #ccf-push-prompt:hover .ccf-popup-img (scale
+  1.05), .ccf-img-badge + @keyframes ccfImgBadgePop (pop-in with a slight
+  rotate), .ccf-corner-dots::before (dotted corner pattern).
+
+
+STEP 2 — Enhanced card image section
+--------------------------------------
+Replaced the plain `if (cfg.imageUrl) { <img> }` block with:
+  - imgWrap (.ccf-img-wrap .ccf-corner-dots): 160px (mobile) / 170px
+    (desktop) tall, relative/overflow-hidden.
+  - The <img> now carries .ccf-popup-img (zoom-on-hover) and its onerror
+    falls back to an accent-colored gradient background on imgWrap itself
+    (was: just hiding the broken image).
+  - Discount % badge (top-left, red/orange gradient pill), shown only
+    when ccfDiscountEnabled() AND the push discount has a percentage.
+  - Two decorative translucent circles, bottom-right.
+When there's no image, added the "premium gradient placeholder" the task
+specified (previously card showed NOTHING when imageUrl was unset — went
+straight to the accent line + content): accent-colored diagonal gradient
+box (120/130px), two soft animated-position circles, a bouncing 🛍️ icon
+(reuses the existing ccfBounce keyframe).
+Both branches still feed into the existing "subtle top accent line"
+element unchanged (it runs after this if/else either way, per its own
+comment).
+
+
+STEP 3 — Split layout (desktop) image panel
+-----------------------------------------------
+leftPanel (the existing 45%-width image column) gets the same
+'ccf-img-wrap ccf-corner-dots' classes, and splitImgEl (the <img>, when
+present) gets 'ccf-popup-img' for the same zoom-on-hover. Added the
+identical top-left discount badge, appended to leftPanel right after the
+image. Mobile-split's own image block (mImg/imgEl, a separate code path
+using an absolutely-positioned <img> inside a div) was left untouched —
+the task named only "the split layout (desktop)" / "the split image
+panel," singular, so only the desktop leftPanel was touched.
+
+
+DEVIATION (verified, not guessed) — same class of bug as the prior task
+---------------------------------------------------------------------------
+The given snippet calls `ccfPct('push')` for the image badge percentage.
+ccfPct(key) indexes discountConfig[key] directly, and the real config
+keys are 'pushDiscount' / 'emailDiscount' / 'phoneDiscount' /
+'bothDiscount' — there is no 'push' key, so discountConfig['push'] is
+always undefined and ccfPct('push') always returns 0. Since the badge is
+only appended `if (pct)`, this would have silently suppressed the badge
+on every popup, always. Fixed to ccfPct('pushDiscount') in both the card
+badge and the new split-desktop badge — confirmed via grep that both call
+sites use the corrected key.
+
+
+VERIFICATION
+------------
+- Extracted the <script> block and ran `node --check` -> LIQUID OK
+- grep confirms both discount-badge call sites use ccfPct('pushDiscount')
+- grep confirms the accent-line block still follows the image/placeholder
+  if/else in the card branch, unchanged in position or logic
+
+Not deployed (shopify app deploy not run).
