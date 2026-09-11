@@ -66,12 +66,32 @@ async function generateDiscount(shopDomain, body = {}) {
 
   const [config, store] = await Promise.all([
     DiscountConfig.findOne({ shopDomain: shop }),
-    Store.findOne({ shopDomain: shop }).select('accessToken'),
+    Store.findOne({ shopDomain: shop }).select(
+      'accessToken onlineAccessToken onlineTokenExpiresAt'
+    ),
   ]);
 
   if (!store || !store.accessToken) {
     return { code: null, error: 'Store not connected' };
   }
+
+  // Prefer the online token (shpua_) — works with new Shopify API.
+  // Fall back to the offline token for backwards compatibility.
+  let apiToken = store.onlineAccessToken || store.accessToken;
+
+  // Check if the online token is expired.
+  if (store.onlineAccessToken && store.onlineTokenExpiresAt) {
+    if (new Date() > store.onlineTokenExpiresAt) {
+      console.log('[discounts] online token expired for', shop);
+      // Fall back to offline token.
+      apiToken = store.accessToken;
+    }
+  }
+
+  console.log(
+    '[discounts] using token type:',
+    apiToken && apiToken.startsWith('shpua_') ? 'online' : 'offline'
+  );
 
   // action -> config sub-doc: push->pushDiscount, email->emailDiscount,
   // phone->phoneDiscount, both->bothDiscount.
@@ -124,7 +144,7 @@ async function generateDiscount(shopDomain, body = {}) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-Shopify-Access-Token': store.accessToken,
+          'X-Shopify-Access-Token': apiToken,
         },
         body: JSON.stringify({ query: mutation, variables }),
       }

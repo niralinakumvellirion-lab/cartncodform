@@ -7,7 +7,7 @@ const {
   buildAuthUrl,
   verifyHmac,
   exchangeCodeForToken,
-  exchangeSessionToken,
+  getOnlineToken,
   fetchShopEmail,
   registerAllWebhooks,
 } = require('../utils/shopify');
@@ -161,37 +161,36 @@ router.get('/callback', async (req, res) => {
 /**
  * POST /api/auth/refresh-token
  * Called from the embedded admin. Uses OAuth Token Exchange to mint a fresh
- * OFFLINE Admin API token from the caller's App Bridge session token and store
- * it — this is how an existing install picks up newly-added scopes
- * (e.g. write_discounts) without a browser re-install.
- * -> { success: true } | { success: false, error }
+ * ONLINE Admin API token (shpua_) from the caller's live App Bridge session
+ * token and stores it alongside its expiry — this is how an existing install
+ * can pick up newly-added scopes (e.g. write_discounts) without a browser
+ * re-install, for as long as an admin has the app open.
+ * -> { success: true } | { success: false, error? }
  */
 router.post('/refresh-token', requireAuth, async (req, res) => {
-  try {
-    const authHeader = req.get('Authorization') || '';
-    const sessionToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
-    if (!sessionToken) {
-      return res.status(401).json({ success: false, error: 'Missing session token' });
-    }
+  const sessionToken = req.headers.authorization?.split(' ')[1];
+  if (!sessionToken) return res.status(400).json({ success: false });
 
-    const newToken = await exchangeSessionToken(req.shopDomain, sessionToken);
-    if (!newToken || typeof newToken !== 'string') {
-      console.error(`[auth] Token exchange returned no access_token for ${req.shopDomain}`);
-      return res.status(502).json({ success: false, error: 'Token exchange failed' });
-    }
+  try {
+    const { token, expiresAt } = await getOnlineToken(req.shopDomain, sessionToken);
+    if (!token) return res.status(502).json({ success: false });
 
     await Store.updateOne(
       { shopDomain: req.shopDomain },
-      { $set: { accessToken: newToken, needsReauth: false } }
+      {
+        $set: {
+          onlineAccessToken: token,
+          onlineTokenExpiresAt: expiresAt,
+          needsReauth: false,
+        },
+      }
     );
-
-    console.log(`[auth] Token refreshed via token-exchange for ${req.shopDomain}`);
+    console.log('[auth] online token refreshed for', req.shopDomain);
     return res.json({ success: true });
   } catch (err) {
     // err.response.data is Shopify's OAuth error JSON (no PII); never log the token.
-    const detail = err.response ? JSON.stringify(err.response.data) : err.message;
-    console.error('[auth] /refresh-token error:', detail);
-    return res.status(500).json({ success: false, error: 'Token refresh failed' });
+    console.error('[auth] token exchange error:', err.message);
+    return res.status(502).json({ success: false, error: err.message });
   }
 });
 

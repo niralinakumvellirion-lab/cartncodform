@@ -138,6 +138,32 @@ async function exchangeSessionToken(shop, sessionToken) {
 }
 
 /**
+ * OAuth Token Exchange: trade a valid App Bridge session token (id_token) for
+ * an ONLINE Admin API access token (shpua_), tied to the admin user whose
+ * session minted it and expiring after `expires_in` seconds.
+ *
+ * @param {string} shop         the *.myshopify.com domain
+ * @param {string} sessionToken the App Bridge session token from the request
+ * @returns {Promise<{token: string|undefined, expiresAt: Date|null}>}
+ */
+async function getOnlineToken(shop, sessionToken) {
+  const url = `https://${shop}/admin/oauth/access_token`;
+  const { data } = await axios.post(url, {
+    client_id: SHOPIFY_API_KEY,
+    client_secret: SHOPIFY_API_SECRET,
+    grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+    subject_token: sessionToken,
+    subject_token_type: 'urn:ietf:params:oauth:token-type:id_token',
+    requested_token_type: 'urn:shopify:params:oauth:token-type:online-access-token',
+  });
+  // data.access_token = online token (shpua_); data.expires_in = seconds until expiry.
+  return {
+    token: data.access_token,
+    expiresAt: data.expires_in ? new Date(Date.now() + data.expires_in * 1000) : null,
+  };
+}
+
+/**
  * Fetch the shop record from the Admin API and return its contact email.
  * Used to link a connected store to an owner when no owner_email was supplied.
  */
@@ -210,6 +236,7 @@ module.exports = {
   verifyWebhookHmac,
   exchangeCodeForToken,
   exchangeSessionToken,
+  getOnlineToken,
   fetchShopEmail,
   registerWebhook,
   registerAllWebhooks,

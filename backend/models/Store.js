@@ -156,6 +156,14 @@ const storeSchema = new mongoose.Schema({
   // write_discounts). The admin surfaces a "reconnect" banner; OAuth clears it.
   needsReauth: { type: Boolean, default: false },
 
+  // --- online-token-exchange: a short-lived (shpua_) Admin API token minted
+  // via OAuth Token Exchange from the admin's live App Bridge session
+  // (see /api/auth/refresh-token). Preferred over the offline `accessToken`
+  // when present and unexpired, since it reflects whatever scopes the
+  // merchant currently has approved. Falls back to `accessToken` once expired.
+  onlineAccessToken: { type: String, default: null },
+  onlineTokenExpiresAt: { type: Date, default: null },
+
   installedAt: {
     type: Date,
     default: Date.now,
