@@ -115,7 +115,16 @@ async function generateDiscount(shopDomain, body = {}) {
   const mutation = `
     mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
       discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
-        codeDiscountNode { id }
+        codeDiscountNode {
+          id
+          codeDiscount {
+            ... on DiscountCodeBasic {
+              codes(first: 1) {
+                nodes { code }
+              }
+            }
+          }
+        }
         userErrors { field message }
       }
     }
@@ -133,6 +142,12 @@ async function generateDiscount(shopDomain, body = {}) {
       },
       appliesOncePerCustomer: true,
       usageLimit: cfg.maxUses || 100,
+      // Required as of the 2024-10+ discounts schema: eligibility now goes
+      // through `context` (the legacy `customerSelection` field is
+      // deprecated). Omitting it is what produces Shopify's userErrors
+      // message "Context can't be blank". { all: ALL } = applies to every
+      // buyer, matching the old customerSelection: { all: true } behavior.
+      context: { all: 'ALL' },
     },
   };
 
