@@ -16,7 +16,16 @@ mongoose.connect(process.env.MONGODB_URI).then(async () => {
   const mutation = `
     mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
       discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
-        codeDiscountNode { id }
+        codeDiscountNode {
+          id
+          codeDiscount {
+            ... on DiscountCodeBasic {
+              codes(first: 1) {
+                nodes { code }
+              }
+            }
+          }
+        }
         userErrors { field message }
       }
     }
@@ -44,6 +53,10 @@ mongoose.connect(process.env.MONGODB_URI).then(async () => {
             },
             appliesOncePerCustomer: true,
             usageLimit: 100,
+            // Mirrors discounts.js: required as of the 2024-10+ discounts
+            // schema — without it Shopify returns userErrors "Context can't
+            // be blank". { all: 'ALL' } = applies to every buyer.
+            context: { all: 'ALL' },
           }
         }
       })
