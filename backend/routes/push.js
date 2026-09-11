@@ -6,6 +6,12 @@ const { sendAbandonedCartEmail } = require('../utils/email');
 const { fetchProductImage } = require('./webhooks');
 const { requireAuth } = require('../middleware/requireOwner');
 const { upsertProfile } = require('../services/profileService');
+const { Resend } = require('resend');
+
+// Same safe-fallback pattern as utils/email.js: the Resend constructor
+// throws if the key is falsy, which would otherwise take this whole route
+// file down on load in an environment where RESEND_API_KEY is unset.
+const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
 
 const router = express.Router();
 
@@ -363,5 +369,79 @@ router.post('/send-journey', requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/push/send-journey-email
+ * Body: { profileId, subject, body }
+ * Sends a one-off email to a single customer from the Journey screen.
+ *
+ * Same IDOR consideration as sendJourneyPush above, and a real gap in the
+ * given spec: it looked the profile up with `Profile.findById(profileId)`
+ * alone — no shop scope at all — so any authenticated shop could email any
+ * other shop's customer by guessing/reusing a profileId. Scoped by the
+ * verified req.shopDomain from the session token instead, same fix as
+ * sendJourneyPush.
+ */
+async function sendJourneyEmail(shopDomain, { profileId, subject, body }) {
+  const Profile = require('../models/Profile');
+
+  if (!profileId || !subject || !body) {
+    return { status: 400, payload: { error: 'Missing fields' } };
+  }
+
+  const shop = String(shopDomain || '').trim().toLowerCase();
+  const profile = await Profile.findOne({ _id: profileId, shopDomain: shop })
+    .select('identifiers channels');
+  if (!profile) {
+    return { status: 404, payload: { error: 'Profile not found' } };
+  }
+
+  const email = profile.channels?.email?.address ||
+    profile.identifiers?.emails?.[0];
+  if (!email) {
+    return { status: 400, payload: { error: 'No email address' } };
+  }
+
+  const { data, error } = await resend.emails.send({
+    from: 'CartnCodForm <onboarding@resend.dev>',
+    to: email,
+    subject: subject,
+    html: `
+      <div style="font-family:-apple-system,BlinkMacSystemFont,
+        sans-serif;max-width:600px;margin:0 auto;padding:32px 24px">
+        <div style="background:#fff;border-radius:12px;
+          border:1px solid #e5e7eb;padding:32px">
+          ${body.replace(/\n/g, '<br>')}
+          <hr style="margin:24px 0;border:none;
+            border-top:1px solid #f3f4f6">
+          <p style="font-size:12px;color:#9ca3af;margin:0">
+            You received this email because you subscribed
+            to notifications from this store.
+          </p>
+        </div>
+      </div>
+    `,
+  });
+
+  if (error) {
+    console.error('[email] Resend error:', error.message);
+    return { status: 500, payload: { error: error.message } };
+  }
+
+  console.log('[email] Sent to profile:', profileId);
+  return { status: 200, payload: { success: true, id: data?.id } };
+}
+
+router.post('/send-journey-email', requireAuth, async (req, res) => {
+  try {
+    const { profileId, subject, body } = req.body;
+    const { status, payload } = await sendJourneyEmail(req.shopDomain, { profileId, subject, body });
+    return res.status(status).json(payload);
+  } catch (err) {
+    console.error('[email] send-journey-email error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 module.exports.sendJourneyPush = sendJourneyPush;
+module.exports.sendJourneyEmail = sendJourneyEmail;

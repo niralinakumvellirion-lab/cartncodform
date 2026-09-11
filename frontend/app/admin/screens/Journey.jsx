@@ -52,10 +52,125 @@ const SUGGESTIONS = {
   },
 };
 
+const NOTIFICATION_SUGGESTIONS = [
+  {
+    category: 'Cart & Purchase',
+    color: '#fee2e2',
+    textColor: '#dc2626',
+    icon: '🛒',
+    suggestions: [
+      {
+        label: 'Cart reminder',
+        title: 'Your cart is waiting!',
+        body: 'You left something behind. Complete your order before it sells out.',
+      },
+      {
+        label: 'Checkout nudge',
+        title: 'Almost there!',
+        body: 'Your order is just one step away. Finish checkout now.',
+      },
+    ],
+  },
+  {
+    category: 'Offers & Discounts',
+    color: '#dcfce7',
+    textColor: '#16a34a',
+    icon: '🏷️',
+    suggestions: [
+      {
+        label: 'Flash sale',
+        title: '⚡ Flash Sale — 24 hours only!',
+        body: 'Up to 30% off on selected items. Shop now before it ends.',
+      },
+      {
+        label: 'Exclusive discount',
+        title: 'A special offer just for you 🎁',
+        body: 'As a valued customer, enjoy an exclusive discount on your next order.',
+      },
+      {
+        label: 'Limited time',
+        title: '⏰ Offer expires tonight!',
+        body: "Don't miss out — your discount code expires at midnight.",
+      },
+    ],
+  },
+  {
+    category: 'Product Updates',
+    color: '#dbeafe',
+    textColor: '#1d4ed8',
+    icon: '✨',
+    suggestions: [
+      {
+        label: 'New arrival',
+        title: '✨ New collection just dropped!',
+        body: 'Fresh styles are here. Be the first to explore our new arrivals.',
+      },
+      {
+        label: 'Back in stock',
+        title: "It's back! 🎉",
+        body: "The item you were eyeing is back in stock. Grab it before it's gone.",
+      },
+      {
+        label: 'Price drop',
+        title: '📉 Price just dropped!',
+        body: 'Good news — the price on your saved item just went down.',
+      },
+    ],
+  },
+  {
+    category: 'Re-engagement',
+    color: '#fef9c3',
+    textColor: '#ca8a04',
+    icon: '💛',
+    suggestions: [
+      {
+        label: 'Win back',
+        title: 'We miss you! 💛',
+        body: "It's been a while. Come back and see what's new in store.",
+      },
+      {
+        label: 'Loyalty reward',
+        title: "You've earned a reward! 🏆",
+        body: "Thank you for being a loyal customer. Here's something special for you.",
+      },
+      {
+        label: 'Special occasion',
+        title: '🎂 A special treat for you!',
+        body: 'Wishing you a wonderful day — enjoy a little something from us.',
+      },
+    ],
+  },
+  {
+    category: 'Post Purchase',
+    color: '#f3e8ff',
+    textColor: '#7c3aed',
+    icon: '📦',
+    suggestions: [
+      {
+        label: 'Thank you',
+        title: 'Thank you for your order! 🙏',
+        body: "We're preparing your order. You'll hear from us soon.",
+      },
+      {
+        label: 'Review request',
+        title: 'How did we do? ⭐',
+        body: "We'd love to hear your feedback on your recent purchase.",
+      },
+      {
+        label: 'Cross-sell',
+        title: 'Complete the look 👗',
+        body: 'Customers who bought this also loved these items.',
+      },
+    ],
+  },
+];
+
 function NotificationComposer({ customer, shop, onSent, onError }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [activeCategory, setActiveCategory] = useState(0);
 
   // Auto-fill based on the customer's top signal whenever the selected
   // customer changes.
@@ -94,6 +209,132 @@ function NotificationComposer({ customer, shop, onSent, onError }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      {/* Suggestions toggle */}
+      <div
+        onClick={() => setShowSuggestions((s) => !s)}
+        style={{
+          display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 12px',
+          background: '#f8f9ff',
+          border: '1px solid #e5e7eb',
+          borderRadius: '10px',
+          cursor: 'pointer',
+          marginBottom: '8px',
+          transition: 'background 0.2s',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = '#f0f4ff')}
+        onMouseLeave={(e) => (e.currentTarget.style.background = '#f8f9ff')}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '16px' }}>💡</span>
+          <span style={{ fontSize: '13px', fontWeight: '600', color: '#4f46e5' }}>
+            Notification ideas
+          </span>
+          <span style={{ fontSize: '11px', color: '#9ca3af' }}>
+            — click to explore
+          </span>
+        </div>
+        <span style={{
+          fontSize: '12px', color: '#9ca3af',
+          transform: showSuggestions ? 'rotate(180deg)' : 'none',
+          transition: 'transform 0.2s', display: 'inline-block',
+        }}>
+          ▼
+        </span>
+      </div>
+
+      {/* Suggestions panel */}
+      {showSuggestions && (
+        <div style={{
+          background: '#fff',
+          border: '1px solid #e5e7eb',
+          borderRadius: '12px', marginBottom: '8px',
+          overflow: 'hidden',
+        }}>
+
+          {/* Category tabs */}
+          <div style={{
+            display: 'flex', overflowX: 'auto',
+            borderBottom: '1px solid #f3f4f6',
+            padding: '8px 8px 0',
+          }}>
+            {NOTIFICATION_SUGGESTIONS.map((cat, i) => (
+              <button
+                key={i}
+                onClick={() => setActiveCategory(i)}
+                style={{
+                  padding: '6px 12px', fontSize: '12px',
+                  fontWeight: activeCategory === i ? '700' : '400',
+                  color: activeCategory === i ? cat.textColor : '#6b7280',
+                  background: activeCategory === i ? cat.color : 'transparent',
+                  border: 'none', borderRadius: '8px 8px 0 0',
+                  cursor: 'pointer', whiteSpace: 'nowrap',
+                  flexShrink: 0, marginRight: '2px',
+                  borderBottom: activeCategory === i
+                    ? '2px solid ' + cat.textColor : '2px solid transparent',
+                }}
+              >
+                {cat.icon} {cat.category}
+              </button>
+            ))}
+          </div>
+
+          {/* Suggestion cards */}
+          <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {NOTIFICATION_SUGGESTIONS[activeCategory].suggestions.map((s, i) => (
+              <div
+                key={i}
+                onClick={() => {
+                  setTitle(s.title);
+                  setBody(s.body);
+                  setShowSuggestions(false);
+                }}
+                style={{
+                  padding: '10px 12px',
+                  background: NOTIFICATION_SUGGESTIONS[activeCategory].color,
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  border: '1px solid transparent',
+                  transition: 'all 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.border =
+                    '1px solid ' + NOTIFICATION_SUGGESTIONS[activeCategory].textColor + '44';
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.border = '1px solid transparent';
+                  e.currentTarget.style.transform = 'none';
+                }}
+              >
+                <div style={{
+                  display: 'flex', alignItems: 'center',
+                  justifyContent: 'space-between', marginBottom: '4px',
+                }}>
+                  <span style={{
+                    fontSize: '11px', fontWeight: '700',
+                    color: NOTIFICATION_SUGGESTIONS[activeCategory].textColor,
+                    textTransform: 'uppercase', letterSpacing: '0.5px',
+                  }}>
+                    {s.label}
+                  </span>
+                  <span style={{ fontSize: '10px', color: '#9ca3af' }}>
+                    click to use →
+                  </span>
+                </div>
+                <div style={{ fontSize: '13px', fontWeight: '600', color: '#111827', marginBottom: '2px' }}>
+                  {s.title}
+                </div>
+                <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.4' }}>
+                  {s.body}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <input
         value={title}
         onChange={(e) => setTitle(e.target.value)}
@@ -138,6 +379,104 @@ function NotificationComposer({ customer, shop, onSent, onError }) {
   );
 }
 
+function EmailComposer({ customer, shop, onSent, onError }) {
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    const signal = customer?.topSignal?.type;
+    const product = customer?.topProducts?.[0]?.title || '';
+    const suggestions = {
+      cart_abandon: {
+        subject: 'You left something behind',
+        body: `Hi there,\n\nWe noticed you added ${product || 'some items'} to your cart but didn't complete your purchase.\n\nYour cart is saved and waiting for you. Come back and complete your order before it sells out!\n\nShop now and get free shipping on orders above ₹999.\n\nWarm regards,\nThe Team`,
+      },
+      high_intent: {
+        subject: `Still thinking about ${product || 'your saved item'}?`,
+        body: `Hi there,\n\nWe noticed you've been checking out ${product || 'one of our products'} multiple times.\n\nWe think you're going to love it! Here's what makes it special...\n\nDon't wait too long — stock is limited.\n\nWarm regards,\nThe Team`,
+      },
+      lapsing: {
+        subject: "We miss you! Here's something special",
+        body: `Hi there,\n\nIt's been a while since your last visit and we miss you!\n\nWe've added exciting new products to our collection that we think you'll love.\n\nCome back and explore — we'd love to see you again.\n\nWarm regards,\nThe Team`,
+      },
+    };
+    const s = suggestions[signal] || {
+      subject: 'A message from our store',
+      body: 'Hi there,\n\nThank you for being a valued customer. We have something special for you.\n\nWarm regards,\nThe Team',
+    };
+    setSubject(s.subject);
+    setBody(s.body);
+  }, [customer]);
+
+  async function send() {
+    if (!subject || !body || sending) return;
+    setSending(true);
+    try {
+      await apiSend('/api/push/send-journey-email', 'POST', {
+        profileId: customer.profile._id,
+        subject,
+        body,
+      });
+      onSent();
+    } catch (e) {
+      onError(e.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const email = customer?.profile?.channels?.email?.address ||
+    customer?.profile?.identifiers?.emails?.[0];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>
+        Sending to: <strong>{email}</strong>
+      </div>
+      <input
+        value={subject}
+        onChange={(e) => setSubject(e.target.value)}
+        placeholder="Email subject"
+        style={{
+          padding: '9px 12px', fontSize: '13px',
+          border: '1px solid #e5e7eb', borderRadius: '8px',
+          outline: 'none', color: '#111827',
+        }}
+      />
+      <textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        placeholder="Email message"
+        rows={6}
+        style={{
+          padding: '9px 12px', fontSize: '13px',
+          border: '1px solid #e5e7eb', borderRadius: '8px',
+          outline: 'none', color: '#111827',
+          resize: 'vertical', fontFamily: 'inherit',
+          lineHeight: '1.5',
+        }}
+      />
+      <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+        Sent from: onboarding@resend.dev
+      </div>
+      <button
+        onClick={send}
+        disabled={sending || !subject || !body}
+        style={{
+          padding: '11px', fontSize: '14px', fontWeight: '700', color: '#fff',
+          background: sending || !subject || !body ? '#9ca3af' : '#0ea5e9',
+          border: 'none', borderRadius: '10px',
+          cursor: sending || !subject || !body ? 'not-allowed' : 'pointer',
+          transition: 'background 0.2s',
+        }}
+      >
+        {sending ? '⏳ Sending...' : '✉️ Send email'}
+      </button>
+    </div>
+  );
+}
+
 export default function JourneyScreen({ shop }) {
   const [customers, setCustomers] = useState([]);
   const [total, setTotal] = useState(0);
@@ -146,6 +485,22 @@ export default function JourneyScreen({ shop }) {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [sendResult, setSendResult] = useState('');
   const [filter, setFilter] = useState('all');
+  const [notifTab, setNotifTab] = useState('push');
+
+  // Default to whichever channel is actually available whenever the
+  // selected customer changes — otherwise picking an email-only customer
+  // while notifTab is still 'push' from a previous selection would render
+  // an empty panel (neither composer's condition would be met).
+  useEffect(() => {
+    if (!selectedCustomer) return;
+    const hasPush = !!selectedCustomer.profile?.channels?.push?.subscribed;
+    const hasEmail = !!(
+      selectedCustomer.profile?.channels?.email?.address ||
+      selectedCustomer.profile?.identifiers?.emails?.[0]
+    );
+    if (notifTab === 'push' && !hasPush && hasEmail) setNotifTab('email');
+    else if (notifTab === 'email' && !hasEmail && hasPush) setNotifTab('push');
+  }, [selectedCustomer]);
 
   const load = useCallback(async () => {
     if (!shop) return;
@@ -422,42 +777,102 @@ export default function JourneyScreen({ shop }) {
             </div>
 
             {/* Send notification panel */}
-            {selectedCustomer.profile?.channels?.push?.subscribed ? (
-              <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px' }}>
-                <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>
-                  Send push notification
-                </div>
+            {(() => {
+              const hasPush = !!selectedCustomer.profile?.channels?.push?.subscribed;
+              const hasEmail = !!(
+                selectedCustomer.profile?.channels?.email?.address ||
+                selectedCustomer.profile?.identifiers?.emails?.[0]
+              );
 
-                <NotificationComposer
-                  customer={selectedCustomer}
-                  shop={shop}
-                  onSent={() => {
-                    setSendResult('Sent successfully!');
-                    setTimeout(() => setSendResult(''), 3000);
-                  }}
-                  onError={(err) => setSendResult('Error: ' + err)}
-                />
-
-                {sendResult && (
+              if (!hasPush && !hasEmail) {
+                return (
                   <div style={{
-                    marginTop: '8px', fontSize: '13px',
-                    color: sendResult.startsWith('Error') ? '#dc2626' : '#16a34a',
-                    textAlign: 'center',
+                    background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '10px',
+                    padding: '16px', textAlign: 'center',
                   }}>
-                    {sendResult}
+                    <div style={{ fontSize: '13px', color: '#9ca3af' }}>
+                      🔕 No push subscription or email on file — cannot send a notification
+                    </div>
                   </div>
-                )}
-              </div>
-            ) : (
-              <div style={{
-                background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '10px',
-                padding: '16px', textAlign: 'center',
-              }}>
-                <div style={{ fontSize: '13px', color: '#9ca3af' }}>
-                  🔔 No push subscription — cannot send notification
+                );
+              }
+
+              return (
+                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px' }}>
+                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>
+                    Send notification
+                  </div>
+
+                  {/* Push / Email tab switcher */}
+                  <div style={{
+                    display: 'flex', gap: '4px', marginBottom: '12px',
+                    background: '#f3f4f6', borderRadius: '10px', padding: '4px',
+                  }}>
+                    {[
+                      { key: 'push', label: '🔔 Push', available: hasPush },
+                      { key: 'email', label: '✉️ Email', available: hasEmail },
+                    ].map((tab) => (
+                      <button
+                        key={tab.key}
+                        onClick={() => tab.available && setNotifTab(tab.key)}
+                        style={{
+                          flex: 1, padding: '8px', fontSize: '13px',
+                          fontWeight: notifTab === tab.key ? '600' : '400',
+                          color: !tab.available ? '#d1d5db' :
+                            notifTab === tab.key ? '#111827' : '#6b7280',
+                          background: notifTab === tab.key ? '#fff' : 'transparent',
+                          border: 'none', borderRadius: '8px',
+                          cursor: tab.available ? 'pointer' : 'not-allowed',
+                          boxShadow: notifTab === tab.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                          transition: 'all 0.15s',
+                        }}
+                      >
+                        {tab.label}
+                        {!tab.available && (
+                          <span style={{ fontSize: '10px', color: '#d1d5db', display: 'block' }}>
+                            Not available
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  {notifTab === 'push' && hasPush && (
+                    <NotificationComposer
+                      customer={selectedCustomer}
+                      shop={shop}
+                      onSent={() => {
+                        setSendResult('Sent successfully!');
+                        setTimeout(() => setSendResult(''), 3000);
+                      }}
+                      onError={(err) => setSendResult('Error: ' + err)}
+                    />
+                  )}
+
+                  {notifTab === 'email' && hasEmail && (
+                    <EmailComposer
+                      customer={selectedCustomer}
+                      shop={shop}
+                      onSent={() => {
+                        setSendResult('Sent successfully!');
+                        setTimeout(() => setSendResult(''), 3000);
+                      }}
+                      onError={(err) => setSendResult('Error: ' + err)}
+                    />
+                  )}
+
+                  {sendResult && (
+                    <div style={{
+                      marginTop: '8px', fontSize: '13px',
+                      color: sendResult.startsWith('Error') ? '#dc2626' : '#16a34a',
+                      textAlign: 'center',
+                    }}>
+                      {sendResult}
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
           </div>
         )}
