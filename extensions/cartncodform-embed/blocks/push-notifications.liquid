@@ -2005,8 +2005,26 @@
         if (ogImage) imageUrl = ogImage.getAttribute('content');
       } catch(e) {}
 
+      // {{ product.title }} is rendered server-side onto #ccf-embed-root's
+      // data-product-title attribute (see the top of this block) — prefer
+      // it over window.ShopifyAnalytics (theme-dependent, can lag or be
+      // absent), then fall back to a cleaned-up document.title.
+      var liquidTitle = null;
+      try {
+        var embedRoot = document.getElementById('ccf-embed-root');
+        liquidTitle = embedRoot ? embedRoot.getAttribute('data-product-title') : null;
+      } catch(e) {}
+
+      var cleanedDocTitle = document.title
+        .replace(' – ' + SHOP_DOMAIN.split('.')[0], '')
+        .trim();
+
+      var productTitle = liquidTitle || p.title || cleanedDocTitle;
+
       return {
-        productId: p.id || null,
+        productId: p.id ? String(p.id) : null,
+        productTitle: productTitle,
+        productPrice: p.price || null,
         title: p.title || null,
         vendor: p.vendor || null,
         type: p.type || null,

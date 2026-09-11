@@ -16,13 +16,13 @@ const discountRouter = require('./routes/discounts');
 const ScheduledJob = require('./models/ScheduledJob');
 const Store = require('./models/Store');
 const { sendPushToCustomers } = require('./utils/pushNotification');
-const { sendAbandonedCartEmail } = require('./utils/email');
+const { sendAbandonedCartEmail, sendMarketingEmail } = require('./utils/email');
 const AbandonedCustomer = require('./models/AbandonedCustomer');
 const CustomerPushSubscription = require('./models/CustomerPushSubscription');
 const Profile = require('./models/Profile');
 const { runNightlySignals } = require('./services/signalEngine');
 const { runBrainForShop } = require('./services/brain');
-const { generateCopy } = require('./services/aiService');
+const { generateCopy, generateEmailCopy } = require('./services/aiService');
 const { checkUnopenedThreshold, updateDeliveredRate } = require('./services/pushHygiene');
 const { computeWeights } = require('./services/weightsService');
 
@@ -189,6 +189,15 @@ async function isOverFrequencyCap(shopDomain, cartToken, customerId) {
   });
   return count >= 3;
 }
+
+// Signal types that also get a marketing email after a successful push
+// (in addition to whatever single channel brain.js already picked for the
+// job itself — see the email-send block inside processScheduledJobs()).
+const EMAIL_SIGNAL_TYPES = [
+  'cart_abandon', 'checkout_abandon', 'high_intent',
+  'lapsing', 'winback', 'post_purchase_d3',
+  'back_in_stock', 'price_drop',
+];
 
 /**
  * Phase C: append a "sent" entry to the profile's message log (kept to the
@@ -381,6 +390,76 @@ async function processScheduledJobs() {
                 result.sent || 0,
                 result.tokensFound || 0
               ).catch((err) => console.error('[hygiene] rate error:', err.message));
+            }
+
+            // Bonus email — after a successful push, also email profiles
+            // (brain-scheduled jobs only; profileId is required to look up
+            // the profile at all) whose signal type warrants a marketing
+            // email, with a 24h dedup guard against emailing the same
+            // profile twice in one day. Reuses jobStore/voice already
+            // loaded above rather than re-fetching Store.
+            if (job.profileId && EMAIL_SIGNAL_TYPES.includes(job.signalType)) {
+              try {
+                const profile = await Profile.findById(job.profileId)
+                  .select('identifiers channels messages');
+
+                const emailAddr = profile?.channels?.email?.address ||
+                  profile?.identifiers?.emails?.[0];
+
+                if (emailAddr) {
+                  const recentEmail = profile?.messages?.find((m) =>
+                    m.channel === 'email' &&
+                    m.sentAt && m.sentAt > new Date(Date.now() - 24 * 60 * 60 * 1000)
+                  );
+
+                  if (!recentEmail) {
+                    const { subject, body } = await generateEmailCopy(
+                      job.shopDomain,
+                      { type: job.signalType, strength: job.strength || 0.5 },
+                      voice,
+                      {}
+                    );
+
+                    await sendMarketingEmail(
+                      emailAddr,
+                      subject,
+                      body.replace(/\n/g, '<br>'),
+                      job.shopDomain
+                    );
+
+                    // Field names match the Profile.messages subdocument
+                    // schema (`type`/`outcome`) — Mongoose strict mode
+                    // silently drops any unrecognized key, so pushing
+                    // signalType/status/payload here (as a naive first
+                    // draft did) would erase job.signalType from this log
+                    // entry and defeat brain.js's per-signal 6h cooldown
+                    // check, which reads m.type. $slice caps it at 20,
+                    // matching recordProfileMessage() above.
+                    await Profile.updateOne(
+                      { _id: job.profileId },
+                      {
+                        $push: {
+                          messages: {
+                            $each: [{
+                              channel: 'email',
+                              type: job.signalType,
+                              sentAt: new Date(),
+                              outcome: 'sent',
+                              jobId: job._id,
+                            }],
+                            $slice: -20,
+                          },
+                        },
+                      }
+                    );
+
+                    console.log('[poller] email sent for job', job._id, 'signal:', job.signalType);
+                  }
+                }
+              } catch (emailErr) {
+                // Email errors never block push delivery.
+                console.error('[poller] email send error:', emailErr.message);
+              }
             }
           }
         } else if (channel === 'email') {

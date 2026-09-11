@@ -176,7 +176,11 @@ function NotificationComposer({ customer, shop, onSent, onError }) {
   // customer changes.
   useEffect(() => {
     const signal = customer?.topSignal?.type;
-    const product = customer?.topProducts?.[0]?.title || '';
+    const rawProduct = customer?.topProducts?.[0]?.title || '';
+    // Fall back to generic copy when only a numeric product ID made it
+    // through (e.g. the storefront event was recorded before productTitle
+    // was tracked) instead of showing the raw ID to the customer.
+    const product = /^\d+$/.test(rawProduct) ? '' : rawProduct;
     const suggestion = SUGGESTIONS[signal] || {
       title: () => 'Hello from the store',
       body: () => 'We have something special for you.',
@@ -386,7 +390,10 @@ function EmailComposer({ customer, shop, onSent, onError }) {
 
   useEffect(() => {
     const signal = customer?.topSignal?.type;
-    const product = customer?.topProducts?.[0]?.title || '';
+    const rawProduct = customer?.topProducts?.[0]?.title || '';
+    // Fall back to generic copy when only a numeric product ID made it
+    // through instead of showing the raw ID to the customer.
+    const product = /^\d+$/.test(rawProduct) ? '' : rawProduct;
     const suggestions = {
       cart_abandon: {
         subject: 'You left something behind',
@@ -627,6 +634,8 @@ export default function JourneyScreen({ shop }) {
                     `Anonymous ${profile?._id?.toString().slice(-6)}`;
                   const isSelected = selectedCustomer?.profile?._id === profile?._id;
                   const hasPush = profile?.channels?.push?.subscribed;
+                  const productTitle = c.topProducts?.[0]?.title || '';
+                  const displayTitle = /^\d+$/.test(productTitle) ? '—' : productTitle;
 
                   return (
                     <div
@@ -680,7 +689,7 @@ export default function JourneyScreen({ shop }) {
                         fontSize: '12px', color: '#374151',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}>
-                        {c.topProducts?.[0]?.title || '—'}
+                        {displayTitle || '—'}
                       </div>
 
                       {/* Action */}

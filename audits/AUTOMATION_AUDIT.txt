@@ -1,0 +1,402 @@
+AUTOMATION AUDIT — read-only file dump
+=======================================
+Generated: 2026-09-12
+No modifications made.
+
+
+════════════════════════════════════════════════════════════════════
+1. backend/services/brain.js — lines 1-80 (ranking + scheduling section)
+════════════════════════════════════════════════════════════════════
+  1	const Profile = require('../models/Profile');
+  2	const Signal = require('../models/Signal');
+  3	const SignalConfig = require('../models/SignalConfig');
+  4	const ScheduledJob = require('../models/ScheduledJob');
+  5	const Store = require('../models/Store');
+  6
+  7	/**
+  8	 * Layer 3 — Brain. For one profile per day: rank its active signals, apply
+  9	 * fatigue caps, pick ONE signal, pick ONE channel, pick a send time, and
+ 10	 * schedule a single ScheduledJob carrying (profileId, signalType, reason) —
+ 11	 * NOT resolved copy. Copy is resolved in the poller at send time (Phase E).
+ 12	 *
+ 13	 * Everything here is deterministic and inspectable.
+ 14	 */
+ 15
+ 16	const HOUR = 60 * 60 * 1000;
+ 17	const DAY = 24 * HOUR;
+ 18
+ 19	// Signal-type channel defaults (SignalConfig.channelOverride wins over these).
+ 20	const EMAIL_FIRST = new Set([
+ 21	  'lapsing', 'winback', 'post_purchase_d3', 'email_capture', 'cod_to_prepaid',
+ 22	]);
+ 23	// Everything else (cart_abandon, checkout_abandon, browse_abandon, high_intent,
+ 24	// price_hesitation, price_drop, back_in_stock) prefers push — time-sensitive.
+ 25
+ 26	// Phase H — static base value per signal type (the EV formula's `baseValue`).
+ 27	const BASE_VALUE = {
+ 28	  cart_abandon: 1.0,
+ 29	  checkout_abandon: 1.2,
+ 30	  price_drop: 0.9,
+ 31	  back_in_stock: 0.9,
+ 32	  high_intent: 0.7,
+ 33	  price_hesitation: 0.6,
+ 34	  cod_to_prepaid: 0.8,
+ 35	  browse_abandon: 0.4,
+ 36	  post_purchase_d3: 0.3,
+ 37	  lapsing: 0.5,
+ 38	  winback: 0.4,
+ 39	  email_capture: 0.3,
+ 40	};
+ 41
+ 42	// Read a `.rate` from a Map (ShopWeights.signalRates / .hourRates) or a plain
+ 43	// object, defaulting to the neutral 1.0 when there is no learned value yet.
+ 44	function rateFromMap(mapLike, key) {
+ 45	  if (!mapLike) return 1.0;
+ 46	  const v = typeof mapLike.get === 'function' ? mapLike.get(String(key)) : mapLike[String(key)];
+ 47	  return v && typeof v.rate === 'number' ? v.rate : 1.0;
+ 48	}
+ 49
+ 50	// --- quiet hours -----------------------------------------------------------
+ 51
+ 52	function isQuietHour(hour, start, end) {
+ 53	  if (start === end) return false;
+ 54	  if (start < end) return hour >= start && hour < end; // same-day window
+ 55	  return hour >= start || hour < end;                  // wraps midnight (e.g. 22->8)
+ 56	}
+ 57
+ 58	function hourInTz(date, tz) {
+ 59	  try {
+ 60	    const h = parseInt(
+ 61	      new Intl.DateTimeFormat('en-US', {
+ 62	        hour: 'numeric',
+ 63	        hour12: false,
+ 64	        timeZone: tz || 'Asia/Kolkata',
+ 65	      }).format(date),
+ 66	      10
+ 67	    );
+ 68	    return h % 24; // some ICU builds emit "24" at midnight
+ 69	  } catch {
+ 70	    return date.getHours();
+ 71	  }
+ 72	}
+ 73
+ 74	// --- channel selection ---------------------------------------------------
+ 75
+ 76	function selectChannel(signalType, config, profile) {
+ 77	  const ch = profile.channels || {};
+ 78	  const avail = {
+ 79	    push: !!(ch.push && ch.push.subscribed === true),
+ 80	    email: !!(ch.email && ch.email.address),
+        [... file continues past line 80, not requested ...]
+
+
+════════════════════════════════════════════════════════════════════
+2. backend/services/aiService.js — generateCopy function only (lines 71-156)
+════════════════════════════════════════════════════════════════════
+ 71	async function generateCopy(store, signalType, product, channel) {
+ 72	  const fallback = channel === 'email' ? FALLBACK_EMAIL : FALLBACK_PUSH;
+ 73	  const shopDomain = (store && store.shopDomain) || '';
+ 74	  const voice = (store && store.voice) || {};
+ 75	  const productId = product && product.productId ? String(product.productId) : null;
+ 76
+ 77	  const voiceHash = crypto.createHash('md5').update(JSON.stringify(voice)).digest('hex');
+ 78	  const cacheKey = buildCacheKey(shopDomain, signalType, productId, channel, voiceHash);
+ 79
+ 80	  // 1. cache
+ 81	  try {
+ 82	    const hit = await CopyCache.findOne({ cacheKey });
+ 83	    if (hit) {
+ 84	      console.log(`[ai] cache hit for ${cacheKey.slice(0, 8)}`);
+ 85	      return { title: hit.title || '', body: hit.body || '', subject: hit.subject || '' };
+ 86	    }
+ 87	  } catch (err) {
+ 88	    console.warn('[ai] cache lookup failed:', err.message);
+ 89	  }
+ 90
+ 91	  // 2. no key -> fallback (do not touch the API)
+ 92	  if (!hasKey()) {
+ 93	    return { title: fallback.title || '', body: fallback.body || '', subject: fallback.subject || '' };
+ 94	  }
+ 95
+ 96	  // 3. build the prompt + call
+ 97	  const priceStr = product && product.price ? String(product.price) : '';
+ 98	  const productLabel = (product && product.title) || 'their cart';
+ 99	  const userPrompt =
+100	    `Store voice: ${JSON.stringify(voice)}\n` +
+101	    `Signal: ${signalType}\n` +
+102	    `Product: ${productLabel} — ₹${priceStr}\n` +
+103	    `Channel: ${channel}\n\n` +
+104	    (channel === 'push'
+105	      ? `Write a web push notification:\n` +
+106	        `- title: max 50 chars\n` +
+107	        `- body: max 90 chars\n` +
+108	        `- Use emoji if store.voice.emoji is true\n` +
+109	        `- End with store.voice.signOff if set`
+110	      : `Write a re-engagement email:\n` +
+111	        `- subject: max 60 chars\n` +
+112	        `- body: 2–3 short paragraphs, plain text, no HTML\n` +
+113	        `- Warm opening, clear CTA ("Return to your cart" or similar)\n` +
+114	        `- End with store.voice.signOff`) +
+115	    `\n\nRespond ONLY with JSON: ` +
+116	    (channel === 'push'
+117	      ? '{"title":"...","body":"..."}'
+118	      : '{"subject":"...","body":"..."}');
+119
+120	  let parsed;
+121	  let promptTokens = 0;
+122	  try {
+123	    const out = await anthropic(userPrompt, { maxTokens: 500, system: SYSTEM_PROMPT });
+124	    promptTokens = out.promptTokens;
+125	    parsed = parseJsonBlock(out.text);
+126	  } catch (err) {
+127	    console.warn(`[ai] generateCopy failed (${signalType}/${channel}):`, err.message);
+128	    return { title: fallback.title || '', body: fallback.body || '', subject: fallback.subject || '' };
+129	  }
+130
+131	  const result = {
+132	    title: parsed.title || fallback.title || '',
+133	    body: parsed.body || fallback.body || '',
+134	    subject: parsed.subject || fallback.subject || '',
+135	  };
+136
+137	  // 4. cache it
+138	  try {
+139	    await CopyCache.create({
+140	      shopDomain,
+141	      cacheKey,
+142	      signalType,
+143	      channel,
+144	      title: result.title,
+145	      body: result.body,
+146	      subject: result.subject,
+147	      promptTokens,
+148	      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+149	    });
+150	  } catch (err) {
+151	    if (!err || err.code !== 11000) console.warn('[ai] cache save failed:', err.message);
+152	  }
+153
+154	  console.log(`[ai] generated copy for ${signalType}/${channel}, tokens=${promptTokens}`);
+155	  return result;
+156	}
+
+
+════════════════════════════════════════════════════════════════════
+3. backend/utils/email.js (full file, 183 lines)
+════════════════════════════════════════════════════════════════════
+  1	const { Resend } = require('resend');
+  2
+  3	// The Resend constructor throws if the key is falsy, which would crash server
+  4	// startup when RESEND_API_KEY is unset. Fall back to a placeholder so the app
+  5	// still boots; sends then fail with an auth error that is caught and logged.
+  6	const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
+  7	const FROM = process.env.FROM_EMAIL || 'onboarding@resend.dev';
+  8
+  9	// --- small HTML helpers -------------------------------------------------------
+ 10
+ 11	function escapeHtml(value) {
+ 12	  return String(value == null ? '' : value)
+ 13	    .replace(/&/g, '&amp;')
+ 14	    .replace(/</g, '&lt;')
+ 15	    .replace(/>/g, '&gt;')
+ 16	    .replace(/"/g, '&quot;');
+ 17	}
+ 18
+ 19	function money(n) {
+ 20	  const num = Number(n) || 0;
+ 21	  return num.toLocaleString('en-IN', {
+ 22	    minimumFractionDigits: 2,
+ 23	    maximumFractionDigits: 2,
+ 24	  });
+ 25	}
+ 26
+ 27	function button(href, label) {
+ 28	  return (
+ 29	    `<a href="${escapeHtml(href)}" ` +
+ 30	    `style="display:inline-block;background:#4f46e5;color:#ffffff;` +
+ 31	    `text-decoration:none;padding:12px 20px;border-radius:8px;` +
+ 32	    `font-weight:600;font-family:Arial,Helvetica,sans-serif;">${escapeHtml(label)}</a>`
+ 33	  );
+ 34	}
+ 35
+ 36	function shell(innerHtml) {
+ 37	  return (
+ 38	    `<div style="font-family:Arial,Helvetica,sans-serif;color:#111827;` +
+ 39	    `max-width:560px;margin:0 auto;padding:24px;">${innerHtml}</div>`
+ 40	  );
+ 41	}
+ 42
+ 43	// ---------------------------------------------------------------------------
+ 44	// 1. Abandoned cart reminder -> the customer
+ 45	// ---------------------------------------------------------------------------
+ 46
+ 47	async function sendAbandonedCartEmail(customer, options = {}) {
+ 48	  try {
+ 49	    if (!customer || !customer.email) {
+ 50	      // No email on file — nothing to send.
+ 51	      return { success: false, error: 'no customer email' };
+ 52	    }
+ 53
+ 54	    const items = Array.isArray(customer.cartItems) ? customer.cartItems : [];
+ 55	    const rows = items
+ 56	      .map((i) => {
+ 57	        const qty = i.quantity || 1;
+ 58	        const line = (Number(i.price) || 0) * qty;
+ 59	        return (
+ 60	          `<tr>` +
+ 61	          `<td style="padding:6px 0;">${escapeHtml(i.title || 'Item')} &times; ${qty}</td>` +
+ 62	          `<td style="padding:6px 0;text-align:right;">${money(line)}</td>` +
+ 63	          `</tr>`
+ 64	        );
+ 65	      })
+ 66	      .join('');
+ 67
+ 68	    // Optional overrides (per automation step / test send).
+ 69	    const subject = options.subject || 'You left something behind! 🛒';
+ 70	    const introHtml = options.body
+ 71	      ? `<p style="margin:0 0 16px;color:#111827;">${escapeHtml(options.body)}</p>`
+ 72	      : '';
+ 73	    const cta = options.cartUrl || process.env.FRONTEND_URL || '#';
+ 74
+ 75	    const html = shell(
+ 76	      `<h1 style="font-size:22px;margin:0 0 12px;">You forgot something!</h1>` +
+ 77	        `<p style="margin:0 0 16px;color:#4b5563;">Here's what's still waiting in your cart:</p>` +
+ 78	        `${introHtml}` +
+ 79	        `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
+ 80	        `${rows || '<tr><td style="padding:6px 0;color:#6b7280;">Your saved items</td></tr>'}` +
+ 81	        `<tr><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">Total</td>` +
+ 82	        `<td style="padding:10px 0;border-top:1px solid #e5e7eb;text-align:right;font-weight:700;">` +
+ 83	        `${money(customer.cartValue)}</td></tr>` +
+ 84	        `</table>` +
+ 85	        `<p style="margin:24px 0;">${button(cta, 'Complete Your Order')}</p>` +
+ 86	        `<p style="margin:32px 0 0;font-size:12px;color:#9ca3af;">` +
+ 87	        `This reminder was sent by CartnCodForm</p>`
+ 88	    );
+ 89
+ 90	    const { error } = await resend.emails.send({
+ 91	      from: FROM,
+ 92	      to: customer.email,
+ 93	      subject: subject,
+ 94	      html,
+ 95	    });
+ 96
+ 97	    if (error) throw new Error(error.message || JSON.stringify(error));
+ 98
+ 99	    console.log(`[email] abandoned_cart sent (profileId: ${customer._id})`);
+100	    return { success: true };
+101	  } catch (err) {
+102	    console.error(`Email failed: ${err.message}`);
+103	    return { success: false, error: err.message };
+104	  }
+105	}
+106
+107	// ---------------------------------------------------------------------------
+108	// 2. New COD order alert -> the store owner
+109	// ---------------------------------------------------------------------------
+110
+111	async function sendNewCodOrderEmail(order, ownerEmail) {
+112	  try {
+113	    if (!ownerEmail) {
+114	      return { success: false, error: 'no owner email' };
+115	    }
+116	    if (!order) {
+117	      return { success: false, error: 'no order' };
+118	    }
+119
+120	    const qty = Number(order.quantity) || 1;
+121	    const price = Number(order.productPrice) || 0;
+122	    const total = price * qty;
+123
+124	    const html = shell(
+125	      `<h1 style="font-size:22px;margin:0 0 12px;">New COD Order!</h1>` +
+126	        `<h2 style="font-size:15px;margin:20px 0 6px;color:#374151;">Customer details</h2>` +
+127	        `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
+128	        `<tr><td style="padding:4px 0;color:#6b7280;">Name</td><td style="padding:4px 0;">${escapeHtml(order.name)}</td></tr>` +
+129	        `<tr><td style="padding:4px 0;color:#6b7280;">Phone</td><td style="padding:4px 0;">${escapeHtml(order.phone)}</td></tr>` +
+130	        `<tr><td style="padding:4px 0;color:#6b7280;">Address</td><td style="padding:4px 0;">${escapeHtml(order.address)}</td></tr>` +
+131	        `<tr><td style="padding:4px 0;color:#6b7280;">City</td><td style="padding:4px 0;">${escapeHtml(order.city)}</td></tr>` +
+132	        `<tr><td style="padding:4px 0;color:#6b7280;">Pincode</td><td style="padding:4px 0;">${escapeHtml(order.pincode)}</td></tr>` +
+133	        `</table>` +
+134	        `<h2 style="font-size:15px;margin:20px 0 6px;color:#374151;">Product</h2>` +
+135	        `<table style="width:100%;border-collapse:collapse;font-size:14px;">` +
+136	        `<tr><td style="padding:4px 0;color:#6b7280;">Item</td><td style="padding:4px 0;">${escapeHtml(order.productName)}</td></tr>` +
+137	        `<tr><td style="padding:4px 0;color:#6b7280;">Price</td><td style="padding:4px 0;">₹${money(price)}</td></tr>` +
+138	        `<tr><td style="padding:4px 0;color:#6b7280;">Quantity</td><td style="padding:4px 0;">${qty}</td></tr>` +
+139	        `<tr><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">Total</td>` +
+140	        `<td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">₹${money(total)}</td></tr>` +
+141	        `</table>` +
+142	        `<p style="margin:32px 0 0;font-size:12px;color:#9ca3af;">Powered by CartnCodForm</p>`
+143	    );
+144
+145	    const { error } = await resend.emails.send({
+146	      from: FROM,
+147	      to: ownerEmail,
+148	      subject: 'New COD Order Received! 📦',
+149	      html,
+150	    });
+151
+152	    if (error) throw new Error(error.message || JSON.stringify(error));
+153
+154	    console.log(`Email sent: new_cod_order to ${ownerEmail}`);
+155	    return { success: true };
+156	  } catch (err) {
+157	    console.error(`Email failed: ${err.message}`);
+158	    return { success: false, error: err.message };
+159	  }
+160	}
+161
+162	// ---------------------------------------------------------------------------
+163	// 3. COD order confirmation -> the customer (not wired up yet)
+164	// ---------------------------------------------------------------------------
+165
+166	async function sendCodOrderConfirmationEmail(order) {
+167	  try {
+168	    // TODO: integrate customer email later. COD customers may not provide an
+169	    // email address on the form, so there is nothing to send to right now.
+170	    // When the COD form collects an email, send a confirmation here.
+171	    return { success: true };
+172	  } catch (err) {
+173	    console.error(`Email failed: ${err.message}`);
+174	    return { success: false, error: err.message };
+175	  }
+176	}
+177
+178	module.exports = {
+179	  sendAbandonedCartEmail,
+180	  sendNewCodOrderEmail,
+181	  sendCodOrderConfirmationEmail,
+182	};
+
+
+NOTES (read-only observations)
+-------------------------------
+- brain.js's header comment (lines 8-11) states it schedules a
+  ScheduledJob carrying (profileId, signalType, reason) — NOT resolved
+  copy — and that copy is resolved in the poller at send time. This
+  matches CLAUDE.md's rule "Message copy resolves in the poller at send
+  time, not when the job is scheduled," and lines up with
+  aiService.generateCopy() being a standalone function callable at send
+  time rather than at scheduling time.
+- generateCopy()'s cache key (buildCacheKey, not in the requested range)
+  is built from shopDomain + signalType + productId + channel + an MD5
+  hash of store.voice — so a per-request cache lookup never touches the
+  AI provider once a given (signal, product, channel, voice) combination
+  has been generated once; only a genuine cache miss reaches step 3 (the
+  actual API call), consistent with CLAUDE.md's "LLM calls ... are cached
+  in Mongo, and are never made per-customer at send time" so long as the
+  same product/signal/voice combination repeats across customers.
+- generateCopy() never throws on failure — every path (cache-lookup
+  error, no API key, API/parse error) falls back to FALLBACK_PUSH /
+  FALLBACK_EMAIL, so a caller can always trust it to return a usable
+  {title, body, subject} object.
+- email.js: sendAbandonedCartEmail() and sendNewCodOrderEmail() both
+  escapeHtml() all interpolated user/order-derived fields (customer cart
+  item titles, order name/phone/address/city/pincode/productName) before
+  building the HTML string — no unescaped interpolation of external data
+  found in this file.
+- sendCodOrderConfirmationEmail() is a documented no-op stub (comment:
+  "not wired up yet") — always returns { success: true } without sending
+  anything, since COD customers may not supply an email on the form.
+- Both real senders throw on a Resend-reported `error` and catch it in
+  the same try/catch, returning { success: false, error: err.message }
+  — neither ever propagates a rejection to its caller.

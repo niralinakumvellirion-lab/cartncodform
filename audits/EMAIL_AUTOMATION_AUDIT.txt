@@ -1,0 +1,146 @@
+EMAIL AUTOMATION — SELF AUDIT
+===============================
+Branch: email-automation
+Date: 2026-09-12
+
+
+FILE LIST DISCREPANCY (flagging, not silently ignoring)
+-----------------------------------------------------------
+The task listed backend/services/brain.js as file #1 to modify, and asked
+for all 4 files to be read in full before any changes. brain.js was read
+in full as instructed, but none of STEP 1/2/3 touch it, and nothing in
+the other 3 files' given code actually requires a brain.js change to
+work: the given server.js snippet reads `job.strength || 0.5`, but
+ScheduledJob's schema (checked) has no `strength` field at all — brain.js
+never writes one when it creates a job — so `job.strength` is always
+undefined and that expression always evaluates to the 0.5 default.
+generateEmailCopy()'s given body never even reads `signal.strength`
+either way, so this doesn't affect behavior. brain.js was left
+unmodified.
+
+
+STEP 1 — email.js: sendMarketingEmail
+------------------------------------------
+Added as specified, with two fixes:
+  - The given code did `const { Resend } = require('resend'); const resend
+    = new Resend(process.env.RESEND_API_KEY);` inline, constructing a
+    second Resend client on every call. This file already has one shared
+    `resend` client at module scope (with the safe placeholder-key
+    fallback). Reused that instead — same `from` string as given, no
+    functional change, one fewer SDK instantiation per send.
+  - The given log line was `console.log('[email] Marketing email sent to
+    profile', '(id redacted) for shop', shopDomain);` — the function
+    doesn't receive a profileId at all, so "to profile (id redacted)" was
+    a misleading, no-op phrase left over from a similar log line in
+    sendJourneyEmail (push.js). Simplified to `console.log('[email]
+    Marketing email sent for shop', shopDomain)` — still never logs the
+    recipient address, per CLAUDE.md's "never log PII" rule (the original
+    also avoided logging `to`, just via confusing wording).
+
+
+STEP 2 — aiService.js: generateEmailCopy
+---------------------------------------------
+The given implementation called `buildCopyPrompt(signal, voice,
+profileData)` and `callLLM(emailPrompt)` — neither function exists
+anywhere in aiService.js (verified: the only helpers are hasKey,
+anthropic, parseJsonBlock, ruleBasedNarrative). As given, the AI branch
+would throw a ReferenceError on every call once an LLM key was set,
+silently caught by the surrounding try/catch and always falling through
+to the template — i.e. the AI path would never actually run, defeating
+the feature's own stated purpose. Rewired it to the real helpers already
+used by generateCopy() in this same file: anthropic() (the raw-fetch
+Anthropic wrapper) + parseJsonBlock(), with a prompt built inline in the
+same style/shape as generateCopy()'s own prompt.
+
+Second, more significant fix: the given generateEmailCopy() never cached
+anything — every call with an LLM key would hit the Anthropic API
+directly. Since this function is invoked once per due job inside the
+poller's per-job loop (one job per customer), that means one live LLM
+call per customer per signal, every time — which is exactly what
+CLAUDE.md's "LLM calls ... are cached in Mongo, and are never made
+per-customer at send time" rule forbids, and exactly what generateCopy()
+above already avoids via CopyCache (whose own doc-comment literally says
+"One LLM call per product per signal per channel per voice, not per
+customer"). Added the same CopyCache-backed caching generateCopy() uses,
+keyed by (shopDomain, signalType, null-productId, 'email-marketing',
+voiceHash) — the 'email-marketing' channel tag keeps this cache
+namespace distinct from generateCopy()'s own 'email' entries, which serve
+a different prompt/template. This required adding a `shopDomain`
+parameter to the function signature (the given signature was
+`(signal, voice, profileData)` — shopDomain wasn't there, and without it
+there's no way to build a per-shop cache key, which would also mean two
+shops with byte-identical `voice` could silently share one shop's
+AI-generated copy with another shop's customers). Updated server.js's
+call site to pass job.shopDomain accordingly.
+
+SIGNAL_EMAIL_TEMPLATES: implemented all 10 templates exactly as given
+(cart_abandon, checkout_abandon, high_intent, price_hesitation, lapsing,
+winback, post_purchase_d3, back_in_stock, price_drop, email_capture) —
+note this is 10, not the "9 signal templates" the task's own requested
+self-audit wording says; counted directly from the given code block.
+Two Signal.type enum values (browse_abandon, cod_to_prepaid) have no
+template and fall back to 'lapsing' — moot today since neither is in
+server.js's EMAIL_SIGNAL_TYPES gate, so that fallback path isn't
+currently reachable; kept for forward-compatibility, not removed.
+Also note: price_hesitation and email_capture DO have templates here but
+are NOT in EMAIL_SIGNAL_TYPES (STEP 3's list), so those two templates are
+currently unreachable too — implemented both lists exactly as given
+without inventing a change to reconcile them, since resolving that is a
+product decision, not a bug.
+
+
+STEP 3 — server.js: poller sends email after push
+-------------------------------------------------------
+Added EMAIL_SIGNAL_TYPES (hoisted to module scope rather than
+re-allocated every loop iteration) and the email-send block, placed
+inside the existing push-success branch, right after the existing hygiene
+calls. Three fixes against the given snippet:
+  - Given code re-required `./models/Store` and `./models/Profile` and
+    ran a second `Store.findOne({shopDomain}, 'voice')` query — both
+    modules are already imported at the top of server.js, and `voice`
+    (derived from the SAME shopDomain) is already computed a few lines
+    above this block for the push-copy generateCopy() call. Reused the
+    existing `Profile` import and `voice` variable instead of
+    re-requiring/re-querying.
+  - Given code pushed `{channel:'email', signalType: job.signalType,
+    sentAt, status:'sent', payload:{subject,body}}` onto
+    profile.messages. Profile.messages' actual subdocument schema (in
+    models/Profile.js) has fields `channel`, `type`, `sentAt`, `outcome`,
+    `jobId` — no `signalType`, `status`, or `payload` fields exist.
+    Mongoose's default strict mode silently drops unrecognized keys on
+    save, so as given this push would have saved a message with `type`
+    unset. brain.js's own 6-hour per-signal cooldown check reads
+    `m.type === s.type` — with `type` never set, this new email entry
+    would never register with that cooldown check on future brain runs.
+    Fixed the field names to `type`/`outcome` (matching the real schema),
+    dropped the unpersistable `payload` field, added `jobId: job._id` to
+    match recordProfileMessage()'s existing shape, and added `$slice:
+    -20` to cap the array (recordProfileMessage(), a few lines above,
+    already does this — the given snippet didn't, which would let the
+    array grow unbounded for shops running this automation for a long
+    time).
+  - Added a `job.profileId` guard around the whole block (legacy
+    rule-scheduled jobs have profileId=null and no Profile document to
+    look anything up on — the given snippet would have run
+    Profile.findById(null), which Mongoose resolves to null without
+    querying, so not a crash, just wasted work every tick for those
+    jobs).
+Everything else (24h dedup via profile.messages, emailAddr resolution
+order, email-errors-never-block-push try/catch) implemented as given.
+
+
+STEP 4 — Verification
+--------------------------
+- node --check backend/server.js -> OK
+- node --check backend/utils/email.js -> OK
+- node --check backend/services/aiService.js -> OK
+- Added backend/__tests__/sendMarketingEmail.test.js (4 tests: missing-key
+  skip, invalid-email skip, happy path via the shared client, Resend-error
+  throw) and backend/__tests__/generateEmailCopy.test.js (6 tests: cache
+  hit, cache miss + AI call + cache write, template fallback with no LLM
+  key, unknown-signal-type fallback to 'lapsing', API-throw fallback, and
+  a direct check that the cache key is scoped per shopDomain).
+- cd backend && npm test -> Test Suites: 19 passed, 19 total.
+  Tests: 147 passed, 147 total (137 baseline + 10 new). No failures.
+
+Not deployed (shopify app deploy not run; this branch was not merged).

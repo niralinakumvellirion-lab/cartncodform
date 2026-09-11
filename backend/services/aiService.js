@@ -156,6 +156,139 @@ async function generateCopy(store, signalType, product, channel) {
 }
 
 // ---------------------------------------------------------------------------
+// generateEmailCopy — signal-type marketing email copy, sent by the poller
+// in addition to a push (see server.js processScheduledJobs()).
+// ---------------------------------------------------------------------------
+
+// One template per signal type the poller may email. Signal types not
+// listed here (browse_abandon, cod_to_prepaid) fall back to 'lapsing' —
+// neither is currently in server.js's EMAIL_SIGNAL_TYPES gate, so that
+// fallback is not reachable today, but is kept for forward-compatibility.
+const SIGNAL_EMAIL_TEMPLATES = {
+  cart_abandon: {
+    subject: 'Your cart is waiting for you',
+    body: 'You left something behind. Come back and complete your order before it sells out.',
+  },
+  checkout_abandon: {
+    subject: 'Almost there — complete your order',
+    body: 'You were so close! Your order is saved. Complete checkout now.',
+  },
+  high_intent: {
+    subject: 'We noticed your interest',
+    body: "You've been checking out one of our products. We think you're going to love it.",
+  },
+  price_hesitation: {
+    subject: 'Still thinking about it?',
+    body: "Great products are worth it. Here's why our customers love what you've been looking at.",
+  },
+  lapsing: {
+    subject: 'We miss you!',
+    body: "It's been a while. Come back and see what's new — we've added exciting products.",
+  },
+  winback: {
+    subject: 'A special message for you',
+    body: "We'd love to have you back. New collection just dropped with styles we think you'll love.",
+  },
+  post_purchase_d3: {
+    subject: 'How are you enjoying your purchase?',
+    body: "We hope you're loving your recent order. Your feedback means a lot to us.",
+  },
+  back_in_stock: {
+    subject: "It's back in stock!",
+    body: "Great news — a product you were interested in is back in stock. Grab it before it's gone.",
+  },
+  price_drop: {
+    subject: 'Price just dropped on your saved item',
+    body: "The item you were eyeing is now cheaper. Now's the perfect time to buy.",
+  },
+  email_capture: {
+    subject: 'Thank you for subscribing',
+    body: "Welcome! You're now part of our community. Enjoy exclusive updates and offers.",
+  },
+};
+
+/**
+ * shopDomain is required (not part of the original spec for this function,
+ * which took only (signal, voice, profileData)) — without it there is no
+ * way to build a per-shop cache key, and without caching every job for an
+ * EMAIL_SIGNAL_TYPES signal would call the LLM directly per customer at
+ * send time, which is exactly what CLAUDE.md's "LLM calls ... are cached
+ * in Mongo, and are never made per-customer at send time" rule forbids —
+ * and which generateCopy() above already correctly avoids via CopyCache.
+ * This reuses that same cache, keyed under channel 'email-marketing' so it
+ * never collides with generateCopy()'s own 'email' cache entries (which
+ * carry a different prompt/product shape).
+ */
+async function generateEmailCopy(shopDomain, signal, voice, profileData) {
+  const signalType = (signal && signal.type) || 'lapsing';
+  const template = SIGNAL_EMAIL_TEMPLATES[signalType] || SIGNAL_EMAIL_TEMPLATES.lapsing;
+
+  const shop = shopDomain || '';
+  const voiceHash = crypto.createHash('md5').update(JSON.stringify(voice || {})).digest('hex');
+  const cacheKey = buildCacheKey(shop, signalType, null, 'email-marketing', voiceHash);
+
+  // 1. cache
+  try {
+    const hit = await CopyCache.findOne({ cacheKey });
+    if (hit) {
+      console.log(`[ai] email copy cache hit for ${cacheKey.slice(0, 8)}`);
+      return { subject: hit.subject || template.subject, body: hit.body || template.body };
+    }
+  } catch (err) {
+    console.warn('[ai] email copy cache lookup failed:', err.message);
+  }
+
+  // 2. no key -> template fallback (do not touch the API)
+  if (!hasKey()) {
+    return template;
+  }
+
+  // 3. build the prompt + call. profileData is accepted for a future
+  // personalization pass but is always {} from the only caller today, so
+  // it isn't folded into the prompt yet.
+  try {
+    const userPrompt =
+      `Store voice: ${JSON.stringify(voice || {})}\n` +
+      `Signal: ${signalType}\n\n` +
+      `Write a re-engagement marketing email:\n` +
+      `- subject: max 60 chars\n` +
+      `- body: 2–3 short paragraphs, plain text, no HTML\n` +
+      `- Warm opening, clear call to action\n` +
+      `- End with store.voice.signOff if set\n\n` +
+      `Respond ONLY with JSON: {"subject":"...","body":"..."}`;
+
+    const out = await anthropic(userPrompt, { maxTokens: 500, system: SYSTEM_PROMPT });
+    const parsed = parseJsonBlock(out.text);
+    const result = {
+      subject: parsed.subject || template.subject,
+      body: parsed.body || template.body,
+    };
+
+    // 4. cache it
+    try {
+      await CopyCache.create({
+        shopDomain: shop,
+        cacheKey,
+        signalType,
+        channel: 'email-marketing',
+        body: result.body,
+        subject: result.subject,
+        promptTokens: out.promptTokens,
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      });
+    } catch (err) {
+      if (!err || err.code !== 11000) console.warn('[ai] email copy cache save failed:', err.message);
+    }
+
+    console.log(`[ai] generated email copy for ${signalType}, tokens=${out.promptTokens}`);
+    return result;
+  } catch (err) {
+    console.warn(`[ai] generateEmailCopy failed (${signalType}):`, err.message);
+    return template;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // generateWeeklyNarrative
 // ---------------------------------------------------------------------------
 function ruleBasedNarrative(stats) {
@@ -210,4 +343,4 @@ async function generateInsights(shopDomain, rawInsights) {
   }
 }
 
-module.exports = { generateCopy, generateWeeklyNarrative, generateInsights };
+module.exports = { generateCopy, generateEmailCopy, generateWeeklyNarrative, generateInsights };

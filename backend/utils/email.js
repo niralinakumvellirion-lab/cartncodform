@@ -160,7 +160,60 @@ async function sendNewCodOrderEmail(order, ownerEmail) {
 }
 
 // ---------------------------------------------------------------------------
-// 3. COD order confirmation -> the customer (not wired up yet)
+// 3. Automation marketing email -> a customer (brain-scheduled, arbitrary
+//    subject/body — see backend/services/aiService.js generateEmailCopy())
+// ---------------------------------------------------------------------------
+
+async function sendMarketingEmail(to, subject, htmlBody, shopDomain) {
+  if (!process.env.RESEND_API_KEY) {
+    console.warn('[email] RESEND_API_KEY not set — skipping');
+    return { skipped: true };
+  }
+  if (!to || !to.includes('@')) {
+    console.warn('[email] Invalid email address — skipping');
+    return { skipped: true };
+  }
+
+  // Reuse the shared client above (already guarded against a missing key)
+  // rather than constructing a second Resend SDK instance per call.
+  const { data, error } = await resend.emails.send({
+    from: 'CartnCodForm <onboarding@resend.dev>',
+    to,
+    subject,
+    html: `
+      <div style="font-family:-apple-system,BlinkMacSystemFont,
+        sans-serif;max-width:600px;margin:0 auto;
+        padding:32px 24px;background:#f9fafb">
+        <div style="background:#fff;border-radius:16px;
+          border:1px solid #e5e7eb;padding:32px">
+          <div style="font-size:16px;color:#111827;
+            line-height:1.6">
+            ${htmlBody}
+          </div>
+          <hr style="margin:24px 0;border:none;
+            border-top:1px solid #f3f4f6">
+          <p style="font-size:12px;color:#9ca3af;margin:0">
+            You received this because you subscribed to
+            notifications from ${shopDomain || 'this store'}.
+            <br>To unsubscribe, reply with "unsubscribe".
+          </p>
+        </div>
+      </div>
+    `,
+  });
+
+  if (error) {
+    console.error('[email] Resend error:', error.message);
+    throw new Error(error.message);
+  }
+
+  // Never log the recipient address (CLAUDE.md: no PII in console.log).
+  console.log('[email] Marketing email sent for shop', shopDomain);
+  return { success: true, id: data?.id };
+}
+
+// ---------------------------------------------------------------------------
+// 4. COD order confirmation -> the customer (not wired up yet)
 // ---------------------------------------------------------------------------
 
 async function sendCodOrderConfirmationEmail(order) {
@@ -179,4 +232,5 @@ module.exports = {
   sendAbandonedCartEmail,
   sendNewCodOrderEmail,
   sendCodOrderConfirmationEmail,
+  sendMarketingEmail,
 };
