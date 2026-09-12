@@ -1,0 +1,87 @@
+=== CAST FIX AUDIT ===
+
+Fix 1: EMAIL_SIGNAL_TYPES before/after
+---------------------------------------
+Before:
+  const EMAIL_SIGNAL_TYPES = [
+    'cart_abandon', 'checkout_abandon', 'high_intent',
+    'lapsing', 'winback', 'post_purchase_d3',
+    'back_in_stock', 'price_drop',
+  ];
+
+After:
+  const EMAIL_SIGNAL_TYPES = [
+    'cart_abandon', 'checkout_abandon', 'high_intent',
+    'lapsing', 'winback', 'post_purchase_d3',
+    'back_in_stock', 'price_drop', 'email_capture',
+  ];
+
+Applied exactly as specified.
+
+
+Fix 2: recordProfileMessage() call sites found: 2
+--------------------------------------------------
+Both call sites passed the bare `job` loop variable — a live Mongoose
+document, since `dueJobs = await ScheduledJob.find({...}).limit(20)` is
+NOT `.lean()`'d — directly into recordProfileMessage(job).
+
+NOTE on the task's given fix shape vs. the actual function contract: the
+task's suggested literal — `{ channel: '...', type: '...', sentAt: new
+Date(), outcome: '...', jobId: job._id }` — is the shape of the MESSAGE
+sub-document recordProfileMessage() builds *internally* for the $push
+(visible in its body: channel/type/sentAt/outcome/jobId). It is NOT the
+shape of the `job` parameter recordProfileMessage(job) itself expects,
+which (per its body — `if (!job.profileId) return;` then
+`Profile.findByIdAndUpdate(job.profileId, ...)`, `channel: job.channel`,
+`type: job.signalType`, `jobId: job._id`) actually reads exactly 4 fields:
+profileId, channel, signalType, _id. Reconstructing the call-site argument
+using the task's literal shape would have silently broken the function
+(job.profileId would be undefined on the reconstructed object, so
+`if (!job.profileId) return;` would fire immediately and the message
+would never be recorded at all). Fixed using the real 4-field contract
+instead, per "Do NOT change the recordProfileMessage() function signature
+itself" — the function's inputs are unchanged in meaning, only guaranteed
+to now be plain values rather than live-document getters.
+
+Site 1 — push-channel success branch (originally ~line 378, now ~383):
+  Old: await recordProfileMessage(job).catch((e) =>
+         console.error('[brain] message log error:', e.message)
+       );
+  New: await recordProfileMessage({
+         profileId: job.profileId,
+         channel: job.channel,
+         signalType: job.signalType,
+         _id: job._id,
+       }).catch((e) =>
+         console.error('[brain] message log error:', e.message)
+       );
+
+Site 2 — email-channel success branch (originally ~line 508, now ~520):
+  Old: await recordProfileMessage(job).catch((e) =>
+         console.error('[brain] message log error:', e.message)
+       );
+  New: await recordProfileMessage({
+         profileId: job.profileId,
+         channel: job.channel,
+         signalType: job.signalType,
+         _id: job._id,
+       }).catch((e) =>
+         console.error('[brain] message log error:', e.message)
+       );
+
+Nothing else in either call site changed (same .catch, same log message,
+same surrounding control flow). recordProfileMessage()'s own function
+body/signature was left untouched, per instruction.
+
+grep confirms no bare `recordProfileMessage(job)` call remains anywhere
+in server.js — only the two reconstructed calls above and the function
+definition itself.
+
+
+Verification
+------------
+node --check backend/server.js: pass
+
+cd backend && npm test: 147/147 passing (19 test suites, 0 failures — same
+  147 as before this change; this is a defensive hardening of existing
+  call sites, not new testable behavior).

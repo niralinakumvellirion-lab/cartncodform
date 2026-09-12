@@ -196,7 +196,7 @@ async function isOverFrequencyCap(shopDomain, cartToken, customerId) {
 const EMAIL_SIGNAL_TYPES = [
   'cart_abandon', 'checkout_abandon', 'high_intent',
   'lapsing', 'winback', 'post_purchase_d3',
-  'back_in_stock', 'price_drop',
+  'back_in_stock', 'price_drop', 'email_capture',
 ];
 
 /**
@@ -375,7 +375,17 @@ async function processScheduledJobs() {
             console.log(`[automation] Job ${job._id} failed: no subscriber reached`);
           } else {
             console.log(`[automation] Job ${job._id} sent successfully`);
-            await recordProfileMessage(job).catch((e) =>
+            // Pass a plain object, not the live ScheduledJob Mongoose
+            // document — recordProfileMessage() only reads these 4 fields
+            // (profileId/channel/signalType/_id); reconstructing them here
+            // guarantees no Mongoose document/Proxy reference reaches the
+            // $push below.
+            await recordProfileMessage({
+              profileId: job.profileId,
+              channel: job.channel,
+              signalType: job.signalType,
+              _id: job._id,
+            }).catch((e) =>
               console.error('[brain] message log error:', e.message)
             );
 
@@ -505,7 +515,14 @@ async function processScheduledJobs() {
               console.log(`[automation] Job ${job._id} email failed: ${sendResult.error}`);
             } else {
               console.log(`[automation] Job ${job._id} email sent successfully`);
-              await recordProfileMessage(job).catch((e) =>
+              // Same fix as the push-branch call site above — plain object,
+              // not the live Mongoose document.
+              await recordProfileMessage({
+                profileId: job.profileId,
+                channel: job.channel,
+                signalType: job.signalType,
+                _id: job._id,
+              }).catch((e) =>
                 console.error('[brain] message log error:', e.message)
               );
             }
