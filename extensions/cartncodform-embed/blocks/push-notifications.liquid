@@ -1832,7 +1832,11 @@
         // getPageType() (not a bare `pageType` var — saveToken() has no such
         // variable in scope; that'd throw a ReferenceError and silently kill
         // this whole discount-capture branch via the outer .catch below).
-        if (ccfDiscountEnabled() && canPromptForDiscount() && getPageType() !== 'product') {
+        var alreadyRedirected = false;
+        try { alreadyRedirected = !!sessionStorage.getItem('ccf_disc_redirected'); } catch(e) {}
+
+        if (ccfDiscountEnabled() && canPromptForDiscount() && getPageType() !== 'product' &&
+            !alreadyRedirected && !promptAlreadyShown()) {
           setTimeout(function() {
             showSoftPrompt('page_load', null);
           }, 1500);
