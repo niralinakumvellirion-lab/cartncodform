@@ -1,0 +1,156 @@
+=== PUSH IMAGE FIX AUDIT ===
+
+Fix 1 — brain.js:
+  AbandonedCustomer lookup added: yes
+  imageUrl passed to payload: yes
+  Line added: the lookup block is lines 258-269 (inside
+    runBrainForProfile()); payload.imageUrl now reads the resulting
+    `imageUrl` variable at the ScheduledJob.create() call (was line 270
+    in the original file before this edit, `imageUrl: ''`, now just
+    `imageUrl,` referencing the resolved variable).
+
+  Adjustments made to match the actual code (per the task's own "adjust
+  variable names to match actual code context" note):
+    - The winning signal object is named `winner` in this file, not
+      `job` (the task's snippet called it `job`, which would have
+      collided conceptually with ScheduledJob, the thing actually named
+      `job` everywhere else in this codebase's poller). Used
+      `winner.type` for the signal-type check, matching the file's real
+      variable.
+    - `job.cartToken` (task's phrase) did not exist as a named variable
+      anywhere in this function — the cartToken value was computed
+      INLINE, directly inside the ScheduledJob.create() call:
+        cartToken: carts[carts.length - 1] || null,
+      (carts[carts.length-1], not carts[0] — already fixed in the
+      immediately preceding task). Extracted this into a new
+      `const cartToken = carts[carts.length - 1] || null;` declared
+      before the image-lookup block, so both the AbandonedCustomer
+      query and the final ScheduledJob.create() call use the exact
+      same value (previously computed twice inline; now computed once).
+    - Upgraded the given snippet's silent `catch (e) {}` to
+      `catch (err) { console.warn('[brain] product image lookup
+      failed:', err.message); }` — matching this codebase's own
+      established convention (used throughout signalEngine.js,
+      server.js, etc.) of never swallowing a caught error completely
+      silently, always at least logging it. Functionally identical
+      otherwise: imageUrl stays '' on any lookup failure, and the job
+      still gets scheduled normally.
+
+  Final code (brain.js, inside runBrainForProfile()):
+    const carts = (profile.identifiers && profile.identifiers.cartTokens) || [];
+    const cartToken = carts[carts.length - 1] || null;
+    const strengthStr = Number(winner.strength).toFixed(2);
+    const reason = `${winner.type} strength=${strengthStr}`;
+
+    // Fetch product image for cart/checkout abandon signals — lets the
+    // eventual push notification show the actual abandoned product's photo
+    // instead of the generic fallback icon (see audits/push-image-audit.txt).
+    let imageUrl = '';
+    if (['cart_abandon', 'checkout_abandon'].includes(winner.type) && cartToken) {
+      try {
+        const AbandonedCustomer = require('../models/AbandonedCustomer');
+        const abandoned = await AbandonedCustomer.findOne({
+          sessionId: cartToken,
+        }).select('productImageUrl').lean();
+        imageUrl = abandoned?.productImageUrl || '';
+      } catch (err) {
+        console.warn('[brain] product image lookup failed:', err.message);
+      }
+    }
+
+    try {
+      await ScheduledJob.create({
+        shopDomain: shop,
+        profileId,
+        signalType: winner.type,
+        channel,
+        reason,
+        payload: {
+          title: '',
+          body: '',
+          url: winner.productId
+            ? `https://${shop}/products/${winner.productId}`
+            : `https://${shop}`,
+          imageUrl, // '' unless resolved above for cart/checkout abandon
+        },
+        cartToken,
+        ruleId: null,
+        stepIndex: 0,
+        status: 'pending',
+        runAt,
+      });
+    ...
+
+
+Fix 2 — server.js:
+  imageUrl already passed to sendPushToCustomers: yes
+  Change needed: no
+
+  Verified the exact call site (lines 360-369):
+    const result = await sendPushToCustomers(
+      job.shopDomain,
+      payload.title || 'You left something behind!',
+      payload.body || 'Come back and check it out.',
+      urlWithJob,
+      payload.imageUrl || null,
+      false,
+      job.cartToken || null,
+      false
+    );
+  `payload` here is `job.payload || {}` (declared a few lines above, at
+  the top of the try block) — so `payload.imageUrl` is already exactly
+  equivalent to the task's suggested `job.payload?.imageUrl`, just via a
+  pre-destructured local variable instead of repeated optional
+  chaining. No separate `const imageUrl = ...` line was added, since
+  that would just be a redundant duplicate of the value `payload.imageUrl`
+  already provides — no functional gap existed here once Fix 1 makes
+  brain.js populate a real imageUrl. server.js itself is unmodified in
+  this task.
+
+
+Fix 3 — webhooks.js field name: productImageUrl (confirmed)
+
+  Verified in backend/routes/webhooks.js:
+    - mapPayloadToCustomer() sets `productImageUrl: firstImageUrl ||
+      undefined` on the doc that becomes/updates the AbandonedCustomer
+      row (from the webhook payload's own cart-item images).
+    - handleWebhook() later re-resolves it via the Admin API when
+      needed and writes it back with
+      `AbandonedCustomer.findByIdAndUpdate(savedCustomer._id, {
+      productImageUrl });`.
+  So the field name Fix 1 reads (`.select('productImageUrl')`,
+  `abandoned?.productImageUrl`) matches exactly what webhooks.js writes
+  — no name adjustment was needed. webhooks.js itself was not modified
+  (verify-only, per the task).
+
+
+VERIFICATION
+------------
+node --check backend/services/brain.js: pass
+
+cd backend && npm test: 151/151 passing (19 test suites, 0 failures).
+
+IMPORTANT, self-caught regression (not part of the 3 named fixes, but
+required to keep the "never leave tests failing" rule): the first test
+run after Fix 1 showed 5 FAILURES in __tests__/brain.test.js — every
+test whose default signal type is 'cart_abandon' (the file's own
+"happy path" default) now triggered the new, real
+AbandonedCustomer.findOne(...) call, which that test file never mocked.
+Since Jest doesn't mock Mongoose models automatically and no live DB
+connection exists in the test environment, the query hung until
+Mongoose's own 10s buffering timeout, blowing past Jest's 5s per-test
+timeout. Fixed by:
+  - adding jest.mock('../models/AbandonedCustomer') alongside this
+    file's other 6 model mocks, with a default beforeEach() mock
+    (`AbandonedCustomer.findOne().select().lean()` resolving to null)
+    matching the exact chained-query shape brain.js now calls.
+  - adding 4 new tests (14-17) directly covering the new behavior: the
+    happy path (image found -> passed through to payload.imageUrl and
+    cartToken), the no-image-on-file case (stays ''), the lookup-throws
+    case (stays '', job still schedules, confirms the catch works), and
+    a non-cart/checkout-abandon signal type never querying
+    AbandonedCustomer at all.
+This was necessary test-file maintenance directly caused by Fix 1, not
+scope creep — CLAUDE.md's "Run npm test before and after every change.
+Never leave tests failing" and "Add tests for new logic" both apply
+directly here.

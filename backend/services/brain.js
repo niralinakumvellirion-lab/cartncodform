@@ -251,8 +251,25 @@ async function runBrainForProfile(profileId, shopDomain) {
   if (existing) return null;
 
   const carts = (profile.identifiers && profile.identifiers.cartTokens) || [];
+  const cartToken = carts[carts.length - 1] || null;
   const strengthStr = Number(winner.strength).toFixed(2);
   const reason = `${winner.type} strength=${strengthStr}`;
+
+  // Fetch product image for cart/checkout abandon signals — lets the
+  // eventual push notification show the actual abandoned product's photo
+  // instead of the generic fallback icon (see audits/push-image-audit.txt).
+  let imageUrl = '';
+  if (['cart_abandon', 'checkout_abandon'].includes(winner.type) && cartToken) {
+    try {
+      const AbandonedCustomer = require('../models/AbandonedCustomer');
+      const abandoned = await AbandonedCustomer.findOne({
+        sessionId: cartToken,
+      }).select('productImageUrl').lean();
+      imageUrl = abandoned?.productImageUrl || '';
+    } catch (err) {
+      console.warn('[brain] product image lookup failed:', err.message);
+    }
+  }
 
   try {
     await ScheduledJob.create({
@@ -267,9 +284,9 @@ async function runBrainForProfile(profileId, shopDomain) {
         url: winner.productId
           ? `https://${shop}/products/${winner.productId}`
           : `https://${shop}`,
-        imageUrl: '', // resolved at send time
+        imageUrl, // '' unless resolved above for cart/checkout abandon
       },
-      cartToken: carts[carts.length - 1] || null,
+      cartToken,
       ruleId: null,
       stepIndex: 0,
       status: 'pending',

@@ -1,0 +1,227 @@
+PUSH IMAGE AUDIT - read-only, no changes
+===========================================
+Generated: 2026-09-12
+
+
+====================================================================
+1. backend/services/aiService.js - generateCopy() return fields
+====================================================================
+Full function, lines 71-156. Every return statement in it (there are
+4: cache hit, no-key fallback, API-error fallback, and the final
+success path) returns ONLY these fields:
+
+  line 85:  return { title: hit.title || '', body: hit.body || '', subject: hit.subject || '' };
+  line 93:  return { title: fallback.title || '', body: fallback.body || '', subject: fallback.subject || '' };
+  line 128: return { title: fallback.title || '', body: fallback.body || '', subject: fallback.subject || '' };
+  line 131-135:
+    const result = {
+      title: parsed.title || fallback.title || '',
+      body: parsed.body || fallback.body || '',
+      subject: parsed.subject || fallback.subject || '',
+    };
+    ... return result; (line 155, via the named `result` variable)
+
+So generateCopy() returns EXACTLY 3 fields, always: title, body,
+subject. There is no image, icon, imageUrl, or any other visual field
+anywhere in this function's return shape, in any of its 4 return
+paths. (subject is only meaningful for channel === 'email'; for
+channel === 'push' it is always '' since nothing in the push prompt
+or FALLBACK_PUSH sets it.)
+
+The prompt this function builds (lines 99-118) explicitly asks the AI
+for only title+body (push) or subject+body (email) -- it never asks
+for or expects an image/icon in the model's JSON response either:
+  115	    `\n\nRespond ONLY with JSON: ` +
+  116	    (channel === 'push'
+  117	      ? '{"title":"...","body":"..."}'
+  118	      : '{"subject":"...","body":"..."}');
+
+
+====================================================================
+2. backend/server.js - the push-send block inside processScheduledJobs()
+====================================================================
+Lines 326-369 (the relevant excerpt; full function is larger):
+
+327	      try {
+328	        const channel = job.channel || 'push';
+329	        const payload = job.payload || {};
+330
+331	        // Phase E -- resolve copy at SEND time (cached per shop/signal/product/
+332	        // channel/voice). Load the store once and reuse it for both branches.
+333	        const jobStore = await Store.findOne({ shopDomain: job.shopDomain });
+334	        const voice = (jobStore && jobStore.voice) || {};
+335	        const product = {
+336	          title: payload.title || '',
+337	          price: '', // not stored on the job yet -- blank for now
+338	          productId: (payload.url && payload.url.split('/products/')[1]) || null,
+339	        };
+340
+341	        if (channel === 'push') {
+342	          // Only brain-scheduled jobs (job.profileId set) get AI copy.
+343	          // Legacy rule-scheduled jobs (profileId unset) keep their frozen payload.
+344	          if (job.profileId) {
+345	            const copy = await generateCopy(
+346	              { ...(jobStore && jobStore.toObject ? jobStore.toObject() : {}), voice },
+347	              job.signalType || 'cart_abandon',
+348	              product,
+349	              'push'
+350	            ).catch(() => ({
+351	              title: 'You left something behind',
+352	              body: 'Come back and complete your order.',
+353	            }));
+354	            payload.title = copy.title || payload.title;
+355	            payload.body = copy.body || payload.body;
+356	          }
+357
+358	          const baseUrl = payload.url || `https://${job.shopDomain}`;
+359	          const urlWithJob = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'ccf_job=' + job._id.toString();
+360	          const result = await sendPushToCustomers(
+361	            job.shopDomain,
+362	            payload.title || 'You left something behind!',
+363	            payload.body || 'Come back and check it out.',
+364	            urlWithJob,
+365	            payload.imageUrl || null,
+366	            false,
+367	            job.cartToken || null,
+368	            false
+369	          );
+
+The icon/image field passed to sendPushToCustomers() is
+`payload.imageUrl || null` (positional argument 5, the function's
+`imageUrl` parameter) -- ONLY EVER `payload.imageUrl`, which is
+whatever was stored on ScheduledJob.payload.imageUrl at job-creation
+time. Per audits/push-query-audit.txt (this same investigation,
+already traced) brain.js's ScheduledJob.create() call sets:
+  payload: {
+    title: '',      // resolved at send time by AI (Phase E)
+    body: '',       // resolved at send time by AI (Phase E)
+    url: ...,
+    imageUrl: '',    // resolved at send time
+  }
+-- imageUrl is ALWAYS the literal empty string '' at creation time, and
+nothing between job creation and this send block ever assigns it a
+real value: `copy` (from generateCopy(), section 1 above) has no image
+field to merge in the way payload.title/payload.body get overwritten
+at lines 354-355 -- there is no equivalent
+`payload.imageUrl = copy.imageUrl || payload.imageUrl` line anywhere in
+this file. Since '' is falsy, `payload.imageUrl || null` always
+evaluates to `null` for every brain-scheduled push
+(cart_abandon/checkout_abandon included) -- confirmed by reading this
+whole block, not merely inferred.
+
+
+====================================================================
+3. backend/utils/pushNotification.js - sendPushToCustomers()'s webpush
+   notification payload (title/body/icon/image fields)
+====================================================================
+Two near-identical message objects are built in this function -- one
+inside the cartToken-targeted branch (lines 149-171), one in the
+broadcast-to-all-subscribers branch (lines 209-235). Both use the SAME
+icon/image logic, driven entirely by the `imageUrl` parameter:
+
+cartToken-targeted branch (lines 149-168):
+  149	        const message = {
+  150	          data: {
+  151	            url: url || `https://${shopDomain}`,
+  152	            imageUrl: imageUrl || '',
+  153	            title: title,
+  154	            body: body,
+  155	            icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+  156	          },
+  157	          webpush: {
+  158	            headers: { Urgency: 'high' },
+  159	            notification: {
+  160	              title,
+  161	              body,
+  162	              icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+  163	              image: imageUrl || undefined,
+  164	              badge: 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+  165	              requireInteraction: false,
+  166	              vibrate: [200, 100, 200],
+  167	            },
+  168	            fcm_options: { link: url || `https://${shopDomain}` },
+  169	          },
+  170	          tokens: [sub.token],
+  171	        };
+
+broadcast branch (lines 209-233) is textually identical in shape for
+the icon/image fields (data.icon, webpush.notification.icon,
+webpush.notification.image, webpush.notification.badge) -- only the
+`tokens` array differs (all subscribers' tokens instead of one).
+
+So: 4 distinct visual fields exist in the outgoing FCM payload:
+  - data.icon               = imageUrl || <hardcoded shopping-cart icon URL>
+  - webpush.notification.icon  = imageUrl || <same hardcoded fallback>
+  - webpush.notification.image = imageUrl || undefined  (omitted entirely if no imageUrl)
+  - webpush.notification.badge = <hardcoded shopping-cart icon URL>, ALWAYS, regardless of imageUrl
+
+Given section 2's finding that `imageUrl` is always `null` for
+brain-scheduled cart_abandon/checkout_abandon pushes, in practice every
+such notification's icon is always the same hardcoded fallback
+(https://img.icons8.com/color/96/shopping-cart--v1.png), its `image`
+field is always omitted (undefined), and its badge is always that same
+hardcoded icon too -- never the actual product's own image.
+
+
+====================================================================
+4. backend/services/signalEngine.js - does cart_abandon/checkout_abandon
+   store any product image URL in signal.meta?
+====================================================================
+No. Signal documents (see the shared `sig()` builder, lines 29-37) have
+exactly these fields: type, strength, productId, evidence, expiresAt --
+there is no `meta` field on a Signal at all (that field name belongs to
+StorefrontEvent, a different model -- see the grep note below), and
+none of the 5 fields above is an image URL.
+
+computeCartAbandon() (lines 42-71) reads `cart.cartItems[0]` from
+AbandonedCustomer (which DOES have per-item imageUrl fields, and a
+top-level productImageUrl set by webhooks.js's fetchProductImage() --
+confirmed in an earlier audit this session, audits/abandoned-customer-
+source-audit.txt) but only pulls `item.title` (for evidence text) and
+`item.productId != null ? item.productId : null` (the signal's
+productId field) -- it never reads item.imageUrl or
+cart.productImageUrl at all. Full relevant lines:
+  63	  const item = (cart.cartItems && cart.cartItems[0]) || {};
+  64	  const evidence = [
+  65	    `Cart abandoned ${Math.round(ageMs / MIN)} minutes ago`,
+  66	    `Cart value: [Rupee]${cart.cartValue != null ? cart.cartValue : 0}`,
+  67	  ];
+  68	  if (item.title) evidence.push(`Item: ${item.title}`);
+  69
+  70	  return sig('cart_abandon', strength, item.productId != null ? item.productId : null, evidence, 48 * HOUR);
+  (Rupee sign kept as literal text here per this file's plain-ASCII
+  requirement; the actual source line uses the real currency symbol.)
+
+computeCheckoutAbandon() (lines 76-109) never touches cart.cartItems or
+any image field at all -- its signal's productId argument is hardcoded
+`null` (line 104), and its only evidence line is plain text
+("Reached checkout N min ago, no order placed").
+
+A grep across the whole file for "imageUrl|productImageUrl|meta\."
+found matches ONLY for `.meta.productId` / `.meta.variantId` (on
+StorefrontEvent documents, used by browse_abandon/high_intent/
+price_hesitation) -- never an image-related field, and never on a
+Signal document itself.
+
+
+====================================================================
+SUMMARY (read-only synthesis, no code changed)
+====================================================================
+Tracing the full path end to end: AbandonedCustomer DOES carry a real
+product image (cartItems[].imageUrl, and a resolved top-level
+productImageUrl set via webhooks.js's Admin-API image lookup) -- but
+none of that ever reaches a Signal (computeCartAbandon() only pulls
+title/productId from the cart item, never its image), so it never
+reaches ScheduledJob.payload (brain.js writes payload.imageUrl as a
+literal '' with no product-image source available to it), so it never
+reaches generateCopy() (which has no image field in its contract at
+all) or the final sendPushToCustomers() call (payload.imageUrl || null
+is always null for these jobs). The result: every brain-scheduled
+cart_abandon/checkout_abandon push notification renders with the same
+hardcoded generic shopping-cart icon
+(https://img.icons8.com/color/96/shopping-cart--v1.png) for its
+icon/badge, and no image at all (image field omitted) -- never the
+actual abandoned product's photo, even though that photo is sitting in
+the database the whole time, one collection away
+(AbandonedCustomer.productImageUrl). Not fixed here -- audit only, per
+task scope.
