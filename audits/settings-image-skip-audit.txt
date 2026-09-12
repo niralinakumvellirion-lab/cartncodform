@@ -1,0 +1,186 @@
+=== SETTINGS IMAGE SKIP AUDIT ===
+popupImageChanged state added: yes (line 58)
+mobileImageChanged state added: yes (line 59)
+setPopupImageChanged(true) on image change: yes, via markImageChanged()
+  (line 182-183), called at all 3 places activePopup.imageUrl is
+  mutated on the desktop tab: upload (line 824), remove button (line
+  836), paste-URL input (line 864)
+setMobileImageChanged(true) on image change: yes, same markImageChanged()
+  helper, same 3 call sites — it dispatches to whichever flag matches
+  popupDevice at the time of the change (line 182-183)
+imageUrl stripped from PATCH when unchanged: PARTIAL — see DEVIATION
+  section below. popup.imageUrl (desktop) IS stripped when unchanged
+  (line 152). mobilePopup.imageUrl is deliberately NOT stripped.
+flags reset after save: yes (lines 168-169, right after setSuccess(true))
+frontend build: pass (npm run build — compiled successfully, all 13
+  static pages generated, no errors)
+
+
+EXACT CODE ADDED
+=========================================================================
+
+STEP 1 — state (lines 55-59, near the other popup-related useState
+declarations):
+  // settings-image-skip: tracks whether the merchant uploaded/removed/pasted
+  // a new image this session, so saveSettings() only re-sends the (large)
+  // base64 imageUrl when it actually changed instead of on every save.
+  const [popupImageChanged, setPopupImageChanged] = useState(false);
+  const [mobileImageChanged, setMobileImageChanged] = useState(false);
+
+Helper (lines 180-183, right after activePopup/setActivePopup are
+derived from popupDevice — placed there because it needs the same
+popupDevice-based branching those two already use):
+  // settings-image-skip: mark whichever config's image was just touched
+  // (upload, remove, or paste-URL — all three mutate activePopup.imageUrl).
+  const markImageChanged = () =>
+    popupDevice === 'desktop' ? setPopupImageChanged(true) : setMobileImageChanged(true);
+
+STEP 2 — call sites. The task named one example call site (the file
+upload / FileReader onload handler); this file actually has THREE
+places that set activePopup.imageUrl, all of which needed the flag for
+the fix to be correct (see DEVIATION section for why the other two are
+not optional):
+  1. File upload, after the compressed image is set (line 823-824):
+       const compressed = canvas.toDataURL('image/jpeg', 0.7);
+       setActivePopup((p) => ({ ...p, imageUrl: compressed }));
+       markImageChanged();
+  2. Remove button (line 833-837):
+       onClick={() => {
+         setActivePopup((p) => ({ ...p, imageUrl: '' }));
+         markImageChanged();
+       }}
+  3. Paste-URL input's onChange (line 862-865):
+       onChange={(e) => {
+         setActivePopup((p) => ({ ...p, imageUrl: e.target.value }));
+         markImageChanged();
+       }}
+
+STEP 3/4 — saveSettings() (lines 130-169):
+    try {
+      // Both PATCHes are independent (different Store sub-paths) — run them
+      // in parallel instead of sequentially so one being slow doesn't hold
+      // up the other, and so a failure in one no longer silently skips the
+      // other entirely (the old sequential version never attempted the
+      // popup save at all if the settings save threw first).
+
+      // settings-image-skip: only re-send popup.imageUrl (a base64 string
+      // that can run to tens/hundreds of KB) when it actually changed this
+      // session — otherwise every save, even a color/text-only edit, was
+      // re-uploading the full image for no reason.
+      //
+      // mobilePopup.imageUrl is deliberately NOT stripped the same way: ...
+      // (full comment reproduced in DEVIATION section below)
+      const popupBody = { ...popup };
+      if (!popupImageChanged) delete popupBody.imageUrl;
+
+      await Promise.all([
+        apiSend(`/api/profiles/${encodeURIComponent(shop)}/settings`, 'PATCH', {
+          voice,
+          caps,
+          quietHours,
+          timezone,
+        }),
+        apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', {
+          ...popupBody,
+          mobilePopup,
+        }),
+      ]);
+      setSuccess(true);
+      setPopupImageChanged(false);
+      setMobileImageChanged(false);
+    } catch (e) {
+      setError(e.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+
+
+DEVIATION FROM THE LITERAL TASK — verified against the actual backend
+handler, not guessed
+=========================================================================
+The task's given STEP 3 code stripped imageUrl from BOTH popupBody and
+a separate mobileBody, then sent `{ ...popupBody, mobilePopup: mobileBody }`.
+I implemented the popupBody half exactly as given, but did NOT create
+or strip a mobileBody — mobilePopup is still sent to the backend
+complete and unmodified, exactly as it was before this task. This is a
+deliberate, safety-driven deviation, not an oversight:
+
+backend/routes/profiles.js's PATCH /:shopDomain/popup handler (read in
+full during a previous audit this session,
+audits/settings-slow-save-audit.txt) treats the two halves of the body
+completely differently:
+
+  const set = {};
+  for (const key of POPUP_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+      set[`popup.${key}`] = req.body[key];
+    }
+  }
+  if (req.body.mobilePopup && typeof req.body.mobilePopup === 'object') {
+    set.mobilePopup = req.body.mobilePopup;
+  }
+  await Store.updateOne({ shopDomain: shop }, { $set: set });
+
+- Top-level fields (imageUrl included) become dot-notation keys like
+  `popup.imageUrl`. MongoDB's $set only touches the exact dotted path
+  named — a field simply absent from the request body is never
+  mentioned in `set`, so the document's EXISTING popup.imageUrl is left
+  completely alone. Omitting popup.imageUrl from the body is safe.
+
+- `mobilePopup`, by contrast, is assigned as a SINGLE top-level key:
+  `set.mobilePopup = req.body.mobilePopup`. This is a wholesale
+  replacement of the entire embedded subdocument — MongoDB's $set on a
+  whole object key overwrites it completely, so any field that object
+  does NOT include (imageUrl included) is deleted from the stored
+  document, not left alone.
+
+Given that, applying the same "delete imageUrl when unchanged" trick
+to mobileBody would mean: the very first time a merchant edits ANY
+mobile-tab field (a color, the headline, textAlign — anything) WITHOUT
+also re-uploading the mobile image in that same session, the resulting
+save would silently wipe out their previously saved mobile popup
+image, because mobilePopup would be sent as a complete object minus
+imageUrl, and the backend would store exactly that (minus the image)
+in place of the old one. This is precisely the scenario the task's own
+problem statement describes as the common case ("only changed a color
+or text field") — so applying the literal fix to mobilePopup would
+break on the very use case it's meant to speed up, for the mobile
+image specifically, on every affected save from then on (silently,
+with no error, since the request would succeed as a valid partial
+mobilePopup object).
+
+Given the explicit "DO NOT touch backend files" constraint, there is
+no safe way to skip sending mobilePopup.imageUrl without either (a)
+also omitting it from the wholesale-replace body only when NOTHING
+else in mobilePopup changed either (which the task's given design does
+not attempt to track, and would require broader dirty-tracking than
+just the image), or (b) the backend itself switching mobilePopup to
+the same per-field dot-notation merge popup.* already uses. Neither is
+in scope here, so mobilePopup is still sent complete and unconditionally,
+exactly as before this task — the bandwidth-savings optimization this
+task delivers applies to the DESKTOP popup.imageUrl only.
+
+mobileImageChanged / setMobileImageChanged are still added and wired
+up exactly as the task specified (tracked correctly across all 3
+image-mutating call sites, reset after a successful save) so the
+plumbing is in place and consistent with the desktop side — should a
+matching backend change land later (switching mobilePopup's PATCH
+handling to per-field dot-notation, mirroring popup.*), the frontend
+change needed at that point would be a one-line addition (stripping
+mobileBody.imageUrl the same way popupBody's is), not a rework.
+
+
+NOT TOUCHED
+=========================================================================
+- backend/routes/profiles.js and every other backend file: untouched
+  (confirmed — the only staged/inspected diff is in
+  frontend/app/admin/screens/Settings.jsx).
+- No other frontend file was changed.
+- Live preview and drag-to-focus: unaffected — both read
+  activePopup.imageUrl / activePopup.imagePosition directly from state,
+  which is updated exactly as before (markImageChanged() is an
+  additional side-effect call, it does not alter what setActivePopup
+  stores or how/when it's stored).
+- No git commit/push or Shopify deploy was performed for this task —
+  the task only asked for `cd frontend && npm run build`, which was run
+  and passed.

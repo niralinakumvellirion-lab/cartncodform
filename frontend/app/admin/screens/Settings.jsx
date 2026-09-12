@@ -52,6 +52,11 @@ export default function Settings({ shop }) {
   // popup-responsive: separate mobile (<=600px) override config + device tab.
   const [mobilePopup, setMobilePopup] = useState({});
   const [popupDevice, setPopupDevice] = useState('desktop');
+  // settings-image-skip: tracks whether the merchant uploaded/removed/pasted
+  // a new image this session, so saveSettings() only re-sends the (large)
+  // base64 imageUrl when it actually changed instead of on every save.
+  const [popupImageChanged, setPopupImageChanged] = useState(false);
+  const [mobileImageChanged, setMobileImageChanged] = useState(false);
   const [pushCount, setPushCount] = useState(0);
   const [emailCount, setEmailCount] = useState(0);
   const [showPopupCustomizer, setShowPopupCustomizer] = useState(false);
@@ -117,23 +122,50 @@ export default function Settings({ shop }) {
     setSaving(true);
     setError('');
     setSuccess(false);
+    console.log(
+      '[settings] saving popup device:', popupDevice,
+      'mobilePopup.layout:', mobilePopup.layout,
+      'mobilePopup.imageUrl:', mobilePopup.imageUrl ? 'SET' : 'EMPTY'
+    );
     try {
-      await apiSend(`/api/profiles/${encodeURIComponent(shop)}/settings`, 'PATCH', {
-        voice,
-        caps,
-        quietHours,
-        timezone,
-      });
-      console.log(
-        '[settings] saving popup device:', popupDevice,
-        'mobilePopup.layout:', mobilePopup.layout,
-        'mobilePopup.imageUrl:', mobilePopup.imageUrl ? 'SET' : 'EMPTY'
-      );
-      await apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', {
-        ...popup,
-        mobilePopup,
-      });
+      // Both PATCHes are independent (different Store sub-paths) — run them
+      // in parallel instead of sequentially so one being slow doesn't hold
+      // up the other, and so a failure in one no longer silently skips the
+      // other entirely (the old sequential version never attempted the
+      // popup save at all if the settings save threw first).
+
+      // settings-image-skip: only re-send popup.imageUrl (a base64 string
+      // that can run to tens/hundreds of KB) when it actually changed this
+      // session — otherwise every save, even a color/text-only edit, was
+      // re-uploading the full image for no reason.
+      //
+      // mobilePopup.imageUrl is deliberately NOT stripped the same way: the
+      // backend's PATCH /popup handler (backend/routes/profiles.js) writes
+      // `popup.<field>` one field at a time via dot-notation $set (so
+      // omitting popup.imageUrl safely leaves the stored value untouched),
+      // but it replaces the ENTIRE mobilePopup subdocument wholesale with
+      // whatever object is sent — omitting imageUrl from that object would
+      // erase the merchant's saved mobile image on every save that doesn't
+      // also touch it, which is worse than the slowness this task fixes.
+      // See audits/settings-image-skip-audit.txt for the full reasoning.
+      const popupBody = { ...popup };
+      if (!popupImageChanged) delete popupBody.imageUrl;
+
+      await Promise.all([
+        apiSend(`/api/profiles/${encodeURIComponent(shop)}/settings`, 'PATCH', {
+          voice,
+          caps,
+          quietHours,
+          timezone,
+        }),
+        apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', {
+          ...popupBody,
+          mobilePopup,
+        }),
+      ]);
       setSuccess(true);
+      setPopupImageChanged(false);
+      setMobileImageChanged(false);
     } catch (e) {
       setError(e.message || 'Save failed');
     } finally {
@@ -145,6 +177,10 @@ export default function Settings({ shop }) {
   // selects — same fields, different state.
   const activePopup = popupDevice === 'desktop' ? popup : mobilePopup;
   const setActivePopup = popupDevice === 'desktop' ? setPopup : setMobilePopup;
+  // settings-image-skip: mark whichever config's image was just touched
+  // (upload, remove, or paste-URL — all three mutate activePopup.imageUrl).
+  const markImageChanged = () =>
+    popupDevice === 'desktop' ? setPopupImageChanged(true) : setMobileImageChanged(true);
 
   const previews = [
     {
@@ -760,9 +796,34 @@ export default function Settings({ shop }) {
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (!file) return;
+                        if (file.size > 500 * 1024) {
+                          alert('Image too large — please use an image under 500KB for best performance.');
+                          return;
+                        }
                         const reader = new FileReader();
                         reader.onload = (ev) => {
-                          setActivePopup((p) => ({ ...p, imageUrl: ev.target.result }));
+                          // Resize/compress via canvas before storing as base64 —
+                          // the raw file (up to 500KB) re-encoded losslessly would
+                          // otherwise bloat the popup config's PATCH body and the
+                          // Store document it's written into. Drag-to-focus and
+                          // the layout previews read activePopup.imageUrl /
+                          // imagePosition independently of how the URL was
+                          // produced, so neither is affected by this.
+                          const img = new Image();
+                          img.onload = () => {
+                            const canvas = document.createElement('canvas');
+                            const MAX = 800;
+                            let w = img.width, h = img.height;
+                            if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+                            if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+                            canvas.width = w;
+                            canvas.height = h;
+                            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+                            const compressed = canvas.toDataURL('image/jpeg', 0.7);
+                            setActivePopup((p) => ({ ...p, imageUrl: compressed }));
+                            markImageChanged();
+                          };
+                          img.src = ev.target.result;
                         };
                         reader.readAsDataURL(file);
                       }}
@@ -770,7 +831,10 @@ export default function Settings({ shop }) {
                   </label>
                   {activePopup.imageUrl && (
                     <button
-                      onClick={() => setActivePopup((p) => ({ ...p, imageUrl: '' }))}
+                      onClick={() => {
+                        setActivePopup((p) => ({ ...p, imageUrl: '' }));
+                        markImageChanged();
+                      }}
                       style={{
                         background: 'none',
                         border: 'none',
@@ -795,9 +859,10 @@ export default function Settings({ shop }) {
                         ? ''
                         : activePopup.imageUrl || ''
                     }
-                    onChange={(e) =>
-                      setActivePopup((p) => ({ ...p, imageUrl: e.target.value }))
-                    }
+                    onChange={(e) => {
+                      setActivePopup((p) => ({ ...p, imageUrl: e.target.value }));
+                      markImageChanged();
+                    }}
                     placeholder="https://cdn.shopify.com/..."
                     style={{
                       flex: 1,
