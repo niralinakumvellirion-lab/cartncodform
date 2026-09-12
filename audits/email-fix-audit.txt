@@ -1,0 +1,76 @@
+=== EMAIL FIX AUDIT ===
+
+Old location: lines 395-463 (inside push success `else` branch, i.e.
+  nested inside `if (channel === 'push') { ... if (!result.success...) {
+  ...} else { ... BONUS EMAIL HERE ... } }`)
+
+New location: lines 396-466 (after the push success/failure `if/else`
+  closes at line 394, still directly inside the `if (channel === 'push')
+  { ... }` block, before its own closing brace at line 466 and before the
+  sibling `} else if (channel === 'email') {` at line 467)
+
+Variables in scope check:
+  voice    = yes (declared `const voice = (jobStore && jobStore.voice) ||
+             {};` at line 333, before the `if (channel === 'push')` check
+             at line 340 — same scope as before the move, unaffected)
+  jobStore = yes (declared at line 332, same as above; only used inside
+             the bonus block's comment, not referenced directly in the
+             code itself — generateEmailCopy() takes `voice`, not
+             jobStore)
+  job      = yes (the `for (const job of dueJobs)` loop variable — in
+             scope for the entire loop body, unaffected by the move)
+  profile  = yes — note: fetched fresh inside the block via
+             `Profile.findById(job.profileId).select('identifiers
+             channels messages')` at its new position, exactly as before;
+             this was never a variable carried over from the push
+             branch, so the move doesn't change how it's obtained.
+
+Diff summary (nesting outline, not full code):
+
+  BEFORE:
+    if (channel === 'push') {
+      ...generate push copy, send push...
+      if (!result.success || result.sent === 0) {
+        // mark job failed
+      } else {
+        // log + recordProfileMessage + hygiene checks
+        // BONUS EMAIL BLOCK (only reachable on push success)
+      }
+    } else if (channel === 'email') { ... }
+
+  AFTER:
+    if (channel === 'push') {
+      ...generate push copy, send push...
+      if (!result.success || result.sent === 0) {
+        // mark job failed
+      } else {
+        // log + recordProfileMessage + hygiene checks
+      }
+      // BONUS EMAIL BLOCK (now reached on both success and failure)
+    } else if (channel === 'email') { ... }
+
+  The bonus-email block's own internal structure (profileId guard ->
+  EMAIL_SIGNAL_TYPES guard -> try -> Profile.findById -> emailAddr
+  resolution -> 24h dedup check -> generateEmailCopy -> sendMarketingEmail
+  -> Profile.updateOne message log -> catch) is completely unchanged —
+  only its outer nesting moved (dedented by 2 spaces, from 12-space base
+  to 10-space base) and its leading comment was updated to describe the
+  new "runs regardless of push success/failure" behavior instead of the
+  old "after a successful push" framing, since the old comment would
+  otherwise now be describing the code incorrectly.
+
+Untouched, as instructed:
+  - The `else if (channel === 'email')` branch (now lines 467-511,
+    unchanged content, shifted down by ~3 lines from the net +3 lines the
+    edit added — the new comment is 2 lines longer than the one it
+    replaced, plus a blank line before the moved block)
+  - sendMarketingEmail() in backend/utils/email.js — not opened for
+    editing
+  - No other poller logic or any other file touched
+
+node --check backend/server.js: pass
+
+cd backend && npm test: Test Suites: 19 passed, 19 total.
+  Tests: 147 passed, 147 total. No failures (same 147 as before this
+  change — this fix only reorders existing logic, it doesn't add new
+  testable branches beyond what was already covered).
