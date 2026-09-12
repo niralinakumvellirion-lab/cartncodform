@@ -1,0 +1,255 @@
+PUSH QUERY AUDIT - read-only, no changes
+===========================================
+Generated: 2026-09-12
+
+NOTE ON FILE LOCATION: sendPushToCustomers() is NOT defined in
+backend/routes/push.js -- it is defined in backend/utils/pushNotification.js
+and imported into push.js (and server.js) from there:
+  backend/routes/push.js line 4:
+    const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
+push.js itself only calls it; it does not define it. Read
+backend/utils/pushNotification.js in full for this audit.
+
+
+====================================================================
+1. sendPushToCustomers() - full function signature
+====================================================================
+backend/utils/pushNotification.js line 89:
+
+  async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobileOnly = false, cartToken = null, skipStaleCleanup = false) {
+
+8 parameters: shopDomain, title, body, url, imageUrl, mobileOnly
+(default false), cartToken (default null), skipStaleCleanup (default
+false). Exported at the bottom of the file (line 239):
+  module.exports = { sendPushToStore, sendPushToCustomers };
+
+
+====================================================================
+2. How it queries CustomerPushSubscription
+====================================================================
+Two entirely different query paths depending on whether `cartToken`
+was passed in (lines 102-162 vs 163-232) -- it does NOT query by
+profileId or pushTokens at all, ANYWHERE in this function. Only
+shopDomain, deviceType (mobileOnly), and cartToken are ever used as
+query filters.
+
+--- Path A: cartToken IS provided (lines 102-161) ---
+  102	    const query = { shopDomain: shop };
+  103	    if (mobileOnly) {
+  104	      query.deviceType = { $in: ['mobile', 'unknown'] };
+  105	    }
+  106	    if (cartToken) {
+  107	      query.cartToken = cartToken;
+  108	      console.log(`[push-customer] targeting cartToken: ${cartToken}`);
+  109
+  110	      // Get ALL rows matching this cartToken, sorted by most recent.
+  111	      const cartSubs = await CustomerPushSubscription.find(query)
+  112	        .sort({ lastActivityAt: -1 });
+  113
+  114	      // Try each matching row until one succeeds.
+  115	      for (const sub of cartSubs) {
+  116	        ...
+  117	        const response = await getMessaging().sendEachForMulticast(message);
+  118	        const result = response.responses[0];
+  119	        if (result.success) {
+  120	          return { success: true, sent: 1, tokensFound: cartSubs.length };
+  121	        }
+  122	        // Token is stale -- prune it (subscription + profile) and try next.
+  123	        const code = result.error?.code || '';
+  124	        if (isStaleCode(code)) {
+  125	          await handleStaleToken(sub.token, shop);
+  126	        } else {
+  127	          break;
+  128	        }
+  129	      }
+  130
+  131	      // No cartToken match succeeded -- do not fall back to another subscriber.
+  132	      console.log(`[push-customer] cartToken: no valid token found for cart ${cartToken} -- skipping`);
+  133	      return { success: true, sent: 0, tokensFound: 0 };
+  134	    }
+  (line numbers here are the surrounding function's real lines, condensed
+  -- see section 3 below for the exact untouched text)
+
+So Path A queries EXCLUSIVELY by `{ shopDomain, cartToken }` (plus
+deviceType if mobileOnly) -- it is a single exact-match lookup against
+CustomerPushSubscription.cartToken. It never falls back to searching
+by profileId, by any of the profile's OTHER cartTokens, or by a
+pushToken already known to belong to that profile. If the one
+cartToken value passed in doesn't match any row, the function gives up
+entirely for that customer (see section 3).
+
+--- Path B: no cartToken (lines 163-232) ---
+  163	    const subs = await CustomerPushSubscription.find(query);
+  164	    if (!subs.length) {
+  165	      console.log(`[push] No customer subscribers for ${shop}`);
+  166	      return { success: true, sent: 0, tokensFound: 0 };
+  167	    }
+  168	    const tokens = subs.map((s) => s.token);
+  ...
+This path queries ALL subscriptions for the shop (optionally narrowed
+by deviceType) and sends to every one of them via
+sendEachForMulticast(). Also never touches profileId or pushTokens --
+just shopDomain (+ optional deviceType).
+
+CustomerPushSubscription's own schema (not re-read in full for this
+audit, but its field usage here confirms it) is keyed by `token` (the
+FCM token, unique per browser/device) with `cartToken` as a mutable
+field on that same row -- NOT the other way around. There is no
+profileId field referenced anywhere in this function.
+
+
+====================================================================
+3. What happens when cartToken has no matching subscription
+====================================================================
+Exact text, lines 106-133 (Path A in full):
+  106	    if (cartToken) {
+  107	      query.cartToken = cartToken;
+  108	      console.log(`[push-customer] targeting cartToken: ${cartToken}`);
+  109
+  110	      // Get ALL rows matching this cartToken, sorted by most recent.
+  111	      const cartSubs = await CustomerPushSubscription.find(query)
+  112	        .sort({ lastActivityAt: -1 });
+  113
+  114	      // Try each matching row until one succeeds.
+  115	      for (const sub of cartSubs) {
+  116	        console.log(`[push-customer] trying token: ${sub.token.substring(0, 20)}...`);
+  117	        const message = { ... tokens: [sub.token] };
+  118	        const response = await getMessaging().sendEachForMulticast(message);
+  119	        const result = response.responses[0];
+  120	        if (result.success) {
+  121	          console.log(`[push] Sent 1/1 to targeted device of ${shop}`);
+  122	          return { success: true, sent: 1, tokensFound: cartSubs.length };
+  123	        }
+  124	        const code = result.error?.code || '';
+  125	        if (isStaleCode(code)) {
+  126	          await handleStaleToken(sub.token, shop);
+  127	          console.log(`[push-customer] Stale token pruned, trying next...`);
+  128	        } else {
+  129	          console.error(`[push-customer] token FAILED: ${code || result.error?.message}`);
+  130	          break;
+  131	        }
+  132	      }
+  133
+  134	      // No cartToken match succeeded -- do not fall back to another subscriber.
+  135	      // If the target customer has no valid token, skip this send.
+  136	      console.log(`[push-customer] cartToken: no valid token found for cart ${cartToken} -- skipping`);
+  137	      return { success: true, sent: 0, tokensFound: 0 };
+  138	    }
+
+If `CustomerPushSubscription.find({ shopDomain, cartToken })` returns
+ZERO rows, `cartSubs` is an empty array, the `for` loop body never
+executes even once, and execution falls straight through to line 137:
+  return { success: true, sent: 0, tokensFound: 0 };
+-- note `success: true` even though NOTHING was sent. This return value
+then reaches the poller in backend/server.js, which checks:
+  if (!result.success || result.sent === 0) { ... status: 'failed' ... }
+Since `result.sent === 0` is true (even though success is also true),
+the job is still marked 'failed', with error defaulting to
+"No active subscriber found" (result.error is undefined here, so the
+fallback string is used) -- this is the exact error string seen on
+every failed job in every previous audit in this investigation.
+
+So: a cartToken with no matching CustomerPushSubscription row does NOT
+throw, does NOT retry with a different identifier, and does NOT
+consult the profile for any OTHER cartToken/pushToken it might have --
+it deterministically returns sent:0 for that one cartToken and the
+caller marks the job failed.
+
+
+====================================================================
+4. backend/services/brain.js - what cartToken gets written to the job
+====================================================================
+runBrainForProfile() (brain.js), lines 253 and 272:
+  253	  const carts = (profile.identifiers && profile.identifiers.cartTokens) || [];
+  ...
+  257	  try {
+  258	    await ScheduledJob.create({
+  259	      shopDomain: shop,
+  260	      profileId,
+  261	      signalType: winner.type,
+  262	      channel,
+  263	      reason,
+  264	      payload: {
+  265	        title: '', // resolved at send time by AI (Phase E)
+  266	        body: '',  // resolved at send time by AI (Phase E)
+  267	        url: winner.productId
+  268	          ? `https://${shop}/products/${winner.productId}`
+  269	          : `https://${shop}`,
+  270	        imageUrl: '', // resolved at send time
+  271	      },
+  272	      cartToken: carts[0] || null,
+  273	      ruleId: null,
+  274	      stepIndex: 0,
+  275	      status: 'pending',
+  276	      runAt,
+  277	    });
+  278	  } catch (err) {
+  279	    if (err && err.code === 11000) return null;
+  280	    throw err;
+  281	  }
+
+The value written to job.cartToken is `carts[0]` -- the FIRST element
+of profile.identifiers.cartTokens, where `carts` is the profile's ENTIRE
+cartTokens array, taken as-is with no filtering, no recency check, and
+no cross-reference against CustomerPushSubscription to confirm that
+cartToken is still live.
+
+profile.identifiers.cartTokens is built by $addToSet (see
+backend/services/profileService.js, not re-read in full here but
+already traced in prior audits this session) -- values are appended
+over the profile's ENTIRE lifetime and never removed, so the array's
+insertion order is oldest-first. carts[0] is therefore the OLDEST
+cartToken this profile has ever accumulated, not the most recent or
+currently-active one.
+
+CROSS-CHECK against the actual data seen in this investigation
+(audits/check-token-mismatch.txt-equivalent terminal output from the
+previous task, not re-queried here since this task is a code-only
+read): the profile's cartTokens array began with
+'6d4f31737b682f6453a7ea9ad7501e9c' as its very first entry -- and that
+is exactly the cartToken value found stored on the checkout_abandon
+ScheduledJob in that same previous task's output. That token had NO
+matching CustomerPushSubscription row (confirmed in the same previous
+task). This is now fully explained: brain.js wrote carts[0] (the oldest
+cartToken on file) onto the job, and CustomerPushSubscription rows only
+ever track a subscriber's CURRENT cartToken (each row's cartToken field
+gets overwritten on every resync -- see resyncCartTokenBeacon() /
+subscribe-customer in the storefront liquid file and push.js, traced in
+earlier audits) -- so an old, superseded cartToken like carts[0] will
+almost always have no live subscription left pointing at it, even
+though the SAME customer (same profile, same physical device/pushToken)
+is still actively subscribed under a newer cartToken value further
+along in that same array.
+
+
+====================================================================
+SUMMARY (read-only synthesis, no code changed)
+====================================================================
+This directly explains the repeated "No active subscriber found"
+failures traced across this entire investigation thread:
+  1. brain.js schedules a job using profile.identifiers.cartTokens[0]
+     -- the OLDEST cartToken ever seen for that profile, not the
+     current one.
+  2. sendPushToCustomers(), when given a cartToken, looks up
+     CustomerPushSubscription by that EXACT cartToken value only -- no
+     fallback to the profile's other cartTokens, its pushTokens, or its
+     profileId.
+  3. CustomerPushSubscription rows track only the CURRENT cartToken per
+     device (overwritten on each resync), so an old cartToken like
+     carts[0] typically has no row left pointing at it, even when that
+     same customer/device is demonstrably still subscribed (confirmed
+     directly in the immediately preceding task: a manual send using
+     the customer's LATEST cartToken succeeded instantly).
+  4. Net result: the job silently returns sent:0 (still reported as
+     success:true internally) and the poller marks it 'failed' with
+     the generic "No active subscriber found" message -- which reads as
+     if the customer has no push subscription at all, when in fact they
+     do; the job simply targeted a stale identifier.
+
+Not fixed here (audit only, per task scope). A fix would need to change
+either what brain.js writes to job.cartToken (e.g. the LAST/most recent
+cartToken, or a value cross-checked against
+CustomerPushSubscription/pushTokens at schedule time or at send time),
+or change sendPushToCustomers() to fall back to the profile's other
+identifiers when the given cartToken has no match -- neither was
+implemented in this task.

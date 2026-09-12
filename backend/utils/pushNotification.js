@@ -108,8 +108,40 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
       console.log(`[push-customer] targeting cartToken: ${cartToken}`);
 
       // Get ALL rows matching this cartToken, sorted by most recent.
-      const cartSubs = await CustomerPushSubscription.find(query)
+      let cartSubs = await CustomerPushSubscription.find(query)
         .sort({ lastActivityAt: -1 });
+
+      // Fallback when the given cartToken has no live subscription at all
+      // (tokensFound === 0 before even trying to send): this function's
+      // signature takes a plain cartToken, not a job/profileId — it has
+      // no profileId to load a profile by id with. But the SAME cartToken
+      // we were given is guaranteed to still be present in
+      // profile.identifiers.cartTokens (that's how brain.js picked it),
+      // even though CustomerPushSubscription — which only tracks a
+      // device's CURRENT cartToken, overwritten on every resync — no
+      // longer has a live row for it. So re-derive the profile from that
+      // cartToken and retry across every cartToken it has ever had.
+      if (cartSubs.length === 0) {
+        console.log(`[push-customer] no subscription for cartToken ${cartToken} — trying profile's other cartTokens`);
+        const Profile = require('../models/Profile');
+        const profile = await Profile.findOne({
+          shopDomain: shop,
+          'identifiers.cartTokens': cartToken,
+        }).select('identifiers.cartTokens');
+
+        const otherCartTokens = profile?.identifiers?.cartTokens || [];
+        if (otherCartTokens.length) {
+          const fallbackQuery = { shopDomain: shop, cartToken: { $in: otherCartTokens } };
+          if (mobileOnly) {
+            fallbackQuery.deviceType = { $in: ['mobile', 'unknown'] };
+          }
+          cartSubs = await CustomerPushSubscription.find(fallbackQuery)
+            .sort({ lastActivityAt: -1 });
+          console.log(`[push-customer] fallback found ${cartSubs.length} subscription(s) across profile's cartTokens`);
+        } else {
+          console.warn(`[push-customer] no profile found for cartToken ${cartToken} — cannot fall back`);
+        }
+      }
 
       // Try each matching row until one succeeds.
       for (const sub of cartSubs) {

@@ -1,0 +1,140 @@
+=== STALE CART TOKEN FIX AUDIT ===
+
+Fix 1 — brain.js:
+  Old: cartToken: carts[0] || null  (X = 0, the OLDEST cartToken ever
+    accumulated on the profile, per audits/push-query-audit.txt)
+  New: cartToken: carts[carts.length - 1] || null  (the NEWEST/most
+    recently added cartToken)
+  Line changed: 272 (backend/services/brain.js, inside
+    runBrainForProfile()'s ScheduledJob.create() call)
+
+Fix 2 — pushNotification.js:
+  profileId available on job: no
+  Fallback query added: yes
+  Where added: lines 106-140 (backend/utils/pushNotification.js,
+    inside sendPushToCustomers()'s cartToken-provided branch)
+
+
+DEVIATION FROM THE LITERAL TASK INSTRUCTIONS (verified, not guessed)
+=========================================================================
+The task's premise for Fix 2 was: "The function currently receives a
+job object — check if it has access to profileId" and, if not,
+"just log a warning and return as before."
+
+Checked directly against the function's real signature (confirmed
+again in this task before editing):
+  async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobileOnly = false, cartToken = null, skipStaleCleanup = false) {
+sendPushToCustomers() does NOT receive a job object, and never has —
+it takes 8 plain scalar parameters. There is no profileId anywhere in
+its scope. The caller (backend/server.js's poller) has a `job` object,
+but only ever forwards job.cartToken (a plain string) into this
+function's `cartToken` parameter — never the job itself.
+
+Taking the task's literal "if not available, log a warning and return
+as before" branch would have left the exact bug this task exists to
+fix completely unaddressed — the function would behave identically to
+before in every case, since profileId is NEVER available under the
+current, unchanged signature (and the task explicitly forbids changing
+that signature). That would make Fix 2 a pure no-op.
+
+Instead, implemented the SAME functional outcome — falling back to the
+profile's other cartTokens when the given one has no live subscription
+— without adding a profileId parameter: the given `cartToken` itself is
+guaranteed to still be present in the correct profile's
+identifiers.cartTokens array (that is literally why brain.js chose it
+as job.cartToken — now carts[carts.length-1] after Fix 1, but the same
+reasoning applied to the historical carts[0] jobs already in the
+system). So the fallback re-derives the profile via:
+  Profile.findOne({ shopDomain: shop, 'identifiers.cartTokens': cartToken })
+instead of the given Profile.findById(profileId) — same destination
+(the profile's full identifiers.cartTokens array), reached through an
+identifier that IS actually available inside this function's existing,
+unchanged signature.
+
+Fallback only triggers when the INITIAL query returns zero rows
+(cartSubs.length === 0), matching the task's literal trigger condition
+("if the initial cartToken query returns 0 subscriptions") — a
+cartToken that has subscriptions but all fail to actually deliver
+(stale-but-present rows, or a non-stale FCM error) is NOT treated as a
+0-subscription case and does not additionally trigger the fallback,
+since the task specifically scoped the fallback to "0 subscriptions",
+not "0 successful sends".
+
+If the profile lookup itself finds nothing (no profile has this
+cartToken at all) or the profile has no other cartTokens, a warning is
+logged and the function proceeds exactly as it did before this fix
+(falls through to the existing "no valid token found... skipping"
+return) — this matches the spirit of the task's own "log a warning and
+return as before" fallback-of-the-fallback, just reached via a
+different (available) identifier instead of a genuinely unavailable
+profileId.
+
+
+EXACT CODE ADDED (lines 106-140, backend/utils/pushNotification.js)
+=========================================================================
+    if (cartToken) {
+      query.cartToken = cartToken;
+      console.log(`[push-customer] targeting cartToken: ${cartToken}`);
+
+      // Get ALL rows matching this cartToken, sorted by most recent.
+      let cartSubs = await CustomerPushSubscription.find(query)
+        .sort({ lastActivityAt: -1 });
+
+      // Fallback when the given cartToken has no live subscription at all
+      // (tokensFound === 0 before even trying to send): this function's
+      // signature takes a plain cartToken, not a job/profileId — it has
+      // no profileId to load a profile by id with. But the SAME cartToken
+      // we were given is guaranteed to still be present in
+      // profile.identifiers.cartTokens (that's how brain.js picked it),
+      // even though CustomerPushSubscription — which only tracks a
+      // device's CURRENT cartToken, overwritten on every resync — no
+      // longer has a live row for it. So re-derive the profile from that
+      // cartToken and retry across every cartToken it has ever had.
+      if (cartSubs.length === 0) {
+        console.log(`[push-customer] no subscription for cartToken ${cartToken} — trying profile's other cartTokens`);
+        const Profile = require('../models/Profile');
+        const profile = await Profile.findOne({
+          shopDomain: shop,
+          'identifiers.cartTokens': cartToken,
+        }).select('identifiers.cartTokens');
+
+        const otherCartTokens = profile?.identifiers?.cartTokens || [];
+        if (otherCartTokens.length) {
+          const fallbackQuery = { shopDomain: shop, cartToken: { $in: otherCartTokens } };
+          if (mobileOnly) {
+            fallbackQuery.deviceType = { $in: ['mobile', 'unknown'] };
+          }
+          cartSubs = await CustomerPushSubscription.find(fallbackQuery)
+            .sort({ lastActivityAt: -1 });
+          console.log(`[push-customer] fallback found ${cartSubs.length} subscription(s) across profile's cartTokens`);
+        } else {
+          console.warn(`[push-customer] no profile found for cartToken ${cartToken} — cannot fall back`);
+        }
+      }
+
+      // Try each matching row until one succeeds.
+      for (const sub of cartSubs) {
+        ... (unchanged loop body — same as before this fix) ...
+
+The rest of the function (the try-each-row loop, the final "no valid
+token found... skipping" return, and the entire non-cartToken branch)
+is untouched.
+
+
+NOT TOUCHED (confirmed)
+=========================================================================
+- sendPushToCustomers()'s function signature — unchanged, still exactly
+  8 parameters, per instruction.
+- Every other file — only backend/services/brain.js and
+  backend/utils/pushNotification.js were opened for editing.
+
+
+VERIFICATION
+------------
+node --check backend/services/brain.js: pass
+node --check backend/utils/pushNotification.js: pass
+cd backend && npm test: 147/147 passing (19 test suites, 0 failures —
+  unchanged from before this task; no existing test exercises
+  runBrainForProfile()'s cartToken selection or
+  sendPushToCustomers()'s fallback path directly, so this count was not
+  expected to change).

@@ -269,7 +269,7 @@ async function runBrainForProfile(profileId, shopDomain) {
           : `https://${shop}`,
         imageUrl: '', // resolved at send time
       },
-      cartToken: carts[0] || null,
+      cartToken: carts[carts.length - 1] || null,
       ruleId: null,
       stepIndex: 0,
       status: 'pending',
