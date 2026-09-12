@@ -103,6 +103,10 @@ async function fetchProductImage(shop, accessToken, productId) {
     }
     if (!apiToken) return null;
 
+    // DEBUG (temporary)
+    console.log('[webhook-img] fetching image for productId:', productId,
+      'shop:', shop, 'token type:', apiToken?.startsWith('shpua_') ? 'online' : 'offline');
+
     console.log('[webhook] Fetching image for productId:', productId,
       'shop:', shop,
       'hasToken:', !!apiToken);
@@ -116,9 +120,14 @@ async function fetchProductImage(shop, accessToken, productId) {
       }
     );
 
+    // DEBUG (temporary)
+    console.log('[webhook-img] HTTP status:', res.status, 'for product:', productId);
+
     if (!res.ok) {
       console.warn('[webhook] fetchProductImage failed:', res.status,
         'for', productId);
+      // DEBUG (temporary)
+      console.log('[webhook-img] fetch failed:', res.status);
       return null;
     }
 
@@ -140,8 +149,13 @@ async function fetchProductImage(shop, accessToken, productId) {
       console.log('[webhook] Cache write error (non-fatal):', cacheWriteErr.message);
     }
 
+    // DEBUG (temporary)
+    console.log('[webhook-img] imageUrl result:', imageUrl || 'null');
+
     return imageUrl;
   } catch(err) {
+    // DEBUG (temporary)
+    console.log('[webhook-img] error:', err.message);
     console.log('[webhook] Image fetch error:', err.message);
     return null;
   }
@@ -241,6 +255,9 @@ async function handleWebhook(source, req, res) {
     let productImageUrl = null;
 
     if (store && productId) {
+      // DEBUG (temporary)
+      console.log('[webhook-img] calling fetchProductImage for productId:',
+        savedCustomer.cartItems?.[0]?.productId, 'cartItems count:', savedCustomer.cartItems?.length);
       productImageUrl = await fetchProductImage(
         shopDomain,
         store.accessToken,
