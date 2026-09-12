@@ -203,22 +203,19 @@ async function registerWebhook(shop, accessToken, topic, address) {
  * Register every webhook topic the app relies on.
  */
 async function registerAllWebhooks(shop, accessToken, backendUrl) {
+  // NOTE: carts/create, carts/update, checkouts/create,
+  // checkouts/update, orders/create are now declared in
+  // shopify.app.toml (declarative subscriptions) and no longer
+  // need to be registered here. This function is kept for any
+  // future dynamic registrations only.
   const topics = [
-    'carts/create',
-    'carts/update',
-    'checkouts/create',
-    'checkouts/update',
-    'orders/create',
     'app_subscriptions/update',
     'app/uninstalled',
   ];
 
   for (const topic of topics) {
     let path;
-    if (topic.startsWith('carts/')) path = 'cart';
-    else if (topic.startsWith('checkouts/')) path = 'checkout';
-    else if (topic.startsWith('orders/')) path = 'order';
-    else if (topic === 'app_subscriptions/update') path = 'app-subscription';
+    if (topic === 'app_subscriptions/update') path = 'app-subscription';
     else if (topic === 'app/uninstalled') path = 'app-uninstalled';
     const address = `${backendUrl}/api/webhooks/${path}`;
     await registerWebhook(shop, accessToken, topic, address);

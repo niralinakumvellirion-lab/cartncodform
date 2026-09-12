@@ -15,6 +15,18 @@ api_version = "2025-01"
   compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
   uri = "https://cartncodform-backend.onrender.com/api/webhooks/compliance"
 
+  [[webhooks.subscriptions]]
+  topics = ["carts/create", "carts/update"]
+  uri = "https://cartncodform-backend.onrender.com/api/webhooks/cart"
+
+  [[webhooks.subscriptions]]
+  topics = ["checkouts/create", "checkouts/update"]
+  uri = "https://cartncodform-backend.onrender.com/api/webhooks/checkout"
+
+  [[webhooks.subscriptions]]
+  topics = ["orders/create"]
+  uri = "https://cartncodform-backend.onrender.com/api/webhooks/order"
+
 [access_scopes]
 scopes = "read_orders,read_customers,write_customers,read_products,write_discounts,read_discounts"
 

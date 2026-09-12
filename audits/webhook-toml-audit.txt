@@ -1,0 +1,120 @@
+=== WEBHOOK TOML AUDIT ===
+
+shopify.app.toml — topics added:
+  carts/create: yes
+  carts/update: yes
+  checkouts/create: yes
+  checkouts/update: yes
+  orders/create: yes
+
+  Added as 3 new [[webhooks.subscriptions]] blocks, right after the
+  existing GDPR compliance block (lines 18-28):
+    [[webhooks.subscriptions]]
+    topics = ["carts/create", "carts/update"]
+    uri = "https://cartncodform-backend.onrender.com/api/webhooks/cart"
+
+    [[webhooks.subscriptions]]
+    topics = ["checkouts/create", "checkouts/update"]
+    uri = "https://cartncodform-backend.onrender.com/api/webhooks/checkout"
+
+    [[webhooks.subscriptions]]
+    topics = ["orders/create"]
+    uri = "https://cartncodform-backend.onrender.com/api/webhooks/order"
+
+shopify.js — registerAllWebhooks() cleaned: yes
+  Topics removed: carts/create, carts/update, checkouts/create,
+    checkouts/update, orders/create (5 topics removed from the
+    `topics` array, plus their now-dead path-derivation branches
+    in the if/else-if chain below it).
+  Topics KEPT (not part of this task's scope): app_subscriptions/update,
+    app/uninstalled — both remain registered via the REST call exactly
+    as before, since only the 5 named topics were asked to move to TOML.
+  Function kept as shell: no — it was NOT reduced to an empty shell,
+    since app_subscriptions/update and app/uninstalled still need live
+    registration and remain in the function body. The required NOTE
+    comment was still added, as the first line of the function body,
+    exactly as specified.
+
+
+DEVIATIONS FROM THE LITERAL GIVEN TOML SNIPPET (verified, not guessed)
+===========================================================================
+The task's literal STEP 2 snippet used `uri = "/api/webhooks"` (the
+same bare relative path, unchanged) for all 3 new subscription blocks.
+Two problems with that, both fixed:
+
+1. Relative vs. absolute URI: this file's ONE pre-existing
+   [[webhooks.subscriptions]] entry (the GDPR compliance one, line 16)
+   uses a FULL absolute URL:
+     uri = "https://cartncodform-backend.onrender.com/api/webhooks/compliance"
+   — not a relative path. This file's own `application_url` (line 3) is
+   the FRONTEND (https://cartncodform-beryl.vercel.app/admin), not the
+   backend. A relative uri in a webhooks.subscriptions block resolves
+   against application_url, not against the backend — so a bare
+   "/api/webhooks" would have pointed Shopify's webhook deliveries at
+   the Vercel frontend, which has no such route at all (the actual
+   /api/webhooks routes only exist on the Render backend, mounted in
+   backend/server.js). Fixed by using the same full absolute backend
+   URL pattern the existing, already-working compliance entry uses.
+
+2. Missing sub-path / all 3 blocks pointing at the same URI: even
+   setting aside issue 1, the literal snippet had all three new blocks
+   using the exact same uri ("/api/webhooks", with no /cart, /checkout,
+   or /order suffix). backend/routes/webhooks.js (which this task
+   explicitly said not to touch, and which was NOT touched) only
+   defines handlers at the sub-paths /cart, /checkout, and /order
+   (router.post('/cart', ...), router.post('/checkout', ...),
+   router.post('/order', ...)), mounted under /api/webhooks by
+   backend/server.js (app.use('/api/webhooks', webhookRoutes)). A POST
+   to the bare /api/webhooks path (no suffix) has no matching Express
+   route and would 404 on every single delivery attempt — meaning even
+   with issue 1 fixed, using one shared "/api/webhooks" uri for all
+   three blocks would still have resulted in 100% failed webhook
+   deliveries for these 5 topics, silently reintroducing the exact
+   problem this task exists to fix. Fixed by giving each of the 3 new
+   blocks the correct existing sub-path that already handles its
+   topics: .../api/webhooks/cart (carts/create + carts/update),
+   .../api/webhooks/checkout (checkouts/create + checkouts/update),
+   .../api/webhooks/order (orders/create) — matching
+   backend/routes/webhooks.js's real, unmodified route definitions
+   exactly.
+
+No other deviations. shopify.js's edit matches the task's literal
+instructions exactly (comment text, removed topics, kept function
+shell with the 2 remaining topics since removing all 5 didn't empty it).
+
+
+VERIFICATION
+------------
+- Visually re-read shopify.app.toml after editing — structure matches
+  the existing GDPR block's format ([[webhooks.subscriptions]] with a
+  topics/compliance_topics array + uri string), consistent indentation.
+  No TOML parser package (@iarna/toml, toml) is installed in this repo
+  to run an automated parse, so this was a manual structural review,
+  not a machine-validated parse.
+- node --check backend/utils/shopify.js -> pass
+- cd backend && npm test -> Test Suites: 19 passed, 19 total.
+  Tests: 147 passed, 147 total. No failures (no existing test exercises
+  registerAllWebhooks() or reads shopify.app.toml, so this count is
+  unchanged from before this task, as expected).
+
+
+NOT TOUCHED (confirmed)
+===========================================================================
+- backend/routes/webhooks.js — not opened for editing. Its existing
+  /cart, /checkout, /order handlers are exactly what the new TOML
+  subscriptions' uri values now point at.
+- registerWebhook() (the single-topic REST helper) — unchanged, still
+  used by the 2 remaining topics in registerAllWebhooks().
+- No file other than shopify.app.toml and backend/utils/shopify.js was
+  modified.
+
+
+NOTE ON DEPLOYMENT (not performed in this task)
+===========================================================================
+Editing shopify.app.toml only changes the LOCAL config file — it does
+not itself register anything with Shopify. Per this project's own
+established convention (shopify app deploy has only ever been run
+previously on explicit request), deploying this config change (so
+Shopify actually creates these 5 webhook subscriptions) was NOT done as
+part of this task and would need a separate, explicit
+`shopify app deploy` step.
