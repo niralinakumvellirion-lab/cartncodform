@@ -75,9 +75,19 @@ async function fetchProductImage(shop, accessToken, productId) {
         shopDomain: shopKey,
         productId: productKey,
       });
-      if (cached) {
+      if (cached && cached.imageUrl) {
         console.log(`[webhook] Product image for ${productId}: cache hit`);
         return cached.imageUrl;
+      }
+      if (cached && !cached.imageUrl) {
+        // Stale null entry — delete it and fall through to re-fetch live,
+        // instead of freezing "no image" in place until this row's TTL
+        // index expires it (up to 24h). See FIX 1 below: new null results
+        // are no longer written here at all, but rows written before that
+        // fix still exist and would otherwise keep short-circuiting every
+        // future attempt for this product.
+        console.log(`[webhook] Discarding stale null-image cache entry for ${productId}, retrying`);
+        await ProductImageCache.deleteOne({ shopDomain: shopKey, productId: productKey }).catch(() => {});
       }
     } catch (cacheErr) {
       console.log('[webhook] Cache lookup error (proceeding to fetch):', cacheErr.message);
@@ -137,16 +147,22 @@ async function fetchProductImage(shop, accessToken, productId) {
                      null;
     console.log(`[webhook] Product image for ${productId}:`, imageUrl ? 'found' : 'not found');
 
-    // Cache the result (even null, to avoid repeatedly hitting the API
-    // for a product with no image) for 24h.
-    try {
-      await ProductImageCache.findOneAndUpdate(
-        { shopDomain: shopKey, productId: productKey },
-        { imageUrl, cachedAt: new Date() },
-        { upsert: true }
-      );
-    } catch (cacheWriteErr) {
-      console.log('[webhook] Cache write error (non-fatal):', cacheWriteErr.message);
+    // Cache the result — only when truthy. A null result (product genuinely
+    // has no image, or the API call failed for any reason) is intentionally
+    // NOT cached: doing so would freeze that "no image" verdict in place
+    // for up to 24h (this model's TTL index), silently blocking every
+    // retry in that window even after whatever caused the null (e.g. an
+    // auth failure) is fixed.
+    if (imageUrl) {
+      try {
+        await ProductImageCache.findOneAndUpdate(
+          { shopDomain: shopKey, productId: productKey },
+          { imageUrl, cachedAt: new Date() },
+          { upsert: true }
+        );
+      } catch (cacheWriteErr) {
+        console.log('[webhook] Cache write error (non-fatal):', cacheWriteErr.message);
+      }
     }
 
     // DEBUG (temporary)
