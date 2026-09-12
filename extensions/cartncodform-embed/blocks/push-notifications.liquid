@@ -2304,6 +2304,8 @@
 
       // Inject product page discount nudge.
       setTimeout(function() {
+        if (Notification.permission === 'granted') return;
+        // already subscribed — no nudge needed
         injectProductNudge();
       }, 1000);
     });

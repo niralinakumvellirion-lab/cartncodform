@@ -1,0 +1,30 @@
+=== NUDGE FIX AUDIT ===
+
+Call site location: line 2307 (originally; the sole call site, inside the
+  setTimeout() at the end of start(), itself inside
+  Promise.all([fetchPopupConfig(), fetchDiscountConfig()]).then(...)).
+  injectProductNudge() itself is defined at line 1339 — confirmed via
+  grep this is the ONLY call site in the file.
+
+Guard added at: call site (no guard existed there before this change, so
+  the function-body alternative was not needed).
+
+Before:
+      // Inject product page discount nudge.
+      setTimeout(function() {
+        injectProductNudge();
+      }, 1000);
+
+After:
+      // Inject product page discount nudge.
+      setTimeout(function() {
+        if (Notification.permission === 'granted') return;
+        // already subscribed — no nudge needed
+        injectProductNudge();
+      }, 1000);
+
+node --check: pass (extracted the <script> block and ran node --check —
+  no syntax errors)
+
+Nothing else touched: showSoftPrompt() and the main popup were not
+  opened for editing; no other file was modified.
