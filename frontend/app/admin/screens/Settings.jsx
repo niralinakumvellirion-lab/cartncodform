@@ -796,8 +796,8 @@ export default function Settings({ shop }) {
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (!file) return;
-                        if (file.size > 500 * 1024) {
-                          alert('Image too large — please use an image under 500KB for best performance.');
+                        if (file.size > 2 * 1024 * 1024) {
+                          alert('Image too large — please use an image under 2MB.');
                           return;
                         }
                         const reader = new FileReader();
