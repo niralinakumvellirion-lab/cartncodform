@@ -1312,12 +1312,22 @@
     }
   }
 
+  // Races a fetch against a plain timer so a cold-starting backend can't
+  // block the popup/discount config load (and, in turn, initIntentTriggers())
+  // for as long as the browser's own fetch would otherwise wait.
+  function fetchWithTimeout(url, ms) {
+    var timeout = new Promise(function(resolve) {
+      setTimeout(resolve, ms || 3000, null);
+    });
+    return Promise.race([fetch(url), timeout]);
+  }
+
   // popup-customizer: pull the merchant's appearance config from the App Proxy
   // (same origin as the store — Shopify signs & appends `shop` automatically).
   // Any failure leaves popupConfig = {} so showSoftPrompt uses its defaults.
   function fetchPopupConfig() {
     var url = window.location.origin + '/apps/cartncodform/popup-config';
-    return fetch(url)
+    return fetchWithTimeout(url, 3000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (data && data.popup && typeof data.popup === 'object') {
@@ -1336,7 +1346,7 @@
   function fetchDiscountConfig() {
     var url = window.location.origin + '/apps/cartncodform/discount-config?shop=' +
       encodeURIComponent(SHOP_DOMAIN);
-    return fetch(url)
+    return fetchWithTimeout(url, 3000)
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (data && typeof data === 'object') discountConfig = data;
