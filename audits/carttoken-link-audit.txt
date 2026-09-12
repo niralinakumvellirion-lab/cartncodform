@@ -1,0 +1,62 @@
+=== CART TOKEN LINK AUDIT ===
+
+Part 1 — server.js EMAIL_SIGNAL_TYPES confirmed: yes
+  Already contained all 12 signal types from the previous task:
+  ['cart_abandon', 'checkout_abandon', 'high_intent', 'lapsing',
+   'winback', 'post_purchase_d3', 'back_in_stock', 'price_drop',
+   'email_capture', 'price_hesitation', 'browse_abandon',
+   'cod_to_prepaid']. No code change needed/made.
+  node --check backend/server.js: pass
+
+Part 2 — discounts.js cartToken extracted from body: yes
+  Location: generateDiscount(), the email/phone identity-resolution
+  block (was lines 213-227, now 213-232 after the addition).
+
+  Old upsertProfile identifiers object:
+    { email: email || null, phone: phone || null, sessionId: body.sessionId || null }
+
+  New upsertProfile identifiers object:
+    {
+      email: email || null,
+      phone: phone || null,
+      sessionId: body.sessionId || null,
+      cartToken: cartToken || null,
+    }
+  (with `const cartToken = body.cartToken ? String(body.cartToken).trim() : null;`
+  added alongside the existing email/phone trim lines.)
+
+  node --check backend/routes/discounts.js: pass
+
+Part 3 — liquid cartToken added to generate-discount fetch: yes
+  Branch A fixed: yes (originally line 1219, the Notification.permission
+    === 'granted' / discount-capture path) — the direct
+    fetch('/apps/cartncodform/generate-discount...') call was wrapped in
+    a preceding fetch('/cart.js') that resolves the current cart token
+    (stripped of any '?key=...' suffix) and passes it as `cartToken` in
+    the generate-discount POST body, exactly as specified. Rest of the
+    chain (.then/.then/.catch, finishDiscount(d, capAction), resetButton()
+    on error) unchanged.
+  Branch B fixed: yes (originally line 1263, the new-subscriber path
+    inside the .then() chain after saveToken()/setupForegroundMessages())
+    — same fetch('/cart.js') wrapper pattern applied, `return`ed from the
+    enclosing .then() as before. Rest of the chain (Stage 3/4 comments,
+    finishDiscount(d, action), resetButton() on error) unchanged.
+
+  NOT touched (confirmed, per "DO NOT touch any other logic"): the third
+  fetch('/apps/cartncodform/generate-discount...') call site (now line
+  1489, originally 1477) lives inside injectProductNudge() — a
+  completely separate function from showSoftPrompt(), not mentioned in
+  this task's instructions. Verified via Read after the edits that its
+  body is unchanged: still a single fetch with
+  { action, email: emailVal || null, phone: phoneVal || null, sessionId: getSessionId() }
+  and no cartToken.
+
+  saveToken() and registerSW() also confirmed untouched (grep shows no
+  diff-relevant matches inside either function; only the two Allow-handler
+  branches inside showSoftPrompt() were edited).
+
+node --check liquid: pass (extracted the <script> block via
+  awk '/^<script>$/{f=1;next} /^<\/script>$/{f=0} f' and ran node --check
+  against it)
+
+npm test: 147/147 passing (19 test suites, 0 failures)

@@ -1216,13 +1216,19 @@
         allow.textContent = '✓ Getting your discount...';
         allow.style.background = '#16a34a';
 
-        fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: capAction, email: email, phone: phone, sessionId: getSessionId()
+        fetch('/cart.js')
+          .then(function (r) { return r.json(); })
+          .then(function (cart) {
+            var cartToken = cart.token ? cart.token.split('?')[0].trim() : null;
+            return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                action: capAction, email: email, phone: phone,
+                sessionId: getSessionId(), cartToken: cartToken
+              })
+            });
           })
-        })
           .then(function (r) { return r.json(); })
           .then(function (d) {
             if (d && d.code) allow.textContent = '🎉 Redirecting...';
@@ -1260,13 +1266,19 @@
             if (email && phone) action = 'both';
             else if (email) action = 'email';
             else if (phone) action = 'phone';
-            return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                action: action, email: email, phone: phone, sessionId: getSessionId()
+            return fetch('/cart.js')
+              .then(function (r) { return r.json(); })
+              .then(function (cart) {
+                var cartToken = cart.token ? cart.token.split('?')[0].trim() : null;
+                return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    action: action, email: email, phone: phone,
+                    sessionId: getSessionId(), cartToken: cartToken
+                  })
+                });
               })
-            })
               .then(function (r) { return r.json(); })
               .then(function (d) {
                 // Stage 3: discount generated — renderDiscountCode swaps the

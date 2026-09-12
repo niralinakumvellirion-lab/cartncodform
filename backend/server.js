@@ -197,6 +197,7 @@ const EMAIL_SIGNAL_TYPES = [
   'cart_abandon', 'checkout_abandon', 'high_intent',
   'lapsing', 'winback', 'post_purchase_d3',
   'back_in_stock', 'price_drop', 'email_capture',
+  'price_hesitation', 'browse_abandon', 'cod_to_prepaid',
 ];
 
 /**

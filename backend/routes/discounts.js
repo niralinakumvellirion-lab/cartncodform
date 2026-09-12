@@ -212,12 +212,18 @@ async function generateDiscount(shopDomain, body = {}) {
   // the response and never logs the PII.
   const email = body.email ? String(body.email).trim() : '';
   const phone = body.phone ? String(body.phone).trim() : '';
+  const cartToken = body.cartToken ? String(body.cartToken).trim() : null;
   if (email || phone) {
     try {
       const { upsertProfile } = require('../services/profileService');
       upsertProfile(
         shop,
-        { email: email || null, phone: phone || null, sessionId: body.sessionId || null },
+        {
+          email: email || null,
+          phone: phone || null,
+          sessionId: body.sessionId || null,
+          cartToken: cartToken || null,
+        },
         {
           ...(email
             ? { 'channels.email.address': email, 'channels.email.source': 'popup' }

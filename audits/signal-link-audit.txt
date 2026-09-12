@@ -1,0 +1,158 @@
+SIGNAL LINKING INVESTIGATION — read-only, no code changed
+=============================================================
+File read in full: backend/services/signalEngine.js
+Supporting files read to answer question 3 (identity-resolution is not
+in signalEngine.js itself): backend/services/profileService.js,
+extensions/cartncodform-embed/blocks/push-notifications.liquid
+(trackEvent/flushEvents/trackCart/initTracking/resyncCartTokenBeacon),
+backend/routes/events.js, backend/routes/push.js, backend/routes/discounts.js.
+
+
+1. How cart_abandon is detected
+------------------------------------
+computeCartAbandon(profile, shopDomain) (signalEngine.js:42-71):
+  const carts = (profile.identifiers && profile.identifiers.cartTokens) || [];
+  if (!carts.length) return null;
+
+  const cart = await AbandonedCustomer.findOne(
+    { shopDomain, sessionId: { $in: carts }, status: 'abandoned' },
+    null,
+    { sort: { createdAt: -1 } }
+  );
+  if (!cart) return null;
+  // age gate: only fires once the cart is 60+ min old, strength decays
+  // from 1.0 (< 2h) down to 0.3 (24h+)
+
+So cart_abandon fires ONLY if:
+  (a) profile.identifiers.cartTokens is non-empty, AND
+  (b) an AbandonedCustomer document exists whose `sessionId` field (a
+      MISLEADING field name — see note below) matches one of those
+      cartTokens, with status:'abandoned', at least 60 minutes old.
+
+NOTE on AbandonedCustomer.sessionId: despite the field name, this query
+matches it against profile.identifiers.CARTTOKENS, not sessionIds — so
+in this one model, `sessionId` actually holds the Shopify cart token,
+not the ccfSessionId UUID used everywhere else in this codebase. (This
+same overloaded-naming issue was flagged in an earlier audit,
+audits/JOURNEY_AUDIT.txt, for StorefrontEvent.sessionId — a different,
+also-overloaded field.)
+
+
+2. What identifier links storefront events to a profile
+-------------------------------------------------------------
+Two DIFFERENT identifiers are used by different signal-compute functions,
+and they are NOT interchangeable:
+
+  - cart_abandon (computeCartAbandon) uses ONLY
+    profile.identifiers.cartTokens, matched against AbandonedCustomer.sessionId
+    (the Shopify cart token, per note above).
+
+  - checkout_abandon, browse_abandon, high_intent, price_hesitation
+    (computeCheckoutAbandon/computeBrowseAbandon/computeHighIntent/
+    computePriceHesitation) all use tokensOf(profile) — defined at
+    signalEngine.js:24-27 as:
+        [...(identifiers.sessionIds || []), ...(identifiers.cartTokens || [])]
+    — i.e. EITHER the ccfSessionId UUID OR a cart token — matched against
+    StorefrontEvent.sessionId (which, per routes/events.js, is populated
+    from whatever the storefront's flushEvents() sent as its top-level
+    `sessionId` field).
+
+Tracing what the storefront actually sends as StorefrontEvent.sessionId:
+  push-notifications.liquid trackEvent()/flushEvents()
+  (lines ~2019-2064): every event (including add_to_cart, product_view,
+  page_view, etc.) is queued with `sessionId: getSessionId()` — and
+  getSessionId() (lines 1944-1950) returns a stable UUID persisted in
+  localStorage (CCF_SESSION_KEY), generated once per browser via
+  generateUUID(). This is the "ccfSessionId" — NEVER the Shopify cart
+  token — for every event sent through the generic /api/events pipe.
+
+  So: every StorefrontEvent's `sessionId` field (add_to_cart included) is
+  the ccfSessionId UUID, NOT a cart token.
+
+  Separately, routes/events.js's POST / handler also calls:
+    upsertProfile(shop, { sessionId: sessionId||null, customerId, pushToken }, ...)
+  on every event batch ingest (fire-and-forget) — this is what links the
+  ccfSessionId into profile.identifiers.sessionIds. It does NOT pass a
+  cartToken — cartToken is never available at this ingest point.
+
+Where cartToken DOES get attached to a profile (the only two paths found):
+  (a) push.js POST /subscribe-customer (called by saveToken() in the
+      liquid file, when a customer subscribes to push) — passes
+      { sessionId: ccfSessionId, cartToken: normalizedCartToken, pushToken }
+      to upsertProfile().
+  (b) push.js POST /cart-activity, called from
+      resyncCartTokenBeacon() (liquid file, lines 2165-2199) — but this
+      function is ONLY invoked from the window.fetch monkey-patch's
+      cart-add/cart-change interceptor (lines 2247-2253), and even then
+      ONLY when:
+        var existingToken = localStorage.getItem(TOKEN_KEY);
+        if (existingToken && Notification.permission === 'granted') {
+          resyncCartTokenBeacon(existingToken);
+        }
+      i.e. ONLY for customers who are ALREADY push-subscribed with
+      permission already granted. For anyone who has not yet subscribed
+      to push, add_to_cart NEVER results in a cartToken being attached to
+      any profile via this path either.
+  (Also checked: trackCart()'s own /api/push/cart-activity call, a
+  separate, seemingly-older click-listener-based add-to-cart tracker —
+  its request body is only { shopDomain, token, event, url } and omits
+  cartToken/ccfSessionId entirely, and the whole call is gated
+  `if (token)` i.e. also push-subscribed-only. So neither of the two
+  add-to-cart tracking mechanisms in this file attaches a cartToken for
+  a non-push-subscribed visitor.)
+
+
+3. Would a profile that got email via the popup have the same
+   sessionId/cartToken as the one that fired add_to_cart?
+--------------------------------------------------------------------
+sessionId (ccfSessionId): YES, reliably, for the same browser/session.
+  The discount popup's Allow-button handler sends
+  `sessionId: getSessionId()` (push-notifications.liquid, both
+  fetch('/apps/cartncodform/generate-discount', ...) call sites) — the
+  exact same localStorage-persisted UUID that every StorefrontEvent
+  (including add_to_cart) already carries. discounts.js's
+  generateDiscount() forwards this into
+  upsertProfile(shop, { email, phone, sessionId: body.sessionId }, ...).
+  Since profileService.upsertProfile()'s buildQuery() does an $or lookup
+  across identifiers.sessionIds (among other fields), and the add_to_cart
+  ingest already added this same ccfSessionId to the profile's
+  identifiers.sessionIds array earlier in the same session, the
+  email-capture upsertProfile() call will match that SAME existing
+  profile document (not create a new one) — as long as localStorage
+  wasn't cleared between the two events. So yes, they end up as the same
+  Profile.
+
+cartToken: NOT NECESSARILY — and this is the likely root of any
+  "cart_abandon signal never fires for profiles captured via the
+  discount popup" symptom:
+  - The discount popup's own upsertProfile() call (STEP above) NEVER
+    supplies a cartToken — only email/phone/sessionId.
+  - A visitor's add_to_cart action only results in a cartToken being
+    attached to their profile if they are ALREADY push-subscribed with
+    granted permission (see section 2's two cartToken-attaching paths,
+    both gated that way).
+  - So a customer who adds an item to cart WITHOUT ever push-subscribing,
+    then later fills in email/phone in the popup to claim a discount
+    (the 'email'/'phone'/'both' action paths, which do not require
+    Notification.permission === 'granted' up front — only the
+    already-granted / discount-capture branch skips requestPermission(),
+    but a brand-new visitor goes through the normal
+    Notification.requestPermission() flow, which the customer could
+    still deny or the browser could still block, and even when granted,
+    cartToken attachment depends on a LATER add-to-cart triggering
+    resyncCartTokenBeacon(), not on the discount claim itself) —
+    such a profile can end up with identifiers.sessionIds populated but
+    identifiers.cartTokens EMPTY.
+  - computeCartAbandon() requires profile.identifiers.cartTokens to be
+    non-empty as its very first check (signalEngine.js:44) — so for any
+    such profile, cart_abandon can never be computed, regardless of
+    whether they actually have an abandoned cart sitting in
+    AbandonedCustomer for that shop.
+
+This is a plausible, code-traced explanation for why the 2 email-carrying
+profiles checked in the previous audit (audits/signal-check-audit.txt)
+showed only price_hesitation/high_intent signals and no cart_abandon —
+worth investigating further whether either of those 2 profiles ever had
+a cartToken attached at all, but that requires a targeted DB query, not
+performed here (not asked for in this task; documentation only, per the
+task's explicit "do NOT fix yet, just document the linking mechanism").
