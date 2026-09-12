@@ -1,0 +1,226 @@
+WEBHOOK IMAGE AUDIT - read-only, no changes
+==============================================
+Generated: 2026-09-12
+
+File read: backend/routes/webhooks.js (relevant excerpt: lines 1-248,
+the shared cart+checkout webhook handler and its two helper functions,
+mapPayloadToCustomer() and fetchProductImage()).
+
+
+====================================================================
+1. How the cart webhook handler creates/updates AbandonedCustomer
+====================================================================
+carts/create and carts/update (and checkouts/create, checkouts/update)
+all share ONE handler, handleWebhook(source, req, res) (source is
+'cart' or 'checkout', set by the two thin route wrappers at the bottom
+of the file -- router.post('/cart', ...) and router.post('/checkout',
+...)).
+
+Exact create/update lines (151-167):
+ 151	    const doc = mapPayloadToCustomer(shopDomain, req.body);
+ 152
+ 153	    console.log('[webhook] Mapped customer productImageUrl:', doc.productImageUrl);
+ 154	    console.log('[webhook] Mapped customer cartItems[0]:',
+ 155	      JSON.stringify(doc.cartItems?.[0], null, 2)
+ 156	    );
+ 157
+ 158	    let savedCustomer;
+ 159	    if (doc.sessionId) {
+ 160	      savedCustomer = await AbandonedCustomer.findOneAndUpdate(
+ 161	        { shopDomain, sessionId: doc.sessionId },
+ 162	        doc,
+ 163	        { upsert: true, new: true, setDefaultsOnInsert: true }
+ 164	      );
+ 165	    } else {
+ 166	      savedCustomer = await AbandonedCustomer.create(doc);
+ 167	    }
+
+`doc` comes from mapPayloadToCustomer(shopDomain, req.body) (lines
+21-59), which maps the raw Shopify cart/checkout webhook payload into
+an AbandonedCustomer-shaped object -- cartItems (with each item's own
+title/quantity/price/imageUrl/productId/variantId), cartValue,
+email/phone, sessionId (= payload.token || payload.cart_token ||
+payload.id), customerId, status:'abandoned'. It is upserted keyed by
+{ shopDomain, sessionId } -- so repeated carts/update events for the
+SAME cart overwrite the same row rather than creating duplicates.
+
+
+====================================================================
+2. Where productImageUrl gets set, and what API call fetches it
+====================================================================
+TWO separate mechanisms set this field, at two different points:
+
+--- Mechanism A: from the webhook payload itself (mapPayloadToCustomer,
+    lines 24-38, 53) ---
+  24	  const cartItems = lineItems.map((item) => ({
+  25	    title: item.title || item.name || 'Unknown item',
+  26	    quantity: item.quantity || 1,
+  27	    price: Number(item.price) || 0,
+  28	    imageUrl:
+  29	      (item.image && item.image.src) ||
+  30	      (Array.isArray(item.images) && item.images[0] && item.images[0].src) ||
+  31	      (item.featured_image && item.featured_image.url) ||
+  32	      null,
+  33	    productId: item.product_id || (item.variant && item.variant.product_id) || null,
+  34	    variantId: item.variant_id || null,
+  35	  }));
+  36
+  37	  // First cart item that has an image -- used as the notification image.
+  38	  const firstImageUrl = (cartItems.find((i) => i.imageUrl) || {}).imageUrl || null;
+  ...
+  53	    productImageUrl: firstImageUrl || undefined,
+  This ONLY works if the webhook's own line_items happen to carry
+  item.image / item.images / item.featured_image data.
+
+--- Mechanism B: a live Shopify Admin API call, fetchProductImage()
+    (lines 65-121), invoked from inside handleWebhook() (lines
+    202-228) ---
+  202	    // Resolve a product image for the customer notification. carts/* line_items
+  203	    // have no image, so fall back to the Admin API using the first productId.
+  204	    const store = await Store.findOne({ shopDomain });
+  205	    const firstItem = savedCustomer.cartItems && savedCustomer.cartItems[0];
+  206	    const productId = (firstItem && firstItem.productId)
+  207	      ? String(firstItem.productId)
+  208	      : null;
+  209
+  210	    // Always resolve the image for the CURRENT first cart item.
+  211	    // The cached productImageUrl may belong to a different product if the
+  212	    // customer updated their cart, so we re-fetch whenever the productId
+  213	    // is available. fetchProductImage returns null on error (safe).
+  214	    let productImageUrl = null;
+  215
+  216	    if (store && productId) {
+  217	      productImageUrl = await fetchProductImage(
+  218	        shopDomain,
+  219	        store.accessToken,
+  220	        productId
+  221	      );
+  222	      if (productImageUrl) {
+  223	        await AbandonedCustomer.findByIdAndUpdate(
+  224	          savedCustomer._id,
+  225	          { productImageUrl }
+  226	        );
+  227	      }
+  228	    }
+  229
+  230	    // Fallback: use whatever image is already stored if Admin API returned nothing
+  231	    if (!productImageUrl) {
+  232	      productImageUrl = savedCustomer.productImageUrl || null;
+  233	    }
+
+  NOTE: the code's own comment at line 202-203 says "carts/* line_items
+  have no image" -- flatly contradicting Mechanism A's existence (which
+  explicitly tries to read item.image/item.images/item.featured_image
+  from those same line_items). Read literally, this comment is the
+  developer's own admission that Mechanism A is dead code for carts/*
+  webhooks in practice (it may still work for checkouts/* payloads,
+  which were not separately distinguished in this code path -- both
+  source types share the exact same mapPayloadToCustomer() function).
+  This audit did not test either webhook payload shape directly to
+  confirm; it is reported here as a discrepancy in the code's own
+  comments, not verified against a live payload.
+
+  fetchProductImage(shop, accessToken, productId) itself (lines 65-121)
+  is the actual API call:
+  89	    const res = await fetch(
+  90	      `https://${shop}/admin/api/2025-01/products/${productId}.json`,
+  91	      {
+  92	        headers: {
+  93	          'X-Shopify-Access-Token': accessToken,
+  94	          'Content-Type': 'application/json'
+  95	        }
+  96	      }
+  97	    );
+  98	    const data = await res.json();
+  99	    const imageUrl = data.product?.image?.src ||
+ 100	                     data.product?.images?.[0]?.src ||
+ 101	                     null;
+  A REST GET against Shopify's Admin API products endpoint, using
+  `store.accessToken` -- the SAME stored offline access token used
+  everywhere else in this codebase (discounts.js, the old
+  registerAllWebhooks(), etc.).
+
+  NOTE (verified, not merely suspected): this function never checks
+  `res.ok` or the HTTP status code at all -- it goes straight to
+  `res.json()` and reads `data.product?.image?.src`. If Shopify
+  responds with an auth-error JSON body (as confirmed directly in
+  audits/webhooks-audit.txt: `{"errors":"[API] Non-expiring access
+  tokens are no longer accepted..."}`), `data.product` is simply
+  undefined, so `imageUrl` computes to `null` via the optional-chaining
+  fallbacks -- logged at line 102 as "not found", IDENTICAL to the
+  log line for a real product that genuinely has no photo. There is no
+  way to tell these two cases apart from this function's own logging.
+
+
+====================================================================
+3. Why recent carts have MISSING productImageUrl but older ones have it
+====================================================================
+Direct evidence available from this investigation, connected here:
+
+  - audits/webhooks-audit.txt (earlier task, same investigation)
+    confirmed, via a LIVE call to Shopify's Admin API using this exact
+    store's stored accessToken, that Shopify now rejects it outright:
+    "Non-expiring access tokens are no longer accepted for the Admin
+    API." This is not topic-specific (webhooks) -- it is a blanket
+    rejection of that token for ANY Admin API call.
+
+  - fetchProductImage() (section 2 above) makes its own, completely
+    separate Admin API call using that SAME store.accessToken.
+
+  - Since that function has no res.ok check (also section 2), a
+    rejected-token response silently resolves to imageUrl = null,
+    logged identically to "this product has no photo".
+
+  - Mechanism A (the webhook payload's own line_items image data) is,
+    per the code's own comment, not actually available for carts/*
+    webhooks -- so in practice Mechanism B (the now-broken Admin API
+    call) is the ONLY realistic source of a fresh productImageUrl for
+    a cart-abandon row.
+
+  - The two OLDER AbandonedCustomer rows checked in the immediately
+    preceding task (sessionId hWNGYT5qafzRgR9yOLa9IaJQ and
+    hWNGYSl977Ap3UC4X3PwpP1w) DO carry a real
+    cdn.shopify.com image URL; the three NEWER rows (sessionId
+    3e9af47bd1f3df3c83d63e09cad0b9e7, hWNGk4gcbJm3IHibIrQYJBHo,
+    hWNGjzKaa5XjMsFIlC6WV3bw) do not.
+
+Putting these together: the most likely explanation is that this
+store's offline access token was still valid (accepted by Shopify) when
+the older rows were created/updated -- fetchProductImage() succeeded
+and wrote a real image URL onto them. At some point since, Shopify
+began rejecting this same token (confirmed still rejected as of this
+session), and every AbandonedCustomer row created or updated from that
+point forward has had fetchProductImage() silently fail (no res.ok
+check surfaces this) -- leaving productImageUrl unset for all of them,
+which is exactly the MISSING pattern seen on the 3 more recent rows.
+This is a plausible, evidence-backed explanation, not something
+directly re-verified with a fresh live test in this task (that would
+require deliberately triggering a new carts/create webhook and watching
+it fail, which was not done here -- audit only).
+
+
+====================================================================
+DOES THE HANDLER MAKE A SHOPIFY ADMIN API CALL TO FETCH PRODUCT IMAGES?
+====================================================================
+Yes -- fetchProductImage() (section 2), called from inside
+handleWebhook() whenever a store record and a productId are both
+available (lines 216-221).
+
+Token used: store.accessToken (line 219) -- loaded via
+`const store = await Store.findOne({ shopDomain });` (line 204) a few
+lines above. This is the plain, classic OAuth offline access token
+stored on the Store document -- NOT store.onlineAccessToken (the
+Token-Exchange-derived online token that backend/routes/discounts.js's
+generateDiscount() was changed to prefer, in an earlier phase of this
+same overall investigation/fix history). fetchProductImage() has no
+awareness of onlineAccessToken at all -- it only ever receives and uses
+whatever `accessToken` its caller passes in, and this caller always
+passes store.accessToken specifically.
+
+Is it the same offline token that was rejected earlier? Yes -- it is
+the exact same field, Store.accessToken, on the exact same Store
+document, confirmed directly rejected by Shopify's Admin API in
+audits/webhooks-audit.txt via a live call. fetchProductImage() would be
+expected to fail for the same underlying reason, for as long as that
+token remains invalid, though this was not independently re-tested
+live in this task (see note above).

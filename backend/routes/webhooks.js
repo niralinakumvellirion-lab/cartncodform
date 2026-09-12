@@ -64,7 +64,7 @@ function mapPayloadToCustomer(shopDomain, payload) {
  */
 async function fetchProductImage(shop, accessToken, productId) {
   try {
-    if (!productId || !accessToken) return null;
+    if (!productId) return null;
 
     const shopKey = String(shop || '').trim().toLowerCase();
     const productKey = String(productId);
@@ -83,18 +83,45 @@ async function fetchProductImage(shop, accessToken, productId) {
       console.log('[webhook] Cache lookup error (proceeding to fetch):', cacheErr.message);
     }
 
+    // Prefer the online token (shpua_) — works with new Shopify API.
+    // Fall back to the offline token for backwards compatibility.
+    // Same pattern as discounts.js generateDiscount(). Re-derived here
+    // (rather than trusting the `accessToken` argument, which every
+    // current caller passes as the store's offline accessToken) because
+    // Shopify now rejects that non-expiring offline token outright
+    // (confirmed live in audits/webhooks-audit.txt) — this is why
+    // product images had silently stopped resolving. This function's
+    // signature/arity is unchanged (routes/push.js also calls it), so
+    // the passed-in `accessToken` is kept as a last-resort fallback.
+    const store = await Store.findOne({ shopDomain: shopKey })
+      .select('accessToken onlineAccessToken onlineTokenExpiresAt');
+    let apiToken = (store && store.onlineAccessToken) || (store && store.accessToken) || accessToken;
+    if (store && store.onlineAccessToken && store.onlineTokenExpiresAt) {
+      if (new Date() > store.onlineTokenExpiresAt) {
+        apiToken = (store && store.accessToken) || accessToken;
+      }
+    }
+    if (!apiToken) return null;
+
     console.log('[webhook] Fetching image for productId:', productId,
       'shop:', shop,
-      'hasToken:', !!accessToken);
+      'hasToken:', !!apiToken);
     const res = await fetch(
       `https://${shop}/admin/api/2025-01/products/${productId}.json`,
       {
         headers: {
-          'X-Shopify-Access-Token': accessToken,
+          'X-Shopify-Access-Token': apiToken,
           'Content-Type': 'application/json'
         }
       }
     );
+
+    if (!res.ok) {
+      console.warn('[webhook] fetchProductImage failed:', res.status,
+        'for', productId);
+      return null;
+    }
+
     const data = await res.json();
     const imageUrl = data.product?.image?.src ||
                      data.product?.images?.[0]?.src ||

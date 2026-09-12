@@ -1,0 +1,158 @@
+=== WEBHOOK IMAGE TOKEN FIX AUDIT ===
+
+fetchProductImage() token change:
+  Old: store.accessToken only (the passed-in `accessToken` parameter,
+    which every current caller supplies as the store's offline token)
+  New: onlineAccessToken preferred, accessToken fallback: yes
+  res.ok check added: yes
+  Line changed: lines 65-124 (the whole function body was touched;
+    the new token-preference block is lines 86-102, the res.ok check
+    is lines 119-123)
+
+node --check: pass
+npm test: 151/151 passing (19 test suites, 0 failures — unchanged from
+  before this task; no existing test exercises fetchProductImage()).
+
+
+DEVIATION FROM THE LITERAL TASK INSTRUCTIONS (verified, not guessed)
+=========================================================================
+The task's premise was: "Find fetchProductImage() function. Currently
+it loads: const store = await Store.findOne({shopDomain})
+.select('accessToken') And uses: store.accessToken for the API call."
+
+Read against the actual file (verified before editing): fetchProductImage()
+itself does NOT load the Store at all — it only ever receives a plain
+`accessToken` string as its 2nd parameter. The `Store.findOne({shopDomain})`
+call (with no .select() at all, loading the whole document) lives in
+the CALLER, handleWebhook() (line 204, in a completely different
+function), which then passes `store.accessToken` into
+`fetchProductImage(shopDomain, store.accessToken, productId)` (lines
+217-221).
+
+Two hard constraints made the "obvious" fix (move the token-preference
+logic into handleWebhook(), where the Store is actually loaded)
+impossible without violating the task's own rules:
+  1. "DO NOT touch any other function in webhooks.js" — the
+     Store.findOne()/store.accessToken lines live inside handleWebhook(),
+     not fetchProductImage(). Changing them would mean editing a
+     different function.
+  2. fetchProductImage()'s signature (shop, accessToken, productId) is
+     also called from backend/routes/push.js (per this file's own
+     comment at the bottom: "fetchProductImage stays exported — the
+     dashboard push route still uses it"). Changing its arity/parameter
+     meaning to, say, (shop, productId) would break that OTHER file's
+     call site — and "DO NOT touch any other file" forbids fixing it
+     there too.
+
+Given both constraints, implemented the fix entirely INSIDE
+fetchProductImage() itself, without changing its external signature at
+all: the function now re-derives the store's token on its own (it
+already has `shop`), using the exact same preference logic as
+discounts.js's generateDiscount() (onlineAccessToken preferred, checked
+against onlineTokenExpiresAt, falling back to accessToken) — and only
+falls back to the `accessToken` parameter the caller passed in if that
+fresh lookup finds nothing at all. This satisfies the actual intent
+(prefer the online token, matching the established pattern) while
+touching only fetchProductImage() and no other function or file.
+
+Known, accepted side effect of this approach: handleWebhook() still
+does its own `Store.findOne({ shopDomain })` (unchanged, since touching
+it was off-limits) purely to obtain store.accessToken to pass in as a
+now-mostly-vestigial fallback argument — so a cart/checkout webhook
+that reaches the image-fetch step now issues two separate Store
+lookups (one in handleWebhook(), one inside fetchProductImage()) where
+one would suffice. Not fixed, since consolidating it would require
+editing handleWebhook() too.
+
+Also relaxed the old early-exit guard from `if (!productId ||
+!accessToken) return null;` to `if (!productId) return null;` — a
+missing/falsy `accessToken` argument is no longer automatically
+disqualifying, since the function can now succeed purely off its own
+fresh Store lookup even when the caller passed nothing useful. A new
+`if (!apiToken) return null;` guard (after the token-preference block)
+replaces the old one's actual safety purpose — still returns null
+before attempting a fetch with no usable token at all.
+
+
+EXACT CODE (fetchProductImage(), lines 65-124)
+=========================================================================
+async function fetchProductImage(shop, accessToken, productId) {
+  try {
+    if (!productId) return null;
+
+    const shopKey = String(shop || '').trim().toLowerCase();
+    const productKey = String(productId);
+
+    // Check cache first — avoids a redundant Admin API call within 24h.
+    try {
+      const cached = await ProductImageCache.findOne({
+        shopDomain: shopKey,
+        productId: productKey,
+      });
+      if (cached) {
+        console.log(`[webhook] Product image for ${productId}: cache hit`);
+        return cached.imageUrl;
+      }
+    } catch (cacheErr) {
+      console.log('[webhook] Cache lookup error (proceeding to fetch):', cacheErr.message);
+    }
+
+    // Prefer the online token (shpua_) — works with new Shopify API.
+    // Fall back to the offline token for backwards compatibility.
+    // Same pattern as discounts.js generateDiscount(). Re-derived here
+    // (rather than trusting the `accessToken` argument, which every
+    // current caller passes as the store's offline accessToken) because
+    // Shopify now rejects that non-expiring offline token outright
+    // (confirmed live in audits/webhooks-audit.txt) — this is why
+    // product images had silently stopped resolving. This function's
+    // signature/arity is unchanged (routes/push.js also calls it), so
+    // the passed-in `accessToken` is kept as a last-resort fallback.
+    const store = await Store.findOne({ shopDomain: shopKey })
+      .select('accessToken onlineAccessToken onlineTokenExpiresAt');
+    let apiToken = (store && store.onlineAccessToken) || (store && store.accessToken) || accessToken;
+    if (store && store.onlineAccessToken && store.onlineTokenExpiresAt) {
+      if (new Date() > store.onlineTokenExpiresAt) {
+        apiToken = (store && store.accessToken) || accessToken;
+      }
+    }
+    if (!apiToken) return null;
+
+    console.log('[webhook] Fetching image for productId:', productId,
+      'shop:', shop,
+      'hasToken:', !!apiToken);
+    const res = await fetch(
+      `https://${shop}/admin/api/2025-01/products/${productId}.json`,
+      {
+        headers: {
+          'X-Shopify-Access-Token': apiToken,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+
+    if (!res.ok) {
+      console.warn('[webhook] fetchProductImage failed:', res.status,
+        'for', productId);
+      return null;
+    }
+
+    const data = await res.json();
+    const imageUrl = data.product?.image?.src ||
+                     data.product?.images?.[0]?.src ||
+                     null;
+    console.log(`[webhook] Product image for ${productId}:`, imageUrl ? 'found' : 'not found');
+
+    ... (cache-write block and catch — unchanged from before this fix) ...
+
+
+NOT TOUCHED (confirmed)
+=========================================================================
+- mapPayloadToCustomer(), handleWebhook(), handleOrderWebhook(),
+  handleAppSubscriptionUpdate(), handleAppUninstalled(),
+  handleCustomersDataRequest(), handleCustomersRedact(),
+  handleShopRedact(), and all router.post(...) route declarations —
+  none of these were opened for editing.
+- backend/routes/push.js — not opened; fetchProductImage()'s call
+  signature there is unaffected since arity/parameter order/return type
+  are all unchanged.
+- No other file was modified.
