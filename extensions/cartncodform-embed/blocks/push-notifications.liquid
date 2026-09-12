@@ -2222,11 +2222,28 @@
           var body = init && init.body;
           var parsed = typeof body === 'string' ? JSON.parse(body) : null;
           var addedPid = parsed && (parsed.id || parsed.items && parsed.items[0] && parsed.items[0].id) || null;
-          trackEvent('add_to_cart', {
+
+          // Fetch the current cart token so the backend can link it onto
+          // the profile (POST /api/events, cartToken-link block) — needed
+          // for cart_abandon to fire (signalEngine.js computeCartAbandon()
+          // matches ONLY via identifiers.cartTokens). Kept out of the
+          // synchronous path below so it never delays showSoftPrompt().
+          var addToCartMeta = {
             productId: addedPid,
             quantity: parsed && (parsed.quantity || 1) || 1,
             url: window.location.href
-          });
+          };
+          fetch('/cart.js')
+            .then(function(r) { return r.json(); })
+            .then(function(cart) {
+              addToCartMeta.cartToken = cart.token ? cart.token.split('?')[0].trim() : null;
+              trackEvent('add_to_cart', addToCartMeta);
+            })
+            .catch(function() {
+              // Still record the event even if the cart token lookup fails.
+              trackEvent('add_to_cart', addToCartMeta);
+            });
+
           // Trigger 3 — ADD TO CART soft prompt (session-guarded internally).
           // Do not show on product pages, even when add-to-cart fires there.
           try {

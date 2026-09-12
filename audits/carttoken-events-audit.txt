@@ -1,0 +1,122 @@
+=== CART TOKEN EVENTS AUDIT ===
+
+events.js change: yes
+  Where added: lines 46-79 (the existing "Phase C2" fire-and-forget
+    block, extended). Specifically:
+      - line 49: const Profile = require('../models/Profile'); (new)
+      - lines 63-77: the cartToken-link block itself, nested inside
+        upsertProfile(...).then((profile) => { ... }), right after the
+        existing computeSignalsForProfile() call.
+  cartToken source: neither of the two literal options given in the
+    task (body.meta.cartToken / body.cartToken) — both are structurally
+    impossible in this handler and were fixed. See DEVIATIONS below.
+
+liquid change: yes
+  Was cartToken already in the add_to_cart trackEvent call: no.
+    Confirmed (grep + read) the existing meta object was
+    { productId: addedPid, quantity: ..., url: window.location.href } —
+    no cartToken field.
+  Where added: inside the window.fetch monkey-patch's `if (isCartAdd)`
+    block (was lines 2220-2237, now lines 2220-2253 after the addition).
+    The trackEvent('add_to_cart', ...) call is now made from inside a
+    fetch('/cart.js') .then()/.catch(), with productId/quantity/url
+    preserved in a shared `addToCartMeta` object and cartToken added to
+    it once the cart lookup resolves.
+
+node --check events.js: pass
+npm test: 147/147 passing (19 test suites, 0 failures)
+
+
+DEVIATIONS FROM THE LITERAL GIVEN CODE (verified, not guessed)
+===================================================================
+
+1. events.js — the given block referenced `type`, `body.meta`, and
+   `body.cartToken`, none of which exist in this handler's scope:
+     - `type` is never declared anywhere in this file. POST /api/events
+       processes a BATCH of events (const { ..., events } = body;
+       events.map(e => ({...type: e.type...}))) — there is no single
+       top-level `type`. Evaluating `if (type === 'add_to_cart')` as
+       given would throw ReferenceError: type is not defined, on EVERY
+       single request that reaches this code (unconditionally, not just
+       for add_to_cart batches) — since this sits inside the outer
+       try/catch (lines 14-83, unchanged), that would have been caught
+       and turned into a 500 response for the ENTIRE /api/events
+       endpoint, silently breaking event ingestion for every shop.
+     - `body.meta` / `body.cartToken`: `body` is the top-level request
+       object ({ shopDomain, sessionId, customerId, token, events }) —
+       it has no top-level `meta` or `cartToken` field; those only ever
+       exist per-event, as `e.meta` inside the `events` array. Both
+       expressions would always evaluate to undefined even if the
+       ReferenceError above didn't already halt execution first.
+   Fixed by using `events.find((e) => e.type === 'add_to_cart' && e.meta
+   && e.meta.cartToken)` to locate the right per-event meta, matching
+   how every other part of this file already treats `events` as a
+   batch (see the existing docs.map() and the page_view check at
+   `events.some((e) => e.type === 'page_view')` a few lines below).
+
+2. events.js — the given block ran as its own separate, immediately-
+   `await`ed statement (wrapped in try/await) using an independent $or
+   lookup ({'identifiers.sessionIds': sessionId} OR
+   {'identifiers.pushTokens': token||''}) to re-find the profile. Two
+   problems with that, both fixed:
+     - It would have executed synchronously in the main handler body,
+       blocking the HTTP/beacon response on an extra DB round-trip —
+       directly contradicting the doc comment already sitting right
+       above this exact code ("Fire-and-forget: the beacon response
+       must not wait on this").
+     - Running as an independent operation (not sequenced after the
+       sibling upsertProfile() call actually resolving) races that same
+       upsertProfile() call: for a brand-new profile, the $or lookup
+       could run before upsertProfile() has finished creating/linking
+       the profile, match zero documents, and silently no-op (no error,
+       since updateOne() with no match just updates 0 documents).
+   Fixed by nesting the new block inside the EXISTING
+   upsertProfile(...).then((profile) => {...}) callback (same
+   fire-and-forget promise chain, right alongside the existing
+   computeSignalsForProfile(profile._id, shop) call) and matching by
+   `{ _id: profile._id }` directly — profile._id is already the
+   just-resolved/created document from upsertProfile() itself, so there
+   is no race and no need for a second identity lookup at all. Kept the
+   error handling as a `.catch()` on the promise (matching this file's
+   own established fire-and-forget style, e.g. the sibling
+   computeSignalsForProfile().catch(...) and upsertProfile().catch(...)
+   calls) rather than a synchronous try/catch around an await, since
+   nothing here is awaited.
+
+3. liquid file — the given replacement code was:
+     fetch('/cart.js').then(...).then(function(cart) {
+       var cartToken = ...;
+       trackEvent('add_to_cart', { cartToken: cartToken });
+     });
+   This DROPS the three fields the existing call already sent
+   (productId, quantity, url) — replacing the whole trackEvent() call
+   with one that only carries cartToken would have silently deleted
+   product-interest data (product-analytics, Journey's topProducts, the
+   admin Insights screen's cart-rate stats — all of which read
+   meta.productId from add_to_cart events) from every add-to-cart event
+   going forward. Fixed by building one shared `addToCartMeta` object
+   with all four fields (productId, quantity, url, cartToken) and
+   firing trackEvent() with the complete object once the cart.js fetch
+   resolves.
+   Also added a `.catch()` fallback (not present in the given snippet)
+   that still calls trackEvent() with the original three fields if the
+   fetch('/cart.js') call itself fails — without it, a network hiccup
+   on that one lookup would silently drop the add_to_cart event
+   entirely, losing product-analytics data for no reason related to the
+   cart-token feature being added.
+   showSoftPrompt('add_to_cart', ...) was deliberately left exactly
+   where it was (synchronous, immediately after intercepting the
+   request) rather than moved inside the fetch chain, so the customer-
+   facing soft-prompt trigger is never delayed by the extra network
+   round-trip — only the event-tracking payload's enrichment is async.
+
+
+NOT TOUCHED (confirmed)
+===================================================================
+- backend/services/signalEngine.js — not opened for editing.
+- All other event types in events.js's docs.map()/page_view logic —
+  unchanged.
+- The 'isCartChange' branch, resyncCartTokenBeacon(), saveToken(),
+  registerSW() — unchanged (grep confirms no diff outside the isCartAdd
+  block in the liquid file).
+- No other file was modified.

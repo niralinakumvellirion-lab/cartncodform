@@ -46,6 +46,7 @@ router.post('/', async (req, res) => {
     {
       const { upsertProfile } = require('../services/profileService');
       const { computeSignalsForProfile } = require('../services/signalEngine');
+      const Profile = require('../models/Profile');
       upsertProfile(shop, {
         sessionId: sessionId || null,
         customerId: customerId || null,
@@ -55,6 +56,25 @@ router.post('/', async (req, res) => {
           if (profile?._id) {
             computeSignalsForProfile(profile._id, shop)
               .catch((err) => console.error('[signals] events ingest error:', err.message));
+
+            // Link a cartToken to profile so cart_abandon signal can
+            // fire — computeCartAbandon() (signalEngine.js) matches
+            // ONLY via identifiers.cartTokens, never sessionIds/
+            // pushTokens, so a profile that only ever captured a
+            // sessionId (e.g. via the discount popup) would otherwise
+            // never accumulate one. Uses profile._id directly (already
+            // resolved above by upsertProfile) rather than a second
+            // identity lookup, so there's no race against that same
+            // profile being created.
+            const addToCartEvent = events.find(
+              (e) => e.type === 'add_to_cart' && e.meta && e.meta.cartToken
+            );
+            if (addToCartEvent) {
+              Profile.updateOne(
+                { _id: profile._id },
+                { $addToSet: { 'identifiers.cartTokens': addToCartEvent.meta.cartToken } }
+              ).catch((err) => console.error('[events] cartToken link error:', err.message));
+            }
           }
         })
         .catch((err) => console.error('[profile] events upsert error:', err.message));
