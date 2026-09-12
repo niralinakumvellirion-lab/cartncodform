@@ -1,0 +1,17 @@
+=== SESSION AUDIT — Sept 12 2026 ===
+
+[Job Counts]
+Pending: 42
+Sent: 20
+Failed: 114
+Skipped: 0
+
+[CCF Log Audit]
+Total lines: 2375
+Lines with [CCF]: 41
+First 5 examples:
+32:  console.log('[CCF] Shop:', SHOP_DOMAIN);
+33:  console.log('[CCF] SW URL:', PROXY_SW_URL);
+458:    console.log('[CCF] discount code:', d.code);
+459:    console.log('[CCF] redirect URL:', redirectUrl);
+460:    console.log('[CCF] action:', action);

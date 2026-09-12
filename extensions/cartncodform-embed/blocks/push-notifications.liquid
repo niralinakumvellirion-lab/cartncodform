@@ -29,8 +29,6 @@
   var TOKEN_KEY = 'ccf_fcm_token_' + SHOP_DOMAIN;
   var SUBSCRIBED_KEY = 'ccf_subscribed_' + SHOP_DOMAIN;
 
-  console.log('[CCF] Shop:', SHOP_DOMAIN);
-  console.log('[CCF] SW URL:', PROXY_SW_URL);
 
   // ============================================
   // SOFT PUSH PROMPT — intent triggers (Phase D)
@@ -455,10 +453,6 @@
     var redirectUrl = '/discount/' + d.code +
       '?redirect=' + encodeURIComponent(redirectPath);
 
-    console.log('[CCF] discount code:', d.code);
-    console.log('[CCF] redirect URL:', redirectUrl);
-    console.log('[CCF] action:', action);
-    console.log('[CCF] productHandle:', productHandle);
 
     // popup-redesign-2: update the popup's own content section IN PLACE
     // (headline/inputs/buttons swap for the "unlocked" state) instead of
@@ -520,7 +514,6 @@
         sessionStorage.setItem('ccf_active_discount', d.code);
         sessionStorage.setItem('ccf_active_pct', String(d.percentage));
       } catch (e) {}
-      console.log('[CCF] redirecting to:', redirectUrl);
       window.location.href = redirectUrl;
     }, 2000);
   }
@@ -951,7 +944,6 @@
     } else {
       // ---------- LAYOUT 1: split (image + content), the default ----------
       var imageUrl = cfg.imageUrl || '';
-      console.log('[CCF] imageUrl:', imageUrl ? 'set' : 'empty');
 
       // Desktop reuses this single <img>; mobile builds its own below.
       var splitImgEl = null;
@@ -1167,7 +1159,6 @@
     // popup, stash the code for cross-page badges, then hand off to the
     // module-level handleDiscount (product button + in-popup code block).
     function finishDiscount(d, action) {
-      console.log('[CCF] d object:', JSON.stringify(d));
       // Guard: only render/inject the discount UI when Shopify actually
       // created a code. On { code: null } just close the popup — the
       // subscribe already succeeded, so nothing else is blocked.
@@ -1640,7 +1631,6 @@
         : firebase.initializeApp(firebaseConfig);
       var messaging = firebase.messaging(app);
       messaging.onMessage(function(payload) {
-        console.log('[CCF] Foreground message:', payload);
         var title = payload.notification && payload.notification.title
           ? payload.notification.title : 'CartnCodForm';
         var body = payload.notification && payload.notification.body
@@ -1649,9 +1639,7 @@
           new Notification(title, { body: body, icon: '/favicon.ico' });
         }
       });
-      console.log('[CCF] Foreground handler set up');
     } catch(err) {
-      console.log('[CCF] Foreground handler error:', err.message);
     }
   }
 
@@ -1666,7 +1654,6 @@
       }
 
       var swUrl = window.location.origin + '/apps/cartncodform/sw.js';
-      console.log('[CCF] Registering SW from:', swUrl);
 
       // Unregister any stale SWs (blob URLs, wrong scope) before registering
       navigator.serviceWorker.getRegistrations().then(function(regs) {
@@ -1676,7 +1663,6 @@
             reg.active &&
             reg.active.scriptURL.indexOf('/apps/cartncodform/sw.js') !== -1;
           if (!isCorrect) {
-            console.log('[CCF] Unregistering stale SW:', reg.scope, reg.active && reg.active.scriptURL);
             return reg.unregister();
           }
           return Promise.resolve(false);
@@ -1694,7 +1680,6 @@
             reg.active.scriptURL.indexOf('/apps/cartncodform/sw.js') !== -1 &&
             reg.scope === window.location.origin + '/apps/cartncodform/'
           ) {
-            console.log('[CCF] Reusing existing correct SW');
             resolve(reg);
             return;
           }
@@ -1705,7 +1690,6 @@
           scope: '/apps/cartncodform/',
           updateViaCache: 'none'
         }).then(function(reg) {
-          console.log('[CCF] SW registered, scope:', reg.scope);
 
           if (reg.active) {
             resolve(reg);
@@ -1726,7 +1710,6 @@
           }, 8000);
 
           sw.addEventListener('statechange', function(e) {
-            console.log('[CCF] SW state:', e.target.state);
             if (e.target.state === 'activated') {
               clearTimeout(timeout);
               resolve(reg);
@@ -1750,7 +1733,6 @@
   function getToken(swReg) {
     return new Promise(function(resolve, reject) {
       try {
-        console.log('[CCF] getToken() using compat SDK');
 
         var app;
         if (firebase.apps && firebase.apps.length > 0) {
@@ -1761,14 +1743,11 @@
 
         var messaging = firebase.messaging(app);
 
-        console.log('[CCF] getToken() called with vapidKey and swReg');
         messaging.getToken({
           vapidKey: VAPID_KEY,
           serviceWorkerRegistration: swReg
         }).then(function(token) {
-          console.log('[CCF] Raw token result:', token ? token.substring(0,20)+'...' : 'null');
           if (token) {
-            console.log('[CCF] Token:', token.substring(0, 20) + '...');
             resolve(token);
           } else {
             reject(new Error('No token returned'));
@@ -1800,7 +1779,6 @@
         // Normalize: strip ?key=... suffix so it matches the webhook token.
         var rawCartToken = cart.token || null;
         var cartToken = rawCartToken ? rawCartToken.split('?')[0].trim() || null : null;
-        console.log('[CCF] Cart token:', cartToken ? cartToken.substring(0,10)+'...' : 'none');
 
         return fetch(BACKEND_URL + '/api/push/subscribe-customer', {
           method: 'POST',
@@ -1824,7 +1802,6 @@
           localStorage.setItem(SUBSCRIBED_KEY, '1');
           // Latch so the PAGE_LOAD trigger never re-prompts this browser.
           try { localStorage.setItem(PAGE_LOAD_TOKEN_KEY, '1'); } catch (e) {}
-          console.log('[CCF] Token saved successfully!');
         } else {
           // Backend rejected the token — clear latch so next visit
           // triggers a fresh getToken() instead of re-saving this one.
@@ -1865,24 +1842,20 @@
 
   function checkAndInit() {
     if (!('Notification' in window)) {
-      console.log('[CCF] Notifications not supported');
       return;
     }
 
-    console.log('[CCF] Permission:', Notification.permission);
 
     if (Notification.permission === 'denied') return;
     if (sessionStorage.getItem('ccf_denied_session')) return;
 
     if (Notification.permission === 'granted') {
-      console.log('[CCF] Permission granted — verifying token with FCM...');
       // Always re-fetch the current FCM token to detect rotation.
       registerSW().then(function(reg) {
         return getToken(reg);
       }).then(function(currentToken) {
         var storedToken = localStorage.getItem(TOKEN_KEY);
         if (currentToken !== storedToken) {
-          console.log('[CCF] Token rotated — updating...');
           // Update localStorage IMMEDIATELY so any concurrent
           // saveToken() calls (from trackCart) use the new token,
           // not the stale one. This prevents two rows being created.
@@ -1921,7 +1894,6 @@
       var form = btn.closest('form[action*="/cart"]');
       if (!form) return;
 
-      console.log('[CCF] Cart add detected');
 
       var token = localStorage.getItem(TOKEN_KEY);
       if (token) {
@@ -1935,7 +1907,6 @@
             url: window.location.href
           })
         }).catch(function(e) {
-          console.log('[CCF] Cart track error:', e.message);
         });
       }
 
@@ -2141,7 +2112,6 @@
               body: JSON.stringify({ attributes: { _ccf_job: ccfJob } })
             }).catch(function() {});
 
-            console.log('[CCF] Push click attributed, job:', ccfJob);
           }).catch(function() {});
       } catch (e) {}
     })();
@@ -2218,7 +2188,6 @@
           if (navigator.sendBeacon) {
             var blob = new Blob([payload], { type: 'application/json' });
             navigator.sendBeacon(BACKEND_URL + '/api/push/subscribe-customer', blob);
-            console.log('[CCF] Resync beacon sent, cartToken:', cartToken ? cartToken.substring(0,10)+'...' : 'none');
           } else {
             fetch(BACKEND_URL + '/api/push/subscribe-customer', {
               method: 'POST',
@@ -2316,7 +2285,6 @@
   function start() {
     if (ccfStarted) return;
     ccfStarted = true;
-    console.log('[CCF] Starting...');
     trackCart();
     checkAndInit();
     initTracking();

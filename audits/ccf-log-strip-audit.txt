@@ -1,0 +1,65 @@
+=== CCF LOG STRIP AUDIT ===
+Lines before: 2375
+Lines after: 2343
+Lines removed: 32
+
+Removed lines (all of them):
+32:   console.log('[CCF] Shop:', SHOP_DOMAIN);
+33:   console.log('[CCF] SW URL:', PROXY_SW_URL);
+458:    console.log('[CCF] discount code:', d.code);
+459:    console.log('[CCF] redirect URL:', redirectUrl);
+460:    console.log('[CCF] action:', action);
+461:    console.log('[CCF] productHandle:', productHandle);
+523:      console.log('[CCF] redirecting to:', redirectUrl);
+954:      console.log('[CCF] imageUrl:', imageUrl ? 'set' : 'empty');
+1170:            console.log('[CCF] d object:', JSON.stringify(d));
+1643:        console.log('[CCF] Foreground message:', payload);
+1652:      console.log('[CCF] Foreground handler set up');
+1654:      console.log('[CCF] Foreground handler error:', err.message);
+1669:      console.log('[CCF] Registering SW from:', swUrl);
+1679:            console.log('[CCF] Unregistering stale SW:', reg.scope, reg.active && reg.active.scriptURL);
+1697:            console.log('[CCF] Reusing existing correct SW');
+1708:          console.log('[CCF] SW registered, scope:', reg.scope);
+1729:            console.log('[CCF] SW state:', e.target.state);
+1753:        console.log('[CCF] getToken() using compat SDK');
+1764:        console.log('[CCF] getToken() called with vapidKey and swReg');
+1769:          console.log('[CCF] Raw token result:', token ? token.substring(0,20)+'...' : 'null');
+1771:            console.log('[CCF] Token:', token.substring(0, 20) + '...');
+1803:        console.log('[CCF] Cart token:', cartToken ? cartToken.substring(0,10)+'...' : 'none');
+1827:          console.log('[CCF] Token saved successfully!');
+1868:      console.log('[CCF] Notifications not supported');
+1872:    console.log('[CCF] Permission:', Notification.permission);
+1878:      console.log('[CCF] Permission granted — verifying token with FCM...');
+1885:          console.log('[CCF] Token rotated — updating...');
+1924:      console.log('[CCF] Cart add detected');
+1938:          console.log('[CCF] Cart track error:', e.message);
+2144:            console.log('[CCF] Push click attributed, job:', ccfJob);
+2221:            console.log('[CCF] Resync beacon sent, cartToken:', cartToken ? cartToken.substring(0,10)+'...' : 'none');
+2319:    console.log('[CCF] Starting...');
+
+console.error/warn lines preserved: 8
+(1293 console.error, 1736 console.error, 1740 console.error, 1777 console.error,
+1781 console.error, 1832 console.warn, 1855 console.error, 1899 console.error —
+original line numbers before the strip; confirmed still present post-strip at
+their shifted positions via grep, unchanged in content)
+
+Any lines NOT removed that still contain [CCF]:
+- Original lines 594-596 (now at 587-589 post-strip):
+    console.log('[CCF] device:', isMobile ? 'mobile' : 'desktop',
+      '| layout:', cfg.layout,
+      '| hasImage:', !!(cfg.imageUrl));
+  This is a single console.log() statement split across 3 lines — it does
+  not match the "entire statement is a standalone single-line
+  console.log('[CCF] ...)" rule, so per the task's rules it was left
+  untouched (removing only the first line would have left the remaining
+  two lines as orphaned, broken syntax).
+
+Verification:
+- node --check on the extracted <script> block -> LIQUID OK (no syntax
+  errors introduced)
+- Line count: 2375 -> 2343 (delta -32, matches "Lines removed" above)
+- grep confirms exactly 8 console.error/console.warn '[CCF]' lines remain,
+  byte-for-byte unchanged
+- Spot-checked blank-line/indentation structure immediately around several
+  removal sites (e.g. original lines 29-33, 446-455) — untouched, no
+  reformatting
