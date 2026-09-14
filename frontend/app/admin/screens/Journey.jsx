@@ -32,6 +32,47 @@ const EVENT_DOT_COLORS = {
   product_view: '#8b5cf6',
 };
 
+// Converts a raw storefront path (e.g. /collections/all,
+// /products/some-handle) into a human-readable label for the journey
+// timeline.
+function getFriendlyPath(path) {
+  if (!path) return '';
+  // Homepage
+  if (path === '/' || path === '') return 'Homepage';
+  // Product page
+  if (path.startsWith('/products/')) {
+    const handle = path.replace('/products/', '').split('?')[0];
+    return 'Product: ' + handle.replace(/-/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
+  }
+  // Collection page
+  if (path.startsWith('/collections/')) {
+    const handle = path.replace('/collections/', '').split('?')[0];
+    if (handle === 'all') return 'All Products';
+    return 'Collection: ' + handle.replace(/-/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
+  }
+  // Cart page
+  if (path.startsWith('/cart')) return 'Cart';
+  // Checkout
+  if (path.startsWith('/checkout') ||
+      path.includes('checkouts')) return 'Checkout';
+  // Search
+  if (path.startsWith('/search')) return 'Search';
+  // Pages
+  if (path.startsWith('/pages/')) {
+    const handle = path.replace('/pages/', '').split('?')[0];
+    return 'Page: ' + handle.replace(/-/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
+  }
+  // Blog
+  if (path.startsWith('/blogs/')) return 'Blog';
+  // Account
+  if (path.startsWith('/account')) return 'Account';
+  // Fallback — clean up the path
+  return path.split('?')[0].replace(/-/g, ' ').replace(/\//g, ' › ').trim();
+}
+
 // Auto-fill suggestions keyed by signal type, shared by every composer
 // instance — kept at module scope since it doesn't depend on props/state.
 const SUGGESTIONS = {
@@ -790,14 +831,14 @@ export default function JourneyScreen({ shop }) {
                       }} />
                       <div style={{ flex: 1 }}>
                         <div style={{ color: '#374151' }}>{EVENT_LABELS[e.type]}</div>
-                        {e.type === 'product_view' && e.meta?.productTitle && (
+                        {e.type === 'product_view' && (e.meta?.productTitle || e.path) && (
                           <div style={{ color: '#6b7280', fontSize: '11px' }}>
-                            {e.meta.productTitle}
+                            {e.meta?.productTitle || getFriendlyPath(e.path)}
                           </div>
                         )}
                         {e.type === 'page_view' && e.path && (
                           <div style={{ color: '#6b7280', fontSize: '11px' }}>
-                            {e.path}
+                            {getFriendlyPath(e.path)}
                           </div>
                         )}
                       </div>
