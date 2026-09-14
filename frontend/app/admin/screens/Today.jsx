@@ -1,8 +1,16 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Page } from '@shopify/polaris';
 import { apiGet } from '../../../lib/api';
+
+const ACTIVITY_TILES = [
+  { key: 'add_to_cart', label: 'Added to cart', icon: '🛒', color: '#f59e0b' },
+  { key: 'checkout_start', label: 'Started checkout', icon: '💳', color: '#8b5cf6' },
+  { key: 'purchase', label: 'Purchased', icon: '✅', color: '#10b981' },
+  { key: 'revisit', label: 'Revisited', icon: '🔁', color: '#3b82f6' },
+];
 
 const SIGNAL_LABELS = {
   cart_abandon: 'Cart left behind',
@@ -20,11 +28,40 @@ const SIGNAL_LABELS = {
 };
 
 export default function Today({ shop }) {
+  const router = useRouter();
   const [stats, setStats] = useState(null);
   const [pushStats, setPushStats] = useState(null);
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Phase 3 — attributed activity tiles (add_to_cart/checkout_start/
+  // purchase/revisit counts from AttributedEvent, Phase 1/2).
+  const [activity, setActivity] = useState(null);
+  const [activityLoading, setActivityLoading] = useState(true);
+
+  useEffect(() => {
+    if (!shop) return;
+    setActivityLoading(true);
+    apiGet(`/api/activity?shop=${encodeURIComponent(shop)}`)
+      .then(data => setActivity(data))
+      .catch(() => setActivity(null))
+      .finally(() => setActivityLoading(false));
+  }, [shop]);
+
+  // No client-side navigation hook/pattern exists anywhere in this app yet
+  // (Customers.jsx and Messages.jsx have none; the only precedent is the
+  // NavMenu's own <a href> links, which are plain browser navigations that
+  // Shopify's embedded-app shell reinjects shop/host into). router.push()
+  // is a same-document SPA transition that bypasses that shell entirely, so
+  // shop is carried forward explicitly here — every admin/*/page.js wrapper
+  // in this app reads shop via `searchParams.get('shop')`, and a future
+  // /admin/activity page (this route doesn't exist yet — Phase 3 only adds
+  // the links, not the destination) would silently break without it.
+  const navigate = (path) => {
+    const sep = path.includes('?') ? '&' : '?';
+    router.push(`${path}${sep}shop=${encodeURIComponent(shop)}`);
+  };
 
   const [isMobileView, setIsMobileView] = useState(false);
   useEffect(() => {
@@ -87,6 +124,49 @@ export default function Today({ shop }) {
         padding: isMobileView ? '0 12px 24px' : '0 0 24px',
       }}
     >
+      {/* Activity (Phase 3) — attributed notification-click activity,
+          rendered first per task spec ("BEFORE any existing content"). */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between',
+                      alignItems: 'center', marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
+            Activity (last 7 days)
+          </h2>
+          <button
+            onClick={() => navigate('/admin/activity')}
+            style={{ fontSize: 13, color: '#6366f1', background: 'none',
+                     border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+            View all →
+          </button>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)',
+                      gap: 12 }}>
+          {ACTIVITY_TILES.map(({ key, label, icon, color }) => (
+            <div
+              key={key}
+              onClick={() => navigate(`/admin/activity?type=${key}`)}
+              style={{ background: '#fff', border: '1px solid #e5e7eb',
+                       borderRadius: 12, padding: '16px 20px',
+                       cursor: 'pointer', transition: 'box-shadow 0.15s' }}
+              onMouseEnter={e => e.currentTarget.style.boxShadow =
+                '0 4px 12px rgba(0,0,0,0.08)'}
+              onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+            >
+              <div style={{ fontSize: 24, marginBottom: 6 }}>{icon}</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color,
+                            lineHeight: 1 }}>
+                {activityLoading ? '...' :
+                 (activity?.summary?.[key] ?? 0)}
+              </div>
+              <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
+                {label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Header */}
       <div style={{ marginBottom: '16px' }}>
         <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 4px' }}>
