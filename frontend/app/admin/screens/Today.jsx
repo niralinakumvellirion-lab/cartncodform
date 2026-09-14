@@ -5,12 +5,142 @@ import { useRouter } from 'next/navigation';
 import { Page } from '@shopify/polaris';
 import { apiGet } from '../../../lib/api';
 
-const ACTIVITY_TILES = [
-  { key: 'add_to_cart', label: 'Added to cart', icon: '🛒', color: '#f59e0b' },
-  { key: 'checkout_start', label: 'Started checkout', icon: '💳', color: '#8b5cf6' },
-  { key: 'purchase', label: 'Purchased', icon: '✅', color: '#10b981' },
-  { key: 'revisit', label: 'Revisited', icon: '🔁', color: '#3b82f6' },
+// Inline SVG icons — professional line-icon set replacing the Phase 3 emoji
+// tiles. Each spreads `...props` so a shared style (color/marginBottom) can
+// be applied uniformly at the call site.
+function BellIcon(props) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+    </svg>
+  );
+}
+function EnvelopeIcon(props) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+      <polyline points="22,6 12,13 2,6"/>
+    </svg>
+  );
+}
+function CursorIcon(props) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
+      <path d="M13 13l6 6"/>
+    </svg>
+  );
+}
+function UserPlusIcon(props) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+      <circle cx="8.5" cy="7" r="4"/>
+      <line x1="20" y1="8" x2="20" y2="14"/>
+      <line x1="23" y1="11" x2="17" y2="11"/>
+    </svg>
+  );
+}
+function UsersIcon(props) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+      <circle cx="9" cy="7" r="4"/>
+      <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+      <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+    </svg>
+  );
+}
+function CartIcon(props) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <circle cx="9" cy="21" r="1"/>
+      <circle cx="20" cy="21" r="1"/>
+      <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+    </svg>
+  );
+}
+function CreditCardIcon(props) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+      <line x1="1" y1="10" x2="23" y2="10"/>
+    </svg>
+  );
+}
+function CheckCircleIcon(props) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+      <polyline points="22 4 12 14.01 9 11.01"/>
+    </svg>
+  );
+}
+function RepeatIcon(props) {
+  return (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
+      <polyline points="17 1 21 5 17 9"/>
+      <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+      <polyline points="7 23 3 19 7 15"/>
+      <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+    </svg>
+  );
+}
+
+const DATE_FILTERS = [
+  { key: 'today', label: 'Today' },
+  { key: 'yesterday', label: 'Yesterday' },
+  { key: '7d', label: 'Last 7 days' },
+  { key: '30d', label: 'Last 30 days' },
 ];
+
+const NOTIF_STATS = [
+  { key: 'pushSent', label: 'Push Sent', Icon: BellIcon },
+  { key: 'emailsSent', label: 'Emails Sent', Icon: EnvelopeIcon },
+  { key: 'popupsShown', label: 'Popups Shown', Icon: CursorIcon },
+  { key: 'emailsCaptured', label: 'Emails Captured', Icon: UserPlusIcon },
+  { key: 'pushSubscribers', label: 'Push Subscribers', Icon: UsersIcon },
+];
+
+const ACTIVITY_STATS = [
+  { key: 'add_to_cart', label: 'Added to Cart', Icon: CartIcon },
+  { key: 'checkout_start', label: 'Started Checkout', Icon: CreditCardIcon },
+  { key: 'purchase', label: 'Purchased', Icon: CheckCircleIcon },
+  { key: 'revisit', label: 'Revisited', Icon: RepeatIcon },
+];
+
+const STAT_LABEL_STYLE = {
+  fontSize: 12,
+  color: '#6b7280',
+  fontWeight: 600,
+  letterSpacing: '0.05em',
+  textTransform: 'uppercase',
+  marginBottom: 8,
+};
+
+const STAT_CARD_STYLE = {
+  background: '#fff',
+  border: '1px solid #e5e7eb',
+  borderRadius: 10,
+  padding: 16,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+};
+
+function getDateRange(f) {
+  const to = new Date();
+  const from = new Date();
+  if (f === 'today') { from.setHours(0, 0, 0, 0); }
+  else if (f === 'yesterday') {
+    from.setDate(from.getDate() - 1); from.setHours(0, 0, 0, 0);
+    to.setDate(to.getDate() - 1); to.setHours(23, 59, 59, 999);
+  }
+  else if (f === '7d') { from.setDate(from.getDate() - 7); }
+  else if (f === '30d') { from.setDate(from.getDate() - 30); }
+  return { from: from.toISOString(), to: to.toISOString() };
+}
 
 const SIGNAL_LABELS = {
   cart_abandon: 'Cart left behind',
@@ -35,19 +165,42 @@ export default function Today({ shop }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Phase 3 — attributed activity tiles (add_to_cart/checkout_start/
-  // purchase/revisit counts from AttributedEvent, Phase 1/2).
+  // Redesign — date-filtered notification stats (Row 1) + attributed
+  // activity stats (Row 2, add_to_cart/checkout_start/purchase/revisit
+  // counts from AttributedEvent, Phase 1/2). Both rows share one loading
+  // flag since they're fetched together, keyed on the same date filter.
+  const [dateFilter, setDateFilter] = useState('7d');
   const [activity, setActivity] = useState(null);
-  const [activityLoading, setActivityLoading] = useState(true);
+  const [notifStats, setNotifStats] = useState(null);
+  const [notifLoading, setNotifLoading] = useState(true);
 
   useEffect(() => {
     if (!shop) return;
-    setActivityLoading(true);
-    apiGet(`/api/activity?shop=${encodeURIComponent(shop)}`)
-      .then(data => setActivity(data))
-      .catch(() => setActivity(null))
-      .finally(() => setActivityLoading(false));
-  }, [shop]);
+    let cancelled = false;
+    const { from, to } = getDateRange(dateFilter);
+    setNotifLoading(true);
+    Promise.all([
+      apiGet(`/api/activity?shop=${encodeURIComponent(shop)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+      apiGet(`/api/profiles/${encodeURIComponent(shop)}/today-stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+    ])
+      .then(([actData, statsData]) => {
+        if (cancelled) return;
+        setActivity(actData);
+        setNotifStats(statsData);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setActivity(null);
+        setNotifStats(null);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setNotifLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [shop, dateFilter]);
 
   // No client-side navigation hook/pattern exists anywhere in this app yet
   // (Customers.jsx and Messages.jsx have none; the only precedent is the
@@ -124,14 +277,78 @@ export default function Today({ shop }) {
         padding: isMobileView ? '0 12px 24px' : '0 0 24px',
       }}
     >
-      {/* Activity (Phase 3) — attributed notification-click activity,
+      {/* Redesign — date filter + notification/activity stat rows,
           rendered first per task spec ("BEFORE any existing content"). */}
+
+      {/* SECTION 1 — Date filter bar */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 4,
+          padding: 4,
+          background: '#f3f4f6',
+          borderRadius: 8,
+          width: 'fit-content',
+          marginBottom: 20,
+        }}
+      >
+        {DATE_FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setDateFilter(f.key)}
+            style={{
+              padding: '6px 14px',
+              fontSize: 13,
+              fontWeight: 600,
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+              background: dateFilter === f.key ? '#4f46e5' : 'transparent',
+              color: dateFilter === f.key ? '#fff' : '#6b7280',
+            }}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* SECTION 2 — Row 1: Notification stats */}
       <div style={{ marginBottom: 24 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between',
-                      alignItems: 'center', marginBottom: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
-            Activity (last 7 days)
-          </h2>
+        <div style={STAT_LABEL_STYLE}>Notifications</div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)',
+            gap: 12,
+          }}
+        >
+          {NOTIF_STATS.map(({ key, label, Icon }) => (
+            <div key={key} style={STAT_CARD_STYLE}>
+              <Icon style={{ color: '#6366f1', marginBottom: 8 }} />
+              <div style={{ fontSize: 24, fontWeight: 700, color: '#111827' }}>
+                {notifLoading ? '...' : (notifStats?.[key] ?? 0)}
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                {label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* SECTION 3 — Row 2: Attributed activity stats (clickable) */}
+      <div style={{ marginBottom: 24 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 8,
+          }}
+        >
+          <div style={{ ...STAT_LABEL_STYLE, marginBottom: 0 }}>
+            Attributed Activity
+          </div>
           <button
             onClick={() => navigate('/admin/activity')}
             style={{ fontSize: 13, color: '#6366f1', background: 'none',
@@ -139,27 +356,26 @@ export default function Today({ shop }) {
             View all →
           </button>
         </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)',
-                      gap: 12 }}>
-          {ACTIVITY_TILES.map(({ key, label, icon, color }) => (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+            gap: 12,
+          }}
+        >
+          {ACTIVITY_STATS.map(({ key, label, Icon }) => (
             <div
               key={key}
               onClick={() => navigate(`/admin/activity?type=${key}`)}
-              style={{ background: '#fff', border: '1px solid #e5e7eb',
-                       borderRadius: 12, padding: '16px 20px',
-                       cursor: 'pointer', transition: 'box-shadow 0.15s' }}
-              onMouseEnter={e => e.currentTarget.style.boxShadow =
-                '0 4px 12px rgba(0,0,0,0.08)'}
-              onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+              style={{ ...STAT_CARD_STYLE, cursor: 'pointer', transition: 'box-shadow 0.15s' }}
+              onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'none'; }}
             >
-              <div style={{ fontSize: 24, marginBottom: 6 }}>{icon}</div>
-              <div style={{ fontSize: 28, fontWeight: 800, color,
-                            lineHeight: 1 }}>
-                {activityLoading ? '...' :
-                 (activity?.summary?.[key] ?? 0)}
+              <Icon style={{ color: '#6366f1', marginBottom: 8 }} />
+              <div style={{ fontSize: 24, fontWeight: 700, color: '#111827' }}>
+                {notifLoading ? '...' : (activity?.summary?.[key] ?? 0)}
               </div>
-              <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
                 {label}
               </div>
             </div>

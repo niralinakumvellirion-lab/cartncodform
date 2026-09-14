@@ -286,6 +286,72 @@ router.get('/:shopDomain/push-stats', requireAuth, requireStoreOwner, async (req
 });
 
 /**
+ * GET /api/profiles/:shopDomain/today-stats?from=&to=
+ * Powers the Today screen's notification-stats row. Defaults to the last
+ * 7 days when from/to are omitted.
+ * -> { pushSent, emailsSent, popupsShown, emailsCaptured, pushSubscribers }
+ */
+router.get('/:shopDomain/today-stats', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const from = new Date(req.query.from || Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const to = new Date(req.query.to || Date.now());
+
+    const [pushSent, emailsSent, popupsShown, emailsCaptured, pushSubscribers] =
+      await Promise.all([
+        // Push sent in range — sentAt (set at the moment ScheduledJob is
+        // claimed/sent, server.js processScheduledJobs()) rather than
+        // updatedAt, which can be nudged forward later by an unrelated
+        // outcome/clickedAt update and would then misattribute the send
+        // to the wrong date range.
+        ScheduledJob.countDocuments({
+          shopDomain: shop,
+          channel: 'push',
+          status: 'sent',
+          sentAt: { $gte: from, $lte: to },
+        }),
+        // Emails sent in range (from Profile.messages)
+        Profile.aggregate([
+          { $match: { shopDomain: shop } },
+          { $unwind: '$messages' },
+          { $match: {
+            'messages.channel': 'email',
+            'messages.sentAt': { $gte: from, $lte: to },
+          } },
+          { $count: 'total' },
+        ]).then((r) => r[0]?.total || 0),
+        // Popups shown in range
+        StorefrontEvent.countDocuments({
+          shopDomain: shop,
+          type: 'push_prompt_shown',
+          ts: { $gte: from, $lte: to },
+        }),
+        // Emails captured in range
+        Profile.countDocuments({
+          shopDomain: shop,
+          'channels.email.capturedAt': { $gte: from, $lte: to },
+        }),
+        // Total push subscribers (all time)
+        Profile.countDocuments({
+          shopDomain: shop,
+          'channels.push.subscribed': true,
+        }),
+      ]);
+
+    return res.json({
+      pushSent,
+      emailsSent,
+      popupsShown,
+      emailsCaptured,
+      pushSubscribers,
+    });
+  } catch (err) {
+    console.error('[profiles] GET today-stats error:', err.message);
+    return res.status(500).json({ error: 'Failed to load stats' });
+  }
+});
+
+/**
  * GET /api/profiles/:shopDomain/weekly-narrative
  * -> { narrative, insights: [string], stats }
  * The full computation is cached in-process for 1 hour per shop so an admin
