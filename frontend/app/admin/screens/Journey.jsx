@@ -1007,12 +1007,20 @@ export default function JourneyScreen({ shop }) {
 
         {/* Right panel — customer detail + send */}
         {selectedCustomer && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', position: 'sticky', top: '16px' }}>
+          <div style={{
+            position: 'sticky',
+            top: 16,
+            height: 'calc(100vh - 120px)',
+            overflowY: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}>
 
             {/* Journey timeline */}
             <div style={{
               background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px',
-              maxHeight: '380px', overflowY: 'auto',
+              flex: '1 1 0', minHeight: 0, overflowY: 'auto',
             }}>
               <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>
                 Customer journey
@@ -1108,6 +1116,7 @@ export default function JourneyScreen({ shop }) {
                   <div style={{
                     background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '10px',
                     padding: '16px', textAlign: 'center',
+                    flex: '0 0 auto', overflowY: 'auto', maxHeight: '45vh',
                   }}>
                     <div style={{ fontSize: '13px', color: '#9ca3af' }}>
                       🔕 No push subscription or email on file — cannot send a notification
@@ -1117,7 +1126,10 @@ export default function JourneyScreen({ shop }) {
               }
 
               return (
-                <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px' }}>
+                <div style={{
+                  background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px',
+                  flex: '0 0 auto', overflowY: 'auto', maxHeight: '45vh',
+                }}>
                   <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>
                     Send notification
                   </div>
