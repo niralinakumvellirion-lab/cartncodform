@@ -43,20 +43,20 @@
       var jobFromUrl = params.get('ccf_job');
       if (jobFromUrl) {
         // Store in sessionStorage for subsequent pages
-        sessionStorage.setItem('ccf_attribution_job', jobFromUrl);
-        sessionStorage.setItem('ccf_attribution_ts', Date.now().toString());
+        localStorage.setItem('ccf_attribution_job', jobFromUrl);
+        localStorage.setItem('ccf_attribution_ts', Date.now().toString());
         return jobFromUrl;
       }
       // Check sessionStorage (subsequent pages in same session)
-      var storedJob = sessionStorage.getItem('ccf_attribution_job');
-      var storedTs = sessionStorage.getItem('ccf_attribution_ts');
+      var storedJob = localStorage.getItem('ccf_attribution_job');
+      var storedTs = localStorage.getItem('ccf_attribution_ts');
       if (storedJob && storedTs) {
         // 7-day attribution window
         var age = Date.now() - parseInt(storedTs, 10);
         if (age < 7 * 24 * 60 * 60 * 1000) return storedJob;
         // Expired - clear it
-        sessionStorage.removeItem('ccf_attribution_job');
-        sessionStorage.removeItem('ccf_attribution_ts');
+        localStorage.removeItem('ccf_attribution_job');
+        localStorage.removeItem('ccf_attribution_ts');
       }
     } catch (e) {}
     return null;
