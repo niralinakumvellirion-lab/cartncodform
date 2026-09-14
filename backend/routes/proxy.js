@@ -436,7 +436,11 @@ router.post('/cod-order', async (req, res) => {
     const { upsertProfile } = require('../services/profileService');
     upsertProfile(shop, { phone: String(phone).trim(), email: cleanEmail || null }, {
       ...(cleanEmail
-        ? { 'channels.email.address': cleanEmail, 'channels.email.source': 'cod' }
+        ? {
+            'channels.email.address': cleanEmail,
+            'channels.email.source': 'cod',
+            'channels.email.capturedAt': new Date(),
+          }
         : {}),
       lastSeenAt: new Date(),
     }).catch((err) => console.error('[profile] cod-proxy upsert error:', err.message));

@@ -226,7 +226,11 @@ async function generateDiscount(shopDomain, body = {}) {
         },
         {
           ...(email
-            ? { 'channels.email.address': email, 'channels.email.source': 'popup' }
+            ? {
+                'channels.email.address': email,
+                'channels.email.source': 'popup',
+                'channels.email.capturedAt': new Date(),
+              }
             : {}),
           lastSeenAt: new Date(),
         }

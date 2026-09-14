@@ -57,6 +57,7 @@ router.post('/order', async (req, res) => {
     }, {
       'channels.email.address': req.body.email || undefined,
       'channels.email.source': req.body.email ? 'cod' : undefined,
+      'channels.email.capturedAt': req.body.email ? new Date() : undefined,
       lastSeenAt: new Date(),
     }).catch((err) => console.error('[profile] upsert error:', err.message));
 
