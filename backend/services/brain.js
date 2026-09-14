@@ -161,7 +161,7 @@ function computeRunAt(profile, quietStart, quietEnd, timezone, hourRates) {
 
 // --- per-profile -----------------------------------------------------------
 
-async function runBrainForProfile(profileId, shopDomain) {
+async function runBrainForProfile(profileId, shopDomain, cfg = null) {
   const profile = await Profile.findById(profileId);
   if (!profile || profile.suppressed) return null;
 
@@ -224,6 +224,12 @@ async function runBrainForProfile(profileId, shopDomain) {
     const config = await SignalConfig.findOne({ shopDomain: shop, signalType: s.type });
     if (config && config.enabled === false) continue;
 
+    // Phase 4 — skip signals disabled via the Automation screen's Section 5
+    // (enabledSignals), independent of the older per-signal SignalConfig
+    // mechanism above. `cfg` is null for a shop with no AutomationConfig
+    // row yet, in which case this never skips anything (same as before).
+    if (cfg?.enabledSignals?.[s.type] === false) continue;
+
     const tooSoon = msgs.some(
       (m) => m.type === s.type && m.sentAt && now - new Date(m.sentAt).getTime() < 6 * HOUR
     );
@@ -240,7 +246,30 @@ async function runBrainForProfile(profileId, shopDomain) {
   if (!channel) return null;
 
   // --- send time ---
-  const runAt = computeRunAt(profile, quietStart, quietEnd, timezone, hourRates);
+  // `let`, not `const` — the Phase 4 delay floor below reassigns this when
+  // AutomationConfig's per-signal delay hasn't elapsed yet.
+  let runAt = computeRunAt(profile, quietStart, quietEnd, timezone, hourRates);
+
+  // Phase 4 — apply the configured minimum delay as a floor: if
+  // computeRunAt()'s own hour-optimization already lands further out than
+  // the configured delay, leave it (a better send time beats an earlier
+  // one); if it would fire sooner than the configured delay allows, push
+  // it out to respect the delay. `cfg` is null for a shop with no
+  // AutomationConfig row yet, in which case this never changes runAt
+  // (same as before).
+  const delayField = {
+    cart_abandon: 'cartAbandonDelay',
+    checkout_abandon: 'checkoutAbandonDelay',
+    browse_abandon: 'browseAbandonDelay',
+  }[winner.type];
+
+  if (delayField && cfg?.[delayField]) {
+    const delayMs = cfg[delayField] * 60 * 1000;
+    // Only add delay if runAt is in the future by less than delay
+    if (runAt < new Date(Date.now() + delayMs)) {
+      runAt = new Date(Date.now() + delayMs);
+    }
+  }
 
   // --- schedule (dedup: one pending job per profile+signal) ---
   const existing = await ScheduledJob.findOne({
@@ -306,6 +335,23 @@ async function runBrainForProfile(profileId, shopDomain) {
 
 async function runBrainForShop(shopDomain) {
   const shop = String(shopDomain || '').trim().toLowerCase();
+
+  // Phase 4 — loaded once per shop-level run and reused for every profile
+  // in this batch below (this task's given snippet assumed runBrainForShop
+  // itself ranks signals and computes runAt; it doesn't — this function
+  // only batches profile ids, and that logic lives entirely in
+  // runBrainForProfile() below, which `cfg` is now threaded into as a new,
+  // backward-compatible optional parameter). See
+  // audits/phase4-realtime-trigger-audit.txt.
+  const AutomationConfig = require('../models/AutomationConfig');
+  const cfg = await AutomationConfig.findOne({ shopDomain: shop }).lean();
+
+  // Respect master switch
+  if (cfg && !cfg.enabled) {
+    console.log('[brain] automation disabled for', shop);
+    return { scheduled: 0, skipped: 0 };
+  }
+
   const profiles = await Profile.find(
     { shopDomain: shop, suppressed: { $ne: true } },
     '_id',
@@ -320,7 +366,7 @@ async function runBrainForShop(shopDomain) {
     const batch = ids.slice(i, i + 50);
     const results = await Promise.all(
       batch.map((id) =>
-        runBrainForProfile(id, shop).catch((err) => {
+        runBrainForProfile(id, shop, cfg).catch((err) => {
           console.error('[brain] profile error:', err.message);
           return null;
         })

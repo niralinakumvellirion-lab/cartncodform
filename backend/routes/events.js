@@ -126,6 +126,39 @@ router.post('/', async (req, res) => {
         .then((profile) => {
           if (profile?._id) {
             computeSignalsForProfile(profile._id, shop)
+              .then(() => {
+                // Phase 4 — realtime brain triggers. Runs after this
+                // profile's signals have just been recomputed above, so
+                // any AutomationConfig realtime check reflects current
+                // state (checkout_abandon vs. cart_abandon, etc.). Uses
+                // `shop` (normalized) and `events`/`e.type` (the real
+                // variable names in scope here) — the task's given
+                // snippet referenced `shopDomain` and `eventTypes`,
+                // neither of which exist in this handler; `shopDomain`
+                // is the raw, unnormalized value destructured from the
+                // request body (see line ~43), and there is no
+                // precomputed `eventTypes` array anywhere in this file —
+                // every other check in this same block already uses
+                // `events.some((e) => e.type === X)` (e.g. the page_view
+                // check a few lines below), so the same idiom is used
+                // here instead of introducing a new array.
+                const { maybeScheduleRealtime } = require('../services/realtimeTrigger');
+
+                // Check for realtime-trigger signals
+                const REALTIME_SIGNALS = ['cart_abandon', 'checkout_abandon', 'browse_abandon'];
+                for (const sig of REALTIME_SIGNALS) {
+                  // Only trigger if this event type is relevant to the signal
+                  if (sig === 'cart_abandon' && events.some((e) => e.type === 'add_to_cart')) {
+                    maybeScheduleRealtime(shop, profile._id, sig).catch(() => {});
+                  }
+                  if (sig === 'checkout_abandon' && events.some((e) => e.type === 'reached_checkout')) {
+                    maybeScheduleRealtime(shop, profile._id, sig).catch(() => {});
+                  }
+                  if (sig === 'browse_abandon' && events.some((e) => e.type === 'product_view')) {
+                    maybeScheduleRealtime(shop, profile._id, sig).catch(() => {});
+                  }
+                }
+              })
               .catch((err) => console.error('[signals] events ingest error:', err.message));
 
             // Link a cartToken to profile so cart_abandon signal can
