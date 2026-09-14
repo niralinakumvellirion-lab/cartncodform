@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Page } from '@shopify/polaris';
-import { apiGet } from '../../../lib/api';
+import { apiGet, apiSend } from '../../../lib/api';
 
 // Inline SVG icons — professional line-icon set replacing the Phase 3 emoji
 // tiles. Each spreads `...props` so a shared style (color/marginBottom) can
@@ -173,6 +173,16 @@ export default function Today({ shop }) {
   const [activity, setActivity] = useState(null);
   const [notifStats, setNotifStats] = useState(null);
   const [notifLoading, setNotifLoading] = useState(true);
+  // Header Refresh button — bumping this re-runs the stats effect below
+  // (it's in that effect's dependency array) without needing its own
+  // separate fetch logic.
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  // Phase 1 — real-time new subscriber alerts.
+  const [newSubscribers, setNewSubscribers] = useState([]);
+  const [subsLoading, setSubsLoading] = useState(false);
+  const [sendingTo, setSendingTo] = useState(null);
+  const [sendResults, setSendResults] = useState({});
 
   useEffect(() => {
     if (!shop) return;
@@ -200,7 +210,56 @@ export default function Today({ shop }) {
     return () => {
       cancelled = true;
     };
-  }, [shop, dateFilter]);
+  }, [shop, dateFilter, refreshKey]);
+
+  // Phase 1 — poll for customers who subscribed to push in the last 24h
+  // and haven't been notified yet, so the alert below can appear without
+  // the merchant needing to reload the page.
+  useEffect(() => {
+    if (!shop) return;
+    let cancelled = false;
+
+    function fetchNewSubs() {
+      apiGet(`/api/profiles/${encodeURIComponent(shop)}/new-subscribers`)
+        .then(data => {
+          if (!cancelled) setNewSubscribers(data.subscribers || []);
+        })
+        .catch(() => {});
+    }
+
+    fetchNewSubs(); // fetch immediately on mount
+    const interval = setInterval(fetchNewSubs, 30000); // poll every 30s
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [shop]);
+
+  async function sendNow(profileId) {
+    setSendingTo(profileId);
+    try {
+      await apiSend(
+        `/api/push/send-now`, 'POST', { profileId }
+      );
+      setSendResults(prev => ({
+        ...prev,
+        [profileId]: { success: true, msg: 'Queued!' }
+      }));
+      // Remove from list after 3s
+      setTimeout(() => {
+        setNewSubscribers(prev =>
+          prev.filter(s => s.profileId !== profileId)
+        );
+      }, 3000);
+    } catch (e) {
+      setSendResults(prev => ({
+        ...prev,
+        [profileId]: { success: false, msg: 'Failed' }
+      }));
+    } finally {
+      setSendingTo(null);
+    }
+  }
 
   // No client-side navigation hook/pattern exists anywhere in this app yet
   // (Customers.jsx and Messages.jsx have none; the only precedent is the
@@ -312,6 +371,81 @@ export default function Today({ shop }) {
         ))}
       </div>
 
+      {/* Phase 1 — new subscriber alerts */}
+      {newSubscribers.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center',
+                        gap: 8, marginBottom: 10 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%',
+                          background: '#10b981',
+                          boxShadow: '0 0 0 3px rgba(16,185,129,0.2)',
+                          animation: 'pulse 2s infinite' }} />
+            <span style={{ fontSize: 13, fontWeight: 600,
+                            color: '#111827' }}>
+              {newSubscribers.length} new subscriber
+              {newSubscribers.length > 1 ? 's' : ''} — send them
+              a welcome notification
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column',
+                        gap: 8 }}>
+            {newSubscribers.map(sub => (
+              <div key={sub.profileId}
+                style={{ display: 'flex', alignItems: 'center',
+                         justifyContent: 'space-between',
+                         padding: '10px 14px', background: '#fff',
+                         border: '1px solid #e5e7eb', borderRadius: 10,
+                         gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600,
+                                color: '#111827' }}>
+                    {sub.email || 'Anonymous subscriber'}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#9ca3af',
+                                marginTop: 2 }}>
+                    Subscribed {sub.subscribedAt
+                      ? new Date(sub.subscribedAt).toLocaleTimeString(
+                          [], {hour: '2-digit', minute: '2-digit'})
+                      : 'recently'}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center',
+                              gap: 8 }}>
+                  {sendResults[sub.profileId] && (
+                    <span style={{
+                      fontSize: 12, fontWeight: 600,
+                      color: sendResults[sub.profileId].success
+                        ? '#10b981' : '#ef4444'
+                    }}>
+                      {sendResults[sub.profileId].msg}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => sendNow(sub.profileId)}
+                    disabled={sendingTo === sub.profileId}
+                    style={{
+                      padding: '7px 14px', borderRadius: 7,
+                      border: 'none', cursor: sendingTo === sub.profileId
+                        ? 'not-allowed' : 'pointer',
+                      background: sendingTo === sub.profileId
+                        ? '#e5e7eb' : '#4f46e5',
+                      color: sendingTo === sub.profileId
+                        ? '#9ca3af' : '#fff',
+                      fontSize: 12, fontWeight: 600,
+                      opacity: sendingTo === sub.profileId ? 0.7 : 1,
+                    }}
+                  >
+                    {sendingTo === sub.profileId
+                      ? 'Sending...' : 'Send now'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* SECTION 2 — Row 1: Notification stats */}
       <div style={{ marginBottom: 24 }}>
         <div style={STAT_LABEL_STYLE}>Notifications</div>
@@ -384,17 +518,41 @@ export default function Today({ shop }) {
       </div>
 
       {/* Header */}
-      <div style={{ marginBottom: '16px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 4px' }}>
-          Today
-        </h1>
-        <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
-          {new Date().toLocaleDateString('en-IN', {
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long',
-          })}
-        </p>
+      <div style={{ marginBottom: '16px', display: 'flex',
+                    justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 4px' }}>
+            Today
+          </h1>
+          <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
+            {new Date().toLocaleDateString('en-IN', {
+              weekday: 'long',
+              day: 'numeric',
+              month: 'long',
+            })}
+          </p>
+        </div>
+        <button
+          onClick={() => setRefreshKey(k => k + 1)}
+          disabled={notifLoading}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '8px 14px', borderRadius: 8, border: '1px solid #e5e7eb',
+            background: '#fff', color: '#374151', fontSize: 13,
+            fontWeight: 600, cursor: notifLoading ? 'not-allowed' : 'pointer',
+            opacity: notifLoading ? 0.6 : 1,
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+            strokeLinejoin="round">
+            <polyline points="23 4 23 10 17 10"/>
+            <polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36
+              A9 9 0 0 0 20.49 15"/>
+          </svg>
+          {notifLoading ? 'Refreshing...' : 'Refresh'}
+        </button>
       </div>
 
       {error && (

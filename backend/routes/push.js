@@ -370,6 +370,82 @@ router.post('/send-journey', requireAuth, async (req, res) => {
 });
 
 /**
+ * POST /api/push/send-now
+ * Body: { profileId }
+ * Sends push (or email, if not push-subscribed) immediately to a profile
+ * from the Today screen's new-subscriber alert. Creates a ScheduledJob
+ * with runAt: now so the poller (server.js processScheduledJobs, runs
+ * every 30s) picks it up right away, rather than sending directly —
+ * this reuses the same claim/send/outcome-tracking path every other
+ * job goes through instead of a separate one-off code path.
+ */
+router.post('/send-now', requireAuth, async (req, res) => {
+  try {
+    const { profileId } = req.body;
+    const shop = req.shopDomain;
+
+    if (!profileId) {
+      return res.status(400).json({ error: 'profileId required' });
+    }
+
+    const Profile = require('../models/Profile');
+    const ScheduledJob = require('../models/ScheduledJob');
+
+    const profile = await Profile.findOne({
+      _id: profileId,
+      shopDomain: shop,
+    }).lean();
+
+    if (!profile) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    const channel = profile.channels?.push?.subscribed ? 'push' : 'email';
+
+    // Generate copy via AI. generateCopy(store, signalType, product, channel)
+    // — the store arg needs .shopDomain/.voice (used for the cache key and
+    // prompt), signalType is a plain string, and channel must be passed
+    // through (it decides push vs. email fallback/prompt shape inside
+    // generateCopy itself). See audits/phase1-realtime-build-audit.txt for
+    // why this differs from a literal 3-arg call.
+    const { generateCopy } = require('../services/aiService');
+    const store = { shopDomain: shop, voice: {} };
+    const { title, body, subject } = await generateCopy(store, 'email_capture', null, channel);
+
+    // Create job with runAt: now (poller picks up within 30s)
+    const cartToken = profile.identifiers?.cartTokens?.slice(-1)[0]
+      || null;
+
+    // Cancel any existing pending job for this profile
+    await ScheduledJob.updateMany(
+      { shopDomain: shop, profileId: profile._id,
+        status: 'pending' },
+      { status: 'cancelled' }
+    );
+
+    const job = await ScheduledJob.create({
+      shopDomain: shop,
+      profileId: profile._id,
+      signalType: 'email_capture',
+      channel,
+      cartToken,
+      runAt: new Date(), // send immediately
+      payload: { title, body, subject, imageUrl: '' },
+      reason: 'Manual send from Today screen',
+    });
+
+    return res.json({
+      success: true,
+      jobId: job._id,
+      message: 'Notification queued — will send within 30 seconds'
+    });
+  } catch (err) {
+    console.error('[push] send-now error:', err.message);
+    return res.status(500).json({ error: 'Failed to queue notification' });
+  }
+});
+
+/**
  * POST /api/push/send-journey-email
  * Body: { profileId, subject, body }
  * Sends a one-off email to a single customer from the Journey screen.

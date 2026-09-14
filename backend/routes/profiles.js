@@ -352,6 +352,54 @@ router.get('/:shopDomain/today-stats', requireAuth, requireStoreOwner, async (re
 });
 
 /**
+ * GET /api/profiles/:shopDomain/new-subscribers
+ * Customers who subscribed to push in the last 24h and haven't received
+ * any notification yet. Powers the Today screen's new-subscriber alert.
+ * -> { count, subscribers: [{ profileId, email, subscribedAt, lastSeenAt }] }
+ */
+router.get('/:shopDomain/new-subscribers', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    // Find profiles that subscribed to push in last 24h
+    // and have no sent jobs yet (messages array empty or
+    // no push message in last 24h)
+    const profiles = await Profile.find({
+      shopDomain: shop,
+      'channels.push.subscribed': true,
+      'channels.push.subscribedAt': { $gte: since },
+    })
+      .select('identifiers channels.push channels.email lastSeenAt messages')
+      .sort({ 'channels.push.subscribedAt': -1 })
+      .limit(50)
+      .lean();
+
+    // Filter out profiles that already received a notification
+    const newProfiles = profiles.filter(p => {
+      const recentMsg = (p.messages || []).find(m =>
+        m.sentAt && m.sentAt > since
+      );
+      return !recentMsg;
+    });
+
+    return res.json({
+      count: newProfiles.length,
+      subscribers: newProfiles.map(p => ({
+        profileId: p._id,
+        email: p.channels?.email?.address ||
+               p.identifiers?.emails?.[0] || null,
+        subscribedAt: p.channels?.push?.subscribedAt,
+        lastSeenAt: p.lastSeenAt,
+      })),
+    });
+  } catch (err) {
+    console.error('[profiles] new-subscribers error:', err.message);
+    return res.status(500).json({ error: 'Failed to load' });
+  }
+});
+
+/**
  * GET /api/profiles/:shopDomain/weekly-narrative
  * -> { narrative, insights: [string], stats }
  * The full computation is cached in-process for 1 hour per shop so an admin
