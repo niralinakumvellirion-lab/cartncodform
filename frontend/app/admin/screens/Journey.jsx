@@ -211,12 +211,128 @@ const NOTIFICATION_SUGGESTIONS = [
   },
 ];
 
+const EMAIL_SUGGESTIONS = [
+  {
+    category: 'Cart & Purchase',
+    color: '#fee2e2',
+    textColor: '#dc2626',
+    suggestions: [
+      {
+        label: 'Cart reminder',
+        subject: 'You left something behind',
+        body: 'Hi there,\n\nYou left items in your cart! Complete your purchase before they sell out.\n\nWarm regards,\nThe Team',
+      },
+      {
+        label: 'Urgency nudge',
+        subject: 'Almost gone — complete your order',
+        body: 'Hi there,\n\nThe items in your cart are selling fast. Complete your order now before stock runs out!\n\nWarm regards,\nThe Team',
+      },
+    ],
+  },
+  {
+    category: 'Offers',
+    color: '#fef3c7',
+    textColor: '#d97706',
+    suggestions: [
+      {
+        label: 'Special discount',
+        subject: 'A special offer just for you',
+        body: 'Hi there,\n\nWe have an exclusive offer waiting for you. Visit our store and use your discount at checkout.\n\nWarm regards,\nThe Team',
+      },
+      {
+        label: 'Free shipping',
+        subject: 'Free shipping on your next order',
+        body: 'Hi there,\n\nGood news! Your next order qualifies for free shipping. Shop now and save.\n\nWarm regards,\nThe Team',
+      },
+    ],
+  },
+  {
+    category: 'Re-engagement',
+    color: '#ede9fe',
+    textColor: '#7c3aed',
+    suggestions: [
+      {
+        label: 'We miss you',
+        subject: "We miss you! Here's something special",
+        body: "Hi there,\n\nIt's been a while! We've added exciting new products we think you'll love. Come back and explore.\n\nWarm regards,\nThe Team",
+      },
+      {
+        label: 'New arrivals',
+        subject: 'New arrivals you might like',
+        body: "Hi there,\n\nWe've just added new products to our collection. Come check out what's new!\n\nWarm regards,\nThe Team",
+      },
+    ],
+  },
+  {
+    category: 'Post Purchase',
+    color: '#dcfce7',
+    textColor: '#16a34a',
+    suggestions: [
+      {
+        label: 'Thank you',
+        subject: 'Thank you for your order!',
+        body: 'Hi there,\n\nThank you for your recent purchase! We hope you love it. Feel free to reach out if you have any questions.\n\nWarm regards,\nThe Team',
+      },
+      {
+        label: 'Review request',
+        subject: 'How was your experience?',
+        body: "Hi there,\n\nWe hope you're enjoying your purchase! We'd love to hear your feedback. Leave us a review and help other customers.\n\nWarm regards,\nThe Team",
+      },
+    ],
+  },
+];
+
+// Change 4 — product thumbnail shown next to product-specific suggestion
+// cards, shared by NotificationComposer and EmailComposer. topProducts
+// (backend/routes/events.js, getJourneyData()) currently has no imageUrl
+// field — { productId, title, count, lastSeen } only — so imageUrl will
+// be undefined today and this always renders the grey placeholder.
+// TODO: once the backend adds a product image (e.g. via
+// ProductImageCache, already used elsewhere for push notifications —
+// see backend/routes/webhooks.js fetchProductImage()), this same prop
+// will pick it up with no further change here. No new API call is made
+// for this — per task instruction, the placeholder is the fallback.
+function ProductThumbnail({ imageUrl }) {
+  if (imageUrl) {
+    return (
+      <img
+        src={imageUrl}
+        alt=""
+        width={40}
+        height={40}
+        style={{ borderRadius: 6, objectFit: 'cover', flexShrink: 0 }}
+      />
+    );
+  }
+  return (
+    <div style={{
+      width: 40, height: 40, background: '#f3f4f6', borderRadius: 6,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      flexShrink: 0,
+    }}>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+        stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+        <circle cx="8.5" cy="8.5" r="1.5"/>
+        <polyline points="21 15 16 10 5 21"/>
+      </svg>
+    </div>
+  );
+}
+
 function NotificationComposer({ customer, shop, onSent, onError }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [activeCategory, setActiveCategory] = useState(0);
+
+  // Change 4 — same numeric-ID guard used elsewhere in this file for
+  // topProducts[0].title (raw Shopify product IDs shouldn't be treated
+  // as a real product name).
+  const rawTopProductTitle = customer?.topProducts?.[0]?.title || '';
+  const hasTopProduct = !!(rawTopProductTitle && !/^\d+$/.test(rawTopProductTitle));
+  const productImage = customer?.topProducts?.[0]?.imageUrl || null;
 
   // Auto-fill based on the customer's top signal whenever the selected
   // customer changes.
@@ -332,55 +448,67 @@ function NotificationComposer({ customer, shop, onSent, onError }) {
 
           {/* Suggestion cards */}
           <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {NOTIFICATION_SUGGESTIONS[activeCategory].suggestions.map((s, i) => (
-              <div
-                key={i}
-                onClick={() => {
-                  setTitle(s.title);
-                  setBody(s.body);
-                  setShowSuggestions(false);
-                }}
-                style={{
-                  padding: '10px 12px',
-                  background: NOTIFICATION_SUGGESTIONS[activeCategory].color,
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  border: '1px solid transparent',
-                  transition: 'all 0.15s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.border =
-                    '1px solid ' + NOTIFICATION_SUGGESTIONS[activeCategory].textColor + '44';
-                  e.currentTarget.style.transform = 'translateY(-1px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.border = '1px solid transparent';
-                  e.currentTarget.style.transform = 'none';
-                }}
-              >
-                <div style={{
-                  display: 'flex', alignItems: 'center',
-                  justifyContent: 'space-between', marginBottom: '4px',
-                }}>
-                  <span style={{
-                    fontSize: '11px', fontWeight: '700',
-                    color: NOTIFICATION_SUGGESTIONS[activeCategory].textColor,
-                    textTransform: 'uppercase', letterSpacing: '0.5px',
-                  }}>
-                    {s.label}
-                  </span>
-                  <span style={{ fontSize: '10px', color: '#9ca3af' }}>
-                    click to use →
-                  </span>
+            {(() => {
+              // Change 4 — product-specific suggestions (Cart & Purchase
+              // category, or any category once the customer has a real
+              // top product) show a thumbnail alongside the copy.
+              const showThumb = NOTIFICATION_SUGGESTIONS[activeCategory].category === 'Cart & Purchase' ||
+                hasTopProduct;
+              return NOTIFICATION_SUGGESTIONS[activeCategory].suggestions.map((s, i) => (
+                <div
+                  key={i}
+                  onClick={() => {
+                    setTitle(s.title);
+                    setBody(s.body);
+                    setShowSuggestions(false);
+                  }}
+                  style={{
+                    padding: '10px 12px',
+                    background: NOTIFICATION_SUGGESTIONS[activeCategory].color,
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    border: '1px solid transparent',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.border =
+                      '1px solid ' + NOTIFICATION_SUGGESTIONS[activeCategory].textColor + '44';
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.border = '1px solid transparent';
+                    e.currentTarget.style.transform = 'none';
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                    {showThumb && <ProductThumbnail imageUrl={productImage} />}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center',
+                        justifyContent: 'space-between', marginBottom: '4px',
+                      }}>
+                        <span style={{
+                          fontSize: '11px', fontWeight: '700',
+                          color: NOTIFICATION_SUGGESTIONS[activeCategory].textColor,
+                          textTransform: 'uppercase', letterSpacing: '0.5px',
+                        }}>
+                          {s.label}
+                        </span>
+                        <span style={{ fontSize: '10px', color: '#9ca3af' }}>
+                          click to use →
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: '600', color: '#111827', marginBottom: '2px' }}>
+                        {s.title}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.4' }}>
+                        {s.body}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div style={{ fontSize: '13px', fontWeight: '600', color: '#111827', marginBottom: '2px' }}>
-                  {s.title}
-                </div>
-                <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.4' }}>
-                  {s.body}
-                </div>
-              </div>
-            ))}
+              ));
+            })()}
           </div>
         </div>
       )}
@@ -433,6 +561,14 @@ function EmailComposer({ customer, shop, onSent, onError }) {
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [activeCategory, setActiveCategory] = useState(0);
+
+  // Change 4 — same numeric-ID guard used elsewhere in this file for
+  // topProducts[0].title.
+  const rawTopProductTitle = customer?.topProducts?.[0]?.title || '';
+  const hasTopProduct = !!(rawTopProductTitle && !/^\d+$/.test(rawTopProductTitle));
+  const productImage = customer?.topProducts?.[0]?.imageUrl || null;
 
   useEffect(() => {
     const signal = customer?.topSignal?.type;
@@ -487,6 +623,87 @@ function EmailComposer({ customer, shop, onSent, onError }) {
       <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>
         Sending to: <strong>{email}</strong>
       </div>
+
+      {/* Suggestion toggle */}
+      <div
+        onClick={() => setShowSuggestions(s => !s)}
+        style={{ display: 'flex', justifyContent: 'space-between',
+                 alignItems: 'center', padding: '8px 10px',
+                 background: '#f9fafb', borderRadius: 8,
+                 cursor: 'pointer', fontSize: 13, color: '#374151',
+                 fontWeight: 500, userSelect: 'none' }}
+      >
+        <span>Email ideas</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ transform: showSuggestions ? 'rotate(180deg)' : 'none',
+                   transition: 'transform 0.2s' }}>
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </div>
+
+      {showSuggestions && (
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: 10,
+                      overflow: 'hidden' }}>
+          {/* Category tabs */}
+          <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb',
+                        overflowX: 'auto' }}>
+            {EMAIL_SUGGESTIONS.map((cat, i) => (
+              <button key={i} onClick={() => setActiveCategory(i)}
+                style={{
+                  padding: '7px 12px', fontSize: 12, fontWeight: 600,
+                  border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
+                  background: activeCategory === i ? cat.color : '#fff',
+                  color: activeCategory === i ? cat.textColor : '#6b7280',
+                  borderBottom: activeCategory === i
+                    ? `2px solid ${cat.textColor}` : '2px solid transparent',
+                }}>
+                {cat.category}
+              </button>
+            ))}
+          </div>
+          {/* Suggestion cards */}
+          <div style={{ padding: 10, display: 'flex', flexDirection: 'column',
+                        gap: 8 }}>
+            {(() => {
+              // Change 4 — same rule as NotificationComposer: Cart &
+              // Purchase suggestions, or any category once the customer
+              // has a real top product, get a thumbnail.
+              const showThumb = EMAIL_SUGGESTIONS[activeCategory].category === 'Cart & Purchase' ||
+                hasTopProduct;
+              return EMAIL_SUGGESTIONS[activeCategory].suggestions.map((s, i) => (
+                <div key={i}
+                  onClick={() => {
+                    setSubject(s.subject);
+                    setBody(s.body);
+                    setShowSuggestions(false);
+                  }}
+                  style={{
+                    padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                    border: '1px solid #e5e7eb', background: '#fff',
+                    fontSize: 13,
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+                  onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                >
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                    {showThumb && <ProductThumbnail imageUrl={productImage} />}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, color: '#111827',
+                                    marginBottom: 2 }}>{s.label}</div>
+                      <div style={{ color: '#6b7280', fontSize: 12 }}>
+                        {s.subject}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      )}
+
       <input
         value={subject}
         onChange={(e) => setSubject(e.target.value)}
@@ -582,13 +799,37 @@ export default function JourneyScreen({ shop }) {
     <div style={{ padding: '0 24px 24px', maxWidth: '1200px', margin: '0 auto' }}>
 
       {/* Header */}
-      <div style={{ marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }}>
-          Customer Journey
-        </h1>
-        <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
-          Customers with active signals — review their journey and send targeted notifications.
-        </p>
+      <div style={{ marginBottom: '20px', display: 'flex',
+                    justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }}>
+            Customer Journey
+          </h1>
+          <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
+            Customers with active signals — review their journey and send targeted notifications.
+          </p>
+        </div>
+        <button
+          onClick={load}
+          disabled={loading}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '8px 14px', borderRadius: 8, border: '1px solid #e5e7eb',
+            background: '#fff', color: '#374151', fontSize: 13,
+            fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
+            opacity: loading ? 0.6 : 1,
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+            strokeLinejoin="round">
+            <polyline points="23 4 23 10 17 10"/>
+            <polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36
+              A9 9 0 0 0 20.49 15"/>
+          </svg>
+          {loading ? 'Refreshing...' : 'Refresh'}
+        </button>
       </div>
 
       {error && (
@@ -769,7 +1010,10 @@ export default function JourneyScreen({ shop }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', position: 'sticky', top: '16px' }}>
 
             {/* Journey timeline */}
-            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px' }}>
+            <div style={{
+              background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px',
+              maxHeight: '380px', overflowY: 'auto',
+            }}>
               <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>
                 Customer journey
               </div>
