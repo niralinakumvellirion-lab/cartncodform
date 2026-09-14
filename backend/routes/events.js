@@ -452,6 +452,15 @@ async function getJourneyData(shopDomain, { limit = 50, page = 0 } = {}) {
         .limit(20)
         .select('type path pageType meta ts');
 
+      // Chronological order (oldest first, newest last) for the Recent
+      // Activity timeline. Reversing the already-fetched array here, rather
+      // than sorting ascending at the query level, keeps `limit(20)`
+      // selecting the 20 MOST RECENT events — sorting ascending with the
+      // same limit would instead select this customer's OLDEST 20 events
+      // ever recorded, defeating the point of a "recent activity" panel.
+      // See audits/journey-order-audit.txt.
+      events.reverse();
+
       // Extract product interests from events.
       const productViews = {};
       events.forEach((e) => {
