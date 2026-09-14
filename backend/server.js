@@ -355,13 +355,23 @@ async function processScheduledJobs() {
             payload.body = copy.body || payload.body;
           }
 
+          // Phase 1 attribution — tag the click URL with ccf_src/ccf_job so
+          // the storefront (getAttributionJob() in push-notifications.liquid)
+          // can attribute subsequent revisit/cart/checkout/purchase events
+          // back to this notification. Keep the existing absolute-URL
+          // fallback (job.payload.url is often unset for legacy rule-based
+          // jobs) rather than a bare '/' — FCM's webpush fcm_options.link
+          // needs a fully-qualified URL, and sendPushToCustomers() itself
+          // already falls back to `https://${shopDomain}` for the same
+          // reason (see backend/utils/pushNotification.js).
           const baseUrl = payload.url || `https://${job.shopDomain}`;
-          const urlWithJob = baseUrl + (baseUrl.includes('?') ? '&' : '?') + 'ccf_job=' + job._id.toString();
+          const clickUrl = baseUrl + (baseUrl.includes('?') ? '&' : '?') +
+            'ccf_src=push&ccf_job=' + job._id.toString();
           const result = await sendPushToCustomers(
             job.shopDomain,
             payload.title || 'You left something behind!',
             payload.body || 'Come back and check it out.',
-            urlWithJob,
+            clickUrl,
             payload.imageUrl || null,
             false,
             job.cartToken || null,

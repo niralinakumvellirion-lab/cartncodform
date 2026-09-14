@@ -3,6 +3,27 @@ const router = express.Router();
 const StorefrontEvent = require('../models/StorefrontEvent');
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
 
+// Phase 1 attribution — incoming storefront event `type` -> AttributedEvent
+// enum. Only these 4 currently produce AttributedEvent rows; everything
+// else (product_view, collection_view, cart_view, search, ...) is ignored
+// for attribution purposes (still saved as a normal StorefrontEvent above).
+// NOTE: the storefront tracker (push-notifications.liquid) does not
+// currently emit a 'checkout_start' or 'purchase' type event — its closest
+// analog to "checkout started" is 'reached_checkout' (the checkout-button
+// click handler in initTracking()), and purchase/order attribution is
+// handled by a separate, pre-existing mechanism (POST /api/attribution/click
+// + the `_ccf_job` Shopify cart attribute, read back on orders/create) —
+// not by this event batch pipeline. Mapped here exactly as specified so
+// this stays forward-compatible if either type is ever emitted, but as of
+// this change those 2 mappings are effectively dormant. See
+// audits/phase1-attribution-audit.txt for the full reasoning.
+const ATTRIBUTION_TYPE_MAP = {
+  page_view: 'revisit',
+  add_to_cart: 'add_to_cart',
+  checkout_start: 'checkout_start',
+  purchase: 'purchase',
+};
+
 /**
  * POST /api/events
  * Body: { shopDomain, sessionId?, customerId?, token?, events: [...] }
@@ -40,6 +61,56 @@ router.post('/', async (req, res) => {
 
     await StorefrontEvent.insertMany(docs, { ordered: false });
     console.log(`[events] Saved ${docs.length} event(s) for ${shop}`);
+
+    // Phase 1 attribution — if this batch carries a ccf_job (see
+    // getAttributionJob() in push-notifications.liquid), record an
+    // AttributedEvent for each event in the batch whose type maps to a
+    // funnel stage this feature tracks. Fire-and-forget: never block the
+    // main event save/response on this.
+    if (body.ccf_job) {
+      (async () => {
+        try {
+          const AttributedEvent = require('../models/AttributedEvent');
+          const Profile = require('../models/Profile');
+
+          let profileId = null;
+          let email = null;
+          if (sessionId) {
+            const profile = await Profile.findOne(
+              { shopDomain: shop, 'identifiers.sessionIds': sessionId },
+              '_id channels.email.address identifiers.emails'
+            ).lean();
+            if (profile) {
+              profileId = profile._id;
+              email = profile.channels?.email?.address || profile.identifiers?.emails?.[0] || null;
+            }
+          }
+
+          const rows = events
+            .filter((e) => ATTRIBUTION_TYPE_MAP[e.type])
+            .map((e) => ({
+              shopDomain: shop,
+              profileId: profileId || undefined,
+              jobId: body.ccf_job,
+              sessionId: sessionId || undefined,
+              email: email || undefined,
+              eventType: ATTRIBUTION_TYPE_MAP[e.type],
+              meta: {
+                productId: e.meta?.productId,
+                productTitle: e.meta?.productTitle,
+                price: e.meta?.price,
+              },
+              ts: e.ts ? new Date(e.ts) : new Date(),
+            }));
+
+          if (rows.length) {
+            await AttributedEvent.insertMany(rows, { ordered: false });
+          }
+        } catch (err) {
+          console.error('[events] attribution save error:', err.message);
+        }
+      })();
+    }
 
     // Phase C2 — on-ingest identity resolution + signal recompute. Fire-and-
     // forget: the beacon response must not wait on this.

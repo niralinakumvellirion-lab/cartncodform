@@ -29,6 +29,39 @@
   var TOKEN_KEY = 'ccf_fcm_token_' + SHOP_DOMAIN;
   var SUBSCRIBED_KEY = 'ccf_subscribed_' + SHOP_DOMAIN;
 
+  // Phase 1 attribution — resolves which push notification (if any) this
+  // session's storefront activity should be attributed to. Separate from
+  // handlePushClickAttribution() below (which records the click itself and
+  // stamps the Shopify cart for order-level attribution): this one persists
+  // the job id across page loads for up to 7 days so ordinary trackEvent()
+  // calls (revisit, add_to_cart, checkout, etc. — see /api/events) can carry
+  // it too, feeding the AttributedEvent funnel model.
+  function getAttributionJob() {
+    try {
+      // Check URL params first (fresh click)
+      var params = new URLSearchParams(window.location.search);
+      var jobFromUrl = params.get('ccf_job');
+      if (jobFromUrl) {
+        // Store in sessionStorage for subsequent pages
+        sessionStorage.setItem('ccf_attribution_job', jobFromUrl);
+        sessionStorage.setItem('ccf_attribution_ts', Date.now().toString());
+        return jobFromUrl;
+      }
+      // Check sessionStorage (subsequent pages in same session)
+      var storedJob = sessionStorage.getItem('ccf_attribution_job');
+      var storedTs = sessionStorage.getItem('ccf_attribution_ts');
+      if (storedJob && storedTs) {
+        // 7-day attribution window
+        var age = Date.now() - parseInt(storedTs, 10);
+        if (age < 7 * 24 * 60 * 60 * 1000) return storedJob;
+        // Expired - clear it
+        sessionStorage.removeItem('ccf_attribution_job');
+        sessionStorage.removeItem('ccf_attribution_ts');
+      }
+    } catch (e) {}
+    return null;
+  }
+
 
   // ============================================
   // SOFT PUSH PROMPT — intent triggers (Phase D)
@@ -2075,7 +2108,12 @@
       sessionId:  sessionId  || null,
       customerId: customerId || null,
       token:      token      || null,
-      events:     batch
+      events:     batch,
+      // Phase 1 attribution — tags this whole batch with the notification
+      // job (if any) this session is currently attributed to, per
+      // getAttributionJob() above. undefined is dropped by JSON.stringify,
+      // so the key is simply absent when there's no active attribution.
+      ccf_job:    getAttributionJob() || undefined
     });
 
     // Use sendBeacon for exit events (survives page unload).
