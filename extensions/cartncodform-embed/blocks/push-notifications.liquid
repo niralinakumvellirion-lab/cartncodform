@@ -147,7 +147,7 @@
     return ccfRuleOn('emailDiscount') || ccfRuleOn('bothDiscount');
   }
   function ccfShowPhoneField() {
-    return ccfRuleOn('phoneDiscount') || ccfRuleOn('bothDiscount');
+    return false;
   }
   function ccfPct(key) {
     var r = discountConfig && discountConfig[key];
@@ -372,10 +372,11 @@
     document.head.appendChild(s);
   }
 
-  // Build the offer headline + email/phone inputs shown inside the popup.
-  // Used by the SPLIT layout only (card builds its own inline fields to
+  // Build the offer headline + email input shown inside the popup.
+  // Used by the SPLIT layout only (card builds its own inline field to
   // match its own content-section design — see showSoftPrompt()).
   // Returns a <div id="ccf-discount-fields"> or null when no discount is on.
+  // Phone field removed — email-only capture (see ccfShowPhoneField()).
   function ccfBuildDiscountFields() {
     if (!ccfDiscountEnabled()) return null;
 
@@ -398,16 +399,6 @@
       ei.placeholder = 'Your email' + (ep ? ' (get ' + ep + '% off)' : '');
       ei.style.cssText = ccfInputStyle();
       box.appendChild(ei);
-    }
-    if (ccfShowPhoneField()) {
-      var pi = document.createElement('input');
-      pi.type = 'tel';
-      pi.id = 'ccf-phone-input';
-      pi.className = 'ccf-input';
-      var pp = ccfFieldPct('phoneDiscount');
-      pi.placeholder = 'Your phone' + (pp ? ' (get ' + pp + '% off)' : '');
-      pi.style.cssText = ccfInputStyle();
-      box.appendChild(pi);
     }
     return box;
   }
@@ -925,9 +916,10 @@
         cardContent.appendChild(offerBox);
       }
 
-      // Card builds its own inline email/phone inputs (matching its own
+      // Card builds its own inline email input (matching its own
       // content-section design) instead of the shared
       // ccfBuildDiscountFields()+append path split still uses below.
+      // Phone field removed — email-only capture (see ccfShowPhoneField()).
       if (ccfShowEmailField()) {
         var cardEmailInput = document.createElement('input');
         cardEmailInput.type = 'email';
@@ -937,16 +929,6 @@
         cardEmailInput.placeholder = 'Your email' + (cardEp ? ' (get ' + cardEp + '% off)' : '');
         cardEmailInput.style.cssText = ccfInputStyle();
         cardContent.appendChild(cardEmailInput);
-      }
-      if (ccfShowPhoneField()) {
-        var cardPhoneInput = document.createElement('input');
-        cardPhoneInput.type = 'tel';
-        cardPhoneInput.id = 'ccf-phone-input';
-        cardPhoneInput.className = 'ccf-input';
-        var cardPp = ccfFieldPct('phoneDiscount');
-        cardPhoneInput.placeholder = 'Your phone' + (cardPp ? ' (get ' + cardPp + '% off)' : '');
-        cardPhoneInput.style.cssText = ccfInputStyle();
-        cardContent.appendChild(cardPhoneInput);
       }
 
       allow = buildAllowBtn(ccfAllowButtonStyle(accent));
@@ -1217,9 +1199,7 @@
     allow.addEventListener('click', function () {
       // Read the discount inputs BEFORE any teardown.
       var emailEl = document.getElementById('ccf-email-input');
-      var phoneEl = document.getElementById('ccf-phone-input');
       var email = emailEl && emailEl.value ? emailEl.value.trim() : '';
-      var phone = phoneEl && phoneEl.value ? phoneEl.value.trim() : '';
       var originalButtonText = allow.textContent;
       var originalButtonBg = allow.style.background;
 
@@ -1242,9 +1222,7 @@
       // entirely and go straight to generating the discount.
       if (Notification.permission === 'granted') {
         var capAction = 'push';
-        if (email && phone) capAction = 'both';
-        else if (email) capAction = 'email';
-        else if (phone) capAction = 'phone';
+        if (email) capAction = 'email';
 
         allow.textContent = '✓ Getting your discount...';
         allow.style.background = '#16a34a';
@@ -1257,7 +1235,7 @@
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
-                action: capAction, email: email, phone: phone,
+                action: capAction, email: email,
                 sessionId: getSessionId(), cartToken: cartToken
               })
             });
@@ -1296,9 +1274,7 @@
               return;
             }
             var action = 'push';
-            if (email && phone) action = 'both';
-            else if (email) action = 'email';
-            else if (phone) action = 'phone';
+            if (email) action = 'email';
             return fetch('/cart.js')
               .then(function (r) { return r.json(); })
               .then(function (cart) {
@@ -1307,7 +1283,7 @@
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    action: action, email: email, phone: phone,
+                    action: action, email: email,
                     sessionId: getSessionId(), cartToken: cartToken
                   })
                 });

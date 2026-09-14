@@ -10,6 +10,17 @@ const DISCOUNT_ITEMS = [
   { key: 'bothDiscount', label: '⭐ Email + Phone', desc: 'Customer provides both email and phone' },
 ];
 
+// remove-phone: the popup no longer has a phone input field (see
+// ccfShowPhoneField() in push-notifications.liquid) — hiding phoneDiscount
+// AND bothDiscount from the merchant UI too, since "Email + Phone" is now
+// misleading (the popup can only ever collect email). Both stay in
+// DISCOUNT_ITEMS/config/backend untouched — this only affects what
+// renders below.
+const HIDDEN_DISCOUNT_KEYS = ['phoneDiscount', 'bothDiscount'];
+const VISIBLE_DISCOUNT_ITEMS = DISCOUNT_ITEMS.filter(
+  (item) => !HIDDEN_DISCOUNT_KEYS.includes(item.key)
+);
+
 export default function Discounts({ shop }) {
   const [config, setConfig] = useState({});
   const [loading, setLoading] = useState(true);
@@ -113,8 +124,9 @@ export default function Discounts({ shop }) {
             />
           </div>
 
-          {/* 4 discount cards */}
-          {DISCOUNT_ITEMS.map((item) => {
+          {/* Discount cards (phone-related ones hidden — see
+              VISIBLE_DISCOUNT_ITEMS) */}
+          {VISIBLE_DISCOUNT_ITEMS.map((item) => {
             const d = config[item.key] || {};
             return (
               <div
