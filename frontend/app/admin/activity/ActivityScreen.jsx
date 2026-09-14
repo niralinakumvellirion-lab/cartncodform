@@ -3,6 +3,47 @@
 import { useState, useEffect } from 'react';
 import { apiGet } from '../../../lib/api';
 
+// Inline SVG icons for the summary tiles — matching Today.jsx's icon set
+// (same paths/viewBox), replacing the emoji previously used here.
+const CartIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+    stroke="#6366f1" strokeWidth="2" strokeLinecap="round"
+    strokeLinejoin="round">
+    <circle cx="9" cy="21" r="1"/>
+    <circle cx="20" cy="21" r="1"/>
+    <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+  </svg>
+);
+
+const CreditCardIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+    stroke="#6366f1" strokeWidth="2" strokeLinecap="round"
+    strokeLinejoin="round">
+    <rect x="1" y="4" width="22" height="16" rx="2" ry="2"/>
+    <line x1="1" y1="10" x2="23" y2="10"/>
+  </svg>
+);
+
+const CheckCircleIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+    stroke="#6366f1" strokeWidth="2" strokeLinecap="round"
+    strokeLinejoin="round">
+    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+    <polyline points="22 4 12 14.01 9 11.01"/>
+  </svg>
+);
+
+const RepeatIcon = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+    stroke="#6366f1" strokeWidth="2" strokeLinecap="round"
+    strokeLinejoin="round">
+    <polyline points="17 1 21 5 17 9"/>
+    <path d="M3 11V9a4 4 0 0 1 4-4h14"/>
+    <polyline points="7 23 3 19 7 15"/>
+    <path d="M21 13v2a4 4 0 0 1-4 4H3"/>
+  </svg>
+);
+
 const FILTER_TABS = [
   { key: 'today', label: 'Today' },
   { key: 'yesterday', label: 'Yesterday' },
@@ -12,12 +53,14 @@ const FILTER_TABS = [
 ];
 
 // Same 4 event types as the Today screen's tiles (Phase 3) — kept in sync
-// so a merchant recognizes the same colors/icons in both places.
+// so a merchant recognizes the same icons in both places. `color` is now
+// only used for the active-tile border highlight (see the SUMMARY TILES
+// JSX below) — the tile's count no longer uses it, per this task.
 const ACTIVITY_TYPES = [
-  { key: 'add_to_cart', icon: '🛒', label: 'Added to cart', color: '#f59e0b' },
-  { key: 'checkout_start', icon: '💳', label: 'Started checkout', color: '#8b5cf6' },
-  { key: 'purchase', icon: '✅', label: 'Purchased', color: '#10b981' },
-  { key: 'revisit', icon: '🔁', label: 'Revisited', color: '#3b82f6' },
+  { key: 'add_to_cart', Icon: CartIcon, label: 'Added to cart', color: '#f59e0b' },
+  { key: 'checkout_start', Icon: CreditCardIcon, label: 'Started checkout', color: '#8b5cf6' },
+  { key: 'purchase', Icon: CheckCircleIcon, label: 'Purchased', color: '#10b981' },
+  { key: 'revisit', Icon: RepeatIcon, label: 'Revisited', color: '#3b82f6' },
 ];
 
 // Table/card activity badge — same colors as ACTIVITY_TYPES above, but the
@@ -227,7 +270,7 @@ export default function ActivityScreen({ shop }) {
           marginBottom: '20px',
         }}
       >
-        {ACTIVITY_TYPES.map(({ key, label, icon, color }) => {
+        {ACTIVITY_TYPES.map(({ key, label, Icon, color }) => {
           const active = activeType === key;
           return (
             <div
@@ -248,12 +291,12 @@ export default function ActivityScreen({ shop }) {
                 e.currentTarget.style.boxShadow = 'none';
               }}
             >
-              <div style={{ fontSize: '24px', marginBottom: '6px' }}>{icon}</div>
+              <div style={{ marginBottom: '6px' }}><Icon /></div>
               <div
                 style={{
                   fontSize: '28px',
                   fontWeight: '800',
-                  color,
+                  color: '#111827',
                   lineHeight: 1,
                 }}
               >
