@@ -140,6 +140,10 @@ app.use('/api/discounts', discountRouter);
 // limiters are reserved for the public, unauthenticated storefront routes.
 const activityRouter = require('./routes/activity');
 app.use('/api/activity', activityRouter);
+// requireAuth-protected admin endpoint (Phase 2 notification queue) — no
+// rate limiter, same reasoning as /api/activity above.
+const queueRouter = require('./routes/queue');
+app.use('/api/queue', queueRouter);
 app.use('/apps/cartncodform', proxyRouter);
 
 // --- 404 + error handlers ---------------------------------------------------
