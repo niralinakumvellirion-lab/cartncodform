@@ -421,7 +421,14 @@ async function getJourneyData(shopDomain, { limit = 50, page = 0 } = {}) {
     profileMap[pid].signals.push(sig);
   });
 
-  const profileIds = Object.keys(profileMap);
+  // Sort profiles by lastSeenAt descending (most recent first)
+  const profileIds = Object.keys(profileMap).sort((a, b) => {
+    const aDate = profileMap[a]?.profile?.lastSeenAt
+      ? new Date(profileMap[a].profile.lastSeenAt) : new Date(0);
+    const bDate = profileMap[b]?.profile?.lastSeenAt
+      ? new Date(profileMap[b].profile.lastSeenAt) : new Date(0);
+    return bDate - aDate;
+  });
   const pageIds = profileIds.slice(page * limit, (page + 1) * limit);
 
   const results = await Promise.all(
