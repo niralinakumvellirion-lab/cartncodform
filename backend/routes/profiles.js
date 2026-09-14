@@ -419,9 +419,22 @@ router.patch('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, r
       }
     }
 
-    // popup-responsive: the whole mobile-override object is replaced wholesale.
+    // popup-responsive: merge mobilePopup fields individually, same as the
+    // desktop popup.* fields above — a wholesale `set.mobilePopup = req.body
+    // .mobilePopup` here would replace the WHOLE subdocument, silently
+    // wiping any field (imageUrl included) the caller didn't happen to send.
+    // Reuses POPUP_FIELDS rather than a separate mobile-only list: the
+    // frontend customizer edits both configs through the same form fields
+    // ("popup-responsive: ... same fields, different state" —
+    // frontend/app/admin/screens/Settings.jsx), so the two must stay in
+    // sync or a field editable on the mobile tab could silently fail to
+    // save.
     if (req.body.mobilePopup && typeof req.body.mobilePopup === 'object') {
-      set.mobilePopup = req.body.mobilePopup;
+      for (const key of POPUP_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(req.body.mobilePopup, key)) {
+          set[`mobilePopup.${key}`] = req.body.mobilePopup[key];
+        }
+      }
     }
 
     if (Object.keys(set).length === 0) {

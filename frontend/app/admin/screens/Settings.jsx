@@ -134,22 +134,17 @@ export default function Settings({ shop }) {
       // other entirely (the old sequential version never attempted the
       // popup save at all if the settings save threw first).
 
-      // settings-image-skip: only re-send popup.imageUrl (a base64 string
-      // that can run to tens/hundreds of KB) when it actually changed this
+      // settings-image-skip: only re-send imageUrl (a base64 string that
+      // can run to tens/hundreds of KB) when it actually changed this
       // session — otherwise every save, even a color/text-only edit, was
       // re-uploading the full image for no reason.
-      //
-      // mobilePopup.imageUrl is deliberately NOT stripped the same way: the
-      // backend's PATCH /popup handler (backend/routes/profiles.js) writes
-      // `popup.<field>` one field at a time via dot-notation $set (so
-      // omitting popup.imageUrl safely leaves the stored value untouched),
-      // but it replaces the ENTIRE mobilePopup subdocument wholesale with
-      // whatever object is sent — omitting imageUrl from that object would
-      // erase the merchant's saved mobile image on every save that doesn't
-      // also touch it, which is worse than the slowness this task fixes.
-      // See audits/settings-image-skip-audit.txt for the full reasoning.
+      // Both popup and mobilePopup now use per-field dot-notation merge
+      // on the backend, so imageUrl is safely omitted when unchanged.
       const popupBody = { ...popup };
       if (!popupImageChanged) delete popupBody.imageUrl;
+
+      const mobileBody = { ...mobilePopup };
+      if (!mobileImageChanged) delete mobileBody.imageUrl;
 
       await Promise.all([
         apiSend(`/api/profiles/${encodeURIComponent(shop)}/settings`, 'PATCH', {
@@ -160,7 +155,7 @@ export default function Settings({ shop }) {
         }),
         apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', {
           ...popupBody,
-          mobilePopup,
+          mobilePopup: mobileBody,
         }),
       ]);
       setSuccess(true);
