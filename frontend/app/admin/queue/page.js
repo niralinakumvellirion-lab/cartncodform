@@ -15,6 +15,7 @@ function QueueContent() {
         <a href="/admin" rel="today">Today</a>
         <a href="/admin/activity" rel="activity">Activity</a>
         <a href="/admin/queue" rel="queue">Queue</a>
+        <a href="/admin/automation" rel="automation">Automation</a>
         <a href="/admin/customers" rel="customers">Customers</a>
         <a href="/admin/journey" rel="journey">Journey</a>
         <a href="/admin/signals" rel="signals">What to act on</a>

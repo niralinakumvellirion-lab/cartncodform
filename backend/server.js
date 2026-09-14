@@ -20,6 +20,7 @@ const { sendAbandonedCartEmail, sendMarketingEmail } = require('./utils/email');
 const AbandonedCustomer = require('./models/AbandonedCustomer');
 const CustomerPushSubscription = require('./models/CustomerPushSubscription');
 const Profile = require('./models/Profile');
+const AutomationConfig = require('./models/AutomationConfig');
 const { runNightlySignals } = require('./services/signalEngine');
 const { runBrainForShop } = require('./services/brain');
 const { generateCopy, generateEmailCopy } = require('./services/aiService');
@@ -144,6 +145,10 @@ app.use('/api/activity', activityRouter);
 // rate limiter, same reasoning as /api/activity above.
 const queueRouter = require('./routes/queue');
 app.use('/api/queue', queueRouter);
+// requireAuth-protected admin endpoint (Phase 3 automation settings) — no
+// rate limiter, same reasoning as /api/activity/queue above.
+const automationRouter = require('./routes/automation');
+app.use('/api/automation', automationRouter);
 app.use('/apps/cartncodform', proxyRouter);
 
 // --- 404 + error handlers ---------------------------------------------------
@@ -256,20 +261,47 @@ async function processScheduledJobs() {
           month: '2-digit',
           day: '2-digit',
         }).format(nowD);
-        const target2am = new Date(`${todayStr}T02:00:00`);
-        const alreadyRanToday = s.lastSignalRunAt && s.lastSignalRunAt >= target2am;
 
-        if (nowD >= target2am && !alreadyRanToday) {
+        // Phase 3 — per-shop automation settings (brain run time + master
+        // on/off switch), read before computing the gate threshold since
+        // the threshold itself now depends on the configured hour/minute.
+        // A shop with no AutomationConfig row yet (never visited the
+        // Automation screen) falls back to the same defaults the schema
+        // itself declares — hour=2, minute=0, enabled=true — so this is a
+        // no-op for every shop until a merchant actually saves settings.
+        const autoConfig = await AutomationConfig.findOne(
+          { shopDomain: s.shopDomain },
+          'brainRunHour brainRunMinute enabled'
+        ).lean();
+        const runHour = autoConfig?.brainRunHour ?? 2;
+        const runMinute = autoConfig?.brainRunMinute ?? 0;
+        const automationEnabled = autoConfig ? autoConfig.enabled !== false : true;
+
+        const hh = String(runHour).padStart(2, '0');
+        const mm = String(runMinute).padStart(2, '0');
+        const targetTime = new Date(`${todayStr}T${hh}:${mm}:00`);
+        const alreadyRanToday = s.lastSignalRunAt && s.lastSignalRunAt >= targetTime;
+
+        if (nowD >= targetTime && !alreadyRanToday) {
           // Claim first so overlapping ticks can't double-run.
           await Store.findOneAndUpdate(
             { shopDomain: s.shopDomain },
             { lastSignalRunAt: nowD }
           );
 
-          runNightlySignals(s.shopDomain)
-            .then(() => runBrainForShop(s.shopDomain))
-            .then(() => computeWeights(s.shopDomain)) // Phase H — refresh weights for tomorrow
-            .catch((err) => console.error('[signals] nightly error:', err.message));
+          // Master switch — "When off, no automated notifications will be
+          // sent" (Automation screen, Section 1). Still claims
+          // lastSignalRunAt above so a disabled shop isn't re-evaluated on
+          // every 30s tick for the rest of the day; manual sends from the
+          // Journey/Today screens are untouched by this flag entirely.
+          if (automationEnabled) {
+            runNightlySignals(s.shopDomain)
+              .then(() => runBrainForShop(s.shopDomain))
+              .then(() => computeWeights(s.shopDomain)) // Phase H — refresh weights for tomorrow
+              .catch((err) => console.error('[signals] nightly error:', err.message));
+          } else {
+            console.log(`[signals] automation disabled for ${s.shopDomain} — skipping nightly run`);
+          }
 
           // Reset the rolling 7-day push stats for shops whose window expired.
           const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);

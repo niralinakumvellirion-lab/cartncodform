@@ -3,10 +3,10 @@ import { Suspense } from 'react';
 import { AppProvider } from '@shopify/polaris';
 import { NavMenu } from '@shopify/app-bridge-react';
 import { useSearchParams } from 'next/navigation';
-import DiscountsScreen from '../screens/Discounts';
+import AutomationScreen from './AutomationScreen';
 import '@shopify/polaris/build/esm/styles.css';
 
-function DiscountsContent() {
+function AutomationContent() {
   const searchParams = useSearchParams();
   const shop = searchParams.get('shop') || '';
   return (
@@ -25,15 +25,15 @@ function DiscountsContent() {
         <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
       </NavMenu>
-      <DiscountsScreen shop={shop} />
+      <AutomationScreen shop={shop} />
     </AppProvider>
   );
 }
 
-export default function DiscountsPage() {
+export default function AutomationPage() {
   return (
     <Suspense fallback={null}>
-      <DiscountsContent />
+      <AutomationContent />
     </Suspense>
   );
 }
