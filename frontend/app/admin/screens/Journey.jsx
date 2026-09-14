@@ -18,13 +18,18 @@ const SIGNAL_LABELS = {
   winback: 'Been a while',
 };
 
-const EVENT_ICONS = {
-  page_view: '👁',
-  product_view: '🔍',
-  add_to_cart: '🛒',
-  page_exit: '↗',
-  push_prompt_shown: '🔔',
-  push_prompt_accepted: '✅',
+const EVENT_LABELS = {
+  page_view: 'Visited website',
+  push_prompt_shown: 'Popup shown',
+  push_prompt_accepted: 'Accepted notifications',
+  product_view: 'Viewed product',
+};
+
+const EVENT_DOT_COLORS = {
+  page_view: '#3b82f6',
+  push_prompt_shown: '#f59e0b',
+  push_prompt_accepted: '#10b981',
+  product_view: '#8b5cf6',
 };
 
 // Auto-fill suggestions keyed by signal type, shared by every composer
@@ -759,29 +764,49 @@ export default function JourneyScreen({ shop }) {
                 Recent activity
               </div>
               <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
-                {selectedCustomer.recentEvents?.length > 0
-                  ? selectedCustomer.recentEvents.map((e, i) => (
-                      <div key={i} style={{
-                        display: 'flex', gap: '8px', alignItems: 'flex-start',
-                        padding: '4px 0', borderBottom: '1px solid #f9fafb', fontSize: '12px',
-                      }}>
-                        <span style={{ flexShrink: 0 }}>{EVENT_ICONS[e.type] || '•'}</span>
-                        <div style={{ flex: 1 }}>
-                          <span style={{ color: '#374151' }}>{e.type.replace(/_/g, ' ')}</span>
-                          {e.meta?.productTitle && (
-                            <span style={{ color: '#6b7280' }}>{' — '}{e.meta.productTitle}</span>
-                          )}
-                        </div>
-                        <span style={{ color: '#9ca3af', flexShrink: 0, fontSize: '11px' }}>
-                          {new Date(e.ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-                        </span>
+                {(() => {
+                  const filteredEvents = (selectedCustomer.recentEvents || [])
+                    .filter((e) => EVENT_LABELS[e.type]);
+
+                  if (filteredEvents.length === 0) {
+                    return (
+                      <div style={{ fontSize: '12px', color: '#9ca3af', padding: '4px 0' }}>
+                        No journey data yet
                       </div>
-                    ))
-                  : (
-                    <div style={{ fontSize: '12px', color: '#9ca3af', padding: '4px 0' }}>
-                      No recent activity.
+                    );
+                  }
+
+                  return filteredEvents.map((e, i) => (
+                    <div key={i} style={{
+                      display: 'flex', gap: '8px', alignItems: 'flex-start',
+                      padding: '4px 0', borderBottom: '1px solid #f9fafb', fontSize: '12px',
+                    }}>
+                      <span style={{
+                        display: 'inline-block',
+                        width: '8px', height: '8px',
+                        borderRadius: '50%',
+                        background: EVENT_DOT_COLORS[e.type],
+                        flexShrink: 0, marginTop: '6px',
+                      }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ color: '#374151' }}>{EVENT_LABELS[e.type]}</div>
+                        {e.type === 'product_view' && e.meta?.productTitle && (
+                          <div style={{ color: '#6b7280', fontSize: '11px' }}>
+                            {e.meta.productTitle}
+                          </div>
+                        )}
+                        {e.type === 'page_view' && e.path && (
+                          <div style={{ color: '#6b7280', fontSize: '11px' }}>
+                            {e.path}
+                          </div>
+                        )}
+                      </div>
+                      <span style={{ color: '#9ca3af', flexShrink: 0, fontSize: '11px' }}>
+                        {new Date(e.ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     </div>
-                  )}
+                  ));
+                })()}
               </div>
             </div>
 

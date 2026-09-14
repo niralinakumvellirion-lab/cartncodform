@@ -446,6 +446,7 @@ async function getJourneyData(shopDomain, { limit = 50, page = 0 } = {}) {
       const events = await StorefrontEvent.find({
         shopDomain: shop,
         sessionId: { $in: [...sessionIds, ...cartTokens] },
+        type: { $in: ['page_view', 'push_prompt_shown', 'push_prompt_accepted', 'product_view'] },
       })
         .sort({ ts: -1 })
         .limit(20)

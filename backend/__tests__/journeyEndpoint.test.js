@@ -79,10 +79,12 @@ test('b. single profile, single signal -> product interests extracted + sorted',
   expect(c.topProducts[0]).toMatchObject({ productId: 'A', title: 'Shirt', count: 2 });
   expect(c.topProducts[1]).toMatchObject({ productId: 'B', title: 'Cap', count: 1 });
 
-  // Queried by this profile's sessionIds + cartTokens combined.
+  // Queried by this profile's sessionIds + cartTokens combined, filtered to
+  // the 4 event types the Journey timeline displays (journey-filter task).
   expect(StorefrontEvent.find).toHaveBeenCalledWith({
     shopDomain: SHOP,
     sessionId: { $in: ['sess-p1'] },
+    type: { $in: ['page_view', 'push_prompt_shown', 'push_prompt_accepted', 'product_view'] },
   });
 });
 
