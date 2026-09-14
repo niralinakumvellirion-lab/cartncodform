@@ -135,6 +135,11 @@ app.use('/api/attribution', attributionLimiter, attributionRouter);
 const profilesRouter = require('./routes/profiles');
 app.use('/api/profiles', profilesRouter);
 app.use('/api/discounts', discountRouter);
+// requireAuth-protected admin endpoint (Phase 2 attribution activity) — no
+// rate limiter, matching /api/profiles and /api/discounts above: those
+// limiters are reserved for the public, unauthenticated storefront routes.
+const activityRouter = require('./routes/activity');
+app.use('/api/activity', activityRouter);
 app.use('/apps/cartncodform', proxyRouter);
 
 // --- 404 + error handlers ---------------------------------------------------
