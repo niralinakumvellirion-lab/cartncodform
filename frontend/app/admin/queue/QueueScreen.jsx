@@ -50,6 +50,14 @@ function formatDateTime(ts) {
   return `${datePart}, ${timePart}`;
 }
 
+function getCustomerLabel(job) {
+  if (job.email) return job.email;
+  if (job.profileId) {
+    return 'Subscriber #' + String(job.profileId).slice(-6);
+  }
+  return 'Anonymous';
+}
+
 export default function QueueScreen({ shop }) {
   const [isMobileView, setIsMobileView] = useState(false);
   useEffect(() => {
@@ -297,7 +305,6 @@ export default function QueueScreen({ shop }) {
           </div>
         ) : (
           jobs.map((job, i) => {
-            const email = job.email || 'Anonymous';
             const channelBadge = CHANNEL_BADGE[job.channel] || CHANNEL_BADGE.push;
             const statusBadge = STATUS_BADGE[job.status] || STATUS_BADGE.skipped;
             const isPending = job.status === 'pending';
@@ -312,6 +319,27 @@ export default function QueueScreen({ shop }) {
               }}>
                 {channelBadge.label}
               </span>
+            );
+
+            // Customer column — email when available, else a stable
+            // "Subscriber #XXXXXX" derived from the profile id, else
+            // "Anonymous" when there's no profileId at all (see
+            // getCustomerLabel()), plus a small channel-type indicator.
+            const customerEl = (
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+                  {getCustomerLabel(job)}
+                </div>
+                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2,
+                              display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <div style={{
+                    width: 6, height: 6, borderRadius: '50%',
+                    background: job.channel === 'push' ? '#3b82f6' : '#8b5cf6',
+                    flexShrink: 0
+                  }} />
+                  {job.channel === 'push' ? 'Push subscriber' : 'Email subscriber'}
+                </div>
+              </div>
             );
 
             const statusEl = (
@@ -370,12 +398,10 @@ export default function QueueScreen({ shop }) {
                   borderBottom: i < jobs.length - 1 ? '1px solid #f9fafb' : 'none',
                 }}>
                   <div style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
                     marginBottom: '6px',
                   }}>
-                    <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>
-                      {email}
-                    </div>
+                    {customerEl}
                     {statusEl}
                   </div>
                   <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>
@@ -398,7 +424,7 @@ export default function QueueScreen({ shop }) {
                 padding: '12px 16px', alignItems: 'center',
                 borderBottom: i < jobs.length - 1 ? '1px solid #f9fafb' : 'none',
               }}>
-                <div style={{ fontSize: '14px', color: '#111827' }}>{email}</div>
+                {customerEl}
                 <div style={{ fontSize: '13px', color: '#374151' }}>{formatSignal(job.signalType)}</div>
                 <div>{channelEl}</div>
                 <div style={{ fontSize: '13px', color: '#374151' }}>{formatDateTime(job.runAt)}</div>
