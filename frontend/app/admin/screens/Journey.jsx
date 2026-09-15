@@ -282,37 +282,34 @@ const EMAIL_SUGGESTIONS = [
   },
 ];
 
-// Change 4 — product thumbnail shown next to product-specific suggestion
-// cards, shared by NotificationComposer and EmailComposer. topProducts
-// (backend/routes/events.js, getJourneyData()) currently has no imageUrl
-// field — { productId, title, count, lastSeen } only — so imageUrl will
-// be undefined today and this always renders the grey placeholder.
-// TODO: once the backend adds a product image (e.g. via
-// ProductImageCache, already used elsewhere for push notifications —
-// see backend/routes/webhooks.js fetchProductImage()), this same prop
-// will pick it up with no further change here. No new API call is made
-// for this — per task instruction, the placeholder is the fallback.
-function ProductThumbnail({ imageUrl }) {
+// Product thumbnail shown next to product-specific suggestion cards,
+// shared by NotificationComposer and EmailComposer, and next to each row
+// in the "Most interested in" list. topProducts (backend/routes/events.js,
+// getJourneyData()) now carries a real imageUrl from ProductImageCache —
+// see audits/topproducts-image-audit.txt — so this renders the actual
+// product image when one is cached, falling back to the placeholder icon
+// otherwise (uncached product, or image not yet fetched).
+function ProductThumbnail({ imageUrl, title }) {
   if (imageUrl) {
     return (
-      <img
-        src={imageUrl}
-        alt=""
-        width={40}
-        height={40}
-        style={{ borderRadius: 6, objectFit: 'cover', flexShrink: 0 }}
-      />
+      <div style={{ width: 40, height: 40, borderRadius: 8,
+                    overflow: 'hidden', flexShrink: 0,
+                    border: '1px solid #e5e7eb' }}>
+        <img src={imageUrl} alt={title || 'Product'}
+          style={{ width: '100%', height: '100%',
+                   objectFit: 'cover' }} />
+      </div>
     );
   }
   return (
-    <div style={{
-      width: 40, height: 40, background: '#f3f4f6', borderRadius: 6,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      flexShrink: 0,
-    }}>
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-        stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+    <div style={{ width: 40, height: 40, borderRadius: 8,
+                  background: '#f3f4f6', border: '1px solid #e5e7eb',
+                  display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', flexShrink: 0 }}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+        stroke="#d1d5db" strokeWidth="2" strokeLinecap="round"
+        strokeLinejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
         <circle cx="8.5" cy="8.5" r="1.5"/>
         <polyline points="21 15 16 10 5 21"/>
       </svg>
@@ -481,7 +478,7 @@ function NotificationComposer({ customer, shop, onSent, onError }) {
                   }}
                 >
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                    {showThumb && <ProductThumbnail imageUrl={productImage} />}
+                    {showThumb && <ProductThumbnail imageUrl={productImage} title={rawTopProductTitle} />}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{
                         display: 'flex', alignItems: 'center',
@@ -688,7 +685,7 @@ function EmailComposer({ customer, shop, onSent, onError }) {
                   onMouseLeave={e => e.currentTarget.style.background = '#fff'}
                 >
                   <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                    {showThumb && <ProductThumbnail imageUrl={productImage} />}
+                    {showThumb && <ProductThumbnail imageUrl={productImage} title={rawTopProductTitle} />}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontWeight: 600, color: '#111827',
                                     marginBottom: 2 }}>{s.label}</div>
@@ -1036,14 +1033,19 @@ export default function JourneyScreen({ shop }) {
                     Most interested in
                   </div>
                   {selectedCustomer.topProducts.map((p, i) => (
-                    <div key={i} style={{
-                      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                      padding: '4px 0', borderBottom: '1px solid #f9fafb',
-                    }}>
-                      <span style={{ fontSize: '12px', color: '#374151' }}>{p.title}</span>
-                      <span style={{ fontSize: '11px', color: '#9ca3af' }}>
-                        {p.count} view{p.count !== 1 ? 's' : ''}
-                      </span>
+                    <div key={i} style={{ display: 'flex', alignItems: 'center',
+                                  gap: 10, padding: '8px 0',
+                                  borderBottom: i < selectedCustomer.topProducts.length - 1
+                                    ? '1px solid #f3f4f6' : 'none' }}>
+                      <ProductThumbnail imageUrl={p.imageUrl} title={p.title} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#111827',
+                                      overflow: 'hidden', textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap' }}>{p.title}</div>
+                        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+                          {p.count} view{p.count !== 1 ? 's' : ''}
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
