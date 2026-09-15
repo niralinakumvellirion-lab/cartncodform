@@ -13,9 +13,13 @@ jest.mock('../models/Profile', () => ({}));
 jest.mock('../models/StorefrontEvent', () => ({
   find: jest.fn(),
 }));
+jest.mock('../models/ProductImageCache', () => ({
+  find: jest.fn(),
+}));
 
 const Signal = require('../models/Signal');
 const StorefrontEvent = require('../models/StorefrontEvent');
+const ProductImageCache = require('../models/ProductImageCache');
 const { getJourneyData } = require('../routes/events');
 
 const SHOP = 'demo.myshopify.com';
@@ -36,6 +40,13 @@ function eventChain(rows) {
   };
 }
 
+function imageCacheChain(rows) {
+  return {
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue(rows),
+  };
+}
+
 function profile(id, overrides = {}) {
   return {
     _id: id,
@@ -47,6 +58,9 @@ function profile(id, overrides = {}) {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // Default: no cached images, so tests that don't care about imageUrl
+  // don't need to stub this themselves.
+  ProductImageCache.find.mockReturnValue(imageCacheChain([]));
 });
 
 test('a. no signals -> empty customers, total 0, no event lookups', async () => {
@@ -69,6 +83,9 @@ test('b. single profile, single signal -> product interests extracted + sorted',
     { type: 'product_view', meta: { productId: 'B', productTitle: 'Cap' }, ts: new Date() },
     { type: 'add_to_cart', meta: {}, ts: new Date() },
   ]));
+  ProductImageCache.find.mockReturnValue(imageCacheChain([
+    { productId: 'A', imageUrl: 'https://cdn.example.com/a.jpg' },
+  ]));
 
   const data = await getJourneyData(SHOP, { limit: 50, page: 0 });
 
@@ -76,8 +93,12 @@ test('b. single profile, single signal -> product interests extracted + sorted',
   expect(data.customers).toHaveLength(1);
   const c = data.customers[0];
   expect(c.topSignal.type).toBe('cart_abandon');
-  expect(c.topProducts[0]).toMatchObject({ productId: 'A', title: 'Shirt', count: 2 });
-  expect(c.topProducts[1]).toMatchObject({ productId: 'B', title: 'Cap', count: 1 });
+  expect(c.topProducts[0]).toMatchObject({ productId: 'A', title: 'Shirt', count: 2, imageUrl: 'https://cdn.example.com/a.jpg' });
+  expect(c.topProducts[1]).toMatchObject({ productId: 'B', title: 'Cap', count: 1, imageUrl: null });
+  expect(ProductImageCache.find).toHaveBeenCalledWith({
+    shopDomain: SHOP,
+    productId: { $in: ['A', 'B'] },
+  });
 
   // Queried by this profile's sessionIds + cartTokens combined, filtered to
   // the 4 event types the Journey timeline displays (journey-filter task).

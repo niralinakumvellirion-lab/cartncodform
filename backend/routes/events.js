@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const StorefrontEvent = require('../models/StorefrontEvent');
+const ProductImageCache = require('../models/ProductImageCache');
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
 
 // Phase 1 attribution — incoming storefront event `type` -> AttributedEvent
@@ -511,14 +512,35 @@ async function getJourneyData(shopDomain, { limit = 50, page = 0 } = {}) {
         }
       });
 
+      const topProducts = Object.values(productViews)
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 3);
+
+      // Enrich topProducts with cached images
+      const productIds = topProducts.map(p => String(p.productId));
+      const cachedImages = productIds.length > 0
+        ? await ProductImageCache.find({
+            shopDomain: shop,
+            productId: { $in: productIds },
+          }).select('productId imageUrl').lean()
+        : [];
+
+      const imageMap = {};
+      cachedImages.forEach(c => {
+        imageMap[String(c.productId)] = c.imageUrl || null;
+      });
+
+      const topProductsWithImages = topProducts.map(p => ({
+        ...p,
+        imageUrl: imageMap[String(p.productId)] || null,
+      }));
+
       return {
         profile,
         topSignal: entry.signal,
         signals: entry.signals,
         recentEvents: events,
-        topProducts: Object.values(productViews)
-          .sort((a, b) => b.count - a.count)
-          .slice(0, 3),
+        topProducts: topProductsWithImages,
       };
     })
   );
