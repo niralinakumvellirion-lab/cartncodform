@@ -47,8 +47,23 @@ router.get('/install', async (req, res) => {
     const ownerEmail =
       (req.query.owner_email || '').toString().trim().toLowerCase() || undefined;
 
-    const state = crypto.randomBytes(16).toString('hex');
-    await OAuthState.create({ nonce: state, ownerEmail });
+    // Check if a recent state already exists for THIS shop (prevents a
+    // double-submitted /install request — e.g. a double-click — from
+    // creating two OAuthState docs that race each other). Scoped by
+    // `shop`, not global: an unscoped lookup would let two DIFFERENT
+    // shops installing within the same 60s window collide onto the same
+    // nonce, which is worse than the duplicate-request problem this is
+    // meant to fix — see audits/oauth-duplicate-fix-audit.txt.
+    const existingState = await OAuthState.findOne({
+      shop,
+      createdAt: { $gte: new Date(Date.now() - 60000) },
+    });
+
+    const state = existingState?.nonce || crypto.randomBytes(16).toString('hex');
+
+    if (!existingState) {
+      await OAuthState.create({ nonce: state, shop, ownerEmail });
+    }
 
     const redirectUri = `${getBackendUrl(req)}/api/auth/callback`;
     const authUrl = buildAuthUrl(shop, redirectUri, state);

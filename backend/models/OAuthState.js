@@ -6,6 +6,17 @@ const oAuthStateSchema = new mongoose.Schema({
     required: true,
     unique: true,
   },
+  // The shop this state nonce was minted for — lets /install's duplicate-
+  // request check (see backend/routes/auth.js) scope its "reuse a recent
+  // state" lookup to THIS shop only, instead of matching any shop's recent
+  // state document. Not required: rows created before this field existed
+  // (and the rare call with no ?shop= override falling back to
+  // process.env.SHOP_DOMAIN) simply won't match any shop-scoped lookup.
+  shop: {
+    type: String,
+    lowercase: true,
+    trim: true,
+  },
   // Optional: dashboard owner's email, passed as ?owner_email= on /install and
   // carried through OAuth so the connected store can be linked to that account.
   ownerEmail: {
