@@ -347,7 +347,7 @@ async function sendJourneyPush(shopDomain, { profileId, title, body, url }) {
     return { status: 400, payload: { error: 'No push subscription' } };
   }
 
-  const cartToken = profile.identifiers?.cartTokens?.[0] || null;
+  const cartToken = profile.identifiers?.cartTokens?.slice(-1)[0] || null;
   const result = await sendPushToCustomers(
     shop, title, body, url, null, false, cartToken
   );
