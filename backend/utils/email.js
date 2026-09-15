@@ -84,7 +84,7 @@ async function sendAbandonedCartEmail(customer, options = {}) {
         `</table>` +
         `<p style="margin:24px 0;">${button(cta, 'Complete Your Order')}</p>` +
         `<p style="margin:32px 0 0;font-size:12px;color:#9ca3af;">` +
-        `This reminder was sent by CartnCodForm</p>`
+        `This reminder was sent by ShopireachboostAI</p>`
     );
 
     const { error } = await resend.emails.send({
@@ -139,7 +139,7 @@ async function sendNewCodOrderEmail(order, ownerEmail) {
         `<tr><td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">Total</td>` +
         `<td style="padding:10px 0;border-top:1px solid #e5e7eb;font-weight:700;">₹${money(total)}</td></tr>` +
         `</table>` +
-        `<p style="margin:32px 0 0;font-size:12px;color:#9ca3af;">Powered by CartnCodForm</p>`
+        `<p style="margin:32px 0 0;font-size:12px;color:#9ca3af;">Powered by ShopireachboostAI</p>`
     );
 
     const { error } = await resend.emails.send({
@@ -177,7 +177,7 @@ async function sendMarketingEmail(to, subject, htmlBody, shopDomain) {
   // Reuse the shared client above (already guarded against a missing key)
   // rather than constructing a second Resend SDK instance per call.
   const { data, error } = await resend.emails.send({
-    from: 'CartnCodForm <onboarding@resend.dev>',
+    from: 'ShopireachboostAI <onboarding@resend.dev>',
     to,
     subject,
     html: `

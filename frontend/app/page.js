@@ -45,7 +45,7 @@ export default function LandingPage() {
           Recover Lost Carts &amp; Accept COD Orders
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg text-gray-600">
-          CartnCodForm plugs into your Shopify stores, tracks every abandoned cart,
+          ShopireachboostAI plugs into your Shopify stores, tracks every abandoned cart,
           and gives your customers a frictionless Cash-on-Delivery form — all managed
           from a single multi-store dashboard.
         </p>
@@ -101,7 +101,7 @@ export default function LandingPage() {
       </section>
 
       <footer className="border-t border-gray-100 py-8 text-center text-sm text-gray-400">
-        © {new Date().getFullYear()} CartnCodForm
+        © {new Date().getFullYear()} ShopireachboostAI
       </footer>
     </main>
   );

@@ -60,7 +60,7 @@ router.get('/health', (req, res) => {
     return res.status(403).json({ error: 'Invalid signature' });
   }
 
-  res.json({ success: true, service: 'CartnCodForm Proxy' });
+  res.json({ success: true, service: 'ShopireachboostAI Proxy' });
 });
 
 // ---------------------------------------------------------------------------

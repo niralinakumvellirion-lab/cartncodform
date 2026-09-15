@@ -1,4 +1,4 @@
-# CartnCodForm — Frontend
+# ShopireachboostAI — Frontend
 
 Next.js 14 (App Router) + Tailwind CSS.
 
@@ -21,7 +21,7 @@ npm run dev                   # http://localhost:3000
 
 | Route | Description |
 | --- | --- |
-| `/` | Landing page (CartnCodForm branding) |
+| `/` | Landing page (ShopireachboostAI branding) |
 | `/dashboard` | Owner dashboard — all connected stores overview |
 | `/dashboard/[shop]` | Single store view — Abandoned Carts + COD Orders tabs |
 | `/install` | Shopify app install page |

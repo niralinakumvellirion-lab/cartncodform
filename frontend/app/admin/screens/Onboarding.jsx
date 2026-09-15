@@ -119,7 +119,7 @@ export default function Onboarding({ shop, onNavigate, onDone }) {
             marginBottom: '8px',
           }}
         >
-          Welcome to CartnCodForm
+          Welcome to ShopireachboostAI
         </h1>
         <p
           style={{

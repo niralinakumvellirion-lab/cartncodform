@@ -1,4 +1,4 @@
-# CartnCodForm
+# ShopireachboostAI
 Multi-store Shopify cart abandonment & COD order platform.
 
 ## Structure

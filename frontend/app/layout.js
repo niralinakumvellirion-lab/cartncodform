@@ -1,7 +1,7 @@
 import './globals.css';
 
 export const metadata = {
-  title: 'CartnCodForm',
+  title: 'ShopireachboostAI',
   description:
     'Multi-store Shopify platform to recover abandoned carts and accept Cash on Delivery orders.',
 };

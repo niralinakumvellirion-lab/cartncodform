@@ -1,6 +1,6 @@
-# CartnCodForm — Backend
+# ShopireachboostAI — Backend
 
-Node.js + Express + MongoDB (Mongoose) API for the CartnCodForm multi-store Shopify platform.
+Node.js + Express + MongoDB (Mongoose) API for the ShopireachboostAI multi-store Shopify platform.
 
 ## Setup
 

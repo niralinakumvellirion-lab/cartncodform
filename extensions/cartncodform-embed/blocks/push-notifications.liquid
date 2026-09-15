@@ -646,7 +646,7 @@
     function buildBranding(styleStr) {
       var d = document.createElement('div');
       d.setAttribute('style', styleStr);
-      d.textContent = 'Powered by CartnCodForm';
+      d.textContent = 'Powered by ShopireachboostAI';
       return d;
     }
 
@@ -1663,7 +1663,7 @@
       var messaging = firebase.messaging(app);
       messaging.onMessage(function(payload) {
         var title = payload.notification && payload.notification.title
-          ? payload.notification.title : 'CartnCodForm';
+          ? payload.notification.title : 'ShopireachboostAI';
         var body = payload.notification && payload.notification.body
           ? payload.notification.body : 'New notification';
         if (Notification.permission === 'granted') {
@@ -2388,7 +2388,7 @@
 
 {% schema %}
 {
-  "name": "CartnCodForm Push",
+  "name": "ShopireachboostAI Push",
   "target": "body",
   "settings": [
     {
