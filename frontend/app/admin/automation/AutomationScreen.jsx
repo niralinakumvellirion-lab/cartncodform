@@ -3,22 +3,19 @@
 import { useState, useEffect } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
 
-// Matches Discounts.jsx's own toggle-switch visual (read for reference
-// per this task's instruction) — reimplemented locally rather than
-// imported, since this screen has its own component boundary and the
-// task explicitly said not to touch any other component.
-function ToggleSwitch({ on, onClick }) {
+// Design system tokens for this screen (see audits/automation-redesign-audit.txt)
+function ToggleSwitch({ checked, onChange }) {
   return (
     <div
-      onClick={onClick}
+      onClick={() => onChange(!checked)}
       style={{
         width: '44px', height: '24px', borderRadius: '12px', cursor: 'pointer',
-        background: on ? '#16a34a' : '#d1d5db', position: 'relative',
+        background: checked ? '#4f46e5' : '#d1d5db', position: 'relative',
         transition: 'background 0.2s', flexShrink: 0,
       }}
     >
       <div style={{
-        position: 'absolute', top: '3px', left: on ? '23px' : '3px',
+        position: 'absolute', top: '3px', left: checked ? '23px' : '3px',
         width: '18px', height: '18px', borderRadius: '50%', background: '#fff',
         transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
       }} />
@@ -46,7 +43,7 @@ const DEFAULT_CONFIG = {
   realtimeTriggers: { cart_abandon: false, checkout_abandon: false, page_visit: false },
 };
 
-// Section 5's 12 signal toggles — label text exactly as specified by the
+// Section 5's 13 signal toggles — label text exactly as specified by the
 // task; description text was not given, so short copy matching this
 // app's existing tone (e.g. Discounts.jsx's DISCOUNT_ITEMS desc lines)
 // was authored for each.
@@ -66,80 +63,95 @@ const SIGNAL_ITEMS = [
   { key: 'page_visit', label: 'Website visit', desc: 'Send when customer visits the store' },
 ];
 
-function formatHour12(h) {
-  const period = h < 12 ? 'AM' : 'PM';
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12} ${period}`;
-}
-
-function formatRunTime(hour, minute) {
-  const period = hour < 12 ? 'AM' : 'PM';
-  const h12 = hour % 12 === 0 ? 12 : hour % 12;
-  const mm = String(minute).padStart(2, '0');
-  return `${h12}:${mm} ${period}`;
-}
-
-const cardStyle = {
-  background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px',
-  padding: '20px 24px', marginBottom: '16px',
+// Signal dot colors, per signal category (design system spec).
+const DOT_COLOR = {
+  cart_abandon: '#dc2626',
+  checkout_abandon: '#dc2626',
+  browse_abandon: '#d97706',
+  high_intent: '#d97706',
+  price_hesitation: '#d97706',
+  lapsing: '#7c3aed',
+  winback: '#7c3aed',
+  email_capture: '#1d4ed8',
+  post_purchase_d3: '#16a34a',
+  price_drop: '#4f46e5',
+  back_in_stock: '#4f46e5',
+  cod_to_prepaid: '#ea580c',
+  page_visit: '#0d9488',
 };
 
-// Custom number + unit delay picker, replacing the fixed dropdown options
-// (CART_CHECKOUT_DELAY_OPTIONS/BROWSE_DELAY_OPTIONS) so a merchant can set
-// any delay, not just the handful of preset values those offered.
-function DelayInput({ value, onChange }) {
-  // value is in minutes
-  // Convert to display: if divisible by 60 show hours, else minutes
-  const [amount, setAmount] = useState(
-    value >= 60 && value % 60 === 0 ? value / 60 : value
-  );
-  const [unit, setUnit] = useState(
-    value >= 60 && value % 60 === 0 ? 'hours' : 'minutes'
-  );
+const cardStyle = {
+  background: '#fff', border: '1px solid #e5e7eb', borderRadius: 16,
+  padding: '24px', marginBottom: 16,
+};
 
-  function handleChange(newAmount, newUnit) {
-    const mins = newUnit === 'hours'
-      ? newAmount * 60
-      : newAmount;
+function DelayInput({ value, onChange }) {
+  const isHours = value >= 60 && value % 60 === 0;
+  const [amount, setAmount] = useState(isHours ? value / 60 : value);
+  const [unit, setUnit] = useState(isHours ? 'hours' : 'minutes');
+
+  function update(a, u) {
+    const mins = u === 'hours' ? a * 60 : a;
     onChange(mins);
   }
 
   return (
-    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center',
+                  flexShrink: 0 }}>
       <input
-        type="number"
-        min="1"
-        max="999"
+        type="number" min="1" max="999"
         value={amount}
         onChange={(e) => {
           const v = Math.max(1, parseInt(e.target.value) || 1);
           setAmount(v);
-          handleChange(v, unit);
+          update(v, unit);
         }}
         style={{
-          width: 64, padding: '6px 8px', borderRadius: 6,
-          border: '1px solid #d1d5db', fontSize: 13,
-          textAlign: 'center',
+          width: 56, padding: '7px 8px', borderRadius: 8,
+          border: '1px solid #e5e7eb', fontSize: 14,
+          fontWeight: 600, textAlign: 'center', color: '#111827',
+          background: '#f9fafb',
         }}
       />
       <select
         value={unit}
         onChange={(e) => {
           setUnit(e.target.value);
-          handleChange(amount, e.target.value);
+          update(amount, e.target.value);
         }}
         style={{
-          padding: '6px 8px', borderRadius: 6,
-          border: '1px solid #d1d5db', fontSize: 13,
-          background: '#fff',
+          padding: '7px 10px', borderRadius: 8,
+          border: '1px solid #e5e7eb', fontSize: 13,
+          background: '#f9fafb', color: '#374151',
+          cursor: 'pointer',
         }}
       >
-        <option value="minutes">minutes</option>
-        <option value="hours">hours</option>
+        <option value="minutes">min</option>
+        <option value="hours">hrs</option>
       </select>
     </div>
   );
 }
+
+const DELAY_ROWS = [
+  { label: 'Cart abandoned', key: 'cartAbandonDelay',
+    desc: 'Customer adds to cart but does not checkout' },
+  { label: 'Checkout abandoned', key: 'checkoutAbandonDelay',
+    desc: 'Customer reaches checkout but does not complete' },
+  { label: 'Browse abandoned', key: 'browseAbandonDelay',
+    desc: 'Customer views products but does not add to cart' },
+  { label: 'Website visit', key: 'pageVisitDelay',
+    desc: 'Customer visits the store' },
+];
+
+const REALTIME_ROWS = [
+  { label: 'Cart abandoned', key: 'cart_abandon',
+    desc: 'Send the moment a customer abandons their cart' },
+  { label: 'Checkout abandoned', key: 'checkout_abandon',
+    desc: 'Send the moment a customer leaves checkout' },
+  { label: 'Website visit', key: 'page_visit',
+    desc: 'Send the moment a customer visits the store' },
+];
 
 export default function AutomationScreen({ shop }) {
   const [isMobileView, setIsMobileView] = useState(false);
@@ -177,20 +189,6 @@ export default function AutomationScreen({ shop }) {
       cancelled = true;
     };
   }, [shop]);
-
-  function toggleSignal(key) {
-    setConfig((c) => ({
-      ...c,
-      enabledSignals: { ...c.enabledSignals, [key]: !c.enabledSignals?.[key] },
-    }));
-  }
-
-  function toggleRealtime(key) {
-    setConfig((c) => ({
-      ...c,
-      realtimeTriggers: { ...c.realtimeTriggers, [key]: !c.realtimeTriggers?.[key] },
-    }));
-  }
 
   // SAVE: PATCH /api/automation/:shop on button click. Sends only the
   // config's own mutable fields — not the GET response's _id/shopDomain/
@@ -240,6 +238,8 @@ export default function AutomationScreen({ shop }) {
     );
   }
 
+  const saved = !!saveResult?.success;
+
   return (
     <div style={{ padding: isMobileView ? '0 12px 24px' : '0 24px 24px', maxWidth: '900px', margin: '0 auto' }}>
       {/* Header */}
@@ -253,190 +253,247 @@ export default function AutomationScreen({ shop }) {
       </div>
 
       {/* SECTION 1 — Master switch */}
-      <div style={cardStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{
+        background: config.enabled ? '#eef2ff' : '#f9fafb',
+        border: `2px solid ${config.enabled ? '#4f46e5' : '#e5e7eb'}`,
+        borderRadius: 16, padding: '20px 24px',
+        display: 'flex', justifyContent: 'space-between',
+        alignItems: 'center', marginBottom: 16,
+        transition: 'all 0.2s',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{
+            width: 12, height: 12, borderRadius: '50%',
+            background: config.enabled ? '#4f46e5' : '#9ca3af',
+            boxShadow: config.enabled
+              ? '0 0 0 4px rgba(79,70,229,0.15)' : 'none',
+            flexShrink: 0,
+          }} />
           <div>
-            <div style={{ fontSize: '15px', fontWeight: '600', color: '#111827' }}>
-              Automation enabled
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
+              {config.enabled ? 'Automation is ON' : 'Automation is OFF'}
             </div>
-            <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '4px', maxWidth: '440px' }}>
-              When off, no automated notifications will be sent. Manual sends from
-              Journey screen still work.
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 3 }}>
+              {config.enabled
+                ? 'Notifications are being sent automatically based on customer behavior'
+                : 'No automated notifications will be sent. Manual sends still work.'}
             </div>
           </div>
-          <ToggleSwitch
-            on={!!config.enabled}
-            onClick={() => setConfig((c) => ({ ...c, enabled: !c.enabled }))}
-          />
         </div>
+        <ToggleSwitch
+          checked={config.enabled}
+          onChange={(v) => setConfig(c => ({ ...c, enabled: v }))}
+        />
       </div>
 
       {/* SECTION 2 — Brain run time */}
       <div style={cardStyle}>
-        <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
-          Daily automation time
+        <div style={{ display: 'flex', alignItems: 'center',
+                      gap: 10, marginBottom: 20 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10,
+                        background: '#eef2ff', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="#4f46e5" strokeWidth="2" strokeLinecap="round"
+              strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </div>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700,
+                          color: '#111827' }}>Daily automation time</div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+              Brain runs once daily to schedule notifications
+            </div>
+          </div>
         </div>
-        <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '14px' }}>
-          Brain runs once daily at this time to schedule notifications for all customers
+
+        <div style={{ background: '#f9fafb', borderRadius: 12,
+                      padding: '16px 20px', marginBottom: 16,
+                      display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 28, fontWeight: 800,
+                         color: '#4f46e5', fontVariantNumeric: 'tabular-nums' }}>
+            {String(config.brainRunHour).padStart(2, '0')}:
+            {String(config.brainRunMinute).padStart(2, '0')}
+          </span>
+          <span style={{ fontSize: 13, color: '#6b7280', marginLeft: 4 }}>
+            IST — runs every day at this time
+          </span>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-          <select
-            value={config.brainRunHour}
-            onChange={(e) => setConfig((c) => ({ ...c, brainRunHour: Number(e.target.value) }))}
-            style={selectStyle}
-          >
-            {Array.from({ length: 24 }, (_, h) => (
-              <option key={h} value={h}>{formatHour12(h)}</option>
-            ))}
-          </select>
-          <select
-            value={config.brainRunMinute}
-            onChange={(e) => setConfig((c) => ({ ...c, brainRunMinute: Number(e.target.value) }))}
-            style={selectStyle}
-          >
-            {[0, 15, 30, 45].map((m) => (
-              <option key={m} value={m}>:{String(m).padStart(2, '0')}</option>
-            ))}
-          </select>
-        </div>
-        <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '10px' }}>
-          Runs daily at {formatRunTime(config.brainRunHour, config.brainRunMinute)} IST
+
+        <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 11, fontWeight: 600,
+                            color: '#6b7280', textTransform: 'uppercase',
+                            letterSpacing: '0.05em', display: 'block',
+                            marginBottom: 6 }}>Hour</label>
+            <select
+              value={config.brainRunHour}
+              onChange={(e) => setConfig(c => ({
+                ...c, brainRunHour: Number(e.target.value)
+              }))}
+              style={{ width: '100%', padding: '9px 12px', borderRadius: 8,
+                       border: '1px solid #e5e7eb', fontSize: 13,
+                       background: '#fff', color: '#111827',
+                       appearance: 'none', cursor: 'pointer' }}
+            >
+              {Array.from({ length: 24 }, (_, i) => {
+                const h = i % 12 || 12;
+                const ampm = i < 12 ? 'AM' : 'PM';
+                return (
+                  <option key={i} value={i}>
+                    {String(i).padStart(2,'0')}:00 — {h} {ampm}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 11, fontWeight: 600,
+                            color: '#6b7280', textTransform: 'uppercase',
+                            letterSpacing: '0.05em', display: 'block',
+                            marginBottom: 6 }}>Minute</label>
+            <select
+              value={config.brainRunMinute}
+              onChange={(e) => setConfig(c => ({
+                ...c, brainRunMinute: Number(e.target.value)
+              }))}
+              style={{ width: '100%', padding: '9px 12px', borderRadius: 8,
+                       border: '1px solid #e5e7eb', fontSize: 13,
+                       background: '#fff', color: '#111827',
+                       appearance: 'none', cursor: 'pointer' }}
+            >
+              {[0, 15, 30, 45].map(m => (
+                <option key={m} value={m}>:{String(m).padStart(2,'0')}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
       {/* SECTION 3 — Signal delays */}
       <div style={cardStyle}>
-        <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
-          Send delay after trigger
-        </div>
-        <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '14px' }}>
-          How long to wait after a customer action before sending a notification
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontSize: '13px', color: '#374151' }}>Cart abandoned</span>
-            <DelayInput
-              value={config.cartAbandonDelay}
-              onChange={(mins) => setConfig((c) => ({ ...c, cartAbandonDelay: mins }))}
-            />
+        <div style={{ display: 'flex', alignItems: 'center',
+                      gap: 10, marginBottom: 20 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10,
+                        background: '#fef3c7', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="#d97706" strokeWidth="2" strokeLinecap="round"
+              strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontSize: '13px', color: '#374151' }}>Checkout abandoned</span>
-            <DelayInput
-              value={config.checkoutAbandonDelay}
-              onChange={(mins) => setConfig((c) => ({ ...c, checkoutAbandonDelay: mins }))}
-            />
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontSize: '13px', color: '#374151' }}>Browse abandoned</span>
-            <DelayInput
-              value={config.browseAbandonDelay}
-              onChange={(mins) => setConfig((c) => ({ ...c, browseAbandonDelay: mins }))}
-            />
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between',
-                        alignItems: 'center', gap: 12 }}>
-            <div>
-              <span style={{ fontSize: '13px', color: '#374151' }}>
-                Website visit
-              </span>
-              <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: 2 }}>
-                Send when customer visits the store
-              </div>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
+              Send delay after trigger
             </div>
-            <DelayInput
-              value={config.pageVisitDelay || 60}
-              onChange={(mins) => setConfig((c) => ({ ...c, pageVisitDelay: mins }))}
-            />
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+              How long to wait before sending after customer action
+            </div>
           </div>
         </div>
+
+        {DELAY_ROWS.map(({ label, key, desc }, i, arr) => (
+          <div key={key}>
+            <div style={{ display: 'flex', justifyContent: 'space-between',
+                          alignItems: 'center', gap: 12,
+                          padding: '14px 0' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600,
+                              color: '#111827' }}>{label}</div>
+                <div style={{ fontSize: 11, color: '#9ca3af',
+                              marginTop: 2 }}>{desc}</div>
+              </div>
+              <DelayInput
+                value={config[key] || 60}
+                onChange={(mins) => setConfig(c => ({ ...c, [key]: mins }))}
+              />
+            </div>
+            {i < arr.length - 1 && (
+              <div style={{ height: 1, background: '#f3f4f6' }} />
+            )}
+          </div>
+        ))}
       </div>
 
       {/* SECTION 4 — Real-time triggers */}
       <div style={cardStyle}>
-        <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
-          Send immediately
-        </div>
-        <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '14px' }}>
-          Skip the delay and send as soon as the signal is detected
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontSize: '13px', fontWeight: '500', color: '#111827' }}>Cart abandon</div>
-              <div style={{ fontSize: '11px', color: '#9ca3af' }}>
-                Send immediately when customer abandons cart
-              </div>
-            </div>
-            <ToggleSwitch
-              on={!!config.realtimeTriggers?.cart_abandon}
-              onClick={() => toggleRealtime('cart_abandon')}
-            />
+        <div style={{ display: 'flex', alignItems: 'center',
+                      gap: 10, marginBottom: 20 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10,
+                        background: '#dcfce7', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="#16a34a" strokeWidth="2" strokeLinecap="round"
+              strokeLinejoin="round">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            </svg>
           </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontSize: '13px', fontWeight: '500', color: '#111827' }}>Checkout abandon</div>
-              <div style={{ fontSize: '11px', color: '#9ca3af' }}>
-                Send immediately when customer reaches checkout but leaves
-              </div>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
+              Send immediately
             </div>
-            <ToggleSwitch
-              on={!!config.realtimeTriggers?.checkout_abandon}
-              onClick={() => toggleRealtime('checkout_abandon')}
-            />
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+              Skip the delay — send as soon as the trigger fires
+            </div>
           </div>
-          {/* Website visit realtime toggle */}
-          <div style={{ display: 'flex', justifyContent: 'space-between',
-                        alignItems: 'center' }}>
-            <div>
-              <div style={{ fontSize: '13px', fontWeight: '500',
-                            color: '#111827' }}>
-                Website visit
+        </div>
+
+        {REALTIME_ROWS.map(({ label, key, desc }, i, arr) => (
+          <div key={key}>
+            <div style={{ display: 'flex', justifyContent: 'space-between',
+                          alignItems: 'center', gap: 12, padding: '14px 0' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600,
+                              color: '#111827' }}>{label}</div>
+                <div style={{ fontSize: 11, color: '#9ca3af',
+                              marginTop: 2 }}>{desc}</div>
               </div>
-              <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: 2 }}>
-                Send immediately when customer visits the store
-              </div>
-            </div>
-            <label style={{ position: 'relative', display: 'inline-block',
-                            width: 44, height: 24, flexShrink: 0 }}>
-              <input
-                type="checkbox"
-                checked={config.realtimeTriggers?.page_visit || false}
-                onChange={(e) => setConfig(c => ({
+              <ToggleSwitch
+                checked={config.realtimeTriggers?.[key] || false}
+                onChange={(v) => setConfig(c => ({
                   ...c,
-                  realtimeTriggers: {
-                    ...c.realtimeTriggers,
-                    page_visit: e.target.checked,
-                  },
+                  realtimeTriggers: { ...c.realtimeTriggers, [key]: v },
                 }))}
-                style={{ opacity: 0, width: 0, height: 0 }}
               />
-              <span style={{
-                position: 'absolute', cursor: 'pointer', inset: 0,
-                background: config.realtimeTriggers?.page_visit
-                  ? '#4f46e5' : '#d1d5db',
-                borderRadius: 24, transition: 'background 0.2s',
-              }}>
-                <span style={{
-                  position: 'absolute', height: 18, width: 18,
-                  left: config.realtimeTriggers?.page_visit ? 23 : 3,
-                  bottom: 3, background: 'white', borderRadius: '50%',
-                  transition: 'left 0.2s',
-                }} />
-              </span>
-            </label>
+            </div>
+            {i < arr.length - 1 && (
+              <div style={{ height: 1, background: '#f3f4f6' }} />
+            )}
           </div>
-        </div>
+        ))}
       </div>
 
       {/* SECTION 5 — Signal controls */}
       <div style={cardStyle}>
-        <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
-          Active signals
+        <div style={{ display: 'flex', alignItems: 'center',
+                      gap: 10, marginBottom: 20 }}>
+          <div style={{ width: 36, height: 36, borderRadius: 10,
+                        background: '#eef2ff', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center',
+                        flexShrink: 0 }}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="#4f46e5" strokeWidth="2" strokeLinecap="round"
+              strokeLinejoin="round">
+              <path d="M3 12h4l3 8 4-16 3 8h4"/>
+            </svg>
+          </div>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
+              Active signals
+            </div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+              Choose which signals trigger automated notifications
+            </div>
+          </div>
         </div>
-        <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '14px' }}>
-          Choose which signals trigger automated notifications
-        </div>
+
         <div style={{
           display: 'grid',
           gridTemplateColumns: isMobileView ? '1fr' : 'repeat(2, 1fr)',
@@ -444,48 +501,70 @@ export default function AutomationScreen({ shop }) {
         }}>
           {SIGNAL_ITEMS.map((item) => (
             <div key={item.key} style={{
-              background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: '10px',
-              padding: '14px 16px', display: 'flex', justifyContent: 'space-between',
-              alignItems: 'center', gap: '12px',
+              display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', padding: '12px 16px',
+              background: '#f9fafb', borderRadius: 10,
+              gap: 12,
             }}>
-              <div>
-                <div style={{ fontSize: '13px', fontWeight: '600', color: '#111827' }}>
-                  {item.label}
-                </div>
-                <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '2px' }}>
-                  {item.desc}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%',
+                              background: DOT_COLOR[item.key],
+                              flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600,
+                                color: '#111827' }}>{item.label}</div>
+                  <div style={{ fontSize: 11, color: '#9ca3af',
+                                marginTop: 1 }}>{item.desc}</div>
                 </div>
               </div>
               <ToggleSwitch
-                on={!!config.enabledSignals?.[item.key]}
-                onClick={() => toggleSignal(item.key)}
+                checked={config.enabledSignals?.[item.key] !== false}
+                onChange={(v) => setConfig(c => ({
+                  ...c,
+                  enabledSignals: { ...c.enabledSignals, [item.key]: v },
+                }))}
               />
             </div>
           ))}
         </div>
       </div>
 
-      {/* SECTION 6 — Save button */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      {/* SECTION 6 — Save bar */}
+      <div style={{
+        position: 'sticky', bottom: 0,
+        background: 'rgba(255,255,255,0.95)',
+        backdropFilter: 'blur(8px)',
+        borderTop: '1px solid #e5e7eb',
+        padding: '16px 24px',
+        marginTop: 8,
+        display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+      }}>
+        <div style={{ fontSize: 12, color: '#9ca3af' }}>
+          Changes are saved to your store's automation settings
+        </div>
         <button
           onClick={saveConfig}
           disabled={saving}
           style={{
-            flex: 1,
-            padding: '13px', fontSize: '14px', fontWeight: '700',
-            color: '#fff',
-            background: saving ? '#9ca3af' : '#111827',
-            border: 'none', borderRadius: '10px',
-            cursor: saving ? 'not-allowed' : 'pointer',
+            padding: '10px 28px', borderRadius: 10,
+            border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
+            background: saving ? '#e5e7eb' : '#4f46e5',
+            color: saving ? '#9ca3af' : '#fff',
+            fontSize: 14, fontWeight: 700,
+            opacity: saving ? 0.7 : 1,
+            transition: 'all 0.15s',
+            minWidth: 140,
           }}
         >
-          {saving ? 'Saving...' : 'Save automation settings'}
+          {saving ? '⏳ Saving...' : saved ? '✓ Saved!' : 'Save settings'}
         </button>
       </div>
-      {saveResult && (
+      {saveResult && !saveResult.success && (
         <div style={{
           marginTop: '10px', fontSize: '13px', fontWeight: '600', textAlign: 'center',
-          color: saveResult.success ? '#16a34a' : '#dc2626',
+          color: '#dc2626',
         }}>
           {saveResult.msg}
         </div>
@@ -493,9 +572,3 @@ export default function AutomationScreen({ shop }) {
     </div>
   );
 }
-
-const selectStyle = {
-  padding: '8px 12px', fontSize: '13px', color: '#111827',
-  border: '1px solid #e5e7eb', borderRadius: '8px', outline: 'none',
-  background: '#fff',
-};
