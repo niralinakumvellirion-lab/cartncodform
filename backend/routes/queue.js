@@ -19,7 +19,7 @@ router.get('/:shopDomain', requireAuth, requireStoreOwner,
 
     const [jobs, total] = await Promise.all([
       ScheduledJob.find(query)
-        .sort({ createdAt: -1 })
+        .sort({ updatedAt: -1 })
         .skip(page * limit)
         .limit(limit)
         .lean(),

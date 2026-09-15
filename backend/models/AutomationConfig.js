@@ -18,6 +18,7 @@ const automationConfigSchema = new mongoose.Schema({
   browseAbandonDelay: { type: Number, default: 30 },
   lapsingDelay: { type: Number, default: 0 },    // 0 = send at brain run time
   winbackDelay: { type: Number, default: 0 },
+  pageVisitDelay: { type: Number, default: 60 }, // minutes
 
   // Which signals are enabled
   enabledSignals: {
@@ -33,12 +34,14 @@ const automationConfigSchema = new mongoose.Schema({
     price_drop: { type: Boolean, default: true },
     back_in_stock: { type: Boolean, default: true },
     cod_to_prepaid: { type: Boolean, default: true },
+    page_visit: { type: Boolean, default: true },
   },
 
   // Real-time triggers (send immediately when signal fires)
   realtimeTriggers: {
     cart_abandon: { type: Boolean, default: false },
     checkout_abandon: { type: Boolean, default: false },
+    page_visit: { type: Boolean, default: false },
   },
 
 }, { timestamps: true });

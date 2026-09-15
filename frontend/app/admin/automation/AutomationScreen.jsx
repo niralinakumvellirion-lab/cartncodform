@@ -35,29 +35,16 @@ const DEFAULT_CONFIG = {
   browseAbandonDelay: 30,
   lapsingDelay: 0,
   winbackDelay: 0,
+  pageVisitDelay: 60,
   enabledSignals: {
     cart_abandon: true, checkout_abandon: true, browse_abandon: true,
     high_intent: true, price_hesitation: true, lapsing: true,
     winback: true, email_capture: true, post_purchase_d3: true,
     price_drop: true, back_in_stock: true, cod_to_prepaid: true,
+    page_visit: true,
   },
-  realtimeTriggers: { cart_abandon: false, checkout_abandon: false },
+  realtimeTriggers: { cart_abandon: false, checkout_abandon: false, page_visit: false },
 };
-
-const CART_CHECKOUT_DELAY_OPTIONS = [
-  { label: '30 min', value: 30 },
-  { label: '1 hour', value: 60 },
-  { label: '2 hours', value: 120 },
-  { label: '6 hours', value: 360 },
-  { label: 'Next brain run', value: 0 },
-];
-
-const BROWSE_DELAY_OPTIONS = [
-  { label: '15 min', value: 15 },
-  { label: '30 min', value: 30 },
-  { label: '1 hour', value: 60 },
-  { label: 'Next brain run', value: 0 },
-];
 
 // Section 5's 12 signal toggles — label text exactly as specified by the
 // task; description text was not given, so short copy matching this
@@ -76,6 +63,7 @@ const SIGNAL_ITEMS = [
   { key: 'price_drop', label: 'Price dropped', desc: "Notify when a saved item's price goes down" },
   { key: 'back_in_stock', label: 'Back in stock', desc: 'Notify when an out-of-stock item is available again' },
   { key: 'cod_to_prepaid', label: 'Offer prepaid on COD', desc: 'Encourage COD customers to pay online next time' },
+  { key: 'page_visit', label: 'Website visit', desc: 'Send when customer visits the store' },
 ];
 
 function formatHour12(h) {
@@ -95,6 +83,63 @@ const cardStyle = {
   background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px',
   padding: '20px 24px', marginBottom: '16px',
 };
+
+// Custom number + unit delay picker, replacing the fixed dropdown options
+// (CART_CHECKOUT_DELAY_OPTIONS/BROWSE_DELAY_OPTIONS) so a merchant can set
+// any delay, not just the handful of preset values those offered.
+function DelayInput({ value, onChange }) {
+  // value is in minutes
+  // Convert to display: if divisible by 60 show hours, else minutes
+  const [amount, setAmount] = useState(
+    value >= 60 && value % 60 === 0 ? value / 60 : value
+  );
+  const [unit, setUnit] = useState(
+    value >= 60 && value % 60 === 0 ? 'hours' : 'minutes'
+  );
+
+  function handleChange(newAmount, newUnit) {
+    const mins = newUnit === 'hours'
+      ? newAmount * 60
+      : newAmount;
+    onChange(mins);
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <input
+        type="number"
+        min="1"
+        max="999"
+        value={amount}
+        onChange={(e) => {
+          const v = Math.max(1, parseInt(e.target.value) || 1);
+          setAmount(v);
+          handleChange(v, unit);
+        }}
+        style={{
+          width: 64, padding: '6px 8px', borderRadius: 6,
+          border: '1px solid #d1d5db', fontSize: 13,
+          textAlign: 'center',
+        }}
+      />
+      <select
+        value={unit}
+        onChange={(e) => {
+          setUnit(e.target.value);
+          handleChange(amount, e.target.value);
+        }}
+        style={{
+          padding: '6px 8px', borderRadius: 6,
+          border: '1px solid #d1d5db', fontSize: 13,
+          background: '#fff',
+        }}
+      >
+        <option value="minutes">minutes</option>
+        <option value="hours">hours</option>
+      </select>
+    </div>
+  );
+}
 
 export default function AutomationScreen({ shop }) {
   const [isMobileView, setIsMobileView] = useState(false);
@@ -170,6 +215,7 @@ export default function AutomationScreen({ shop }) {
         cartAbandonDelay: config.cartAbandonDelay,
         checkoutAbandonDelay: config.checkoutAbandonDelay,
         browseAbandonDelay: config.browseAbandonDelay,
+        pageVisitDelay: config.pageVisitDelay,
         lapsingDelay: config.lapsingDelay,
         winbackDelay: config.winbackDelay,
         enabledSignals: config.enabledSignals,
@@ -269,39 +315,39 @@ export default function AutomationScreen({ shop }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: '13px', color: '#374151' }}>Cart abandoned</span>
-            <select
+            <DelayInput
               value={config.cartAbandonDelay}
-              onChange={(e) => setConfig((c) => ({ ...c, cartAbandonDelay: Number(e.target.value) }))}
-              style={selectStyle}
-            >
-              {CART_CHECKOUT_DELAY_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
+              onChange={(mins) => setConfig((c) => ({ ...c, cartAbandonDelay: mins }))}
+            />
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: '13px', color: '#374151' }}>Checkout abandoned</span>
-            <select
+            <DelayInput
               value={config.checkoutAbandonDelay}
-              onChange={(e) => setConfig((c) => ({ ...c, checkoutAbandonDelay: Number(e.target.value) }))}
-              style={selectStyle}
-            >
-              {CART_CHECKOUT_DELAY_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
+              onChange={(mins) => setConfig((c) => ({ ...c, checkoutAbandonDelay: mins }))}
+            />
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: '13px', color: '#374151' }}>Browse abandoned</span>
-            <select
+            <DelayInput
               value={config.browseAbandonDelay}
-              onChange={(e) => setConfig((c) => ({ ...c, browseAbandonDelay: Number(e.target.value) }))}
-              style={selectStyle}
-            >
-              {BROWSE_DELAY_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
+              onChange={(mins) => setConfig((c) => ({ ...c, browseAbandonDelay: mins }))}
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between',
+                        alignItems: 'center', gap: 12 }}>
+            <div>
+              <span style={{ fontSize: '13px', color: '#374151' }}>
+                Website visit
+              </span>
+              <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: 2 }}>
+                Send when customer visits the store
+              </div>
+            </div>
+            <DelayInput
+              value={config.pageVisitDelay || 60}
+              onChange={(mins) => setConfig((c) => ({ ...c, pageVisitDelay: mins }))}
+            />
           </div>
         </div>
       </div>
@@ -338,6 +384,47 @@ export default function AutomationScreen({ shop }) {
               on={!!config.realtimeTriggers?.checkout_abandon}
               onClick={() => toggleRealtime('checkout_abandon')}
             />
+          </div>
+          {/* Website visit realtime toggle */}
+          <div style={{ display: 'flex', justifyContent: 'space-between',
+                        alignItems: 'center' }}>
+            <div>
+              <div style={{ fontSize: '13px', fontWeight: '500',
+                            color: '#111827' }}>
+                Website visit
+              </div>
+              <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: 2 }}>
+                Send immediately when customer visits the store
+              </div>
+            </div>
+            <label style={{ position: 'relative', display: 'inline-block',
+                            width: 44, height: 24, flexShrink: 0 }}>
+              <input
+                type="checkbox"
+                checked={config.realtimeTriggers?.page_visit || false}
+                onChange={(e) => setConfig(c => ({
+                  ...c,
+                  realtimeTriggers: {
+                    ...c.realtimeTriggers,
+                    page_visit: e.target.checked,
+                  },
+                }))}
+                style={{ opacity: 0, width: 0, height: 0 }}
+              />
+              <span style={{
+                position: 'absolute', cursor: 'pointer', inset: 0,
+                background: config.realtimeTriggers?.page_visit
+                  ? '#4f46e5' : '#d1d5db',
+                borderRadius: 24, transition: 'background 0.2s',
+              }}>
+                <span style={{
+                  position: 'absolute', height: 18, width: 18,
+                  left: config.realtimeTriggers?.page_visit ? 23 : 3,
+                  bottom: 3, background: 'white', borderRadius: '50%',
+                  transition: 'left 0.2s',
+                }} />
+              </span>
+            </label>
           </div>
         </div>
       </div>
