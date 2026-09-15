@@ -10,6 +10,7 @@ const {
   getOnlineToken,
   fetchShopEmail,
   registerAllWebhooks,
+  refreshAccessTokenIfNeeded,
 } = require('../utils/shopify');
 const { requireAuth } = require('../middleware/requireOwner');
 const { getActiveSubscription, createSubscription } = require('../utils/billing');
@@ -87,7 +88,11 @@ router.get('/callback', async (req, res) => {
 
     // Normalise: lowercase, no surrounding whitespace, no trailing slash.
     const shopDomain = shop.toString().trim().toLowerCase().replace(/\/+$/, '');
-    const accessToken = await exchangeCodeForToken(shopDomain, code);
+    const tokenData = await exchangeCodeForToken(shopDomain, code);
+    const accessToken = tokenData.access_token;
+    const accessTokenExpiresAt = tokenData.expires_in
+      ? new Date(Date.now() + tokenData.expires_in * 1000)
+      : null;
 
     // Owner email: prefer the one passed at install time, otherwise pull the
     // shop's contact email from the Shopify Admin API (GET /admin/api/<v>/shop.json).
@@ -99,6 +104,7 @@ router.get('/callback', async (req, res) => {
     const update = {
       shopDomain,
       accessToken,
+      accessTokenExpiresAt,
       installedAt: new Date(),
       // Fresh grant — clear the "reconnect to enable discounts" flag that a
       // prior ACCESS_DENIED (token predating write_discounts) may have set.
@@ -117,7 +123,12 @@ router.get('/callback', async (req, res) => {
     );
 
     // Register webhooks (best-effort, non-blocking failures are logged).
-    await registerAllWebhooks(shopDomain, accessToken, getBackendUrl(req));
+    // Resolve via refreshAccessTokenIfNeeded() rather than the raw
+    // `accessToken` local — a no-op here since `store` was just upserted
+    // with a fresh, unexpired accessToken, but keeps every Admin API call
+    // site on the same shared token-selection policy.
+    const webhookApiToken = await refreshAccessTokenIfNeeded(store);
+    await registerAllWebhooks(shopDomain, webhookApiToken, getBackendUrl(req));
 
     // Return the merchant into the embedded app inside Shopify Admin.
     const dashboardUrl = `https://admin.shopify.com/store/${shopDomain.replace('.myshopify.com', '')}/apps/cartncodform`;

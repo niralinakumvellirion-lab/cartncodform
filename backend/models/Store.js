@@ -164,6 +164,12 @@ const storeSchema = new mongoose.Schema({
   onlineAccessToken: { type: String, default: null },
   onlineTokenExpiresAt: { type: Date, default: null },
 
+  // --- expiring offline token: Shopify's newer offline access tokens carry
+  // an expires_in on grant, unlike the old non-expiring format (see
+  // audits/api-token-test-audit.txt for the live 403 the old format now
+  // gets). Populated alongside `accessToken` at OAuth callback time.
+  accessTokenExpiresAt: { type: Date, default: null },
+
   installedAt: {
     type: Date,
     default: Date.now,

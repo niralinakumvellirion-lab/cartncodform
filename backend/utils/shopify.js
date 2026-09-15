@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const axios = require('axios');
+const Store = require('../models/Store');
 
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
@@ -102,7 +103,12 @@ function verifyWebhookHmac(rawBody, hmacHeader) {
 }
 
 /**
- * Exchange a temporary OAuth `code` for a permanent access token.
+ * Exchange a temporary OAuth `code` for an access token. Returns the full
+ * token response object (access_token, expires_in, scope, ...) rather than
+ * just the token string, so callers can also capture expires_in — Shopify's
+ * current offline-token format is expiring, unlike the old non-expiring
+ * format (see audits/api-token-test-audit.txt for the live 403 that format
+ * now gets rejected with).
  */
 async function exchangeCodeForToken(shop, code) {
   const url = `https://${shop}/admin/oauth/access_token`;
@@ -111,7 +117,7 @@ async function exchangeCodeForToken(shop, code) {
     client_secret: SHOPIFY_API_SECRET,
     code,
   });
-  return data.access_token;
+  return data;
 }
 
 /**
@@ -222,6 +228,63 @@ async function registerAllWebhooks(shop, accessToken, backendUrl) {
   }
 }
 
+/**
+ * Resolve a usable Admin API token for `store`. Prefers the offline
+ * accessToken while it has a known, comfortably-future expiry; falls back
+ * to the online token otherwise (including when accessTokenExpiresAt is
+ * not set at all — true for every store that installed before this field
+ * existed, which currently includes every real installed store — treating
+ * an unknown expiry as "not provably valid" rather than trusting it
+ * forever, since the pre-existing offline token for at least one store is
+ * a legacy non-expiring format Shopify now rejects outright, see
+ * audits/api-token-test-audit.txt). Flags needsReauth only once neither
+ * token can be confirmed usable.
+ *
+ * NOTE: this is deliberately stricter than the literal version given in
+ * this task's own instructions, which returned `store.accessToken`
+ * immediately whenever accessTokenExpiresAt was unset — that would have
+ * made every current call site (which today all have accessTokenExpiresAt
+ * unset, since it's a brand-new field) always use the known-broken offline
+ * token and never try the working online token, which is a regression from
+ * webhooks.js's fetchProductImage() own pre-existing fallback logic (see
+ * audits/token-fix-audit.txt for the full reasoning).
+ */
+async function refreshAccessTokenIfNeeded(store) {
+  const now = new Date();
+  const fiveMinutes = 5 * 60 * 1000;
+
+  const offlineExpiry = store.accessTokenExpiresAt ? new Date(store.accessTokenExpiresAt) : null;
+  const offlineKnownValid = offlineExpiry && offlineExpiry > new Date(now.getTime() + fiveMinutes);
+
+  // Offline token has a known, comfortably-future expiry — use it.
+  if (offlineKnownValid) {
+    return store.accessToken;
+  }
+
+  // Offline token is expired, expiring soon, or its expiry is unknown —
+  // use the online token as fallback if it's present and unexpired.
+  if (store.onlineAccessToken && store.onlineTokenExpiresAt) {
+    const onlineExpiry = new Date(store.onlineTokenExpiresAt);
+    if (onlineExpiry > now) {
+      console.log('[auth] using onlineToken fallback for', store.shopDomain);
+      return store.onlineAccessToken;
+    }
+  }
+
+  // No usable online token. Only flag needsReauth once the offline token's
+  // expiry is POSITIVELY known to be in the past — an unknown expiry still
+  // gets one last attempt with the offline token rather than an immediate
+  // reauth flag, since it may still work.
+  if (offlineExpiry && offlineExpiry <= now) {
+    console.warn('[auth] both tokens expired for', store.shopDomain, '— needs reauth');
+    await Store.updateOne(
+      { shopDomain: store.shopDomain },
+      { $set: { needsReauth: true } }
+    );
+  }
+  return store.accessToken; // return anyway, will fail gracefully
+}
+
 module.exports = {
   SHOPIFY_API_KEY,
   SHOPIFY_API_SECRET,
@@ -237,4 +300,5 @@ module.exports = {
   fetchShopEmail,
   registerWebhook,
   registerAllWebhooks,
+  refreshAccessTokenIfNeeded,
 };

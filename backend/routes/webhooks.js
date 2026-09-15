@@ -1,7 +1,7 @@
 const express = require('express');
 const AbandonedCustomer = require('../models/AbandonedCustomer');
 const Store = require('../models/Store');
-const { verifyWebhookHmac } = require('../utils/shopify');
+const { verifyWebhookHmac, refreshAccessTokenIfNeeded } = require('../utils/shopify');
 const { sendAbandonedCartEmail } = require('../utils/email');
 const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
 const PushClick = require('../models/PushClick');
@@ -93,24 +93,19 @@ async function fetchProductImage(shop, accessToken, productId) {
       console.log('[webhook] Cache lookup error (proceeding to fetch):', cacheErr.message);
     }
 
-    // Prefer the online token (shpua_) — works with new Shopify API.
-    // Fall back to the offline token for backwards compatibility.
-    // Same pattern as discounts.js generateDiscount(). Re-derived here
-    // (rather than trusting the `accessToken` argument, which every
-    // current caller passes as the store's offline accessToken) because
-    // Shopify now rejects that non-expiring offline token outright
-    // (confirmed live in audits/webhooks-audit.txt) — this is why
-    // product images had silently stopped resolving. This function's
-    // signature/arity is unchanged (routes/push.js also calls it), so
-    // the passed-in `accessToken` is kept as a last-resort fallback.
+    // Resolve via the shared refreshAccessTokenIfNeeded() policy
+    // (utils/shopify.js) instead of this function's own ad-hoc online-
+    // first fallback — same underlying goal (Shopify now rejects the
+    // legacy non-expiring offline token outright, see
+    // audits/api-token-test-audit.txt), now centralized so every Admin
+    // API call site behaves the same way. Re-derived from a fresh Store
+    // lookup (rather than trusting the `accessToken` argument, which
+    // every current caller passes as the store's offline accessToken)
+    // since that argument may be stale; the passed-in `accessToken` is
+    // kept as a last-resort fallback if no Store row is found at all.
     const store = await Store.findOne({ shopDomain: shopKey })
-      .select('accessToken onlineAccessToken onlineTokenExpiresAt');
-    let apiToken = (store && store.onlineAccessToken) || (store && store.accessToken) || accessToken;
-    if (store && store.onlineAccessToken && store.onlineTokenExpiresAt) {
-      if (new Date() > store.onlineTokenExpiresAt) {
-        apiToken = (store && store.accessToken) || accessToken;
-      }
-    }
+      .select('shopDomain accessToken accessTokenExpiresAt onlineAccessToken onlineTokenExpiresAt');
+    const apiToken = store ? await refreshAccessTokenIfNeeded(store) : accessToken;
     if (!apiToken) return null;
 
     // DEBUG (temporary)
