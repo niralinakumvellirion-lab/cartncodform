@@ -18,7 +18,7 @@ const { getActiveSubscription, createSubscription } = require('../utils/billing'
 const router = express.Router();
 
 // Build the public base URL of THIS backend. In production BACKEND_URL must be
-// set (e.g. https://cartncodform-backend.onrender.com) so the OAuth redirect_uri
+// set (e.g. https://api.shopireachboost.com) so the OAuth redirect_uri
 // exactly matches the one registered in the Shopify app. Only when it is unset
 // do we fall back to the incoming request's protocol + host.
 function getBackendUrl(req) {

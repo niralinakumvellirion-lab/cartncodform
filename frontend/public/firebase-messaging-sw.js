@@ -2,7 +2,7 @@
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
 
-const DASHBOARD_URL = 'https://cartncodform-beryl.vercel.app/dashboard';
+const DASHBOARD_URL = 'https://app.shopireachboost.com/dashboard';
 
 const firebaseConfig = {
   apiKey: "AIzaSyASPGdEC4K_acNQYY7AeQvskDQ5Xq4-ecU",
@@ -47,7 +47,7 @@ self.addEventListener('notificationclick', function(event) {
     clients.matchAll({ type: 'window', includeUncontrolled: true })
       .then(function(clientList) {
         for (const client of clientList) {
-          if (client.url.includes('cartncodform-beryl.vercel.app') && 'focus' in client) {
+          if (client.url.includes('app.shopireachboost.com') && 'focus' in client) {
             return client.focus();
           }
         }

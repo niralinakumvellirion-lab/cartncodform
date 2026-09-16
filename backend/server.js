@@ -36,7 +36,7 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,
-  'https://cartncodform-beryl.vercel.app',
+  'https://app.shopireachboost.com',
   'https://admin.shopify.com',
   'http://localhost:3000',
 ].filter(Boolean);

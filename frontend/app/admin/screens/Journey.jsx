@@ -825,7 +825,7 @@ function EmailComposer({ customer, shop, onSent, onError }) {
         }}
       />
       <div style={{ fontSize: '11px', color: '#9ca3af' }}>
-        Sent from: onboarding@resend.dev
+        Sent from: notifications@shopireachboost.com
       </div>
       <button
         onClick={send}

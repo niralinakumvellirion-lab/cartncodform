@@ -478,7 +478,7 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body }) {
   }
 
   const { data, error } = await resend.emails.send({
-    from: 'ShopireachboostAI <onboarding@resend.dev>',
+    from: 'ShopireachboostAI <notifications@shopireachboost.com>',
     to: email,
     subject: subject,
     html: `

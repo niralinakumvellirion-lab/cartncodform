@@ -4,7 +4,7 @@ const { Resend } = require('resend');
 // startup when RESEND_API_KEY is unset. Fall back to a placeholder so the app
 // still boots; sends then fail with an auth error that is caught and logged.
 const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
-const FROM = process.env.FROM_EMAIL || 'onboarding@resend.dev';
+const FROM = process.env.FROM_EMAIL || 'notifications@shopireachboost.com';
 
 // --- small HTML helpers -------------------------------------------------------
 
@@ -177,7 +177,7 @@ async function sendMarketingEmail(to, subject, htmlBody, shopDomain) {
   // Reuse the shared client above (already guarded against a missing key)
   // rather than constructing a second Resend SDK instance per call.
   const { data, error } = await resend.emails.send({
-    from: 'ShopireachboostAI <onboarding@resend.dev>',
+    from: 'ShopireachboostAI <notifications@shopireachboost.com>',
     to,
     subject,
     html: `

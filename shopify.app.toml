@@ -1,11 +1,11 @@
 name = "ShopireachboostAI"
 client_id = "b2cafd271c21b90a630528234402b0a1"
-application_url = "https://cartncodform-beryl.vercel.app/admin"
+application_url = "https://app.shopireachboost.com/admin"
 embedded = true
 
 [auth]
 redirect_urls = [
-  "https://cartncodform-backend.onrender.com/api/auth/callback"
+  "https://api.shopireachboost.com/api/auth/callback"
 ]
 
 [webhooks]
@@ -13,25 +13,25 @@ api_version = "2025-01"
 
   [[webhooks.subscriptions]]
   compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
-  uri = "https://cartncodform-backend.onrender.com/api/webhooks/compliance"
+  uri = "https://api.shopireachboost.com/api/webhooks/compliance"
 
   [[webhooks.subscriptions]]
   topics = ["carts/create", "carts/update"]
-  uri = "https://cartncodform-backend.onrender.com/api/webhooks/cart"
+  uri = "https://api.shopireachboost.com/api/webhooks/cart"
 
   [[webhooks.subscriptions]]
   topics = ["checkouts/create", "checkouts/update"]
-  uri = "https://cartncodform-backend.onrender.com/api/webhooks/checkout"
+  uri = "https://api.shopireachboost.com/api/webhooks/checkout"
 
   [[webhooks.subscriptions]]
   topics = ["orders/create"]
-  uri = "https://cartncodform-backend.onrender.com/api/webhooks/order"
+  uri = "https://api.shopireachboost.com/api/webhooks/order"
 
 [access_scopes]
 scopes = "read_orders,read_customers,write_customers,read_products,write_discounts,read_discounts"
 
 [app_proxy]
-url = "https://cartncodform-backend.onrender.com/apps/cartncodform"
+url = "https://api.shopireachboost.com/apps/cartncodform"
 subpath = "cartncodform"
 prefix = "apps"
 
