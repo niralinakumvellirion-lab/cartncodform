@@ -5,6 +5,106 @@ import { useRouter } from 'next/navigation';
 import { Page } from '@shopify/polaris';
 import { apiGet, apiSend } from '../../../lib/api';
 
+const DS = {
+  page: {
+    maxWidth: 960,
+    margin: '0 auto',
+    padding: '24px 20px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  },
+  card: {
+    background: '#ffffff',
+    border: '1px solid #e5e7eb',
+    borderRadius: 14,
+    padding: '20px 24px',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+    marginBottom: 16,
+  },
+  cardFlat: {
+    background: '#ffffff',
+    border: '1px solid #f0f0f0',
+    borderRadius: 14,
+    padding: '20px 24px',
+    marginBottom: 16,
+  },
+  pageTitle: {
+    fontSize: 22,
+    fontWeight: 800,
+    color: '#0f0f0f',
+    margin: 0,
+    letterSpacing: '-0.3px',
+  },
+  pageSubtitle: {
+    fontSize: 13,
+    color: '#9ca3af',
+    margin: '4px 0 0',
+    fontWeight: 400,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#9ca3af',
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    marginBottom: 10,
+  },
+  primary: '#4f46e5',
+  primaryLight: '#eef2ff',
+  success: '#16a34a',
+  successLight: '#dcfce7',
+  warning: '#d97706',
+  warningLight: '#fef3c7',
+  danger: '#dc2626',
+  dangerLight: '#fee2e2',
+  gray50: '#f9fafb',
+  gray100: '#f3f4f6',
+  gray200: '#e5e7eb',
+  gray400: '#9ca3af',
+  gray600: '#4b5563',
+  gray900: '#111827',
+  btnPrimary: {
+    background: '#4f46e5',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 9,
+    padding: '10px 20px',
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: 'pointer',
+  },
+  btnSecondary: {
+    background: '#f3f4f6',
+    color: '#374151',
+    border: '1px solid #e5e7eb',
+    borderRadius: 9,
+    padding: '8px 16px',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+};
+
+function PageHeader({ title, subtitle, action }) {
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between',
+                    alignItems: 'flex-start' }}>
+        <div>
+          <h1 style={DS.pageTitle}>{title}</h1>
+          {subtitle && (
+            <p style={DS.pageSubtitle}>{subtitle}</p>
+          )}
+        </div>
+        {action && (
+          <div style={{ flexShrink: 0, marginTop: 2 }}>{action}</div>
+        )}
+      </div>
+      <div style={{ height: 3, background: 'linear-gradient(90deg, #4f46e5, #818cf8)',
+                    borderRadius: 2, marginTop: 12, width: 48 }} />
+    </div>
+  );
+}
+
 // Inline SVG icons — professional line-icon set replacing the Phase 3 emoji
 // tiles. Each spreads `...props` so a shared style (color/marginBottom) can
 // be applied uniformly at the call site.
@@ -120,10 +220,9 @@ const STAT_LABEL_STYLE = {
 };
 
 const STAT_CARD_STYLE = {
-  background: '#fff',
-  border: '1px solid #e5e7eb',
-  borderRadius: 10,
+  ...DS.card,
   padding: 16,
+  marginBottom: 0,
   display: 'flex',
   flexDirection: 'column',
   gap: 4,
@@ -327,15 +426,44 @@ export default function Today({ shop }) {
       ).sort((a, b) => b.strength - a.strength)
     : [];
 
-  return (
-    <Page>
-    <div
+  const todaySubtitle = new Date().toLocaleDateString('en-IN', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+  });
+
+  const refreshButton = (
+    <button
+      onClick={() => setRefreshKey(k => k + 1)}
+      disabled={notifLoading}
       style={{
-        maxWidth: '1100px',
-        margin: '0 auto',
-        padding: isMobileView ? '0 12px 24px' : '0 0 24px',
+        display: 'flex', alignItems: 'center', gap: 6,
+        ...DS.btnSecondary,
+        cursor: notifLoading ? 'not-allowed' : 'pointer',
+        opacity: notifLoading ? 0.6 : 1,
       }}
     >
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+        strokeLinejoin="round">
+        <polyline points="23 4 23 10 17 10"/>
+        <polyline points="1 20 1 14 7 14"/>
+        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36
+          A9 9 0 0 0 20.49 15"/>
+      </svg>
+      {notifLoading ? 'Refreshing...' : 'Refresh'}
+    </button>
+  );
+
+  return (
+    <Page>
+    <div style={DS.page}>
+      <PageHeader
+        title="Today"
+        subtitle={todaySubtitle}
+        action={refreshButton}
+      />
+
       {/* Redesign — date filter + notification/activity stat rows,
           rendered first per task spec ("BEFORE any existing content"). */}
 
@@ -392,10 +520,9 @@ export default function Today({ shop }) {
                         gap: 8 }}>
             {newSubscribers.map(sub => (
               <div key={sub.profileId}
-                style={{ display: 'flex', alignItems: 'center',
+                style={{ ...DS.card, display: 'flex', alignItems: 'center',
                          justifyContent: 'space-between',
-                         padding: '10px 14px', background: '#fff',
-                         border: '1px solid #e5e7eb', borderRadius: 10,
+                         padding: '10px 14px', marginBottom: 0,
                          gap: 12 }}>
                 <div>
                   <div style={{ fontSize: 13, fontWeight: 600,
@@ -517,48 +644,10 @@ export default function Today({ shop }) {
         </div>
       </div>
 
-      {/* Header */}
-      <div style={{ marginBottom: '16px', display: 'flex',
-                    justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 4px' }}>
-            Today
-          </h1>
-          <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
-            {new Date().toLocaleDateString('en-IN', {
-              weekday: 'long',
-              day: 'numeric',
-              month: 'long',
-            })}
-          </p>
-        </div>
-        <button
-          onClick={() => setRefreshKey(k => k + 1)}
-          disabled={notifLoading}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '8px 14px', borderRadius: 8, border: '1px solid #e5e7eb',
-            background: '#fff', color: '#374151', fontSize: 13,
-            fontWeight: 600, cursor: notifLoading ? 'not-allowed' : 'pointer',
-            opacity: notifLoading ? 0.6 : 1,
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
-            strokeLinejoin="round">
-            <polyline points="23 4 23 10 17 10"/>
-            <polyline points="1 20 1 14 7 14"/>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36
-              A9 9 0 0 0 20.49 15"/>
-          </svg>
-          {notifLoading ? 'Refreshing...' : 'Refresh'}
-        </button>
-      </div>
-
       {error && (
         <div
           style={{
-            background: '#fef2f2',
+            background: DS.dangerLight,
             border: '1px solid #fecaca',
             borderRadius: '10px',
             padding: '14px 20px',
@@ -582,12 +671,7 @@ export default function Today({ shop }) {
       >
         {/* LEFT — Planned for today */}
         <div
-          style={{
-            background: '#fff',
-            border: '1px solid #e5e7eb',
-            borderRadius: '10px',
-            padding: '18px 20px',
-          }}
+          style={{ ...DS.card, padding: '18px 20px', marginBottom: 0 }}
         >
           <div
             style={{
@@ -668,12 +752,7 @@ export default function Today({ shop }) {
 
         {/* RIGHT — Yesterday */}
         <div
-          style={{
-            background: '#fff',
-            border: '1px solid #e5e7eb',
-            borderRadius: '10px',
-            padding: '18px 20px',
-          }}
+          style={{ ...DS.card, padding: '18px 20px', marginBottom: 0 }}
         >
           <div
             style={{
@@ -788,12 +867,7 @@ export default function Today({ shop }) {
       {/* Recovered this week chart */}
       <div>
         <div
-          style={{
-            background: '#fff',
-            border: '1px solid #e5e7eb',
-            borderRadius: '10px',
-            padding: '18px 20px',
-          }}
+          style={{ ...DS.card, padding: '18px 20px', marginBottom: 0 }}
         >
           <div
             style={{

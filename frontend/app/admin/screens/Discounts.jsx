@@ -3,6 +3,106 @@
 import { useState, useEffect } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
 
+const DS = {
+  page: {
+    maxWidth: 960,
+    margin: '0 auto',
+    padding: '24px 20px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  },
+  card: {
+    background: '#ffffff',
+    border: '1px solid #e5e7eb',
+    borderRadius: 14,
+    padding: '20px 24px',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+    marginBottom: 16,
+  },
+  cardFlat: {
+    background: '#ffffff',
+    border: '1px solid #f0f0f0',
+    borderRadius: 14,
+    padding: '20px 24px',
+    marginBottom: 16,
+  },
+  pageTitle: {
+    fontSize: 22,
+    fontWeight: 800,
+    color: '#0f0f0f',
+    margin: 0,
+    letterSpacing: '-0.3px',
+  },
+  pageSubtitle: {
+    fontSize: 13,
+    color: '#9ca3af',
+    margin: '4px 0 0',
+    fontWeight: 400,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#9ca3af',
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    marginBottom: 10,
+  },
+  primary: '#4f46e5',
+  primaryLight: '#eef2ff',
+  success: '#16a34a',
+  successLight: '#dcfce7',
+  warning: '#d97706',
+  warningLight: '#fef3c7',
+  danger: '#dc2626',
+  dangerLight: '#fee2e2',
+  gray50: '#f9fafb',
+  gray100: '#f3f4f6',
+  gray200: '#e5e7eb',
+  gray400: '#9ca3af',
+  gray600: '#4b5563',
+  gray900: '#111827',
+  btnPrimary: {
+    background: '#4f46e5',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 9,
+    padding: '10px 20px',
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: 'pointer',
+  },
+  btnSecondary: {
+    background: '#f3f4f6',
+    color: '#374151',
+    border: '1px solid #e5e7eb',
+    borderRadius: 9,
+    padding: '8px 16px',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+};
+
+function PageHeader({ title, subtitle, action }) {
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between',
+                    alignItems: 'flex-start' }}>
+        <div>
+          <h1 style={DS.pageTitle}>{title}</h1>
+          {subtitle && (
+            <p style={DS.pageSubtitle}>{subtitle}</p>
+          )}
+        </div>
+        {action && (
+          <div style={{ flexShrink: 0, marginTop: 2 }}>{action}</div>
+        )}
+      </div>
+      <div style={{ height: 3, background: 'linear-gradient(90deg, #4f46e5, #818cf8)',
+                    borderRadius: 2, marginTop: 12, width: 48 }} />
+    </div>
+  );
+}
+
 const DISCOUNT_ITEMS = [
   { key: 'pushDiscount', label: '🔔 Push notification', desc: 'Customer allows push notifications' },
   { key: 'emailDiscount', label: '✉️ Email address', desc: 'Customer provides their email' },
@@ -74,30 +174,18 @@ export default function Discounts({ shop }) {
   }
 
   return (
-    <div style={{ padding: '0 24px 24px', maxWidth: '800px', margin: '0 auto' }}>
-      <div style={{ marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }}>
-          Discounts
-        </h1>
-        <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
-          Reward customers who subscribe with automatic discount codes.
-        </p>
-      </div>
+    <div style={DS.page}>
+      <PageHeader
+        title="Discounts"
+        subtitle="Configure discount rules for popup capture"
+      />
 
       {loading ? (
         <div style={{ fontSize: '13px', color: '#9ca3af' }}>Loading…</div>
       ) : (
         <>
           {/* Offer headline */}
-          <div
-            style={{
-              background: '#fff',
-              border: '1px solid #e5e7eb',
-              borderRadius: '10px',
-              padding: '20px 24px',
-              marginBottom: '16px',
-            }}
-          >
+          <div style={DS.card}>
             <div
               style={{
                 fontSize: '14px',
@@ -131,13 +219,7 @@ export default function Discounts({ shop }) {
             return (
               <div
                 key={item.key}
-                style={{
-                  background: '#fff',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '10px',
-                  padding: '20px 24px',
-                  marginBottom: '12px',
-                }}
+                style={DS.card}
               >
                 {/* Header row */}
                 <div
@@ -334,20 +416,17 @@ export default function Discounts({ shop }) {
               onClick={saveConfig}
               disabled={saving}
               style={{
+                ...DS.btnPrimary,
                 padding: '12px 32px',
                 fontSize: '14px',
-                fontWeight: '600',
-                color: '#fff',
-                background: saving ? '#9ca3af' : '#111827',
-                border: 'none',
-                borderRadius: '8px',
+                background: saving ? DS.gray400 : DS.primary,
                 cursor: saving ? 'not-allowed' : 'pointer',
               }}
             >
               {saving ? 'Saving…' : 'Save discount settings'}
             </button>
-            {success && <span style={{ fontSize: '13px', color: '#16a34a' }}>✓ Saved</span>}
-            {error && <span style={{ fontSize: '13px', color: '#dc2626' }}>{error}</span>}
+            {success && <span style={{ fontSize: '13px', color: DS.success }}>✓ Saved</span>}
+            {error && <span style={{ fontSize: '13px', color: DS.danger }}>{error}</span>}
           </div>
         </>
       )}

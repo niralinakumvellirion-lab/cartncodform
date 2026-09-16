@@ -4,6 +4,106 @@ import { useState, useEffect } from 'react';
 import { Banner, Button } from '@shopify/polaris';
 import { apiGet, apiSend, BACKEND_URL } from '../../../lib/api';
 
+const DS = {
+  page: {
+    maxWidth: 960,
+    margin: '0 auto',
+    padding: '24px 20px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  },
+  card: {
+    background: '#ffffff',
+    border: '1px solid #e5e7eb',
+    borderRadius: 14,
+    padding: '20px 24px',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+    marginBottom: 16,
+  },
+  cardFlat: {
+    background: '#ffffff',
+    border: '1px solid #f0f0f0',
+    borderRadius: 14,
+    padding: '20px 24px',
+    marginBottom: 16,
+  },
+  pageTitle: {
+    fontSize: 22,
+    fontWeight: 800,
+    color: '#0f0f0f',
+    margin: 0,
+    letterSpacing: '-0.3px',
+  },
+  pageSubtitle: {
+    fontSize: 13,
+    color: '#9ca3af',
+    margin: '4px 0 0',
+    fontWeight: 400,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#9ca3af',
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    marginBottom: 10,
+  },
+  primary: '#4f46e5',
+  primaryLight: '#eef2ff',
+  success: '#16a34a',
+  successLight: '#dcfce7',
+  warning: '#d97706',
+  warningLight: '#fef3c7',
+  danger: '#dc2626',
+  dangerLight: '#fee2e2',
+  gray50: '#f9fafb',
+  gray100: '#f3f4f6',
+  gray200: '#e5e7eb',
+  gray400: '#9ca3af',
+  gray600: '#4b5563',
+  gray900: '#111827',
+  btnPrimary: {
+    background: '#4f46e5',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 9,
+    padding: '10px 20px',
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: 'pointer',
+  },
+  btnSecondary: {
+    background: '#f3f4f6',
+    color: '#374151',
+    border: '1px solid #e5e7eb',
+    borderRadius: 9,
+    padding: '8px 16px',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+};
+
+function PageHeader({ title, subtitle, action }) {
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between',
+                    alignItems: 'flex-start' }}>
+        <div>
+          <h1 style={DS.pageTitle}>{title}</h1>
+          {subtitle && (
+            <p style={DS.pageSubtitle}>{subtitle}</p>
+          )}
+        </div>
+        {action && (
+          <div style={{ flexShrink: 0, marginTop: 2 }}>{action}</div>
+        )}
+      </div>
+      <div style={{ height: 3, background: 'linear-gradient(90deg, #4f46e5, #818cf8)',
+                    borderRadius: 2, marginTop: 12, width: 48 }} />
+    </div>
+  );
+}
+
 const TONES = ['friendly', 'direct', 'playful'];
 const LANGS = [
   { value: 'en', label: 'English' },
@@ -253,10 +353,8 @@ export default function Settings({ shop }) {
     cursor: 'pointer',
   });
   const card = {
-    background: '#fff',
-    border: '1px solid #e5e7eb',
-    borderRadius: '10px',
-    padding: isMobileView ? '16px' : '20px 24px',
+    ...DS.card,
+    padding: isMobileView ? '16px' : DS.card.padding,
   };
 
   // --- popup customization row styles ---
@@ -561,10 +659,9 @@ export default function Settings({ shop }) {
   const saveCard = (
     <div
       style={{
-        background: '#fff',
-        border: '1px solid #e5e7eb',
-        borderRadius: '10px',
+        ...DS.card,
         padding: '16px 20px',
+        marginBottom: 0,
         display: 'flex',
         alignItems: 'center',
         gap: '12px',
@@ -574,13 +671,10 @@ export default function Settings({ shop }) {
         onClick={saveSettings}
         disabled={saving}
         style={{
+          ...DS.btnPrimary,
           padding: '10px 24px',
           fontSize: '14px',
-          fontWeight: '600',
-          color: '#fff',
-          background: saving ? '#9ca3af' : '#111827',
-          border: 'none',
-          borderRadius: '8px',
+          background: saving ? DS.gray400 : DS.primary,
           cursor: saving ? 'not-allowed' : 'pointer',
           flex: 1,
         }}
@@ -605,10 +699,7 @@ export default function Settings({ shop }) {
   const popupCard = !showPopupCustomizer ? (
     <div
       style={{
-        background: '#fff',
-        border: '1px solid #e5e7eb',
-        borderRadius: '10px',
-        padding: isMobileView ? '16px' : '20px 24px',
+        ...card,
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
@@ -632,14 +723,8 @@ export default function Settings({ shop }) {
               <button
                 onClick={() => setShowPopupCustomizer(true)}
                 style={{
+                  ...DS.btnPrimary,
                   padding: '8px 18px',
-                  fontSize: '13px',
-                  fontWeight: '600',
-                  color: '#fff',
-                  background: '#111827',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
                   flexShrink: 0,
                   marginLeft: '16px',
                 }}
@@ -1853,14 +1938,11 @@ export default function Settings({ shop }) {
                 onClick={saveSettings}
                 disabled={saving}
                 style={{
+                  ...DS.btnPrimary,
                   flex: 1,
                   padding: '12px 24px',
                   fontSize: '14px',
-                  fontWeight: '600',
-                  color: '#fff',
-                  background: saving ? '#9ca3af' : '#111827',
-                  border: 'none',
-                  borderRadius: '8px',
+                  background: saving ? DS.gray400 : DS.primary,
                   cursor: saving ? 'not-allowed' : 'pointer',
                 }}
               >
@@ -1885,23 +1967,11 @@ export default function Settings({ shop }) {
   );
 
   return (
-    <div style={{ padding: '0 24px 24px', maxWidth: '1100px', margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '20px' }}>
-        <h1
-          style={{
-            fontSize: '24px',
-            fontWeight: '700',
-            color: '#111827',
-            margin: '0 0 6px',
-          }}
-        >
-          Settings
-        </h1>
-        <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
-          Two minutes here shapes every message.
-        </p>
-      </div>
+    <div style={DS.page}>
+      <PageHeader
+        title="Settings"
+        subtitle="Configure your automation preferences"
+      />
 
       {needsReauth && (
         <div style={{ marginBottom: '16px' }}>

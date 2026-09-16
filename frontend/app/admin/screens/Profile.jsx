@@ -14,6 +14,106 @@ import {
 } from '@shopify/polaris';
 import { apiGet } from '../../../lib/api';
 
+const DS = {
+  page: {
+    maxWidth: 960,
+    margin: '0 auto',
+    padding: '24px 20px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  },
+  card: {
+    background: '#ffffff',
+    border: '1px solid #e5e7eb',
+    borderRadius: 14,
+    padding: '20px 24px',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+    marginBottom: 16,
+  },
+  cardFlat: {
+    background: '#ffffff',
+    border: '1px solid #f0f0f0',
+    borderRadius: 14,
+    padding: '20px 24px',
+    marginBottom: 16,
+  },
+  pageTitle: {
+    fontSize: 22,
+    fontWeight: 800,
+    color: '#0f0f0f',
+    margin: 0,
+    letterSpacing: '-0.3px',
+  },
+  pageSubtitle: {
+    fontSize: 13,
+    color: '#9ca3af',
+    margin: '4px 0 0',
+    fontWeight: 400,
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    color: '#9ca3af',
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
+    marginBottom: 10,
+  },
+  primary: '#4f46e5',
+  primaryLight: '#eef2ff',
+  success: '#16a34a',
+  successLight: '#dcfce7',
+  warning: '#d97706',
+  warningLight: '#fef3c7',
+  danger: '#dc2626',
+  dangerLight: '#fee2e2',
+  gray50: '#f9fafb',
+  gray100: '#f3f4f6',
+  gray200: '#e5e7eb',
+  gray400: '#9ca3af',
+  gray600: '#4b5563',
+  gray900: '#111827',
+  btnPrimary: {
+    background: '#4f46e5',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 9,
+    padding: '10px 20px',
+    fontSize: 13,
+    fontWeight: 700,
+    cursor: 'pointer',
+  },
+  btnSecondary: {
+    background: '#f3f4f6',
+    color: '#374151',
+    border: '1px solid #e5e7eb',
+    borderRadius: 9,
+    padding: '8px 16px',
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: 'pointer',
+  },
+};
+
+function PageHeader({ title, subtitle, action }) {
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between',
+                    alignItems: 'flex-start' }}>
+        <div>
+          <h1 style={DS.pageTitle}>{title}</h1>
+          {subtitle && (
+            <p style={DS.pageSubtitle}>{subtitle}</p>
+          )}
+        </div>
+        {action && (
+          <div style={{ flexShrink: 0, marginTop: 2 }}>{action}</div>
+        )}
+      </div>
+      <div style={{ height: 3, background: 'linear-gradient(90deg, #4f46e5, #818cf8)',
+                    borderRadius: 2, marginTop: 12, width: 48 }} />
+    </div>
+  );
+}
+
 export default function Profile({ shop, profileId, onBack }) {
   const [profile, setProfile] = useState(null);
   const [signals, setSignals] = useState([]);
