@@ -87,11 +87,19 @@ const cardStyle = {
 
 function DelayInput({ value, onChange }) {
   const isHours = value >= 60 && value % 60 === 0;
-  const [amount, setAmount] = useState(isHours ? value / 60 : value);
-  const [unit, setUnit] = useState(isHours ? 'hours' : 'minutes');
+  const isSeconds = value > 0 && value < 1;
+  const [amount, setAmount] = useState(
+    isHours ? value / 60 : isSeconds ? Math.round(value * 60) : value
+  );
+  const [unit, setUnit] = useState(
+    isHours ? 'hours' : isSeconds ? 'seconds' : 'minutes'
+  );
 
   function update(a, u) {
-    const mins = u === 'hours' ? a * 60 : a;
+    let mins;
+    if (u === 'seconds') mins = a / 60;
+    else if (u === 'hours') mins = a * 60;
+    else mins = a;
     onChange(mins);
   }
 
@@ -126,6 +134,7 @@ function DelayInput({ value, onChange }) {
           cursor: 'pointer',
         }}
       >
+        <option value="seconds">sec</option>
         <option value="minutes">min</option>
         <option value="hours">hrs</option>
       </select>
