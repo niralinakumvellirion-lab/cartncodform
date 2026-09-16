@@ -241,31 +241,33 @@ export default function QueueScreen({ shop }) {
         ))}
       </div>
 
-      {/* 3. STATS ROW */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(2, 1fr)',
-          gap: 12,
-          marginBottom: 20,
-        }}
-      >
-        {STATS_STATUSES.map((s) => {
-          const badge = STATUS_BADGE[s];
-          return (
-            <div key={s} style={{
-              background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10,
-              padding: 16,
-            }}>
-              <div style={{ fontSize: 24, fontWeight: 700, color: badge.color }}>
-                {statsLoading ? '...' : (statusCounts[s] ?? 0)}
-              </div>
-              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                {formatSignal(s)}
-              </div>
-            </div>
-          );
-        })}
+      {/* 3. STATS ROW — compact inline bar (see
+          audits/queue-stats-compact-audit.txt). NOTE: the task assumed a
+          `stats` object with stats.pending/stats.sent; the actual state
+          holding these counts in this file is `statusCounts` (keyed by
+          status string, populated by the STATS_STATUSES effect above) —
+          adapted accordingly. */}
+      <div style={{
+        display: 'flex',
+        gap: 24,
+        padding: '12px 0',
+        marginBottom: 16,
+        borderBottom: '1px solid #f3f4f6',
+      }}>
+        {[
+          { label: 'Pending', value: statusCounts.pending, color: '#f59e0b' },
+          { label: 'Sent', value: statusCounts.sent, color: '#16a34a' },
+        ].map(({ label, value, color }) => (
+          <div key={label} style={{ display: 'flex',
+                                    alignItems: 'baseline', gap: 6 }}>
+            <span style={{ fontSize: 20, fontWeight: 800, color }}>
+              {value ?? '—'}
+            </span>
+            <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 500 }}>
+              {label}
+            </span>
+          </div>
+        ))}
       </div>
 
       {/* 4. TABLE / CARD LIST */}
