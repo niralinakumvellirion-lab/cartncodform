@@ -583,13 +583,12 @@ export default function Today({ shop }) {
             gap: 12,
           }}
         >
-          {NOTIF_STATS.map(({ key, label, Icon }) => (
+          {NOTIF_STATS.map(({ key, label }) => (
             <div key={key} style={STAT_CARD_STYLE}>
-              <Icon style={{ color: '#6366f1', marginBottom: 8 }} />
-              <div style={{ fontSize: 24, fontWeight: 700, color: '#111827' }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>
                 {notifLoading ? '...' : (notifStats?.[key] ?? 0)}
               </div>
-              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+              <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
                 {label}
               </div>
             </div>
@@ -624,7 +623,7 @@ export default function Today({ shop }) {
             gap: 12,
           }}
         >
-          {ACTIVITY_STATS.map(({ key, label, Icon }) => (
+          {ACTIVITY_STATS.map(({ key, label }) => (
             <div
               key={key}
               onClick={() => navigate(`/admin/activity?type=${key}`)}
@@ -632,11 +631,10 @@ export default function Today({ shop }) {
               onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'none'; }}
             >
-              <Icon style={{ color: '#6366f1', marginBottom: 8 }} />
-              <div style={{ fontSize: 24, fontWeight: 700, color: '#111827' }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>
                 {notifLoading ? '...' : (activity?.summary?.[key] ?? 0)}
               </div>
-              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+              <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
                 {label}
               </div>
             </div>
