@@ -7,7 +7,7 @@ import { apiGet, apiSend } from '../../../lib/api';
 
 const DS = {
   page: {
-    maxWidth: 960,
+    maxWidth: 1100,
     margin: '0 auto',
     padding: '24px 20px',
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -15,7 +15,7 @@ const DS = {
   card: {
     background: '#ffffff',
     border: '1px solid #e5e7eb',
-    borderRadius: 14,
+    borderRadius: 12,
     padding: '20px 24px',
     boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
     marginBottom: 16,
@@ -364,28 +364,24 @@ export default function DashboardScreen({ shop }) {
     return b.views - a.views;
   });
 
-  const TILES = [
-    {
-      label: 'Product views this week',
-      value: insightsStats?.productViewsThisWeek?.toLocaleString('en-IN') ?? '—',
-      sub: '↗ tracking active',
-    },
-    {
-      label: 'Allowed notifications',
-      value: insightsStats?.allowedNotifications ? `${insightsStats.allowedNotifications}%` : '—',
-      sub: 'of visitors with the popup',
-    },
-    {
-      label: 'Add-to-cart rate',
-      value: insightsStats?.addToCartRate ? `${insightsStats.addToCartRate}%` : '—',
-      sub: 'sessions that added something',
-    },
-    {
-      label: 'Sessions tracked',
-      value: insightsStats?.sessionCount?.toLocaleString('en-IN') ?? '—',
-      sub: 'unique visitors this week',
-    },
+  // --- Redesign-only derived data (render-time groupings, no new
+  // fetches/state — mirrors the existing TILES/groupedSignals pattern) ---
+  const kpiRow1 = [
+    { label: 'Push Sent', value: notifStats?.pushSent },
+    { label: 'Emails Sent', value: notifStats?.emailsSent },
+    { label: 'Push Subscribers', value: notifStats?.pushSubscribers },
   ];
+  const kpiRow2 = [
+    { label: 'Popups Shown', value: notifStats?.popupsShown },
+    { label: 'Emails Captured', value: notifStats?.emailsCaptured },
+    { label: 'New Subscribers Today', value: newSubscribers.length },
+  ];
+  const ACT_COLORS = {
+    add_to_cart: '#d97706',
+    checkout_start: '#4f46e5',
+    purchase: '#16a34a',
+    revisit: '#6b7280',
+  };
 
   // Header "Refresh" — re-runs Today's date-filtered effect (via
   // refreshKey) AND Insights' own load, so one button refreshes the
@@ -420,369 +416,364 @@ export default function DashboardScreen({ shop }) {
   return (
     <Page>
     <div style={DS.page}>
-      {/* 1. Page header */}
-      <PageHeader
-        title="Dashboard"
-        subtitle="Your store performance at a glance"
-        action={refreshButton}
-      />
 
-      {/* 2. Date filter bar (from Today.jsx — unchanged) */}
+      {/* SECTION 1 — sticky top bar */}
       <div
         style={{
+          position: isMobileView ? 'relative' : 'sticky',
+          top: 0,
+          zIndex: 10,
+          background: '#ffffff',
+          borderBottom: '1px solid #e5e7eb',
+          padding: '12px 24px',
+          marginBottom: 24,
           display: 'flex',
-          gap: 4,
-          padding: 4,
-          background: '#f3f4f6',
-          borderRadius: 8,
-          width: 'fit-content',
-          marginBottom: 20,
+          flexDirection: isMobileView ? 'column' : 'row',
+          justifyContent: 'space-between',
+          alignItems: isMobileView ? 'flex-start' : 'center',
+          gap: isMobileView ? 10 : 0,
         }}
       >
-        {DATE_FILTERS.map((f) => (
-          <button
-            key={f.key}
-            onClick={() => setDateFilter(f.key)}
+        <div>
+          <h1 style={{ ...DS.pageTitle, fontSize: 20 }}>Dashboard</h1>
+          <p style={DS.pageSubtitle}>{todaySubtitle}</p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div
             style={{
-              padding: '6px 14px',
-              fontSize: 13,
-              fontWeight: 600,
-              border: 'none',
-              borderRadius: 6,
-              cursor: 'pointer',
-              background: dateFilter === f.key ? '#4f46e5' : 'transparent',
-              color: dateFilter === f.key ? '#fff' : '#6b7280',
+              display: 'flex',
+              gap: 4,
+              padding: 4,
+              background: '#f3f4f6',
+              borderRadius: 8,
             }}
           >
-            {f.label}
-          </button>
-        ))}
-      </div>
-
-      {/* 3. Insights content — full content, charts, graphs (from Insights.jsx) */}
-      {insightsError && (
-        <div
-          style={{
-            background: DS.dangerLight,
-            border: '1px solid #fecaca',
-            borderRadius: '10px',
-            padding: '12px 16px',
-            marginBottom: '16px',
-            fontSize: '13px',
-            color: '#b91c1c',
-          }}
-        >
-          {insightsError}
-        </div>
-      )}
-
-      {/* 4 stat tiles */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-          gap: '12px',
-          marginBottom: '20px',
-        }}
-      >
-        {TILES.map((tile) => (
-          <div
-            key={tile.label}
-            style={{ ...DS.card, padding: '16px 18px', marginBottom: 0 }}
-          >
-            <div
-              style={{
-                fontSize: '11px',
-                color: '#9ca3af',
-                fontWeight: '500',
-                marginBottom: '8px',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-              }}
-            >
-              {tile.label}
-            </div>
-            <div
-              style={{
-                fontSize: '28px',
-                fontWeight: '700',
-                color: '#111827',
-                lineHeight: 1,
-                marginBottom: '6px',
-              }}
-            >
-              {insightsLoading ? '—' : tile.value}
-            </div>
-            <div style={{ fontSize: '11px', color: '#9ca3af' }}>{tile.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Products table */}
-      <div
-        style={{ ...DS.card, padding: 0, overflow: 'hidden' }}
-      >
-        {/* Table header with sort tabs */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '14px 20px',
-            borderBottom: '1px solid #f3f4f6',
-          }}
-        >
-          <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>
-            Products
-          </div>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            {SORT_TABS.map((tab) => (
+            {DATE_FILTERS.map((f) => (
               <button
-                key={tab.key}
-                onClick={() => setSortBy(tab.key)}
+                key={f.key}
+                onClick={() => setDateFilter(f.key)}
                 style={{
-                  padding: '4px 12px',
-                  fontSize: '12px',
-                  fontWeight: sortBy === tab.key ? '600' : '400',
-                  color: sortBy === tab.key ? '#111827' : '#9ca3af',
-                  background: sortBy === tab.key ? '#f3f4f6' : 'transparent',
-                  border: '1px solid',
-                  borderColor: sortBy === tab.key ? '#e5e7eb' : 'transparent',
-                  borderRadius: '6px',
+                  padding: '6px 14px',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  border: 'none',
+                  borderRadius: 6,
                   cursor: 'pointer',
+                  background: dateFilter === f.key ? '#4f46e5' : 'transparent',
+                  color: dateFilter === f.key ? '#fff' : '#6b7280',
                 }}
               >
-                {tab.label}
+                {f.label}
               </button>
             ))}
           </div>
+          {refreshButton}
         </div>
+      </div>
 
-        {/* Column headers */}
+      {/* SECTION 2 — KPI row (6 cards, 2 rows of 3 via grid wrap) */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
+          gap: 12,
+          marginBottom: 24,
+        }}
+      >
+        {[...kpiRow1, ...kpiRow2].map((kpi) => (
+          <div
+            key={kpi.label}
+            style={{ ...DS.card, padding: '16px 20px', marginBottom: 0 }}
+          >
+            <div
+              style={{
+                fontSize: 12,
+                color: '#6b7280',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                marginBottom: 8,
+              }}
+            >
+              {kpi.label}
+            </div>
+            <div style={{ fontSize: 28, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
+              {notifLoading ? '—' : (kpi.value ?? 0)}
+            </div>
+            <div style={{ width: 40, height: 3, background: '#4f46e5', borderRadius: 2, marginTop: 12 }} />
+          </div>
+        ))}
+      </div>
+
+      {/* SECTION 3 — Attributed Activity (4 clickable cards) */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={DS.sectionLabel}>Attributed Activity</div>
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: '2fr 80px 80px 100px 80px',
-            padding: '8px 20px',
-            background: '#f9fafb',
-            borderBottom: '1px solid #f3f4f6',
+            gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+            gap: 12,
           }}
         >
-          {['Product', 'Views', 'Avg time', 'Avg scroll', 'Cart rate'].map((h) => (
+          {ACTIVITY_STATS.map(({ key, label }) => (
             <div
-              key={h}
-              style={{
-                fontSize: '11px',
-                fontWeight: '600',
-                color: '#9ca3af',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px',
-              }}
+              key={key}
+              onClick={() => navigate(`/admin/activity?type=${key}`)}
+              style={{ ...DS.card, marginBottom: 0, padding: '16px 20px',
+                       cursor: 'pointer', transition: 'box-shadow 0.15s' }}
+              onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'; }}
+              onMouseLeave={e => { e.currentTarget.style.boxShadow = DS.card.boxShadow; }}
             >
-              {h}
+              <div
+                style={{
+                  fontSize: 24,
+                  fontWeight: 700,
+                  color: ACT_COLORS[key] || '#111827',
+                  lineHeight: 1,
+                  marginBottom: 6,
+                }}
+              >
+                {notifLoading ? '—' : (activity?.summary?.[key] ?? 0)}
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>{label}</div>
             </div>
           ))}
         </div>
+      </div>
 
-        {/* Rows */}
-        {insightsLoading ? (
-          [1, 2, 3, 4].map((i) => (
+      {/* SECTION 4 — two column layout (60/40, stacks on mobile) */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: isMobileView ? '1fr' : '3fr 2fr',
+          gap: 24,
+          marginBottom: 24,
+        }}
+      >
+        {/* LEFT column — products + AI insight */}
+        <div>
+          {insightsError && (
             <div
-              key={i}
               style={{
-                height: '52px',
-                borderBottom: '1px solid #f9fafb',
+                background: DS.dangerLight,
+                border: '1px solid #fecaca',
+                borderRadius: 10,
+                padding: '12px 16px',
+                marginBottom: 16,
+                fontSize: 13,
+                color: '#b91c1c',
+              }}
+            >
+              {insightsError}
+            </div>
+          )}
+
+          {/* 4A — Most Viewed Products */}
+          <div style={{ ...DS.card, padding: 0, overflow: 'hidden', marginBottom: 16 }}>
+            <div
+              style={{
                 display: 'flex',
                 alignItems: 'center',
-                padding: '0 20px',
+                justifyContent: 'space-between',
+                padding: '14px 20px',
+                borderBottom: '1px solid #f3f4f6',
+              }}
+            >
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
+                Most Viewed Products
+              </span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {SORT_TABS.map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setSortBy(tab.key)}
+                    style={{
+                      padding: '4px 12px',
+                      fontSize: 12,
+                      fontWeight: sortBy === tab.key ? 600 : 400,
+                      color: sortBy === tab.key ? '#111827' : '#9ca3af',
+                      background: sortBy === tab.key ? '#f3f4f6' : 'transparent',
+                      border: '1px solid',
+                      borderColor: sortBy === tab.key ? '#e5e7eb' : 'transparent',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '32px 2fr 60px 70px',
+                padding: '8px 20px',
+                background: '#f9fafb',
+                borderBottom: '1px solid #f3f4f6',
+              }}
+            >
+              {['#', 'Product', 'Views', 'Avg time'].map((h) => (
+                <div
+                  key={h}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: '#9ca3af',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                  }}
+                >
+                  {h}
+                </div>
+              ))}
+            </div>
+
+            {insightsLoading ? (
+              [1, 2, 3].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    height: 48,
+                    borderBottom: '1px solid #f9fafb',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '0 20px',
+                  }}
+                >
+                  <div style={{ width: '40%', height: 12, background: '#f3f4f6', borderRadius: 4 }} />
+                </div>
+              ))
+            ) : sortedProducts.length === 0 ? (
+              <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+                No product view data yet.
+              </div>
+            ) : (
+              sortedProducts.slice(0, 5).map((p, i, arr) => (
+                <div
+                  key={p.productId}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '32px 2fr 60px 70px',
+                    padding: '10px 20px',
+                    alignItems: 'center',
+                    borderBottom: i < arr.length - 1 ? '1px solid #f9fafb' : 'none',
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600 }}>{i + 1}</div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>
+                    {p.productTitle || p.productId || 'Unknown'}
+                  </div>
+                  <div style={{ fontSize: 13, color: '#374151' }}>{p.views}</div>
+                  <div style={{ fontSize: 13, color: '#374151' }}>
+                    {p.avgDwell > 0 ? `${p.avgDwell}s` : '—'}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* 4B — AI insight */}
+          {aiInsights?.length > 0 && (
+            <div
+              style={{
+                ...DS.card,
+                marginBottom: 0,
+                borderLeft: '3px solid #4f46e5',
+                background: '#ffffff',
               }}
             >
               <div
                 style={{
-                  width: '40%',
-                  height: '12px',
-                  background: '#f3f4f6',
-                  borderRadius: '4px',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: '#9ca3af',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  marginBottom: 8,
                 }}
-              />
+              >
+                Weekly insight
+              </div>
+              <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, margin: 0 }}>
+                {aiInsights[0]}
+              </p>
             </div>
-          ))
-        ) : sortedProducts.length === 0 ? (
-          <div
-            style={{
-              padding: '32px',
-              textAlign: 'center',
-              color: '#9ca3af',
-              fontSize: '14px',
-            }}
-          >
-            No product view data yet. Make sure the storefront block is enabled.
-          </div>
-        ) : (
-          sortedProducts.map((p, i) => (
-            <div
-              key={p.productId}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '2fr 80px 80px 100px 80px',
-                padding: '12px 20px',
-                alignItems: 'center',
-                borderBottom:
-                  i < sortedProducts.length - 1 ? '1px solid #f9fafb' : 'none',
-              }}
-            >
-              {/* Product */}
-              <div>
+          )}
+        </div>
+
+        {/* RIGHT column — planned + yesterday */}
+        <div>
+          {/* 4C — Planned for today */}
+          <div style={{ ...DS.card, marginBottom: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 12 }}>
+              Planned for today
+            </div>
+            {todayLoading ? (
+              [1, 2, 3].map((i) => (
+                <div key={i} style={{ height: 24, background: '#f3f4f6', borderRadius: 4, marginBottom: 8 }} />
+              ))
+            ) : groupedSignals.length ? (
+              groupedSignals.slice(0, 5).map((sig) => (
                 <div
-                  style={{ fontSize: '13px', fontWeight: '500', color: '#111827' }}
-                >
-                  {p.productTitle || p.productId || 'Unknown'}
-                </div>
-                {p.productPrice && (
-                  <div style={{ fontSize: '11px', color: '#9ca3af' }}>
-                    ₹{Number(p.productPrice).toLocaleString('en-IN')}
-                  </div>
-                )}
-              </div>
-              {/* Views */}
-              <div style={{ fontSize: '13px', color: '#374151' }}>
-                {p.views}
-                <div style={{ fontSize: '11px', color: '#9ca3af' }}>
-                  {p.uniqueViewers} people
-                </div>
-              </div>
-              {/* Avg time */}
-              <div style={{ fontSize: '13px', color: '#374151' }}>
-                {p.avgDwell > 0 ? `${p.avgDwell}s` : '—'}
-              </div>
-              {/* Avg scroll bar */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div
+                  key={sig.type}
                   style={{
-                    flex: 1,
-                    height: '4px',
-                    background: '#e5e7eb',
-                    borderRadius: '2px',
-                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '7px 0',
+                    borderBottom: '1px solid #f9fafb',
                   }}
                 >
-                  <div
-                    style={{
-                      height: '100%',
-                      width: `${Math.min(p.cartRate || 0, 100)}%`,
-                      background: p.cartRate > 15 ? '#16a34a' : '#374151',
-                      borderRadius: '2px',
-                    }}
-                  />
+                  <span style={{ fontSize: 13, color: '#374151' }}>
+                    {SIGNAL_LABELS[sig.type] || sig.type.replace(/_/g, ' ')}
+                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: '#9ca3af',
+                        background: '#f3f4f6',
+                        padding: '2px 8px',
+                        borderRadius: 20,
+                      }}
+                    >
+                      {sig.channel || 'push'}
+                    </span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#111827', minWidth: 16, textAlign: 'right' }}>
+                      {sig.count}
+                    </span>
+                  </div>
                 </div>
-                <span
-                  style={{ fontSize: '11px', color: '#9ca3af', minWidth: '30px' }}
-                >
-                  {p.cartRate}%
-                </span>
-              </div>
-              {/* Cart rate */}
-              <div style={{ fontSize: '13px', color: '#374151' }}>
-                {p.cartRate}%
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* AI insight at bottom */}
-      {aiInsights?.length > 0 && (
-        <div
-          style={{
-            ...DS.card,
-            background: DS.warningLight,
-            border: '1px solid #fde68a',
-            display: 'flex',
-            gap: '12px',
-            alignItems: 'flex-start',
-          }}
-        >
-          <span style={{ fontSize: '18px', flexShrink: 0 }}>✨</span>
-          <p
-            style={{
-              fontSize: '13px',
-              color: '#374151',
-              lineHeight: '1.6',
-              margin: 0,
-            }}
-          >
-            {aiInsights[0]}
-          </p>
-        </div>
-      )}
-
-      {/* 4. Today stats section — Notifications 2-column layout, then
-          new subscriber alerts (from Today.jsx) */}
-
-      {/* Notifications (left) + Attributed Activity (right) */}
-      <div style={{ display: 'grid',
-                    gridTemplateColumns: isMobileView ? '1fr' : '1fr 1fr',
-                    gap: 16, marginTop: 20, marginBottom: 20 }}>
-
-        {/* Left — Notifications */}
-        <div style={{ ...DS.card, padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #f3f4f6',
-                        display: 'flex', justifyContent: 'space-between',
-                        alignItems: 'center' }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
-                           textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Notifications
-            </span>
-            <span style={{ fontSize: 11, color: '#9ca3af' }}>
-              {dateFilter === '7d' ? 'Last 7 days' :
-               dateFilter === '30d' ? 'Last 30 days' :
-               dateFilter === 'today' ? 'Today' : 'Yesterday'}
-            </span>
+              ))
+            ) : (
+              <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>No signals right now.</p>
+            )}
           </div>
-          {NOTIF_STATS.map(({ key, label }) => (
-            <div key={key} style={{ display: 'flex', justifyContent: 'space-between',
-                                    alignItems: 'center', padding: '12px 20px',
-                                    borderBottom: '1px solid #f9fafb' }}>
-              <span style={{ fontSize: 13, color: '#6b7280' }}>{label}</span>
-              <span style={{ fontSize: 16, fontWeight: 700, color: '#111827' }}>
-                {notifLoading ? '—' : (notifStats?.[key] ?? 0)}
-              </span>
-            </div>
-          ))}
-        </div>
 
-        {/* Right — Activity */}
-        <div style={{ ...DS.card, padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #f3f4f6',
-                        display: 'flex', justifyContent: 'space-between',
-                        alignItems: 'center' }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
-                           textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Attributed Activity
-            </span>
-            <span
-              onClick={() => navigate('/admin/activity')}
-              style={{ fontSize: 11, color: '#4f46e5', cursor: 'pointer',
-                       fontWeight: 600 }}>
-              View all →
-            </span>
-          </div>
-          {ACTIVITY_STATS.map(({ key, label, color }) => (
-            <div key={key}
-              onClick={() => navigate(`/admin/activity?type=${key}`)}
-              style={{ display: 'flex', justifyContent: 'space-between',
-                       alignItems: 'center', padding: '12px 20px',
-                       borderBottom: '1px solid #f9fafb',
-                       cursor: 'pointer', transition: 'background 0.15s' }}
-              onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              <span style={{ fontSize: 13, color: '#6b7280' }}>{label}</span>
-              <span style={{ fontSize: 16, fontWeight: 700, color: color || '#111827' }}>
-                {notifLoading ? '—' : (activity?.summary?.[key] ?? 0)}
-              </span>
+          {/* 4D — Yesterday performance */}
+          <div style={{ ...DS.card, marginBottom: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 14 }}>
+              Yesterday
             </div>
-          ))}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>Sent</div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
+                  {todayStats?.messagesSent ?? '—'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>
+                  Opened or clicked
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
+                  {pushStats?.deliveredLast7d ?? '—'}
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -791,10 +782,10 @@ export default function DashboardScreen({ shop }) {
           style={{
             background: DS.dangerLight,
             border: '1px solid #fecaca',
-            borderRadius: '10px',
+            borderRadius: 10,
             padding: '14px 20px',
-            marginBottom: '16px',
-            fontSize: '13px',
+            marginBottom: 24,
+            fontSize: 13,
             color: '#b91c1c',
           }}
         >
@@ -802,46 +793,41 @@ export default function DashboardScreen({ shop }) {
         </div>
       )}
 
-      {/* New subscriber alerts */}
+      {/* SECTION 5 — new subscribers alert */}
       {newSubscribers.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'center',
-                        gap: 8, marginBottom: 10 }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%',
-                          background: '#10b981',
-                          boxShadow: '0 0 0 3px rgba(16,185,129,0.2)',
-                          animation: 'pulse 2s infinite' }} />
-            <span style={{ fontSize: 13, fontWeight: 600,
-                            color: '#111827' }}>
-              {newSubscribers.length} new subscriber
-              {newSubscribers.length > 1 ? 's' : ''} — send them
-              a welcome notification
+        <div style={{ ...DS.card, borderLeft: '3px solid #16a34a', marginBottom: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+              {newSubscribers.length} new subscriber{newSubscribers.length > 1 ? 's' : ''} — send
+              them a welcome notification
             </span>
           </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column',
-                        gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {newSubscribers.map(sub => (
-              <div key={sub.profileId}
-                style={{ ...DS.card, display: 'flex', alignItems: 'center',
-                         justifyContent: 'space-between',
-                         padding: '10px 14px', marginBottom: 0,
-                         gap: 12 }}>
+              <div
+                key={sub.profileId}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 14px',
+                  border: '1px solid #f3f4f6',
+                  borderRadius: 10,
+                  gap: 12,
+                }}
+              >
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600,
-                                color: '#111827' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
                     {sub.email || 'Anonymous subscriber'}
                   </div>
-                  <div style={{ fontSize: 12, color: '#9ca3af',
-                                marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
                     Subscribed {sub.subscribedAt
                       ? new Date(sub.subscribedAt).toLocaleTimeString(
                           [], {hour: '2-digit', minute: '2-digit'})
                       : 'recently'}
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center',
-                              gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   {sendResults[sub.profileId] && (
                     <span style={{
                       fontSize: 12, fontWeight: 600,
@@ -876,280 +862,6 @@ export default function DashboardScreen({ shop }) {
         </div>
       )}
 
-      {/* 5. Planned for today + Yesterday stats (from Today.jsx) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: isMobileView ? '1fr' : '1fr 1fr',
-          gap: '16px',
-          marginBottom: '16px',
-        }}
-      >
-        {/* LEFT — Planned for today */}
-        <div
-          style={{ ...DS.card, padding: '18px 20px', marginBottom: 0 }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: '14px',
-            }}
-          >
-            <span style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>
-              Planned for today
-            </span>
-            <span style={{ fontSize: '12px', color: '#9ca3af' }}>
-              {groupedSignals.length} signal types, one message each
-            </span>
-          </div>
-
-          {/* Signal rows */}
-          {todayLoading ? (
-            [1, 2, 3, 4, 5].map((i) => (
-              <div
-                key={i}
-                style={{
-                  height: '28px',
-                  background: '#f3f4f6',
-                  borderRadius: '4px',
-                  marginBottom: '8px',
-                }}
-              />
-            ))
-          ) : groupedSignals.length ? (
-            groupedSignals.map((sig) => (
-              <div
-                key={sig.type}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '7px 0',
-                  borderBottom: '1px solid #f9fafb',
-                }}
-              >
-                <span style={{ fontSize: '13px', color: '#374151' }}>
-                  {SIGNAL_LABELS[sig.type] || sig.type.replace(/_/g, ' ')}
-                </span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      color: '#9ca3af',
-                      background: '#f3f4f6',
-                      padding: '2px 8px',
-                      borderRadius: '20px',
-                    }}
-                  >
-                    {sig.channel || 'push'}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: '13px',
-                      fontWeight: '600',
-                      color: '#111827',
-                      minWidth: '16px',
-                      textAlign: 'right',
-                    }}
-                  >
-                    {sig.count}
-                  </span>
-                </div>
-              </div>
-            ))
-          ) : (
-            <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
-              No signals right now.
-            </p>
-          )}
-        </div>
-
-        {/* RIGHT — Yesterday */}
-        <div
-          style={{ ...DS.card, padding: '18px 20px', marginBottom: 0 }}
-        >
-          <div
-            style={{
-              fontSize: '14px',
-              fontWeight: '600',
-              color: '#111827',
-              marginBottom: '16px',
-            }}
-          >
-            Yesterday
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-            {/* Sent */}
-            <div>
-              <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>
-                Sent
-              </div>
-              <div
-                style={{
-                  fontSize: '32px',
-                  fontWeight: '700',
-                  color: '#111827',
-                  lineHeight: 1,
-                }}
-              >
-                {todayStats?.messagesSent ?? '—'}
-              </div>
-              <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
-                {pushStats?.deliveredLast7d ?? 0} push ·{' '}
-                {todayStats?.messagesSent
-                  ? Math.max(
-                      0,
-                      todayStats.messagesSent - (pushStats?.deliveredLast7d || 0)
-                    )
-                  : 0}{' '}
-                email
-              </div>
-            </div>
-
-            {/* Opened or clicked */}
-            <div>
-              <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>
-                Opened or clicked
-              </div>
-              <div
-                style={{
-                  fontSize: '32px',
-                  fontWeight: '700',
-                  color: '#111827',
-                  lineHeight: 1,
-                }}
-              >
-                {pushStats?.deliveredLast7d ?? '—'}
-              </div>
-              <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
-                {pushStats?.rateLast7d != null
-                  ? `${(pushStats.rateLast7d * 100).toFixed(0)}% —`
-                  : ''}{' '}
-                push{' '}
-                {pushStats?.rateLast7d != null
-                  ? `${(pushStats.rateLast7d * 100).toFixed(0)}%`
-                  : '—'}
-              </div>
-            </div>
-
-            {/* Came back and bought */}
-            <div>
-              <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>
-                Came back and bought
-              </div>
-              <div
-                style={{
-                  fontSize: '32px',
-                  fontWeight: '700',
-                  color: '#111827',
-                  lineHeight: 1,
-                }}
-              >
-                {todayStats?.conversions ?? '—'}
-              </div>
-              <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
-                {todayStats?.messagesSent
-                  ? `${((todayStats.conversions / todayStats.messagesSent) * 100).toFixed(1)}% of sends`
-                  : ''}
-              </div>
-            </div>
-
-            {/* Recovered */}
-            <div>
-              <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '4px' }}>
-                Recovered
-              </div>
-              <div
-                style={{
-                  fontSize: '32px',
-                  fontWeight: '700',
-                  color: '#16a34a',
-                  lineHeight: 1,
-                }}
-              >
-                ₹{(todayStats?.revenueRecovered || 0).toLocaleString('en-IN')}
-              </div>
-              <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
-                ↑ this week
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Recovered this week chart (from Today.jsx — kept so no
-          functionality from Today.jsx is lost) */}
-      <div>
-        <div
-          style={{ ...DS.card, padding: '18px 20px', marginBottom: 0 }}
-        >
-          <div
-            style={{
-              fontSize: '14px',
-              fontWeight: '600',
-              color: '#111827',
-              marginBottom: '4px',
-            }}
-          >
-            Recovered this week
-          </div>
-          <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '16px' }}>
-            ₹{(todayStats?.revenueRecovered || 0).toLocaleString('en-IN')} from{' '}
-            {todayStats?.messagesSent || 0} messages
-          </div>
-
-          {/* Simple bar chart using divs */}
-          {(() => {
-            const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-            const today = new Date().getDay();
-            const total = todayStats?.revenueRecovered || 0;
-            const bars = days.map((day, i) => ({
-              day,
-              value: i < today ? Math.round(total * Math.random() * 0.3) : 0,
-            }));
-            const maxVal = Math.max(...bars.map((b) => b.value), 1);
-            return (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-end',
-                  gap: '8px',
-                  height: '80px',
-                }}
-              >
-                {bars.map((bar) => (
-                  <div
-                    key={bar.day}
-                    style={{
-                      flex: 1,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      gap: '4px',
-                      height: '100%',
-                      justifyContent: 'flex-end',
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: '100%',
-                        height: `${(bar.value / maxVal) * 70}px`,
-                        background: bar.value > 0 ? '#16a34a' : '#e5e7eb',
-                        borderRadius: '3px 3px 0 0',
-                        minHeight: bar.value > 0 ? '4px' : '2px',
-                      }}
-                    />
-                    <div style={{ fontSize: '10px', color: '#9ca3af' }}>{bar.day}</div>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-        </div>
-      </div>
     </div>
     </Page>
   );
