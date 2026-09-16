@@ -3,10 +3,10 @@ import { Suspense } from 'react';
 import { AppProvider } from '@shopify/polaris';
 import { NavMenu } from '@shopify/app-bridge-react';
 import { useSearchParams } from 'next/navigation';
-import MessagesScreen from '../screens/Messages';
+import DashboardScreen from './DashboardScreen';
 import '@shopify/polaris/build/esm/styles.css';
 
-function MessagesContent() {
+function DashboardContent() {
   const searchParams = useSearchParams();
   const shop = searchParams.get('shop') || '';
   return (
@@ -24,15 +24,15 @@ function MessagesContent() {
         <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
       </NavMenu>
-      <MessagesScreen shop={shop} />
+      <DashboardScreen shop={shop} />
     </AppProvider>
   );
 }
 
-export default function MessagesPage() {
+export default function DashboardPage() {
   return (
     <Suspense fallback={null}>
-      <MessagesContent />
+      <DashboardContent />
     </Suspense>
   );
 }
