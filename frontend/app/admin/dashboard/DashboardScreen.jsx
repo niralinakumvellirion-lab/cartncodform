@@ -377,10 +377,10 @@ export default function DashboardScreen({ shop }) {
     { label: 'New Subscribers Today', value: newSubscribers.length },
   ];
   const ACT_COLORS = {
-    add_to_cart: '#d97706',
-    checkout_start: '#4f46e5',
+    add_to_cart: '#f59e0b',
+    checkout_start: '#8b5cf6',
     purchase: '#16a34a',
-    revisit: '#6b7280',
+    revisit: '#3b82f6',
   };
 
   // Header "Refresh" — re-runs Today's date-filtered effect (via
@@ -423,9 +423,9 @@ export default function DashboardScreen({ shop }) {
           position: isMobileView ? 'relative' : 'sticky',
           top: 0,
           zIndex: 10,
-          background: '#ffffff',
+          background: '#fff',
           borderBottom: '1px solid #e5e7eb',
-          padding: '12px 24px',
+          padding: '14px 24px',
           marginBottom: 24,
           display: 'flex',
           flexDirection: isMobileView ? 'column' : 'row',
@@ -435,7 +435,7 @@ export default function DashboardScreen({ shop }) {
         }}
       >
         <div>
-          <h1 style={{ ...DS.pageTitle, fontSize: 20 }}>Dashboard</h1>
+          <h1 style={{ ...DS.pageTitle, fontSize: 18, fontWeight: 700 }}>Dashboard</h1>
           <p style={DS.pageSubtitle}>{todaySubtitle}</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
@@ -483,7 +483,8 @@ export default function DashboardScreen({ shop }) {
         {[...kpiRow1, ...kpiRow2].map((kpi) => (
           <div
             key={kpi.label}
-            style={{ ...DS.card, padding: '16px 20px', marginBottom: 0 }}
+            style={{ ...DS.card, padding: '16px 20px', marginBottom: 0,
+                     borderLeft: '3px solid #4f46e5' }}
           >
             <div
               style={{
@@ -497,12 +498,65 @@ export default function DashboardScreen({ shop }) {
             >
               {kpi.label}
             </div>
-            <div style={{ fontSize: 28, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
+            <div style={{ fontSize: 24, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
               {notifLoading ? '—' : (kpi.value ?? 0)}
             </div>
-            <div style={{ width: 40, height: 3, background: '#4f46e5', borderRadius: 2, marginTop: 12 }} />
           </div>
         ))}
+      </div>
+
+      {/* Insights Stats Row — restored (see audits/dashboard-missing-audit.txt).
+          NOTE: the task text that requested this row assumed insightsStats
+          has fields named productViews/optInRate/sessions. The actual
+          object (set from GET /api/events/:shop/product-analytics's
+          `.stats`, in loadInsights() above) has productViewsThisWeek,
+          allowedNotifications, addToCartRate, sessionCount instead —
+          confirmed by re-reading loadInsights() in this file plus the
+          backend route in an earlier audit. Using the real field names
+          below so the cards show live data instead of always '—'. */}
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
+                      textTransform: 'uppercase', letterSpacing: '0.06em',
+                      marginBottom: 10 }}>
+          Store Performance
+        </div>
+        <div style={{ display: 'grid',
+                      gridTemplateColumns: isMobileView
+                        ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+                      gap: 12 }}>
+          {[
+            { label: 'PRODUCT VIEWS THIS WEEK',
+              value: insightsStats?.productViewsThisWeek ?? '—',
+              sub: '↗ tracking active' },
+            { label: 'ALLOWED NOTIFICATIONS',
+              value: insightsStats?.allowedNotifications
+                ? insightsStats.allowedNotifications + '%' : '—',
+              sub: 'of visitors with the popup' },
+            { label: 'ADD-TO-CART RATE',
+              value: insightsStats?.addToCartRate
+                ? insightsStats.addToCartRate + '%' : '—',
+              sub: 'sessions that added something' },
+            { label: 'SESSIONS TRACKED',
+              value: insightsStats?.sessionCount ?? '—',
+              sub: 'unique visitors this week' },
+          ].map(({ label, value, sub }) => (
+            <div key={label} style={{
+              background: '#fff',
+              border: '1px solid #e5e7eb',
+              borderRadius: 12,
+              padding: '16px 20px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+            }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af',
+                            textTransform: 'uppercase', letterSpacing: '0.06em',
+                            marginBottom: 8 }}>{label}</div>
+              <div style={{ fontSize: 26, fontWeight: 800,
+                            color: '#111827', lineHeight: 1 }}>{value}</div>
+              <div style={{ fontSize: 11, color: '#9ca3af',
+                            marginTop: 6 }}>{sub}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* SECTION 3 — Attributed Activity (4 clickable cards) */}
@@ -520,13 +574,19 @@ export default function DashboardScreen({ shop }) {
               key={key}
               onClick={() => navigate(`/admin/activity?type=${key}`)}
               style={{ ...DS.card, marginBottom: 0, padding: '16px 20px',
-                       cursor: 'pointer', transition: 'box-shadow 0.15s' }}
-              onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'; }}
-              onMouseLeave={e => { e.currentTarget.style.boxShadow = DS.card.boxShadow; }}
+                       cursor: 'pointer', transition: 'box-shadow 0.15s, background 0.15s' }}
+              onMouseEnter={e => {
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                e.currentTarget.style.background = '#f9fafb';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.boxShadow = DS.card.boxShadow;
+                e.currentTarget.style.background = '#ffffff';
+              }}
             >
               <div
                 style={{
-                  fontSize: 24,
+                  fontSize: 22,
                   fontWeight: 700,
                   color: ACT_COLORS[key] || '#111827',
                   lineHeight: 1,
@@ -546,7 +606,7 @@ export default function DashboardScreen({ shop }) {
         style={{
           display: 'grid',
           gridTemplateColumns: isMobileView ? '1fr' : '3fr 2fr',
-          gap: 24,
+          gap: 20,
           marginBottom: 24,
         }}
       >
@@ -658,7 +718,7 @@ export default function DashboardScreen({ shop }) {
                     gridTemplateColumns: '32px 2fr 60px 70px',
                     padding: '10px 20px',
                     alignItems: 'center',
-                    borderBottom: i < arr.length - 1 ? '1px solid #f9fafb' : 'none',
+                    borderBottom: i < arr.length - 1 ? '1px solid #f3f4f6' : 'none',
                   }}
                 >
                   <div style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600 }}>{i + 1}</div>
@@ -688,13 +748,13 @@ export default function DashboardScreen({ shop }) {
                 style={{
                   fontSize: 11,
                   fontWeight: 700,
-                  color: '#9ca3af',
+                  color: '#4f46e5',
                   textTransform: 'uppercase',
                   letterSpacing: '0.06em',
                   marginBottom: 8,
                 }}
               >
-                Weekly insight
+                AI Weekly Insight
               </div>
               <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, margin: 0 }}>
                 {aiInsights[0]}
@@ -795,7 +855,8 @@ export default function DashboardScreen({ shop }) {
 
       {/* SECTION 5 — new subscribers alert */}
       {newSubscribers.length > 0 && (
-        <div style={{ ...DS.card, borderLeft: '3px solid #16a34a', marginBottom: 0 }}>
+        <div style={{ ...DS.card, borderLeft: '3px solid #16a34a', marginBottom: 0,
+                      background: '#f0fdf4' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
               {newSubscribers.length} new subscriber{newSubscribers.length > 1 ? 's' : ''} — send
