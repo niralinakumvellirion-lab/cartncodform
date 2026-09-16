@@ -82,7 +82,7 @@ const DOT_COLOR = {
 
 const cardStyle = {
   background: '#fff', border: '1px solid #e5e7eb', borderRadius: 16,
-  padding: '24px', marginBottom: 16,
+  padding: '16px 20px', marginBottom: 12,
 };
 
 function DelayInput({ value, onChange }) {
@@ -242,181 +242,69 @@ export default function AutomationScreen({ shop }) {
 
   return (
     <div style={{ padding: isMobileView ? '0 12px 24px' : '0 24px 24px', maxWidth: '900px', margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }}>
-          Automation
-        </h1>
-        <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
-          Control when and how notifications are sent automatically
-        </p>
-      </div>
-
-      {/* SECTION 1 — Master switch */}
-      <div style={{
-        background: config.enabled ? '#eef2ff' : '#f9fafb',
-        border: `2px solid ${config.enabled ? '#4f46e5' : '#e5e7eb'}`,
-        borderRadius: 16, padding: '20px 24px',
-        display: 'flex', justifyContent: 'space-between',
-        alignItems: 'center', marginBottom: 16,
-        transition: 'all 0.2s',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-          <div style={{
-            width: 12, height: 12, borderRadius: '50%',
-            background: config.enabled ? '#4f46e5' : '#9ca3af',
-            boxShadow: config.enabled
-              ? '0 0 0 4px rgba(79,70,229,0.15)' : 'none',
-            flexShrink: 0,
-          }} />
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
-              {config.enabled ? 'Automation is ON' : 'Automation is OFF'}
-            </div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 3 }}>
-              {config.enabled
-                ? 'Notifications are being sent automatically based on customer behavior'
-                : 'No automated notifications will be sent. Manual sends still work.'}
-            </div>
-          </div>
+      {/* Header + master toggle — combined compact row (see
+          audits/automation-ui-fix-audit.txt). Replaces the old separate
+          "Header" block and "SECTION 1 — Master switch" status card. */}
+      <div style={{ display: 'flex', justifyContent: 'space-between',
+                    alignItems: 'center', marginBottom: 24 }}>
+        <div>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: '#111827',
+                       margin: 0 }}>Automation</h1>
+          <p style={{ fontSize: 13, color: '#9ca3af', margin: '4px 0 0' }}>
+            Control when and how notifications are sent automatically
+          </p>
+          <div style={{ height: 3, width: 40, borderRadius: 2,
+                        background: 'linear-gradient(90deg, #4f46e5, #818cf8)',
+                        marginTop: 10 }} />
         </div>
-        <ToggleSwitch
-          checked={config.enabled}
-          onChange={(v) => setConfig(c => ({ ...c, enabled: v }))}
-        />
-      </div>
-
-      {/* SECTION 2 — Brain run time */}
-      <div style={cardStyle}>
-        <div style={{ display: 'flex', alignItems: 'center',
-                      gap: 10, marginBottom: 20 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10,
-                        background: '#eef2ff', display: 'flex',
-                        alignItems: 'center', justifyContent: 'center',
-                        flexShrink: 0 }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-              stroke="#4f46e5" strokeWidth="2" strokeLinecap="round"
-              strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
-          </div>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700,
-                          color: '#111827' }}>Daily automation time</div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-              Brain runs once daily to schedule notifications
-            </div>
-          </div>
-        </div>
-
-        <div style={{ background: '#f9fafb', borderRadius: 12,
-                      padding: '16px 20px', marginBottom: 16,
-                      display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 28, fontWeight: 800,
-                         color: '#4f46e5', fontVariantNumeric: 'tabular-nums' }}>
-            {String(config.brainRunHour).padStart(2, '0')}:
-            {String(config.brainRunMinute).padStart(2, '0')}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: 13, color: config.enabled
+                          ? '#4f46e5' : '#9ca3af', fontWeight: 600 }}>
+            {config.enabled ? 'ON' : 'OFF'}
           </span>
-          <span style={{ fontSize: 13, color: '#6b7280', marginLeft: 4 }}>
-            IST — runs every day at this time
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', gap: 12 }}>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 11, fontWeight: 600,
-                            color: '#6b7280', textTransform: 'uppercase',
-                            letterSpacing: '0.05em', display: 'block',
-                            marginBottom: 6 }}>Hour</label>
-            <select
-              value={config.brainRunHour}
-              onChange={(e) => setConfig(c => ({
-                ...c, brainRunHour: Number(e.target.value)
-              }))}
-              style={{ width: '100%', padding: '9px 12px', borderRadius: 8,
-                       border: '1px solid #e5e7eb', fontSize: 13,
-                       background: '#fff', color: '#111827',
-                       appearance: 'none', cursor: 'pointer' }}
-            >
-              {Array.from({ length: 24 }, (_, i) => {
-                const h = i % 12 || 12;
-                const ampm = i < 12 ? 'AM' : 'PM';
-                return (
-                  <option key={i} value={i}>
-                    {String(i).padStart(2,'0')}:00 — {h} {ampm}
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 11, fontWeight: 600,
-                            color: '#6b7280', textTransform: 'uppercase',
-                            letterSpacing: '0.05em', display: 'block',
-                            marginBottom: 6 }}>Minute</label>
-            <select
-              value={config.brainRunMinute}
-              onChange={(e) => setConfig(c => ({
-                ...c, brainRunMinute: Number(e.target.value)
-              }))}
-              style={{ width: '100%', padding: '9px 12px', borderRadius: 8,
-                       border: '1px solid #e5e7eb', fontSize: 13,
-                       background: '#fff', color: '#111827',
-                       appearance: 'none', cursor: 'pointer' }}
-            >
-              {[0, 15, 30, 45].map(m => (
-                <option key={m} value={m}>:{String(m).padStart(2,'0')}</option>
-              ))}
-            </select>
-          </div>
+          <ToggleSwitch
+            checked={config.enabled}
+            onChange={(v) => setConfig(c => ({ ...c, enabled: v }))}
+          />
         </div>
       </div>
+
+      {/* SECTION 2 — Brain run time: removed from render per task
+          instructions (see audits/automation-ui-fix-audit.txt). The
+          brainRunHour/brainRunMinute fields remain in `config` state
+          (from the GET response / DEFAULT_CONFIG) and are still sent
+          unchanged in saveConfig()'s PATCH body below — only the JSX
+          that displayed/edited them was removed, so the shop keeps
+          whatever run time it already had, saved silently on every
+          Save settings click. */}
 
       {/* SECTION 3 — Signal delays */}
       <div style={cardStyle}>
-        <div style={{ display: 'flex', alignItems: 'center',
-                      gap: 10, marginBottom: 20 }}>
-          <div style={{ width: 36, height: 36, borderRadius: 10,
-                        background: '#fef3c7', display: 'flex',
-                        alignItems: 'center', justifyContent: 'center',
-                        flexShrink: 0 }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-              stroke="#d97706" strokeWidth="2" strokeLinecap="round"
-              strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10"/>
-              <polyline points="12 6 12 12 16 14"/>
-            </svg>
+        <div style={{ borderLeft: '3px solid #f59e0b', paddingLeft: 12,
+                      marginBottom: 14 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
+            Send delay after trigger
           </div>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
-              Send delay after trigger
-            </div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-              How long to wait before sending after customer action
-            </div>
+          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+            How long to wait before sending after customer action
           </div>
         </div>
 
-        {DELAY_ROWS.map(({ label, key, desc }, i, arr) => (
-          <div key={key}>
-            <div style={{ display: 'flex', justifyContent: 'space-between',
-                          alignItems: 'center', gap: 12,
-                          padding: '14px 0' }}>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600,
-                              color: '#111827' }}>{label}</div>
-                <div style={{ fontSize: 11, color: '#9ca3af',
-                              marginTop: 2 }}>{desc}</div>
+        {DELAY_ROWS.map(({ label, key, desc }) => (
+          <div key={key} style={{ display: 'flex', justifyContent: 'space-between',
+                        alignItems: 'center', padding: '12px 0',
+                        borderBottom: '1px solid #f3f4f6' }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600,
+                            color: '#111827' }}>{label}</div>
+              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+                {desc}
               </div>
-              <DelayInput
-                value={config[key] || 60}
-                onChange={(mins) => setConfig(c => ({ ...c, [key]: mins }))}
-              />
             </div>
-            {i < arr.length - 1 && (
-              <div style={{ height: 1, background: '#f3f4f6' }} />
-            )}
+            <DelayInput
+              value={config[key] || 60}
+              onChange={(mins) => setConfig(c => ({ ...c, [key]: mins }))}
+            />
           </div>
         ))}
       </div>
