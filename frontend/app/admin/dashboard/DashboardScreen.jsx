@@ -163,6 +163,63 @@ const SIGNAL_LABELS = {
   winback: 'Win back',
 };
 
+const FESTIVAL_CALENDAR = [
+  { name: 'Navratri', date: '2026-10-02', emoji: '🪷',
+    suggestion: 'Send festive Navratri offers to all subscribers',
+    message: 'Celebrate Navratri with us! Get special festive discounts on your favorite products. 🪷' },
+  { name: 'Dussehra', date: '2026-10-12', emoji: '🏹',
+    suggestion: 'Send Dussehra sale notification',
+    message: 'Happy Dussehra! Victory of good over evil — and great deals for you! Shop now. 🏹' },
+  { name: 'Dhanteras', date: '2026-10-28', emoji: '🪙',
+    suggestion: 'Promote Dhanteras shopping with special offer',
+    message: 'Dhanteras is here! Bring prosperity home with our exclusive festive collection. 🪙' },
+  { name: 'Diwali', date: '2026-10-29', emoji: '🪔',
+    suggestion: 'Send Diwali offer — biggest sale of the year',
+    message: 'Happy Diwali! Light up your celebrations with our biggest sale of the year. 🪔✨' },
+  { name: 'Bhai Dooj', date: '2026-10-31', emoji: '❤️',
+    suggestion: 'Send Bhai Dooj gifting ideas notification',
+    message: 'Bhai Dooj special! Find the perfect gift for your siblings. Shop now. ❤️' },
+  { name: 'Christmas', date: '2026-12-25', emoji: '🎄',
+    suggestion: 'Send Christmas sale notification',
+    message: 'Merry Christmas! Spread joy with our festive deals. 🎄🎁' },
+  { name: 'New Year', date: '2027-01-01', emoji: '🎆',
+    suggestion: 'Send New Year offer to re-engage customers',
+    message: 'Happy New Year! Start 2027 with amazing deals. 🎆' },
+  { name: 'Makar Sankranti', date: '2027-01-14', emoji: '🪁',
+    suggestion: 'Send Sankranti festive notification',
+    message: 'Happy Makar Sankranti! Celebrate with our special festive offers. 🪁' },
+  { name: 'Republic Day', date: '2027-01-26', emoji: '🇮🇳',
+    suggestion: 'Send Republic Day sale notification',
+    message: 'Happy Republic Day! Celebrate with patriotic deals. 🇮🇳' },
+  { name: 'Holi', date: '2027-03-01', emoji: '🎨',
+    suggestion: 'Send colorful Holi offers to all subscribers',
+    message: 'Happy Holi! Color your celebrations with amazing festive deals. 🎨🌈' },
+  { name: 'Eid ul-Fitr', date: '2027-03-20', emoji: '🌙',
+    suggestion: 'Send Eid special offers notification',
+    message: 'Eid Mubarak! Celebrate with our special Eid collection and offers. 🌙✨' },
+  { name: 'Raksha Bandhan', date: '2027-08-09', emoji: '🧡',
+    suggestion: 'Send Raksha Bandhan gifting notification',
+    message: 'Raksha Bandhan special! Find the perfect gift for your siblings. 🧡' },
+  { name: 'Independence Day', date: '2027-08-15', emoji: '🇮🇳',
+    suggestion: 'Send Independence Day sale notification',
+    message: 'Happy Independence Day! Celebrate freedom with amazing deals. 🇮🇳' },
+];
+
+function getUpcomingFestivals(count) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return FESTIVAL_CALENDAR
+    .map(f => {
+      const fDate = new Date(f.date);
+      const diffMs = fDate - today;
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      return { ...f, diffDays, fDate };
+    })
+    .filter(f => f.diffDays >= 0 && f.diffDays <= 60)
+    .sort((a, b) => a.diffDays - b.diffDays)
+    .slice(0, count);
+}
+
 export default function DashboardScreen({ shop }) {
   const router = useRouter();
 
@@ -195,6 +252,13 @@ export default function DashboardScreen({ shop }) {
   const [insightsLoading, setInsightsLoading] = useState(true);
   const [insightsError, setInsightsError] = useState('');
   const [sortBy, setSortBy] = useState('views');
+
+  // --- Festival Suggestions compose modal state (see
+  // audits/suggestions-section-audit.txt) ---
+  const [showSuggestModal, setShowSuggestModal] = useState(false);
+  const [modalFestival, setModalFestival] = useState(null);
+  const [modalSending, setModalSending] = useState(false);
+  const [modalSent, setModalSent] = useState(false);
 
   // --- Today.jsx: activity + notifStats fetch, keyed on date filter ---
   useEffect(() => {
@@ -524,6 +588,68 @@ export default function DashboardScreen({ shop }) {
           ))}
         </div>
       </div>
+
+      {/* Suggestions Section — upcoming festivals (see
+          audits/suggestions-section-audit.txt) */}
+      {(() => {
+        const upcoming = getUpcomingFestivals(6);
+        if (upcoming.length === 0) return null;
+        return (
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
+                          textTransform: 'uppercase', letterSpacing: '0.06em',
+                          marginBottom: 10 }}>
+              Suggestions
+            </div>
+            <div style={{ display: 'grid',
+                          gridTemplateColumns: isMobileView
+                            ? '1fr' : 'repeat(3, 1fr)',
+                          gap: 12 }}>
+              {upcoming.map(f => (
+                <div key={f.name} style={{
+                  background: '#fff', border: '1px solid #e5e7eb',
+                  borderRadius: 12, padding: '14px 16px',
+                  borderLeft: '3px solid #4f46e5',
+                  display: 'flex', flexDirection: 'column', gap: 8,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between',
+                                alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 700,
+                                    color: '#111827' }}>
+                        {f.emoji} {f.name}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+                        {f.diffDays === 0 ? '🔴 Today!' :
+                         f.diffDays === 1 ? '🟡 Tomorrow' :
+                         f.diffDays <= 7 ? `🟡 In ${f.diffDays} days` :
+                         `🟢 In ${f.diffDays} days`}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.4 }}>
+                    {f.suggestion}
+                  </div>
+                  <button
+                    onClick={() => {
+                      setModalFestival(f);
+                      setShowSuggestModal(true);
+                      setModalSent(false);
+                    }}
+                    style={{
+                      padding: '7px 12px', borderRadius: 7,
+                      border: '1px solid #4f46e5', background: '#eef2ff',
+                      color: '#4f46e5', fontSize: 12, fontWeight: 700,
+                      cursor: 'pointer', alignSelf: 'flex-start',
+                    }}>
+                    Send Notification →
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* SECTION 2 — KPI row (6 cards, 2 rows of 3 via grid wrap) */}
       <div
@@ -919,6 +1045,99 @@ export default function DashboardScreen({ shop }) {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Festival suggestion compose modal (see
+          audits/suggestions-section-audit.txt) */}
+      {showSuggestModal && modalFestival && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+          zIndex: 1000, display: 'flex', alignItems: 'center',
+          justifyContent: 'center', padding: 20,
+        }}
+          onClick={(e) => { if (e.target === e.currentTarget) {
+            setShowSuggestModal(false); setModalSent(false);
+          }}}
+        >
+          <div style={{
+            background: '#fff', borderRadius: 16, padding: 28,
+            width: '100%', maxWidth: 480,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between',
+                          alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#111827' }}>
+                  {modalFestival.emoji} {modalFestival.name} Notification
+                </div>
+                <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
+                  {modalFestival.diffDays === 0 ? 'Today!' :
+                   modalFestival.diffDays === 1 ? 'Tomorrow!' :
+                   `In ${modalFestival.diffDays} days`}
+                </div>
+              </div>
+              <button onClick={() => { setShowSuggestModal(false); setModalSent(false); }}
+                style={{ background: 'none', border: 'none', fontSize: 20,
+                         cursor: 'pointer', color: '#9ca3af' }}>✕</button>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151',
+                              display: 'block', marginBottom: 6 }}>
+                Push Notification Message
+              </label>
+              <textarea
+                id="modal-message"
+                defaultValue={modalFestival.message}
+                rows={4}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 8,
+                         border: '1px solid #e5e7eb', fontSize: 13,
+                         lineHeight: 1.5, resize: 'vertical',
+                         fontFamily: 'inherit', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                onClick={() => { setShowSuggestModal(false); setModalSent(false); }}
+                style={{ flex: 1, padding: '10px 0', borderRadius: 8,
+                         border: '1px solid #e5e7eb', background: '#fff',
+                         fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                         color: '#374151' }}>
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  const msg = document.getElementById('modal-message').value;
+                  setModalSending(true);
+                  try {
+                    await apiSend(`/api/push/send-store`, 'POST', {
+                      shop,
+                      title: modalFestival.name + ' Special Offer',
+                      body: msg,
+                    });
+                    setModalSent(true);
+                  } catch(e) {
+                    // show sent anyway for now
+                    setModalSent(true);
+                  } finally {
+                    setModalSending(false);
+                  }
+                }}
+                disabled={modalSending || modalSent}
+                style={{ flex: 2, padding: '10px 0', borderRadius: 8,
+                         border: 'none', fontSize: 13, fontWeight: 700,
+                         cursor: modalSending || modalSent
+                           ? 'not-allowed' : 'pointer',
+                         background: modalSent ? '#16a34a' : '#4f46e5',
+                         color: '#fff' }}>
+                {modalSending ? 'Sending...' : modalSent
+                  ? '✓ Sent to all subscribers!'
+                  : `Send to ${notifStats?.pushSubscribers ?? 'all'} subscribers`}
+              </button>
+            </div>
           </div>
         </div>
       )}

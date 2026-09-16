@@ -518,6 +518,58 @@ router.post('/send-journey-email', requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/push/send-store
+ * Body: { title, body }
+ * Sends a push notification to every storefront customer subscribed for
+ * the shop. Powers the Dashboard's festival Suggestions section
+ * (see audits/suggestions-section-audit.txt).
+ *
+ * Shop is taken from req.shopDomain (the verified session token), never
+ * from a client-supplied field — same IDOR pattern as every other route
+ * in this file (see sendJourneyPush's comment above): a client-supplied
+ * shop would let one authenticated store blast another store's
+ * customers by spoofing the request body.
+ *
+ * DEVIATION FROM THE GIVEN SPEC: the task asked for a new
+ * `sendPushToStore(shopDomain, { title, body, url })` helper in
+ * utils/pushNotification.js. A function named `sendPushToStore` ALREADY
+ * EXISTS there with a DIFFERENT signature — sendPushToStore(shopDomain,
+ * title, body) — and a DIFFERENT purpose: it sends to the STORE OWNER's
+ * own PushSubscription (the admin device), and is already used by
+ * POST /api/push/send above. Adding the task's version under the same
+ * name would have silently overwritten that export and broken the
+ * existing /send route (its 3 positional string args would destructure
+ * against the new object-shaped second parameter, yielding
+ * undefined title/body with no thrown error). Reused the existing
+ * sendPushToCustomers() helper instead (already imported at the top of
+ * this file) — called with no cartToken, it already sends to every
+ * CustomerPushSubscription row for the shop, i.e. exactly "all
+ * subscribers" — so no change to utils/pushNotification.js was needed.
+ */
+router.post('/send-store', requireAuth, async (req, res) => {
+  try {
+    const { title, body } = req.body;
+    const shop = req.shopDomain;
+
+    if (!title || !body) {
+      return res.status(400).json({ error: 'title and body required' });
+    }
+
+    const result = await sendPushToCustomers(shop, title, body, '/', null, false, null, false);
+
+    if (!result.success) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+
+    console.log(`[push] Festival push sent to ${shop}: sent=${result.sent} tokensFound=${result.tokensFound}`);
+    return res.json({ success: true, sent: result.sent || 0, tokensFound: result.tokensFound || 0 });
+  } catch (err) {
+    console.error('[push] send-store error:', err.message);
+    return res.status(500).json({ error: 'Failed to send' });
+  }
+});
+
 module.exports = router;
 module.exports.sendJourneyPush = sendJourneyPush;
 module.exports.sendJourneyEmail = sendJourneyEmail;
