@@ -429,11 +429,109 @@ router.get('/:shopDomain/product-analytics', requireAuth, requireStoreOwner, asy
  * that profile's strongest, so profileMap[pid] is only ever created once
  * per profile and its `signals` array is never reset after being populated.
  */
-async function getJourneyData(shopDomain, { limit = 50, page = 0 } = {}) {
+// Builds one Journey "customer" entry (recent activity + top products,
+// enriched with cached images) for a single profile + its already-sorted
+// (strongest-first) signals array. Shared by the list path below and the
+// single-profile lookup path (profileId query param) added for the
+// Customers-screen merge — see audits/customers-journey-merge-build-audit.txt.
+async function buildJourneyEntry(shop, profile, entrySignals) {
+  // sessionId is overloaded in this collection — POST /api/events
+  // stores the storefront's ccfSessionId there, while cartToken is a
+  // separate identifier on some rows. Matching both catches events
+  // recorded under either convention.
+  const sessionIds = profile?.identifiers?.sessionIds || [];
+  const cartTokens = profile?.identifiers?.cartTokens || [];
+
+  const events = await StorefrontEvent.find({
+    shopDomain: shop,
+    sessionId: { $in: [...sessionIds, ...cartTokens] },
+    type: { $in: ['page_view', 'push_prompt_shown', 'push_prompt_accepted', 'product_view'] },
+  })
+    .sort({ ts: -1 })
+    .limit(20)
+    .select('type path pageType meta ts');
+
+  // Chronological order (oldest first, newest last) for the Recent
+  // Activity timeline. Reversing the already-fetched array here, rather
+  // than sorting ascending at the query level, keeps `limit(20)`
+  // selecting the 20 MOST RECENT events — sorting ascending with the
+  // same limit would instead select this customer's OLDEST 20 events
+  // ever recorded, defeating the point of a "recent activity" panel.
+  // See audits/journey-order-audit.txt.
+  events.reverse();
+
+  // Extract product interests from events.
+  const productViews = {};
+  events.forEach((e) => {
+    if (e.type === 'product_view' && e.meta?.productId) {
+      const productId = e.meta.productId;
+      if (!productViews[productId]) {
+        productViews[productId] = {
+          productId,
+          title: e.meta.productTitle || productId,
+          count: 0,
+          lastSeen: e.ts,
+        };
+      }
+      productViews[productId].count++;
+    }
+  });
+
+  const topProducts = Object.values(productViews)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3);
+
+  // Enrich topProducts with cached images
+  const productIds = topProducts.map(p => String(p.productId));
+  const cachedImages = productIds.length > 0
+    ? await ProductImageCache.find({
+        shopDomain: shop,
+        productId: { $in: productIds },
+      }).select('productId imageUrl').lean()
+    : [];
+
+  const imageMap = {};
+  cachedImages.forEach(c => {
+    imageMap[String(c.productId)] = c.imageUrl || null;
+  });
+
+  const topProductsWithImages = topProducts.map(p => ({
+    ...p,
+    imageUrl: imageMap[String(p.productId)] || null,
+  }));
+
+  return {
+    profile,
+    topSignal: entrySignals[0] || null,
+    signals: entrySignals,
+    recentEvents: events,
+    topProducts: topProductsWithImages,
+  };
+}
+
+async function getJourneyData(shopDomain, { limit = 50, page = 0, profileId = null } = {}) {
   const Signal = require('../models/Signal');
   const Profile = require('../models/Profile');
 
   const shop = String(shopDomain || '').trim().toLowerCase();
+
+  // Single-profile lookup (Customers-screen "click a row" path) — scoped
+  // directly by profileId + shop, independent of the signals-driven list
+  // below, so it also works for a profile with NO active signal (the list
+  // path below only ever surfaces profiles that have at least one Signal
+  // document; a repeat buyer with no current abandonment/lapsing signal
+  // would never appear there no matter how high `limit` is set).
+  if (profileId) {
+    const profile = await Profile.findOne({ _id: profileId, shopDomain: shop })
+      .select('identifiers stage orders channels lastSeenAt');
+    if (!profile) return { customers: [], total: 0 };
+
+    const profileSignals = await Signal.find({ shopDomain: shop, profileId: profile._id })
+      .sort({ strength: -1 });
+
+    const entry = await buildJourneyEntry(shop, profile, profileSignals);
+    return { customers: [entry], total: 1 };
+  }
 
   const signals = await Signal.find({ shopDomain: shop })
     .sort({ strength: -1 })
@@ -468,80 +566,7 @@ async function getJourneyData(shopDomain, { limit = 50, page = 0 } = {}) {
   const results = await Promise.all(
     pageIds.map(async (pid) => {
       const entry = profileMap[pid];
-      const profile = entry.profile;
-
-      // sessionId is overloaded in this collection — POST /api/events
-      // stores the storefront's ccfSessionId there, while cartToken is a
-      // separate identifier on some rows. Matching both catches events
-      // recorded under either convention.
-      const sessionIds = profile?.identifiers?.sessionIds || [];
-      const cartTokens = profile?.identifiers?.cartTokens || [];
-
-      const events = await StorefrontEvent.find({
-        shopDomain: shop,
-        sessionId: { $in: [...sessionIds, ...cartTokens] },
-        type: { $in: ['page_view', 'push_prompt_shown', 'push_prompt_accepted', 'product_view'] },
-      })
-        .sort({ ts: -1 })
-        .limit(20)
-        .select('type path pageType meta ts');
-
-      // Chronological order (oldest first, newest last) for the Recent
-      // Activity timeline. Reversing the already-fetched array here, rather
-      // than sorting ascending at the query level, keeps `limit(20)`
-      // selecting the 20 MOST RECENT events — sorting ascending with the
-      // same limit would instead select this customer's OLDEST 20 events
-      // ever recorded, defeating the point of a "recent activity" panel.
-      // See audits/journey-order-audit.txt.
-      events.reverse();
-
-      // Extract product interests from events.
-      const productViews = {};
-      events.forEach((e) => {
-        if (e.type === 'product_view' && e.meta?.productId) {
-          const productId = e.meta.productId;
-          if (!productViews[productId]) {
-            productViews[productId] = {
-              productId,
-              title: e.meta.productTitle || productId,
-              count: 0,
-              lastSeen: e.ts,
-            };
-          }
-          productViews[productId].count++;
-        }
-      });
-
-      const topProducts = Object.values(productViews)
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 3);
-
-      // Enrich topProducts with cached images
-      const productIds = topProducts.map(p => String(p.productId));
-      const cachedImages = productIds.length > 0
-        ? await ProductImageCache.find({
-            shopDomain: shop,
-            productId: { $in: productIds },
-          }).select('productId imageUrl').lean()
-        : [];
-
-      const imageMap = {};
-      cachedImages.forEach(c => {
-        imageMap[String(c.productId)] = c.imageUrl || null;
-      });
-
-      const topProductsWithImages = topProducts.map(p => ({
-        ...p,
-        imageUrl: imageMap[String(p.productId)] || null,
-      }));
-
-      return {
-        profile,
-        topSignal: entry.signal,
-        signals: entry.signals,
-        recentEvents: events,
-        topProducts: topProductsWithImages,
-      };
+      return buildJourneyEntry(shop, entry.profile, entry.signals);
     })
   );
 
@@ -550,7 +575,10 @@ async function getJourneyData(shopDomain, { limit = 50, page = 0 } = {}) {
 
 /**
  * GET /api/events/:shopDomain/journey
- * Query params: limit (default 50, max 200), page (default 0).
+ * Query params: limit (default 50, max 200), page (default 0),
+ * profileId (optional — when given, returns just that one profile's
+ * journey entry regardless of whether it has an active signal; see
+ * buildJourneyEntry/getJourneyData above).
  */
 router.get('/:shopDomain/journey', requireAuth, requireStoreOwner, async (req, res) => {
   try {
@@ -561,7 +589,11 @@ router.get('/:shopDomain/journey', requireAuth, requireStoreOwner, async (req, r
     let page = parseInt(req.query.page, 10);
     if (!Number.isFinite(page) || page < 0) page = 0;
 
-    const data = await getJourneyData(req.params.shopDomain, { limit, page });
+    const profileId = typeof req.query.profileId === 'string' && req.query.profileId
+      ? req.query.profileId
+      : null;
+
+    const data = await getJourneyData(req.params.shopDomain, { limit, page, profileId });
     return res.json(data);
   } catch (err) {
     console.error('[events] journey error:', err.message);

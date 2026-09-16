@@ -1,8 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { apiGet } from '../../../lib/api';
-import ProfileScreen from './Profile';
+import { apiGet, apiSend } from '../../../lib/api';
 
 const DS = {
   page: {
@@ -190,6 +189,723 @@ const FILTER_TABS = [
   { key: 'going_quiet', label: 'Going quiet' },
 ];
 
+// --- Everything below this line through ProductThumbnail/
+// NotificationComposer/EmailComposer is copied from
+// frontend/app/admin/screens/Journey.jsx, per the Journey-panel merge
+// (see audits/customers-journey-merge-build-audit.txt). Journey.jsx
+// itself is unchanged and still exists, just unlinked from the nav. ---
+
+const EVENT_LABELS = {
+  page_view: 'Visited website',
+  push_prompt_shown: 'Popup shown',
+  push_prompt_accepted: 'Accepted notifications',
+  product_view: 'Viewed product',
+};
+
+const EVENT_DOT_COLORS = {
+  page_view: '#3b82f6',
+  push_prompt_shown: '#f59e0b',
+  push_prompt_accepted: '#10b981',
+  product_view: '#8b5cf6',
+};
+
+// Converts a raw storefront path (e.g. /collections/all,
+// /products/some-handle) into a human-readable label for the journey
+// timeline.
+function getFriendlyPath(path) {
+  if (!path) return '';
+  // Homepage
+  if (path === '/' || path === '') return 'Homepage';
+  // Product page
+  if (path.startsWith('/products/')) {
+    const handle = path.replace('/products/', '').split('?')[0];
+    return 'Product: ' + handle.replace(/-/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
+  }
+  // Collection page
+  if (path.startsWith('/collections/')) {
+    const handle = path.replace('/collections/', '').split('?')[0];
+    if (handle === 'all') return 'All Products';
+    return 'Collection: ' + handle.replace(/-/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
+  }
+  // Cart page
+  if (path.startsWith('/cart')) return 'Cart';
+  // Checkout
+  if (path.startsWith('/checkout') ||
+      path.includes('checkouts')) return 'Checkout';
+  // Search
+  if (path.startsWith('/search')) return 'Search';
+  // Pages
+  if (path.startsWith('/pages/')) {
+    const handle = path.replace('/pages/', '').split('?')[0];
+    return 'Page: ' + handle.replace(/-/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
+  }
+  // Blog
+  if (path.startsWith('/blogs/')) return 'Blog';
+  // Account
+  if (path.startsWith('/account')) return 'Account';
+  // Fallback — clean up the path
+  return path.split('?')[0].replace(/-/g, ' ').replace(/\//g, ' › ').trim();
+}
+
+// Auto-fill suggestions keyed by signal type, shared by every composer
+// instance — kept at module scope since it doesn't depend on props/state.
+// NOTE: this constant (SUGGESTIONS) was not itself listed in the task's
+// Step 5 copy list, but NotificationComposer's own auto-fill useEffect
+// below references it directly — omitting it would leave
+// NotificationComposer throwing a ReferenceError the moment it renders,
+// so it was copied over alongside the composer that needs it.
+const SUGGESTIONS = {
+  cart_abandon: {
+    title: (product) => (product ? `Your ${product} is waiting` : 'Your cart is waiting'),
+    body: () => 'Complete your order before it sells out.',
+  },
+  high_intent: {
+    title: (product) => (product ? `Still thinking about ${product}?` : 'Still interested?'),
+    body: () => 'We saved it for you. Come back and take a look.',
+  },
+  price_hesitation: {
+    title: () => 'Worth every rupee',
+    body: (product) => (product ? `Here's why ${product} is worth it.` : 'Quality that speaks for itself.'),
+  },
+  lapsing: {
+    title: () => 'We miss you!',
+    body: () => 'New arrivals are waiting. Come back and explore.',
+  },
+  winback: {
+    title: () => "It's been a while...",
+    body: () => 'New collection just dropped. Come check it out.',
+  },
+};
+
+const NOTIFICATION_SUGGESTIONS = [
+  {
+    category: 'Cart & Purchase',
+    color: '#fee2e2',
+    textColor: '#dc2626',
+    icon: '🛒',
+    suggestions: [
+      {
+        label: 'Cart reminder',
+        title: 'Your cart is waiting!',
+        body: 'You left something behind. Complete your order before it sells out.',
+      },
+      {
+        label: 'Checkout nudge',
+        title: 'Almost there!',
+        body: 'Your order is just one step away. Finish checkout now.',
+      },
+    ],
+  },
+  {
+    category: 'Offers & Discounts',
+    color: '#dcfce7',
+    textColor: '#16a34a',
+    icon: '🏷️',
+    suggestions: [
+      {
+        label: 'Flash sale',
+        title: '⚡ Flash Sale — 24 hours only!',
+        body: 'Up to 30% off on selected items. Shop now before it ends.',
+      },
+      {
+        label: 'Exclusive discount',
+        title: 'A special offer just for you 🎁',
+        body: 'As a valued customer, enjoy an exclusive discount on your next order.',
+      },
+      {
+        label: 'Limited time',
+        title: '⏰ Offer expires tonight!',
+        body: "Don't miss out — your discount code expires at midnight.",
+      },
+    ],
+  },
+  {
+    category: 'Product Updates',
+    color: '#dbeafe',
+    textColor: '#1d4ed8',
+    icon: '✨',
+    suggestions: [
+      {
+        label: 'New arrival',
+        title: '✨ New collection just dropped!',
+        body: 'Fresh styles are here. Be the first to explore our new arrivals.',
+      },
+      {
+        label: 'Back in stock',
+        title: "It's back! 🎉",
+        body: "The item you were eyeing is back in stock. Grab it before it's gone.",
+      },
+      {
+        label: 'Price drop',
+        title: '📉 Price just dropped!',
+        body: 'Good news — the price on your saved item just went down.',
+      },
+    ],
+  },
+  {
+    category: 'Re-engagement',
+    color: '#fef9c3',
+    textColor: '#ca8a04',
+    icon: '💛',
+    suggestions: [
+      {
+        label: 'Win back',
+        title: 'We miss you! 💛',
+        body: "It's been a while. Come back and see what's new in store.",
+      },
+      {
+        label: 'Loyalty reward',
+        title: "You've earned a reward! 🏆",
+        body: "Thank you for being a loyal customer. Here's something special for you.",
+      },
+      {
+        label: 'Special occasion',
+        title: '🎂 A special treat for you!',
+        body: 'Wishing you a wonderful day — enjoy a little something from us.',
+      },
+    ],
+  },
+  {
+    category: 'Post Purchase',
+    color: '#f3e8ff',
+    textColor: '#7c3aed',
+    icon: '📦',
+    suggestions: [
+      {
+        label: 'Thank you',
+        title: 'Thank you for your order! 🙏',
+        body: "We're preparing your order. You'll hear from us soon.",
+      },
+      {
+        label: 'Review request',
+        title: 'How did we do? ⭐',
+        body: "We'd love to hear your feedback on your recent purchase.",
+      },
+      {
+        label: 'Cross-sell',
+        title: 'Complete the look 👗',
+        body: 'Customers who bought this also loved these items.',
+      },
+    ],
+  },
+];
+
+const EMAIL_SUGGESTIONS = [
+  {
+    category: 'Cart & Purchase',
+    color: '#fee2e2',
+    textColor: '#dc2626',
+    suggestions: [
+      {
+        label: 'Cart reminder',
+        subject: 'You left something behind',
+        body: 'Hi there,\n\nYou left items in your cart! Complete your purchase before they sell out.\n\nWarm regards,\nThe Team',
+      },
+      {
+        label: 'Urgency nudge',
+        subject: 'Almost gone — complete your order',
+        body: 'Hi there,\n\nThe items in your cart are selling fast. Complete your order now before stock runs out!\n\nWarm regards,\nThe Team',
+      },
+    ],
+  },
+  {
+    category: 'Offers',
+    color: '#fef3c7',
+    textColor: '#d97706',
+    suggestions: [
+      {
+        label: 'Special discount',
+        subject: 'A special offer just for you',
+        body: 'Hi there,\n\nWe have an exclusive offer waiting for you. Visit our store and use your discount at checkout.\n\nWarm regards,\nThe Team',
+      },
+      {
+        label: 'Free shipping',
+        subject: 'Free shipping on your next order',
+        body: 'Hi there,\n\nGood news! Your next order qualifies for free shipping. Shop now and save.\n\nWarm regards,\nThe Team',
+      },
+    ],
+  },
+  {
+    category: 'Re-engagement',
+    color: '#ede9fe',
+    textColor: '#7c3aed',
+    suggestions: [
+      {
+        label: 'We miss you',
+        subject: "We miss you! Here's something special",
+        body: "Hi there,\n\nIt's been a while! We've added exciting new products we think you'll love. Come back and explore.\n\nWarm regards,\nThe Team",
+      },
+      {
+        label: 'New arrivals',
+        subject: 'New arrivals you might like',
+        body: "Hi there,\n\nWe've just added new products to our collection. Come check out what's new!\n\nWarm regards,\nThe Team",
+      },
+    ],
+  },
+  {
+    category: 'Post Purchase',
+    color: '#dcfce7',
+    textColor: '#16a34a',
+    suggestions: [
+      {
+        label: 'Thank you',
+        subject: 'Thank you for your order!',
+        body: 'Hi there,\n\nThank you for your recent purchase! We hope you love it. Feel free to reach out if you have any questions.\n\nWarm regards,\nThe Team',
+      },
+      {
+        label: 'Review request',
+        subject: 'How was your experience?',
+        body: "Hi there,\n\nWe hope you're enjoying your purchase! We'd love to hear your feedback. Leave us a review and help other customers.\n\nWarm regards,\nThe Team",
+      },
+    ],
+  },
+];
+
+// Product thumbnail shown next to product-specific suggestion cards,
+// shared by NotificationComposer and EmailComposer, and next to each row
+// in the "Most interested in" list.
+function ProductThumbnail({ imageUrl, title }) {
+  if (imageUrl) {
+    return (
+      <div style={{ width: 40, height: 40, borderRadius: 8,
+                    overflow: 'hidden', flexShrink: 0,
+                    border: '1px solid #e5e7eb' }}>
+        <img src={imageUrl} alt={title || 'Product'}
+          style={{ width: '100%', height: '100%',
+                   objectFit: 'cover' }} />
+      </div>
+    );
+  }
+  return (
+    <div style={{ width: 40, height: 40, borderRadius: 8,
+                  background: '#f3f4f6', border: '1px solid #e5e7eb',
+                  display: 'flex', alignItems: 'center',
+                  justifyContent: 'center', flexShrink: 0 }}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+        stroke="#d1d5db" strokeWidth="2" strokeLinecap="round"
+        strokeLinejoin="round">
+        <rect x="3" y="3" width="18" height="18" rx="2"/>
+        <circle cx="8.5" cy="8.5" r="1.5"/>
+        <polyline points="21 15 16 10 5 21"/>
+      </svg>
+    </div>
+  );
+}
+
+function NotificationComposer({ customer, shop, onSent, onError }) {
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [sending, setSending] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [activeCategory, setActiveCategory] = useState(0);
+
+  const rawTopProductTitle = customer?.topProducts?.[0]?.title || '';
+  const hasTopProduct = !!(rawTopProductTitle && !/^\d+$/.test(rawTopProductTitle));
+  const productImage = customer?.topProducts?.[0]?.imageUrl || null;
+
+  // Auto-fill based on the customer's top signal whenever the selected
+  // customer changes.
+  useEffect(() => {
+    const signal = customer?.topSignal?.type;
+    const rawProduct = customer?.topProducts?.[0]?.title || '';
+    const product = /^\d+$/.test(rawProduct) ? '' : rawProduct;
+    const suggestion = SUGGESTIONS[signal] || {
+      title: () => 'Hello from the store',
+      body: () => 'We have something special for you.',
+    };
+    setTitle(suggestion.title(product));
+    setBody(suggestion.body(product));
+  }, [customer]);
+
+  async function send() {
+    if (!title || !body || sending) return;
+    setSending(true);
+    try {
+      await apiSend('/api/push/send-journey', 'POST', {
+        profileId: customer.profile._id,
+        title,
+        body,
+        url: customer.topProducts?.[0]
+          ? `https://${shop}/products/${customer.topProducts[0].productId}`
+          : `https://${shop}`,
+      });
+      onSent();
+      setTitle('');
+      setBody('');
+    } catch (e) {
+      onError(e.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      {/* Suggestions toggle */}
+      <div
+        onClick={() => setShowSuggestions((s) => !s)}
+        style={{
+          display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '10px 12px',
+          background: '#f8f9ff',
+          border: '1px solid #e5e7eb',
+          borderRadius: '10px',
+          cursor: 'pointer',
+          marginBottom: '8px',
+          transition: 'background 0.2s',
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = '#f0f4ff')}
+        onMouseLeave={(e) => (e.currentTarget.style.background = '#f8f9ff')}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '16px' }}>💡</span>
+          <span style={{ fontSize: '13px', fontWeight: '600', color: '#4f46e5' }}>
+            Notification ideas
+          </span>
+          <span style={{ fontSize: '11px', color: '#9ca3af' }}>
+            — click to explore
+          </span>
+        </div>
+        <span style={{
+          fontSize: '12px', color: '#9ca3af',
+          transform: showSuggestions ? 'rotate(180deg)' : 'none',
+          transition: 'transform 0.2s', display: 'inline-block',
+        }}>
+          ▼
+        </span>
+      </div>
+
+      {/* Suggestions panel */}
+      {showSuggestions && (
+        <div style={{
+          background: '#fff',
+          border: '1px solid #e5e7eb',
+          borderRadius: '12px', marginBottom: '8px',
+          overflow: 'hidden',
+        }}>
+
+          {/* Category tabs */}
+          <div style={{
+            display: 'flex', overflowX: 'auto',
+            borderBottom: '1px solid #f3f4f6',
+            padding: '8px 8px 0',
+          }}>
+            {NOTIFICATION_SUGGESTIONS.map((cat, i) => (
+              <button
+                key={i}
+                onClick={() => setActiveCategory(i)}
+                style={{
+                  padding: '6px 12px', fontSize: '12px',
+                  fontWeight: activeCategory === i ? '700' : '400',
+                  color: activeCategory === i ? cat.textColor : '#6b7280',
+                  background: activeCategory === i ? cat.color : 'transparent',
+                  border: 'none', borderRadius: '8px 8px 0 0',
+                  cursor: 'pointer', whiteSpace: 'nowrap',
+                  flexShrink: 0, marginRight: '2px',
+                  borderBottom: activeCategory === i
+                    ? '2px solid ' + cat.textColor : '2px solid transparent',
+                }}
+              >
+                {cat.icon} {cat.category}
+              </button>
+            ))}
+          </div>
+
+          {/* Suggestion cards */}
+          <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {(() => {
+              const showThumb = NOTIFICATION_SUGGESTIONS[activeCategory].category === 'Cart & Purchase' ||
+                hasTopProduct;
+              return NOTIFICATION_SUGGESTIONS[activeCategory].suggestions.map((s, i) => (
+                <div
+                  key={i}
+                  onClick={() => {
+                    setTitle(s.title);
+                    setBody(s.body);
+                    setShowSuggestions(false);
+                  }}
+                  style={{
+                    padding: '10px 12px',
+                    background: NOTIFICATION_SUGGESTIONS[activeCategory].color,
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    border: '1px solid transparent',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.border =
+                      '1px solid ' + NOTIFICATION_SUGGESTIONS[activeCategory].textColor + '44';
+                    e.currentTarget.style.transform = 'translateY(-1px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.border = '1px solid transparent';
+                    e.currentTarget.style.transform = 'none';
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                    {showThumb && <ProductThumbnail imageUrl={productImage} title={rawTopProductTitle} />}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center',
+                        justifyContent: 'space-between', marginBottom: '4px',
+                      }}>
+                        <span style={{
+                          fontSize: '11px', fontWeight: '700',
+                          color: NOTIFICATION_SUGGESTIONS[activeCategory].textColor,
+                          textTransform: 'uppercase', letterSpacing: '0.5px',
+                        }}>
+                          {s.label}
+                        </span>
+                        <span style={{ fontSize: '10px', color: '#9ca3af' }}>
+                          click to use →
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '13px', fontWeight: '600', color: '#111827', marginBottom: '2px' }}>
+                        {s.title}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.4' }}>
+                        {s.body}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      )}
+
+      <input
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+        placeholder="Notification title"
+        style={{
+          padding: '9px 12px', fontSize: '13px',
+          border: '1px solid #e5e7eb', borderRadius: '8px',
+          outline: 'none', color: '#111827',
+        }}
+      />
+      <textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        placeholder="Notification message"
+        rows={3}
+        style={{
+          padding: '9px 12px', fontSize: '13px',
+          border: '1px solid #e5e7eb', borderRadius: '8px',
+          outline: 'none', color: '#111827', resize: 'vertical',
+          fontFamily: 'inherit',
+        }}
+      />
+      <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+        Signal: {SIGNAL_LABELS[customer?.topSignal?.type] || '—'} ·
+        Strength: {((customer?.topSignal?.strength || 0) * 100).toFixed(0)}%
+      </div>
+      <button
+        onClick={send}
+        disabled={sending || !title || !body}
+        style={{
+          padding: '11px', fontSize: '14px', fontWeight: '700',
+          color: '#fff',
+          background: sending || !title || !body ? '#9ca3af' : '#4f46e5',
+          border: 'none', borderRadius: '10px',
+          cursor: sending || !title || !body ? 'not-allowed' : 'pointer',
+          transition: 'background 0.2s',
+        }}
+      >
+        {sending ? '⏳ Sending...' : '🔔 Send notification'}
+      </button>
+    </div>
+  );
+}
+
+function EmailComposer({ customer, shop, onSent, onError }) {
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [sending, setSending] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [activeCategory, setActiveCategory] = useState(0);
+
+  const rawTopProductTitle = customer?.topProducts?.[0]?.title || '';
+  const hasTopProduct = !!(rawTopProductTitle && !/^\d+$/.test(rawTopProductTitle));
+  const productImage = customer?.topProducts?.[0]?.imageUrl || null;
+
+  useEffect(() => {
+    const signal = customer?.topSignal?.type;
+    const rawProduct = customer?.topProducts?.[0]?.title || '';
+    const product = /^\d+$/.test(rawProduct) ? '' : rawProduct;
+    const suggestions = {
+      cart_abandon: {
+        subject: 'You left something behind',
+        body: `Hi there,\n\nWe noticed you added ${product || 'some items'} to your cart but didn't complete your purchase.\n\nYour cart is saved and waiting for you. Come back and complete your order before it sells out!\n\nShop now and get free shipping on orders above ₹999.\n\nWarm regards,\nThe Team`,
+      },
+      high_intent: {
+        subject: `Still thinking about ${product || 'your saved item'}?`,
+        body: `Hi there,\n\nWe noticed you've been checking out ${product || 'one of our products'} multiple times.\n\nWe think you're going to love it! Here's what makes it special...\n\nDon't wait too long — stock is limited.\n\nWarm regards,\nThe Team`,
+      },
+      lapsing: {
+        subject: "We miss you! Here's something special",
+        body: `Hi there,\n\nIt's been a while since your last visit and we miss you!\n\nWe've added exciting new products to our collection that we think you'll love.\n\nCome back and explore — we'd love to see you again.\n\nWarm regards,\nThe Team`,
+      },
+    };
+    const s = suggestions[signal] || {
+      subject: 'A message from our store',
+      body: 'Hi there,\n\nThank you for being a valued customer. We have something special for you.\n\nWarm regards,\nThe Team',
+    };
+    setSubject(s.subject);
+    setBody(s.body);
+  }, [customer]);
+
+  async function send() {
+    if (!subject || !body || sending) return;
+    setSending(true);
+    try {
+      await apiSend('/api/push/send-journey-email', 'POST', {
+        profileId: customer.profile._id,
+        subject,
+        body,
+      });
+      onSent();
+    } catch (e) {
+      onError(e.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const email = customer?.profile?.channels?.email?.address ||
+    customer?.profile?.identifiers?.emails?.[0];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>
+        Sending to: <strong>{email}</strong>
+      </div>
+
+      {/* Suggestion toggle */}
+      <div
+        onClick={() => setShowSuggestions(s => !s)}
+        style={{ display: 'flex', justifyContent: 'space-between',
+                 alignItems: 'center', padding: '8px 10px',
+                 background: '#f9fafb', borderRadius: 8,
+                 cursor: 'pointer', fontSize: 13, color: '#374151',
+                 fontWeight: 500, userSelect: 'none' }}
+      >
+        <span>Email ideas</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ transform: showSuggestions ? 'rotate(180deg)' : 'none',
+                   transition: 'transform 0.2s' }}>
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </div>
+
+      {showSuggestions && (
+        <div style={{ border: '1px solid #e5e7eb', borderRadius: 10,
+                      overflow: 'hidden' }}>
+          {/* Category tabs */}
+          <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb',
+                        overflowX: 'auto' }}>
+            {EMAIL_SUGGESTIONS.map((cat, i) => (
+              <button key={i} onClick={() => setActiveCategory(i)}
+                style={{
+                  padding: '7px 12px', fontSize: 12, fontWeight: 600,
+                  border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
+                  background: activeCategory === i ? cat.color : '#fff',
+                  color: activeCategory === i ? cat.textColor : '#6b7280',
+                  borderBottom: activeCategory === i
+                    ? `2px solid ${cat.textColor}` : '2px solid transparent',
+                }}>
+                {cat.category}
+              </button>
+            ))}
+          </div>
+          {/* Suggestion cards */}
+          <div style={{ padding: 10, display: 'flex', flexDirection: 'column',
+                        gap: 8 }}>
+            {(() => {
+              const showThumb = EMAIL_SUGGESTIONS[activeCategory].category === 'Cart & Purchase' ||
+                hasTopProduct;
+              return EMAIL_SUGGESTIONS[activeCategory].suggestions.map((s, i) => (
+                <div key={i}
+                  onClick={() => {
+                    setSubject(s.subject);
+                    setBody(s.body);
+                    setShowSuggestions(false);
+                  }}
+                  style={{
+                    padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                    border: '1px solid #e5e7eb', background: '#fff',
+                    fontSize: 13,
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+                  onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                >
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                    {showThumb && <ProductThumbnail imageUrl={productImage} title={rawTopProductTitle} />}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 600, color: '#111827',
+                                    marginBottom: 2 }}>{s.label}</div>
+                      <div style={{ color: '#6b7280', fontSize: 12 }}>
+                        {s.subject}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      )}
+
+      <input
+        value={subject}
+        onChange={(e) => setSubject(e.target.value)}
+        placeholder="Email subject"
+        style={{
+          padding: '9px 12px', fontSize: '13px',
+          border: '1px solid #e5e7eb', borderRadius: '8px',
+          outline: 'none', color: '#111827',
+        }}
+      />
+      <textarea
+        value={body}
+        onChange={(e) => setBody(e.target.value)}
+        placeholder="Email message"
+        rows={6}
+        style={{
+          padding: '9px 12px', fontSize: '13px',
+          border: '1px solid #e5e7eb', borderRadius: '8px',
+          outline: 'none', color: '#111827',
+          resize: 'vertical', fontFamily: 'inherit',
+          lineHeight: '1.5',
+        }}
+      />
+      <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+        Sent from: notifications@shopireachboost.com
+      </div>
+      <button
+        onClick={send}
+        disabled={sending || !subject || !body}
+        style={{
+          padding: '11px', fontSize: '14px', fontWeight: '700', color: '#fff',
+          background: sending || !subject || !body ? '#9ca3af' : '#0ea5e9',
+          border: 'none', borderRadius: '10px',
+          cursor: sending || !subject || !body ? 'not-allowed' : 'pointer',
+          transition: 'background 0.2s',
+        }}
+      >
+        {sending ? '⏳ Sending...' : '✉️ Send email'}
+      </button>
+    </div>
+  );
+}
+
 export default function Customers({ shop }) {
   const [profiles, setProfiles] = useState([]);
   const [signalMap, setSignalMap] = useState({});
@@ -199,7 +915,13 @@ export default function Customers({ shop }) {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('everyone');
   const [search, setSearch] = useState('');
-  const [selectedProfileId, setSelectedProfileId] = useState(null);
+
+  // --- Journey panel state (see audits/customers-journey-merge-build-audit.txt).
+  // Replaces the screen's old selectedProfileId/full-screen-ProfileScreen
+  // navigation, which a row click can no longer reach — see the audit
+  // for why that was retired rather than left as dead code. ---
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [journeyLoading, setJourneyLoading] = useState(false);
 
   const [isMobileView, setIsMobileView] = useState(false);
   useEffect(() => {
@@ -265,15 +987,73 @@ export default function Customers({ shop }) {
     };
   }, [loadData]);
 
-  if (selectedProfileId) {
-    return (
-      <ProfileScreen
-        shop={shop}
-        profileId={selectedProfileId}
-        onBack={() => setSelectedProfileId(null)}
-      />
-    );
+  // --- Journey panel data loading ---
+  // NOTE ON A REAL BACKEND GAP FOUND WHILE IMPLEMENTING THIS: the given
+  // task text called this exact endpoint
+  // (`/api/events/:shop/journey?profileId=...`) as if profileId filtering
+  // already existed. It did not — GET /api/events/:shopDomain/journey
+  // (backend/routes/events.js) previously only accepted limit/page and
+  // silently ignored any other query param, so this call would have come
+  // back with an arbitrary top-50 customer (whoever has the strongest
+  // signal / most recent activity), NOT the one actually clicked — and
+  // for any profile with zero active signals, no request shape could ever
+  // have found it at all, since the old endpoint only ever iterated
+  // profiles that have a Signal document. Rather than build a different,
+  // ad hoc client-side lookup, backend/routes/events.js was extended to
+  // genuinely support `profileId` (see the buildJourneyEntry refactor and
+  // audits/customers-journey-merge-build-audit.txt), so this call below
+  // now works exactly as the given code intended.
+  async function loadCustomerJourney(profileId) {
+    if (!shop || !profileId) return;
+    setJourneyLoading(true);
+    try {
+      const data = await apiGet(
+        `/api/events/${encodeURIComponent(shop)}/journey?profileId=${profileId}`
+      );
+      if (data?.customers?.length > 0) {
+        setSelectedCustomer(data.customers[0]);
+      }
+    } catch (e) {
+      console.error('[customers] journey load error:', e.message);
+    } finally {
+      setJourneyLoading(false);
+    }
   }
+
+  // --- Send functions (per task Step 6). NOTE: NotificationComposer and
+  // EmailComposer above were copied over with their own internal
+  // apiSend() calls unmodified (per Step 5's "copy ... full"), so these
+  // two wrapper functions are not currently called by anything — kept
+  // here anyway per the explicit instruction to add them. See
+  // audits/customers-journey-merge-build-audit.txt. ---
+  async function sendJourneyPush(profileId, title, body) {
+    return apiSend('/api/push/send-journey', 'POST',
+      { profileId, title, body, url: '/' });
+  }
+
+  async function sendJourneyEmail(profileId, subject, body) {
+    return apiSend('/api/push/send-journey-email', 'POST',
+      { profileId, subject, body });
+  }
+
+  const [sendResult, setSendResult] = useState('');
+  const [notifTab, setNotifTab] = useState('push');
+
+  // Default to whichever channel is actually available whenever the
+  // selected customer changes — otherwise picking an email-only customer
+  // while notifTab is still 'push' from a previous selection would render
+  // an empty panel (neither composer's condition would be met). Same
+  // effect as Journey.jsx's own version.
+  useEffect(() => {
+    if (!selectedCustomer) return;
+    const hasPush = !!selectedCustomer.profile?.channels?.push?.subscribed;
+    const hasEmail = !!(
+      selectedCustomer.profile?.channels?.email?.address ||
+      selectedCustomer.profile?.identifiers?.emails?.[0]
+    );
+    if (notifTab === 'push' && !hasPush && hasEmail) setNotifTab('email');
+    else if (notifTab === 'email' && !hasEmail && hasPush) setNotifTab('push');
+  }, [selectedCustomer]);
 
   return (
     <div style={DS.page}>
@@ -368,386 +1148,626 @@ export default function Customers({ shop }) {
         </div>
       </div>
 
-      {/* Table */}
-      <div
-        style={{ ...DS.card, padding: 0, overflow: 'hidden' }}
-      >
-        {/* Table header — desktop only */}
-        {!isMobileView && (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: GRID_COLS,
-              padding: '10px 16px',
-              borderBottom: '1px solid #f3f4f6',
-              background: '#f9fafb',
-            }}
-          >
-            {['Customer', 'Stage', 'Most interested in', 'Reach', 'Last messaged', 'Spent'].map(
-              (h) => (
-                <div
-                  key={h}
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: '600',
-                    color: '#9ca3af',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                  }}
-                >
-                  {h}
-                </div>
-              )
-            )}
-          </div>
-        )}
+      {/* Customer list + Journey right panel — 2-panel layout once a
+          customer is selected (see audits/customers-journey-merge-build-audit.txt) */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: (selectedCustomer || journeyLoading)
+          ? (isMobileView ? '1fr' : '1fr 380px')
+          : '1fr',
+        gap: 16,
+        alignItems: 'start',
+      }}>
 
-        {/* Rows */}
-        {loading ? (
-          [1, 2, 3, 4, 5].map((i) => (
-            <div
-              key={i}
-              style={{
-                height: '60px',
-                borderBottom: '1px solid #f3f4f6',
-                background: '#fff',
-                display: 'flex',
-                alignItems: 'center',
-                padding: '0 16px',
-              }}
-            >
+        {/* Left: existing customer list */}
+        <div>
+          <div
+            style={{ ...DS.card, padding: 0, overflow: 'hidden' }}
+          >
+            {/* Table header — desktop only */}
+            {!isMobileView && (
               <div
                 style={{
-                  width: '60%',
-                  height: '14px',
-                  background: '#f3f4f6',
-                  borderRadius: '4px',
+                  display: 'grid',
+                  gridTemplateColumns: GRID_COLS,
+                  padding: '10px 16px',
+                  borderBottom: '1px solid #f3f4f6',
+                  background: '#f9fafb',
                 }}
-              />
-            </div>
-          ))
-        ) : profiles.length ? (
-          profiles.map((p, i) => {
-            const sig = signalMap[p._id?.toString()];
-            const lastMsg = p.messages?.length
-              ? p.messages[p.messages.length - 1]
-              : null;
+              >
+                {['Customer', 'Stage', 'Most interested in', 'Reach', 'Last messaged', 'Spent'].map(
+                  (h) => (
+                    <div
+                      key={h}
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: '600',
+                        color: '#9ca3af',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px',
+                      }}
+                    >
+                      {h}
+                    </div>
+                  )
+                )}
+              </div>
+            )}
 
-            // Determine stage label + colors
-            let stageLabel = STAGE_CONFIG[p.stage]?.label || p.stage;
-            let stageBg = STAGE_CONFIG[p.stage]?.bg || '#f3f4f6';
-            let stageColor = STAGE_CONFIG[p.stage]?.color || '#6b7280';
-            if (p.orders?.count >= 2) {
-              stageLabel = 'Repeat buyer';
-              stageBg = '#dbeafe';
-              stageColor = '#1d4ed8';
-            } else if (p.orders?.count === 1) {
-              stageLabel = 'Bought once';
-              stageBg = '#dcfce7';
-              stageColor = '#16a34a';
-            } else if (
-              p.identifiers?.cartTokens?.length > 0 &&
-              p.orders?.count === 0
-            ) {
-              stageLabel = 'Has a cart';
-              stageBg = '#fef9c3';
-              stageColor = '#ca8a04';
-            }
-
-            const name =
-              p.identifiers?.emails?.[0] || p.identifiers?.phones?.[0] || null;
-            const displayName = name
-              ? name
-              : `Anonymous shopper · #${p._id?.toString().slice(-5)}`;
-
-            const lastSeen = p.lastSeenAt
-              ? getRelativeTime(new Date(p.lastSeenAt))
-              : null;
-
-            const interests = p.interests ? Object.entries(p.interests) : [];
-            const topInterest = interests.sort((a, b) => b[1] - a[1])[0];
-
-            if (isMobileView) {
-              const sigN = signalCountMap[p._id] || 0;
-              return (
+            {/* Rows */}
+            {loading ? (
+              [1, 2, 3, 4, 5].map((i) => (
                 <div
-                  key={p._id}
-                  onClick={() => setSelectedProfileId(p._id)}
+                  key={i}
                   style={{
-                    padding: '14px 16px',
-                    borderBottom:
-                      i < profiles.length - 1 ? '1px solid #f9fafb' : 'none',
-                    cursor: 'pointer',
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#f9fafb';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = '#fff';
+                    height: '60px',
+                    borderBottom: '1px solid #f3f4f6',
+                    background: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    padding: '0 16px',
                   }}
                 >
-                  {/* Row 1: Name + Stage badge */}
                   <div
                     style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '6px',
+                      width: '60%',
+                      height: '14px',
+                      background: '#f3f4f6',
+                      borderRadius: '4px',
                     }}
-                  >
-                    <div
-                      style={{
-                        fontSize: '14px',
-                        fontWeight: '600',
-                        color: '#111827',
-                      }}
-                    >
-                      {p.identifiers?.emails?.[0] ||
-                        p.identifiers?.phones?.[0] ||
-                        `Anonymous #${p._id?.toString().slice(-5)}`}
-                    </div>
-                    <span
-                      style={{
-                        padding: '3px 10px',
-                        borderRadius: '20px',
-                        fontSize: '11px',
-                        fontWeight: '500',
-                        background: getStageBg(p),
-                        color: getStageColor(p),
-                        flexShrink: 0,
-                        marginLeft: '8px',
-                      }}
-                    >
-                      {getStageLabel(p)}
-                    </span>
-                  </div>
+                  />
+                </div>
+              ))
+            ) : profiles.length ? (
+              profiles.map((p, i) => {
+                const sig = signalMap[p._id?.toString()];
+                const lastMsg = p.messages?.length
+                  ? p.messages[p.messages.length - 1]
+                  : null;
+                const isSel = selectedCustomer?.profile?._id === p._id;
 
-                  {/* Row 2: Last seen + Signal */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '4px',
-                    }}
-                  >
-                    <div style={{ fontSize: '12px', color: '#9ca3af' }}>
-                      {p.lastSeenAt
-                        ? `seen ${getRelativeTime(new Date(p.lastSeenAt))}`
-                        : ''}
-                    </div>
-                    {sigN > 0 && (
-                      <span
+                // Determine stage label + colors
+                let stageLabel = STAGE_CONFIG[p.stage]?.label || p.stage;
+                let stageBg = STAGE_CONFIG[p.stage]?.bg || '#f3f4f6';
+                let stageColor = STAGE_CONFIG[p.stage]?.color || '#6b7280';
+                if (p.orders?.count >= 2) {
+                  stageLabel = 'Repeat buyer';
+                  stageBg = '#dbeafe';
+                  stageColor = '#1d4ed8';
+                } else if (p.orders?.count === 1) {
+                  stageLabel = 'Bought once';
+                  stageBg = '#dcfce7';
+                  stageColor = '#16a34a';
+                } else if (
+                  p.identifiers?.cartTokens?.length > 0 &&
+                  p.orders?.count === 0
+                ) {
+                  stageLabel = 'Has a cart';
+                  stageBg = '#fef9c3';
+                  stageColor = '#ca8a04';
+                }
+
+                const name =
+                  p.identifiers?.emails?.[0] || p.identifiers?.phones?.[0] || null;
+                const displayName = name
+                  ? name
+                  : `Anonymous shopper · #${p._id?.toString().slice(-5)}`;
+
+                const lastSeen = p.lastSeenAt
+                  ? getRelativeTime(new Date(p.lastSeenAt))
+                  : null;
+
+                const interests = p.interests ? Object.entries(p.interests) : [];
+                const topInterest = interests.sort((a, b) => b[1] - a[1])[0];
+
+                if (isMobileView) {
+                  const sigN = signalCountMap[p._id] || 0;
+                  return (
+                    <div
+                      key={p._id}
+                      onClick={() => loadCustomerJourney(p.profileId || p._id)}
+                      style={{
+                        padding: '14px 16px',
+                        borderBottom:
+                          i < profiles.length - 1 ? '1px solid #f9fafb' : 'none',
+                        cursor: 'pointer',
+                        background: isSel ? '#f5f3ff' : 'transparent',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isSel) e.currentTarget.style.background = '#f9fafb';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = isSel ? '#f5f3ff' : '#fff';
+                      }}
+                    >
+                      {/* Row 1: Name + Stage badge */}
+                      <div
                         style={{
-                          fontSize: '11px',
-                          color: '#f97316',
-                          fontWeight: '500',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: '6px',
                         }}
                       >
-                        {sigN} signal{sigN > 1 ? 's' : ''}
-                      </span>
-                    )}
-                  </div>
+                        <div
+                          style={{
+                            fontSize: '14px',
+                            fontWeight: '600',
+                            color: '#111827',
+                          }}
+                        >
+                          {p.identifiers?.emails?.[0] ||
+                            p.identifiers?.phones?.[0] ||
+                            `Anonymous #${p._id?.toString().slice(-5)}`}
+                        </div>
+                        <span
+                          style={{
+                            padding: '3px 10px',
+                            borderRadius: '20px',
+                            fontSize: '11px',
+                            fontWeight: '500',
+                            background: getStageBg(p),
+                            color: getStageColor(p),
+                            flexShrink: 0,
+                            marginLeft: '8px',
+                          }}
+                        >
+                          {getStageLabel(p)}
+                        </span>
+                      </div>
 
-                  {/* Row 3: Channels + LTV */}
+                      {/* Row 2: Last seen + Signal */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: '4px',
+                        }}
+                      >
+                        <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+                          {p.lastSeenAt
+                            ? `seen ${getRelativeTime(new Date(p.lastSeenAt))}`
+                            : ''}
+                        </div>
+                        {sigN > 0 && (
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              color: '#f97316',
+                              fontWeight: '500',
+                            }}
+                          >
+                            {sigN} signal{sigN > 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Row 3: Channels + LTV */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <span
+                            style={{
+                              fontSize: '14px',
+                              opacity: p.channels?.push?.subscribed ? 1 : 0.2,
+                            }}
+                          >
+                            🔔
+                          </span>
+                          <span
+                            style={{
+                              fontSize: '14px',
+                              opacity: p.channels?.email?.address ? 1 : 0.2,
+                            }}
+                          >
+                            ✉️
+                          </span>
+                          <span
+                            style={{
+                              fontSize: '14px',
+                              opacity: p.identifiers?.phones?.length > 0 ? 1 : 0.2,
+                            }}
+                          >
+                            📱
+                          </span>
+                        </div>
+                        {p.orders?.ltv > 0 && (
+                          <div
+                            style={{
+                              fontSize: '13px',
+                              fontWeight: '600',
+                              color: '#111827',
+                            }}
+                          >
+                            ₹{p.orders.ltv.toLocaleString('en-IN')}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
                   <div
+                    key={p._id}
+                    onClick={() => loadCustomerJourney(p.profileId || p._id)}
                     style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
+                      display: 'grid',
+                      gridTemplateColumns: GRID_COLS,
+                      padding: '12px 16px',
+                      borderBottom:
+                        i < profiles.length - 1 ? '1px solid #f9fafb' : 'none',
+                      cursor: 'pointer',
+                      background: isSel ? '#f5f3ff' : 'transparent',
+                      transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isSel) e.currentTarget.style.background = '#f9fafb';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = isSel ? '#f5f3ff' : '#fff';
                     }}
                   >
-                    <div style={{ display: 'flex', gap: '6px' }}>
+                    {/* Customer */}
+                    <div>
+                      <div
+                        style={{ fontSize: '14px', fontWeight: '500', color: '#111827' }}
+                      >
+                        {displayName}
+                      </div>
+                      {lastSeen && (
+                        <div
+                          style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}
+                        >
+                          seen {lastSeen}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Stage */}
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
                       <span
                         style={{
-                          fontSize: '14px',
+                          padding: '3px 10px',
+                          borderRadius: '20px',
+                          fontSize: '12px',
+                          fontWeight: '500',
+                          background: stageBg,
+                          color: stageColor,
+                        }}
+                      >
+                        {stageLabel}
+                      </span>
+                    </div>
+
+                    {/* Most interested in */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      {sig ? (
+                        <>
+                          <div style={{ fontSize: '13px', color: '#374151' }}>
+                            {topInterest?.[0] || '—'}
+                          </div>
+                          <div
+                            style={{ fontSize: '12px', color: '#6366f1', marginTop: '2px' }}
+                          >
+                            {SIGNAL_LABELS[sig.type] || sig.type}
+                          </div>
+                        </>
+                      ) : (
+                        <span style={{ color: '#d1d5db' }}>—</span>
+                      )}
+                    </div>
+
+                    {/* Reach — channel icons */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span
+                        style={{
                           opacity: p.channels?.push?.subscribed ? 1 : 0.2,
+                          fontSize: '16px',
                         }}
                       >
                         🔔
                       </span>
                       <span
                         style={{
-                          fontSize: '14px',
                           opacity: p.channels?.email?.address ? 1 : 0.2,
+                          fontSize: '16px',
                         }}
                       >
                         ✉️
                       </span>
                       <span
                         style={{
-                          fontSize: '14px',
                           opacity: p.identifiers?.phones?.length > 0 ? 1 : 0.2,
+                          fontSize: '16px',
                         }}
                       >
                         📱
                       </span>
                     </div>
-                    {p.orders?.ltv > 0 && (
-                      <div
-                        style={{
-                          fontSize: '13px',
-                          fontWeight: '600',
-                          color: '#111827',
-                        }}
-                      >
-                        ₹{p.orders.ltv.toLocaleString('en-IN')}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            }
 
-            return (
+                    {/* Last messaged */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        fontSize: '13px',
+                        color: '#374151',
+                      }}
+                    >
+                      {lastMsg ? (
+                        getRelativeTime(new Date(lastMsg.sentAt))
+                      ) : (
+                        <span style={{ color: '#d1d5db' }}>Never</span>
+                      )}
+                    </div>
+
+                    {/* Spent */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        color: '#111827',
+                      }}
+                    >
+                      {p.orders?.ltv > 0 ? (
+                        `₹${p.orders.ltv.toLocaleString('en-IN')}`
+                      ) : (
+                        <span style={{ color: '#d1d5db' }}>—</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
               <div
-                key={p._id}
-                onClick={() => setSelectedProfileId(p._id)}
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: GRID_COLS,
-                  padding: '12px 16px',
-                  borderBottom:
-                    i < profiles.length - 1 ? '1px solid #f9fafb' : 'none',
-                  cursor: 'pointer',
-                  transition: 'background 0.1s',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = '#f9fafb';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = '#fff';
+                  padding: '32px 16px',
+                  textAlign: 'center',
+                  fontSize: '13px',
+                  color: '#9ca3af',
                 }}
               >
-                {/* Customer */}
-                <div>
-                  <div
-                    style={{ fontSize: '14px', fontWeight: '500', color: '#111827' }}
-                  >
-                    {displayName}
+                No customers match this view.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Journey panel */}
+        {(selectedCustomer || journeyLoading) && (
+          <div style={{
+            position: 'sticky',
+            top: 16,
+            height: 'calc(100vh - 120px)',
+            overflowY: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}>
+            <button
+              onClick={() => setSelectedCustomer(null)}
+              style={{ position: 'absolute', top: 8, right: 8,
+                       background: 'none', border: 'none',
+                       fontSize: 18, cursor: 'pointer', color: '#9ca3af' }}>
+              ✕
+            </button>
+
+            {journeyLoading && !selectedCustomer ? (
+              <div style={{ ...DS.card, marginBottom: 0, textAlign: 'center',
+                            padding: '32px 16px', color: '#9ca3af', fontSize: 13 }}>
+                Loading journey…
+              </div>
+            ) : selectedCustomer && (
+              <>
+                {/* Journey timeline */}
+                <div style={{
+                  ...DS.card, padding: '16px', marginBottom: 0,
+                  flex: '1 1 0', minHeight: 0, overflowY: 'auto',
+                }}>
+                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>
+                    Customer journey
                   </div>
-                  {lastSeen && (
-                    <div
-                      style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}
-                    >
-                      seen {lastSeen}
+
+                  {/* Top products */}
+                  {selectedCustomer.topProducts?.length > 0 && (
+                    <div style={{ marginBottom: '12px' }}>
+                      <div style={{
+                        fontSize: '11px', color: '#9ca3af', fontWeight: '600',
+                        textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px',
+                      }}>
+                        Most interested in
+                      </div>
+                      {selectedCustomer.topProducts.map((p, i) => (
+                        <div key={i} style={{ display: 'flex', alignItems: 'center',
+                                      gap: 10, padding: '8px 0',
+                                      borderBottom: i < selectedCustomer.topProducts.length - 1
+                                        ? '1px solid #f3f4f6' : 'none' }}>
+                          <ProductThumbnail imageUrl={p.imageUrl} title={p.title} />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#111827',
+                                          overflow: 'hidden', textOverflow: 'ellipsis',
+                                          whiteSpace: 'nowrap' }}>{p.title}</div>
+                            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+                              {p.count} view{p.count !== 1 ? 's' : ''}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   )}
+
+                  {/* Recent events */}
+                  <div style={{
+                    fontSize: '11px', color: '#9ca3af', fontWeight: '600',
+                    textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px',
+                  }}>
+                    Recent activity
+                  </div>
+                  <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    {(() => {
+                      const filteredEvents = (selectedCustomer.recentEvents || [])
+                        .filter((e) => EVENT_LABELS[e.type]);
+
+                      if (filteredEvents.length === 0) {
+                        return (
+                          <div style={{ fontSize: '12px', color: '#9ca3af', padding: '4px 0' }}>
+                            No journey data yet
+                          </div>
+                        );
+                      }
+
+                      return filteredEvents.map((e, i) => (
+                        <div key={i} style={{
+                          display: 'flex', gap: '8px', alignItems: 'flex-start',
+                          padding: '4px 0', borderBottom: '1px solid #f9fafb', fontSize: '12px',
+                        }}>
+                          <span style={{
+                            display: 'inline-block',
+                            width: '8px', height: '8px',
+                            borderRadius: '50%',
+                            background: EVENT_DOT_COLORS[e.type],
+                            flexShrink: 0, marginTop: '6px',
+                          }} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ color: '#374151' }}>{EVENT_LABELS[e.type]}</div>
+                            {e.type === 'product_view' && (e.meta?.productTitle || e.path) && (
+                              <div style={{ color: '#6b7280', fontSize: '11px' }}>
+                                {e.meta?.productTitle || getFriendlyPath(e.path)}
+                              </div>
+                            )}
+                            {e.type === 'page_view' && e.path && (
+                              <div style={{ color: '#6b7280', fontSize: '11px' }}>
+                                {getFriendlyPath(e.path)}
+                              </div>
+                            )}
+                          </div>
+                          <span style={{ color: '#9ca3af', flexShrink: 0, fontSize: '11px' }}>
+                            {new Date(e.ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      ));
+                    })()}
+                  </div>
                 </div>
 
-                {/* Stage */}
-                <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <span
-                    style={{
-                      padding: '3px 10px',
-                      borderRadius: '20px',
-                      fontSize: '12px',
-                      fontWeight: '500',
-                      background: stageBg,
-                      color: stageColor,
-                    }}
-                  >
-                    {stageLabel}
-                  </span>
-                </div>
+                {/* Send notification panel */}
+                {(() => {
+                  const hasPush = !!selectedCustomer.profile?.channels?.push?.subscribed;
+                  const hasEmail = !!(
+                    selectedCustomer.profile?.channels?.email?.address ||
+                    selectedCustomer.profile?.identifiers?.emails?.[0]
+                  );
 
-                {/* Most interested in */}
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                  }}
-                >
-                  {sig ? (
-                    <>
-                      <div style={{ fontSize: '13px', color: '#374151' }}>
-                        {topInterest?.[0] || '—'}
+                  if (!hasPush && !hasEmail) {
+                    return (
+                      <div style={{
+                        ...DS.card, background: DS.gray50, padding: '16px',
+                        marginBottom: 0, textAlign: 'center',
+                        flex: '0 0 auto', overflowY: 'auto', maxHeight: '45vh',
+                      }}>
+                        <div style={{ fontSize: '13px', color: '#9ca3af' }}>
+                          🔕 No push subscription or email on file — cannot send a notification
+                        </div>
                       </div>
-                      <div
-                        style={{ fontSize: '12px', color: '#6366f1', marginTop: '2px' }}
-                      >
-                        {SIGNAL_LABELS[sig.type] || sig.type}
+                    );
+                  }
+
+                  return (
+                    <div style={{
+                      ...DS.card, padding: '16px', marginBottom: 0,
+                      flex: '0 0 auto', overflowY: 'auto', maxHeight: '45vh',
+                    }}>
+                      <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>
+                        Send notification
                       </div>
-                    </>
-                  ) : (
-                    <span style={{ color: '#d1d5db' }}>—</span>
-                  )}
-                </div>
 
-                {/* Reach — channel icons */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span
-                    style={{
-                      opacity: p.channels?.push?.subscribed ? 1 : 0.2,
-                      fontSize: '16px',
-                    }}
-                  >
-                    🔔
-                  </span>
-                  <span
-                    style={{
-                      opacity: p.channels?.email?.address ? 1 : 0.2,
-                      fontSize: '16px',
-                    }}
-                  >
-                    ✉️
-                  </span>
-                  <span
-                    style={{
-                      opacity: p.identifiers?.phones?.length > 0 ? 1 : 0.2,
-                      fontSize: '16px',
-                    }}
-                  >
-                    📱
-                  </span>
-                </div>
+                      {/* Push / Email tab switcher */}
+                      <div style={{
+                        display: 'flex', gap: '4px', marginBottom: '12px',
+                        background: '#f3f4f6', borderRadius: '10px', padding: '4px',
+                      }}>
+                        {[
+                          { key: 'push', label: '🔔 Push', available: hasPush },
+                          { key: 'email', label: '✉️ Email', available: hasEmail },
+                        ].map((tab) => (
+                          <button
+                            key={tab.key}
+                            onClick={() => tab.available && setNotifTab(tab.key)}
+                            style={{
+                              flex: 1, padding: '8px', fontSize: '13px',
+                              fontWeight: notifTab === tab.key ? '600' : '400',
+                              color: !tab.available ? '#d1d5db' :
+                                notifTab === tab.key ? '#111827' : '#6b7280',
+                              background: notifTab === tab.key ? '#fff' : 'transparent',
+                              border: 'none', borderRadius: '8px',
+                              cursor: tab.available ? 'pointer' : 'not-allowed',
+                              boxShadow: notifTab === tab.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                              transition: 'all 0.15s',
+                            }}
+                          >
+                            {tab.label}
+                            {!tab.available && (
+                              <span style={{ fontSize: '10px', color: '#d1d5db', display: 'block' }}>
+                                Not available
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
 
-                {/* Last messaged */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    fontSize: '13px',
-                    color: '#374151',
-                  }}
-                >
-                  {lastMsg ? (
-                    getRelativeTime(new Date(lastMsg.sentAt))
-                  ) : (
-                    <span style={{ color: '#d1d5db' }}>Never</span>
-                  )}
-                </div>
+                      {notifTab === 'push' && hasPush && (
+                        <NotificationComposer
+                          customer={selectedCustomer}
+                          shop={shop}
+                          onSent={() => {
+                            setSendResult('Sent successfully!');
+                            setTimeout(() => setSendResult(''), 3000);
+                          }}
+                          onError={(err) => setSendResult('Error: ' + err)}
+                        />
+                      )}
 
-                {/* Spent */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    fontSize: '13px',
-                    fontWeight: '500',
-                    color: '#111827',
-                  }}
-                >
-                  {p.orders?.ltv > 0 ? (
-                    `₹${p.orders.ltv.toLocaleString('en-IN')}`
-                  ) : (
-                    <span style={{ color: '#d1d5db' }}>—</span>
-                  )}
-                </div>
-              </div>
-            );
-          })
-        ) : (
-          <div
-            style={{
-              padding: '32px 16px',
-              textAlign: 'center',
-              fontSize: '13px',
-              color: '#9ca3af',
-            }}
-          >
-            No customers match this view.
+                      {notifTab === 'email' && hasEmail && (
+                        <EmailComposer
+                          customer={selectedCustomer}
+                          shop={shop}
+                          onSent={() => {
+                            setSendResult('Sent successfully!');
+                            setTimeout(() => setSendResult(''), 3000);
+                          }}
+                          onError={(err) => setSendResult('Error: ' + err)}
+                        />
+                      )}
+
+                      {sendResult && (
+                        <div style={{
+                          marginTop: '8px', fontSize: '13px',
+                          color: sendResult.startsWith('Error') ? '#dc2626' : '#16a34a',
+                          textAlign: 'center',
+                        }}>
+                          {sendResult}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </>
+            )}
           </div>
         )}
       </div>
