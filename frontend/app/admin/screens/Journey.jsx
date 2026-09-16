@@ -972,18 +972,26 @@ export default function JourneyScreen({ shop }) {
       }}>
 
         {/* Customer list */}
-        <div style={{ ...DS.card, padding: 0, overflow: 'hidden' }}>
+        <div style={{ ...DS.card, padding: 0, overflow: 'hidden', overflowX: 'hidden' }}>
 
-          {/* Column headers */}
+          {/* Column headers — flex-based widths so the ACTION column
+              (Notify button) always has room and is never clipped. */}
           <div style={{
-            display: 'grid', gridTemplateColumns: '1fr 140px 120px 100px',
+            display: 'flex',
             padding: '10px 16px', background: '#f9fafb', borderBottom: '1px solid #f3f4f6',
           }}>
-            {['Customer', 'Top signal', 'Top product', 'Action'].map((h) => (
-              <div key={h} style={{
+            {[
+              { label: 'Customer', flex: 2 },
+              { label: 'Top signal', flex: 1.5 },
+              { label: 'Top product', flex: 1.5 },
+              { label: 'Action', flex: 1, flexShrink: 0, minWidth: 90 },
+            ].map((col) => (
+              <div key={col.label} style={{
+                flex: col.flex, flexShrink: col.flexShrink ?? 1,
+                minWidth: col.minWidth,
                 fontSize: '11px', fontWeight: '600', color: '#9ca3af',
                 textTransform: 'uppercase', letterSpacing: '0.5px',
-              }}>{h}</div>
+              }}>{col.label}</div>
             ))}
           </div>
 
@@ -1019,8 +1027,7 @@ export default function JourneyScreen({ shop }) {
                       key={profile?._id || i}
                       onClick={() => setSelectedCustomer(isSelected ? null : c)}
                       style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 140px 120px 100px',
+                        display: 'flex',
                         padding: '12px 16px', alignItems: 'center',
                         borderBottom: i < filteredCustomers.length - 1 ? '1px solid #f9fafb' : 'none',
                         cursor: 'pointer',
@@ -1036,8 +1043,9 @@ export default function JourneyScreen({ shop }) {
                     >
 
                       {/* Customer */}
-                      <div>
-                        <div style={{ fontSize: '13px', fontWeight: '500', color: '#111827', marginBottom: '2px' }}>
+                      <div style={{ flex: 2, minWidth: 0 }}>
+                        <div style={{ fontSize: '13px', fontWeight: '500', color: '#111827', marginBottom: '2px',
+                                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {identifier}
                         </div>
                         <div style={{ fontSize: '11px', color: '#9ca3af' }}>
@@ -1047,7 +1055,7 @@ export default function JourneyScreen({ shop }) {
                       </div>
 
                       {/* Top signal */}
-                      <div>
+                      <div style={{ flex: 1.5, minWidth: 0 }}>
                         <span style={{
                           padding: '3px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: '500',
                           background:
@@ -1063,6 +1071,7 @@ export default function JourneyScreen({ shop }) {
 
                       {/* Top product */}
                       <div style={{
+                        flex: 1.5, minWidth: 0,
                         fontSize: '12px', color: '#374151',
                         overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}>
@@ -1070,7 +1079,7 @@ export default function JourneyScreen({ shop }) {
                       </div>
 
                       {/* Action */}
-                      <div>
+                      <div style={{ flex: 1, flexShrink: 0, minWidth: 90 }}>
                         {hasPush ? (
                           <button
                             onClick={(e) => {
