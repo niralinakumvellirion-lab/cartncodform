@@ -187,19 +187,14 @@ export default function Today({ shop }) {
     let cancelled = false;
     const { from, to } = getDateRange(dateFilter);
     setNotifLoading(true);
-    Promise.all([
+    Promise.allSettled([
       apiGet(`/api/activity?shop=${encodeURIComponent(shop)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
       apiGet(`/api/profiles/${encodeURIComponent(shop)}/today-stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
     ])
-      .then(([actData, statsData]) => {
+      .then(([actResult, statsResult]) => {
         if (cancelled) return;
-        setActivity(actData);
-        setNotifStats(statsData);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setActivity(null);
-        setNotifStats(null);
+        setActivity(actResult.status === 'fulfilled' ? actResult.value : null);
+        setNotifStats(statsResult.status === 'fulfilled' ? statsResult.value : null);
       })
       .finally(() => {
         if (cancelled) return;
