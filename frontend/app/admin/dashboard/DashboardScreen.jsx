@@ -471,40 +471,6 @@ export default function DashboardScreen({ shop }) {
         </div>
       </div>
 
-      {/* SECTION 2 — KPI row (6 cards, 2 rows of 3 via grid wrap) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
-          gap: 12,
-          marginBottom: 24,
-        }}
-      >
-        {[...kpiRow1, ...kpiRow2].map((kpi) => (
-          <div
-            key={kpi.label}
-            style={{ ...DS.card, padding: '16px 20px', marginBottom: 0,
-                     borderLeft: '3px solid #4f46e5' }}
-          >
-            <div
-              style={{
-                fontSize: 12,
-                color: '#6b7280',
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                marginBottom: 8,
-              }}
-            >
-              {kpi.label}
-            </div>
-            <div style={{ fontSize: 24, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
-              {notifLoading ? '—' : (kpi.value ?? 0)}
-            </div>
-          </div>
-        ))}
-      </div>
-
       {/* Insights Stats Row — restored (see audits/dashboard-missing-audit.txt).
           NOTE: the task text that requested this row assumed insightsStats
           has fields named productViews/optInRate/sessions. The actual
@@ -557,6 +523,40 @@ export default function DashboardScreen({ shop }) {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* SECTION 2 — KPI row (6 cards, 2 rows of 3 via grid wrap) */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
+          gap: 12,
+          marginBottom: 24,
+        }}
+      >
+        {[...kpiRow1, ...kpiRow2].map((kpi) => (
+          <div
+            key={kpi.label}
+            style={{ ...DS.card, padding: '16px 20px', marginBottom: 0,
+                     borderLeft: '3px solid #4f46e5' }}
+          >
+            <div
+              style={{
+                fontSize: 12,
+                color: '#6b7280',
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                marginBottom: 8,
+              }}
+            >
+              {kpi.label}
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
+              {notifLoading ? '—' : (kpi.value ?? 0)}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* SECTION 3 — Attributed Activity (4 clickable cards) */}
