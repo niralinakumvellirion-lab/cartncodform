@@ -7,19 +7,18 @@ const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'pending', label: 'Pending' },
   { key: 'sent', label: 'Sent' },
-  { key: 'failed', label: 'Failed' },
-  { key: 'cancelled', label: 'Cancelled' },
 ];
 
-// The 4 stats-row tiles. The GET /api/queue/:shop endpoint only returns a
-// `total` scoped to whatever single `status` filter was requested — there
-// is no aggregate "counts per status" field — so the stats row is built
-// from 4 parallel calls to that same endpoint (one per status, reading
+// The stats-row tiles (Pending, Sent only — Failed/Cancelled tiles were
+// removed). The GET /api/queue/:shop endpoint only returns a `total`
+// scoped to whatever single `status` filter was requested — there is no
+// aggregate "counts per status" field — so the stats row is built from
+// parallel calls to that same endpoint (one per status here, reading
 // only .total from each). Wasteful (each call also returns up to 20 full,
 // profile-enriched job rows that this row never uses) but stays within
 // the given backend contract, which this task presented as complete and
 // did not ask to extend. See audits/phase2-queue-audit.txt.
-const STATS_STATUSES = ['pending', 'sent', 'failed', 'cancelled'];
+const STATS_STATUSES = ['pending', 'sent'];
 
 const STATUS_BADGE = {
   pending: { bg: '#fef3c7', color: '#d97706' },
@@ -246,7 +245,7 @@ export default function QueueScreen({ shop }) {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+          gridTemplateColumns: 'repeat(2, 1fr)',
           gap: 12,
           marginBottom: 20,
         }}
