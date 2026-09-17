@@ -136,7 +136,7 @@ function getRelativeTime(date) {
   return `${days} days ago`;
 }
 
-const GRID_COLS = '2fr 100px 130px 80px 110px 70px';
+const GRID_COLS = 'minmax(180px,2fr) 100px minmax(100px,1fr) 90px 110px 70px';
 
 const FILTER_TABS = [
   { key: 'everyone', label: 'Everyone' },
@@ -1287,7 +1287,14 @@ export default function Customers({ shop }) {
               ))
             ) : profiles.length ? (
               profiles.map((p, i) => {
-                const sig = signalMap[p._id?.toString()];
+                // `sig` (this profile's strongest signal, from signalMap)
+                // is no longer read here — the rebuilt desktop row's
+                // "Most interested in" column dropped the secondary
+                // signal-type sub-line the earlier design had (the given
+                // rebuild JSX's column is a single non-wrapping line with
+                // no room for a second line). signalMap/signalCountMap
+                // state itself is untouched — see
+                // audits/customers-row-rebuild-audit.txt.
                 const lastMsg = p.messages?.length
                   ? p.messages[p.messages.length - 1]
                   : null;
@@ -1421,6 +1428,33 @@ export default function Customers({ shop }) {
                 const avatarSource = p.identifiers?.emails?.[0];
                 const avatarInitial = (avatarSource || '?').charAt(0).toUpperCase();
 
+                // Rebuilt row (see audits/customers-row-rebuild-audit.txt).
+                // NOTE: the task's given JSX referenced customer.email,
+                // customer.lastSeenLabel, customer.topInterest,
+                // customer.lastMessaged, customer.ltv, and
+                // customer.profileId — NONE of these fields exist on the
+                // Profile documents this screen actually fetches (GET
+                // /api/profiles/:shop/profiles). Verified this by reading
+                // the pre-existing derived-variable block directly above
+                // (displayName/lastSeen/interestRaw/interestDisplay/
+                // avatarInitial, already computed a few lines up in this
+                // same .map callback) plus the real field paths used
+                // throughout the rest of this file: p.identifiers.emails/
+                // phones, p.lastSeenAt (via getRelativeTime), p.interests
+                // (via topInterest/interestRaw), p.messages (via lastMsg),
+                // p.orders.ltv. Used those real values/paths below instead
+                // of the given (nonexistent) field names, per this task's
+                // own explicit instruction not to guess. Kept the loop's
+                // existing variable name `p` (not `customer`, matching
+                // every other row/section in this file) and the existing
+                // `isSel` variable (computed once above, reused 3x below)
+                // rather than repeating the full selection comparison
+                // inline three times as the given snippet did — same
+                // behavior, less duplication.
+                const lastMessagedDisplay = lastMsg
+                  ? getRelativeTime(new Date(lastMsg.sentAt))
+                  : 'Never';
+
                 return (
                   <div
                     key={p._id}
@@ -1428,120 +1462,72 @@ export default function Customers({ shop }) {
                     style={{
                       display: 'grid',
                       gridTemplateColumns: GRID_COLS,
-                      padding: '12px 16px',
-                      borderBottom:
-                        i < profiles.length - 1 ? '1px solid #f3f4f6' : 'none',
-                      cursor: 'pointer',
-                      background: isSel ? '#f5f3ff' : 'transparent',
-                      transition: 'background 0.1s',
                       alignItems: 'center',
+                      padding: '10px 16px',
+                      borderBottom: '1px solid #f3f4f6',
+                      cursor: 'pointer',
+                      background: isSel ? '#f5f3ff' : '#fff',
+                      transition: 'background 0.1s',
                     }}
                     onMouseEnter={(e) => {
                       if (!isSel) e.currentTarget.style.background = '#f9fafb';
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.background = isSel ? '#f5f3ff' : '#fff';
+                      if (!isSel) e.currentTarget.style.background = '#fff';
                     }}
                   >
-                    {/* Customer */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ width: 32, height: 32, borderRadius: '50%',
-                                    background: '#eef2ff', color: '#4f46e5',
-                                    display: 'flex', alignItems: 'center',
-                                    justifyContent: 'center', fontSize: 13,
-                                    fontWeight: 700, flexShrink: 0 }}>
+                    {/* CUSTOMER column */}
+                    <div style={{ display: 'flex', alignItems: 'center',
+                                  gap: 10, minWidth: 0 }}>
+                      <div style={{
+                        width: 34, height: 34, borderRadius: '50%',
+                        background: '#eef2ff', color: '#4f46e5',
+                        display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', fontSize: 13,
+                        fontWeight: 700, flexShrink: 0,
+                      }}>
                         {avatarInitial}
                       </div>
-                      <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                      <div style={{ minWidth: 0 }}>
                         <div style={{ fontSize: 13, fontWeight: 600, color: '#111827',
                                       overflow: 'hidden', textOverflow: 'ellipsis',
                                       whiteSpace: 'nowrap' }}>
                           {displayName}
                         </div>
                         {lastSeen && (
-                          <div style={{ fontSize: 11, color: '#9ca3af' }}>
+                          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>
                             seen {lastSeen}
                           </div>
                         )}
                       </div>
                     </div>
 
-                    {/* Stage */}
-                    <div style={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
+                    {/* STAGE column */}
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
                       <StageBadge customer={p} />
                     </div>
 
-                    {/* Most interested in */}
-                    <div
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'center',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {interestRaw ? (
-                        <>
-                          <div style={{ fontSize: 12, color: '#374151',
-                                        overflow: 'hidden', textOverflow: 'ellipsis',
-                                        whiteSpace: 'nowrap' }}>
-                            {interestDisplay}
-                          </div>
-                          {sig && (
-                            <div
-                              style={{ fontSize: '12px', color: '#6366f1', marginTop: '2px',
-                                       overflow: 'hidden', textOverflow: 'ellipsis',
-                                       whiteSpace: 'nowrap' }}
-                            >
-                              {SIGNAL_LABELS[sig.type] || sig.type}
-                            </div>
-                          )}
-                        </>
-                      ) : (
-                        <span style={{ fontSize: 12, color: '#d1d5db' }}>—</span>
-                      )}
+                    {/* MOST INTERESTED IN column */}
+                    <div style={{ fontSize: 12, color: '#374151',
+                                  overflow: 'hidden', textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap', paddingRight: 8 }}>
+                      {interestDisplay}
                     </div>
 
-                    {/* Reach — channel icons */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {/* REACH column */}
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
                       <ReachIcons customer={p} />
                     </div>
 
-                    {/* Last messaged */}
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        fontSize: 12,
-                        color: '#6b7280',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {lastMsg ? (
-                        getRelativeTime(new Date(lastMsg.sentAt))
-                      ) : (
-                        <span style={{ color: '#d1d5db' }}>Never</span>
-                      )}
+                    {/* LAST MESSAGED column */}
+                    <div style={{ fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap' }}>
+                      {lastMessagedDisplay}
                     </div>
 
-                    {/* Spent */}
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        fontSize: 13,
-                        fontWeight: 600,
-                        color: '#111827',
-                        textAlign: 'right',
-                        justifyContent: 'flex-end',
-                      }}
-                    >
-                      {p.orders?.ltv > 0 ? (
-                        `₹${p.orders.ltv.toLocaleString('en-IN')}`
-                      ) : (
-                        <span style={{ color: '#d1d5db' }}>—</span>
-                      )}
+                    {/* SPENT column */}
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#111827',
+                                  display: 'flex', justifyContent: 'flex-end' }}>
+                      {p.orders?.ltv > 0 ? `₹${p.orders.ltv.toLocaleString('en-IN')}` : '—'}
                     </div>
                   </div>
                 );
