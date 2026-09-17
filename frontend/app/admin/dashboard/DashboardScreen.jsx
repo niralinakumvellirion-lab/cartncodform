@@ -1114,7 +1114,8 @@ export default function DashboardScreen({ shop }) {
 
             {/* Festival list — visible when open */}
             {suggestionsOpen && (
-              <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+              <div style={{ maxHeight: 'calc(100vh - 300px)',
+                            overflowY: 'auto', overflowX: 'hidden' }}>
                 {upcomingFestivals.map(f => (
                   <div
                     key={f.name}
@@ -1251,29 +1252,95 @@ export default function DashboardScreen({ shop }) {
                 flex: 1, padding: 20, overflowY: 'auto',
                 borderRight: '1px solid #f3f4f6',
               }}>
-                {/* Image URL */}
+                {/* Notification Image — upload button + preview
+                    (replaces the old Image URL text input). See
+                    audits/suggestions-fix-audit.txt. */}
                 <div style={{ marginBottom: 16 }}>
                   <label style={{ fontSize: 12, fontWeight: 600,
                                   color: '#374151', display: 'block',
                                   marginBottom: 6 }}>
-                    Image URL (optional)
+                    Notification Image
                   </label>
-                  <input
-                    type="url"
-                    placeholder="https://example.com/image.jpg"
-                    value={editorImageUrl}
-                    onChange={e => setEditorImageUrl(e.target.value)}
-                    style={{ width: '100%', padding: '8px 12px',
-                             borderRadius: 8, border: '1px solid #e5e7eb',
-                             fontSize: 13, boxSizing: 'border-box' }}
-                  />
-                  {editorImageUrl && (
-                    <img src={editorImageUrl} alt="preview"
-                      style={{ marginTop: 8, width: '100%', height: 100,
-                               objectFit: 'cover', borderRadius: 8,
-                               border: '1px solid #e5e7eb' }}
-                      onError={e => e.target.style.display = 'none'}
+
+                  {/* Upload button */}
+                  <label style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '8px 16px', borderRadius: 8,
+                    border: '2px dashed #d1d5db', background: '#f9fafb',
+                    cursor: 'pointer', fontSize: 13, color: '#374151',
+                    fontWeight: 500, width: '100%', boxSizing: 'border-box',
+                    justifyContent: 'center',
+                  }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+                      strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="17 8 12 3 7 8"/>
+                      <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    {editorImageUrl ? 'Change Image' : 'Upload Image'}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => {
+                          setEditorImageUrl(ev.target.result);
+                        };
+                        reader.readAsDataURL(file);
+                      }}
                     />
+                  </label>
+
+                  {/* Image preview with dimensions */}
+                  {editorImageUrl && (
+                    <div style={{ marginTop: 10, position: 'relative' }}>
+                      <img
+                        src={editorImageUrl}
+                        alt="preview"
+                        id="editor-img-preview"
+                        style={{
+                          width: '100%',
+                          height: 120,
+                          objectFit: 'cover',
+                          borderRadius: 8,
+                          border: '1px solid #e5e7eb',
+                          display: 'block',
+                        }}
+                        onLoad={(e) => {
+                          const img = e.target;
+                          const info = document.getElementById('img-dimensions');
+                          if (info) {
+                            info.textContent = `${img.naturalWidth} × ${img.naturalHeight}px`;
+                          }
+                        }}
+                      />
+                      {/* Dimensions overlay */}
+                      <div style={{
+                        position: 'absolute', bottom: 6, right: 6,
+                        background: 'rgba(0,0,0,0.6)', color: '#fff',
+                        fontSize: 10, padding: '2px 6px', borderRadius: 4,
+                        fontWeight: 600,
+                      }}>
+                        <span id="img-dimensions">Loading...</span>
+                      </div>
+                      {/* Remove button */}
+                      <button
+                        onClick={() => setEditorImageUrl('')}
+                        style={{
+                          position: 'absolute', top: 6, right: 6,
+                          background: 'rgba(0,0,0,0.6)', border: 'none',
+                          borderRadius: '50%', width: 24, height: 24,
+                          color: '#fff', cursor: 'pointer', fontSize: 14,
+                          display: 'flex', alignItems: 'center',
+                          justifyContent: 'center',
+                        }}>
+                        ✕
+                      </button>
+                    </div>
                   )}
                 </div>
 
@@ -1434,11 +1501,18 @@ export default function DashboardScreen({ shop }) {
                     boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
                   }}>
                     {editorImageUrl && (
-                      <img src={editorImageUrl} alt=""
-                        style={{ width: '100%', height: 80,
-                                 objectFit: 'cover' }}
-                        onError={e => e.target.style.display = 'none'}
-                      />
+                      <div style={{ position: 'relative' }}>
+                        <img src={editorImageUrl} alt=""
+                          style={{
+                            width: '100%',
+                            height: 'auto',
+                            maxHeight: 100,
+                            objectFit: 'cover',
+                            display: 'block',
+                          }}
+                          onError={e => e.target.style.display = 'none'}
+                        />
+                      </div>
                     )}
                     <div style={{ padding: '10px 12px' }}>
                       <div style={{ display: 'flex', alignItems: 'center',
@@ -1462,6 +1536,15 @@ export default function DashboardScreen({ shop }) {
                     </div>
                   </div>
                 </div>
+
+                {editorImageUrl && (
+                  <div style={{
+                    textAlign: 'center', fontSize: 10,
+                    color: '#9ca3af', marginTop: 4
+                  }}>
+                    Image added ✓
+                  </div>
+                )}
 
                 <div style={{ marginTop: 16, fontSize: 11,
                               color: '#9ca3af', textAlign: 'center' }}>
