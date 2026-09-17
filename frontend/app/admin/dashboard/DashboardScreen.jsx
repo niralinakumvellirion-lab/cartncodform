@@ -1672,10 +1672,14 @@ export default function DashboardScreen({ shop }) {
                               {editorBody || 'Your message will appear here...'}
                             </div>
                           </div>
-                          {/* Thumbnail on right */}
+                          {/* Thumbnail on right — hidden once the large
+                              banner image below takes over, per the task's
+                              "no need for both thumbnail AND banner". See
+                              audits/banner-image-audit.txt. */}
                           <div style={{ width: 40, height: 40, borderRadius: 8,
                                         overflow: 'hidden', flexShrink: 0,
-                                        background: '#eef2ff' }}>
+                                        background: '#eef2ff',
+                                        display: editorMobileImageUrl ? 'none' : 'flex' }}>
                             {editorMobileImageUrl ? (
                               <img src={editorMobileImageUrl} alt=""
                                 style={{ width: '100%', height: '100%',
@@ -1690,6 +1694,26 @@ export default function DashboardScreen({ shop }) {
                             )}
                           </div>
                         </div>
+
+                        {/* Large banner image — shown below the content
+                            row when a mobile image is uploaded. */}
+                        {editorMobileImageUrl && (
+                          <div style={{
+                            width: '100%',
+                            height: 80,
+                            overflow: 'hidden',
+                          }}>
+                            <img src={editorMobileImageUrl} alt=""
+                              style={{
+                                width: '100%',
+                                height: '100%',
+                                objectFit: 'cover',
+                                display: 'block',
+                              }}
+                              onError={e => e.target.style.display = 'none'}
+                            />
+                          </div>
+                        )}
                       </div>
                       {/* Home indicator */}
                       <div style={{ height: 20, display: 'flex',
