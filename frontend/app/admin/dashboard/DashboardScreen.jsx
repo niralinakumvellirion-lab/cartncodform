@@ -270,6 +270,7 @@ export default function DashboardScreen({ shop }) {
   const [editorImageUrl, setEditorImageUrl] = useState('');
   const [editorAction, setEditorAction] = useState(null);
   const [editorDate, setEditorDate] = useState('');
+  const [showImageInfo, setShowImageInfo] = useState(false);
 
   // --- Today.jsx: activity + notifStats fetch, keyed on date filter ---
   useEffect(() => {
@@ -1211,8 +1212,10 @@ export default function DashboardScreen({ shop }) {
           zIndex: 1000, display: 'flex', alignItems: 'center',
           justifyContent: 'center', padding: 20,
         }}
-          onClick={e => { if (e.target === e.currentTarget)
-            setShowEditor(false); }}
+          onClick={e => { if (e.target === e.currentTarget) {
+            setShowEditor(false);
+            setShowImageInfo(false);
+          } }}
         >
           <div style={{
             background: '#fff', borderRadius: 16,
@@ -1236,7 +1239,10 @@ export default function DashboardScreen({ shop }) {
                   Edit and preview before sending
                 </div>
               </div>
-              <button onClick={() => setShowEditor(false)}
+              <button onClick={() => {
+                  setShowEditor(false);
+                  setShowImageInfo(false);
+                }}
                 style={{ background: 'none', border: 'none',
                          fontSize: 20, cursor: 'pointer', color: '#9ca3af' }}>
                 ✕
@@ -1256,11 +1262,47 @@ export default function DashboardScreen({ shop }) {
                     (replaces the old Image URL text input). See
                     audits/suggestions-fix-audit.txt. */}
                 <div style={{ marginBottom: 16 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600,
-                                  color: '#374151', display: 'block',
-                                  marginBottom: 6 }}>
-                    Notification Image
-                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center',
+                                gap: 6, marginBottom: 6 }}>
+                    <label style={{ fontSize: 12, fontWeight: 600,
+                                    color: '#374151' }}>
+                      Notification Image
+                    </label>
+                    <button
+                      onClick={() => setShowImageInfo(s => !s)}
+                      style={{
+                        width: 16, height: 16, borderRadius: '50%',
+                        border: '1.5px solid #9ca3af', background: 'none',
+                        color: '#9ca3af', fontSize: 10, fontWeight: 700,
+                        cursor: 'pointer', display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', lineHeight: 1, padding: 0,
+                        flexShrink: 0,
+                      }}
+                      title="Image size guidance"
+                    >
+                      i
+                    </button>
+                  </div>
+
+                  {/* Info tooltip/box */}
+                  {showImageInfo && (
+                    <div style={{
+                      background: '#f0f9ff', border: '1px solid #bae6fd',
+                      borderRadius: 8, padding: '10px 12px', marginBottom: 10,
+                      fontSize: 12, color: '#0369a1', lineHeight: 1.6,
+                    }}>
+                      <div style={{ fontWeight: 700, marginBottom: 4 }}>
+                        📐 Recommended Image Size
+                      </div>
+                      <div>• <strong>360 × 180px</strong> — best for all platforms</div>
+                      <div>• Ratio: <strong>2:1</strong> (wide landscape)</div>
+                      <div>• Format: <strong>JPG or PNG</strong></div>
+                      <div>• Max size: <strong>under 1MB</strong></div>
+                      <div style={{ marginTop: 6, color: '#0284c7', fontSize: 11 }}>
+                        Tip: Avoid text in the image — it gets cropped on mobile screens.
+                      </div>
+                    </div>
+                  )}
 
                   {/* Upload button */}
                   <label style={{
@@ -1409,6 +1451,7 @@ export default function DashboardScreen({ shop }) {
                           imageUrl: editorImageUrl,
                         });
                         setShowEditor(false);
+                        setShowImageInfo(false);
                         alert('Notification sent to all subscribers!');
                       } catch(e) {
                         alert('Failed to send');
@@ -1437,6 +1480,7 @@ export default function DashboardScreen({ shop }) {
                           }
                         );
                         setShowEditor(false);
+                        setShowImageInfo(false);
                         alert('Added to queue as approved!');
                       } catch(e) {
                         alert('Failed to approve');
@@ -1465,6 +1509,7 @@ export default function DashboardScreen({ shop }) {
                           }
                         );
                         setShowEditor(false);
+                        setShowImageInfo(false);
                       } catch(e) {
                         alert('Failed to save');
                       }
