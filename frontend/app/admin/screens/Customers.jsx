@@ -136,7 +136,7 @@ function getRelativeTime(date) {
   return `${days} days ago`;
 }
 
-const GRID_COLS = '2fr 120px 140px 90px 120px 80px';
+const GRID_COLS = '2fr 100px 130px 80px 110px 70px';
 
 const FILTER_TABS = [
   { key: 'everyone', label: 'Everyone' },
@@ -912,7 +912,8 @@ function StageBadge({ customer }) {
 
   return (
     <span style={{
-      display: 'inline-block',
+      display: 'inline-flex',
+      alignItems: 'center',
       padding: '2px 8px',
       borderRadius: 20,
       fontSize: 11,
@@ -932,7 +933,7 @@ function ReachIcons({ customer }) {
   const hasPhone = customer.identifiers?.phones?.length > 0;
 
   return (
-    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       {/* Push bell */}
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
         stroke={hasPush ? '#4f46e5' : '#d1d5db'} strokeWidth="2"
@@ -1433,6 +1434,7 @@ export default function Customers({ shop }) {
                       cursor: 'pointer',
                       background: isSel ? '#f5f3ff' : 'transparent',
                       transition: 'background 0.1s',
+                      alignItems: 'center',
                     }}
                     onMouseEnter={(e) => {
                       if (!isSel) e.currentTarget.style.background = '#f9fafb';
@@ -1450,8 +1452,10 @@ export default function Customers({ shop }) {
                                     fontWeight: 700, flexShrink: 0 }}>
                         {avatarInitial}
                       </div>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+                      <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#111827',
+                                      overflow: 'hidden', textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap' }}>
                           {displayName}
                         </div>
                         {lastSeen && (
@@ -1463,7 +1467,7 @@ export default function Customers({ shop }) {
                     </div>
 
                     {/* Stage */}
-                    <div style={{ display: 'flex', alignItems: 'center', whiteSpace: 'nowrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', overflow: 'hidden' }}>
                       <StageBadge customer={p} />
                     </div>
 
