@@ -1589,142 +1589,191 @@ export default function DashboardScreen({ shop }) {
                 </div>
               </div>
 
-              {/* Right: Live Preview — dual mobile + desktop preview.
-                  See audits/dual-preview-audit.txt. */}
+              {/* Right: Live Preview — realistic phone-frame mobile
+                  preview + dark Mac-style desktop preview. See
+                  audits/preview-fix-audit.txt. */}
               <div style={{
-                width: 280, padding: '16px 12px', background: '#f9fafb',
-                overflowY: 'auto', borderLeft: '1px solid #f3f4f6',
+                width: 280, padding: '16px 12px', background: '#f1f5f9',
+                overflowY: 'auto', borderLeft: '1px solid #e5e7eb',
+                display: 'flex', flexDirection: 'column', gap: 20,
               }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b',
                               textTransform: 'uppercase', letterSpacing: '0.06em',
-                              marginBottom: 14, textAlign: 'center' }}>
+                              textAlign: 'center' }}>
                   Live Preview
                 </div>
 
-                {/* Mobile Preview */}
-                <div style={{ marginBottom: 20 }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: '#6b7280',
-                                textAlign: 'center', marginBottom: 8 }}>
-                    📱 Mobile
-                  </div>
-                  <div style={{
-                    background: '#1f2937', borderRadius: 16, padding: 8,
-                    maxWidth: 200, margin: '0 auto',
-                  }}>
-                    <div style={{
-                      background: '#fff', borderRadius: 10, overflow: 'hidden',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-                    }}>
-                      {editorMobileImageUrl ? (
-                        <img src={editorMobileImageUrl} alt=""
-                          style={{ width: '100%', height: 70,
-                                   objectFit: 'cover', display: 'block' }}
-                          onError={e => e.target.style.display = 'none'}
-                        />
-                      ) : (
-                        <div style={{ width: '100%', height: 70, background: '#eef2ff',
-                                      display: 'flex', alignItems: 'center',
-                                      justifyContent: 'center', fontSize: 24 }}>
-                          🔔
-                        </div>
-                      )}
-                      <div style={{ padding: '8px 10px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center',
-                                      gap: 4, marginBottom: 4 }}>
-                          <div style={{ width: 12, height: 12,
-                                        background: '#4f46e5', borderRadius: 3 }} />
-                          <span style={{ fontSize: 9, color: '#6b7280',
-                                         fontWeight: 600 }}>
-                            ShopiReachBoost AI
-                          </span>
-                        </div>
-                        <div style={{ fontSize: 11, fontWeight: 700,
-                                      color: '#111827', marginBottom: 2,
-                                      overflow: 'hidden', textOverflow: 'ellipsis',
-                                      whiteSpace: 'nowrap' }}>
-                          {editorTitle || 'Notification Title'}
-                        </div>
-                        <div style={{ fontSize: 10, color: '#6b7280',
-                                      lineHeight: 1.3,
-                                      display: '-webkit-box',
-                                      WebkitLineClamp: 2,
-                                      WebkitBoxOrient: 'vertical',
-                                      overflow: 'hidden' }}>
-                          {editorBody || 'Your message will appear here...'}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Desktop Preview */}
+                {/* === MOBILE PREVIEW === */}
                 <div>
-                  <div style={{ fontSize: 10, fontWeight: 600, color: '#6b7280',
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b',
                                 textAlign: 'center', marginBottom: 8 }}>
-                    🖥️ Desktop
+                    📱 Mobile Notification
                   </div>
+                  {/* Phone frame */}
                   <div style={{
-                    background: '#e5e7eb', borderRadius: 10, padding: 8,
-                    maxWidth: 240, margin: '0 auto',
+                    width: 200, margin: '0 auto',
+                    background: '#1c1c1e', borderRadius: 32,
+                    padding: '10px 6px', boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
                   }}>
-                    {/* Desktop notification toast style */}
+                    {/* Screen */}
                     <div style={{
-                      background: '#fff', borderRadius: 8, overflow: 'hidden',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                      display: 'flex', gap: 0,
+                      background: '#f2f2f7', borderRadius: 24,
+                      overflow: 'hidden', minHeight: 120,
                     }}>
-                      {/* Image on left for desktop */}
-                      {editorDesktopImageUrl ? (
-                        <img src={editorDesktopImageUrl} alt=""
-                          style={{ width: 60, height: 60,
-                                   objectFit: 'cover', flexShrink: 0 }}
-                          onError={e => e.target.style.display = 'none'}
-                        />
-                      ) : (
-                        <div style={{ width: 60, height: 60,
-                                      background: '#eef2ff', flexShrink: 0,
-                                      display: 'flex', alignItems: 'center',
-                                      justifyContent: 'center', fontSize: 20 }}>
-                          🔔
+                      {/* Status bar */}
+                      <div style={{
+                        background: '#f2f2f7', padding: '6px 12px 2px',
+                        display: 'flex', justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}>
+                        <span style={{ fontSize: 9, fontWeight: 700,
+                                       color: '#1c1c1e' }}>9:41</span>
+                        <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                          <span style={{ fontSize: 9, color: '#1c1c1e' }}>●●●</span>
                         </div>
-                      )}
-                      {/* Text on right */}
-                      <div style={{ padding: '8px 10px', flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'center',
-                                      gap: 4, marginBottom: 3 }}>
-                          <div style={{ width: 10, height: 10,
-                                        background: '#4f46e5', borderRadius: 2 }} />
-                          <span style={{ fontSize: 8, color: '#6b7280',
-                                         fontWeight: 600 }}>
+                      </div>
+                      {/* Notification banner */}
+                      <div style={{
+                        margin: '4px 6px', background: 'rgba(255,255,255,0.95)',
+                        borderRadius: 14, overflow: 'hidden',
+                        boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+                      }}>
+                        {/* Top: app name row */}
+                        <div style={{
+                          display: 'flex', alignItems: 'center', gap: 6,
+                          padding: '8px 10px 4px',
+                        }}>
+                          <div style={{ width: 16, height: 16, background: '#4f46e5',
+                                        borderRadius: 4, flexShrink: 0 }} />
+                          <span style={{ fontSize: 10, color: '#6b7280',
+                                         fontWeight: 600, flex: 1 }}>
                             ShopiReachBoost AI
                           </span>
+                          <span style={{ fontSize: 9, color: '#9ca3af' }}>now</span>
                         </div>
-                        <div style={{ fontSize: 10, fontWeight: 700,
-                                      color: '#111827', marginBottom: 2,
+                        {/* Content row: text + image */}
+                        <div style={{
+                          display: 'flex', alignItems: 'flex-start',
+                          gap: 8, padding: '0 10px 10px',
+                        }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700,
+                                          color: '#111827', marginBottom: 2,
+                                          overflow: 'hidden', textOverflow: 'ellipsis',
+                                          whiteSpace: 'nowrap' }}>
+                              {editorTitle || 'Notification Title'}
+                            </div>
+                            <div style={{ fontSize: 10, color: '#6b7280',
+                                          lineHeight: 1.3,
+                                          display: '-webkit-box',
+                                          WebkitLineClamp: 2,
+                                          WebkitBoxOrient: 'vertical',
+                                          overflow: 'hidden' }}>
+                              {editorBody || 'Your message will appear here...'}
+                            </div>
+                          </div>
+                          {/* Thumbnail on right */}
+                          <div style={{ width: 40, height: 40, borderRadius: 8,
+                                        overflow: 'hidden', flexShrink: 0,
+                                        background: '#eef2ff' }}>
+                            {editorMobileImageUrl ? (
+                              <img src={editorMobileImageUrl} alt=""
+                                style={{ width: '100%', height: '100%',
+                                         objectFit: 'cover' }}
+                                onError={e => e.target.style.display = 'none'} />
+                            ) : (
+                              <div style={{ width: '100%', height: '100%',
+                                            display: 'flex', alignItems: 'center',
+                                            justifyContent: 'center', fontSize: 18 }}>
+                                🔔
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      {/* Home indicator */}
+                      <div style={{ height: 20, display: 'flex',
+                                    alignItems: 'center', justifyContent: 'center' }}>
+                        <div style={{ width: 60, height: 4, background: '#c7c7cc',
+                                      borderRadius: 2 }} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* === DESKTOP PREVIEW === */}
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b',
+                                textAlign: 'center', marginBottom: 8 }}>
+                    🖥️ Desktop Notification
+                  </div>
+                  {/* Mac-style notification */}
+                  <div style={{
+                    background: 'rgba(50,50,50,0.85)',
+                    borderRadius: 14, overflow: 'hidden',
+                    maxWidth: 240, margin: '0 auto',
+                    boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+                    backdropFilter: 'blur(20px)',
+                  }}>
+                    {/* App header */}
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 6,
+                      padding: '8px 10px 4px',
+                    }}>
+                      <div style={{ width: 14, height: 14, background: '#4f46e5',
+                                    borderRadius: 4, flexShrink: 0 }} />
+                      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)',
+                                     fontWeight: 600, flex: 1 }}>
+                        ShopiReachBoost AI
+                      </span>
+                      <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)' }}>
+                        now
+                      </span>
+                    </div>
+                    {/* Content */}
+                    <div style={{ display: 'flex', gap: 8,
+                                  padding: '4px 10px 10px',
+                                  alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700,
+                                      color: '#fff', marginBottom: 2,
                                       overflow: 'hidden', textOverflow: 'ellipsis',
                                       whiteSpace: 'nowrap' }}>
                           {editorTitle || 'Notification Title'}
                         </div>
-                        <div style={{ fontSize: 9, color: '#6b7280',
+                        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)',
                                       lineHeight: 1.3,
                                       display: '-webkit-box',
                                       WebkitLineClamp: 2,
                                       WebkitBoxOrient: 'vertical',
                                       overflow: 'hidden' }}>
-                          {editorBody || 'Message preview...'}
+                          {editorBody || 'Message preview here...'}
                         </div>
                       </div>
-                    </div>
-                    <div style={{ fontSize: 9, color: '#9ca3af',
-                                  textAlign: 'right', marginTop: 4 }}>
-                      Chrome · now
+                      {/* Desktop thumbnail */}
+                      <div style={{ width: 44, height: 44, borderRadius: 8,
+                                    overflow: 'hidden', flexShrink: 0,
+                                    background: 'rgba(255,255,255,0.15)' }}>
+                        {editorDesktopImageUrl ? (
+                          <img src={editorDesktopImageUrl} alt=""
+                            style={{ width: '100%', height: '100%',
+                                     objectFit: 'cover' }}
+                            onError={e => e.target.style.display = 'none'} />
+                        ) : (
+                          <div style={{ width: '100%', height: '100%',
+                                        display: 'flex', alignItems: 'center',
+                                        justifyContent: 'center', fontSize: 20 }}>
+                            🔔
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
 
-                <div style={{ marginTop: 14, fontSize: 10, color: '#9ca3af',
-                              textAlign: 'center', lineHeight: 1.4 }}>
-                  Preview updates as you type
+                <div style={{ fontSize: 10, color: '#94a3b8',
+                              textAlign: 'center' }}>
+                  Updates as you type
                 </div>
               </div>
             </div>
