@@ -505,7 +505,8 @@ function NotificationComposer({ customer, shop, onSent, onError }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px',
+                  width: '100%', boxSizing: 'border-box', overflowX: 'hidden' }}>
       {/* Suggestions toggle */}
       <div
         onClick={() => setShowSuggestions((s) => !s)}
@@ -743,7 +744,8 @@ function EmailComposer({ customer, shop, onSent, onError }) {
     customer?.profile?.identifiers?.emails?.[0];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px',
+                  width: '100%', boxSizing: 'border-box', overflowX: 'hidden' }}>
       <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>
         Sending to: <strong>{email}</strong>
       </div>
@@ -1119,7 +1121,7 @@ export default function Customers({ shop }) {
   }, [selectedCustomer]);
 
   return (
-    <div style={DS.page}>
+    <div style={{ ...DS.page, overflowX: 'hidden', width: '100%' }}>
       <PageHeader
         title="Customers"
         subtitle="All push notification subscribers"
@@ -1216,14 +1218,14 @@ export default function Customers({ shop }) {
       <div style={{
         display: 'grid',
         gridTemplateColumns: (selectedCustomer || journeyLoading)
-          ? (isMobileView ? '1fr' : '1fr 380px')
+          ? (isMobileView ? '1fr' : 'minmax(0, 1fr) 360px')
           : '1fr',
         gap: 16,
         alignItems: 'start',
       }}>
 
         {/* Left: existing customer list */}
-        <div>
+        <div style={{ minWidth: 0, overflow: 'hidden' }}>
           <div
             style={{ ...DS.card, padding: 0, overflow: 'hidden',
                      overflowX: 'auto', minWidth: 600 }}
@@ -1565,6 +1567,8 @@ export default function Customers({ shop }) {
             display: 'flex',
             flexDirection: 'column',
             gap: 12,
+            width: '100%',
+            overflowX: 'hidden',
           }}>
             {journeyLoading && !selectedCustomer ? (
               <div style={{ ...DS.card, marginBottom: 0, textAlign: 'center',
