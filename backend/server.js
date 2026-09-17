@@ -95,7 +95,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // --- Routes --------------------------------------------------------------
 app.get('/', (_req, res) => {
-  res.json({ service: 'ShopireachboostAI API', status: 'ok' });
+  res.json({ service: 'ShopiReachBoost AI API', status: 'ok' });
 });
 
 app.get('/api/health', (_req, res) => {
@@ -602,7 +602,7 @@ console.log('[automation] Scheduled job poller started (30s interval; nightly si
 async function start() {
   await connectDB();
   app.listen(PORT, () => {
-    console.log(`[server] ShopireachboostAI API listening on port ${PORT}`);
+    console.log(`[server] ShopiReachBoost AI API listening on port ${PORT}`);
     console.log(`[server] CORS allowed origins: ${allowedOrigins.join(', ')}`);
   });
 }

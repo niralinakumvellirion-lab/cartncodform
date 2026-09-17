@@ -218,7 +218,7 @@ export default function Onboarding({ shop, onNavigate, onDone }) {
             marginBottom: '8px',
           }}
         >
-          Welcome to ShopireachboostAI
+          Welcome to ShopiReachBoost AI
         </h1>
         <p
           style={{

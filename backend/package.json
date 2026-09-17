@@ -1,7 +1,7 @@
 {
   "name": "shopireachboostai-backend",
   "version": "1.0.0",
-  "description": "Backend for ShopireachboostAI - multi-store Shopify abandoned cart + COD platform",
+  "description": "Backend for ShopiReachBoost AI - multi-store Shopify abandoned cart + COD platform",
   "main": "server.js",
   "engines": {
     "node": ">=20"

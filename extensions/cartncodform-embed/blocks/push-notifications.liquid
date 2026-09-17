@@ -646,7 +646,7 @@
     function buildBranding(styleStr) {
       var d = document.createElement('div');
       d.setAttribute('style', styleStr);
-      d.textContent = 'Powered by ShopireachboostAI';
+      d.textContent = 'Powered by ShopiReachBoost AI';
       return d;
     }
 
@@ -1663,7 +1663,7 @@
       var messaging = firebase.messaging(app);
       messaging.onMessage(function(payload) {
         var title = payload.notification && payload.notification.title
-          ? payload.notification.title : 'ShopireachboostAI';
+          ? payload.notification.title : 'ShopiReachBoost AI';
         var body = payload.notification && payload.notification.body
           ? payload.notification.body : 'New notification';
         if (Notification.permission === 'granted') {
@@ -2388,7 +2388,7 @@
 
 {% schema %}
 {
-  "name": "ShopireachboostAI Push",
+  "name": "ShopiReachBoost AI Push",
   "target": "body",
   "settings": [
     {

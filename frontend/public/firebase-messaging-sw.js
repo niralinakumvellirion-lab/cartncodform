@@ -19,7 +19,7 @@ try {
 
   messaging.onBackgroundMessage(function(payload) {
     console.log('[SW] Background message received:', payload);
-    const title = payload.notification?.title || 'ShopireachboostAI';
+    const title = payload.notification?.title || 'ShopiReachBoost AI';
     const body = payload.notification?.body || 'You have a new notification';
     const icon = payload.notification?.icon || '/favicon.ico';
 
