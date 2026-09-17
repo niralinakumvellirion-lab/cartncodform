@@ -107,4 +107,53 @@ router.post('/:shopDomain/:jobId/cancel', requireAuth,
   }
 });
 
+// POST /api/queue/:shopDomain/festival
+// Save (or queue) a festival-suggestion notification from the Dashboard's
+// notification editor. Powers "Approve" (status: 'approved') and "Add to
+// Queue" (status: 'draft') — see audits/dashboard-phase1-audit.txt.
+//
+// DEVIATION FROM THE GIVEN SPEC: the task's own route was `router.post(
+// '/festival', requireAuth, requireStoreOwner, ...)` — a path with NO
+// :shopDomain segment. requireStoreOwner (backend/middleware/
+// requireOwner.js) unconditionally compares `req.shopDomain !==
+// req.params.shopDomain` and 403s if they differ; with no :shopDomain in
+// the route path, req.params.shopDomain is always undefined, which never
+// equals a real shop string — so EVERY request to that route would have
+// been rejected with 403, no matter who called it. Every other route in
+// this file already uses the `/:shopDomain/...` shape for exactly this
+// reason. Added `:shopDomain` to the path to match, and dropped the
+// (unread) `shop` field from the request body accordingly — the
+// handler below already takes shop from the verified req.shopDomain
+// token, never the body, same as every other route here.
+router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
+  async (req, res) => {
+  try {
+    const shop = req.shopDomain;
+    const { title, body, imageUrl, scheduledAt,
+            festival, status } = req.body;
+
+    if (!title || !scheduledAt) {
+      return res.status(400).json({
+        error: 'title and scheduledAt required'
+      });
+    }
+
+    const FestivalQueue = require('../models/FestivalQueue');
+    const item = await FestivalQueue.create({
+      shopDomain: shop,
+      title,
+      body: body || '',
+      imageUrl: imageUrl || '',
+      scheduledAt: new Date(scheduledAt),
+      festival: festival || '',
+      status: status || 'draft',
+    });
+
+    return res.json({ success: true, id: item._id });
+  } catch (err) {
+    console.error('[queue] festival error:', err.message);
+    return res.status(500).json({ error: 'Failed to save' });
+  }
+});
+
 module.exports = router;

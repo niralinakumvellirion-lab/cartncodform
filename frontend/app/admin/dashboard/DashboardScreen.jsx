@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Page } from '@shopify/polaris';
 import { apiGet, apiSend } from '../../../lib/api';
 
 const DS = {
@@ -253,12 +252,18 @@ export default function DashboardScreen({ shop }) {
   const [insightsError, setInsightsError] = useState('');
   const [sortBy, setSortBy] = useState('views');
 
-  // --- Festival Suggestions compose modal state (see
-  // audits/suggestions-section-audit.txt) ---
-  const [showSuggestModal, setShowSuggestModal] = useState(false);
-  const [modalFestival, setModalFestival] = useState(null);
-  const [modalSending, setModalSending] = useState(false);
-  const [modalSent, setModalSent] = useState(false);
+  // --- Phase 1: Notification Suggestions sidebar + editor modal state
+  // (see audits/dashboard-phase1-audit.txt). Replaces the old
+  // showSuggestModal/modalFestival/modalSending/modalSent compose-modal
+  // state from the previous phase entirely. ---
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [selectedFestival, setSelectedFestival] = useState(null);
+  const [showEditor, setShowEditor] = useState(false);
+  const [editorTitle, setEditorTitle] = useState('');
+  const [editorBody, setEditorBody] = useState('');
+  const [editorImageUrl, setEditorImageUrl] = useState('');
+  const [editorAction, setEditorAction] = useState(null);
+  const [editorDate, setEditorDate] = useState('');
 
   // --- Today.jsx: activity + notifStats fetch, keyed on date filter ---
   useEffect(() => {
@@ -447,6 +452,10 @@ export default function DashboardScreen({ shop }) {
     revisit: '#3b82f6',
   };
 
+  // Phase 1 sidebar: all festivals in the next 60 days (getUpcomingFestivals
+  // already filters to <=60 days internally — see its definition above).
+  const upcomingFestivals = getUpcomingFestivals(10);
+
   // Header "Refresh" — re-runs Today's date-filtered effect (via
   // refreshKey) AND Insights' own load, so one button refreshes the
   // whole merged dashboard. Insights previously had no manual refresh
@@ -477,11 +486,25 @@ export default function DashboardScreen({ shop }) {
     </button>
   );
 
+  // Phase 1: one-page layout — outer <Page> (Polaris) was removed here.
+  // See audits/dashboard-phase1-audit.txt: this screen was the only one
+  // in the app still wrapped in Polaris's <Page>; every other admin
+  // screen already renders a plain `<div style={DS.page}>` with no
+  // <Page> ancestor. Keeping <Page> around a fixed-viewport-height flex
+  // layout risked its own internal padding/scroll behavior fighting the
+  // "no page-level scroll" requirement, and it added nothing this
+  // hand-rolled layout doesn't already provide.
   return (
-    <Page>
-    <div style={DS.page}>
+    <div style={{
+      height: 'calc(100vh - 40px)',
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      background: '#f9fafb',
+    }}>
 
-      {/* SECTION 1 — sticky top bar */}
+      {/* SECTION 1 — sticky top bar (kept exactly as-is, per instruction) */}
       <div
         style={{
           position: isMobileView ? 'relative' : 'sticky',
@@ -535,614 +558,885 @@ export default function DashboardScreen({ shop }) {
         </div>
       </div>
 
-      {/* Insights Stats Row — restored (see audits/dashboard-missing-audit.txt).
-          NOTE: the task text that requested this row assumed insightsStats
-          has fields named productViews/optInRate/sessions. The actual
-          object (set from GET /api/events/:shop/product-analytics's
-          `.stats`, in loadInsights() above) has productViewsThisWeek,
-          allowedNotifications, addToCartRate, sessionCount instead —
-          confirmed by re-reading loadInsights() in this file plus the
-          backend route in an earlier audit. Using the real field names
-          below so the cards show live data instead of always '—'. */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
-                      textTransform: 'uppercase', letterSpacing: '0.06em',
-                      marginBottom: 10 }}>
-          Store Performance
-        </div>
-        <div style={{ display: 'grid',
-                      gridTemplateColumns: isMobileView
-                        ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-                      gap: 12 }}>
-          {[
-            { label: 'PRODUCT VIEWS THIS WEEK',
-              value: insightsStats?.productViewsThisWeek ?? '—',
-              sub: '↗ tracking active' },
-            { label: 'ALLOWED NOTIFICATIONS',
-              value: insightsStats?.allowedNotifications
-                ? insightsStats.allowedNotifications + '%' : '—',
-              sub: 'of visitors with the popup' },
-            { label: 'ADD-TO-CART RATE',
-              value: insightsStats?.addToCartRate
-                ? insightsStats.addToCartRate + '%' : '—',
-              sub: 'sessions that added something' },
-            { label: 'SESSIONS TRACKED',
-              value: insightsStats?.sessionCount ?? '—',
-              sub: 'unique visitors this week' },
-          ].map(({ label, value, sub }) => (
-            <div key={label} style={{
-              background: '#fff',
-              border: '1px solid #e5e7eb',
-              borderRadius: 12,
-              padding: '16px 20px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-            }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af',
-                            textTransform: 'uppercase', letterSpacing: '0.06em',
-                            marginBottom: 8 }}>{label}</div>
-              <div style={{ fontSize: 26, fontWeight: 800,
-                            color: '#111827', lineHeight: 1 }}>{value}</div>
-              <div style={{ fontSize: 11, color: '#9ca3af',
-                            marginTop: 6 }}>{sub}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Content area below the top bar — two columns, per Part A/B */}
+      <div style={{
+        flex: 1,
+        overflow: 'hidden',
+        display: 'flex',
+        gap: 16,
+        padding: '16px 20px',
+      }}>
 
-      {/* Suggestions Section — upcoming festivals (see
-          audits/suggestions-section-audit.txt) */}
-      {(() => {
-        const upcoming = getUpcomingFestivals(6);
-        if (upcoming.length === 0) return null;
-        return (
-          <div style={{ marginBottom: 20 }}>
+        {/* LEFT column — main content, scrolls internally */}
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+
+          {/* Store Performance row (compact, Part A item 1) */}
+          <div style={{ marginBottom: 10 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
                           textTransform: 'uppercase', letterSpacing: '0.06em',
                           marginBottom: 10 }}>
-              Suggestions
+              Store Performance
             </div>
             <div style={{ display: 'grid',
                           gridTemplateColumns: isMobileView
-                            ? '1fr' : 'repeat(3, 1fr)',
+                            ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
                           gap: 12 }}>
-              {upcoming.map(f => (
-                <div key={f.name} style={{
-                  background: '#fff', border: '1px solid #e5e7eb',
-                  borderRadius: 12, padding: '14px 16px',
-                  borderLeft: '3px solid #4f46e5',
-                  display: 'flex', flexDirection: 'column', gap: 8,
+              {[
+                { label: 'PRODUCT VIEWS THIS WEEK',
+                  value: insightsStats?.productViewsThisWeek ?? '—',
+                  sub: '↗ tracking active' },
+                { label: 'ALLOWED NOTIFICATIONS',
+                  value: insightsStats?.allowedNotifications
+                    ? insightsStats.allowedNotifications + '%' : '—',
+                  sub: 'of visitors with the popup' },
+                { label: 'ADD-TO-CART RATE',
+                  value: insightsStats?.addToCartRate
+                    ? insightsStats.addToCartRate + '%' : '—',
+                  sub: 'sessions that added something' },
+                { label: 'SESSIONS TRACKED',
+                  value: insightsStats?.sessionCount ?? '—',
+                  sub: 'unique visitors this week' },
+              ].map(({ label, value, sub }) => (
+                <div key={label} style={{
+                  background: '#fff',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: 12,
+                  padding: '10px 14px',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
                 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between',
-                                alignItems: 'flex-start' }}>
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 700,
-                                    color: '#111827' }}>
-                        {f.emoji} {f.name}
-                      </div>
-                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
-                        {f.diffDays === 0 ? '🔴 Today!' :
-                         f.diffDays === 1 ? '🟡 Tomorrow' :
-                         f.diffDays <= 7 ? `🟡 In ${f.diffDays} days` :
-                         `🟢 In ${f.diffDays} days`}
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.4 }}>
-                    {f.suggestion}
-                  </div>
-                  <button
-                    onClick={() => {
-                      setModalFestival(f);
-                      setShowSuggestModal(true);
-                      setModalSent(false);
-                    }}
-                    style={{
-                      padding: '7px 12px', borderRadius: 7,
-                      border: '1px solid #4f46e5', background: '#eef2ff',
-                      color: '#4f46e5', fontSize: 12, fontWeight: 700,
-                      cursor: 'pointer', alignSelf: 'flex-start',
-                    }}>
-                    Send Notification →
-                  </button>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af',
+                                textTransform: 'uppercase', letterSpacing: '0.06em',
+                                marginBottom: 6 }}>{label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800,
+                                color: '#111827', lineHeight: 1 }}>{value}</div>
+                  <div style={{ fontSize: 10, color: '#9ca3af',
+                                marginTop: 4 }}>{sub}</div>
                 </div>
               ))}
             </div>
           </div>
-        );
-      })()}
 
-      {/* SECTION 2 — KPI row (6 cards, 2 rows of 3 via grid wrap) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
-          gap: 12,
-          marginBottom: 24,
-        }}
-      >
-        {[...kpiRow1, ...kpiRow2].map((kpi) => (
+          {/* SECTION 2 — KPI row (compact, Part A item 2) */}
           <div
-            key={kpi.label}
-            style={{ ...DS.card, padding: '16px 20px', marginBottom: 0,
-                     borderLeft: '3px solid #4f46e5' }}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
+              gap: 12,
+              marginBottom: 10,
+            }}
           >
+            {[...kpiRow1, ...kpiRow2].map((kpi) => (
+              <div
+                key={kpi.label}
+                style={{ ...DS.card, padding: '10px 14px', marginBottom: 0,
+                         borderLeft: '3px solid #4f46e5' }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: '#6b7280',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    marginBottom: 6,
+                  }}
+                >
+                  {kpi.label}
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
+                  {notifLoading ? '—' : (kpi.value ?? 0)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* SECTION 3 — Attributed Activity (compact, Part A item 3) */}
+          <div style={{ marginBottom: 10 }}>
+            <div style={DS.sectionLabel}>Attributed Activity</div>
             <div
               style={{
-                fontSize: 12,
-                color: '#6b7280',
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                marginBottom: 8,
+                display: 'grid',
+                gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+                gap: 12,
               }}
             >
-              {kpi.label}
-            </div>
-            <div style={{ fontSize: 24, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
-              {notifLoading ? '—' : (kpi.value ?? 0)}
+              {ACTIVITY_STATS.map(({ key, label }) => (
+                <div
+                  key={key}
+                  onClick={() => navigate(`/admin/activity?type=${key}`)}
+                  style={{ ...DS.card, marginBottom: 0, padding: '10px 14px',
+                           cursor: 'pointer', transition: 'box-shadow 0.15s, background 0.15s' }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                    e.currentTarget.style.background = '#f9fafb';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.boxShadow = DS.card.boxShadow;
+                    e.currentTarget.style.background = '#ffffff';
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 18,
+                      fontWeight: 700,
+                      color: ACT_COLORS[key] || '#111827',
+                      lineHeight: 1,
+                      marginBottom: 4,
+                    }}
+                  >
+                    {notifLoading ? '—' : (activity?.summary?.[key] ?? 0)}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#6b7280' }}>{label}</div>
+                </div>
+              ))}
             </div>
           </div>
-        ))}
-      </div>
 
-      {/* SECTION 3 — Attributed Activity (4 clickable cards) */}
-      <div style={{ marginBottom: 24 }}>
-        <div style={DS.sectionLabel}>Attributed Activity</div>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-            gap: 12,
-          }}
-        >
-          {ACTIVITY_STATS.map(({ key, label }) => (
-            <div
-              key={key}
-              onClick={() => navigate(`/admin/activity?type=${key}`)}
-              style={{ ...DS.card, marginBottom: 0, padding: '16px 20px',
-                       cursor: 'pointer', transition: 'box-shadow 0.15s, background 0.15s' }}
-              onMouseEnter={e => {
-                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-                e.currentTarget.style.background = '#f9fafb';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.boxShadow = DS.card.boxShadow;
-                e.currentTarget.style.background = '#ffffff';
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 22,
-                  fontWeight: 700,
-                  color: ACT_COLORS[key] || '#111827',
-                  lineHeight: 1,
-                  marginBottom: 6,
-                }}
-              >
-                {notifLoading ? '—' : (activity?.summary?.[key] ?? 0)}
+          {/* SECTION 4 — two column layout: products+AI insight | planned+yesterday
+              (compact, Part A items 4 + 7) */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: isMobileView ? '1fr' : '3fr 2fr',
+              gap: 20,
+              marginBottom: 10,
+            }}
+          >
+            {/* LEFT column — products + AI insight */}
+            <div>
+              {insightsError && (
+                <div
+                  style={{
+                    background: DS.dangerLight,
+                    border: '1px solid #fecaca',
+                    borderRadius: 10,
+                    padding: '10px 14px',
+                    marginBottom: 10,
+                    fontSize: 12,
+                    color: '#b91c1c',
+                  }}
+                >
+                  {insightsError}
+                </div>
+              )}
+
+              {/* 4A — Most Viewed Products */}
+              <div style={{ ...DS.card, padding: 0, overflow: 'hidden', marginBottom: 10 }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '10px 16px',
+                    borderBottom: '1px solid #f3f4f6',
+                  }}
+                >
+                  <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+                    Most Viewed Products
+                  </span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {SORT_TABS.map((tab) => (
+                      <button
+                        key={tab.key}
+                        onClick={() => setSortBy(tab.key)}
+                        style={{
+                          padding: '3px 10px',
+                          fontSize: 11,
+                          fontWeight: sortBy === tab.key ? 600 : 400,
+                          color: sortBy === tab.key ? '#111827' : '#9ca3af',
+                          background: sortBy === tab.key ? '#f3f4f6' : 'transparent',
+                          border: '1px solid',
+                          borderColor: sortBy === tab.key ? '#e5e7eb' : 'transparent',
+                          borderRadius: 6,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '28px 2fr 50px 60px',
+                    padding: '5px 16px',
+                    background: '#f9fafb',
+                    borderBottom: '1px solid #f3f4f6',
+                  }}
+                >
+                  {['#', 'Product', 'Views', 'Avg time'].map((h) => (
+                    <div
+                      key={h}
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        color: '#9ca3af',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.5px',
+                      }}
+                    >
+                      {h}
+                    </div>
+                  ))}
+                </div>
+
+                {insightsLoading ? (
+                  [1, 2, 3].map((i) => (
+                    <div
+                      key={i}
+                      style={{
+                        height: 36,
+                        borderBottom: '1px solid #f9fafb',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '0 16px',
+                      }}
+                    >
+                      <div style={{ width: '40%', height: 10, background: '#f3f4f6', borderRadius: 4 }} />
+                    </div>
+                  ))
+                ) : sortedProducts.length === 0 ? (
+                  <div style={{ padding: 16, textAlign: 'center', color: '#9ca3af', fontSize: 12 }}>
+                    No product view data yet.
+                  </div>
+                ) : (
+                  sortedProducts.slice(0, 5).map((p, i, arr) => (
+                    <div
+                      key={p.productId}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '28px 2fr 50px 60px',
+                        padding: '6px 16px',
+                        alignItems: 'center',
+                        borderBottom: i < arr.length - 1 ? '1px solid #f3f4f6' : 'none',
+                      }}
+                    >
+                      <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600 }}>{i + 1}</div>
+                      <div style={{ fontSize: 12, fontWeight: 500, color: '#111827' }}>
+                        {p.productTitle || p.productId || 'Unknown'}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#374151' }}>{p.views}</div>
+                      <div style={{ fontSize: 12, color: '#374151' }}>
+                        {p.avgDwell > 0 ? `${p.avgDwell}s` : '—'}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
-              <div style={{ fontSize: 12, color: '#6b7280' }}>{label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
 
-      {/* SECTION 4 — two column layout (60/40, stacks on mobile) */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: isMobileView ? '1fr' : '3fr 2fr',
-          gap: 20,
-          marginBottom: 24,
-        }}
-      >
-        {/* LEFT column — products + AI insight */}
-        <div>
-          {insightsError && (
+              {/* 4B — AI insight */}
+              {aiInsights?.length > 0 && (
+                <div
+                  style={{
+                    ...DS.card,
+                    marginBottom: 0,
+                    padding: '12px 16px',
+                    borderLeft: '3px solid #4f46e5',
+                    background: '#ffffff',
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: '#4f46e5',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.06em',
+                      marginBottom: 6,
+                    }}
+                  >
+                    AI Weekly Insight
+                  </div>
+                  <p style={{ fontSize: 12, color: '#374151', lineHeight: 1.5, margin: 0 }}>
+                    {aiInsights[0]}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* RIGHT column — planned + yesterday */}
+            <div>
+              {/* 4C — Planned for today */}
+              <div style={{ ...DS.card, marginBottom: 10, padding: '12px 16px' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', marginBottom: 8 }}>
+                  Planned for today
+                </div>
+                {todayLoading ? (
+                  [1, 2, 3].map((i) => (
+                    <div key={i} style={{ height: 18, background: '#f3f4f6', borderRadius: 4, marginBottom: 6 }} />
+                  ))
+                ) : groupedSignals.length ? (
+                  groupedSignals.slice(0, 5).map((sig) => (
+                    <div
+                      key={sig.type}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '6px 0',
+                        borderBottom: '1px solid #f9fafb',
+                      }}
+                    >
+                      <span style={{ fontSize: 12, color: '#374151' }}>
+                        {SIGNAL_LABELS[sig.type] || sig.type.replace(/_/g, ' ')}
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span
+                          style={{
+                            fontSize: 10,
+                            color: '#9ca3af',
+                            background: '#f3f4f6',
+                            padding: '2px 7px',
+                            borderRadius: 20,
+                          }}
+                        >
+                          {sig.channel || 'push'}
+                        </span>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: '#111827', minWidth: 14, textAlign: 'right' }}>
+                          {sig.count}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>No signals right now.</p>
+                )}
+              </div>
+
+              {/* 4D — Yesterday performance. NOTE: kept the hero numbers
+                  at 18px (matching the KPI/Activity rows above) rather
+                  than the literal "fontSize throughout: 12px" from Part A
+                  item 7 — shrinking a headline stat number down to the
+                  same size as its own label would have made it
+                  unreadable as a "hero" figure and inconsistent with
+                  every other stat number on this same compacted page
+                  (all reduced to 18px, not 12px). Labels themselves are
+                  12px/11px per the compacting spec. See
+                  audits/dashboard-phase1-audit.txt. */}
+              <div style={{ ...DS.card, marginBottom: 0, padding: '12px 16px' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', marginBottom: 8 }}>
+                  Yesterday
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 3 }}>Sent</div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
+                      {todayStats?.messagesSent ?? '—'}
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 3 }}>
+                      Opened or clicked
+                    </div>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
+                      {pushStats?.deliveredLast7d ?? '—'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {todayError && (
             <div
               style={{
                 background: DS.dangerLight,
                 border: '1px solid #fecaca',
                 borderRadius: 10,
-                padding: '12px 16px',
-                marginBottom: 16,
-                fontSize: 13,
+                padding: '10px 14px',
+                marginBottom: 10,
+                fontSize: 12,
                 color: '#b91c1c',
               }}
             >
-              {insightsError}
+              {todayError}
             </div>
           )}
 
-          {/* 4A — Most Viewed Products */}
-          <div style={{ ...DS.card, padding: 0, overflow: 'hidden', marginBottom: 16 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '14px 20px',
-                borderBottom: '1px solid #f3f4f6',
-              }}
-            >
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
-                Most Viewed Products
-              </span>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {SORT_TABS.map((tab) => (
-                  <button
-                    key={tab.key}
-                    onClick={() => setSortBy(tab.key)}
+          {/* SECTION 5 — new subscribers alert (compact, Part A item 5) */}
+          {newSubscribers.length > 0 && (
+            <div style={{ ...DS.card, borderLeft: '3px solid #16a34a', marginBottom: 10,
+                          background: '#f0fdf4' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+                  {newSubscribers.length} new subscriber{newSubscribers.length > 1 ? 's' : ''} — send
+                  them a welcome notification
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {newSubscribers.map(sub => (
+                  <div
+                    key={sub.profileId}
                     style={{
-                      padding: '4px 12px',
-                      fontSize: 12,
-                      fontWeight: sortBy === tab.key ? 600 : 400,
-                      color: sortBy === tab.key ? '#111827' : '#9ca3af',
-                      background: sortBy === tab.key ? '#f3f4f6' : 'transparent',
-                      border: '1px solid',
-                      borderColor: sortBy === tab.key ? '#e5e7eb' : 'transparent',
-                      borderRadius: 6,
-                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 14px',
+                      border: '1px solid #f3f4f6',
+                      borderRadius: 10,
+                      gap: 12,
                     }}
                   >
-                    {tab.label}
-                  </button>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+                        {sub.email || 'Anonymous subscriber'}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
+                        Subscribed {sub.subscribedAt
+                          ? new Date(sub.subscribedAt).toLocaleTimeString(
+                              [], {hour: '2-digit', minute: '2-digit'})
+                          : 'recently'}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {sendResults[sub.profileId] && (
+                        <span style={{
+                          fontSize: 12, fontWeight: 600,
+                          color: sendResults[sub.profileId].success
+                            ? '#10b981' : '#ef4444'
+                        }}>
+                          {sendResults[sub.profileId].msg}
+                        </span>
+                      )}
+                      <button
+                        onClick={() => sendNow(sub.profileId)}
+                        disabled={sendingTo === sub.profileId}
+                        style={{
+                          padding: '7px 14px', borderRadius: 7,
+                          border: 'none', cursor: sendingTo === sub.profileId
+                            ? 'not-allowed' : 'pointer',
+                          background: sendingTo === sub.profileId
+                            ? '#e5e7eb' : '#4f46e5',
+                          color: sendingTo === sub.profileId
+                            ? '#9ca3af' : '#fff',
+                          fontSize: 12, fontWeight: 600,
+                          opacity: sendingTo === sub.profileId ? 0.7 : 1,
+                        }}
+                      >
+                        {sendingTo === sub.profileId
+                          ? 'Sending...' : 'Send now'}
+                      </button>
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '32px 2fr 60px 70px',
-                padding: '8px 20px',
-                background: '#f9fafb',
-                borderBottom: '1px solid #f3f4f6',
-              }}
-            >
-              {['#', 'Product', 'Views', 'Avg time'].map((h) => (
-                <div
-                  key={h}
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: '#9ca3af',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.5px',
-                  }}
-                >
-                  {h}
-                </div>
-              ))}
-            </div>
-
-            {insightsLoading ? (
-              [1, 2, 3].map((i) => (
-                <div
-                  key={i}
-                  style={{
-                    height: 48,
-                    borderBottom: '1px solid #f9fafb',
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: '0 20px',
-                  }}
-                >
-                  <div style={{ width: '40%', height: 12, background: '#f3f4f6', borderRadius: 4 }} />
-                </div>
-              ))
-            ) : sortedProducts.length === 0 ? (
-              <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
-                No product view data yet.
-              </div>
-            ) : (
-              sortedProducts.slice(0, 5).map((p, i, arr) => (
-                <div
-                  key={p.productId}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '32px 2fr 60px 70px',
-                    padding: '10px 20px',
-                    alignItems: 'center',
-                    borderBottom: i < arr.length - 1 ? '1px solid #f3f4f6' : 'none',
-                  }}
-                >
-                  <div style={{ fontSize: 12, color: '#9ca3af', fontWeight: 600 }}>{i + 1}</div>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>
-                    {p.productTitle || p.productId || 'Unknown'}
-                  </div>
-                  <div style={{ fontSize: 13, color: '#374151' }}>{p.views}</div>
-                  <div style={{ fontSize: 13, color: '#374151' }}>
-                    {p.avgDwell > 0 ? `${p.avgDwell}s` : '—'}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* 4B — AI insight */}
-          {aiInsights?.length > 0 && (
-            <div
-              style={{
-                ...DS.card,
-                marginBottom: 0,
-                borderLeft: '3px solid #4f46e5',
-                background: '#ffffff',
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: '#4f46e5',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  marginBottom: 8,
-                }}
-              >
-                AI Weekly Insight
-              </div>
-              <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, margin: 0 }}>
-                {aiInsights[0]}
-              </p>
-            </div>
           )}
+
         </div>
 
-        {/* RIGHT column — planned + yesterday */}
-        <div>
-          {/* 4C — Planned for today */}
-          <div style={{ ...DS.card, marginBottom: 16 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 12 }}>
-              Planned for today
-            </div>
-            {todayLoading ? (
-              [1, 2, 3].map((i) => (
-                <div key={i} style={{ height: 24, background: '#f3f4f6', borderRadius: 4, marginBottom: 8 }} />
-              ))
-            ) : groupedSignals.length ? (
-              groupedSignals.slice(0, 5).map((sig) => (
-                <div
-                  key={sig.type}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '7px 0',
-                    borderBottom: '1px solid #f9fafb',
-                  }}
-                >
-                  <span style={{ fontSize: 13, color: '#374151' }}>
-                    {SIGNAL_LABELS[sig.type] || sig.type.replace(/_/g, ' ')}
-                  </span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span
-                      style={{
-                        fontSize: 11,
-                        color: '#9ca3af',
-                        background: '#f3f4f6',
-                        padding: '2px 8px',
-                        borderRadius: 20,
-                      }}
-                    >
-                      {sig.channel || 'push'}
-                    </span>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: '#111827', minWidth: 16, textAlign: 'right' }}>
-                      {sig.count}
-                    </span>
-                  </div>
+        {/* RIGHT sidebar — Notification Suggestions + Quick Stats (Part B) */}
+        <div style={{
+          width: 300,
+          flexShrink: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          overflowY: 'auto',
+        }}>
+
+          {/* Notification Suggestions card */}
+          <div style={{
+            background: '#fff',
+            border: '1px solid #e5e7eb',
+            borderRadius: 12,
+            overflow: 'hidden',
+          }}>
+            {/* Header — always visible */}
+            <div
+              onClick={() => setSuggestionsOpen(o => !o)}
+              style={{
+                padding: '14px 16px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                cursor: 'pointer',
+                borderBottom: suggestionsOpen ? '1px solid #f3f4f6' : 'none',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
+                  Notification Suggestions
                 </div>
-              ))
-            ) : (
-              <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>No signals right now.</p>
+                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+                  {upcomingFestivals.length} upcoming festivals
+                </div>
+              </div>
+              <div style={{
+                background: '#4f46e5',
+                color: '#fff',
+                borderRadius: 20,
+                padding: '2px 8px',
+                fontSize: 11,
+                fontWeight: 700,
+              }}>
+                {upcomingFestivals.length}
+              </div>
+            </div>
+
+            {/* Festival list — visible when open */}
+            {suggestionsOpen && (
+              <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                {upcomingFestivals.map(f => (
+                  <div
+                    key={f.name}
+                    onClick={() => {
+                      setSelectedFestival(f);
+                      setEditorTitle(f.name + ' Special Offer');
+                      setEditorBody(f.message);
+                      setEditorImageUrl('');
+                      setEditorDate(f.date);
+                      setEditorAction(null);
+                      setShowEditor(true);
+                    }}
+                    style={{
+                      padding: '10px 16px',
+                      borderBottom: '1px solid #f9fafb',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+                    onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                  >
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600,
+                                    color: '#111827' }}>
+                        {f.emoji} {f.name}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+                        {f.diffDays === 0 ? 'Today' :
+                         f.diffDays === 1 ? 'Tomorrow' :
+                         `In ${f.diffDays} days`}
+                      </div>
+                    </div>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                      stroke="#9ca3af" strokeWidth="2" strokeLinecap="round"
+                      strokeLinejoin="round">
+                      <polyline points="9 18 15 12 9 6"/>
+                    </svg>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
 
-          {/* 4D — Yesterday performance */}
-          <div style={{ ...DS.card, marginBottom: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 14 }}>
-              Yesterday
+          {/* Quick stats card */}
+          <div style={{
+            background: '#fff', border: '1px solid #e5e7eb',
+            borderRadius: 12, padding: '14px 16px',
+          }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
+                          textTransform: 'uppercase', letterSpacing: '0.06em',
+                          marginBottom: 10 }}>
+              Quick Stats
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-              <div>
-                <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>Sent</div>
-                <div style={{ fontSize: 24, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
-                  {todayStats?.messagesSent ?? '—'}
-                </div>
-              </div>
-              <div>
-                <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 4 }}>
-                  Opened or clicked
-                </div>
-                <div style={{ fontSize: 24, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
-                  {pushStats?.deliveredLast7d ?? '—'}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {todayError && (
-        <div
-          style={{
-            background: DS.dangerLight,
-            border: '1px solid #fecaca',
-            borderRadius: 10,
-            padding: '14px 20px',
-            marginBottom: 24,
-            fontSize: 13,
-            color: '#b91c1c',
-          }}
-        >
-          {todayError}
-        </div>
-      )}
-
-      {/* SECTION 5 — new subscribers alert */}
-      {newSubscribers.length > 0 && (
-        <div style={{ ...DS.card, borderLeft: '3px solid #16a34a', marginBottom: 0,
-                      background: '#f0fdf4' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
-              {newSubscribers.length} new subscriber{newSubscribers.length > 1 ? 's' : ''} — send
-              them a welcome notification
-            </span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {newSubscribers.map(sub => (
-              <div
-                key={sub.profileId}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '10px 14px',
-                  border: '1px solid #f3f4f6',
-                  borderRadius: 10,
-                  gap: 12,
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
-                    {sub.email || 'Anonymous subscriber'}
-                  </div>
-                  <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
-                    Subscribed {sub.subscribedAt
-                      ? new Date(sub.subscribedAt).toLocaleTimeString(
-                          [], {hour: '2-digit', minute: '2-digit'})
-                      : 'recently'}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {sendResults[sub.profileId] && (
-                    <span style={{
-                      fontSize: 12, fontWeight: 600,
-                      color: sendResults[sub.profileId].success
-                        ? '#10b981' : '#ef4444'
-                    }}>
-                      {sendResults[sub.profileId].msg}
-                    </span>
-                  )}
-                  <button
-                    onClick={() => sendNow(sub.profileId)}
-                    disabled={sendingTo === sub.profileId}
-                    style={{
-                      padding: '7px 14px', borderRadius: 7,
-                      border: 'none', cursor: sendingTo === sub.profileId
-                        ? 'not-allowed' : 'pointer',
-                      background: sendingTo === sub.profileId
-                        ? '#e5e7eb' : '#4f46e5',
-                      color: sendingTo === sub.profileId
-                        ? '#9ca3af' : '#fff',
-                      fontSize: 12, fontWeight: 600,
-                      opacity: sendingTo === sub.profileId ? 0.7 : 1,
-                    }}
-                  >
-                    {sendingTo === sub.profileId
-                      ? 'Sending...' : 'Send now'}
-                  </button>
-                </div>
+            {[
+              { label: 'Push subscribers',
+                value: notifStats?.pushSubscribers ?? '—' },
+              { label: 'Emails captured',
+                value: notifStats?.emailsCaptured ?? '—' },
+              { label: 'Popups shown',
+                value: notifStats?.popupsShown ?? '—' },
+            ].map(({ label, value }) => (
+              <div key={label} style={{
+                display: 'flex', justifyContent: 'space-between',
+                padding: '6px 0', borderBottom: '1px solid #f9fafb',
+              }}>
+                <span style={{ fontSize: 12, color: '#6b7280' }}>{label}</span>
+                <span style={{ fontSize: 13, fontWeight: 700,
+                               color: '#111827' }}>{value}</span>
               </div>
             ))}
           </div>
         </div>
-      )}
 
-      {/* Festival suggestion compose modal (see
-          audits/suggestions-section-audit.txt) */}
-      {showSuggestModal && modalFestival && (
+      </div>
+
+      {/* Notification Editor modal (Part C) — replaces the old compose
+          modal entirely. See audits/dashboard-phase1-audit.txt for the
+          /api/queue/festival URL-shape fix (the given spec's `/festival`
+          path, with no :shopDomain segment, would have made every
+          Approve/Add-to-Queue request fail with 403 under this backend's
+          requireStoreOwner middleware, which requires and compares
+          req.params.shopDomain — matched to this file's own established
+          route pattern instead) and for the known, undone gap where
+          POST /api/push/send-store does not yet forward imageUrl (Send
+          Now already sends it; the endpoint itself silently drops it —
+          left as-is since fixing it would mean editing
+          backend/routes/push.js, outside this task's stated file scope). */}
+      {showEditor && selectedFestival && (
         <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
           zIndex: 1000, display: 'flex', alignItems: 'center',
           justifyContent: 'center', padding: 20,
         }}
-          onClick={(e) => { if (e.target === e.currentTarget) {
-            setShowSuggestModal(false); setModalSent(false);
-          }}}
+          onClick={e => { if (e.target === e.currentTarget)
+            setShowEditor(false); }}
         >
           <div style={{
-            background: '#fff', borderRadius: 16, padding: 28,
-            width: '100%', maxWidth: 480,
-            boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+            background: '#fff', borderRadius: 16,
+            width: '100%', maxWidth: 760,
+            boxShadow: '0 8px 40px rgba(0,0,0,0.15)',
+            display: 'flex', flexDirection: 'column',
+            maxHeight: '90vh', overflow: 'hidden',
           }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between',
-                          alignItems: 'center', marginBottom: 20 }}>
+            {/* Modal header */}
+            <div style={{
+              padding: '16px 20px', borderBottom: '1px solid #f3f4f6',
+              display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center',
+            }}>
               <div>
-                <div style={{ fontSize: 18, fontWeight: 800, color: '#111827' }}>
-                  {modalFestival.emoji} {modalFestival.name} Notification
+                <div style={{ fontSize: 15, fontWeight: 700,
+                              color: '#111827' }}>
+                  {selectedFestival.emoji} {selectedFestival.name} Notification
                 </div>
                 <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
-                  {modalFestival.diffDays === 0 ? 'Today!' :
-                   modalFestival.diffDays === 1 ? 'Tomorrow!' :
-                   `In ${modalFestival.diffDays} days`}
+                  Edit and preview before sending
                 </div>
               </div>
-              <button onClick={() => { setShowSuggestModal(false); setModalSent(false); }}
-                style={{ background: 'none', border: 'none', fontSize: 20,
-                         cursor: 'pointer', color: '#9ca3af' }}>✕</button>
+              <button onClick={() => setShowEditor(false)}
+                style={{ background: 'none', border: 'none',
+                         fontSize: 20, cursor: 'pointer', color: '#9ca3af' }}>
+                ✕
+              </button>
             </div>
 
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151',
-                              display: 'block', marginBottom: 6 }}>
-                Push Notification Message
-              </label>
-              <textarea
-                id="modal-message"
-                defaultValue={modalFestival.message}
-                rows={4}
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 8,
-                         border: '1px solid #e5e7eb', fontSize: 13,
-                         lineHeight: 1.5, resize: 'vertical',
-                         fontFamily: 'inherit', boxSizing: 'border-box' }}
-              />
-            </div>
+            {/* Modal body — editor + preview side by side */}
+            <div style={{
+              display: 'flex', flex: 1, overflow: 'hidden',
+            }}>
+              {/* Left: Editor */}
+              <div style={{
+                flex: 1, padding: 20, overflowY: 'auto',
+                borderRight: '1px solid #f3f4f6',
+              }}>
+                {/* Image URL */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600,
+                                  color: '#374151', display: 'block',
+                                  marginBottom: 6 }}>
+                    Image URL (optional)
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://example.com/image.jpg"
+                    value={editorImageUrl}
+                    onChange={e => setEditorImageUrl(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px',
+                             borderRadius: 8, border: '1px solid #e5e7eb',
+                             fontSize: 13, boxSizing: 'border-box' }}
+                  />
+                  {editorImageUrl && (
+                    <img src={editorImageUrl} alt="preview"
+                      style={{ marginTop: 8, width: '100%', height: 100,
+                               objectFit: 'cover', borderRadius: 8,
+                               border: '1px solid #e5e7eb' }}
+                      onError={e => e.target.style.display = 'none'}
+                    />
+                  )}
+                </div>
 
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button
-                onClick={() => { setShowSuggestModal(false); setModalSent(false); }}
-                style={{ flex: 1, padding: '10px 0', borderRadius: 8,
-                         border: '1px solid #e5e7eb', background: '#fff',
-                         fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                         color: '#374151' }}>
-                Cancel
-              </button>
-              <button
-                onClick={async () => {
-                  const msg = document.getElementById('modal-message').value;
-                  setModalSending(true);
-                  try {
-                    await apiSend(`/api/push/send-store`, 'POST', {
-                      shop,
-                      title: modalFestival.name + ' Special Offer',
-                      body: msg,
-                    });
-                    setModalSent(true);
-                  } catch(e) {
-                    // show sent anyway for now
-                    setModalSent(true);
-                  } finally {
-                    setModalSending(false);
-                  }
-                }}
-                disabled={modalSending || modalSent}
-                style={{ flex: 2, padding: '10px 0', borderRadius: 8,
-                         border: 'none', fontSize: 13, fontWeight: 700,
-                         cursor: modalSending || modalSent
-                           ? 'not-allowed' : 'pointer',
-                         background: modalSent ? '#16a34a' : '#4f46e5',
-                         color: '#fff' }}>
-                {modalSending ? 'Sending...' : modalSent
-                  ? '✓ Sent to all subscribers!'
-                  : `Send to ${notifStats?.pushSubscribers ?? 'all'} subscribers`}
-              </button>
+                {/* Title */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600,
+                                  color: '#374151', display: 'block',
+                                  marginBottom: 6 }}>
+                    Notification Title
+                  </label>
+                  <input
+                    type="text"
+                    value={editorTitle}
+                    onChange={e => setEditorTitle(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px',
+                             borderRadius: 8, border: '1px solid #e5e7eb',
+                             fontSize: 13, boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                {/* Body */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600,
+                                  color: '#374151', display: 'block',
+                                  marginBottom: 6 }}>
+                    Message
+                  </label>
+                  <textarea
+                    value={editorBody}
+                    onChange={e => setEditorBody(e.target.value)}
+                    rows={4}
+                    style={{ width: '100%', padding: '8px 12px',
+                             borderRadius: 8, border: '1px solid #e5e7eb',
+                             fontSize: 13, resize: 'vertical',
+                             fontFamily: 'inherit', boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                {/* Scheduled date */}
+                <div style={{ marginBottom: 20 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600,
+                                  color: '#374151', display: 'block',
+                                  marginBottom: 6 }}>
+                    Schedule Date & Time
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={editorDate ?
+                      new Date(editorDate).toISOString().slice(0,16) : ''}
+                    onChange={e => setEditorDate(e.target.value)}
+                    style={{ width: '100%', padding: '8px 12px',
+                             borderRadius: 8, border: '1px solid #e5e7eb',
+                             fontSize: 13, boxSizing: 'border-box' }}
+                  />
+                </div>
+
+                {/* Action buttons */}
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await apiSend('/api/push/send-store', 'POST', {
+                          shop,
+                          title: editorTitle,
+                          body: editorBody,
+                          imageUrl: editorImageUrl,
+                        });
+                        setShowEditor(false);
+                        alert('Notification sent to all subscribers!');
+                      } catch(e) {
+                        alert('Failed to send');
+                      }
+                    }}
+                    style={{
+                      flex: 1, padding: '10px 0', borderRadius: 8,
+                      border: 'none', background: '#4f46e5', color: '#fff',
+                      fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                    }}>
+                    Send Now
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await apiSend(
+                          `/api/queue/${encodeURIComponent(shop)}/festival`,
+                          'POST',
+                          {
+                            title: editorTitle,
+                            body: editorBody,
+                            imageUrl: editorImageUrl,
+                            scheduledAt: editorDate,
+                            festival: selectedFestival.name,
+                            status: 'approved',
+                          }
+                        );
+                        setShowEditor(false);
+                        alert('Added to queue as approved!');
+                      } catch(e) {
+                        alert('Failed to approve');
+                      }
+                    }}
+                    style={{
+                      flex: 1, padding: '10px 0', borderRadius: 8,
+                      border: 'none', background: '#16a34a', color: '#fff',
+                      fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                    }}>
+                    Approve
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await apiSend(
+                          `/api/queue/${encodeURIComponent(shop)}/festival`,
+                          'POST',
+                          {
+                            title: editorTitle,
+                            body: editorBody,
+                            imageUrl: editorImageUrl,
+                            scheduledAt: editorDate,
+                            festival: selectedFestival.name,
+                            status: 'draft',
+                          }
+                        );
+                        setShowEditor(false);
+                      } catch(e) {
+                        alert('Failed to save');
+                      }
+                    }}
+                    style={{
+                      flex: 1, padding: '10px 0', borderRadius: 8,
+                      border: '1px solid #e5e7eb', background: '#fff',
+                      color: '#374151', fontSize: 13, fontWeight: 700,
+                      cursor: 'pointer',
+                    }}>
+                    Add to Queue
+                  </button>
+                </div>
+              </div>
+
+              {/* Right: Live Preview */}
+              <div style={{
+                width: 260, padding: 20, background: '#f9fafb',
+                overflowY: 'auto',
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 700,
+                              color: '#9ca3af', textTransform: 'uppercase',
+                              letterSpacing: '0.06em', marginBottom: 12 }}>
+                  Live Preview
+                </div>
+
+                {/* Phone mockup */}
+                <div style={{
+                  background: '#1f2937', borderRadius: 20, padding: 12,
+                  maxWidth: 220, margin: '0 auto',
+                }}>
+                  <div style={{
+                    background: '#fff', borderRadius: 12, overflow: 'hidden',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                  }}>
+                    {editorImageUrl && (
+                      <img src={editorImageUrl} alt=""
+                        style={{ width: '100%', height: 80,
+                                 objectFit: 'cover' }}
+                        onError={e => e.target.style.display = 'none'}
+                      />
+                    )}
+                    <div style={{ padding: '10px 12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center',
+                                    gap: 6, marginBottom: 6 }}>
+                        <div style={{ width: 16, height: 16,
+                                      background: '#4f46e5',
+                                      borderRadius: 4 }} />
+                        <span style={{ fontSize: 10, color: '#6b7280',
+                                       fontWeight: 600 }}>
+                          ShopiReachBoost AI
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, fontWeight: 700,
+                                    color: '#111827', marginBottom: 4 }}>
+                        {editorTitle || 'Notification Title'}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#6b7280',
+                                    lineHeight: 1.4 }}>
+                        {editorBody || 'Your message will appear here...'}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 16, fontSize: 11,
+                              color: '#9ca3af', textAlign: 'center' }}>
+                  Preview updates as you type
+                </div>
+              </div>
             </div>
           </div>
         </div>
       )}
 
     </div>
-    </Page>
   );
 }
