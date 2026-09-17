@@ -156,4 +156,64 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
   }
 });
 
+// GET /api/queue/:shopDomain/festival
+// Returns every FestivalQueue item for this shop (draft + approved +
+// sent + cancelled), oldest scheduledAt first — powers the Phase 2
+// Queue calendar/planning views. See audits/queue-phase2-audit.txt.
+router.get('/:shopDomain/festival', requireAuth, requireStoreOwner,
+  async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const FestivalQueue = require('../models/FestivalQueue');
+
+    const items = await FestivalQueue.find({ shopDomain: shop })
+      .sort({ scheduledAt: 1 })
+      .lean();
+
+    return res.json({ items });
+  } catch (err) {
+    console.error('[queue] festival GET error:', err.message);
+    return res.status(500).json({ error: 'Failed to load' });
+  }
+});
+
+// PATCH /api/queue/:shopDomain/festival/:id
+// Partial update (used by the Planning List's "Approve" button to set
+// status: 'approved').
+router.patch('/:shopDomain/festival/:id', requireAuth,
+  requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const FestivalQueue = require('../models/FestivalQueue');
+    const item = await FestivalQueue.findOneAndUpdate(
+      { _id: req.params.id, shopDomain: shop },
+      { $set: req.body },
+      { new: true }
+    );
+    return res.json({ success: true, item });
+  } catch (err) {
+    console.error('[queue] festival PATCH error:', err.message);
+    return res.status(500).json({ error: 'Failed to update' });
+  }
+});
+
+// DELETE /api/queue/:shopDomain/festival/:id
+router.delete('/:shopDomain/festival/:id', requireAuth,
+  requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const FestivalQueue = require('../models/FestivalQueue');
+
+    await FestivalQueue.findOneAndDelete({
+      _id: req.params.id,
+      shopDomain: shop,
+    });
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[queue] festival DELETE error:', err.message);
+    return res.status(500).json({ error: 'Failed to delete' });
+  }
+});
+
 module.exports = router;

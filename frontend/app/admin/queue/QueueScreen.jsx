@@ -57,6 +57,162 @@ function getCustomerLabel(job) {
   return 'Anonymous';
 }
 
+// --- Phase 2: festival calendar data, copied verbatim from
+// DashboardScreen.jsx per the task's own instruction ("Also add
+// FESTIVAL_CALENDAR and getUpcomingFestivals from DashboardScreen — copy
+// them into QueueScreen.jsx as well"), matching this app's established
+// no-shared-layout convention of duplicating such module-level constants
+// per screen file rather than extracting a shared module. See
+// audits/queue-phase2-audit.txt.
+const FESTIVAL_CALENDAR = [
+  { name: 'Navratri', date: '2026-10-02', emoji: '🪷',
+    suggestion: 'Send festive Navratri offers to all subscribers',
+    message: 'Celebrate Navratri with us! Get special festive discounts on your favorite products. 🪷' },
+  { name: 'Dussehra', date: '2026-10-12', emoji: '🏹',
+    suggestion: 'Send Dussehra sale notification',
+    message: 'Happy Dussehra! Victory of good over evil — and great deals for you! Shop now. 🏹' },
+  { name: 'Dhanteras', date: '2026-10-28', emoji: '🪙',
+    suggestion: 'Promote Dhanteras shopping with special offer',
+    message: 'Dhanteras is here! Bring prosperity home with our exclusive festive collection. 🪙' },
+  { name: 'Diwali', date: '2026-10-29', emoji: '🪔',
+    suggestion: 'Send Diwali offer — biggest sale of the year',
+    message: 'Happy Diwali! Light up your celebrations with our biggest sale of the year. 🪔✨' },
+  { name: 'Bhai Dooj', date: '2026-10-31', emoji: '❤️',
+    suggestion: 'Send Bhai Dooj gifting ideas notification',
+    message: 'Bhai Dooj special! Find the perfect gift for your siblings. Shop now. ❤️' },
+  { name: 'Christmas', date: '2026-12-25', emoji: '🎄',
+    suggestion: 'Send Christmas sale notification',
+    message: 'Merry Christmas! Spread joy with our festive deals. 🎄🎁' },
+  { name: 'New Year', date: '2027-01-01', emoji: '🎆',
+    suggestion: 'Send New Year offer to re-engage customers',
+    message: 'Happy New Year! Start 2027 with amazing deals. 🎆' },
+  { name: 'Makar Sankranti', date: '2027-01-14', emoji: '🪁',
+    suggestion: 'Send Sankranti festive notification',
+    message: 'Happy Makar Sankranti! Celebrate with our special festive offers. 🪁' },
+  { name: 'Republic Day', date: '2027-01-26', emoji: '🇮🇳',
+    suggestion: 'Send Republic Day sale notification',
+    message: 'Happy Republic Day! Celebrate with patriotic deals. 🇮🇳' },
+  { name: 'Holi', date: '2027-03-01', emoji: '🎨',
+    suggestion: 'Send colorful Holi offers to all subscribers',
+    message: 'Happy Holi! Color your celebrations with amazing festive deals. 🎨🌈' },
+  { name: 'Eid ul-Fitr', date: '2027-03-20', emoji: '🌙',
+    suggestion: 'Send Eid special offers notification',
+    message: 'Eid Mubarak! Celebrate with our special Eid collection and offers. 🌙✨' },
+  { name: 'Raksha Bandhan', date: '2027-08-09', emoji: '🧡',
+    suggestion: 'Send Raksha Bandhan gifting notification',
+    message: 'Raksha Bandhan special! Find the perfect gift for your siblings. 🧡' },
+  { name: 'Independence Day', date: '2027-08-15', emoji: '🇮🇳',
+    suggestion: 'Send Independence Day sale notification',
+    message: 'Happy Independence Day! Celebrate freedom with amazing deals. 🇮🇳' },
+];
+
+function getUpcomingFestivals(count) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return FESTIVAL_CALENDAR
+    .map(f => {
+      const fDate = new Date(f.date);
+      const diffMs = fDate - today;
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+      return { ...f, diffDays, fDate };
+    })
+    .filter(f => f.diffDays >= 0 && f.diffDays <= 60)
+    .sort((a, b) => a.diffDays - b.diffDays)
+    .slice(0, count);
+}
+
+// MonthCalendar — renders one month grid. `festivals` is passed the raw,
+// unfiltered FESTIVAL_CALENDAR array rather than getUpcomingFestivals()'s
+// output: getUpcomingFestivals only returns festivals within a 60-day-
+// from-today rolling window, but this calendar has its own month
+// navigation (the required ←/→ arrows), so a merchant browsing to a
+// month outside that window would see festival markers silently vanish
+// if the filtered/capped helper were used instead. The raw array has no
+// such limitation and correctly shows festival markers for whatever
+// month is on screen. See audits/queue-phase2-audit.txt.
+//
+// DEVIATION FROM THE GIVEN SPEC: the given code keyed the leading empty
+// cells by `key={i}` (array index) and the real day cells by `key={day}`
+// (day-of-month number) within the SAME .map() over `days` — since `i`
+// and `day` are both small integers, an empty cell and a real day cell
+// could end up with the identical React key (e.g. index 1 is an empty
+// cell, but day 1 is also a real cell later in the same array), a
+// sibling key collision that produces incorrect reconciliation on
+// re-render (e.g. when navigating between months). Fixed by keying every
+// cell — empty and real — by the array index `i`, which is unique across
+// the whole array regardless of cell type.
+function MonthCalendar({ month, items, festivals }) {
+  const year = month.getFullYear();
+  const mon = month.getMonth();
+  const firstDay = new Date(year, mon, 1).getDay();
+  const daysInMonth = new Date(year, mon + 1, 0).getDate();
+  const days = [];
+  for (let i = 0; i < firstDay; i++) { days.push(null); }
+  for (let d = 1; d <= daysInMonth; d++) { days.push(d); }
+  return (
+    <div>
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1,
+        background: '#e5e7eb', border: '1px solid #e5e7eb',
+        borderRadius: 10, overflow: 'hidden',
+      }}>
+        {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
+          <div key={d} style={{
+            background: '#f9fafb', padding: '8px 0',
+            textAlign: 'center', fontSize: 11,
+            fontWeight: 700, color: '#9ca3af',
+          }}>{d}</div>
+        ))}
+        {days.map((day, i) => {
+          if (!day) return (
+            <div key={i} style={{ background: '#f9fafb', minHeight: 80 }} />
+          );
+          const dateStr = `${year}-${String(mon+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+          const isToday = new Date().toDateString() ===
+            new Date(year, mon, day).toDateString();
+          const festival = festivals.find(f => f.date.startsWith(dateStr));
+          const queued = items.filter(item => {
+            const d = new Date(item.scheduledAt);
+            return d.getFullYear() === year &&
+                   d.getMonth() === mon &&
+                   d.getDate() === day;
+          });
+          return (
+            <div key={i} style={{
+              background: '#fff', minHeight: 80, padding: 6, position: 'relative',
+            }}>
+              <div style={{
+                width: 24, height: 24, borderRadius: '50%',
+                background: isToday ? '#4f46e5' : 'transparent',
+                color: isToday ? '#fff' : '#111827',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 12, fontWeight: isToday ? 700 : 400, marginBottom: 4,
+              }}>{day}</div>
+              {festival && (
+                <div style={{
+                  fontSize: 10, background: '#fef3c7', color: '#d97706',
+                  borderRadius: 4, padding: '2px 4px', marginBottom: 2,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>{festival.emoji} {festival.name}</div>
+              )}
+              {queued.map(q => (
+                <div key={q._id} style={{
+                  fontSize: 10,
+                  background: q.status === 'approved' ? '#dcfce7' : '#dbeafe',
+                  color: q.status === 'approved' ? '#16a34a' : '#2563eb',
+                  borderRadius: 4, padding: '2px 4px', marginBottom: 2,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  cursor: 'pointer',
+                }}>📢 {q.title}</div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function QueueScreen({ shop }) {
   const [isMobileView, setIsMobileView] = useState(false);
   useEffect(() => {
@@ -81,6 +237,16 @@ export default function QueueScreen({ shop }) {
   const [actionResults, setActionResults] = useState({});
 
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Phase 2: calendar + planning view state.
+  const [queueTab, setQueueTab] = useState('calendar');
+  const [festivalItems, setFestivalItems] = useState([]);
+  const [festivalLoading, setFestivalLoading] = useState(true);
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  // Not given an exact name/default by the task ("wrapped in a
+  // collapsible 'Sent Notifications' section that defaults to
+  // collapsed") — invented, defaulting to false (collapsed).
+  const [sentNotifsOpen, setSentNotifsOpen] = useState(false);
 
   // FETCH LOGIC — job list. Fetch on mount + when statusFilter or page
   // changes; refreshKey also re-triggers this (Refresh button, and after
@@ -144,6 +310,15 @@ export default function QueueScreen({ shop }) {
     setPage(0);
   }, [statusFilter]);
 
+  // Phase 2: festival queue fetch.
+  useEffect(() => {
+    if (!shop) return;
+    apiGet(`/api/queue/${encodeURIComponent(shop)}/festival`)
+      .then(data => setFestivalItems(data.items || []))
+      .catch(() => setFestivalItems([]))
+      .finally(() => setFestivalLoading(false));
+  }, [shop]);
+
   async function sendNowJob(jobId) {
     setActionLoading(jobId);
     try {
@@ -181,59 +356,36 @@ export default function QueueScreen({ shop }) {
         margin: '0 auto',
       }}
     >
-      {/* 1. HEADER */}
-      <div style={{ marginBottom: '20px', display: 'flex',
-                    justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }}>
-            Notification Queue
-          </h1>
-          <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
-            Manage scheduled and sent notifications
-          </p>
-        </div>
-        <button
-          onClick={() => setRefreshKey((k) => k + 1)}
-          disabled={loading}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '8px 14px', borderRadius: 8, border: '1px solid #e5e7eb',
-            background: '#fff', color: '#374151', fontSize: 13,
-            fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
-            opacity: loading ? 0.6 : 1,
-          }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
-            strokeLinejoin="round">
-            <polyline points="23 4 23 10 17 10"/>
-            <polyline points="1 20 1 14 7 14"/>
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36
-              A9 9 0 0 0 20.49 15"/>
-          </svg>
-          {loading ? 'Refreshing...' : 'Refresh'}
-        </button>
+      {/* PAGE HEADER — subtitle text deliberately changed per the task
+          ("Manage scheduled and sent notifications" ->
+          "Plan and schedule festival notifications") */}
+      <div style={{ marginBottom: '20px' }}>
+        <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }}>
+          Notification Queue
+        </h1>
+        <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
+          Plan and schedule festival notifications
+        </p>
       </div>
 
-      {/* 2. STATUS FILTER TABS */}
-      <div style={{
-        display: 'flex', gap: '8px', marginBottom: '16px',
-        overflowX: 'auto', paddingBottom: '4px',
-      }}>
-        {STATUS_FILTERS.map((tab) => (
+      {/* TABS: Calendar | Planning List */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {[
+          { key: 'calendar', label: '📅 Calendar' },
+          { key: 'planning', label: '📋 Planning List' },
+        ].map(tab => (
           <button
             key={tab.key}
-            onClick={() => setStatusFilter(tab.key)}
+            onClick={() => setQueueTab(tab.key)}
             style={{
-              padding: '6px 14px', fontSize: '13px',
-              fontWeight: statusFilter === tab.key ? '600' : '400',
-              color: statusFilter === tab.key ? '#111827' : '#6b7280',
-              background: statusFilter === tab.key ? '#fff' : 'transparent',
+              padding: '8px 16px', fontSize: 13,
+              fontWeight: queueTab === tab.key ? 700 : 500,
+              color: queueTab === tab.key ? '#111827' : '#6b7280',
+              background: queueTab === tab.key ? '#fff' : 'transparent',
               border: '1px solid',
-              borderColor: statusFilter === tab.key ? '#e5e7eb' : 'transparent',
-              borderRadius: '20px', cursor: 'pointer',
-              flexShrink: 0, whiteSpace: 'nowrap',
-              boxShadow: statusFilter === tab.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              borderColor: queueTab === tab.key ? '#e5e7eb' : 'transparent',
+              borderRadius: 20, cursor: 'pointer',
+              boxShadow: queueTab === tab.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
             }}
           >
             {tab.label}
@@ -241,236 +393,431 @@ export default function QueueScreen({ shop }) {
         ))}
       </div>
 
-      {/* 3. STATS ROW — compact inline bar (see
-          audits/queue-stats-compact-audit.txt). NOTE: the task assumed a
-          `stats` object with stats.pending/stats.sent; the actual state
-          holding these counts in this file is `statusCounts` (keyed by
-          status string, populated by the STATS_STATUSES effect above) —
-          adapted accordingly. */}
-      <div style={{
-        display: 'flex',
-        gap: 24,
-        padding: '12px 0',
-        marginBottom: 16,
-        borderBottom: '1px solid #f3f4f6',
-      }}>
-        {[
-          { label: 'Pending', value: statusCounts.pending, color: '#f59e0b' },
-          { label: 'Sent', value: statusCounts.sent, color: '#16a34a' },
-        ].map(({ label, value, color }) => (
-          <div key={label} style={{ display: 'flex',
-                                    alignItems: 'baseline', gap: 6 }}>
-            <span style={{ fontSize: 20, fontWeight: 800, color }}>
-              {value ?? '—'}
-            </span>
-            <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 500 }}>
-              {label}
-            </span>
+      {/* MONTH NAVIGATION — calendar tab only. Prev/next handlers not
+          given verbatim by the task; implemented as ±1 month shifts on
+          currentMonth. */}
+      {queueTab === 'calendar' && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          gap: 16, marginBottom: 16,
+        }}>
+          <button
+            onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+            style={{
+              width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb',
+              background: '#fff', color: '#374151', fontSize: 16, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >‹</button>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', minWidth: 160, textAlign: 'center' }}>
+            {currentMonth.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
           </div>
-        ))}
-      </div>
+          <button
+            onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+            style={{
+              width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb',
+              background: '#fff', color: '#374151', fontSize: 16, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >›</button>
+        </div>
+      )}
 
-      {/* 4. TABLE / CARD LIST */}
-      <div style={{
-        background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px',
-        overflow: 'hidden',
-      }}>
-        {/* Table header — desktop only */}
-        {!isMobileView && (
-          <div style={{
-            display: 'grid', gridTemplateColumns: GRID_COLS,
-            padding: '10px 16px', background: '#f9fafb', borderBottom: '1px solid #f3f4f6',
-          }}>
-            {['Customer', 'Signal', 'Channel', 'Scheduled', 'Status', 'Actions'].map((h) => (
-              <div key={h} style={{
-                fontSize: '11px', fontWeight: '600', color: '#9ca3af',
-                textTransform: 'uppercase', letterSpacing: '0.5px',
-              }}>{h}</div>
-            ))}
-          </div>
-        )}
-
-        {/* Rows */}
-        {loading ? (
-          [1, 2, 3].map((i) => (
-            <div key={i} style={{
-              height: '60px', borderBottom: '1px solid #f3f4f6',
-              display: 'flex', alignItems: 'center', padding: '0 16px',
-            }}>
-              <div style={{ width: '60%', height: '14px', background: '#f3f4f6', borderRadius: '4px' }} />
-            </div>
-          ))
-        ) : jobs.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
-            No jobs in the queue.
+      {/* CONTENT AREA */}
+      {queueTab === 'calendar' ? (
+        festivalLoading ? (
+          <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 40 }}>
+            Loading...
           </div>
         ) : (
-          jobs.map((job, i) => {
-            const channelBadge = CHANNEL_BADGE[job.channel] || CHANNEL_BADGE.push;
-            const statusBadge = STATUS_BADGE[job.status] || STATUS_BADGE.skipped;
-            const isPending = job.status === 'pending';
-            const isActing = actionLoading === job._id;
-            const result = actionResults[job._id];
-
-            const channelEl = (
-              <span style={{
-                display: 'inline-block', padding: '3px 10px', borderRadius: '20px',
-                fontSize: '12px', fontWeight: '500',
-                background: channelBadge.bg, color: channelBadge.color,
-              }}>
-                {channelBadge.label}
-              </span>
-            );
-
-            // Customer column — email when available, else a stable
-            // "Subscriber #XXXXXX" derived from the profile id, else
-            // "Anonymous" when there's no profileId at all (see
-            // getCustomerLabel()), plus a small channel-type indicator.
-            const customerEl = (
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
-                  {getCustomerLabel(job)}
+          <MonthCalendar month={currentMonth} items={festivalItems} festivals={FESTIVAL_CALENDAR} />
+        )
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {festivalLoading ? (
+            <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 40 }}>
+              Loading...
+            </div>
+          ) : festivalItems.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 40 }}>
+              <div style={{ fontSize: 32, marginBottom: 8 }}>📅</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
+                No notifications planned yet
+              </div>
+              <div style={{ fontSize: 13, color: '#9ca3af', marginTop: 4 }}>
+                Go to Dashboard → Notification Suggestions to plan festival notifications
+              </div>
+            </div>
+          ) : festivalItems.map(item => (
+            <div key={item._id} style={{
+              background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12,
+              padding: '14px 16px', display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center', gap: 12,
+            }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                    background: item.status === 'approved' ? '#dcfce7' : '#dbeafe',
+                    color: item.status === 'approved' ? '#16a34a' : '#2563eb',
+                  }}>{item.status === 'approved' ? 'Approved' : 'Draft'}</span>
+                  {item.festival && (
+                    <span style={{ fontSize: 11, color: '#9ca3af' }}>{item.festival}</span>
+                  )}
                 </div>
-                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2,
-                              display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <div style={{
-                    width: 6, height: 6, borderRadius: '50%',
-                    background: job.channel === 'push' ? '#3b82f6' : '#8b5cf6',
-                    flexShrink: 0
-                  }} />
-                  {job.channel === 'push' ? 'Push subscriber' : 'Email subscriber'}
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 2 }}>
+                  {item.title}
+                </div>
+                <div style={{ fontSize: 12, color: '#6b7280' }}>
+                  Scheduled: {new Date(item.scheduledAt).toLocaleString('en-IN', {
+                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                  })}
                 </div>
               </div>
-            );
-
-            const statusEl = (
-              <span style={{
-                display: 'inline-block', padding: '3px 10px', borderRadius: '20px',
-                fontSize: '12px', fontWeight: '500',
-                background: statusBadge.bg, color: statusBadge.color,
-              }}>
-                {formatSignal(job.status)}
-              </span>
-            );
-
-            const actionsEl = isPending ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                {result && (
-                  <span style={{
-                    fontSize: 11, fontWeight: 600,
-                    color: result.success ? '#16a34a' : '#dc2626',
-                  }}>
-                    {result.msg}
-                  </span>
+              <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                {item.status === 'draft' && (
+                  <button
+                    onClick={async () => {
+                      await apiSend(
+                        `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
+                        'PATCH', { status: 'approved' }
+                      );
+                      setFestivalItems(prev => prev.map(i =>
+                        i._id === item._id ? {...i, status: 'approved'} : i
+                      ));
+                    }}
+                    style={{
+                      padding: '6px 12px', borderRadius: 7, border: 'none',
+                      background: '#4f46e5', color: '#fff', fontSize: 12,
+                      fontWeight: 600, cursor: 'pointer',
+                    }}>Approve</button>
                 )}
                 <button
-                  onClick={() => sendNowJob(job._id)}
-                  disabled={isActing}
+                  onClick={async () => {
+                    await apiSend(
+                      `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
+                      'DELETE', {}
+                    );
+                    setFestivalItems(prev => prev.filter(i => i._id !== item._id));
+                  }}
                   style={{
-                    padding: '5px 10px', fontSize: '11px', fontWeight: '600',
-                    color: '#fff', background: isActing ? '#9ca3af' : '#4f46e5',
-                    border: 'none', borderRadius: '6px',
-                    cursor: isActing ? 'not-allowed' : 'pointer',
+                    padding: '6px 12px', borderRadius: 7,
+                    border: '1px solid #fee2e2', background: '#fff',
+                    color: '#dc2626', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  }}>Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* SENT NOTIFICATIONS — the pre-existing ScheduledJob-based
+          list (filter tabs, stats row, table/card list, pagination),
+          preserved exactly as it was, now wrapped in a collapsible
+          section that defaults to collapsed. */}
+      <div style={{ marginTop: 28 }}>
+        <button
+          onClick={() => setSentNotifsOpen(o => !o)}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            width: '100%', padding: '12px 16px', borderRadius: 10,
+            border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer',
+          }}
+        >
+          <span style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>
+            Sent Notifications
+          </span>
+          <span style={{ fontSize: 13, color: '#9ca3af' }}>
+            {sentNotifsOpen ? '▲ Hide' : '▼ Show'}
+          </span>
+        </button>
+
+        {sentNotifsOpen && (
+          <div style={{ marginTop: 16 }}>
+            {/* HEADER (Refresh button only — title/subtitle moved up top) */}
+            <div style={{ marginBottom: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => setRefreshKey((k) => k + 1)}
+                disabled={loading}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '8px 14px', borderRadius: 8, border: '1px solid #e5e7eb',
+                  background: '#fff', color: '#374151', fontSize: 13,
+                  fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer',
+                  opacity: loading ? 0.6 : 1,
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+                  strokeLinejoin="round">
+                  <polyline points="23 4 23 10 17 10"/>
+                  <polyline points="1 20 1 14 7 14"/>
+                  <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36
+                    A9 9 0 0 0 20.49 15"/>
+                </svg>
+                {loading ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+
+            {/* STATUS FILTER TABS */}
+            <div style={{
+              display: 'flex', gap: '8px', marginBottom: '16px',
+              overflowX: 'auto', paddingBottom: '4px',
+            }}>
+              {STATUS_FILTERS.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setStatusFilter(tab.key)}
+                  style={{
+                    padding: '6px 14px', fontSize: '13px',
+                    fontWeight: statusFilter === tab.key ? '600' : '400',
+                    color: statusFilter === tab.key ? '#111827' : '#6b7280',
+                    background: statusFilter === tab.key ? '#fff' : 'transparent',
+                    border: '1px solid',
+                    borderColor: statusFilter === tab.key ? '#e5e7eb' : 'transparent',
+                    borderRadius: '20px', cursor: 'pointer',
+                    flexShrink: 0, whiteSpace: 'nowrap',
+                    boxShadow: statusFilter === tab.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
                   }}
                 >
-                  Send now
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* STATS ROW — compact inline bar (see
+                audits/queue-stats-compact-audit.txt). NOTE: the task
+                assumed a `stats` object with stats.pending/stats.sent;
+                the actual state holding these counts in this file is
+                `statusCounts` (keyed by status string, populated by the
+                STATS_STATUSES effect above) — adapted accordingly. */}
+            <div style={{
+              display: 'flex',
+              gap: 24,
+              padding: '12px 0',
+              marginBottom: 16,
+              borderBottom: '1px solid #f3f4f6',
+            }}>
+              {[
+                { label: 'Pending', value: statusCounts.pending, color: '#f59e0b' },
+                { label: 'Sent', value: statusCounts.sent, color: '#16a34a' },
+              ].map(({ label, value, color }) => (
+                <div key={label} style={{ display: 'flex',
+                                          alignItems: 'baseline', gap: 6 }}>
+                  <span style={{ fontSize: 20, fontWeight: 800, color }}>
+                    {value ?? '—'}
+                  </span>
+                  <span style={{ fontSize: 12, color: '#9ca3af', fontWeight: 500 }}>
+                    {label}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            {/* TABLE / CARD LIST */}
+            <div style={{
+              background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px',
+              overflow: 'hidden',
+            }}>
+              {/* Table header — desktop only */}
+              {!isMobileView && (
+                <div style={{
+                  display: 'grid', gridTemplateColumns: GRID_COLS,
+                  padding: '10px 16px', background: '#f9fafb', borderBottom: '1px solid #f3f4f6',
+                }}>
+                  {['Customer', 'Signal', 'Channel', 'Scheduled', 'Status', 'Actions'].map((h) => (
+                    <div key={h} style={{
+                      fontSize: '11px', fontWeight: '600', color: '#9ca3af',
+                      textTransform: 'uppercase', letterSpacing: '0.5px',
+                    }}>{h}</div>
+                  ))}
+                </div>
+              )}
+
+              {/* Rows */}
+              {loading ? (
+                [1, 2, 3].map((i) => (
+                  <div key={i} style={{
+                    height: '60px', borderBottom: '1px solid #f3f4f6',
+                    display: 'flex', alignItems: 'center', padding: '0 16px',
+                  }}>
+                    <div style={{ width: '60%', height: '14px', background: '#f3f4f6', borderRadius: '4px' }} />
+                  </div>
+                ))
+              ) : jobs.length === 0 ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>
+                  No jobs in the queue.
+                </div>
+              ) : (
+                jobs.map((job, i) => {
+                  const channelBadge = CHANNEL_BADGE[job.channel] || CHANNEL_BADGE.push;
+                  const statusBadge = STATUS_BADGE[job.status] || STATUS_BADGE.skipped;
+                  const isPending = job.status === 'pending';
+                  const isActing = actionLoading === job._id;
+                  const result = actionResults[job._id];
+
+                  const channelEl = (
+                    <span style={{
+                      display: 'inline-block', padding: '3px 10px', borderRadius: '20px',
+                      fontSize: '12px', fontWeight: '500',
+                      background: channelBadge.bg, color: channelBadge.color,
+                    }}>
+                      {channelBadge.label}
+                    </span>
+                  );
+
+                  // Customer column — email when available, else a stable
+                  // "Subscriber #XXXXXX" derived from the profile id, else
+                  // "Anonymous" when there's no profileId at all (see
+                  // getCustomerLabel()), plus a small channel-type indicator.
+                  const customerEl = (
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+                        {getCustomerLabel(job)}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2,
+                                    display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <div style={{
+                          width: 6, height: 6, borderRadius: '50%',
+                          background: job.channel === 'push' ? '#3b82f6' : '#8b5cf6',
+                          flexShrink: 0
+                        }} />
+                        {job.channel === 'push' ? 'Push subscriber' : 'Email subscriber'}
+                      </div>
+                    </div>
+                  );
+
+                  const statusEl = (
+                    <span style={{
+                      display: 'inline-block', padding: '3px 10px', borderRadius: '20px',
+                      fontSize: '12px', fontWeight: '500',
+                      background: statusBadge.bg, color: statusBadge.color,
+                    }}>
+                      {formatSignal(job.status)}
+                    </span>
+                  );
+
+                  const actionsEl = isPending ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      {result && (
+                        <span style={{
+                          fontSize: 11, fontWeight: 600,
+                          color: result.success ? '#16a34a' : '#dc2626',
+                        }}>
+                          {result.msg}
+                        </span>
+                      )}
+                      <button
+                        onClick={() => sendNowJob(job._id)}
+                        disabled={isActing}
+                        style={{
+                          padding: '5px 10px', fontSize: '11px', fontWeight: '600',
+                          color: '#fff', background: isActing ? '#9ca3af' : '#4f46e5',
+                          border: 'none', borderRadius: '6px',
+                          cursor: isActing ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        Send now
+                      </button>
+                      <button
+                        onClick={() => cancelJob(job._id)}
+                        disabled={isActing}
+                        style={{
+                          padding: '5px 10px', fontSize: '11px', fontWeight: '600',
+                          color: '#dc2626', background: '#fff',
+                          border: '1px solid #fecaca', borderRadius: '6px',
+                          cursor: isActing ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: '12px', color: '#d1d5db' }}>—</span>
+                  );
+
+                  if (isMobileView) {
+                    return (
+                      <div key={job._id} style={{
+                        padding: '14px 16px',
+                        borderBottom: i < jobs.length - 1 ? '1px solid #f9fafb' : 'none',
+                      }}>
+                        <div style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+                          marginBottom: '6px',
+                        }}>
+                          {customerEl}
+                          {statusEl}
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>
+                          {formatSignal(job.signalType)} · {channelEl}
+                        </div>
+                        <div style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          fontSize: '12px', color: '#9ca3af', marginBottom: '8px',
+                        }}>
+                          {formatDateTime(job.runAt)}
+                        </div>
+                        {actionsEl}
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={job._id} style={{
+                      display: 'grid', gridTemplateColumns: GRID_COLS,
+                      padding: '12px 16px', alignItems: 'center',
+                      borderBottom: i < jobs.length - 1 ? '1px solid #f9fafb' : 'none',
+                    }}>
+                      {customerEl}
+                      <div style={{ fontSize: '13px', color: '#374151' }}>{formatSignal(job.signalType)}</div>
+                      <div>{channelEl}</div>
+                      <div style={{ fontSize: '13px', color: '#374151' }}>{formatDateTime(job.runAt)}</div>
+                      <div>{statusEl}</div>
+                      <div>{actionsEl}</div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* PAGINATION */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              marginTop: '16px',
+            }}>
+              <span style={{ fontSize: '12px', color: '#9ca3af' }}>
+                {total > 0 ? `Showing ${from}-${to} of ${total}` : 'Showing 0 of 0'}
+              </span>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={page === 0 || loading}
+                  style={{
+                    padding: '6px 14px', fontSize: '13px', fontWeight: '600',
+                    color: page === 0 ? '#d1d5db' : '#374151',
+                    background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px',
+                    cursor: page === 0 || loading ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Previous
                 </button>
                 <button
-                  onClick={() => cancelJob(job._id)}
-                  disabled={isActing}
+                  onClick={() => setPage((p) => p + 1)}
+                  disabled={to >= total || loading}
                   style={{
-                    padding: '5px 10px', fontSize: '11px', fontWeight: '600',
-                    color: '#dc2626', background: '#fff',
-                    border: '1px solid #fecaca', borderRadius: '6px',
-                    cursor: isActing ? 'not-allowed' : 'pointer',
+                    padding: '6px 14px', fontSize: '13px', fontWeight: '600',
+                    color: to >= total ? '#d1d5db' : '#374151',
+                    background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px',
+                    cursor: to >= total || loading ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  Cancel
+                  Next
                 </button>
               </div>
-            ) : (
-              <span style={{ fontSize: '12px', color: '#d1d5db' }}>—</span>
-            );
-
-            if (isMobileView) {
-              return (
-                <div key={job._id} style={{
-                  padding: '14px 16px',
-                  borderBottom: i < jobs.length - 1 ? '1px solid #f9fafb' : 'none',
-                }}>
-                  <div style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-                    marginBottom: '6px',
-                  }}>
-                    {customerEl}
-                    {statusEl}
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>
-                    {formatSignal(job.signalType)} · {channelEl}
-                  </div>
-                  <div style={{
-                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    fontSize: '12px', color: '#9ca3af', marginBottom: '8px',
-                  }}>
-                    {formatDateTime(job.runAt)}
-                  </div>
-                  {actionsEl}
-                </div>
-              );
-            }
-
-            return (
-              <div key={job._id} style={{
-                display: 'grid', gridTemplateColumns: GRID_COLS,
-                padding: '12px 16px', alignItems: 'center',
-                borderBottom: i < jobs.length - 1 ? '1px solid #f9fafb' : 'none',
-              }}>
-                {customerEl}
-                <div style={{ fontSize: '13px', color: '#374151' }}>{formatSignal(job.signalType)}</div>
-                <div>{channelEl}</div>
-                <div style={{ fontSize: '13px', color: '#374151' }}>{formatDateTime(job.runAt)}</div>
-                <div>{statusEl}</div>
-                <div>{actionsEl}</div>
-              </div>
-            );
-          })
+            </div>
+          </div>
         )}
-      </div>
-
-      {/* 5. PAGINATION */}
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        marginTop: '16px',
-      }}>
-        <span style={{ fontSize: '12px', color: '#9ca3af' }}>
-          {total > 0 ? `Showing ${from}-${to} of ${total}` : 'Showing 0 of 0'}
-        </span>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            disabled={page === 0 || loading}
-            style={{
-              padding: '6px 14px', fontSize: '13px', fontWeight: '600',
-              color: page === 0 ? '#d1d5db' : '#374151',
-              background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px',
-              cursor: page === 0 || loading ? 'not-allowed' : 'pointer',
-            }}
-          >
-            Previous
-          </button>
-          <button
-            onClick={() => setPage((p) => p + 1)}
-            disabled={to >= total || loading}
-            style={{
-              padding: '6px 14px', fontSize: '13px', fontWeight: '600',
-              color: to >= total ? '#d1d5db' : '#374151',
-              background: '#fff', border: '1px solid #e5e7eb', borderRadius: '8px',
-              cursor: to >= total || loading ? 'not-allowed' : 'pointer',
-            }}
-          >
-            Next
-          </button>
-        </div>
       </div>
     </div>
   );
