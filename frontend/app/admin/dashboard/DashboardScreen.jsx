@@ -1264,16 +1264,16 @@ export default function DashboardScreen({ shop }) {
                 flex: 1, padding: 20, overflowY: 'auto',
                 borderRight: '1px solid #f3f4f6',
               }}>
-                {/* Mobile Image + Desktop Image — separate uploads, one
-                    per preview surface. See
-                    audits/separate-images-audit.txt. */}
-                {/* Mobile Image */}
-                <div style={{ marginBottom: 14 }}>
+                {/* Mobile Image + Desktop Image — separate uploads, shown
+                    side by side. See audits/horizontal-upload-audit.txt
+                    (was audits/separate-images-audit.txt, stacked). */}
+                <div style={{ marginBottom: 16 }}>
+                  {/* Label row with info button */}
                   <div style={{ display: 'flex', alignItems: 'center',
-                                gap: 6, marginBottom: 6 }}>
+                                gap: 6, marginBottom: 8 }}>
                     <label style={{ fontSize: 12, fontWeight: 600,
                                     color: '#374151' }}>
-                      📱 Mobile Image
+                      Notification Images
                     </label>
                     <button
                       onClick={() => setShowImageInfo(s => !s)}
@@ -1311,83 +1311,134 @@ export default function DashboardScreen({ shop }) {
                     </div>
                   )}
 
-                  <label style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 8,
-                    padding: '8px 16px', borderRadius: 8,
-                    border: '2px dashed #d1d5db', background: '#f9fafb',
-                    cursor: 'pointer', fontSize: 13, color: '#374151',
-                    fontWeight: 500, width: '100%', boxSizing: 'border-box',
-                    justifyContent: 'center',
-                  }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
-                      strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                      <polyline points="17 8 12 3 7 8"/>
-                      <line x1="12" y1="3" x2="12" y2="15"/>
-                    </svg>
-                    {editorMobileImageUrl ? 'Change Mobile Image' : 'Upload Mobile Image'}
-                    <input type="file" accept="image/*" style={{ display: 'none' }}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = (ev) => setEditorMobileImageUrl(ev.target.result);
-                        reader.readAsDataURL(file);
-                      }}
-                    />
-                  </label>
-                  {editorMobileImageUrl && (
-                    <button onClick={() => setEditorMobileImageUrl('')}
-                      style={{ marginTop: 4, fontSize: 11, color: '#dc2626',
-                               background: 'none', border: 'none',
-                               cursor: 'pointer', padding: 0 }}>
-                      Remove mobile image
-                    </button>
-                  )}
-                </div>
+                  {/* Two upload boxes side by side */}
+                  <div style={{ display: 'grid',
+                                gridTemplateColumns: '1fr 1fr',
+                                gap: 10 }}>
 
-                {/* Desktop Image */}
-                <div style={{ marginBottom: 16 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600,
-                                  color: '#374151', display: 'block',
-                                  marginBottom: 6 }}>
-                    🖥️ Desktop Image
-                  </label>
-                  <label style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 8,
-                    padding: '8px 16px', borderRadius: 8,
-                    border: '2px dashed #d1d5db', background: '#f9fafb',
-                    cursor: 'pointer', fontSize: 13, color: '#374151',
-                    fontWeight: 500, width: '100%', boxSizing: 'border-box',
-                    justifyContent: 'center',
-                  }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
-                      strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                      <polyline points="17 8 12 3 7 8"/>
-                      <line x1="12" y1="3" x2="12" y2="15"/>
-                    </svg>
-                    {editorDesktopImageUrl ? 'Change Desktop Image' : 'Upload Desktop Image'}
-                    <input type="file" accept="image/*" style={{ display: 'none' }}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = (ev) => setEditorDesktopImageUrl(ev.target.result);
-                        reader.readAsDataURL(file);
-                      }}
-                    />
-                  </label>
-                  {editorDesktopImageUrl && (
-                    <button onClick={() => setEditorDesktopImageUrl('')}
-                      style={{ marginTop: 4, fontSize: 11, color: '#dc2626',
-                               background: 'none', border: 'none',
-                               cursor: 'pointer', padding: 0 }}>
-                      Remove desktop image
-                    </button>
-                  )}
+                    {/* Mobile upload box */}
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600,
+                                    color: '#6b7280', marginBottom: 4,
+                                    textAlign: 'center' }}>
+                        📱 Mobile
+                      </div>
+                      <label style={{
+                        display: 'flex', flexDirection: 'column',
+                        alignItems: 'center', justifyContent: 'center',
+                        gap: 4, padding: '12px 8px',
+                        borderRadius: 8, border: '2px dashed #d1d5db',
+                        background: editorMobileImageUrl ? '#f0fdf4' : '#f9fafb',
+                        cursor: 'pointer', fontSize: 11, color: '#6b7280',
+                        fontWeight: 500, minHeight: 80,
+                        boxSizing: 'border-box', width: '100%',
+                        position: 'relative', overflow: 'hidden',
+                      }}>
+                        {editorMobileImageUrl ? (
+                          <>
+                            <img src={editorMobileImageUrl} alt="mobile"
+                              style={{ width: '100%', height: 60,
+                                       objectFit: 'cover', borderRadius: 6 }} />
+                            <span style={{ fontSize: 10, color: '#16a34a',
+                                           fontWeight: 600 }}>✓ Uploaded</span>
+                          </>
+                        ) : (
+                          <>
+                            <svg width="20" height="20" viewBox="0 0 24 24"
+                              fill="none" stroke="#9ca3af" strokeWidth="2"
+                              strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                              <polyline points="17 8 12 3 7 8"/>
+                              <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                            <span>Upload</span>
+                          </>
+                        )}
+                        <input type="file" accept="image/*"
+                               style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = (ev) =>
+                              setEditorMobileImageUrl(ev.target.result);
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                      </label>
+                      {editorMobileImageUrl && (
+                        <button onClick={() => setEditorMobileImageUrl('')}
+                          style={{ width: '100%', marginTop: 4, fontSize: 10,
+                                   color: '#dc2626', background: 'none',
+                                   border: 'none', cursor: 'pointer', padding: 0,
+                                   textAlign: 'center' }}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Desktop upload box */}
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 600,
+                                    color: '#6b7280', marginBottom: 4,
+                                    textAlign: 'center' }}>
+                        🖥️ Desktop
+                      </div>
+                      <label style={{
+                        display: 'flex', flexDirection: 'column',
+                        alignItems: 'center', justifyContent: 'center',
+                        gap: 4, padding: '12px 8px',
+                        borderRadius: 8, border: '2px dashed #d1d5db',
+                        background: editorDesktopImageUrl ? '#f0fdf4' : '#f9fafb',
+                        cursor: 'pointer', fontSize: 11, color: '#6b7280',
+                        fontWeight: 500, minHeight: 80,
+                        boxSizing: 'border-box', width: '100%',
+                        position: 'relative', overflow: 'hidden',
+                      }}>
+                        {editorDesktopImageUrl ? (
+                          <>
+                            <img src={editorDesktopImageUrl} alt="desktop"
+                              style={{ width: '100%', height: 60,
+                                       objectFit: 'cover', borderRadius: 6 }} />
+                            <span style={{ fontSize: 10, color: '#16a34a',
+                                           fontWeight: 600 }}>✓ Uploaded</span>
+                          </>
+                        ) : (
+                          <>
+                            <svg width="20" height="20" viewBox="0 0 24 24"
+                              fill="none" stroke="#9ca3af" strokeWidth="2"
+                              strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                              <polyline points="17 8 12 3 7 8"/>
+                              <line x1="12" y1="3" x2="12" y2="15"/>
+                            </svg>
+                            <span>Upload</span>
+                          </>
+                        )}
+                        <input type="file" accept="image/*"
+                               style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const reader = new FileReader();
+                            reader.onload = (ev) =>
+                              setEditorDesktopImageUrl(ev.target.result);
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                      </label>
+                      {editorDesktopImageUrl && (
+                        <button onClick={() => setEditorDesktopImageUrl('')}
+                          style={{ width: '100%', marginTop: 4, fontSize: 10,
+                                   color: '#dc2626', background: 'none',
+                                   border: 'none', cursor: 'pointer', padding: 0,
+                                   textAlign: 'center' }}>
+                          Remove
+                        </button>
+                      )}
+                    </div>
+
+                  </div>
                 </div>
 
                 {/* Title */}
