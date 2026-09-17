@@ -136,7 +136,7 @@ function getRelativeTime(date) {
   return `${days} days ago`;
 }
 
-const GRID_COLS = '2fr 1fr 2fr minmax(80px, 1fr) 1.5fr 1fr';
+const GRID_COLS = '2fr 120px 140px 90px 120px 80px';
 
 const FILTER_TABS = [
   { key: 'everyone', label: 'Everyone' },
@@ -1225,7 +1225,8 @@ export default function Customers({ shop }) {
         {/* Left: existing customer list */}
         <div>
           <div
-            style={{ ...DS.card, padding: 0, overflow: 'hidden' }}
+            style={{ ...DS.card, padding: 0, overflow: 'hidden',
+                     overflowX: 'auto', minWidth: 600 }}
           >
             {/* Table header — desktop only */}
             {!isMobileView && (
@@ -1460,7 +1461,7 @@ export default function Customers({ shop }) {
                     </div>
 
                     {/* Stage */}
-                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', whiteSpace: 'nowrap' }}>
                       <StageBadge customer={p} />
                     </div>
 
@@ -1497,7 +1498,7 @@ export default function Customers({ shop }) {
                     </div>
 
                     {/* Reach — channel icons */}
-                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <ReachIcons customer={p} />
                     </div>
 
@@ -1508,6 +1509,7 @@ export default function Customers({ shop }) {
                         alignItems: 'center',
                         fontSize: 12,
                         color: '#6b7280',
+                        whiteSpace: 'nowrap',
                       }}
                     >
                       {lastMsg ? (
@@ -1525,6 +1527,8 @@ export default function Customers({ shop }) {
                         fontSize: 13,
                         fontWeight: 600,
                         color: '#111827',
+                        textAlign: 'right',
+                        justifyContent: 'flex-end',
                       }}
                     >
                       {p.orders?.ltv > 0 ? (
