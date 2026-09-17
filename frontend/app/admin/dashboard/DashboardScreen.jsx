@@ -267,7 +267,8 @@ export default function DashboardScreen({ shop }) {
   const [showEditor, setShowEditor] = useState(false);
   const [editorTitle, setEditorTitle] = useState('');
   const [editorBody, setEditorBody] = useState('');
-  const [editorImageUrl, setEditorImageUrl] = useState('');
+  const [editorMobileImageUrl, setEditorMobileImageUrl] = useState('');
+  const [editorDesktopImageUrl, setEditorDesktopImageUrl] = useState('');
   const [editorAction, setEditorAction] = useState(null);
   const [editorDate, setEditorDate] = useState('');
   const [showImageInfo, setShowImageInfo] = useState(false);
@@ -1124,7 +1125,8 @@ export default function DashboardScreen({ shop }) {
                       setSelectedFestival(f);
                       setEditorTitle(f.name + ' Special Offer');
                       setEditorBody(f.message);
-                      setEditorImageUrl('');
+                      setEditorMobileImageUrl('');
+                      setEditorDesktopImageUrl('');
                       setEditorDate(f.date);
                       setEditorAction(null);
                       setShowEditor(true);
@@ -1215,6 +1217,8 @@ export default function DashboardScreen({ shop }) {
           onClick={e => { if (e.target === e.currentTarget) {
             setShowEditor(false);
             setShowImageInfo(false);
+            setEditorMobileImageUrl('');
+            setEditorDesktopImageUrl('');
           } }}
         >
           <div style={{
@@ -1242,6 +1246,8 @@ export default function DashboardScreen({ shop }) {
               <button onClick={() => {
                   setShowEditor(false);
                   setShowImageInfo(false);
+                  setEditorMobileImageUrl('');
+                  setEditorDesktopImageUrl('');
                 }}
                 style={{ background: 'none', border: 'none',
                          fontSize: 20, cursor: 'pointer', color: '#9ca3af' }}>
@@ -1258,15 +1264,16 @@ export default function DashboardScreen({ shop }) {
                 flex: 1, padding: 20, overflowY: 'auto',
                 borderRight: '1px solid #f3f4f6',
               }}>
-                {/* Notification Image — upload button + preview
-                    (replaces the old Image URL text input). See
-                    audits/suggestions-fix-audit.txt. */}
-                <div style={{ marginBottom: 16 }}>
+                {/* Mobile Image + Desktop Image — separate uploads, one
+                    per preview surface. See
+                    audits/separate-images-audit.txt. */}
+                {/* Mobile Image */}
+                <div style={{ marginBottom: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center',
                                 gap: 6, marginBottom: 6 }}>
                     <label style={{ fontSize: 12, fontWeight: 600,
                                     color: '#374151' }}>
-                      Notification Image
+                      📱 Mobile Image
                     </label>
                     <button
                       onClick={() => setShowImageInfo(s => !s)}
@@ -1304,7 +1311,6 @@ export default function DashboardScreen({ shop }) {
                     </div>
                   )}
 
-                  {/* Upload button */}
                   <label style={{
                     display: 'inline-flex', alignItems: 'center', gap: 8,
                     padding: '8px 16px', borderRadius: 8,
@@ -1320,22 +1326,68 @@ export default function DashboardScreen({ shop }) {
                       <polyline points="17 8 12 3 7 8"/>
                       <line x1="12" y1="3" x2="12" y2="15"/>
                     </svg>
-                    {editorImageUrl ? 'Change Image' : 'Upload Image'}
-                    <input
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' }}
+                    {editorMobileImageUrl ? 'Change Mobile Image' : 'Upload Mobile Image'}
+                    <input type="file" accept="image/*" style={{ display: 'none' }}
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (!file) return;
                         const reader = new FileReader();
-                        reader.onload = (ev) => {
-                          setEditorImageUrl(ev.target.result);
-                        };
+                        reader.onload = (ev) => setEditorMobileImageUrl(ev.target.result);
                         reader.readAsDataURL(file);
                       }}
                     />
                   </label>
+                  {editorMobileImageUrl && (
+                    <button onClick={() => setEditorMobileImageUrl('')}
+                      style={{ marginTop: 4, fontSize: 11, color: '#dc2626',
+                               background: 'none', border: 'none',
+                               cursor: 'pointer', padding: 0 }}>
+                      Remove mobile image
+                    </button>
+                  )}
+                </div>
+
+                {/* Desktop Image */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600,
+                                  color: '#374151', display: 'block',
+                                  marginBottom: 6 }}>
+                    🖥️ Desktop Image
+                  </label>
+                  <label style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 8,
+                    padding: '8px 16px', borderRadius: 8,
+                    border: '2px dashed #d1d5db', background: '#f9fafb',
+                    cursor: 'pointer', fontSize: 13, color: '#374151',
+                    fontWeight: 500, width: '100%', boxSizing: 'border-box',
+                    justifyContent: 'center',
+                  }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+                      strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="17 8 12 3 7 8"/>
+                      <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    {editorDesktopImageUrl ? 'Change Desktop Image' : 'Upload Desktop Image'}
+                    <input type="file" accept="image/*" style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = (ev) => setEditorDesktopImageUrl(ev.target.result);
+                        reader.readAsDataURL(file);
+                      }}
+                    />
+                  </label>
+                  {editorDesktopImageUrl && (
+                    <button onClick={() => setEditorDesktopImageUrl('')}
+                      style={{ marginTop: 4, fontSize: 11, color: '#dc2626',
+                               background: 'none', border: 'none',
+                               cursor: 'pointer', padding: 0 }}>
+                      Remove desktop image
+                    </button>
+                  )}
                 </div>
 
                 {/* Title */}
@@ -1400,10 +1452,13 @@ export default function DashboardScreen({ shop }) {
                           shop,
                           title: editorTitle,
                           body: editorBody,
-                          imageUrl: editorImageUrl,
+                          mobileImageUrl: editorMobileImageUrl,
+                          desktopImageUrl: editorDesktopImageUrl,
                         });
                         setShowEditor(false);
                         setShowImageInfo(false);
+                        setEditorMobileImageUrl('');
+                        setEditorDesktopImageUrl('');
                         alert('Notification sent to all subscribers!');
                       } catch(e) {
                         alert('Failed to send');
@@ -1425,7 +1480,8 @@ export default function DashboardScreen({ shop }) {
                           {
                             title: editorTitle,
                             body: editorBody,
-                            imageUrl: editorImageUrl,
+                            mobileImageUrl: editorMobileImageUrl,
+                            desktopImageUrl: editorDesktopImageUrl,
                             scheduledAt: editorDate,
                             festival: selectedFestival.name,
                             status: 'approved',
@@ -1433,6 +1489,8 @@ export default function DashboardScreen({ shop }) {
                         );
                         setShowEditor(false);
                         setShowImageInfo(false);
+                        setEditorMobileImageUrl('');
+                        setEditorDesktopImageUrl('');
                         alert('Added to queue as approved!');
                       } catch(e) {
                         alert('Failed to approve');
@@ -1454,7 +1512,8 @@ export default function DashboardScreen({ shop }) {
                           {
                             title: editorTitle,
                             body: editorBody,
-                            imageUrl: editorImageUrl,
+                            mobileImageUrl: editorMobileImageUrl,
+                            desktopImageUrl: editorDesktopImageUrl,
                             scheduledAt: editorDate,
                             festival: selectedFestival.name,
                             status: 'draft',
@@ -1462,6 +1521,8 @@ export default function DashboardScreen({ shop }) {
                         );
                         setShowEditor(false);
                         setShowImageInfo(false);
+                        setEditorMobileImageUrl('');
+                        setEditorDesktopImageUrl('');
                       } catch(e) {
                         alert('Failed to save');
                       }
@@ -1503,12 +1564,18 @@ export default function DashboardScreen({ shop }) {
                       background: '#fff', borderRadius: 10, overflow: 'hidden',
                       boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
                     }}>
-                      {editorImageUrl && (
-                        <img src={editorImageUrl} alt=""
+                      {editorMobileImageUrl ? (
+                        <img src={editorMobileImageUrl} alt=""
                           style={{ width: '100%', height: 70,
                                    objectFit: 'cover', display: 'block' }}
                           onError={e => e.target.style.display = 'none'}
                         />
+                      ) : (
+                        <div style={{ width: '100%', height: 70, background: '#eef2ff',
+                                      display: 'flex', alignItems: 'center',
+                                      justifyContent: 'center', fontSize: 24 }}>
+                          🔔
+                        </div>
                       )}
                       <div style={{ padding: '8px 10px' }}>
                         <div style={{ display: 'flex', alignItems: 'center',
@@ -1556,8 +1623,8 @@ export default function DashboardScreen({ shop }) {
                       display: 'flex', gap: 0,
                     }}>
                       {/* Image on left for desktop */}
-                      {editorImageUrl ? (
-                        <img src={editorImageUrl} alt=""
+                      {editorDesktopImageUrl ? (
+                        <img src={editorDesktopImageUrl} alt=""
                           style={{ width: 60, height: 60,
                                    objectFit: 'cover', flexShrink: 0 }}
                           onError={e => e.target.style.display = 'none'}

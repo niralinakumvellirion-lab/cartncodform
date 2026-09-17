@@ -5,6 +5,8 @@ const festivalQueueSchema = new mongoose.Schema({
   title: { type: String, required: true },
   body: { type: String, default: '' },
   imageUrl: { type: String, default: '' },
+  mobileImageUrl: { type: String, default: '' },
+  desktopImageUrl: { type: String, default: '' },
   scheduledAt: { type: Date, required: true },
   festival: { type: String, default: '' },
   status: {
