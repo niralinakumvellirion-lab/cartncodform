@@ -136,7 +136,7 @@ function getRelativeTime(date) {
   return `${days} days ago`;
 }
 
-const GRID_COLS = '2fr 1fr 2fr 1fr 1.5fr 1fr';
+const GRID_COLS = '2fr 1fr 2fr minmax(80px, 1fr) 1.5fr 1fr';
 
 const FILTER_TABS = [
   { key: 'everyone', label: 'Everyone' },
@@ -424,10 +424,15 @@ const EMAIL_SUGGESTIONS = [
 // Product thumbnail shown next to product-specific suggestion cards,
 // shared by NotificationComposer and EmailComposer, and next to each row
 // in the "Most interested in" list.
-function ProductThumbnail({ imageUrl, title }) {
+// size/radius are optional (default 40/8, the original fixed values)
+// so every existing caller (the suggestion-card thumbnails in
+// NotificationComposer/EmailComposer) keeps its exact prior size —
+// only the "Most interested in" panel row below passes a smaller
+// 36/6 explicitly, per FIX 3. See audits/customer-panel-fix-audit.txt.
+function ProductThumbnail({ imageUrl, title, size = 40, radius = 8 }) {
   if (imageUrl) {
     return (
-      <div style={{ width: 40, height: 40, borderRadius: 8,
+      <div style={{ width: size, height: size, borderRadius: radius,
                     overflow: 'hidden', flexShrink: 0,
                     border: '1px solid #e5e7eb' }}>
         <img src={imageUrl} alt={title || 'Product'}
@@ -437,7 +442,7 @@ function ProductThumbnail({ imageUrl, title }) {
     );
   }
   return (
-    <div style={{ width: 40, height: 40, borderRadius: 8,
+    <div style={{ width: size, height: size, borderRadius: radius,
                   background: '#f3f4f6', border: '1px solid #e5e7eb',
                   display: 'flex', alignItems: 'center',
                   justifyContent: 'center', flexShrink: 0 }}>
@@ -1095,20 +1100,22 @@ export default function Customers({ shop }) {
   const [sendResult, setSendResult] = useState('');
   const [notifTab, setNotifTab] = useState('push');
 
-  // Default to whichever channel is actually available whenever the
-  // selected customer changes — otherwise picking an email-only customer
-  // while notifTab is still 'push' from a previous selection would render
-  // an empty panel (neither composer's condition would be met). Same
-  // effect as Journey.jsx's own version.
+  // Default the active tab to 'push' when the newly-selected customer has
+  // push, else 'email' — reset every time selectedCustomer itself changes
+  // (a fresh row click / journey load), but not on every render, so
+  // manually switching tabs for the SAME customer isn't fought (FIX 1;
+  // see audits/customer-panel-fix-audit.txt). Uses `notifTab`/
+  // `setNotifTab` (the file's existing state) rather than a separately
+  // named `activeTab`/`setActiveTab` as the task text's own snippet did,
+  // since notifTab is already the single source of truth wired into the
+  // tab buttons and composer rendering below — introducing a second,
+  // differently-named state for the same purpose would just create two
+  // states that could disagree.
   useEffect(() => {
-    if (!selectedCustomer) return;
-    const hasPush = !!selectedCustomer.profile?.channels?.push?.subscribed;
-    const hasEmail = !!(
-      selectedCustomer.profile?.channels?.email?.address ||
-      selectedCustomer.profile?.identifiers?.emails?.[0]
-    );
-    if (notifTab === 'push' && !hasPush && hasEmail) setNotifTab('email');
-    else if (notifTab === 'email' && !hasEmail && hasPush) setNotifTab('push');
+    if (selectedCustomer) {
+      const hasPush = selectedCustomer?.profile?.channels?.push?.subscribed;
+      setNotifTab(hasPush ? 'push' : 'email');
+    }
   }, [selectedCustomer]);
 
   return (
@@ -1463,16 +1470,22 @@ export default function Customers({ shop }) {
                         display: 'flex',
                         flexDirection: 'column',
                         justifyContent: 'center',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
                       }}
                     >
                       {interestRaw ? (
                         <>
-                          <div style={{ fontSize: 12, color: '#374151' }}>
+                          <div style={{ fontSize: 12, color: '#374151',
+                                        overflow: 'hidden', textOverflow: 'ellipsis',
+                                        whiteSpace: 'nowrap' }}>
                             {interestDisplay}
                           </div>
                           {sig && (
                             <div
-                              style={{ fontSize: '12px', color: '#6366f1', marginTop: '2px' }}
+                              style={{ fontSize: '12px', color: '#6366f1', marginTop: '2px',
+                                       overflow: 'hidden', textOverflow: 'ellipsis',
+                                       whiteSpace: 'nowrap' }}
                             >
                               {SIGNAL_LABELS[sig.type] || sig.type}
                             </div>
@@ -1549,36 +1562,55 @@ export default function Customers({ shop }) {
             flexDirection: 'column',
             gap: 12,
           }}>
-            <button
-              onClick={() => setSelectedCustomer(null)}
-              style={{ position: 'absolute', top: 8, right: 8,
-                       background: 'none', border: 'none',
-                       fontSize: 18, cursor: 'pointer', color: '#9ca3af' }}>
-              ✕
-            </button>
-
             {journeyLoading && !selectedCustomer ? (
               <div style={{ ...DS.card, marginBottom: 0, textAlign: 'center',
-                            padding: '32px 16px', color: '#9ca3af', fontSize: 13 }}>
+                            padding: '32px 16px', color: '#9ca3af', fontSize: 13,
+                            position: 'relative' }}>
+                <button
+                  onClick={() => setSelectedCustomer(null)}
+                  style={{ position: 'absolute', top: 8, right: 8,
+                           background: 'none', border: 'none',
+                           fontSize: 18, cursor: 'pointer', color: '#9ca3af' }}>
+                  ✕
+                </button>
                 Loading journey…
               </div>
             ) : selectedCustomer && (
               <>
+                {/* Right panel header — see FIX 2,
+                    audits/customer-panel-fix-audit.txt. Replaces the old
+                    bare floating close button; the "Customer journey"
+                    title that used to live inside the timeline card below
+                    was moved up here as the subtitle instead of being
+                    shown twice. */}
+                <div style={{ display: 'flex', justifyContent: 'space-between',
+                              alignItems: 'center', marginBottom: 12,
+                              paddingBottom: 12, borderBottom: '1px solid #f3f4f6' }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>
+                      {selectedCustomer?.profile?.identifiers?.emails?.[0]
+                        || 'Anonymous customer'}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+                      Customer journey
+                    </div>
+                  </div>
+                  <button onClick={() => setSelectedCustomer(null)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer',
+                             color: '#9ca3af', fontSize: 16, padding: 4 }}>✕</button>
+                </div>
+
                 {/* Journey timeline */}
                 <div style={{
                   ...DS.card, padding: '16px', marginBottom: 0,
                   flex: '1 1 0', minHeight: 0, overflowY: 'auto',
                 }}>
-                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>
-                    Customer journey
-                  </div>
-
                   {/* Top products */}
                   {selectedCustomer.topProducts?.length > 0 && (
                     <div style={{ marginBottom: '12px' }}>
                       <div style={{
-                        fontSize: '11px', color: '#9ca3af', fontWeight: '600',
-                        textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px',
+                        fontSize: 10, color: '#9ca3af', fontWeight: '600',
+                        textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '6px',
                       }}>
                         Most interested in
                       </div>
@@ -1587,9 +1619,9 @@ export default function Customers({ shop }) {
                                       gap: 10, padding: '8px 0',
                                       borderBottom: i < selectedCustomer.topProducts.length - 1
                                         ? '1px solid #f3f4f6' : 'none' }}>
-                          <ProductThumbnail imageUrl={p.imageUrl} title={p.title} />
+                          <ProductThumbnail imageUrl={p.imageUrl} title={p.title} size={36} radius={6} />
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#111827',
+                            <div style={{ fontSize: 12, fontWeight: 600, color: '#111827',
                                           overflow: 'hidden', textOverflow: 'ellipsis',
                                           whiteSpace: 'nowrap' }}>{p.title}</div>
                             <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
@@ -1682,42 +1714,58 @@ export default function Customers({ shop }) {
                       ...DS.card, padding: '16px', marginBottom: 0,
                       flex: '0 0 auto', overflowY: 'auto', maxHeight: '45vh',
                     }}>
-                      <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginBottom: 10 }}>
                         Send notification
                       </div>
 
-                      {/* Push / Email tab switcher */}
+                      {/* Push / Email tab switcher — hides an unavailable
+                          channel entirely instead of showing a disabled
+                          "Not available" tab (FIX 1). NOTE: the
+                          "!hasPush && !hasEmail" branch below is
+                          currently unreachable in practice — the outer
+                          `if (!hasPush && !hasEmail) return (...)` guard
+                          just above this whole block already short-
+                          circuits with its own "No push subscription or
+                          email on file" message before this switcher is
+                          ever reached in that case. Implemented anyway,
+                          verbatim, per the explicit instruction — see
+                          audits/customer-panel-fix-audit.txt. */}
                       <div style={{
-                        display: 'flex', gap: '4px', marginBottom: '12px',
-                        background: '#f3f4f6', borderRadius: '10px', padding: '4px',
+                        display: 'flex', gap: 8, marginBottom: 12,
                       }}>
-                        {[
-                          { key: 'push', label: '🔔 Push', available: hasPush },
-                          { key: 'email', label: '✉️ Email', available: hasEmail },
-                        ].map((tab) => (
+                        {hasPush && (
                           <button
-                            key={tab.key}
-                            onClick={() => tab.available && setNotifTab(tab.key)}
+                            onClick={() => setNotifTab('push')}
                             style={{
-                              flex: 1, padding: '8px', fontSize: '13px',
-                              fontWeight: notifTab === tab.key ? '600' : '400',
-                              color: !tab.available ? '#d1d5db' :
-                                notifTab === tab.key ? '#111827' : '#6b7280',
-                              background: notifTab === tab.key ? '#fff' : 'transparent',
-                              border: 'none', borderRadius: '8px',
-                              cursor: tab.available ? 'pointer' : 'not-allowed',
-                              boxShadow: notifTab === tab.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-                              transition: 'all 0.15s',
+                              borderRadius: 7, padding: '7px 16px',
+                              fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                              border: 'none',
+                              background: notifTab === 'push' ? '#4f46e5' : '#f3f4f6',
+                              color: notifTab === 'push' ? '#fff' : '#6b7280',
                             }}
                           >
-                            {tab.label}
-                            {!tab.available && (
-                              <span style={{ fontSize: '10px', color: '#d1d5db', display: 'block' }}>
-                                Not available
-                              </span>
-                            )}
+                            🔔 Push
                           </button>
-                        ))}
+                        )}
+                        {hasEmail && (
+                          <button
+                            onClick={() => setNotifTab('email')}
+                            style={{
+                              borderRadius: 7, padding: '7px 16px',
+                              fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                              border: 'none',
+                              background: notifTab === 'email' ? '#4f46e5' : '#f3f4f6',
+                              color: notifTab === 'email' ? '#fff' : '#6b7280',
+                            }}
+                          >
+                            ✉️ Email
+                          </button>
+                        )}
+                        {!hasPush && !hasEmail && (
+                          <div style={{ fontSize: 13, color: '#9ca3af', padding: 16 }}>
+                            No contact channels available
+                          </div>
+                        )}
                       </div>
 
                       {notifTab === 'push' && hasPush && (
