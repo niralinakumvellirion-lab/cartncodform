@@ -966,7 +966,7 @@ export default function Customers({ shop }) {
   const [signalMap, setSignalMap] = useState({});
   const [signalCountMap, setSignalCountMap] = useState({});
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('everyone');
   const [search, setSearch] = useState('');
@@ -1004,6 +1004,7 @@ export default function Customers({ shop }) {
 
         setProfiles(Array.isArray(profRes?.profiles) ? profRes.profiles : []);
         setTotal(Number.isFinite(profRes?.total) ? profRes.total : 0);
+        setError(null);
 
         // strongest signal per profile + a per-profile signal count
         const map = {};
