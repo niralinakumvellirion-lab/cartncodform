@@ -129,8 +129,8 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
   async (req, res) => {
   try {
     const shop = req.shopDomain;
-    const { title, body, imageUrl, scheduledAt,
-            festival, status } = req.body;
+    const { title, body, imageUrl, scheduledAt, festival,
+            status, mobileImageUrl, desktopImageUrl } = req.body;
 
     if (!title || !scheduledAt) {
       return res.status(400).json({
@@ -144,6 +144,8 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
       title,
       body: body || '',
       imageUrl: imageUrl || '',
+      mobileImageUrl: mobileImageUrl || '',
+      desktopImageUrl: desktopImageUrl || '',
       scheduledAt: new Date(scheduledAt),
       festival: festival || '',
       status: status || 'draft',

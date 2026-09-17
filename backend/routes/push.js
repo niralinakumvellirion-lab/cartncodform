@@ -520,10 +520,20 @@ router.post('/send-journey-email', requireAuth, async (req, res) => {
 
 /**
  * POST /api/push/send-store
- * Body: { title, body }
+ * Body: { title, body, mobileImageUrl, desktopImageUrl }
  * Sends a push notification to every storefront customer subscribed for
  * the shop. Powers the Dashboard's festival Suggestions section
- * (see audits/suggestions-section-audit.txt).
+ * (see audits/suggestions-section-audit.txt and
+ * audits/festival-image-backend-audit.txt).
+ *
+ * sendPushToCustomers() takes a single positional imageUrl argument —
+ * FCM push notifications carry one image, rendered by whatever device
+ * the token belongs to, so there is no per-device image slot to fill
+ * separately at send time (unlike the editor's two live previews,
+ * which are just a visual mock of how each device *would* render it).
+ * mobileImageUrl is preferred when both are set, falling back to
+ * desktopImageUrl, per the task's given `mobileImageUrl ||
+ * desktopImageUrl || ''` formula.
  *
  * Shop is taken from req.shopDomain (the verified session token), never
  * from a client-supplied field — same IDOR pattern as every other route
@@ -549,14 +559,15 @@ router.post('/send-journey-email', requireAuth, async (req, res) => {
  */
 router.post('/send-store', requireAuth, async (req, res) => {
   try {
-    const { title, body } = req.body;
+    const { title, body, mobileImageUrl, desktopImageUrl } = req.body;
     const shop = req.shopDomain;
 
     if (!title || !body) {
       return res.status(400).json({ error: 'title and body required' });
     }
 
-    const result = await sendPushToCustomers(shop, title, body, '/', null, false, null, false);
+    const imageUrl = mobileImageUrl || desktopImageUrl || '';
+    const result = await sendPushToCustomers(shop, title, body, '/', imageUrl, false, null, false);
 
     if (!result.success) {
       return res.status(500).json({ success: false, error: result.error });
