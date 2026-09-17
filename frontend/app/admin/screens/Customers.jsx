@@ -136,49 +136,6 @@ function getRelativeTime(date) {
   return `${days} days ago`;
 }
 
-// Stage badge — shared by the desktop table and the mobile cards.
-function getStageLabel(p) {
-  if (p.orders?.count >= 2) return 'Repeat buyer';
-  if (p.orders?.count === 1) return 'Bought once';
-  if (p.identifiers?.cartTokens?.length > 0 && p.orders?.count === 0)
-    return 'Has a cart';
-  const labels = {
-    customer: 'Bought once',
-    identified: 'Has a cart',
-    anonymous: 'Visitor',
-    lapsed: 'Going quiet',
-  };
-  return labels[p.stage] || p.stage;
-}
-
-function getStageBg(p) {
-  if (p.orders?.count >= 2) return '#dbeafe';
-  if (p.orders?.count === 1) return '#dcfce7';
-  if (p.identifiers?.cartTokens?.length > 0 && p.orders?.count === 0)
-    return '#fef9c3';
-  const bgs = {
-    customer: '#dcfce7',
-    identified: '#fef9c3',
-    anonymous: '#f3f4f6',
-    lapsed: '#fee2e2',
-  };
-  return bgs[p.stage] || '#f3f4f6';
-}
-
-function getStageColor(p) {
-  if (p.orders?.count >= 2) return '#1d4ed8';
-  if (p.orders?.count === 1) return '#16a34a';
-  if (p.identifiers?.cartTokens?.length > 0 && p.orders?.count === 0)
-    return '#ca8a04';
-  const colors = {
-    customer: '#16a34a',
-    identified: '#ca8a04',
-    anonymous: '#6b7280',
-    lapsed: '#dc2626',
-  };
-  return colors[p.stage] || '#6b7280';
-}
-
 const GRID_COLS = '2fr 1fr 2fr 1fr 1.5fr 1fr';
 
 const FILTER_TABS = [
@@ -906,6 +863,104 @@ function EmailComposer({ customer, shop, onSent, onError }) {
   );
 }
 
+// --- Stage badge + reach icons, redesigned (see
+// audits/customers-ui-redesign-audit.txt). Replaces the old
+// getStageLabel/getStageBg/getStageColor helpers and the 3 emoji
+// spans, used by both the desktop and mobile row renders below.
+//
+// NOTE ON TWO REAL BUGS FOUND IN THE GIVEN StageBadge CODE, FIXED HERE:
+//  1. `const orders = customer.orders || 0` then `orders > 1` /
+//     `orders === 1` — but a profile's `orders` field is an OBJECT
+//     ({ count, ltv }), never a plain number (confirmed throughout
+//     this file's own pre-existing code: p.orders?.count,
+//     p.orders?.ltv). `orders > 1` on an object coerces via
+//     Object.prototype.toString -> "[object Object]" -> NaN, so that
+//     comparison (and orders === 1) would ALWAYS be false — "Repeat
+//     buyer" and "Bought once" would never render for ANY customer,
+//     no matter how many orders they have. Fixed to read
+//     customer.orders?.count.
+//  2. `customer.stage === 'lapsing'` — this file's own STAGE_CONFIG
+//     (still defined above, now otherwise unused) and every other
+//     stage check in this codebase use the PROFILE STAGE value
+//     'lapsed', not 'lapsing' ('lapsing' is a SIGNAL TYPE elsewhere
+//     in this app — a different enum). 'lapsing' would never match a
+//     real profile.stage value, so the "Going quiet" branch would
+//     never fire; every non-buying, no-cart profile would show
+//     "Visitor" even if actually lapsed. Fixed to check 'lapsed'.
+function StageBadge({ customer }) {
+  const orders = customer.orders?.count || 0;
+  const hasCart = customer.identifiers?.cartTokens?.length > 0;
+
+  let label, color, bg;
+  if (orders > 1) {
+    label = 'Repeat buyer'; color = '#16a34a'; bg = '#dcfce7';
+  } else if (orders === 1) {
+    label = 'Bought once'; color = '#2563eb'; bg = '#dbeafe';
+  } else if (hasCart) {
+    label = 'Has cart'; color = '#d97706'; bg = '#fef3c7';
+  } else {
+    label = customer.stage === 'lapsed' ? 'Going quiet' : 'Visitor';
+    color = '#6b7280'; bg = '#f3f4f6';
+  }
+
+  return (
+    <span style={{
+      display: 'inline-block',
+      padding: '2px 8px',
+      borderRadius: 20,
+      fontSize: 11,
+      fontWeight: 600,
+      color,
+      background: bg,
+      whiteSpace: 'nowrap',
+    }}>
+      {label}
+    </span>
+  );
+}
+
+function ReachIcons({ customer }) {
+  const hasPush = customer.channels?.push?.subscribed;
+  const hasEmail = !!customer.channels?.email?.address;
+  const hasPhone = customer.identifiers?.phones?.length > 0;
+
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      {/* Push bell */}
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+        stroke={hasPush ? '#4f46e5' : '#d1d5db'} strokeWidth="2"
+        strokeLinecap="round" strokeLinejoin="round"
+        title="Push subscriber">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+        <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      </svg>
+      {/* Email */}
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+        stroke={hasEmail ? '#4f46e5' : '#d1d5db'} strokeWidth="2"
+        strokeLinecap="round" strokeLinejoin="round"
+        title="Email subscriber">
+        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2
+          2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+        <polyline points="22,6 12,13 2,6"/>
+      </svg>
+      {/* Phone */}
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+        stroke={hasPhone ? '#4f46e5' : '#d1d5db'} strokeWidth="2"
+        strokeLinecap="round" strokeLinejoin="round"
+        title="Phone">
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0
+          0 1-8.63-3.07A19.5 19.5 0 0 1 4.69
+          12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1
+          3.6 1.18h3a2 2 0 0 1 2 1.72c.127.96.361
+          1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91
+          8.77a16 16 0 0 0 6.29 6.29l.91-.91a2 2 0
+          0 1 2.11-.45c.907.339 1.85.573 2.81.7A2
+          2 0 0 1 22 16.92z"/>
+      </svg>
+    </div>
+  );
+}
+
 export default function Customers({ shop }) {
   const [profiles, setProfiles] = useState([]);
   const [signalMap, setSignalMap] = useState({});
@@ -1170,8 +1225,8 @@ export default function Customers({ shop }) {
                 style={{
                   display: 'grid',
                   gridTemplateColumns: GRID_COLS,
-                  padding: '10px 16px',
-                  borderBottom: '1px solid #f3f4f6',
+                  padding: '8px 16px',
+                  borderBottom: '1px solid #e5e7eb',
                   background: '#f9fafb',
                 }}
               >
@@ -1180,11 +1235,11 @@ export default function Customers({ shop }) {
                     <div
                       key={h}
                       style={{
-                        fontSize: '11px',
-                        fontWeight: '600',
+                        fontSize: 10,
+                        fontWeight: 700,
                         color: '#9ca3af',
                         textTransform: 'uppercase',
-                        letterSpacing: '0.5px',
+                        letterSpacing: '0.06em',
                       }}
                     >
                       {h}
@@ -1225,27 +1280,6 @@ export default function Customers({ shop }) {
                   ? p.messages[p.messages.length - 1]
                   : null;
                 const isSel = selectedCustomer?.profile?._id === p._id;
-
-                // Determine stage label + colors
-                let stageLabel = STAGE_CONFIG[p.stage]?.label || p.stage;
-                let stageBg = STAGE_CONFIG[p.stage]?.bg || '#f3f4f6';
-                let stageColor = STAGE_CONFIG[p.stage]?.color || '#6b7280';
-                if (p.orders?.count >= 2) {
-                  stageLabel = 'Repeat buyer';
-                  stageBg = '#dbeafe';
-                  stageColor = '#1d4ed8';
-                } else if (p.orders?.count === 1) {
-                  stageLabel = 'Bought once';
-                  stageBg = '#dcfce7';
-                  stageColor = '#16a34a';
-                } else if (
-                  p.identifiers?.cartTokens?.length > 0 &&
-                  p.orders?.count === 0
-                ) {
-                  stageLabel = 'Has a cart';
-                  stageBg = '#fef9c3';
-                  stageColor = '#ca8a04';
-                }
 
                 const name =
                   p.identifiers?.emails?.[0] || p.identifiers?.phones?.[0] || null;
@@ -1300,20 +1334,9 @@ export default function Customers({ shop }) {
                             p.identifiers?.phones?.[0] ||
                             `Anonymous #${p._id?.toString().slice(-5)}`}
                         </div>
-                        <span
-                          style={{
-                            padding: '3px 10px',
-                            borderRadius: '20px',
-                            fontSize: '11px',
-                            fontWeight: '500',
-                            background: getStageBg(p),
-                            color: getStageColor(p),
-                            flexShrink: 0,
-                            marginLeft: '8px',
-                          }}
-                        >
-                          {getStageLabel(p)}
-                        </span>
+                        <div style={{ flexShrink: 0, marginLeft: '8px' }}>
+                          <StageBadge customer={p} />
+                        </div>
                       </div>
 
                       {/* Row 2: Last seen + Signal */}
@@ -1351,32 +1374,7 @@ export default function Customers({ shop }) {
                           alignItems: 'center',
                         }}
                       >
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <span
-                            style={{
-                              fontSize: '14px',
-                              opacity: p.channels?.push?.subscribed ? 1 : 0.2,
-                            }}
-                          >
-                            🔔
-                          </span>
-                          <span
-                            style={{
-                              fontSize: '14px',
-                              opacity: p.channels?.email?.address ? 1 : 0.2,
-                            }}
-                          >
-                            ✉️
-                          </span>
-                          <span
-                            style={{
-                              fontSize: '14px',
-                              opacity: p.identifiers?.phones?.length > 0 ? 1 : 0.2,
-                            }}
-                          >
-                            📱
-                          </span>
-                        </div>
+                        <ReachIcons customer={p} />
                         {p.orders?.ltv > 0 && (
                           <div
                             style={{
@@ -1393,6 +1391,24 @@ export default function Customers({ shop }) {
                   );
                 }
 
+                // "Most interested in" truncated to 20 chars, per the
+                // redesign spec. NOTE: the task described this as a
+                // "product title", but no per-product data is fetched
+                // for the list view (topProducts only exists once a
+                // customer's Journey panel is loaded, per-row, on
+                // click) — the only "most interested in" data actually
+                // available for every row up front is the existing
+                // topInterest name (from p.interests), so that's what
+                // gets truncated here. See
+                // audits/customers-ui-redesign-audit.txt.
+                const interestRaw = topInterest?.[0] || null;
+                const interestDisplay = interestRaw
+                  ? (interestRaw.length > 20 ? interestRaw.slice(0, 20) + '…' : interestRaw)
+                  : '—';
+
+                const avatarSource = p.identifiers?.emails?.[0];
+                const avatarInitial = (avatarSource || '?').charAt(0).toUpperCase();
+
                 return (
                   <div
                     key={p._id}
@@ -1402,7 +1418,7 @@ export default function Customers({ shop }) {
                       gridTemplateColumns: GRID_COLS,
                       padding: '12px 16px',
                       borderBottom:
-                        i < profiles.length - 1 ? '1px solid #f9fafb' : 'none',
+                        i < profiles.length - 1 ? '1px solid #f3f4f6' : 'none',
                       cursor: 'pointer',
                       background: isSel ? '#f5f3ff' : 'transparent',
                       transition: 'background 0.1s',
@@ -1415,35 +1431,29 @@ export default function Customers({ shop }) {
                     }}
                   >
                     {/* Customer */}
-                    <div>
-                      <div
-                        style={{ fontSize: '14px', fontWeight: '500', color: '#111827' }}
-                      >
-                        {displayName}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 32, height: 32, borderRadius: '50%',
+                                    background: '#eef2ff', color: '#4f46e5',
+                                    display: 'flex', alignItems: 'center',
+                                    justifyContent: 'center', fontSize: 13,
+                                    fontWeight: 700, flexShrink: 0 }}>
+                        {avatarInitial}
                       </div>
-                      {lastSeen && (
-                        <div
-                          style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}
-                        >
-                          seen {lastSeen}
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+                          {displayName}
                         </div>
-                      )}
+                        {lastSeen && (
+                          <div style={{ fontSize: 11, color: '#9ca3af' }}>
+                            seen {lastSeen}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     {/* Stage */}
                     <div style={{ display: 'flex', alignItems: 'center' }}>
-                      <span
-                        style={{
-                          padding: '3px 10px',
-                          borderRadius: '20px',
-                          fontSize: '12px',
-                          fontWeight: '500',
-                          background: stageBg,
-                          color: stageColor,
-                        }}
-                      >
-                        {stageLabel}
-                      </span>
+                      <StageBadge customer={p} />
                     </div>
 
                     {/* Most interested in */}
@@ -1454,48 +1464,27 @@ export default function Customers({ shop }) {
                         justifyContent: 'center',
                       }}
                     >
-                      {sig ? (
+                      {interestRaw ? (
                         <>
-                          <div style={{ fontSize: '13px', color: '#374151' }}>
-                            {topInterest?.[0] || '—'}
+                          <div style={{ fontSize: 12, color: '#374151' }}>
+                            {interestDisplay}
                           </div>
-                          <div
-                            style={{ fontSize: '12px', color: '#6366f1', marginTop: '2px' }}
-                          >
-                            {SIGNAL_LABELS[sig.type] || sig.type}
-                          </div>
+                          {sig && (
+                            <div
+                              style={{ fontSize: '12px', color: '#6366f1', marginTop: '2px' }}
+                            >
+                              {SIGNAL_LABELS[sig.type] || sig.type}
+                            </div>
+                          )}
                         </>
                       ) : (
-                        <span style={{ color: '#d1d5db' }}>—</span>
+                        <span style={{ fontSize: 12, color: '#d1d5db' }}>—</span>
                       )}
                     </div>
 
                     {/* Reach — channel icons */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span
-                        style={{
-                          opacity: p.channels?.push?.subscribed ? 1 : 0.2,
-                          fontSize: '16px',
-                        }}
-                      >
-                        🔔
-                      </span>
-                      <span
-                        style={{
-                          opacity: p.channels?.email?.address ? 1 : 0.2,
-                          fontSize: '16px',
-                        }}
-                      >
-                        ✉️
-                      </span>
-                      <span
-                        style={{
-                          opacity: p.identifiers?.phones?.length > 0 ? 1 : 0.2,
-                          fontSize: '16px',
-                        }}
-                      >
-                        📱
-                      </span>
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <ReachIcons customer={p} />
                     </div>
 
                     {/* Last messaged */}
@@ -1503,8 +1492,8 @@ export default function Customers({ shop }) {
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        fontSize: '13px',
-                        color: '#374151',
+                        fontSize: 12,
+                        color: '#6b7280',
                       }}
                     >
                       {lastMsg ? (
@@ -1519,8 +1508,8 @@ export default function Customers({ shop }) {
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        fontSize: '13px',
-                        fontWeight: '500',
+                        fontSize: 13,
+                        fontWeight: 600,
                         color: '#111827',
                       }}
                     >
