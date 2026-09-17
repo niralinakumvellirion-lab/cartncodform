@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
+import { ShimmerCard } from '../components/Shimmer';
 
 // Design system tokens for this screen (see audits/automation-redesign-audit.txt)
 function ToggleSwitch({ checked, onChange }) {
@@ -241,8 +242,11 @@ export default function AutomationScreen({ shop }) {
 
   if (loading || !config) {
     return (
-      <div style={{ padding: '0 24px 24px', maxWidth: '900px', margin: '0 auto' }}>
-        <div style={{ fontSize: '13px', color: '#9ca3af', paddingTop: '24px' }}>Loading…</div>
+      <div style={{ padding: '0 24px 24px', maxWidth: '900px', margin: '0 auto', paddingTop: 24 }}>
+        <ShimmerCard rows={2} />
+        <ShimmerCard rows={4} />
+        <ShimmerCard rows={3} />
+        <ShimmerCard rows={5} />
       </div>
     );
   }
@@ -255,7 +259,10 @@ export default function AutomationScreen({ shop }) {
           audits/automation-ui-fix-audit.txt). Replaces the old separate
           "Header" block and "SECTION 1 — Master switch" status card. */}
       <div style={{ display: 'flex', justifyContent: 'space-between',
-                    alignItems: 'center', marginBottom: 24 }}>
+                    alignItems: 'center', marginBottom: 24,
+                    opacity: saving ? 0.6 : 1,
+                    pointerEvents: saving ? 'none' : 'auto',
+                    transition: 'opacity 0.15s' }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 800, color: '#111827',
                        margin: 0 }}>Automation</h1>
@@ -288,7 +295,9 @@ export default function AutomationScreen({ shop }) {
           Save settings click. */}
 
       {/* SECTION 3 — Signal delays */}
-      <div style={cardStyle}>
+      <div style={{ ...cardStyle, opacity: saving ? 0.6 : 1,
+                    pointerEvents: saving ? 'none' : 'auto',
+                    transition: 'opacity 0.15s' }}>
         <div style={{ borderLeft: '3px solid #f59e0b', paddingLeft: 12,
                       marginBottom: 14 }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
@@ -319,7 +328,9 @@ export default function AutomationScreen({ shop }) {
       </div>
 
       {/* SECTION 4 — Real-time triggers */}
-      <div style={cardStyle}>
+      <div style={{ ...cardStyle, opacity: saving ? 0.6 : 1,
+                    pointerEvents: saving ? 'none' : 'auto',
+                    transition: 'opacity 0.15s' }}>
         <div style={{ display: 'flex', alignItems: 'center',
                       gap: 10, marginBottom: 20 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10,
@@ -368,7 +379,9 @@ export default function AutomationScreen({ shop }) {
       </div>
 
       {/* SECTION 5 — Signal controls */}
-      <div style={cardStyle}>
+      <div style={{ ...cardStyle, opacity: saving ? 0.6 : 1,
+                    pointerEvents: saving ? 'none' : 'auto',
+                    transition: 'opacity 0.15s' }}>
         <div style={{ display: 'flex', alignItems: 'center',
                       gap: 10, marginBottom: 20 }}>
           <div style={{ width: 36, height: 36, borderRadius: 10,
@@ -426,7 +439,13 @@ export default function AutomationScreen({ shop }) {
         </div>
       </div>
 
-      {/* SECTION 6 — Save bar */}
+      {/* SECTION 6 — Save bar. Subtle loading overlay while saving=true
+          (a light tint scrim, not the ShimmerCard/shimmer-gradient
+          treatment used for the initial config-fetch loading state
+          above) — the save bar's own values are already known and
+          shouldn't be replaced by placeholder shimmer boxes; a scrim
+          communicates "in progress" while satisfying "keep form
+          visible". See audits/shimmer-audit.txt. */}
       <div style={{
         position: 'sticky', bottom: 0,
         background: 'rgba(255,255,255,0.95)',
@@ -438,6 +457,13 @@ export default function AutomationScreen({ shop }) {
         justifyContent: 'space-between',
         gap: 12,
       }}>
+        {saving && (
+          <div style={{
+            position: 'absolute', inset: 0,
+            background: 'rgba(79,70,229,0.05)',
+            pointerEvents: 'none',
+          }} />
+        )}
         <div style={{ fontSize: 12, color: '#9ca3af' }}>
           Changes are saved to your store's automation settings
         </div>

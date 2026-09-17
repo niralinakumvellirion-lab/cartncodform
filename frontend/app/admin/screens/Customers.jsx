@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
+import { ShimmerTable } from '../components/Shimmer';
 
 const DS = {
   page: {
@@ -1263,28 +1264,7 @@ export default function Customers({ shop }) {
 
             {/* Rows */}
             {loading ? (
-              [1, 2, 3, 4, 5].map((i) => (
-                <div
-                  key={i}
-                  style={{
-                    height: '60px',
-                    borderBottom: '1px solid #f3f4f6',
-                    background: '#fff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    padding: '0 16px',
-                  }}
-                >
-                  <div
-                    style={{
-                      width: '60%',
-                      height: '14px',
-                      background: '#f3f4f6',
-                      borderRadius: '4px',
-                    }}
-                  />
-                </div>
-              ))
+              <ShimmerTable rows={8} />
             ) : profiles.length ? (
               profiles.map((p, i) => {
                 // `sig` (this profile's strongest signal, from signalMap)

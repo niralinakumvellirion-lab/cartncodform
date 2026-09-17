@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
+import { ShimmerCard } from '../components/Shimmer';
 
 const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
@@ -636,13 +637,8 @@ export default function QueueScreen({ shop }) {
 
               {/* Rows */}
               {loading ? (
-                [1, 2, 3].map((i) => (
-                  <div key={i} style={{
-                    height: '60px', borderBottom: '1px solid #f3f4f6',
-                    display: 'flex', alignItems: 'center', padding: '0 16px',
-                  }}>
-                    <div style={{ width: '60%', height: '14px', background: '#f3f4f6', borderRadius: '4px' }} />
-                  </div>
+                Array.from({ length: 5 }).map((_, i) => (
+                  <ShimmerCard key={i} />
                 ))
               ) : jobs.length === 0 ? (
                 <div style={{ padding: '40px', textAlign: 'center', color: '#9ca3af', fontSize: '14px' }}>

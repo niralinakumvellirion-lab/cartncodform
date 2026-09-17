@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { apiGet } from '../../../lib/api';
+import { ShimmerRow, ShimmerTable } from '../components/Shimmer';
 
 // Inline SVG icons for the summary tiles — matching Today.jsx's icon set
 // (same paths/viewBox), replacing the emoji previously used here.
@@ -262,53 +263,59 @@ export default function ActivityScreen({ shop }) {
       </div>
 
       {/* 3. SUMMARY TILES */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-          gap: '12px',
-          marginBottom: '20px',
-        }}
-      >
-        {ACTIVITY_TYPES.map(({ key, label, Icon, color }) => {
-          const active = activeType === key;
-          return (
-            <div
-              key={key}
-              onClick={() => setActiveType(active ? null : key)}
-              style={{
-                background: '#fff',
-                border: active ? `2px solid ${color}` : '1px solid #e5e7eb',
-                borderRadius: '12px',
-                padding: '16px 20px',
-                cursor: 'pointer',
-                transition: 'box-shadow 0.15s',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.boxShadow = 'none';
-              }}
-            >
-              <div style={{ marginBottom: '6px' }}><Icon /></div>
+      {loading ? (
+        <div style={{ marginBottom: '20px' }}>
+          <ShimmerRow cols={isMobileView ? 2 : 4} />
+        </div>
+      ) : (
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+            gap: '12px',
+            marginBottom: '20px',
+          }}
+        >
+          {ACTIVITY_TYPES.map(({ key, label, Icon, color }) => {
+            const active = activeType === key;
+            return (
               <div
+                key={key}
+                onClick={() => setActiveType(active ? null : key)}
                 style={{
-                  fontSize: '28px',
-                  fontWeight: '800',
-                  color: '#111827',
-                  lineHeight: 1,
+                  background: '#fff',
+                  border: active ? `2px solid ${color}` : '1px solid #e5e7eb',
+                  borderRadius: '12px',
+                  padding: '16px 20px',
+                  cursor: 'pointer',
+                  transition: 'box-shadow 0.15s',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.08)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.boxShadow = 'none';
                 }}
               >
-                {loading ? '...' : (summary?.[key] ?? 0)}
+                <div style={{ marginBottom: '6px' }}><Icon /></div>
+                <div
+                  style={{
+                    fontSize: '28px',
+                    fontWeight: '800',
+                    color: '#111827',
+                    lineHeight: 1,
+                  }}
+                >
+                  {summary?.[key] ?? 0}
+                </div>
+                <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
+                  {label}
+                </div>
               </div>
-              <div style={{ fontSize: '13px', color: '#6b7280', marginTop: '4px' }}>
-                {label}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* 4. TABLE / CARD LIST */}
       <div
@@ -349,28 +356,7 @@ export default function ActivityScreen({ shop }) {
 
         {/* Rows */}
         {loading ? (
-          [1, 2, 3].map((i) => (
-            <div
-              key={i}
-              style={{
-                height: '60px',
-                borderBottom: '1px solid #f3f4f6',
-                background: '#fff',
-                display: 'flex',
-                alignItems: 'center',
-                padding: '0 16px',
-              }}
-            >
-              <div
-                style={{
-                  width: '60%',
-                  height: '14px',
-                  background: '#f3f4f6',
-                  borderRadius: '4px',
-                }}
-              />
-            </div>
-          ))
+          <ShimmerTable rows={6} />
         ) : users.length ? (
           users.map((u, i) => {
             const badge = BADGE_CONFIG[u.eventType] || {

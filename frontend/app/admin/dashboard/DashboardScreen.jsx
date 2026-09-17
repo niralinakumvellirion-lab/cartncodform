@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
+import { ShimmerRow, ShimmerCard } from '../components/Shimmer';
 
 const DS = {
   page: {
@@ -235,6 +236,11 @@ export default function DashboardScreen({ shop }) {
   const [notifStats, setNotifStats] = useState(null);
   const [notifLoading, setNotifLoading] = useState(true);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Phase: shimmer-on-refresh — distinguishes a manual Refresh click
+  // (isRefreshing true -> shimmer overlay) from the page's first load
+  // (isRefreshing stays false -> the existing '—' fallback still shows).
+  // See audits/shimmer-audit.txt.
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [newSubscribers, setNewSubscribers] = useState([]);
   const [subsLoading, setSubsLoading] = useState(false);
@@ -348,6 +354,20 @@ export default function DashboardScreen({ shop }) {
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
+
+  // Clears isRefreshing once both effects a Refresh click kicks off
+  // (notifLoading via refreshKey, insightsLoading via loadInsights())
+  // have settled back to false. Not given verbatim by the task (its own
+  // sketch was just "// after data loads: setIsRefreshing(false)" inside
+  // the click handler, which can't work directly since refreshKey only
+  // triggers an effect asynchronously and isn't awaitable at the click
+  // site) — watching both loading flags is the accurate way to know
+  // when the refresh has actually finished.
+  useEffect(() => {
+    if (isRefreshing && !notifLoading && !insightsLoading) {
+      setIsRefreshing(false);
+    }
+  }, [isRefreshing, notifLoading, insightsLoading]);
 
   // --- Today.jsx: push-stats / signals / orders ---
   useEffect(() => {
@@ -463,8 +483,12 @@ export default function DashboardScreen({ shop }) {
   const refreshButton = (
     <button
       onClick={() => {
+        setIsRefreshing(true);
+        // existing refresh logic
         setRefreshKey(k => k + 1);
         loadInsights();
+        // after data loads: setIsRefreshing(false) — handled by the
+        // watcher effect above once notifLoading/insightsLoading settle
       }}
       disabled={notifLoading || insightsLoading}
       style={{
@@ -577,119 +601,131 @@ export default function DashboardScreen({ shop }) {
                           marginBottom: 10 }}>
               Store Performance
             </div>
-            <div style={{ display: 'grid',
-                          gridTemplateColumns: isMobileView
-                            ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-                          gap: 12 }}>
-              {[
-                { label: 'PRODUCT VIEWS THIS WEEK',
-                  value: insightsStats?.productViewsThisWeek ?? '—',
-                  sub: '↗ tracking active' },
-                { label: 'ALLOWED NOTIFICATIONS',
-                  value: insightsStats?.allowedNotifications
-                    ? insightsStats.allowedNotifications + '%' : '—',
-                  sub: 'of visitors with the popup' },
-                { label: 'ADD-TO-CART RATE',
-                  value: insightsStats?.addToCartRate
-                    ? insightsStats.addToCartRate + '%' : '—',
-                  sub: 'sessions that added something' },
-                { label: 'SESSIONS TRACKED',
-                  value: insightsStats?.sessionCount ?? '—',
-                  sub: 'unique visitors this week' },
-              ].map(({ label, value, sub }) => (
-                <div key={label} style={{
-                  background: '#fff',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: 12,
-                  padding: '10px 14px',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af',
-                                textTransform: 'uppercase', letterSpacing: '0.06em',
-                                marginBottom: 6 }}>{label}</div>
-                  <div style={{ fontSize: 20, fontWeight: 800,
-                                color: '#111827', lineHeight: 1 }}>{value}</div>
-                  <div style={{ fontSize: 10, color: '#9ca3af',
-                                marginTop: 4 }}>{sub}</div>
-                </div>
-              ))}
-            </div>
+            {isRefreshing ? (
+              <ShimmerRow cols={4} />
+            ) : (
+              <div style={{ display: 'grid',
+                            gridTemplateColumns: isMobileView
+                              ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+                            gap: 12 }}>
+                {[
+                  { label: 'PRODUCT VIEWS THIS WEEK',
+                    value: insightsStats?.productViewsThisWeek ?? '—',
+                    sub: '↗ tracking active' },
+                  { label: 'ALLOWED NOTIFICATIONS',
+                    value: insightsStats?.allowedNotifications
+                      ? insightsStats.allowedNotifications + '%' : '—',
+                    sub: 'of visitors with the popup' },
+                  { label: 'ADD-TO-CART RATE',
+                    value: insightsStats?.addToCartRate
+                      ? insightsStats.addToCartRate + '%' : '—',
+                    sub: 'sessions that added something' },
+                  { label: 'SESSIONS TRACKED',
+                    value: insightsStats?.sessionCount ?? '—',
+                    sub: 'unique visitors this week' },
+                ].map(({ label, value, sub }) => (
+                  <div key={label} style={{
+                    background: '#fff',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 12,
+                    padding: '10px 14px',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                  }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af',
+                                  textTransform: 'uppercase', letterSpacing: '0.06em',
+                                  marginBottom: 6 }}>{label}</div>
+                    <div style={{ fontSize: 20, fontWeight: 800,
+                                  color: '#111827', lineHeight: 1 }}>{value}</div>
+                    <div style={{ fontSize: 10, color: '#9ca3af',
+                                  marginTop: 4 }}>{sub}</div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* SECTION 2 — KPI row (compact, Part A item 2) */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
-              gap: 12,
-              marginBottom: 10,
-            }}
-          >
-            {[...kpiRow1, ...kpiRow2].map((kpi) => (
-              <div
-                key={kpi.label}
-                style={{ ...DS.card, padding: '10px 14px', marginBottom: 0,
-                         borderLeft: '3px solid #4f46e5' }}
-              >
+          {isRefreshing ? (
+            <ShimmerRow cols={3} />
+          ) : (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
+                gap: 12,
+                marginBottom: 10,
+              }}
+            >
+              {[...kpiRow1, ...kpiRow2].map((kpi) => (
                 <div
-                  style={{
-                    fontSize: 11,
-                    color: '#6b7280',
-                    fontWeight: 600,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    marginBottom: 6,
-                  }}
+                  key={kpi.label}
+                  style={{ ...DS.card, padding: '10px 14px', marginBottom: 0,
+                           borderLeft: '3px solid #4f46e5' }}
                 >
-                  {kpi.label}
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: '#6b7280',
+                      fontWeight: 600,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                      marginBottom: 6,
+                    }}
+                  >
+                    {kpi.label}
+                  </div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
+                    {notifLoading ? '—' : (kpi.value ?? 0)}
+                  </div>
                 </div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
-                  {notifLoading ? '—' : (kpi.value ?? 0)}
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
 
           {/* SECTION 3 — Attributed Activity (compact, Part A item 3) */}
           <div style={{ marginBottom: 10 }}>
             <div style={DS.sectionLabel}>Attributed Activity</div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-                gap: 12,
-              }}
-            >
-              {ACTIVITY_STATS.map(({ key, label }) => (
-                <div
-                  key={key}
-                  onClick={() => navigate(`/admin/activity?type=${key}`)}
-                  style={{ ...DS.card, marginBottom: 0, padding: '10px 14px',
-                           cursor: 'pointer', transition: 'box-shadow 0.15s, background 0.15s' }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-                    e.currentTarget.style.background = '#f9fafb';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.boxShadow = DS.card.boxShadow;
-                    e.currentTarget.style.background = '#ffffff';
-                  }}
-                >
+            {isRefreshing ? (
+              <ShimmerRow cols={4} />
+            ) : (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+                  gap: 12,
+                }}
+              >
+                {ACTIVITY_STATS.map(({ key, label }) => (
                   <div
-                    style={{
-                      fontSize: 18,
-                      fontWeight: 700,
-                      color: ACT_COLORS[key] || '#111827',
-                      lineHeight: 1,
-                      marginBottom: 4,
+                    key={key}
+                    onClick={() => navigate(`/admin/activity?type=${key}`)}
+                    style={{ ...DS.card, marginBottom: 0, padding: '10px 14px',
+                             cursor: 'pointer', transition: 'box-shadow 0.15s, background 0.15s' }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                      e.currentTarget.style.background = '#f9fafb';
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.boxShadow = DS.card.boxShadow;
+                      e.currentTarget.style.background = '#ffffff';
                     }}
                   >
-                    {notifLoading ? '—' : (activity?.summary?.[key] ?? 0)}
+                    <div
+                      style={{
+                        fontSize: 18,
+                        fontWeight: 700,
+                        color: ACT_COLORS[key] || '#111827',
+                        lineHeight: 1,
+                        marginBottom: 4,
+                      }}
+                    >
+                      {notifLoading ? '—' : (activity?.summary?.[key] ?? 0)}
+                    </div>
+                    <div style={{ fontSize: 11, color: '#6b7280' }}>{label}</div>
                   </div>
-                  <div style={{ fontSize: 11, color: '#6b7280' }}>{label}</div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* SECTION 4 — two column layout: products+AI insight | planned+yesterday
