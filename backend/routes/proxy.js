@@ -469,4 +469,80 @@ router.post('/cod-order', async (req, res) => {
   }
 });
 
+// Proxy route for storefront push subscription (avoids cross-origin CORS block)
+router.post('/subscribe-customer', async (req, res) => {
+  try {
+    // Validate Shopify App Proxy signature
+    const shop = req.query.shop || req.body.shopDomain;
+    if (!shop) {
+      return res.status(400).json({ error: 'Missing shop' });
+    }
+
+    // Forward to the same CustomerPushSubscription upsert logic
+    const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+
+    const { token, oldToken, deviceType, cartToken, customerId, ccfSessionId, page } = req.body;
+
+    if (!token) {
+      return res.status(400).json({ error: 'Missing token' });
+    }
+
+    const normalizedCartToken = cartToken ? cartToken.split('?')[0].trim() || undefined : undefined;
+
+    // Remove old token if rotated
+    if (oldToken && oldToken !== token) {
+      await CustomerPushSubscription.deleteOne({ token: oldToken });
+      console.log(`[proxy:subscribe] Removed old token for: ${shop}`);
+    }
+
+    // Upsert new token
+    const result = await CustomerPushSubscription.findOneAndUpdate(
+      { token },
+      {
+        shopDomain: shop,
+        token,
+        page: page || undefined,
+        deviceType: deviceType || 'unknown',
+        cartToken: normalizedCartToken || undefined,
+        customerId: customerId || undefined,
+        ccfSessionId: ccfSessionId || undefined,
+        lastActivityAt: new Date()
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    // Remove any OTHER rows with the same cartToken but a different
+    // FCM token — prevents same-cart multi-row accumulation. Mirrors
+    // the same cleanup in routes/push.js POST /subscribe-customer.
+    if (normalizedCartToken) {
+      await CustomerPushSubscription.deleteMany({
+        shopDomain: shop,
+        cartToken: normalizedCartToken,
+        token: { $ne: token }
+      });
+    }
+
+    // Identity resolution — fire-and-forget, never on the critical path.
+    // Mirrors the same call in routes/push.js POST /subscribe-customer.
+    const { upsertProfile } = require('../services/profileService');
+    upsertProfile(shop, {
+      sessionId: ccfSessionId,
+      cartToken: normalizedCartToken,
+      pushToken: token,
+    }, {
+      'channels.push.subscribed': true,
+      'channels.push.lastToken': token,
+      'channels.push.subscribedAt': new Date(),
+      lastSeenAt: new Date(),
+    }).catch((err) => console.error('[profile] upsert error:', err.message));
+
+    console.log(`[proxy:subscribe] Token saved for: ${shop}, deviceType: ${deviceType}, tokenSnippet: ${token.slice(-8)}`);
+    return res.status(200).json({ success: true });
+
+  } catch (err) {
+    console.error('[proxy:subscribe] Error:', err.message);
+    return res.status(500).json({ error: 'Failed to save subscription' });
+  }
+});
+
 module.exports = router;
