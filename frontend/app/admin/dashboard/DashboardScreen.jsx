@@ -1543,6 +1543,7 @@ export default function DashboardScreen({ shop }) {
                         });
                         setShowEditor(false);
                         setSendingNow(false);
+                        setShowImageInfo(false);
                         // Show success toast
                         setSuccessMsg('Notification sent successfully! 🎉');
                         setTimeout(() => setSuccessMsg(''), 3000);
