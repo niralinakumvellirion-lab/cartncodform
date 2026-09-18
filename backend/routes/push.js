@@ -15,6 +15,37 @@ const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key')
 
 const router = express.Router();
 
+// Uploads a base64 data: URI to Cloudinary's unsigned upload endpoint so
+// FCM (which only accepts a real, fetchable image URL — see the
+// /send-store handler below) has something it can actually use. Returns
+// null (never throws) if Cloudinary isn't configured or the upload
+// fails, so the caller can fall back to sending with no image rather
+// than failing the whole send. See audits/sendnow-fixes-audit.txt.
+async function uploadToCloudinary(base64Data) {
+  try {
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET;
+    if (!cloudName || !uploadPreset) return null;
+
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file: base64Data,
+          upload_preset: uploadPreset,
+        }),
+      }
+    );
+    const data = await response.json();
+    return data.secure_url || null;
+  } catch (e) {
+    console.error('[push] cloudinary upload error:', e.message);
+    return null;
+  }
+}
+
 /**
  * POST /api/push/subscribe
  * Body: { shopDomain, token }
@@ -568,10 +599,24 @@ router.post('/send-store', requireAuth, async (req, res) => {
 
     // FCM only accepts a real, fetchable image URL — a base64 data: URI
     // (what the Dashboard editor's file upload produces, see
-    // audits/separate-images-audit.txt) is rejected by FCM, so strip it
-    // here rather than pass it through and have the whole send fail.
+    // audits/separate-images-audit.txt) is rejected by FCM. Try
+    // uploading it to Cloudinary first so the image still reaches the
+    // notification; if that's not configured (or fails), fall back to
+    // stripping it rather than passing an unusable data: URI through
+    // and failing the whole send.
     const rawImage = mobileImageUrl || desktopImageUrl || '';
-    const imageUrl = rawImage.startsWith('data:') ? '' : rawImage;
+    let imageUrl = '';
+    if (rawImage.startsWith('data:')) {
+      // Try to upload to Cloudinary
+      const cloudUrl = await uploadToCloudinary(rawImage);
+      imageUrl = cloudUrl || '';
+      if (cloudUrl) {
+        console.log('[push] image uploaded to Cloudinary:',
+          cloudUrl.substring(0, 50));
+      }
+    } else {
+      imageUrl = rawImage;
+    }
     console.log('[push] send-store imageUrl:',
       imageUrl ? imageUrl.substring(0,30)+'...' : 'none');
     const result = await sendPushToCustomers(shop, title, body, '/', imageUrl, false, null, false);

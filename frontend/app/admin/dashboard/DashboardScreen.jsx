@@ -223,6 +223,21 @@ function getUpcomingFestivals(count) {
 export default function DashboardScreen({ shop }) {
   const router = useRouter();
 
+  // Shared keyframes for the Send Now spinner + success toast, injected
+  // once (same idempotent-injection pattern as components/Shimmer.jsx).
+  // See audits/sendnow-fixes-audit.txt.
+  if (typeof window !== 'undefined' &&
+      !document.getElementById('dashboard-anim')) {
+    const s = document.createElement('style');
+    s.id = 'dashboard-anim';
+    s.textContent = `
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes fadeIn { from { opacity: 0; transform: translateY(-8px); }
+                          to { opacity: 1; transform: translateY(0); } }
+    `;
+    document.head.appendChild(s);
+  }
+
   // --- Today.jsx state (renamed stats/loading/error -> today* to avoid
   // colliding with Insights' own stats/loading/error below) ---
   const [todayStats, setTodayStats] = useState(null);
@@ -272,6 +287,8 @@ export default function DashboardScreen({ shop }) {
   const [editorAction, setEditorAction] = useState(null);
   const [editorDate, setEditorDate] = useState('');
   const [showImageInfo, setShowImageInfo] = useState(false);
+  const [sendingNow, setSendingNow] = useState(false);
+  const [successMsg, setSuccessMsg] = useState('');
 
   // --- Today.jsx: activity + notifStats fetch, keyed on date filter ---
   useEffect(() => {
@@ -583,6 +600,21 @@ export default function DashboardScreen({ shop }) {
           {refreshButton}
         </div>
       </div>
+
+      {/* Success toast — shown after Send Now completes. See
+          audits/sendnow-fixes-audit.txt. */}
+      {successMsg && (
+        <div style={{
+          position: 'fixed', top: 20, right: 20, zIndex: 9999,
+          background: '#16a34a', color: '#fff',
+          padding: '12px 20px', borderRadius: 10,
+          fontSize: 13, fontWeight: 600,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          animation: 'fadeIn 0.3s ease',
+        }}>
+          {successMsg}
+        </div>
+      )}
 
       {/* Content area below the top bar — two columns, per Part A/B */}
       <div style={{
@@ -1219,6 +1251,7 @@ export default function DashboardScreen({ shop }) {
             setShowImageInfo(false);
             setEditorMobileImageUrl('');
             setEditorDesktopImageUrl('');
+            setSendingNow(false);
           } }}
         >
           <div style={{
@@ -1248,6 +1281,7 @@ export default function DashboardScreen({ shop }) {
                   setShowImageInfo(false);
                   setEditorMobileImageUrl('');
                   setEditorDesktopImageUrl('');
+                  setSendingNow(false);
                 }}
                 style={{ background: 'none', border: 'none',
                          fontSize: 20, cursor: 'pointer', color: '#9ca3af' }}>
@@ -1498,6 +1532,7 @@ export default function DashboardScreen({ shop }) {
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button
                     onClick={async () => {
+                      setSendingNow(true);
                       try {
                         await apiSend('/api/push/send-store', 'POST', {
                           shop,
@@ -1507,20 +1542,37 @@ export default function DashboardScreen({ shop }) {
                           desktopImageUrl: editorDesktopImageUrl,
                         });
                         setShowEditor(false);
-                        setShowImageInfo(false);
-                        setEditorMobileImageUrl('');
-                        setEditorDesktopImageUrl('');
-                        alert('Notification sent to all subscribers!');
+                        setSendingNow(false);
+                        // Show success toast
+                        setSuccessMsg('Notification sent successfully! 🎉');
+                        setTimeout(() => setSuccessMsg(''), 3000);
                       } catch(e) {
-                        alert('Failed to send');
+                        setSendingNow(false);
+                        alert('Failed to send notification');
                       }
                     }}
+                    disabled={sendingNow}
                     style={{
                       flex: 1, padding: '10px 0', borderRadius: 8,
-                      border: 'none', background: '#4f46e5', color: '#fff',
-                      fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                      border: 'none',
+                      background: sendingNow ? '#818cf8' : '#4f46e5',
+                      color: '#fff', fontSize: 13, fontWeight: 700,
+                      cursor: sendingNow ? 'not-allowed' : 'pointer',
+                      opacity: sendingNow ? 0.8 : 1,
+                      display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', gap: 6,
                     }}>
-                    Send Now
+                    {sendingNow ? (
+                      <>
+                        <span style={{
+                          width: 12, height: 12, border: '2px solid #fff',
+                          borderTopColor: 'transparent', borderRadius: '50%',
+                          display: 'inline-block',
+                          animation: 'spin 0.8s linear infinite',
+                        }} />
+                        Sending...
+                      </>
+                    ) : 'Send Now'}
                   </button>
                   <button
                     onClick={async () => {
@@ -1542,6 +1594,7 @@ export default function DashboardScreen({ shop }) {
                         setShowImageInfo(false);
                         setEditorMobileImageUrl('');
                         setEditorDesktopImageUrl('');
+                        setSendingNow(false);
                         alert('Added to queue as approved!');
                       } catch(e) {
                         alert('Failed to approve');
@@ -1574,6 +1627,7 @@ export default function DashboardScreen({ shop }) {
                         setShowImageInfo(false);
                         setEditorMobileImageUrl('');
                         setEditorDesktopImageUrl('');
+                        setSendingNow(false);
                       } catch(e) {
                         alert('Failed to save');
                       }
