@@ -38,6 +38,7 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
   'https://app.shopireachboost.com',
   'https://admin.shopify.com',
+  'https://cartncod-form.myshopify.com',
   'http://localhost:3000',
 ].filter(Boolean);
 
