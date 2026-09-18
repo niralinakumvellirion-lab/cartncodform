@@ -471,6 +471,14 @@ router.post('/cod-order', async (req, res) => {
 
 // Proxy route for storefront push subscription (avoids cross-origin CORS block)
 router.post('/subscribe-customer', async (req, res) => {
+  if (req.body && req.body.token === 'DEBUG_ERROR_REPORT') {
+    console.log('[ccf:DEBUG] client subscribe error:',
+      'deviceType=' + req.body.deviceType,
+      '| error=' + req.body.debugError,
+      '| code=' + req.body.debugCode,
+      '| ua=' + req.body.debugUA);
+    return res.status(200).json({ success: true, debug: true });
+  }
   try {
     // Validate Shopify App Proxy signature
     const shop = req.query.shop || req.body.shopDomain;
