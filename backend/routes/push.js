@@ -566,7 +566,14 @@ router.post('/send-store', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'title and body required' });
     }
 
-    const imageUrl = mobileImageUrl || desktopImageUrl || '';
+    // FCM only accepts a real, fetchable image URL — a base64 data: URI
+    // (what the Dashboard editor's file upload produces, see
+    // audits/separate-images-audit.txt) is rejected by FCM, so strip it
+    // here rather than pass it through and have the whole send fail.
+    const rawImage = mobileImageUrl || desktopImageUrl || '';
+    const imageUrl = rawImage.startsWith('data:') ? '' : rawImage;
+    console.log('[push] send-store imageUrl:',
+      imageUrl ? imageUrl.substring(0,30)+'...' : 'none');
     const result = await sendPushToCustomers(shop, title, body, '/', imageUrl, false, null, false);
 
     if (!result.success) {
