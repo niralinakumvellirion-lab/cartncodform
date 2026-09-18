@@ -1,0 +1,90 @@
+SELF-AUDIT — sw-scope-fix
+
+SCOPE OF DEVIATION FROM LITERAL REQUEST
+----------------------------------------
+The requested Change 3 snippet used `await` inside registerSW(), which is a
+plain function returning `new Promise(function(resolve, reject) {...})` —
+not `async`. Pasted verbatim it is a SyntaxError and would break the entire
+<script> block (all push notification logic on every storefront page).
+Additionally, applying Change 1 (scope '/apps/cartncodform/' -> '/') without
+also updating the pre-existing cleanup/active-check logic (which hardcoded
+the old scope) would have caused the existing "unregister wrong-scope SW"
+block to treat every future '/'-scoped registration as wrong-scope and
+unregister it on every subsequent call, with the "already active" check
+never matching it either — a permanent unregister/re-register loop on every
+page load. Flagged to user via AskUserQuestion; user selected "Implement
+corrected version." Changes below reflect that corrected implementation,
+which preserves the literal request's intent (scope -> '/', old-scope
+cleanup, Service-Worker-Allowed -> '/') using the file's existing
+Promise-chain style instead of await, plus consistent scope references.
+
+FILE 1: extensions/cartncodform-embed/blocks/push-notifications.liquid
+------------------------------------------------------------------------
+Lines changed inside registerSW() (function spans 1681-1758+ pre-edit):
+
+- Line 1692 (pre-edit): `var swScope = window.location.origin + '/apps/cartncodform/';`
+  Changed to: `var swScope = window.location.origin + '/';`
+  Reason: this var feeds the "isCorrect" check in the pre-existing stale-SW
+  cleanup block (unchanged otherwise); it must reflect the new scope or the
+  cleanup block treats every correctly-scoped new registration as stale.
+
+- New block inserted (post-edit lines 1703-1714), positioned immediately
+  after the existing stale-registration cleanup block's `.then()` chain
+  ends and before the "check if correct SW already active" / register()
+  `.then()` stage:
+    .then(function() {
+      // Unregister old scoped SW if present
+      return navigator.serviceWorker.getRegistrations();
+    }).then(function(existingRegs) {
+      var unregisterOldScopePromises = existingRegs.map(function(reg) {
+        if (reg.scope && reg.scope.indexOf('/apps/cartncodform/') !== -1) {
+          return reg.unregister();
+        }
+        return Promise.resolve(false);
+      });
+      return Promise.all(unregisterOldScopePromises);
+    })
+  This is the Change 3 logic (unregister any SW whose scope still contains
+  the old '/apps/cartncodform/' path), implemented as a chained .then()
+  stage instead of top-level await, since registerSW() is not async.
+
+- Line 1712 (pre-edit, now shifted down ~12 lines by the inserted block):
+  `reg.scope === window.location.origin + '/apps/cartncodform/'`
+  Changed to: `reg.scope === window.location.origin + '/'`
+  Reason: "already active" detection must match the new registration scope,
+  otherwise registerSW() would never recognize an existing correct
+  registration and would re-register from scratch on every call.
+
+- Line 1721 (pre-edit): `scope: '/apps/cartncodform/',` inside the
+  `navigator.serviceWorker.register(swUrl, {...})` call.
+  Changed to: `scope: '/',` — this is the literal Change 1 requested.
+
+No other lines in the file were touched. `PROXY_SW_URL` (line 12), `swUrl`
+(line 1687), `firebaseConfig`, `getToken()`, and everything outside
+registerSW() are unchanged.
+
+FILE 2: backend/routes/proxy.js — /sw.js route
+------------------------------------------------
+Confirmed the header was NOT already '/': it was set to
+`res.setHeader('Service-Worker-Allowed', '/apps/cartncodform/');`.
+Changed to: `res.setHeader('Service-Worker-Allowed', '/');`
+This is the only line changed in this file.
+
+VERIFICATION
+------------
+- New scope value in register() call: '/' — confirmed.
+- Service-Worker-Allowed header value in proxy.js: '/' — confirmed.
+- Unregister-old-scope block position: confirmed it sits after the existing
+  stale-registration cleanup .then() chain and before the "already active"
+  check / navigator.serviceWorker.register() call.
+- `cd backend && npm test` run after the proxy.js change: 19 test suites,
+  151 tests, all passing.
+- The .liquid file has no automated test coverage in this repo (theme
+  extension JS); verified by direct read of the edited region for syntax
+  consistency with the surrounding Promise-chain style (no await/async
+  introduced).
+
+DEPLOY
+------
+`shopify app deploy --allow-updates` run after these changes (see CLI
+output for release confirmation).

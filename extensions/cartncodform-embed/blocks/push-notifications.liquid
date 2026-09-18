@@ -1689,7 +1689,7 @@
       // Unregister any stale SWs (blob URLs, wrong scope) before registering
       navigator.serviceWorker.getRegistrations().then(function(regs) {
         var unregisterPromises = regs.map(function(reg) {
-          var swScope = window.location.origin + '/apps/cartncodform/';
+          var swScope = window.location.origin + '/';
           var isCorrect = reg.scope === swScope &&
             reg.active &&
             reg.active.scriptURL.indexOf('/apps/cartncodform/sw.js') !== -1;
@@ -1701,6 +1701,18 @@
 
         return Promise.all(unregisterPromises);
       }).then(function() {
+        // Unregister old scoped SW if present
+        return navigator.serviceWorker.getRegistrations();
+      }).then(function(existingRegs) {
+        var unregisterOldScopePromises = existingRegs.map(function(reg) {
+          if (reg.scope && reg.scope.indexOf('/apps/cartncodform/') !== -1) {
+            return reg.unregister();
+          }
+          return Promise.resolve(false);
+        });
+
+        return Promise.all(unregisterOldScopePromises);
+      }).then(function() {
         // Check if correct SW already active
         return navigator.serviceWorker.getRegistrations();
       }).then(function(regs) {
@@ -1709,7 +1721,7 @@
           if (
             reg.active &&
             reg.active.scriptURL.indexOf('/apps/cartncodform/sw.js') !== -1 &&
-            reg.scope === window.location.origin + '/apps/cartncodform/'
+            reg.scope === window.location.origin + '/'
           ) {
             resolve(reg);
             return;
@@ -1718,7 +1730,7 @@
 
         // Register fresh
         navigator.serviceWorker.register(swUrl, {
-          scope: '/apps/cartncodform/',
+          scope: '/',
           updateViaCache: 'none'
         }).then(function(reg) {
 
