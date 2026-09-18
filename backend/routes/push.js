@@ -112,6 +112,13 @@ router.post('/send', requireAuth, async (req, res) => {
  * cleans up a superseded token if one was supplied.
  */
 router.post('/subscribe-customer', async (req, res) => {
+  console.log('[subscribe-customer:entry] hit — body:', JSON.stringify({
+    shopDomain: req.body.shopDomain,
+    tokenSnippet: req.body.token ? req.body.token.slice(-8) : 'MISSING',
+    deviceType: req.body.deviceType,
+    hasOldToken: !!req.body.oldToken,
+    cartToken: req.body.cartToken || null
+  }));
   try {
     const { shopDomain, token, oldToken, page, deviceType, cartToken, customerId, ccfSessionId } = req.body;
 
@@ -133,6 +140,7 @@ router.post('/subscribe-customer', async (req, res) => {
     }
 
     // Upsert new token
+    console.log('[subscribe-customer:upsert] attempting upsert for token:', req.body.token ? req.body.token.slice(-8) : 'MISSING');
     const result = await CustomerPushSubscription.findOneAndUpdate(
       { token },
       {
@@ -147,6 +155,7 @@ router.post('/subscribe-customer', async (req, res) => {
       },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
+    console.log('[subscribe-customer:saved] token saved:', result.token ? result.token.slice(-8) : 'N/A', 'deviceType:', result.deviceType);
 
     // Remove any OTHER rows with the same cartToken but a different
     // FCM token — prevents same-cart multi-row accumulation.
@@ -174,6 +183,7 @@ router.post('/subscribe-customer', async (req, res) => {
     return res.status(200).json({ success: true });
 
   } catch (err) {
+    console.log('[subscribe-customer:error] failed:', err.message, err.code);
     console.error('[subscribe-customer] Error:', err.message);
     return res.status(500).json({ error: 'Failed to save subscription' });
   }

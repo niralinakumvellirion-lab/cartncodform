@@ -75,6 +75,13 @@ app.use((req, _res, next) => {
   next();
 });
 
+app.use(function(req, res, next) {
+  if (req.method === 'POST' && req.path.includes('subscribe-customer')) {
+    console.log('[subscribe-customer:raw] incoming POST, origin:', req.headers.origin, 'body size:', JSON.stringify(req.body || {}).length);
+  }
+  next();
+});
+
 // Allow the app to be embedded as an iframe inside Shopify Admin.
 app.use((_req, res, next) => {
   res.setHeader(
