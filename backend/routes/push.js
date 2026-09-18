@@ -600,33 +600,56 @@ router.post('/send-store', requireAuth, async (req, res) => {
     // FCM only accepts a real, fetchable image URL — a base64 data: URI
     // (what the Dashboard editor's file upload produces, see
     // audits/separate-images-audit.txt) is rejected by FCM. Try
-    // uploading it to Cloudinary first so the image still reaches the
-    // notification; if that's not configured (or fails), fall back to
-    // stripping it rather than passing an unusable data: URI through
-    // and failing the whole send.
-    const rawImage = mobileImageUrl || desktopImageUrl || '';
-    let imageUrl = '';
-    if (rawImage.startsWith('data:')) {
-      // Try to upload to Cloudinary
-      const cloudUrl = await uploadToCloudinary(rawImage);
-      imageUrl = cloudUrl || '';
-      if (cloudUrl) {
-        console.log('[push] image uploaded to Cloudinary:',
-          cloudUrl.substring(0, 50));
-      }
-    } else {
-      imageUrl = rawImage;
-    }
-    console.log('[push] send-store imageUrl:',
-      imageUrl ? imageUrl.substring(0,30)+'...' : 'none');
-    const result = await sendPushToCustomers(shop, title, body, '/', imageUrl, false, null, false);
+    // uploading each image to Cloudinary separately so mobile and
+    // desktop subscribers each get their own image in the notification
+    // rather than one shared/collapsed image; if upload isn't
+    // configured (or fails) for a given image, fall back to stripping
+    // it rather than passing an unusable data: URI through.
+    const rawMobile = mobileImageUrl || '';
+    const rawDesktop = desktopImageUrl || '';
 
-    if (!result.success) {
-      return res.status(500).json({ success: false, error: result.error });
+    let mobileImage = rawMobile.startsWith('data:')
+      ? (await uploadToCloudinary(rawMobile)) || ''
+      : rawMobile;
+
+    let desktopImage = rawDesktop.startsWith('data:')
+      ? (await uploadToCloudinary(rawDesktop)) || ''
+      : rawDesktop;
+
+    // Fallback: if one is missing, use the other.
+    if (!mobileImage) mobileImage = desktopImage;
+    if (!desktopImage) desktopImage = mobileImage;
+
+    console.log('[push] send-store mobileImage:',
+      mobileImage ? mobileImage.substring(0, 30) + '...' : 'none');
+    console.log('[push] send-store desktopImage:',
+      desktopImage ? desktopImage.substring(0, 30) + '...' : 'none');
+
+    // Send to mobile subscribers with the mobile image.
+    const mobileResult = await sendPushToCustomers(
+      shop, title, body, '/', mobileImage, true, null, false, false
+    );
+
+    // Send to desktop subscribers with the desktop image.
+    const desktopResult = await sendPushToCustomers(
+      shop, title, body, '/', desktopImage, false, null, false, true
+    );
+
+    if (!mobileResult.success && !desktopResult.success) {
+      return res.status(500).json({
+        success: false,
+        error: mobileResult.error || desktopResult.error,
+      });
     }
 
-    console.log(`[push] Festival push sent to ${shop}: sent=${result.sent} tokensFound=${result.tokensFound}`);
-    return res.json({ success: true, sent: result.sent || 0, tokensFound: result.tokensFound || 0 });
+    const totalSent = (mobileResult.sent || 0) + (desktopResult.sent || 0);
+    console.log(`[push] Festival push split-sent to ${shop}: mobile=${mobileResult.sent || 0} desktop=${desktopResult.sent || 0}`);
+    return res.json({
+      success: true,
+      sent: totalSent,
+      mobile: mobileResult,
+      desktop: desktopResult,
+    });
   } catch (err) {
     console.error('[push] send-store error:', err.message);
     return res.status(500).json({ error: 'Failed to send' });
