@@ -1,6 +1,12 @@
 self.addEventListener('install', function(e) { e.waitUntil(self.skipWaiting()); });
 self.addEventListener('activate', function(e) { e.waitUntil(clients.claim()); });
 
+self.addEventListener('message', function(event) {
+  if (event.data && event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js');
 
