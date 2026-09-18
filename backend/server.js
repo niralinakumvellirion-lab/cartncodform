@@ -58,7 +58,7 @@ app.use(
 // Capture the raw body so Shopify webhook HMAC can be verified if needed.
 app.use(
   express.json({
-    limit: '5mb',
+    limit: '10mb',
     verify: (req, _res, buf) => {
       req.rawBody = buf.toString('utf8');
     },
