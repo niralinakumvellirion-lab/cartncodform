@@ -195,6 +195,10 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
       return { success: true, sent: 0, tokensFound: 0 };
     }
     const subs = await CustomerPushSubscription.find(query);
+    console.log('[push-debug] query:', JSON.stringify(query),
+      '| found:', subs.length,
+      '| tokens:', subs.map(s => ({ deviceType: s.deviceType, tokenSnippet: s.token?.slice(-8) }))
+    );
     if (!subs.length) {
       console.log(`[push] No customer subscribers for ${shop}`);
       return { success: true, sent: 0, tokensFound: 0 };
