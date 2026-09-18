@@ -616,10 +616,6 @@ router.post('/send-store', requireAuth, async (req, res) => {
       ? (await uploadToCloudinary(rawDesktop)) || ''
       : rawDesktop;
 
-    // Fallback: if one is missing, use the other.
-    if (!mobileImage) mobileImage = desktopImage;
-    if (!desktopImage) desktopImage = mobileImage;
-
     console.log('[push] send-store mobileImage:',
       mobileImage ? mobileImage.substring(0, 30) + '...' : 'none');
     console.log('[push] send-store desktopImage:',
