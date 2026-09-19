@@ -681,6 +681,21 @@ router.get('/test-mobile-push', async (req, res) => {
   }
 });
 
+// GET /api/push/festivals
+// Serves the shared festival calendar (backend/data/festivals.json) to the
+// admin dashboard. Not shop-scoped — every store sees the same calendar —
+// so this only needs requireAuth (a valid signed-in session), not
+// requireStoreOwner (which requires a :shopDomain route param to compare
+// against and would 403 every request on a route shaped like this one).
+router.get('/festivals', requireAuth, function (req, res) {
+  try {
+    const festivals = require('../data/festivals.json');
+    return res.json(festivals);
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to load festivals' });
+  }
+});
+
 module.exports = router;
 module.exports.sendJourneyPush = sendJourneyPush;
 module.exports.sendJourneyEmail = sendJourneyEmail;

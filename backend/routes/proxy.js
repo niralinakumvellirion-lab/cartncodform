@@ -553,4 +553,15 @@ router.post('/subscribe-customer', async (req, res) => {
   }
 });
 
+router.get('/festivals', function (req, res) {
+  try {
+    const festivals = require('../data/festivals.json');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+    return res.json(festivals);
+  } catch (err) {
+    console.error('[proxy:festivals] error:', err.message);
+    return res.status(500).json({ error: 'Failed to load festivals' });
+  }
+});
+
 module.exports = router;

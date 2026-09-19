@@ -1,0 +1,119 @@
+[
+  {
+    "name": "Navratri",
+    "date": "2026-10-02",
+    "emoji": "🪷",
+    "suggestion": "Send festive Navratri offers to all subscribers",
+    "message": "Celebrate Navratri with us! Get special festive discounts on your favorite products. 🪷",
+    "searchTerm": "navratri garba dance",
+    "imageUrl": "https://res.cloudinary.com/y0kktn9f/image/upload/v1789796311/ausgezfhwyivcswmojmi.jpg"
+  },
+  {
+    "name": "Dussehra",
+    "date": "2026-10-12",
+    "emoji": "🏹",
+    "suggestion": "Send Dussehra sale notification",
+    "message": "Happy Dussehra! Victory of good over evil — and great deals for you! Shop now. 🏹",
+    "searchTerm": "dussehra festival celebration",
+    "imageUrl": "https://res.cloudinary.com/y0kktn9f/image/upload/v1789796313/rmqgg4kqkz0yhuxy1c1k.jpg"
+  },
+  {
+    "name": "Dhanteras",
+    "date": "2026-10-28",
+    "emoji": "🪙",
+    "suggestion": "Promote Dhanteras shopping with special offer",
+    "message": "Dhanteras is here! Bring prosperity home with our exclusive festive collection. 🪙",
+    "searchTerm": "dhanteras gold diya",
+    "imageUrl": "https://res.cloudinary.com/y0kktn9f/image/upload/v1789796315/lt9va3uqcullbw3ils5g.jpg"
+  },
+  {
+    "name": "Diwali",
+    "date": "2026-10-29",
+    "emoji": "🪔",
+    "suggestion": "Send Diwali offer — biggest sale of the year",
+    "message": "Happy Diwali! Light up your celebrations with our biggest sale of the year. 🪔✨",
+    "searchTerm": "diwali diya lamps",
+    "imageUrl": "https://res.cloudinary.com/y0kktn9f/image/upload/v1789796317/ll2muraxgo6pmdf2bi5d.jpg"
+  },
+  {
+    "name": "Bhai Dooj",
+    "date": "2026-10-31",
+    "emoji": "❤️",
+    "suggestion": "Send Bhai Dooj gifting ideas notification",
+    "message": "Bhai Dooj special! Find the perfect gift for your siblings. Shop now. ❤️",
+    "searchTerm": "bhai dooj celebration",
+    "imageUrl": "https://res.cloudinary.com/y0kktn9f/image/upload/v1789796320/p0urc4wemgbt3vgbwyyo.jpg"
+  },
+  {
+    "name": "Christmas",
+    "date": "2026-12-25",
+    "emoji": "🎄",
+    "suggestion": "Send Christmas sale notification",
+    "message": "Merry Christmas! Spread joy with our festive deals. 🎄🎁",
+    "searchTerm": "christmas decoration",
+    "imageUrl": "https://res.cloudinary.com/y0kktn9f/image/upload/v1789796322/sgziyovm50lpwwdwquog.jpg"
+  },
+  {
+    "name": "New Year",
+    "date": "2027-01-01",
+    "emoji": "🎆",
+    "suggestion": "Send New Year offer to re-engage customers",
+    "message": "Happy New Year! Start 2027 with amazing deals. 🎆",
+    "searchTerm": "new year fireworks celebration",
+    "imageUrl": "https://res.cloudinary.com/y0kktn9f/image/upload/v1789796324/yv2sxsk4cdbpvtfi1ntd.jpg"
+  },
+  {
+    "name": "Makar Sankranti",
+    "date": "2027-01-14",
+    "emoji": "🪁",
+    "suggestion": "Send Sankranti festive notification",
+    "message": "Happy Makar Sankranti! Celebrate with our special festive offers. 🪁",
+    "searchTerm": "makar sankranti kite flying",
+    "imageUrl": "https://res.cloudinary.com/y0kktn9f/image/upload/v1789796327/ryt1bfbk82dezeinpkxp.jpg"
+  },
+  {
+    "name": "Republic Day",
+    "date": "2027-01-26",
+    "emoji": "🇮🇳",
+    "suggestion": "Send Republic Day sale notification",
+    "message": "Happy Republic Day! Celebrate with patriotic deals. 🇮🇳",
+    "searchTerm": "indian republic day flag",
+    "imageUrl": "https://res.cloudinary.com/y0kktn9f/image/upload/v1789796330/xkdnhkhnsqwrbdvq8zpu.jpg"
+  },
+  {
+    "name": "Holi",
+    "date": "2027-03-01",
+    "emoji": "🎨",
+    "suggestion": "Send colorful Holi offers to all subscribers",
+    "message": "Happy Holi! Color your celebrations with amazing festive deals. 🎨🌈",
+    "searchTerm": "holi colors festival",
+    "imageUrl": "https://res.cloudinary.com/y0kktn9f/image/upload/v1789796332/iuwmfsgnkt9rxatg0x9f.jpg"
+  },
+  {
+    "name": "Eid ul-Fitr",
+    "date": "2027-03-20",
+    "emoji": "🌙",
+    "suggestion": "Send Eid special offers notification",
+    "message": "Eid Mubarak! Celebrate with our special Eid collection and offers. 🌙✨",
+    "searchTerm": "eid mubarak celebration",
+    "imageUrl": "https://res.cloudinary.com/y0kktn9f/image/upload/v1789796334/jxghs20chs6r7jg0rqlk.jpg"
+  },
+  {
+    "name": "Raksha Bandhan",
+    "date": "2027-08-09",
+    "emoji": "🧡",
+    "suggestion": "Send Raksha Bandhan gifting notification",
+    "message": "Raksha Bandhan special! Find the perfect gift for your siblings. 🧡",
+    "searchTerm": "rakhi raksha bandhan",
+    "imageUrl": "https://res.cloudinary.com/y0kktn9f/image/upload/v1789796336/cayk6kbkvbzvu7bu7tsu.jpg"
+  },
+  {
+    "name": "Independence Day",
+    "date": "2027-08-15",
+    "emoji": "🇮🇳",
+    "suggestion": "Send Independence Day sale notification",
+    "message": "Happy Independence Day! Celebrate freedom with amazing deals. 🇮🇳",
+    "searchTerm": "indian independence day flag",
+    "imageUrl": "https://res.cloudinary.com/y0kktn9f/image/upload/v1789796338/f4y1pt4wklyalvvlsiro.jpg"
+  }
+]

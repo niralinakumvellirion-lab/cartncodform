@@ -163,7 +163,10 @@ const SIGNAL_LABELS = {
   winback: 'Win back',
 };
 
-const FESTIVAL_CALENDAR = [
+// Used only if the /api/push/festivals fetch fails — see the
+// festivalCalendar state + useEffect in DashboardScreen below. The
+// canonical, image-enriched copy lives in backend/data/festivals.json.
+const FESTIVAL_CALENDAR_FALLBACK = [
   { name: 'Navratri', date: '2026-10-02', emoji: '🪷',
     suggestion: 'Send festive Navratri offers to all subscribers',
     message: 'Celebrate Navratri with us! Get special festive discounts on your favorite products. 🪷' },
@@ -205,12 +208,16 @@ const FESTIVAL_CALENDAR = [
     message: 'Happy Independence Day! Celebrate freedom with amazing deals. 🇮🇳' },
 ];
 
-function getUpcomingFestivals(count) {
+function getUpcomingFestivals(festivals, count) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return FESTIVAL_CALENDAR
+  return festivals
     .map(f => {
-      const fDate = new Date(f.date);
+      // Parse as LOCAL midnight (not UTC) so diffDays doesn't shift by a
+      // day in timezones behind UTC — new Date('YYYY-MM-DD') parses as
+      // UTC midnight, which used to be diffed against local-midnight today.
+      const parts = f.date.split('-');
+      const fDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
       const diffMs = fDate - today;
       const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
       return { ...f, diffDays, fDate };
@@ -218,6 +225,14 @@ function getUpcomingFestivals(count) {
     .filter(f => f.diffDays >= 0 && f.diffDays <= 60)
     .sort((a, b) => a.diffDays - b.diffDays)
     .slice(0, count);
+}
+
+function formatRelativeDate(diffDays) {
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Tomorrow';
+  if (diffDays <= 13) return `In ${diffDays} days`;
+  const weeks = Math.round(diffDays / 7);
+  return `In ${weeks} week${weeks === 1 ? '' : 's'}`;
 }
 
 export default function DashboardScreen({ shop }) {
@@ -277,7 +292,8 @@ export default function DashboardScreen({ shop }) {
   // (see audits/dashboard-phase1-audit.txt). Replaces the old
   // showSuggestModal/modalFestival/modalSending/modalSent compose-modal
   // state from the previous phase entirely. ---
-  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(true);
+  const [festivalCalendar, setFestivalCalendar] = useState([]);
   const [selectedFestival, setSelectedFestival] = useState(null);
   const [showEditor, setShowEditor] = useState(false);
   const [editorTitle, setEditorTitle] = useState('');
@@ -289,6 +305,26 @@ export default function DashboardScreen({ shop }) {
   const [showImageInfo, setShowImageInfo] = useState(false);
   const [sendingNow, setSendingNow] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+
+  // Fetch the shared, image-enriched festival calendar once on mount.
+  // Falls back to the hardcoded (no-image) copy if the request fails, so
+  // the sidebar still works if the backend or festivals.json is briefly
+  // unavailable.
+  useEffect(() => {
+    let cancelled = false;
+    apiGet('/api/push/festivals')
+      .then((data) => {
+        if (cancelled) return;
+        setFestivalCalendar(Array.isArray(data) ? data : FESTIVAL_CALENDAR_FALLBACK);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFestivalCalendar(FESTIVAL_CALENDAR_FALLBACK);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // --- Today.jsx: activity + notifStats fetch, keyed on date filter ---
   useEffect(() => {
@@ -493,7 +529,20 @@ export default function DashboardScreen({ shop }) {
 
   // Phase 1 sidebar: all festivals in the next 60 days (getUpcomingFestivals
   // already filters to <=60 days internally — see its definition above).
-  const upcomingFestivals = getUpcomingFestivals(10);
+  const upcomingFestivals = getUpcomingFestivals(festivalCalendar, 10);
+
+  // Shared by the suggestion row's click and its Create button — opens the
+  // festival notification editor pre-filled for that festival.
+  function openFestivalEditor(f) {
+    setSelectedFestival(f);
+    setEditorTitle(f.name + ' Special Offer');
+    setEditorBody(f.message);
+    setEditorMobileImageUrl('');
+    setEditorDesktopImageUrl('');
+    setEditorDate(f.date);
+    setEditorAction(null);
+    setShowEditor(true);
+  }
 
   // Header "Refresh" — re-runs Today's date-filtered effect (via
   // refreshKey) AND Insights' own load, so one button refreshes the
@@ -1112,18 +1161,21 @@ export default function DashboardScreen({ shop }) {
             background: '#fff',
             border: '1px solid #e5e7eb',
             borderRadius: 12,
-            overflow: 'hidden',
           }}>
-            {/* Header — always visible */}
+            {/* Header — whole area is the click target */}
             <div
               onClick={() => setSuggestionsOpen(o => !o)}
+              onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+              onMouseLeave={e => e.currentTarget.style.background = '#fff'}
               style={{
-                padding: '14px 16px',
+                padding: '16px',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 cursor: 'pointer',
                 borderBottom: suggestionsOpen ? '1px solid #f3f4f6' : 'none',
+                borderRadius: suggestionsOpen ? '12px 12px 0 0' : '12px',
+                transition: 'background 0.15s',
               }}
             >
               <div>
@@ -1131,98 +1183,178 @@ export default function DashboardScreen({ shop }) {
                   Notification Suggestions
                 </div>
                 <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
-                  {upcomingFestivals.length} upcoming festivals
+                  {upcomingFestivals.length} upcoming festival{upcomingFestivals.length === 1 ? '' : 's'}
                 </div>
               </div>
-              <div style={{
-                background: '#4f46e5',
-                color: '#fff',
-                borderRadius: 20,
-                padding: '2px 8px',
-                fontSize: 11,
-                fontWeight: 700,
-              }}>
-                {upcomingFestivals.length}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div style={{
+                  background: DS.primary,
+                  color: '#fff',
+                  borderRadius: 20,
+                  padding: '2px 8px',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  minWidth: 18,
+                  textAlign: 'center',
+                }}>
+                  {upcomingFestivals.length}
+                </div>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="#9ca3af" strokeWidth="2" strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{
+                    transform: suggestionsOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                    transition: 'transform 0.2s',
+                    flexShrink: 0,
+                  }}
+                >
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
               </div>
             </div>
 
             {/* Festival list — visible when open */}
             {suggestionsOpen && (
-              <div style={{ maxHeight: 'calc(100vh - 300px)',
-                            overflowY: 'auto', overflowX: 'hidden' }}>
-                {upcomingFestivals.map(f => (
-                  <div
-                    key={f.name}
-                    onClick={() => {
-                      setSelectedFestival(f);
-                      setEditorTitle(f.name + ' Special Offer');
-                      setEditorBody(f.message);
-                      setEditorMobileImageUrl('');
-                      setEditorDesktopImageUrl('');
-                      setEditorDate(f.date);
-                      setEditorAction(null);
-                      setShowEditor(true);
-                    }}
-                    style={{
-                      padding: '10px 16px',
-                      borderBottom: '1px solid #f9fafb',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
-                    onMouseLeave={e => e.currentTarget.style.background = '#fff'}
-                  >
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600,
-                                    color: '#111827' }}>
-                        {f.emoji} {f.name}
-                      </div>
-                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
-                        {f.diffDays === 0 ? 'Today' :
-                         f.diffDays === 1 ? 'Tomorrow' :
-                         `In ${f.diffDays} days`}
-                      </div>
-                    </div>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                      stroke="#9ca3af" strokeWidth="2" strokeLinecap="round"
-                      strokeLinejoin="round">
-                      <polyline points="9 18 15 12 9 6"/>
-                    </svg>
+              upcomingFestivals.length === 0 ? (
+                <div style={{ padding: '32px 20px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 28, opacity: 0.4, marginBottom: 8 }}>📅</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>
+                    No upcoming festivals
                   </div>
-                ))}
-              </div>
+                  <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>
+                    Check back closer to the next festival season.
+                  </div>
+                </div>
+              ) : (
+                <div style={{ maxHeight: 400, overflowY: 'auto', overflowX: 'hidden', paddingBottom: '8px' }}>
+                  {upcomingFestivals.map((f, idx) => {
+                    const urgent = f.diffDays <= 7;
+                    const isLast = idx === upcomingFestivals.length - 1;
+                    return (
+                      <div
+                        key={f.name}
+                        onClick={() => openFestivalEditor(f)}
+                        style={{
+                          padding: '12px 14px',
+                          borderBottom: isLast ? 'none' : '1px solid #f9fafb',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={e => {
+                          e.currentTarget.style.background = '#f9fafb';
+                          const btn = e.currentTarget.querySelector('[data-create-btn]');
+                          if (btn) { btn.style.background = DS.primary; btn.style.color = '#fff'; }
+                        }}
+                        onMouseLeave={e => {
+                          e.currentTarget.style.background = '#fff';
+                          const btn = e.currentTarget.querySelector('[data-create-btn]');
+                          if (btn) { btn.style.background = DS.primaryLight; btn.style.color = DS.primary; }
+                        }}
+                      >
+                        <div style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: '50%',
+                          background: '#f3f4f6',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: 17,
+                          flexShrink: 0,
+                          overflow: 'hidden',
+                        }}>
+                          {f.imageUrl ? (
+                            <>
+                              <img
+                                src={f.imageUrl}
+                                alt=""
+                                style={{
+                                  width: '100%',
+                                  height: '100%',
+                                  borderRadius: '50%',
+                                  objectFit: 'cover',
+                                }}
+                                onError={e => {
+                                  e.target.style.display = 'none';
+                                  if (e.target.nextSibling) {
+                                    e.target.nextSibling.style.display = 'flex';
+                                  }
+                                }}
+                              />
+                              <span style={{
+                                display: 'none',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                width: '100%',
+                                height: '100%',
+                              }}>
+                                {f.emoji}
+                              </span>
+                            </>
+                          ) : (
+                            f.emoji
+                          )}
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: 14,
+                            fontWeight: 600,
+                            color: '#111827',
+                            whiteSpace: 'nowrap',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                          }}>
+                            {f.name}
+                          </div>
+                          <div style={{
+                            fontSize: 12,
+                            marginTop: 2,
+                            color: urgent ? DS.warning : '#9ca3af',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                          }}>
+                            {urgent && (
+                              <span style={{
+                                width: 5,
+                                height: 5,
+                                borderRadius: '50%',
+                                background: DS.warning,
+                                display: 'inline-block',
+                                flexShrink: 0,
+                              }} />
+                            )}
+                            {formatRelativeDate(f.diffDays)}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          data-create-btn=""
+                          onClick={e => { e.stopPropagation(); openFestivalEditor(f); }}
+                          style={{
+                            flexShrink: 0,
+                            border: 'none',
+                            borderRadius: 8,
+                            padding: '5px 12px',
+                            fontSize: 11.5,
+                            fontWeight: 700,
+                            background: DS.primaryLight,
+                            color: DS.primary,
+                            cursor: 'pointer',
+                            transition: 'background 0.15s, color 0.15s',
+                          }}
+                        >
+                          Create
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )
             )}
-          </div>
-
-          {/* Quick stats card */}
-          <div style={{
-            background: '#fff', border: '1px solid #e5e7eb',
-            borderRadius: 12, padding: '14px 16px',
-          }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
-                          textTransform: 'uppercase', letterSpacing: '0.06em',
-                          marginBottom: 10 }}>
-              Quick Stats
-            </div>
-            {[
-              { label: 'Push subscribers',
-                value: notifStats?.pushSubscribers ?? '—' },
-              { label: 'Emails captured',
-                value: notifStats?.emailsCaptured ?? '—' },
-              { label: 'Popups shown',
-                value: notifStats?.popupsShown ?? '—' },
-            ].map(({ label, value }) => (
-              <div key={label} style={{
-                display: 'flex', justifyContent: 'space-between',
-                padding: '6px 0', borderBottom: '1px solid #f9fafb',
-              }}>
-                <span style={{ fontSize: 12, color: '#6b7280' }}>{label}</span>
-                <span style={{ fontSize: 13, fontWeight: 700,
-                               color: '#111827' }}>{value}</span>
-              </div>
-            ))}
           </div>
         </div>
 
@@ -1534,7 +1666,7 @@ export default function DashboardScreen({ shop }) {
                     onClick={async () => {
                       setSendingNow(true);
                       try {
-                        await apiSend('/api/push/send-store', 'POST', {
+                        const result = await apiSend('/api/push/send-store', 'POST', {
                           shop,
                           title: editorTitle,
                           body: editorBody,
