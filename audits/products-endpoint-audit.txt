@@ -1,0 +1,134 @@
+SELF-AUDIT — products-endpoint
+
+ROUTE PATH, AUTH MIDDLEWARE, MOUNT
+---------------------------------------
+Added to backend/routes/stores.js (chose the existing file over a new
+backend/routes/products.js — this endpoint is a single shop-scoped GET
+following the exact same shape as this file's existing `/:shopDomain/
+customers` and `/:shopDomain/orders` routes, so it fits the established
+sibling-resource convention here rather than justifying a whole new
+mounted router for one route).
+
+  router.get('/:shopDomain/products', requireAuth, requireStoreOwner, ...)
+
+Mounted the same way every other route in this file already is:
+backend/server.js:137 — `app.use('/api/stores', storeRoutes);` (no
+change needed there, since the whole file was already mounted). Full
+path: GET /api/stores/:shopDomain/products. Auth middleware is exactly
+`requireAuth, requireStoreOwner` — same two, same order, as every other
+route in this file, confirmed by reading the file's existing
+/customers, /orders, and DELETE /:shopDomain routes before writing this
+one.
+
+EXACT SHOPIFY API URL AND FIELDS REQUESTED
+-----------------------------------------------
+  https://{shopDomain}/admin/api/2025-01/products.json?limit={limit}&fields=id,title,handle,image,status[&title={q}]
+
+Built via URLSearchParams (`limit`, `fields` always set; `title` only
+added when `?q=` was supplied) rather than manual string concatenation,
+so `q` gets properly URL-encoded. API version 2025-01 matches both the
+task's instruction and this codebase's existing calls (webhooks.js's
+fetchProductImage, discounts.js) — confirmed by reading
+fetchProductImage before writing this route. `X-Shopify-Access-Token`
+header carries the token resolved via refreshAccessTokenIfNeeded(store)
+(see below), same header name/pattern as fetchProductImage.
+
+Response shape returned to the caller (after filtering + trimming):
+  [{ id, title, handle, imageUrl, status }, ...]
+`imageUrl` is `product.image?.src ?? null` (per spec — null, not
+undefined/omitted, when a product has no image). `status` is kept on
+the trimmed object too (not stripped) even though every returned item is
+now guaranteed 'active' — harmless and lets a future caller assert it
+without re-deriving.
+
+CONFIRM ERROR HANDLING DISTINGUISHES FAILURE FROM EMPTY
+-------------------------------------------------------------
+Three distinct failure points, all return 502 with a specific message,
+none of them fall through to `return res.json([])`:
+1. No Store document found for the shop -> 404 'Store not found' (a
+   different, more specific case than an Admin API failure — the store
+   was never even looked up against Shopify).
+2. refreshAccessTokenIfNeeded(store) resolves to a falsy token (only
+   possible if the Store row itself has no accessToken at all, since the
+   helper always returns SOME string as a last resort otherwise) -> 502
+   'Could not authenticate with Shopify to load products. Please
+   reconnect the store.'
+3. The Shopify fetch() call itself throws (network failure) -> 502
+   'Failed to reach Shopify to load products. Please try again.'
+4. Shopify responds but !res.ok (4xx/5xx, including the known 403 case)
+   -> logs the status + response body, then 502 'Failed to load products
+   from Shopify. Please try again.'
+5. Any other unexpected exception (outer try/catch) -> also 502 with the
+   same generic message, never a silent empty array.
+A genuinely empty product list (Shopify returns 200 with `products: []`,
+or every returned product is filtered out for not being 'active') is the
+ONLY path that produces `res.json([])` — an empty array is exclusively a
+"this shop really has zero matching active products" signal, never used
+to paper over an error, satisfying the task's explicit requirement that
+the UI be able to tell those two states apart.
+
+CACHE TTL AND SEARCH BYPASS
+--------------------------------
+Module-level `Map` (`productsCache`), keyed by `shopDomain`, storing
+`{ data, expiresAt }`. TTL is exactly 5 minutes
+(`PRODUCTS_CACHE_TTL_MS = 5 * 60 * 1000`). Checked BEFORE any Shopify
+call, but ONLY when `q` is empty (`if (!q) { ... check cache ... }`) —
+a request with `?q=` always falls through to a live Shopify call and
+never reads OR writes the cache, exactly matching "search queries bypass
+the cache." A cache hit returns `cached.data.slice(0, limit)`, so a
+repeated no-search open of the picker at the same (typically default)
+limit is served entirely from memory; a later no-search request asking
+for a higher limit than what was cached on the populating call gets
+fewer items than requested until the entry naturally expires (5 min)
+rather than erroring or triggering a synchronous re-fetch — a deliberate
+simplicity tradeoff for "a small in-memory cache," not a full
+general-purpose one, worth knowing about if the picker is ever built to
+request larger/varying limits.
+
+OFFLINE/ONLINE TOKEN FALLBACK — DOES IT WORK HERE, AND DOES THE KNOWN ISSUE AFFECT IT
+-------------------------------------------------------------------------------------------
+Yes, the fallback applies identically to this endpoint, because it calls
+the exact same shared helper — `refreshAccessTokenIfNeeded(store)` from
+backend/utils/shopify.js — that fetchProductImage() and every other
+Admin-API-calling code path in this codebase already uses. Read that
+helper's full implementation (and its own doc comment, which explicitly
+references the known issue) before writing this route: it prefers the
+offline `accessToken` only when `accessTokenExpiresAt` is set AND
+comfortably in the future; otherwise it tries `onlineAccessToken` (if
+present and unexpired); only if BOTH are unusable does it fall back to
+returning the (possibly broken) offline token as a last resort and, if
+that offline token's expiry is positively known to be in the past, flags
+`needsReauth: true` on the Store document.
+
+Whether the KNOWN issue (see audits/api-token-test-audit.txt and
+audits/token-fix-audit.txt: at least one store's offline token is a
+legacy non-expiring format Shopify now rejects outright, even though
+this app's own `accessTokenExpiresAt` field shows it as "not expired"
+because that field was simply never set for pre-existing installs)
+affects THIS endpoint specifically:
+- For a store that has a valid, unexpired `onlineAccessToken` (the
+  normal case post-fix, per token-fix-audit.txt), this endpoint uses
+  that online token and is unaffected by the broken-offline-token issue
+  entirely — same as fetchProductImage() today.
+- For a store that has ONLY the broken legacy offline token and no
+  usable online token, `refreshAccessTokenIfNeeded` still returns that
+  broken offline token as a last resort (by design — "return anyway,
+  will fail gracefully"), and Shopify will reject the products.json
+  call with a 403. This endpoint does NOT paper over that: the
+  `!shopifyRes.ok` branch catches it, logs the exact status/body, and
+  returns 502 with a clear message — so the failure surfaces correctly
+  to the caller instead of silently returning an empty product list.
+  This is the same failure mode every other Admin-API route in this
+  codebase has for that same class of store; this endpoint doesn't fix
+  the underlying broken-token issue (that's out of this task's scope —
+  it's a per-store data/reauth problem, not something a new read route
+  can resolve) and doesn't make it worse either.
+
+TESTS
+---------
+`cd backend && npm test`: 19 test suites, 151 tests, all passing. No
+existing test touches routes/stores.js or this new route (this
+codebase's existing test suite doesn't do HTTP-level route testing at
+all — confirmed in a prior turn — so this is consistent with how every
+other route in this file is currently covered: not at all, at the HTTP
+layer). `node --check routes/stores.js` confirms the file parses.

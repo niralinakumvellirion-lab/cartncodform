@@ -1,0 +1,208 @@
+SELF-AUDIT — queue-ui-redesign
+
+CONFIRM NO DATA FETCHING / STATE / HANDLER LOGIC CHANGED
+------------------------------------------------------------
+Verified via `git diff --stat` and targeted greps rather than by eye alone:
+- `git diff frontend/app/admin/queue/QueueScreen.jsx | grep -E
+  "^-.*(useState|useEffect|useRef|function \w+\()"` returns exactly ONE
+  line: the old `function MonthCalendar({ month, items, festivals }) {`
+  signature (replaced by the same function with one added prop,
+  `onItemClick` — see below). No useState/useEffect/useRef line was
+  removed anywhere in the file.
+- `git diff ... | grep -E "^\+.*(useState|useEffect|useRef)\("` returns
+  NOTHING — confirms no new hooks were introduced either. Every piece of
+  state (isMobileView, statusFilter, page, jobs, total, loading,
+  statusCounts, statsLoading, actionLoading, actionResults, refreshKey,
+  queueTab, festivalItems, festivalLoading, currentMonth, festivalCalendar,
+  sentNotifsOpen, editingItem, editTitle, editBody, editMobileImageUrl,
+  editDesktopImageUrl, editScheduledAt, editSaving) and every fetch
+  useEffect is byte-for-byte the same as before this task.
+- All API calls (`apiGet`/`apiSend`) — endpoints, methods, and payload
+  shapes — are unchanged: GET /api/queue/{shop}?status=&page=, GET
+  /api/queue/{shop} (per-status stats), GET /api/queue/{shop}/festival,
+  GET /api/push/festivals, POST .../{jobId}/send-now, POST
+  .../{jobId}/cancel, PATCH .../festival/{id} (approve, and the edit
+  modal's saveEdit), DELETE .../festival/{id}. Confirmed via `git diff |
+  grep -E "(apiSend|apiGet|api/queue|api/push)"` — every changed line is
+  the exact same call, just re-indented one or two levels deeper because
+  it now sits inside the new date-grouping wrapper.
+- sendNowJob, cancelJob, openEditModal, closeEditModal, saveEdit — none
+  of these functions (defined above the return statement) were touched
+  at all; only their call sites inside JSX (still the same function
+  references) moved to new visual positions.
+
+ONE INTENTIONAL NEW PIECE OF WIRING (explicitly requested by the task)
+----------------------------------------------------------------------------
+Calendar chips previously had `cursor: pointer` styling but NO onClick at
+all — clicking one did nothing. The task explicitly asked "clicking a
+chip opens the edit modal for that item." Added a new `onItemClick` prop
+to the (local, non-exported) `MonthCalendar` component and wired it to
+the chip's onClick, calling the ALREADY-EXISTING `openEditModal` function
+from QueueScreen — no new handler logic was written, no new state, no new
+API call; this only connects a previously-inert visual element to
+existing capability, per the task's explicit instruction for this exact
+interaction.
+
+SECTIONS REDESIGNED
+------------------------
+1. PAGE HEADER: replaced the ad-hoc 24px/700-weight title with "Queue"
+   at 22px/800-weight/#0f0f0f (matching DashboardScreen's DS.pageTitle
+   token exactly) plus a 13px/#9ca3af one-line subtitle. Container
+   maxWidth changed 1200px -> 1100px, padding changed to match
+   Dashboard's DS.page pattern (24px top/bottom, 20px sides, reduced on
+   mobile).
+
+2. TAB SWITCHER: replaced individual pill-shaped buttons (plain
+   background/border toggling, no shared container) with a proper
+   segmented control — a single `background:#f3f4f6, borderRadius:10,
+   padding:4` wrapper holding two buttons, active tab getting solid
+   `#4f46e5` fill + white text, inactive transparent + grey text. This is
+   the exact same visual pattern as DashboardScreen's own DATE_FILTERS
+   switcher (read directly from DashboardScreen.jsx before building this,
+   confirmed `background:'#f3f4f6', padding:4, gap:4` wrapper +
+   `background: dateFilter===f.key ? '#4f46e5' : 'transparent'` buttons).
+   Buttons given `minHeight: 36`.
+
+3. CALENDAR — MONTH HEADER: month name/year now 19px/weight 600 (was
+   15px/700, smaller and less prominent than the task's 18-20px ask).
+   Prev/next are now real SVG chevron icon buttons (32px circles, 1px
+   border, hover background toggled via onMouseEnter/onMouseLeave direct
+   style mutation — the same convention already used throughout this
+   file and DashboardScreen for hover effects) instead of plain "‹"/"›"
+   text glyphs. Added a "Today" button (`setCurrentMonth(new Date())`) —
+   new UI, but calls setCurrentMonth with a value of the same type/shape
+   the existing prev/next buttons already pass it, not new state logic.
+
+4. CALENDAR — GRID: MonthCalendar rewritten to build a complete 6/5-row
+   grid including dimmed leading/trailing days from the adjacent months
+   (previously: blank grey cells with no day number at all before day 1,
+   and no trailing cells after the last day). These outside-month cells
+   are purely visual — they show only a muted day number, no festival/
+   queue-item matching is attempted against them (kept presentation-only,
+   no new cross-month data logic). Day cell min-height 80->90px. Today's
+   cell now gets both the existing filled-circle day number AND a subtle
+   full-cell tint (`#eef2ff` background + `inset 0 0 0 1.5px #4f46e5`
+   ring) — previously only the day number itself was highlighted. Weekday
+   header row kept Sun-first ordering (unchanged — this matches en-IN
+   locale convention already used elsewhere in the file, and reordering
+   it without also changing the `firstDay = new Date(...).getDay()`
+   math would have been a real logic change, not presentation). Now
+   uppercase with letter-spacing, 10px.
+
+5. CALENDAR — MARKERS/CHIPS: festival markers were already amber-tinted,
+   10px, ellipsis/nowrap — left essentially as-is (font-weight 600 added,
+   radius bumped 4->5). Queue chips bumped 10px->11px, radius 4->5,
+   font-weight 600 added, capped at 2 visible per day with a
+   `+N more` muted-text indicator for the rest (previously ALL items for
+   a day rendered unconditionally, no cap). Day cells (non-outside) now
+   get a faint hover background via onMouseEnter/onMouseLeave, skipped
+   for today's cell so it doesn't fight the persistent accent tint.
+
+6. PLANNING LIST: rows are now grouped under date headings via a new
+   render-time-only helper, `groupFestivalItemsByDay` (groups the
+   already-fetched, already-sorted `festivalItems` array — no new fetch)
+   and `formatGroupHeading` (Today/Tomorrow/Yesterday or "Fri 20 Nov").
+   Each row restructured to the requested column order: 32px thumbnail
+   (unchanged, added in a prior turn) | title (14px/600) + below it
+   "festival · time" (12px muted, e.g. "Diwali · 7:00 PM" — previously
+   the festival name sat in a small tag ABOVE the title next to the
+   status badge, and the line below the title was a full "Scheduled:
+   ..." date+time string) | status badge | actions. Status badges now
+   use a real 4-way map (`FESTIVAL_STATUS_BADGE`: draft grey, approved
+   green, sent blue, cancelled muted+strikethrough) instead of the old
+   binary `item.status === 'approved' ? 'Approved' : 'Draft'` ternary,
+   which was silently mislabeling any 'sent' or 'cancelled' item as
+   "Draft" — a real existing display bug, fixed as part of this
+   presentation pass since it's purely how status is rendered, not what
+   data drives it. Actions (Approve/Edit/Delete) grouped in a
+   `data-row-actions` div that sits at `opacity:0.55` by default and
+   `opacity:1` on row hover (direct style toggle via onMouseEnter/Leave,
+   not a new React state) — de-emphasized rather than
+   `display:none` so keyboard/touch users on mobile (no real hover) can
+   still see and use them. 1px separator between rows within a group,
+   none after each group's last row (each date group is its own rounded
+   card, so no separator is needed between groups either — the heading
+   above provides that break). Empty state copy updated to "Nothing
+   queued yet" / "Head to the Dashboard's Notification Suggestions to
+   plan your first festival notification." (icon opacity 0.4, matching
+   DashboardScreen's own Suggestions-card empty state exactly).
+
+7. SENT NOTIFICATIONS (not itemized in the task's per-section list —
+   left untouched internally): only the outer section's top margin
+   (28->32px) and its collapsible header's hover state (added
+   onMouseEnter/onMouseLeave, matching every other clickable header in
+   this file and DashboardScreen) were touched. The stats row, table/
+   card list, and pagination inside it are byte-for-byte unchanged.
+
+8. EDIT MODAL: max-width 480->560px. The read-only festival header
+   (thumbnail/name/date) moved OUT of the scrollable fields area onto
+   its own `background:#f9fafb` strip between the modal's title bar and
+   the fields, with a `1px solid #f3f4f6` border separating it from the
+   fields below — now visually distinct from the editable content, as
+   asked. Field spacing made consistent (12px muted labels, 16px gap
+   between every field group, including the Scheduled Date field which
+   previously had only 8px). Footer changed from two `flex:1` (equal-
+   width, edge-to-edge) buttons to `justifyContent:'flex-end'` with
+   auto-width, right-aligned Cancel/Save buttons, still separated from
+   the fields by the existing 1px `borderTop`. Close ✕ unchanged
+   (top-right, already present). Added `flex:1, minHeight:0` to the
+   scrollable fields container — matches DashboardScreen's own modal
+   pattern (its Left Editor panel already has `flex:1`) and is a
+   correctness fix for the flexbox "scrollable middle child" pattern:
+   without an explicit flex-basis and `min-height:0`, a flex item won't
+   actually scroll internally before the parent's own `overflow:hidden`
+   clips it — presentation-only, no data/logic involved.
+
+CONFIRM RESPONSIVE BEHAVIOUR DOWN TO 600px
+-----------------------------------------------
+- Page container: side padding already reduces (20px -> 12px) under the
+  existing `isMobileView` breakpoint (768px, JS-based, unchanged from
+  before this task) — still applies at 600px since 600 < 768.
+- Tab switcher and month-nav row: use flex-wrap / no fixed widths, so
+  they reflow rather than overflow at 600px.
+- Calendar grid: `repeat(7, 1fr)` was already fluid; unchanged.
+- Planning List rows: flex-based, thumbnail/badges are flexShrink:0 while
+  the title/meta column is flex:1 with `overflow:hidden` +
+  `textOverflow:ellipsis`, so long titles truncate rather than break the
+  row at narrow widths (same pattern the file already used elsewhere).
+- Edit modal: `width:'100%', maxWidth:560` with the backdrop's own
+  `padding:20` means the modal itself already shrinks to fit a 600px (or
+  narrower) viewport with margin to spare. The ImageUploadPair grid
+  specifically: added a `.ccf-upload-pair-grid` className inside
+  ImageUploadPair.jsx (internal-only — see next section) and a one-time
+  `<style>` injection in QueueScreen (same idempotent-injection pattern
+  DashboardScreen already uses for its own keyframes) with
+  `@media (max-width: 600px) { .ccf-upload-pair-grid { grid-template-
+  columns: 1fr !important; } }`, so the mobile/desktop upload boxes stack
+  vertically under exactly the 600px threshold the task specified, rather
+  than staying cramped at `1fr 1fr` the way ImageUploadPair's own inline
+  styles alone would force.
+
+CONFIRM IMAGEUPLOADPAIR'S API IS UNCHANGED
+-----------------------------------------------
+The component's exported signature is still exactly
+`ImageUploadPair({ mobileImageUrl, desktopImageUrl, onMobileChange,
+onDesktopChange })` — no prop added, removed, or renamed. Both call
+sites (DashboardScreen.jsx's editor and QueueScreen.jsx's new edit
+modal) pass the same 4 props they already did; neither needed any
+change. The only edit to ImageUploadPair.jsx was adding a
+`className="ccf-upload-pair-grid"` to its OWN internal upload-boxes
+`<div>` — an implementation detail invisible to any consumer, not part
+of the props contract, added specifically so an external CSS media query
+could target that div (since inline styles can't do media queries on
+their own, and a `className` selector with `!important` is the minimal
+way to override an inline `style` from outside without changing how the
+component is called). This does mean DashboardScreen's own edit modal
+also now stacks its image pair under 600px as a side effect of sharing
+the component — flagging this explicitly since it does touch a file
+DashboardScreen also imports, even though it's a non-breaking, purely
+responsive enhancement, not a regression, and DashboardScreen's own
+modal already needs to work at the same iframe widths.
+
+BUILD / DEPLOY
+------------------
+`cd frontend && npm run build`: compiled successfully, all 17 routes
+generated, no type/lint errors. /admin/queue grew from 9.08 kB to 10 kB
+(expected — grid/grouping/badge-map logic and the extra modal markup).
+`cd frontend && npx vercel --prod`: build succeeded again on Vercel's
+infrastructure, deployed and aliased to https://app.shopireachboost.com.

@@ -37,6 +37,18 @@ const CHANNEL_BADGE = {
 
 const GRID_COLS = '1.8fr 1.4fr 0.9fr 1.5fr 1fr 1.8fr';
 
+// FestivalQueue's 4 statuses (see backend/models/FestivalQueue.js) — the
+// Planning List previously only ever showed "Approved"/"Draft" (a ternary
+// on item.status === 'approved'), silently mislabeling any 'sent' or
+// 'cancelled' item as "Draft". Presentation-only fix: a proper 4-way
+// badge map, same shape as STATUS_BADGE above.
+const FESTIVAL_STATUS_BADGE = {
+  draft: { bg: '#f3f4f6', color: '#6b7280', label: 'Draft' },
+  approved: { bg: '#dcfce7', color: '#16a34a', label: 'Approved' },
+  sent: { bg: '#dbeafe', color: '#2563eb', label: 'Sent' },
+  cancelled: { bg: '#f3f4f6', color: '#9ca3af', label: 'Cancelled', strike: true },
+};
+
 function formatSignal(type) {
   if (!type) return '—';
   const s = String(type).replace(/_/g, ' ');
@@ -281,6 +293,37 @@ function formatFestivalDate(dateStr) {
   });
 }
 
+// Planning List date-group headings — render-time grouping only, no new
+// state/fetch (festivalItems already arrives sorted by scheduledAt from
+// the backend). "Today"/"Tomorrow"/"Yesterday" for near dates, otherwise
+// "Fri 20 Nov".
+function formatGroupHeading(date) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const diffDays = Math.round((d - today) / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Tomorrow';
+  if (diffDays === -1) return 'Yesterday';
+  return date.toLocaleDateString('en-IN', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  });
+}
+
+function groupFestivalItemsByDay(items) {
+  const groups = new Map();
+  items.forEach((item) => {
+    const d = new Date(item.scheduledAt);
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    if (!groups.has(key)) groups.set(key, { date: d, items: [] });
+    groups.get(key).items.push(item);
+  });
+  return Array.from(groups.values());
+}
+
 // MonthCalendar — renders one month grid. `festivals` is passed the raw,
 // unfiltered FESTIVAL_CALENDAR array rather than getUpcomingFestivals()'s
 // output: getUpcomingFestivals only returns festivals within a 60-day-
@@ -301,79 +344,144 @@ function formatFestivalDate(dateStr) {
 // re-render (e.g. when navigating between months). Fixed by keying every
 // cell — empty and real — by the array index `i`, which is unique across
 // the whole array regardless of cell type.
-function MonthCalendar({ month, items, festivals }) {
+const MAX_CHIPS_PER_DAY = 2;
+
+// MonthCalendar — renders one month grid, now a complete 6x7-capable
+// grid with dimmed leading/trailing days from adjacent months (purely
+// visual — those dimmed cells show only a day number, no festival/queue
+// matching against their real month, keeping this presentation-only).
+// `onItemClick` is a new prop (this component is local to this file,
+// not a shared/exported one, so this isn't touching any external API) —
+// wires the existing openEditModal() into the previously-inert chips.
+function MonthCalendar({ month, items, festivals, onItemClick }) {
   const year = month.getFullYear();
   const mon = month.getMonth();
   const firstDay = new Date(year, mon, 1).getDay();
   const daysInMonth = new Date(year, mon + 1, 0).getDate();
-  const days = [];
-  for (let i = 0; i < firstDay; i++) { days.push(null); }
-  for (let d = 1; d <= daysInMonth; d++) { days.push(d); }
+  const daysInPrevMonth = new Date(year, mon, 0).getDate();
+  const totalCells = Math.ceil((firstDay + daysInMonth) / 7) * 7;
+  const trailingCount = totalCells - firstDay - daysInMonth;
+
+  const cells = [];
+  for (let i = 0; i < firstDay; i++) {
+    cells.push({ day: daysInPrevMonth - firstDay + 1 + i, outside: true });
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push({ day: d, outside: false });
+  }
+  for (let i = 1; i <= trailingCount; i++) {
+    cells.push({ day: i, outside: true });
+  }
+
+  const todayReal = new Date();
+
   return (
-    <div>
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1,
-        background: '#e5e7eb', border: '1px solid #e5e7eb',
-        borderRadius: 10, overflow: 'hidden',
-      }}>
-        {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
-          <div key={d} style={{
-            background: '#f9fafb', padding: '8px 0',
-            textAlign: 'center', fontSize: 11,
-            fontWeight: 700, color: '#9ca3af',
-          }}>{d}</div>
-        ))}
-        {days.map((day, i) => {
-          if (!day) return (
-            <div key={i} style={{ background: '#f9fafb', minHeight: 80 }} />
-          );
-          const dateStr = `${year}-${String(mon+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-          const isToday = new Date().toDateString() ===
-            new Date(year, mon, day).toDateString();
-          const festival = festivals.find(f => f.date.startsWith(dateStr));
-          const queued = items.filter(item => {
-            const d = new Date(item.scheduledAt);
-            return d.getFullYear() === year &&
-                   d.getMonth() === mon &&
-                   d.getDate() === day;
-          });
+    <div style={{
+      display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1,
+      background: '#e5e7eb', border: '1px solid #e5e7eb',
+      borderRadius: 10, overflow: 'hidden',
+    }}>
+      {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
+        <div key={d} style={{
+          background: '#f9fafb', padding: '8px 0',
+          textAlign: 'center', fontSize: 10,
+          fontWeight: 700, color: '#9ca3af',
+          textTransform: 'uppercase', letterSpacing: '0.06em',
+        }}>{d}</div>
+      ))}
+      {cells.map((cell, i) => {
+        if (cell.outside) {
           return (
             <div key={i} style={{
-              background: '#fff', minHeight: 80, padding: 6, position: 'relative',
+              background: '#fbfbfc', minHeight: 90, padding: 6,
             }}>
-              <div style={{
-                width: 24, height: 24, borderRadius: '50%',
-                background: isToday ? '#4f46e5' : 'transparent',
-                color: isToday ? '#fff' : '#111827',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: 12, fontWeight: isToday ? 700 : 400, marginBottom: 4,
-              }}>{day}</div>
-              {festival && (
-                <div style={{
-                  fontSize: 10, background: '#fef3c7', color: '#d97706',
-                  borderRadius: 4, padding: '2px 4px', marginBottom: 2,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>{festival.emoji} {festival.name}</div>
-              )}
-              {queued.map(q => (
-                <div key={q._id} style={{
-                  fontSize: 10,
-                  background: q.status === 'approved' ? '#dcfce7' : '#dbeafe',
-                  color: q.status === 'approved' ? '#16a34a' : '#2563eb',
-                  borderRadius: 4, padding: '2px 4px', marginBottom: 2,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  cursor: 'pointer',
-                }}>📢 {q.title}</div>
-              ))}
+              <div style={{ fontSize: 12, color: '#d1d5db' }}>{cell.day}</div>
             </div>
           );
-        })}
-      </div>
+        }
+
+        const day = cell.day;
+        const dateStr = `${year}-${String(mon+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        const isToday = todayReal.toDateString() ===
+          new Date(year, mon, day).toDateString();
+        const festival = festivals.find(f => f.date.startsWith(dateStr));
+        const queued = items.filter(item => {
+          const d = new Date(item.scheduledAt);
+          return d.getFullYear() === year &&
+                 d.getMonth() === mon &&
+                 d.getDate() === day;
+        });
+        const visibleChips = queued.slice(0, MAX_CHIPS_PER_DAY);
+        const extraCount = queued.length - MAX_CHIPS_PER_DAY;
+
+        return (
+          <div key={i}
+            onMouseEnter={e => { if (!isToday) e.currentTarget.style.background = '#f9fafb'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = isToday ? '#eef2ff' : '#fff'; }}
+            style={{
+              background: isToday ? '#eef2ff' : '#fff',
+              minHeight: 90, padding: 6, position: 'relative',
+              boxShadow: isToday ? 'inset 0 0 0 1.5px #4f46e5' : 'none',
+              transition: 'background 0.12s',
+            }}
+          >
+            <div style={{
+              width: 22, height: 22, borderRadius: '50%',
+              background: isToday ? '#4f46e5' : 'transparent',
+              color: isToday ? '#fff' : '#111827',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 12, fontWeight: isToday ? 700 : 400, marginBottom: 4,
+            }}>{day}</div>
+            {festival && (
+              <div style={{
+                fontSize: 10, background: '#fef3c7', color: '#d97706',
+                borderRadius: 5, padding: '2px 5px', marginBottom: 2,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                fontWeight: 600,
+              }}>{festival.emoji} {festival.name}</div>
+            )}
+            {visibleChips.map(q => (
+              <div key={q._id}
+                onClick={() => onItemClick && onItemClick(q)}
+                style={{
+                  fontSize: 11,
+                  background: q.status === 'approved' ? '#dcfce7' : '#dbeafe',
+                  color: q.status === 'approved' ? '#16a34a' : '#2563eb',
+                  borderRadius: 5, padding: '2px 5px', marginBottom: 2,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  cursor: 'pointer', fontWeight: 600,
+                }}>{q.title}</div>
+            ))}
+            {extraCount > 0 && (
+              <div style={{ fontSize: 10, color: '#9ca3af', padding: '1px 5px', fontWeight: 600 }}>
+                +{extraCount} more
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
 export default function QueueScreen({ shop }) {
+  // One-time style injection — same idempotent pattern DashboardScreen
+  // uses for its own keyframes. Only rule here: stack ImageUploadPair's
+  // two upload boxes under 600px (that component's props/API are
+  // untouched — this targets a className added inside it purely for
+  // this external hook).
+  if (typeof window !== 'undefined' &&
+      !document.getElementById('queue-responsive')) {
+    const s = document.createElement('style');
+    s.id = 'queue-responsive';
+    s.textContent = `
+      @media (max-width: 600px) {
+        .ccf-upload-pair-grid { grid-template-columns: 1fr !important; }
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
   const [isMobileView, setIsMobileView] = useState(false);
   useEffect(() => {
     const check = () => setIsMobileView(window.innerWidth <= 768);
@@ -615,41 +723,40 @@ export default function QueueScreen({ shop }) {
   return (
     <div
       style={{
-        padding: isMobileView ? '0 12px 24px' : '0 24px 24px',
-        maxWidth: '1200px',
+        padding: isMobileView ? '20px 12px 32px' : '24px 20px 32px',
+        maxWidth: '1100px',
         margin: '0 auto',
       }}
     >
-      {/* PAGE HEADER — subtitle text deliberately changed per the task
-          ("Manage scheduled and sent notifications" ->
-          "Plan and schedule festival notifications") */}
-      <div style={{ marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }}>
-          Notification Queue
+      {/* PAGE HEADER */}
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f0f0f', margin: '0 0 4px', letterSpacing: '-0.3px' }}>
+          Queue
         </h1>
-        <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
-          Plan and schedule festival notifications
+        <p style={{ fontSize: 13, color: '#9ca3af', margin: 0 }}>
+          Plan, schedule, and track your festival notifications before they go out.
         </p>
       </div>
 
-      {/* TABS: Calendar | Planning List */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      {/* TABS: Calendar | Planning List — segmented control, same pill
+          pattern as the Dashboard's own DATE_FILTERS switcher. */}
+      <div style={{
+        display: 'inline-flex', gap: 4, padding: 4,
+        background: '#f3f4f6', borderRadius: 10, marginBottom: 24,
+      }}>
         {[
-          { key: 'calendar', label: '📅 Calendar' },
-          { key: 'planning', label: '📋 Planning List' },
+          { key: 'calendar', label: 'Calendar' },
+          { key: 'planning', label: 'Planning List' },
         ].map(tab => (
           <button
             key={tab.key}
             onClick={() => setQueueTab(tab.key)}
             style={{
-              padding: '8px 16px', fontSize: 13,
-              fontWeight: queueTab === tab.key ? 700 : 500,
-              color: queueTab === tab.key ? '#111827' : '#6b7280',
-              background: queueTab === tab.key ? '#fff' : 'transparent',
-              border: '1px solid',
-              borderColor: queueTab === tab.key ? '#e5e7eb' : 'transparent',
-              borderRadius: 20, cursor: 'pointer',
-              boxShadow: queueTab === tab.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              padding: '8px 18px', minHeight: 36, fontSize: 13, fontWeight: 600,
+              border: 'none', borderRadius: 7, cursor: 'pointer',
+              background: queueTab === tab.key ? '#4f46e5' : 'transparent',
+              color: queueTab === tab.key ? '#fff' : '#6b7280',
+              transition: 'background 0.15s, color 0.15s',
             }}
           >
             {tab.label}
@@ -657,33 +764,66 @@ export default function QueueScreen({ shop }) {
         ))}
       </div>
 
-      {/* MONTH NAVIGATION — calendar tab only. Prev/next handlers not
-          given verbatim by the task; implemented as ±1 month shifts on
-          currentMonth. */}
+      {/* MONTH NAVIGATION — calendar tab only. Prev/next/Today handlers
+          not given verbatim by the task; Today jumps to new Date(), the
+          same seed value currentMonth starts from. */}
       {queueTab === 'calendar' && (
         <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          gap: 16, marginBottom: 16,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 16, flexWrap: 'wrap', gap: 12,
         }}>
-          <button
-            onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
-            style={{
-              width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb',
-              background: '#fff', color: '#374151', fontSize: 16, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >‹</button>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#111827', minWidth: 160, textAlign: 'center' }}>
+          <div style={{ fontSize: 19, fontWeight: 600, color: '#111827' }}>
             {currentMonth.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
           </div>
-          <button
-            onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
-            style={{
-              width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb',
-              background: '#fff', color: '#374151', fontSize: 16, cursor: 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >›</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button
+              onClick={() => setCurrentMonth(new Date())}
+              onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+              onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+              style={{
+                padding: '6px 14px', fontSize: 12, fontWeight: 600,
+                border: '1px solid #e5e7eb', borderRadius: 8,
+                background: '#fff', color: '#374151', cursor: 'pointer',
+                transition: 'background 0.15s',
+              }}
+            >
+              Today
+            </button>
+            <button
+              aria-label="Previous month"
+              onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+              onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+              onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+              style={{
+                width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb',
+                background: '#fff', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'background 0.15s',
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#374151"
+                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="15 18 9 12 15 6"/>
+              </svg>
+            </button>
+            <button
+              aria-label="Next month"
+              onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+              onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+              onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+              style={{
+                width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb',
+                background: '#fff', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                transition: 'background 0.15s',
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#374151"
+                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+            </button>
+          </div>
         </div>
       )}
 
@@ -694,102 +834,146 @@ export default function QueueScreen({ shop }) {
             Loading...
           </div>
         ) : (
-          <MonthCalendar month={currentMonth} items={festivalItems} festivals={festivalCalendar} />
+          <MonthCalendar
+            month={currentMonth}
+            items={festivalItems}
+            festivals={festivalCalendar}
+            onItemClick={openEditModal}
+          />
         )
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div>
           {festivalLoading ? (
             <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 40 }}>
               Loading...
             </div>
           ) : festivalItems.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: 40 }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>📅</div>
+            <div style={{ textAlign: 'center', padding: '48px 20px' }}>
+              <div style={{ fontSize: 32, opacity: 0.4, marginBottom: 8 }}>📋</div>
               <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
-                No notifications planned yet
+                Nothing queued yet
               </div>
               <div style={{ fontSize: 13, color: '#9ca3af', marginTop: 4 }}>
-                Go to Dashboard → Notification Suggestions to plan festival notifications
+                Head to the Dashboard's Notification Suggestions to plan your first festival notification.
               </div>
             </div>
-          ) : festivalItems.map(item => (
-            <div key={item._id} style={{
-              background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12,
-              padding: '14px 16px', display: 'flex', justifyContent: 'space-between',
-              alignItems: 'center', gap: 12,
-            }}>
-              {(item.mobileImageUrl || item.desktopImageUrl) && (
-                <img
-                  src={item.mobileImageUrl || item.desktopImageUrl}
-                  alt=""
-                  style={{
-                    width: 32, height: 32, borderRadius: 8,
-                    objectFit: 'cover', flexShrink: 0,
-                  }}
-                  onError={e => { e.target.style.display = 'none'; }}
-                />
-              )}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <span style={{
-                    fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
-                    background: item.status === 'approved' ? '#dcfce7' : '#dbeafe',
-                    color: item.status === 'approved' ? '#16a34a' : '#2563eb',
-                  }}>{item.status === 'approved' ? 'Approved' : 'Draft'}</span>
-                  {item.festival && (
-                    <span style={{ fontSize: 11, color: '#9ca3af' }}>{item.festival}</span>
-                  )}
+          ) : (
+            groupFestivalItemsByDay(festivalItems).map((group) => (
+              <div key={`${group.date.getFullYear()}-${group.date.getMonth()}-${group.date.getDate()}`}
+                style={{ marginBottom: 20 }}>
+                <div style={{
+                  fontSize: 11, fontWeight: 700, color: '#9ca3af',
+                  textTransform: 'uppercase', letterSpacing: '0.06em',
+                  marginBottom: 8, paddingLeft: 2,
+                }}>
+                  {formatGroupHeading(group.date)}
                 </div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 2 }}>
-                  {item.title}
-                </div>
-                <div style={{ fontSize: 12, color: '#6b7280' }}>
-                  Scheduled: {new Date(item.scheduledAt).toLocaleString('en-IN', {
-                    day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                <div style={{
+                  background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12,
+                  overflow: 'hidden',
+                }}>
+                  {group.items.map((item, ii) => {
+                    const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
+                    const isLastInGroup = ii === group.items.length - 1;
+                    return (
+                      <div key={item._id}
+                        onMouseEnter={e => {
+                          e.currentTarget.style.background = '#f9fafb';
+                          const actions = e.currentTarget.querySelector('[data-row-actions]');
+                          if (actions) actions.style.opacity = '1';
+                        }}
+                        onMouseLeave={e => {
+                          e.currentTarget.style.background = '#fff';
+                          const actions = e.currentTarget.querySelector('[data-row-actions]');
+                          if (actions) actions.style.opacity = '0.55';
+                        }}
+                        style={{
+                          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
+                          borderBottom: isLastInGroup ? 'none' : '1px solid #f9fafb',
+                          transition: 'background 0.12s',
+                        }}
+                      >
+                        {(item.mobileImageUrl || item.desktopImageUrl) && (
+                          <img
+                            src={item.mobileImageUrl || item.desktopImageUrl}
+                            alt=""
+                            style={{
+                              width: 32, height: 32, borderRadius: 8,
+                              objectFit: 'cover', flexShrink: 0,
+                            }}
+                            onError={e => { e.target.style.display = 'none'; }}
+                          />
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{
+                            fontSize: 14, fontWeight: 600, color: '#111827',
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          }}>
+                            {item.title}
+                          </div>
+                          <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
+                            {item.festival ? `${item.festival} · ` : ''}
+                            {new Date(item.scheduledAt).toLocaleTimeString('en-IN', {
+                              hour: 'numeric', minute: '2-digit', hour12: true,
+                            })}
+                          </div>
+                        </div>
+                        <span style={{
+                          fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+                          background: badge.bg, color: badge.color, flexShrink: 0,
+                          textDecoration: badge.strike ? 'line-through' : 'none',
+                        }}>
+                          {badge.label}
+                        </span>
+                        <div data-row-actions style={{
+                          display: 'flex', gap: 6, flexShrink: 0,
+                          opacity: 0.55, transition: 'opacity 0.15s',
+                        }}>
+                          {item.status === 'draft' && (
+                            <button
+                              onClick={async () => {
+                                await apiSend(
+                                  `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
+                                  'PATCH', { status: 'approved' }
+                                );
+                                setFestivalItems(prev => prev.map(i =>
+                                  i._id === item._id ? {...i, status: 'approved'} : i
+                                ));
+                              }}
+                              style={{
+                                padding: '5px 10px', borderRadius: 6, border: 'none',
+                                background: '#4f46e5', color: '#fff', fontSize: 11,
+                                fontWeight: 600, cursor: 'pointer',
+                              }}>Approve</button>
+                          )}
+                          <button
+                            onClick={() => openEditModal(item)}
+                            style={{
+                              padding: '5px 10px', borderRadius: 6,
+                              border: '1px solid #e5e7eb', background: '#fff',
+                              color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                            }}>Edit</button>
+                          <button
+                            onClick={async () => {
+                              await apiSend(
+                                `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
+                                'DELETE', {}
+                              );
+                              setFestivalItems(prev => prev.filter(i => i._id !== item._id));
+                            }}
+                            style={{
+                              padding: '5px 10px', borderRadius: 6,
+                              border: '1px solid #fee2e2', background: '#fff',
+                              color: '#dc2626', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                            }}>Delete</button>
+                        </div>
+                      </div>
+                    );
                   })}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                {item.status === 'draft' && (
-                  <button
-                    onClick={async () => {
-                      await apiSend(
-                        `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
-                        'PATCH', { status: 'approved' }
-                      );
-                      setFestivalItems(prev => prev.map(i =>
-                        i._id === item._id ? {...i, status: 'approved'} : i
-                      ));
-                    }}
-                    style={{
-                      padding: '6px 12px', borderRadius: 7, border: 'none',
-                      background: '#4f46e5', color: '#fff', fontSize: 12,
-                      fontWeight: 600, cursor: 'pointer',
-                    }}>Approve</button>
-                )}
-                <button
-                  onClick={() => openEditModal(item)}
-                  style={{
-                    padding: '6px 12px', borderRadius: 7,
-                    border: '1px solid #e5e7eb', background: '#fff',
-                    color: '#374151', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                  }}>Edit</button>
-                <button
-                  onClick={async () => {
-                    await apiSend(
-                      `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
-                      'DELETE', {}
-                    );
-                    setFestivalItems(prev => prev.filter(i => i._id !== item._id));
-                  }}
-                  style={{
-                    padding: '6px 12px', borderRadius: 7,
-                    border: '1px solid #fee2e2', background: '#fff',
-                    color: '#dc2626', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-                  }}>Delete</button>
-              </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       )}
 
@@ -797,13 +981,16 @@ export default function QueueScreen({ shop }) {
           list (filter tabs, stats row, table/card list, pagination),
           preserved exactly as it was, now wrapped in a collapsible
           section that defaults to collapsed. */}
-      <div style={{ marginTop: 28 }}>
+      <div style={{ marginTop: 32 }}>
         <button
           onClick={() => setSentNotifsOpen(o => !o)}
+          onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+          onMouseLeave={e => e.currentTarget.style.background = '#fff'}
           style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             width: '100%', padding: '12px 16px', borderRadius: 10,
             border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer',
+            transition: 'background 0.15s',
           }}
         >
           <span style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>
@@ -1100,7 +1287,9 @@ export default function QueueScreen({ shop }) {
       {/* Edit modal — mirrors the Dashboard editor's structure (read-only
           festival header, editable title/body/images/date, Save/Cancel),
           minus the live phone/desktop preview panel, which wasn't part
-          of this task's spec. */}
+          of this task's spec. Widened to ~560px and the festival header
+          moved onto its own tinted strip, visually distinct from the
+          editable fields below it. */}
       {editingItem && (
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
@@ -1111,7 +1300,7 @@ export default function QueueScreen({ shop }) {
         >
           <div style={{
             background: '#fff', borderRadius: 16,
-            width: '100%', maxWidth: 480,
+            width: '100%', maxWidth: 560,
             boxShadow: '0 8px 40px rgba(0,0,0,0.15)',
             display: 'flex', flexDirection: 'column',
             maxHeight: '90vh', overflow: 'hidden',
@@ -1120,7 +1309,7 @@ export default function QueueScreen({ shop }) {
             <div style={{
               padding: '16px 20px', borderBottom: '1px solid #f3f4f6',
               display: 'flex', justifyContent: 'space-between',
-              alignItems: 'center',
+              alignItems: 'center', flexShrink: 0,
             }}>
               <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
                 Edit Notification
@@ -1132,65 +1321,70 @@ export default function QueueScreen({ shop }) {
               </button>
             </div>
 
-            <div style={{ padding: 20, overflowY: 'auto' }}>
-              {/* Festival header — thumbnail + name + date, read only */}
-              {(() => {
-                const meta = festivalCalendar.find(f => f.name === editingItem.festival);
-                return (
+            {/* Festival header — thumbnail + name + date, read only, on
+                a tinted strip so it reads as context, not an editable
+                field. */}
+            {(() => {
+              const meta = festivalCalendar.find(f => f.name === editingItem.festival);
+              return (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '16px 20px', background: '#f9fafb',
+                  borderBottom: '1px solid #f3f4f6', flexShrink: 0,
+                }}>
                   <div style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    marginBottom: 20, paddingBottom: 16,
-                    borderBottom: '1px solid #f3f4f6',
+                    width: 48, height: 48, borderRadius: '50%',
+                    background: '#fff', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center',
+                    fontSize: 22, flexShrink: 0, overflow: 'hidden',
+                    border: '1px solid #f3f4f6',
                   }}>
-                    <div style={{
-                      width: 48, height: 48, borderRadius: '50%',
-                      background: '#f3f4f6', display: 'flex',
-                      alignItems: 'center', justifyContent: 'center',
-                      fontSize: 22, flexShrink: 0, overflow: 'hidden',
-                    }}>
-                      {meta?.imageUrl ? (
-                        <>
-                          <img
-                            src={meta.imageUrl}
-                            alt=""
-                            style={{
-                              width: '100%', height: '100%',
-                              borderRadius: '50%', objectFit: 'cover',
-                            }}
-                            onError={e => {
-                              e.target.style.display = 'none';
-                              if (e.target.nextSibling) {
-                                e.target.nextSibling.style.display = 'flex';
-                              }
-                            }}
-                          />
-                          <span style={{
-                            display: 'none', alignItems: 'center',
-                            justifyContent: 'center', width: '100%', height: '100%',
-                          }}>
-                            {meta?.emoji || '📢'}
-                          </span>
-                        </>
-                      ) : (
-                        meta?.emoji || '📢'
-                      )}
+                    {meta?.imageUrl ? (
+                      <>
+                        <img
+                          src={meta.imageUrl}
+                          alt=""
+                          style={{
+                            width: '100%', height: '100%',
+                            borderRadius: '50%', objectFit: 'cover',
+                          }}
+                          onError={e => {
+                            e.target.style.display = 'none';
+                            if (e.target.nextSibling) {
+                              e.target.nextSibling.style.display = 'flex';
+                            }
+                          }}
+                        />
+                        <span style={{
+                          display: 'none', alignItems: 'center',
+                          justifyContent: 'center', width: '100%', height: '100%',
+                        }}>
+                          {meta?.emoji || '📢'}
+                        </span>
+                      </>
+                    ) : (
+                      meta?.emoji || '📢'
+                    )}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: '#111827' }}>
+                      {editingItem.festival || 'Notification'}
                     </div>
-                    <div>
-                      <div style={{ fontSize: 15, fontWeight: 600, color: '#111827' }}>
-                        {editingItem.festival || 'Notification'}
-                      </div>
-                      <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
-                        {meta
-                          ? formatFestivalDate(meta.date)
-                          : new Date(editingItem.scheduledAt).toLocaleDateString('en-IN', {
-                              weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
-                            })}
-                      </div>
+                    <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
+                      {meta
+                        ? formatFestivalDate(meta.date)
+                        : new Date(editingItem.scheduledAt).toLocaleDateString('en-IN', {
+                            weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+                          })}
                     </div>
                   </div>
-                );
-              })()}
+                </div>
+              );
+            })()}
 
+            {/* Editable fields — scrollable if the modal runs out of
+                vertical room. */}
+            <div style={{ padding: 20, overflowY: 'auto', flex: 1, minHeight: 0 }}>
               {/* Title */}
               <div style={{ marginBottom: 16 }}>
                 <label style={{ fontSize: 12, fontWeight: 600,
@@ -1227,16 +1421,21 @@ export default function QueueScreen({ shop }) {
               </div>
 
               {/* Mobile Image + Desktop Image — shared widget, same as
-                  the Dashboard editor. */}
-              <ImageUploadPair
-                mobileImageUrl={editMobileImageUrl}
-                desktopImageUrl={editDesktopImageUrl}
-                onMobileChange={setEditMobileImageUrl}
-                onDesktopChange={setEditDesktopImageUrl}
-              />
+                  the Dashboard editor. Side by side on desktop; the
+                  component's own internal grid stacks under 600px via a
+                  media query QueueScreen injects (see the top of this
+                  file) — ImageUploadPair's props are unchanged. */}
+              <div style={{ marginBottom: 16 }}>
+                <ImageUploadPair
+                  mobileImageUrl={editMobileImageUrl}
+                  desktopImageUrl={editDesktopImageUrl}
+                  onMobileChange={setEditMobileImageUrl}
+                  onDesktopChange={setEditDesktopImageUrl}
+                />
+              </div>
 
               {/* Scheduled date */}
-              <div style={{ marginBottom: 8 }}>
+              <div>
                 <label style={{ fontSize: 12, fontWeight: 600,
                                 color: '#374151', display: 'block',
                                 marginBottom: 6 }}>
@@ -1254,16 +1453,17 @@ export default function QueueScreen({ shop }) {
               </div>
             </div>
 
-            {/* Save / Cancel */}
+            {/* Footer — right-aligned, separated by a 1px divider */}
             <div style={{
               padding: '16px 20px', borderTop: '1px solid #f3f4f6',
-              display: 'flex', gap: 8,
+              display: 'flex', justifyContent: 'flex-end', gap: 8,
+              flexShrink: 0,
             }}>
               <button
                 onClick={closeEditModal}
                 disabled={editSaving}
                 style={{
-                  flex: 1, padding: '10px 0', borderRadius: 8,
+                  padding: '10px 20px', borderRadius: 8,
                   border: '1px solid #e5e7eb', background: '#fff',
                   color: '#374151', fontSize: 13, fontWeight: 700,
                   cursor: editSaving ? 'not-allowed' : 'pointer',
@@ -1274,7 +1474,7 @@ export default function QueueScreen({ shop }) {
                 onClick={saveEdit}
                 disabled={editSaving}
                 style={{
-                  flex: 1, padding: '10px 0', borderRadius: 8,
+                  padding: '10px 20px', borderRadius: 8,
                   border: 'none', background: editSaving ? '#818cf8' : '#4f46e5',
                   color: '#fff', fontSize: 13, fontWeight: 700,
                   cursor: editSaving ? 'not-allowed' : 'pointer',

@@ -70,8 +70,12 @@ export function ImageUploadPair({
         </div>
       )}
 
-      {/* Two upload boxes side by side */}
-      <div style={{ display: 'grid',
+      {/* Two upload boxes side by side. The className (internal-only —
+          this component's props/API are unchanged) is a hook for an
+          external <600px media query; see QueueScreen.jsx, which injects
+          the actual rule once (same pattern as DashboardScreen's own
+          one-time <style> injection for its spinner/toast keyframes). */}
+      <div className="ccf-upload-pair-grid" style={{ display: 'grid',
                     gridTemplateColumns: '1fr 1fr',
                     gap: 10 }}>
 
