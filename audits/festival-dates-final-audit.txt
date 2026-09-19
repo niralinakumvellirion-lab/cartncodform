@@ -1,0 +1,57 @@
+SELF-AUDIT — festival-dates-final
+
+DATE UPDATE (backend/data/festivals.json)
+--------------------------------------------
+Applied the user-supplied date list via a small one-off Node script
+(scratchpad, not committed to the repo) that: loaded festivals.json,
+matched each entry by exact `name` string against the supplied
+name -> date map, asserted every name in the file has a corresponding
+entry in the map and vice versa (so nothing silently skipped or
+mismatched due to a typo), asserted the total count is 36 on both sides,
+overwrote only the `date` field on each matching object, and wrote the
+file back with the same 2-space JSON formatting used previously.
+
+Verified afterward with an independent check (re-reading the written file
+and comparing every one of the 36 `date` values against the exact
+user-supplied list): ALL 36 MATCH. Per the user's explicit instruction,
+these dates were applied exactly as given without question, adjustment, or
+commentary — including Ganesh Chaturthi and Janmashtami both landing on
+2027-09-04.
+
+CONFIRM NO OTHER FIELDS MODIFIED
+------------------------------------
+The update script only ever assigned to `f.date` on each already-parsed
+object — every other property (`name`, `emoji`, `suggestion`, `message`,
+`searchTerm`, `imageUrl`) was left as a reference to the original parsed
+value and never touched. Independently re-verified by checking that all
+36 entries still have all 7 expected keys present (`name`, `date`,
+`emoji`, `suggestion`, `message`, `searchTerm`, `imageUrl`) and that this
+matches the pre-existing count/shape from before this change.
+
+FESTIVAL_CALENDAR_FALLBACK (frontend/app/admin/dashboard/DashboardScreen.jsx)
+----------------------------------------------------------------------------------
+Regenerated the entire array literal directly from the current
+festivals.json (all 36 entries, in file order), now including
+`searchTerm` and `imageUrl` fields on every entry — previously the
+fallback only had `name`/`date`/`emoji`/`suggestion`/`message` and had no
+`imageUrl` at all, so this also closes that earlier gap, not just the
+dates.
+
+Verified programmatically: extracted the FESTIVAL_CALENDAR_FALLBACK array
+literal from the .jsx source (via regex + eval on the isolated array
+text, not the whole file) and diffed it field-by-field against
+require('./backend/data/festivals.json') for all 7 fields on all 36
+entries, in order. Result: FALLBACK MATCHES festivals.json EXACTLY —
+zero diffs, equal counts (36 and 36).
+
+VERIFICATION COMMANDS RUN
+------------------------------
+`cd backend && node -e "require('./data/festivals.json')"` — parsed
+successfully, no errors.
+`cd frontend && npm run build` — completed cleanly, all 17 routes
+generated, no type/lint errors. /admin/dashboard route size grew from
+~11.5 kB to 13.7 kB, consistent with the larger inlined fallback array
+(36 entries with imageUrl strings vs. the previous 13-entry, no-imageUrl
+version) — expected, not a build problem.
+
+No other files were touched in this task.

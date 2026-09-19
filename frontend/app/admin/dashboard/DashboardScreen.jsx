@@ -167,45 +167,186 @@ const SIGNAL_LABELS = {
 // festivalCalendar state + useEffect in DashboardScreen below. The
 // canonical, image-enriched copy lives in backend/data/festivals.json.
 const FESTIVAL_CALENDAR_FALLBACK = [
-  { name: 'Navratri', date: '2026-10-02', emoji: '🪷',
+  { name: 'Navratri', date: '2026-10-11', emoji: '🪷',
     suggestion: 'Send festive Navratri offers to all subscribers',
-    message: 'Celebrate Navratri with us! Get special festive discounts on your favorite products. 🪷' },
-  { name: 'Dussehra', date: '2026-10-12', emoji: '🏹',
+    message: 'Celebrate Navratri with us! Get special festive discounts on your favorite products. 🪷',
+    searchTerm: 'navratri garba dance',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796311/ausgezfhwyivcswmojmi.jpg' },
+  { name: 'Dussehra', date: '2026-10-20', emoji: '🏹',
     suggestion: 'Send Dussehra sale notification',
-    message: 'Happy Dussehra! Victory of good over evil — and great deals for you! Shop now. 🏹' },
-  { name: 'Dhanteras', date: '2026-10-28', emoji: '🪙',
+    message: 'Happy Dussehra! Victory of good over evil — and great deals for you! Shop now. 🏹',
+    searchTerm: 'dussehra festival celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796313/rmqgg4kqkz0yhuxy1c1k.jpg' },
+  { name: 'Dhanteras', date: '2026-11-06', emoji: '🪙',
     suggestion: 'Promote Dhanteras shopping with special offer',
-    message: 'Dhanteras is here! Bring prosperity home with our exclusive festive collection. 🪙' },
-  { name: 'Diwali', date: '2026-10-29', emoji: '🪔',
+    message: 'Dhanteras is here! Bring prosperity home with our exclusive festive collection. 🪙',
+    searchTerm: 'dhanteras gold diya',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796315/lt9va3uqcullbw3ils5g.jpg' },
+  { name: 'Diwali', date: '2026-11-08', emoji: '🪔',
     suggestion: 'Send Diwali offer — biggest sale of the year',
-    message: 'Happy Diwali! Light up your celebrations with our biggest sale of the year. 🪔✨' },
-  { name: 'Bhai Dooj', date: '2026-10-31', emoji: '❤️',
+    message: 'Happy Diwali! Light up your celebrations with our biggest sale of the year. 🪔✨',
+    searchTerm: 'diwali diya lamps',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796317/ll2muraxgo6pmdf2bi5d.jpg' },
+  { name: 'Bhai Dooj', date: '2026-11-11', emoji: '❤️',
     suggestion: 'Send Bhai Dooj gifting ideas notification',
-    message: 'Bhai Dooj special! Find the perfect gift for your siblings. Shop now. ❤️' },
+    message: 'Bhai Dooj special! Find the perfect gift for your siblings. Shop now. ❤️',
+    searchTerm: 'bhai dooj celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796320/p0urc4wemgbt3vgbwyyo.jpg' },
   { name: 'Christmas', date: '2026-12-25', emoji: '🎄',
     suggestion: 'Send Christmas sale notification',
-    message: 'Merry Christmas! Spread joy with our festive deals. 🎄🎁' },
+    message: 'Merry Christmas! Spread joy with our festive deals. 🎄🎁',
+    searchTerm: 'christmas decoration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796322/sgziyovm50lpwwdwquog.jpg' },
   { name: 'New Year', date: '2027-01-01', emoji: '🎆',
     suggestion: 'Send New Year offer to re-engage customers',
-    message: 'Happy New Year! Start 2027 with amazing deals. 🎆' },
+    message: 'Happy New Year! Start 2027 with amazing deals. 🎆',
+    searchTerm: 'new year fireworks celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796324/yv2sxsk4cdbpvtfi1ntd.jpg' },
   { name: 'Makar Sankranti', date: '2027-01-14', emoji: '🪁',
     suggestion: 'Send Sankranti festive notification',
-    message: 'Happy Makar Sankranti! Celebrate with our special festive offers. 🪁' },
+    message: 'Happy Makar Sankranti! Celebrate with our special festive offers. 🪁',
+    searchTerm: 'makar sankranti kite flying',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796327/ryt1bfbk82dezeinpkxp.jpg' },
   { name: 'Republic Day', date: '2027-01-26', emoji: '🇮🇳',
     suggestion: 'Send Republic Day sale notification',
-    message: 'Happy Republic Day! Celebrate with patriotic deals. 🇮🇳' },
-  { name: 'Holi', date: '2027-03-01', emoji: '🎨',
+    message: 'Happy Republic Day! Celebrate with patriotic deals. 🇮🇳',
+    searchTerm: 'indian republic day flag',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796330/xkdnhkhnsqwrbdvq8zpu.jpg' },
+  { name: 'Holi', date: '2027-03-22', emoji: '🎨',
     suggestion: 'Send colorful Holi offers to all subscribers',
-    message: 'Happy Holi! Color your celebrations with amazing festive deals. 🎨🌈' },
-  { name: 'Eid ul-Fitr', date: '2027-03-20', emoji: '🌙',
+    message: 'Happy Holi! Color your celebrations with amazing festive deals. 🎨🌈',
+    searchTerm: 'holi colors festival',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796332/iuwmfsgnkt9rxatg0x9f.jpg' },
+  { name: 'Eid ul-Fitr', date: '2027-03-05', emoji: '🌙',
     suggestion: 'Send Eid special offers notification',
-    message: 'Eid Mubarak! Celebrate with our special Eid collection and offers. 🌙✨' },
-  { name: 'Raksha Bandhan', date: '2027-08-09', emoji: '🧡',
+    message: 'Eid Mubarak! Celebrate with our special Eid collection and offers. 🌙✨',
+    searchTerm: 'eid mubarak celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796334/jxghs20chs6r7jg0rqlk.jpg' },
+  { name: 'Raksha Bandhan', date: '2027-08-17', emoji: '🧡',
     suggestion: 'Send Raksha Bandhan gifting notification',
-    message: 'Raksha Bandhan special! Find the perfect gift for your siblings. 🧡' },
+    message: 'Raksha Bandhan special! Find the perfect gift for your siblings. 🧡',
+    searchTerm: 'rakhi raksha bandhan',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796336/cayk6kbkvbzvu7bu7tsu.jpg' },
   { name: 'Independence Day', date: '2027-08-15', emoji: '🇮🇳',
     suggestion: 'Send Independence Day sale notification',
-    message: 'Happy Independence Day! Celebrate freedom with amazing deals. 🇮🇳' },
+    message: 'Happy Independence Day! Celebrate freedom with amazing deals. 🇮🇳',
+    searchTerm: 'indian independence day flag',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796338/f4y1pt4wklyalvvlsiro.jpg' },
+  { name: 'Ganesh Chaturthi', date: '2027-09-04', emoji: '🐘',
+    suggestion: 'Ganesh Chaturthi sale — festive offers',
+    message: 'Ganpati Bappa Morya! Celebrate Ganesh Chaturthi with special festive deals. 🐘',
+    searchTerm: 'ganesh chaturthi idol festival',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797138/qbvdkmc2zzm6vcjraxyz.jpg' },
+  { name: 'Janmashtami', date: '2027-09-04', emoji: '🦚',
+    suggestion: 'Janmashtami offer — Krishna Janmashtami sale',
+    message: 'Happy Janmashtami! Celebrate Lord Krishna\'s birth with festive discounts. 🦚',
+    searchTerm: 'janmashtami krishna festival',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797140/ciggs111tdqkd1sb1dtn.jpg' },
+  { name: 'Maha Shivratri', date: '2027-03-06', emoji: '🔱',
+    suggestion: 'Maha Shivratri notification — festive offers',
+    message: 'Har Har Mahadev! Celebrate Maha Shivratri with special festive deals. 🔱',
+    searchTerm: 'maha shivratri shiva temple',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797143/etenxn6oneucxrgs1vfx.jpg' },
+  { name: 'Karva Chauth', date: '2026-10-20', emoji: '🌕',
+    suggestion: 'Karva Chauth gifting notification',
+    message: 'Karva Chauth special! Find the perfect gift for your loved one. 🌕',
+    searchTerm: 'karva chauth moon celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797145/yudwvhtztdqbfazfhzfp.jpg' },
+  { name: 'Chhath Puja', date: '2026-11-04', emoji: '🌅',
+    suggestion: 'Chhath Puja festive notification',
+    message: 'Happy Chhath Puja! Celebrate with our special festive collection. 🌅',
+    searchTerm: 'chhath puja sunset ritual',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797147/yaz52icxiueuplhdh0lx.jpg' },
+  { name: 'Onam', date: '2027-09-15', emoji: '🌼',
+    suggestion: 'Onam sale — festive offers for Kerala customers',
+    message: 'Happy Onam! Celebrate with our special festive discounts. 🌼',
+    searchTerm: 'onam pookalam flower rangoli',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797150/mzediieihrbuukczbywi.jpg' },
+  { name: 'Pongal', date: '2027-01-14', emoji: '🌾',
+    suggestion: 'Pongal harvest festival sale',
+    message: 'Happy Pongal! Celebrate the harvest festival with festive deals. 🌾',
+    searchTerm: 'pongal harvest festival',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797152/vulsjz2m8wrjd7vmcrcl.jpg' },
+  { name: 'Baisakhi', date: '2027-04-13', emoji: '🪘',
+    suggestion: 'Baisakhi sale notification',
+    message: 'Happy Baisakhi! Celebrate the harvest festival with special offers. 🪘',
+    searchTerm: 'baisakhi bhangra celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797154/gdokf4u4zrezgbqczowq.jpg' },
+  { name: 'Gudi Padwa', date: '2027-03-28', emoji: '🚩',
+    suggestion: 'Gudi Padwa new year sale',
+    message: 'Happy Gudi Padwa! Celebrate the Maharashtrian New Year with deals. 🚩',
+    searchTerm: 'gudi padwa flag celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797156/lbbna1lj54xjmxn6jefg.jpg' },
+  { name: 'Ugadi', date: '2027-03-28', emoji: '🥭',
+    suggestion: 'Ugadi new year offer',
+    message: 'Happy Ugadi! Celebrate the Telugu New Year with festive discounts. 🥭',
+    searchTerm: 'ugadi pachadi new year',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797159/tlqoerkq1be2tnkrnxcs.jpg' },
+  { name: 'Durga Puja', date: '2026-10-10', emoji: '🎊',
+    suggestion: 'Durga Puja festive sale',
+    message: 'Happy Durga Puja! Celebrate with our special festive collection. 🎊',
+    searchTerm: 'durga puja pandal festival',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797161/y4tn0pcsp9qhrfu8ukfv.jpg' },
+  { name: 'Lohri', date: '2027-01-13', emoji: '🔥',
+    suggestion: 'Lohri bonfire festival sale',
+    message: 'Happy Lohri! Celebrate with warm festive deals. 🔥',
+    searchTerm: 'lohri bonfire celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797163/xdmkbu4rqagarvyf01kd.jpg' },
+  { name: 'Guru Nanak Jayanti', date: '2026-11-24', emoji: '🙏',
+    suggestion: 'Guru Nanak Jayanti notification',
+    message: 'Happy Guru Nanak Jayanti! Celebrate with our special festive offers. 🙏',
+    searchTerm: 'guru nanak jayanti gurudwara',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797165/c97fdkeszhuh7431xp10.jpg' },
+  { name: 'Eid ul-Adha (Bakrid)', date: '2027-05-28', emoji: '🐐',
+    suggestion: 'Eid ul-Adha special offers',
+    message: 'Eid Mubarak! Celebrate Bakrid with our special collection and offers. 🐐',
+    searchTerm: 'eid al adha celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797167/fxevfpwgmp3ttnhfrjag.jpg' },
+  { name: 'Muharram', date: '2027-07-17', emoji: '🕌',
+    suggestion: 'Muharram notification',
+    message: 'Muharram Mubarak. Explore our thoughtful collection this season. 🕌',
+    searchTerm: 'muharram islamic new year',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797170/o40ouswvnmoqemdplvhs.jpg' },
+  { name: 'Good Friday', date: '2027-03-26', emoji: '✝️',
+    suggestion: 'Good Friday notification',
+    message: 'Good Friday blessings. Explore our special seasonal collection. ✝️',
+    searchTerm: 'good friday church cross',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797172/papwwzne8ljinzz6bsba.jpg' },
+  { name: 'Easter', date: '2027-03-28', emoji: '🐣',
+    suggestion: 'Easter sale — festive offers',
+    message: 'Happy Easter! Celebrate with our special spring collection and deals. 🐣',
+    searchTerm: 'easter eggs spring celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797174/yrgajnwskwxd3movwp5z.jpg' },
+  { name: 'Valentine\'s Day', date: '2027-02-14', emoji: '💝',
+    suggestion: 'Valentine\'s Day sale notification',
+    message: 'Happy Valentine\'s Day! Find the perfect gift for your loved one. 💝',
+    searchTerm: 'valentines day gift romance',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797176/k3feozivl8dl1t7ppthg.jpg' },
+  { name: 'Mother\'s Day', date: '2027-05-09', emoji: '💐',
+    suggestion: 'Mother\'s Day gifting notification',
+    message: 'Happy Mother\'s Day! Find the perfect gift to celebrate Mom. 💐',
+    searchTerm: 'mothers day flowers gift',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797178/xts7wthyutqopqaabxbd.jpg' },
+  { name: 'Father\'s Day', date: '2027-06-20', emoji: '👔',
+    suggestion: 'Father\'s Day gifting notification',
+    message: 'Happy Father\'s Day! Find the perfect gift to celebrate Dad. 👔',
+    searchTerm: 'fathers day gift celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797182/ma4qy7dbda8dvovufzwx.jpg' },
+  { name: 'Friendship Day', date: '2027-08-01', emoji: '🤝',
+    suggestion: 'Friendship Day gifting notification',
+    message: 'Happy Friendship Day! Find the perfect gift for your best friend. 🤝',
+    searchTerm: 'friendship day gift celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797184/f3sesbauw1yeb5ut798s.jpg' },
+  { name: 'Children\'s Day', date: '2026-11-14', emoji: '🎈',
+    suggestion: 'Children\'s Day sale notification',
+    message: 'Happy Children\'s Day! Special deals on gifts for the little ones. 🎈',
+    searchTerm: 'childrens day balloons celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797186/luygup3vempztbmdpu5h.jpg' },
+  { name: 'Gandhi Jayanti', date: '2026-10-02', emoji: '🕊️',
+    suggestion: 'Gandhi Jayanti notification',
+    message: 'Remembering Mahatma Gandhi. Explore our thoughtful collection today. 🕊️',
+    searchTerm: 'gandhi jayanti peace',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797188/ytmidkcp8tju6bzsohat.jpg' },
 ];
 
 function getUpcomingFestivals(festivals, count) {
@@ -233,6 +374,19 @@ function formatRelativeDate(diffDays) {
   if (diffDays <= 13) return `In ${diffDays} days`;
   const weeks = Math.round(diffDays / 7);
   return `In ${weeks} week${weeks === 1 ? '' : 's'}`;
+}
+
+// Parsed as LOCAL midnight (see getUpcomingFestivals) so the displayed
+// date always matches the day the merchant picked, regardless of timezone.
+function formatFestivalDate(dateStr) {
+  const parts = dateStr.split('-');
+  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  return d.toLocaleDateString('en-IN', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
 }
 
 export default function DashboardScreen({ shop }) {
@@ -537,8 +691,11 @@ export default function DashboardScreen({ shop }) {
     setSelectedFestival(f);
     setEditorTitle(f.name + ' Special Offer');
     setEditorBody(f.message);
-    setEditorMobileImageUrl('');
-    setEditorDesktopImageUrl('');
+    // Pre-fill both image slots with the festival's own photo (if we have
+    // one) as a sensible default — the merchant can still replace either
+    // one via the existing upload inputs.
+    setEditorMobileImageUrl(f.imageUrl || '');
+    setEditorDesktopImageUrl(f.imageUrl || '');
     setEditorDate(f.date);
     setEditorAction(null);
     setShowEditor(true);
@@ -1430,6 +1587,57 @@ export default function DashboardScreen({ shop }) {
                 flex: 1, padding: 20, overflowY: 'auto',
                 borderRight: '1px solid #f3f4f6',
               }}>
+                {/* Festival visual header — image (or emoji fallback),
+                    name, and date, so the merchant can confirm which
+                    festival they're editing before scrolling further. */}
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  marginBottom: 20, paddingBottom: 16,
+                  borderBottom: '1px solid #f3f4f6',
+                }}>
+                  <div style={{
+                    width: 48, height: 48, borderRadius: '50%',
+                    background: '#f3f4f6', display: 'flex',
+                    alignItems: 'center', justifyContent: 'center',
+                    fontSize: 22, flexShrink: 0, overflow: 'hidden',
+                  }}>
+                    {selectedFestival.imageUrl ? (
+                      <>
+                        <img
+                          src={selectedFestival.imageUrl}
+                          alt=""
+                          style={{
+                            width: '100%', height: '100%',
+                            borderRadius: '50%', objectFit: 'cover',
+                          }}
+                          onError={e => {
+                            e.target.style.display = 'none';
+                            if (e.target.nextSibling) {
+                              e.target.nextSibling.style.display = 'flex';
+                            }
+                          }}
+                        />
+                        <span style={{
+                          display: 'none', alignItems: 'center',
+                          justifyContent: 'center', width: '100%', height: '100%',
+                        }}>
+                          {selectedFestival.emoji}
+                        </span>
+                      </>
+                    ) : (
+                      selectedFestival.emoji
+                    )}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: '#111827' }}>
+                      {selectedFestival.name}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
+                      {formatFestivalDate(selectedFestival.date)}
+                    </div>
+                  </div>
+                </div>
+
                 {/* Mobile Image + Desktop Image — separate uploads, shown
                     side by side. See audits/horizontal-upload-audit.txt
                     (was audits/separate-images-audit.txt, stacked). */}
