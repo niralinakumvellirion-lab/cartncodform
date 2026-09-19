@@ -14,8 +14,9 @@ const pushRouter = require('./routes/push');
 const proxyRouter = require('./routes/proxy');
 const discountRouter = require('./routes/discounts');
 const ScheduledJob = require('./models/ScheduledJob');
+const FestivalQueue = require('./models/FestivalQueue');
 const Store = require('./models/Store');
-const { sendPushToCustomers } = require('./utils/pushNotification');
+const { sendPushToCustomers, buildClickUrl } = require('./utils/pushNotification');
 const { sendAbandonedCartEmail, sendMarketingEmail } = require('./utils/email');
 const AbandonedCustomer = require('./models/AbandonedCustomer');
 const CustomerPushSubscription = require('./models/CustomerPushSubscription');
@@ -601,10 +602,130 @@ async function processScheduledJobs() {
   }
 }
 
+// After how many consecutive failed send attempts a FestivalQueue item
+// gives up and moves to 'cancelled' instead of retrying forever (e.g. a
+// shop whose Firebase config broke, or every subscriber token going
+// stale at once — something that genuinely won't resolve itself on the
+// next 30s tick).
+const FESTIVAL_MAX_FAILED_ATTEMPTS = 5;
+
+/**
+ * Sends every FestivalQueue item whose scheduledAt has arrived. Mirrors
+ * POST /api/push/send-store's own split-send logic (mobile subscribers
+ * get mobileImageUrl, desktop subscribers get desktopImageUrl, via two
+ * separate sendPushToCustomers calls) — including the base64 -> Cloudinary
+ * upload step /send-store does first: a FestivalQueue item's image can
+ * still be a raw data: URI from ImageUploadPair's FileReader-based
+ * upload (the Dashboard/Queue editors never run it through Cloudinary at
+ * save time, only /send-store did, for a live Send Now), and FCM rejects
+ * a data: URI outright — skipping this step here would silently send
+ * every queued item with no image whenever a merchant uploaded a custom
+ * one instead of using the festival's own pre-filled photo.
+ *
+ * Deliberately does NOT require `sent > 0` to mark an item 'sent' — only
+ * that at least one of the two sendPushToCustomers calls itself
+ * succeeded. sendPushToCustomers returns `{ success: true, sent: 0 }`
+ * for a shop with zero matching subscribers (see utils/
+ * pushNotification.js — that's not an error, just nobody to notify), so
+ * treating "sent > 0" as the success bar would mean any shop with few or
+ * no push subscribers yet gets every approved festival item cycled
+ * through as a "failure" and permanently 'cancelled' after
+ * FESTIVAL_MAX_FAILED_ATTEMPTS ticks (2.5 minutes) — which is wrong: the
+ * send itself didn't fail, there was simply nobody to send it to.
+ */
+async function processFestivalQueue() {
+  try {
+    const now = new Date();
+    // Same .limit(20)-per-tick safeguard processScheduledJobs already
+    // uses above, for the same reason (bound how much one tick can do).
+    const dueItems = await FestivalQueue.find({
+      status: 'approved',
+      scheduledAt: { $lte: now },
+    }).limit(20);
+
+    for (const item of dueItems) {
+      try {
+        const clickUrl = buildClickUrl(item.shopDomain, item.targetType, item.productHandle);
+
+        const rawMobile = item.mobileImageUrl || '';
+        const rawDesktop = item.desktopImageUrl || '';
+        const mobileImage = rawMobile.startsWith('data:')
+          ? (await pushRouter.uploadToCloudinary(rawMobile)) || ''
+          : rawMobile;
+        const desktopImage = rawDesktop.startsWith('data:')
+          ? (await pushRouter.uploadToCloudinary(rawDesktop)) || ''
+          : rawDesktop;
+
+        const mobileResult = await sendPushToCustomers(
+          item.shopDomain, item.title, item.body, clickUrl, mobileImage, true, null, false, false
+        );
+        const desktopResult = await sendPushToCustomers(
+          item.shopDomain, item.title, item.body, clickUrl, desktopImage, false, null, false, true
+        );
+
+        const totalSent = (mobileResult.sent || 0) + (desktopResult.sent || 0);
+        console.log(
+          `[festival-queue] item ${item._id} "${item.festival || item.title}" — ` +
+          `clickUrl=${clickUrl} mobileSent=${mobileResult.sent || 0} desktopSent=${desktopResult.sent || 0}`
+        );
+
+        if (mobileResult.success || desktopResult.success) {
+          await FestivalQueue.findByIdAndUpdate(item._id, {
+            status: 'sent',
+            sentAt: new Date(),
+            recipientCount: totalSent,
+          });
+          console.log(`[festival-queue] item ${item._id} marked sent (recipientCount=${totalSent})`);
+        } else {
+          // Total failure — both legs failed outright.
+          const failedAttempts = (item.failedAttempts || 0) + 1;
+          const errMsg = mobileResult.error || desktopResult.error || 'Unknown error';
+          console.error(
+            `[festival-queue] item ${item._id} "${item.festival || item.title}" ` +
+            `FAILED (attempt ${failedAttempts}/${FESTIVAL_MAX_FAILED_ATTEMPTS}): ${errMsg}`
+          );
+          if (failedAttempts > FESTIVAL_MAX_FAILED_ATTEMPTS) {
+            await FestivalQueue.findByIdAndUpdate(item._id, {
+              status: 'cancelled',
+              failedAttempts,
+            });
+            console.error(
+              `[festival-queue] item ${item._id} CANCELLED after ${failedAttempts} ` +
+              `consecutive failed attempts — last error: ${errMsg}`
+            );
+          } else {
+            // Leave status 'approved' so it retries next tick.
+            await FestivalQueue.findByIdAndUpdate(item._id, { failedAttempts });
+          }
+        }
+      } catch (itemErr) {
+        console.error(`[festival-queue] item ${item._id} error:`, itemErr.message);
+      }
+    }
+  } catch (err) {
+    console.error('[festival-queue] processFestivalQueue error:', err.message);
+  }
+}
+
 // Poll every 30 seconds. The nightly signals + brain run is gated inside this
 // same tick (see processScheduledJobs), so there is no separate scheduler.
-setInterval(processScheduledJobs, 30 * 1000);
-console.log('[automation] Scheduled job poller started (30s interval; nightly signals gated inside)');
+// processFestivalQueue() runs after processScheduledJobs() on the same
+// tick, wrapped in its own try/catch here (on top of its own internal
+// one) so a failure in either poller can never block or crash the other.
+async function runPollerTick() {
+  try {
+    await processScheduledJobs();
+  } catch (err) {
+    console.error('[automation] processScheduledJobs error (poller tick):', err.message);
+  }
+  try {
+    await processFestivalQueue();
+  } catch (err) {
+    console.error('[festival-queue] processFestivalQueue error (poller tick):', err.message);
+  }
+}
+setInterval(runPollerTick, 30 * 1000);
+console.log('[automation] Scheduled job poller started (30s interval; nightly signals gated inside; festival queue sender runs after each tick)');
 
 // --- Boot ---------------------------------------------------------------
 async function start() {

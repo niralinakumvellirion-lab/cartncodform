@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
 import { ShimmerCard } from '../components/Shimmer';
 import { ImageUploadPair } from '../components/ImageUploadPair';
+import { ProductPicker } from '../components/ProductPicker';
 
 const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
@@ -648,6 +649,10 @@ export default function QueueScreen({ shop }) {
   const [editMobileImageUrl, setEditMobileImageUrl] = useState('');
   const [editDesktopImageUrl, setEditDesktopImageUrl] = useState('');
   const [editScheduledAt, setEditScheduledAt] = useState('');
+  const [editTargetType, setEditTargetType] = useState('home');
+  const [editProductId, setEditProductId] = useState('');
+  const [editProductHandle, setEditProductHandle] = useState('');
+  const [editProductTitle, setEditProductTitle] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
   function openEditModal(item) {
@@ -657,6 +662,10 @@ export default function QueueScreen({ shop }) {
     setEditMobileImageUrl(item.mobileImageUrl || '');
     setEditDesktopImageUrl(item.desktopImageUrl || '');
     setEditScheduledAt(item.scheduledAt || '');
+    setEditTargetType(item.targetType || 'home');
+    setEditProductId(item.productId || '');
+    setEditProductHandle(item.productHandle || '');
+    setEditProductTitle(item.productTitle || '');
   }
 
   function closeEditModal() {
@@ -676,6 +685,10 @@ export default function QueueScreen({ shop }) {
           mobileImageUrl: editMobileImageUrl,
           desktopImageUrl: editDesktopImageUrl,
           scheduledAt: editScheduledAt,
+          targetType: editTargetType,
+          productId: editProductId,
+          productHandle: editProductHandle,
+          productTitle: editProductTitle,
         }
       );
       setEditingItem(null);
@@ -916,6 +929,14 @@ export default function QueueScreen({ shop }) {
                             {new Date(item.scheduledAt).toLocaleTimeString('en-IN', {
                               hour: 'numeric', minute: '2-digit', hour12: true,
                             })}
+                          </div>
+                          <div style={{
+                            fontSize: 12, color: '#9ca3af', marginTop: 2,
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          }}>
+                            {item.targetType === 'product'
+                              ? `→ ${item.productTitle || 'Product'}`
+                              : '→ Storefront home'}
                           </div>
                         </div>
                         <span style={{
@@ -1419,6 +1440,24 @@ export default function QueueScreen({ shop }) {
                            fontFamily: 'inherit', boxSizing: 'border-box' }}
                 />
               </div>
+
+              {/* Where the notification click-through goes — home page
+                  or a specific product. */}
+              <ProductPicker
+                shop={shop}
+                value={{
+                  targetType: editTargetType,
+                  productId: editProductId,
+                  productHandle: editProductHandle,
+                  productTitle: editProductTitle,
+                }}
+                onChange={(next) => {
+                  setEditTargetType(next.targetType);
+                  setEditProductId(next.productId);
+                  setEditProductHandle(next.productHandle);
+                  setEditProductTitle(next.productTitle);
+                }}
+              />
 
               {/* Mobile Image + Desktop Image — shared widget, same as
                   the Dashboard editor. Side by side on desktop; the

@@ -706,3 +706,7 @@ router.get('/festivals', requireAuth, function (req, res) {
 module.exports = router;
 module.exports.sendJourneyPush = sendJourneyPush;
 module.exports.sendJourneyEmail = sendJourneyEmail;
+// Exported so server.js's FestivalQueue poller can convert a queued
+// item's base64 image the exact same way /send-store already does
+// before it — see uploadToCloudinary's own comment above for why.
+module.exports.uploadToCloudinary = uploadToCloudinary;

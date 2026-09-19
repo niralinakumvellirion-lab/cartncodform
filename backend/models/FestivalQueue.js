@@ -20,6 +20,12 @@ const festivalQueueSchema = new mongoose.Schema({
   },
   sentAt: { type: Date },
   recipientCount: { type: Number, default: 0 },
+  // Consecutive failed send attempts by processFestivalQueue() in
+  // server.js — reset is not needed since a successful send moves the
+  // item to status 'sent' (this field just stops mattering at that
+  // point); capped at FESTIVAL_MAX_FAILED_ATTEMPTS there, past which the
+  // item is marked 'cancelled' instead of retrying forever.
+  failedAttempts: { type: Number, default: 0 },
 }, { timestamps: true });
 
 module.exports = mongoose.model('FestivalQueue', festivalQueueSchema);

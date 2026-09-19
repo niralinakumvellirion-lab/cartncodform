@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import { ShimmerRow, ShimmerCard } from '../components/Shimmer';
 import { ImageUploadPair } from '../components/ImageUploadPair';
+import { ProductPicker } from '../components/ProductPicker';
 
 const DS = {
   page: {
@@ -457,6 +458,10 @@ export default function DashboardScreen({ shop }) {
   const [editorDesktopImageUrl, setEditorDesktopImageUrl] = useState('');
   const [editorAction, setEditorAction] = useState(null);
   const [editorDate, setEditorDate] = useState('');
+  const [editorTargetType, setEditorTargetType] = useState('home');
+  const [editorProductId, setEditorProductId] = useState('');
+  const [editorProductHandle, setEditorProductHandle] = useState('');
+  const [editorProductTitle, setEditorProductTitle] = useState('');
   const [sendingNow, setSendingNow] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   // FestivalQueue items already queued for this shop — used to hide
@@ -736,6 +741,12 @@ export default function DashboardScreen({ shop }) {
     setEditorDesktopImageUrl(f.imageUrl || '');
     setEditorDate(f.date);
     setEditorAction(null);
+    // Every suggestion starts targeting the storefront home page — the
+    // merchant picks a specific product via ProductPicker if they want one.
+    setEditorTargetType('home');
+    setEditorProductId('');
+    setEditorProductHandle('');
+    setEditorProductTitle('');
     setShowEditor(true);
   }
 
@@ -1674,17 +1685,6 @@ export default function DashboardScreen({ shop }) {
                   </div>
                 </div>
 
-                {/* Mobile Image + Desktop Image — shared widget, see
-                    frontend/app/admin/components/ImageUploadPair.jsx.
-                    See audits/horizontal-upload-audit.txt (was
-                    audits/separate-images-audit.txt, stacked). */}
-                <ImageUploadPair
-                  mobileImageUrl={editorMobileImageUrl}
-                  desktopImageUrl={editorDesktopImageUrl}
-                  onMobileChange={setEditorMobileImageUrl}
-                  onDesktopChange={setEditorDesktopImageUrl}
-                />
-
                 {/* Title */}
                 <div style={{ marginBottom: 16 }}>
                   <label style={{ fontSize: 12, fontWeight: 600,
@@ -1720,6 +1720,41 @@ export default function DashboardScreen({ shop }) {
                   />
                 </div>
 
+                {/* Where the notification click-through goes — home page
+                    or a specific product. Reordered ImageUploadPair to
+                    sit after this (was directly after Title/Body before
+                    this task) so both editors now share the same field
+                    order: Title, Body, ProductPicker, ImageUploadPair,
+                    Scheduled date — matching QueueScreen's edit modal. */}
+                <ProductPicker
+                  shop={shop}
+                  value={{
+                    targetType: editorTargetType,
+                    productId: editorProductId,
+                    productHandle: editorProductHandle,
+                    productTitle: editorProductTitle,
+                  }}
+                  onChange={(next) => {
+                    setEditorTargetType(next.targetType);
+                    setEditorProductId(next.productId);
+                    setEditorProductHandle(next.productHandle);
+                    setEditorProductTitle(next.productTitle);
+                  }}
+                />
+
+                {/* Mobile Image + Desktop Image — shared widget, see
+                    frontend/app/admin/components/ImageUploadPair.jsx.
+                    See audits/horizontal-upload-audit.txt (was
+                    audits/separate-images-audit.txt, stacked). */}
+                <div style={{ marginBottom: 16 }}>
+                  <ImageUploadPair
+                    mobileImageUrl={editorMobileImageUrl}
+                    desktopImageUrl={editorDesktopImageUrl}
+                    onMobileChange={setEditorMobileImageUrl}
+                    onDesktopChange={setEditorDesktopImageUrl}
+                  />
+                </div>
+
                 {/* Scheduled date */}
                 <div style={{ marginBottom: 20 }}>
                   <label style={{ fontSize: 12, fontWeight: 600,
@@ -1750,12 +1785,8 @@ export default function DashboardScreen({ shop }) {
                           body: editorBody,
                           mobileImageUrl: editorMobileImageUrl,
                           desktopImageUrl: editorDesktopImageUrl,
-                          // No product-picker UI exists yet (see
-                          // audits/products-endpoint-audit.txt for the
-                          // backend groundwork) — this editor can only
-                          // ever target the shop's home page today.
-                          targetType: 'home',
-                          productHandle: '',
+                          targetType: editorTargetType,
+                          productHandle: editorProductHandle,
                         });
                         setShowEditor(false);
                         setSendingNow(false);
@@ -1803,6 +1834,10 @@ export default function DashboardScreen({ shop }) {
                             desktopImageUrl: editorDesktopImageUrl,
                             scheduledAt: editorDate,
                             festival: selectedFestival.name,
+                            targetType: editorTargetType,
+                            productId: editorProductId,
+                            productHandle: editorProductHandle,
+                            productTitle: editorProductTitle,
                             status: 'approved',
                           }
                         );
@@ -1843,6 +1878,10 @@ export default function DashboardScreen({ shop }) {
                             desktopImageUrl: editorDesktopImageUrl,
                             scheduledAt: editorDate,
                             festival: selectedFestival.name,
+                            targetType: editorTargetType,
+                            productId: editorProductId,
+                            productHandle: editorProductHandle,
+                            productTitle: editorProductTitle,
                             status: 'draft',
                           }
                         );
