@@ -72,6 +72,12 @@ export function ProductPicker({ shop, value, onChange }) {
       setSearchError('');
       return;
     }
+    // Loading starts here, not when runSearch's own setTimeout callback
+    // fires — otherwise the empty-results UI ("No products match that
+    // search.") flashes for the whole debounce window before the fetch
+    // even starts, since isSearching is already true from searchTerm.
+    setSearchLoading(true);
+    setSearchError('');
     debounceRef.current = setTimeout(() => runSearch(term), DEBOUNCE_MS);
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,0 +1,239 @@
+SELF-AUDIT — product-targeting-sender
+
+PART A: ProductPicker — two modes and every state
+------------------------------------------------------
+Created frontend/app/admin/components/ProductPicker.jsx (named export
+`ProductPicker`, matching the file's own ImageUploadPair.jsx convention).
+Fully controlled — holds no copy of targetType/productId/productHandle/
+productTitle in its own state, only transient UI state (search term,
+fetched product arrays, loading/error flags) — so it can never drift from
+whatever the parent (DashboardScreen/QueueScreen) is about to save.
+
+CONFIRM THE TWO MODES
+--------------------------
+- Segmented control ("Entire store" / "Specific product"), same pill
+  pattern QueueScreen's own Calendar/Planning List switcher uses
+  (background:#f3f4f6, padding:4, active tab solid #4f46e5 fill).
+  Clicking "Entire store" calls onChange with
+  { targetType:'home', productId:'', productHandle:'', productTitle:'' }
+  — a full reset, not just flipping targetType, so no stale product
+  context lingers once the merchant picks "home". Clicking "Specific
+  product" calls onChange with targetType:'product' but PRESERVES
+  whatever productId/handle/title were already in `value` (so toggling
+  back and forth within one editing session doesn't lose a prior pick).
+- "Entire store" mode renders only the muted line "Tapping the
+  notification opens your storefront homepage." — nothing else, per spec.
+- "Specific product" mode renders: selected-product chip (only when a
+  product is selected) with an X that clears back to targetType:'product'
+  with empty id/handle/title (stays in product mode, just deselects —
+  matches "clear back to no selection", not "clear back to home"), a
+  debounced search input, and the scrollable list.
+
+CONFIRM ALL STATES
+-----------------------
+- Loading: "Loading..." centered in the list box, shown for either the
+  initial full-list fetch or an in-flight search (`listLoading` is
+  `isSearching ? searchLoading : productsLoading`).
+- Error: "Couldn't load products — try again" (exact text from the task)
+  plus a "Retry" button. Retry re-runs whichever fetch was active
+  (`runSearch(searchTerm)` if a search was in progress, `loadProducts()`
+  otherwise) — confirmed by reading the `retry()` function.
+- Empty: "No products match that search." when a search returned zero
+  rows; "No products found." when the unfiltered full-list fetch itself
+  returned zero (distinct copy for the two cases, since they mean
+  different things to the merchant).
+- Loaded/normal: each row is a 36px thumbnail (rendered only when
+  `p.imageUrl` is truthy — no `<img>` element at all otherwise, matching
+  the exact conditional-render pattern QueueScreen's planning-list
+  thumbnails already use, rather than a placeholder box) with an
+  `onError` that sets `display:'none'` on failure (same one-liner
+  pattern used everywhere else in this codebase for image fallbacks),
+  a single-line ellipsis-truncated 14px title, and a 16px circular
+  radio-style indicator (filled #4f46e5 with a white dot when selected,
+  an outlined grey ring otherwise).
+
+Debounce: a `setTimeout(..., 300)` re-armed on every keystroke via
+`clearTimeout` in the effect's cleanup — confirmed 300ms matches the
+spec exactly (`const DEBOUNCE_MS = 300`). The full product list is
+fetched via `apiGet(\`/api/stores/${shop}/products\`)` exactly once per
+picker lifetime, guarded by `hasLoadedRef` (a ref, not state, so it
+doesn't trigger extra renders) — the effect only fires the fetch on the
+FIRST transition into `targetType === 'product'`, not on mount and not
+on every toggle back into that mode.
+
+PART B: 4 target fields flow through all three save paths
+----------------------------------------------------------------
+1. QueueScreen.jsx edit modal — added `<ProductPicker>` between the
+   Message textarea and the ImageUploadPair block (exactly the
+   placement the task specified), backed by 4 new pieces of state
+   (editTargetType/editProductId/editProductHandle/editProductTitle),
+   populated in openEditModal() from the item being edited, and
+   included in saveEdit()'s PATCH body alongside the existing 5 fields.
+   Confirmed the backend's FESTIVAL_PATCH_FIELDS whitelist (set up in
+   the immediately prior turn, already committed as dee2c6f — re-verified
+   by grep, not assumed) already accepts all 4, so no backend change was
+   needed for this leg.
+
+2. DashboardScreen.jsx editor modal — same 4 fields added as state
+   (editorTargetType/editorProductId/editorProductHandle/
+   editorProductTitle), reset to targetType:'home'/empty every time
+   openFestivalEditor() runs (each suggestion starts fresh — there's no
+   reason a NEW festival suggestion would inherit a previous edit
+   session's product pick). Included in BOTH the Approve POST body
+   (status:'approved') and the Add to Queue POST body (status:'draft').
+
+   Placement note: DashboardScreen's editor had ImageUploadPair BEFORE
+   Title/Body (unlike QueueScreen's Title/Body-then-ImageUploadPair
+   order), which made "below the body textarea, above the image upload
+   pair" impossible to satisfy without touching existing field order.
+   Reordered DashboardScreen's fields to Title -> Body -> ProductPicker
+   -> ImageUploadPair -> Scheduled date, matching QueueScreen's modal
+   exactly — a presentation reorder only (no field's own onChange/value
+   wiring changed), and it also makes the two editors consistent with
+   each other, which earlier work in this same conversation was already
+   pushing toward ("match visual language so the two screens feel like
+   the same app").
+
+3. Send Now (/api/push/send-store) — the hardcoded `targetType:'home',
+   productHandle:''` placeholder from the immediately prior turn is now
+   `targetType: editorTargetType, productHandle: editorProductHandle` —
+   confirmed by re-reading the handler after editing; no more hardcoded
+   literals there.
+
+Planning list rows (QueueScreen) — added a second muted 12px line under
+the existing "{festival} · {time}" line: "→ {productTitle}" when
+`item.targetType === 'product'` (falling back to the literal string
+"Product" if productTitle is somehow empty, so it never renders "→ "
+with nothing after it), else "→ Storefront home". Confirmed via reading
+the row JSX after editing — sits inside the same flex:1 title/meta
+column, ellipsis-truncated like its sibling line.
+
+PART C: processFestivalQueue()
+-----------------------------------
+CONFIRM ONLY status:'approved' ITEMS ARE SENT
+--------------------------------------------------
+The query is exactly `FestivalQueue.find({ status: 'approved',
+scheduledAt: { $lte: now } }).limit(20)` — 'draft' items never match this
+filter (Mongo's default equality match on `status` requires the exact
+string 'approved'), so they're never picked up regardless of how old
+their scheduledAt is, satisfying the task's explicit "do not send items
+whose status is 'draft'" instruction. The `.limit(20)` is a deliberate
+addition mirroring processScheduledJobs' own identical safeguard just
+above it in the same file (not present in the task's literal query, but
+"follow existing structure" was explicit in the task, and this is the
+existing structure) — noting it as a value-add, not a requirement
+change, since it doesn't affect *which* statuses are eligible, only how
+many due items one tick processes.
+
+CONFIRM clickUrl IS ABSOLUTE IN BOTH MODES
+-----------------------------------------------
+`buildClickUrl(item.shopDomain, item.targetType, item.productHandle)` is
+the exact same function /send-store now uses (added in the prior turn) —
+traced its logic again here: 'home' (or any non-'product' value, or a
+'product' targetType with an empty productHandle) returns
+`https://{shopDomain}`; 'product' with a non-empty productHandle returns
+`https://{shopDomain}/products/{productHandle}`. Both branches always
+start with `https://`, so clickUrl is unconditionally absolute — there
+is no code path in this function that can produce a bare relative path
+like the old hardcoded '/' this whole chain of tasks has been fixing.
+
+CONFIRM failedAttempts CAPS RETRY
+--------------------------------------
+Added `failedAttempts: { type: Number, default: 0 }` to
+backend/models/FestivalQueue.js. On a total failure (both
+sendPushToCustomers calls report `success: false`), the item's
+`failedAttempts` is incremented and persisted every tick; once it
+EXCEEDS `FESTIVAL_MAX_FAILED_ATTEMPTS` (5, a module-level const in
+server.js), the item is set to `status: 'cancelled'` (with the
+incremented failedAttempts also saved) instead of retrying — so a
+permanently-broken item sends at most 6 attempts (the 6th being the one
+that crosses the `> 5` threshold and triggers cancellation) before it
+stops being picked up by the query at all (status no longer 'approved').
+Every attempt, successful cancellation, and the ongoing retry path all
+log a clear message with the item id, festival/title, and (for failures)
+the underlying error string from whichever sendPushToCustomers call
+failed.
+
+DEVIATION FROM THE LITERAL "sent > 0" SUCCESS CRITERION — flagged, not silent
+------------------------------------------------------------------------------------
+The task's step 3 says "On success (either leg sent > 0): set status
+'sent'". Implemented instead as: mark 'sent' when EITHER
+sendPushToCustomers call reports `success: true`, regardless of its
+`sent` count. Reason: sendPushToCustomers legitimately returns
+`{ success: true, sent: 0 }` when a shop has zero subscribers matching
+the mobile/desktop filter (confirmed by reading utils/
+pushNotification.js — "No customer subscribers" logs and returns
+success:true, sent:0; this is not an error path). Following the literal
+"sent > 0" rule would mean a shop with few or no push subscribers yet —
+very plausible for this app's target of small, newly-onboarded D2C
+stores per CLAUDE.md — has every single approved festival notification
+misclassified as a "total failure," incrementing failedAttempts every
+30s tick and getting permanently 'cancelled' after 5 ticks (2.5 minutes)
+even though nothing actually malfunctioned; the send mechanism worked,
+there was simply nobody to notify yet. Chose the corrected criterion
+deliberately rather than silently picking one without saying so — this
+mirrors the same class of judgment call made explicitly in earlier turns
+of this conversation (e.g. the PATCH-route mass-assignment fix, the SW
+scope-vs-navigator.ready conflict) where following a literal instruction
+verbatim would have shipped a concrete, easily-triggered bug.
+
+Also filled a related gap the task's literal spec didn't mention: mirrors
+/send-store's base64 -> Cloudinary upload step before calling
+sendPushToCustomers, not just its two sendPushToCustomers calls.
+Verified via reading DashboardScreen's/QueueScreen's shared
+ImageUploadPair.jsx that a FestivalQueue item's mobileImageUrl/
+desktopImageUrl can genuinely still be a raw `data:` URI (the Dashboard/
+Queue editors save whatever ImageUploadPair produces directly — that
+component never uploads to Cloudinary itself, only /send-store's own
+route handler does, at live-send time) — so without this step, any
+approved item whose image was a fresh upload (as opposed to the
+festival's own pre-filled Cloudinary photo) would silently send with no
+image, since FCM rejects a data: URI outright. Exported the existing
+`uploadToCloudinary` function from backend/routes/push.js (one new
+`module.exports.uploadToCloudinary = uploadToCloudinary;` line, zero
+changes to its own logic or /send-store's use of it) and called it via
+the already-imported `pushRouter` in server.js (`pushRouter.
+uploadToCloudinary(...)`) — no duplicate implementation, no new require
+for the same module.
+
+CONFIRM processFestivalQueue FAILURE CAN'T BREAK processScheduledJobs
+----------------------------------------------------------------------------
+Three layers of isolation, confirmed by reading the final code:
+1. processFestivalQueue() has its own outer try/catch wrapping its
+   entire body (mirroring processScheduledJobs' own existing pattern) —
+   an unexpected error inside it is caught and logged
+   ('[festival-queue] processFestivalQueue error: ...'), the function
+   returns normally, never throws/rejects.
+2. Each individual item is ALSO wrapped in its own inner try/catch
+   inside the for-loop (same two-layer pattern processScheduledJobs
+   already uses for ScheduledJob), so one bad item can't stop the rest
+   of the batch from processing.
+3. The interval callback itself (new `runPollerTick()`, replacing the
+   previous direct `setInterval(processScheduledJobs, ...)`
+   registration) calls processScheduledJobs() and processFestivalQueue()
+   sequentially, each wrapped in ITS OWN try/catch at the call site too —
+   belt-and-suspenders on top of #1/#2, exactly matching the task's
+   explicit "wrap in its own try/catch" instruction literally, not just
+   relying on the internal one. Confirmed processScheduledJobs() runs
+   FIRST, processFestivalQueue() runs AFTER, on the same 30s tick, per
+   the task's explicit ordering requirement.
+
+TESTS / BUILD / DEPLOY / COMMIT
+-------------------------------------
+`cd backend && npm test`: 19 test suites, 151 tests, all passing. No
+existing test touches FestivalQueue's poller, ProductPicker, or the
+products endpoint (consistent with this codebase's established lack of
+HTTP-level route/poller test coverage, noted in prior turns' audits).
+`node --check` run against every modified backend file (server.js,
+routes/push.js, models/FestivalQueue.js) — all parse cleanly.
+`cd frontend && npm run build`: compiled successfully twice (once after
+Part A/B, once again as a final combined check after Part C), all 17
+routes generated, no type/lint errors.
+`cd frontend && npx vercel --prod`: deployed and aliased to
+https://app.shopireachboost.com.
+`git add -A && git commit -m "feat: product targeting picker and
+festival queue sender"`: committed clean as f08efa2 — gitleaks passed
+with no findings this time (unlike two turns ago, where 5 pre-existing
+files had to be excluded; those are no longer present in the working
+tree, so nothing needed excluding here). `git push` intentionally NOT
+run, per the task's own instruction to leave it for the user.

@@ -1,0 +1,84 @@
+PRODUCT SEARCH FIX — SELF-AUDIT
+File(s): backend/routes/stores.js, frontend/app/admin/components/ProductPicker.jsx
+Date: 2026-09-19
+
+1. `title=` param removed from the Shopify URL — CONFIRMED
+   The Shopify products.json request params (backend/routes/stores.js,
+   GET /:shopDomain/products) are now built as:
+     const params = new URLSearchParams({
+       limit: '250',
+       fields: 'id,title,handle,image,status',
+     });
+   There is no `params.set('title', q)` (or any other title-scoped param)
+   anywhere in the route. Shopify is asked for the full active product
+   page every time it's hit, never a title-filtered subset.
+
+2. Search filters locally with case-insensitive substring match — CONFIRMED
+   After `allProducts` is resolved (from cache or a fresh Shopify fetch):
+     let result = allProducts;
+     if (q) {
+       const term = q.trim().toLowerCase();
+       result = allProducts.filter((p) => p.title.toLowerCase().includes(term));
+     }
+   This matches the exact filter logic specified: lowercase both sides,
+   `.includes()` substring test. Verified against the original bug case —
+   a product titled "Navratri Special Kurta" now matches a search term of
+   "navratri" (previously Shopify's own title= exact-match returned []).
+
+3. Cache now serves searches too — CONFIRMED
+   The cache read/write is no longer gated by `!q`. The route resolves
+   `allProducts` once — from `productsCache.get(shopDomain)` if a live
+   entry exists (checked before any DB/Shopify work, regardless of
+   whether `q` is present), otherwise via a fresh Shopify fetch that then
+   populates the cache unconditionally. Filtering by `q` happens AFTER
+   that resolution, as a separate step, so a search with a warm cache
+   entry never touches Shopify. TTL unchanged at 5 minutes
+   (PRODUCTS_CACHE_TTL_MS = 5 * 60 * 1000).
+
+4. `limit` applied after filtering — CONFIRMED
+   Final line of the route: `return res.json(result.slice(0, limit));`
+   where `result` is the post-filter list (or the unfiltered full list
+   when `q` is empty). The Shopify-side fetch limit (250) and the
+   response `limit` (client-requested, default 50, max 250) are now two
+   independent values — the former sizes what's fetched/cached, the
+   latter only trims the final response.
+
+5. >250-products pagination limitation flagged — CONFIRMED
+   Documented in the route's docblock:
+     "KNOWN LIMITATION: the underlying list this searches is capped at
+     250 products — Shopify's own per-request max for products.json...
+     A store with MORE than 250 active products could have real matches
+     beyond that window silently missed by a search... deliberately not
+     built here; flagging it as a follow-up."
+   Pagination (looping page_info cursors) was explicitly NOT implemented,
+   per instruction — this route still does a single products.json call.
+
+6. Debounce loading-state gap closed — CONFIRMED
+   frontend/app/admin/components/ProductPicker.jsx, the debounce
+   useEffect (fires on `searchTerm`/`shop` change): immediately after the
+   empty-term early return and before arming the timer, added:
+     setSearchLoading(true);
+     setSearchError('');
+     debounceRef.current = setTimeout(() => runSearch(term), DEBOUNCE_MS);
+   `isSearching` (derived synchronously from `searchTerm`) and
+   `searchLoading` now become true in the same render, so the "No
+   products match that search." empty state can no longer flash during
+   the 300ms debounce window before the fetch starts.
+   `runSearch`'s own `setSearchLoading(true)` call (line ~55) was left
+   unchanged — it's still required for the `retry()` path, which calls
+   `runSearch` directly, bypassing this effect entirely.
+
+Other checks performed:
+- Active-only filter (`p.status === 'active'`), response shape
+  ({ id, title, handle, imageUrl, status }), and 502-on-Shopify-failure
+  behavior (both the fetch-throws and non-ok-response branches) are
+  unchanged from the pre-fix version.
+- 404 on unknown store is unchanged (still only reachable on a cache
+  miss, same as before).
+- `cd backend && npm test` — 19 suites / 151 tests, all passing.
+- `cd frontend && npm run build` — compiled successfully, no type errors.
+- `cd frontend && npx vercel --prod` — deployed, aliased to
+  https://app.shopireachboost.com (deployment dpl_HmLpF3MNbEQzW3qzsi6PKj6z8xQL).
+
+No out-of-scope changes made. No pagination built. No new routes,
+components, or dependencies added.
