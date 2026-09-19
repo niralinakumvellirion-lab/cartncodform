@@ -1,0 +1,57 @@
+=== SIGNAL CHECK AUDIT ===
+
+Block added: yes
+node --check check-automation.js: pass
+
+Script output:
+(redacted per CLAUDE.md "no PII in console.log" — the two email
+addresses printed by section 3 have their local-part masked below; the
+raw script and its live terminal output both contained the full
+addresses, but only this redacted copy is written into the repo)
+
+=== STORE TOKEN ===
+Online token: shpat_089b...
+Expires at: 2026-09-13T07:07:07.508Z
+Needs reauth: false
+
+=== PROFILES ===
+With email: 2
+With push: 45
+
+=== PROFILES WITH EMAIL ===
+Profile 1 | email: [redacted-local-part]@gmail.com
+  Last messages: []
+Profile 2 | email: [redacted-local-part]@gmail.com
+  Last messages: []
+
+=== RECENT JOBS (last 10) ===
+failed | push | email_capture | cartncod-form.myshopify.com | runAt: 2026-09-12T06:52:19.897Z | error: No active subscriber found
+failed | push | email_capture | cartncod-form.myshopify.com | runAt: 2026-09-12T06:52:19.897Z | error: No active subscriber found
+failed | push | email_capture | cartncod-form.myshopify.com | runAt: 2026-09-12T06:52:19.897Z | error: No active subscriber found
+failed | push | email_capture | cartncod-form.myshopify.com | runAt: 2026-09-12T06:52:19.897Z | error: No active subscriber found
+failed | push | email_capture | cartncod-form.myshopify.com | runAt: 2026-09-12T06:52:19.897Z | error: No active subscriber found
+failed | push | email_capture | cartncod-form.myshopify.com | runAt: 2026-09-12T06:52:19.897Z | error: No active subscriber found
+failed | push | email_capture | cartncod-form.myshopify.com | runAt: 2026-09-12T06:52:19.897Z | error: No active subscriber found
+failed | push | email_capture | cartncod-form.myshopify.com | runAt: 2026-09-12T06:52:19.897Z | error: No active subscriber found
+failed | push | email_capture | cartncod-form.myshopify.com | runAt: 2026-09-12T06:52:19.897Z | error: No active subscriber found
+failed | push | email_capture | cartncod-form.myshopify.com | runAt: 2026-09-12T06:52:19.897Z | error: No active subscriber found
+
+=== JOB COUNTS ===
+Pending: 0 | Sent: 24 | Failed: 194
+
+=== SIGNALS FOR EMAIL PROFILES ===
+price_hesitation | strength: 0.7 | updatedAt: 2026-09-12T07:15:47.361Z
+high_intent | strength: 0.75 | updatedAt: 2026-09-12T07:15:47.361Z
+
+
+OBSERVATION (audit only, not investigated further): only 2 signals total
+across the 2 email-carrying profiles (price_hesitation, high_intent) —
+neither is 'email_capture', 'cart_abandon', 'checkout_abandon',
+'lapsing', 'winback', 'post_purchase_d3', 'back_in_stock', or
+'price_drop' (server.js's EMAIL_SIGNAL_TYPES list). This means, under
+the current bonus-email logic, NEITHER of these 2 profiles would
+currently qualify for a bonus marketing email even if brain.js scheduled
+a job for them — their only active signals (price_hesitation,
+high_intent) aren't in that gate list. This is consistent with both
+profiles' `messages` arrays being empty, seen in section 3 of this same
+run.

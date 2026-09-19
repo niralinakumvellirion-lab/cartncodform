@@ -1,0 +1,163 @@
+=== DASHBOARD MISSING-STATS AUDIT ===
+Generated: 2026-09-17
+Scope: AUDIT ONLY, read-only. No files were modified while producing this.
+
+File read in full: frontend/app/admin/dashboard/DashboardScreen.jsx
+(869 lines, current state as of the redesign committed 8dd6fce)
+
+
+====================================================================
+1. IS THERE A SECTION SHOWING THE 4 STATS FROM THE SCREENSHOT?
+====================================================================
+
+  - Product Views This Week
+  - Allowed Notifications (opt-in rate %)
+  - Add-to-cart Rate %
+  - Sessions Tracked
+
+CONFIRMED MISSING. There is no section, card, row, or any JSX element
+anywhere in the current file that renders these 4 values.
+
+Evidence: the state variable that holds this data is `insightsStats`
+(declared line 192). Searching the whole file for the identifier
+`insightsStats`, it appears in exactly two places:
+  Line 192: const [insightsStats, setInsightsStats] = useState(null);
+  Line 344: setInsightsStats(pa.value?.stats || null);
+Both are write-side (declaration + setter call inside the fetch
+effect). There is no third occurrence anywhere in the JSX (lines
+416-868) that reads `insightsStats.xxx` or `insightsStats?.xxx`. The
+value is fetched and stored every time loadInsights() runs, then
+never displayed.
+
+Root cause: the previous redesign task (see
+audits/dashboard-redesign-audit.txt, "Deviations" item 1) replaced
+the old 4-tile Insights row (which read insightsStats) with a new
+6-card KPI row driven by `notifStats` instead (pushSent, emailsSent,
+pushSubscribers, popupsShown, emailsCaptured, newSubscribers.length —
+see section 2 and 3 below). The task that ordered that redesign gave
+an explicit 5-section Information Architecture with no slot for the
+insightsStats-driven tiles, so they were dropped from render (while
+the fetch itself was kept, per "keep all state/effects"). This was
+flagged at the time as a real gap, not a fix applied silently.
+
+
+====================================================================
+2. insightsStats STATE — FULL DECLARATION + HOW IT IS POPULATED
+====================================================================
+
+Declaration (line 192):
+  const [insightsStats, setInsightsStats] = useState(null);
+
+Populated by: the `loadInsights` useCallback (lines 334-355), which
+is invoked once on mount by the useEffect at lines 357-359
+(dependency: [loadInsights]), and again any time the user clicks the
+header Refresh button (refreshButton, lines 390-414, calls
+loadInsights() directly) or the whole Dashboard component re-renders
+with a new `loadInsights` reference.
+
+Relevant code (lines 334-355):
+  const loadInsights = useCallback(async () => {
+    if (!shop) return;
+    setInsightsLoading(true);
+    setInsightsError('');
+    try {
+      const [pa, wn] = await Promise.allSettled([
+        apiGet(`/api/events/${encodeURIComponent(shop)}/product-analytics`),
+        apiGet(`/api/profiles/${encodeURIComponent(shop)}/weekly-narrative`),
+      ]);
+      if (pa.status === 'fulfilled') {
+        setInsightsStats(pa.value?.stats || null);
+        setInsightsProducts(Array.isArray(pa.value?.products) ? pa.value.products : []);
+      } else {
+        setInsightsError(pa.reason?.message || 'Failed to load analytics');
+      }
+      if (wn.status === 'fulfilled') {
+        setAiInsights(Array.isArray(wn.value?.insights) ? wn.value.insights : []);
+      }
+    } finally {
+      setInsightsLoading(false);
+    }
+  }, [shop]);
+
+API called: GET /api/events/:shop/product-analytics
+(backend/routes/events.js — read in full in an earlier audit)
+
+Response shape (the `.stats` object that becomes insightsStats):
+  {
+    stats: {
+      productViewsThisWeek,   // total product views this week
+      allowedNotifications,   // opt-in rate (%)
+      addToCartRate,          // % of sessions that added to cart
+      sessionCount,           // unique sessions tracked
+    },
+    products: [ ... ]  // separately captured into insightsProducts,
+                        // NOT part of insightsStats
+  }
+
+So insightsStats, once set, is exactly the 4-field object:
+  { productViewsThisWeek, allowedNotifications, addToCartRate, sessionCount }
+— i.e. precisely the 4 stats asked about in section 1 — but as shown
+above, nothing in the JSX ever reads it.
+
+
+====================================================================
+3. CURRENT FULL JSX STRUCTURE — section by section, with line numbers
+====================================================================
+
+Return statement: lines 416-868
+  <Page>                                              416-417
+  <div style={DS.page}>                                418
+
+  SECTION 1 — sticky top bar                           420-472
+    - title "Dashboard" + todaySubtitle date            437-440
+    - date filter pills (DATE_FILTERS)                  441-469
+    - refreshButton                                     470
+
+  SECTION 2 — KPI row, 6 cards                          474-506
+    - maps over [...kpiRow1, ...kpiRow2]                483-505
+      kpiRow1 (line 369-373): Push Sent, Emails Sent,
+        Push Subscribers            <- from notifStats
+      kpiRow2 (line 374-378): Popups Shown,
+        Emails Captured, New Subscribers Today
+        <- from notifStats + newSubscribers.length
+    - NOTE: none of these 6 cards use insightsStats.
+
+  SECTION 3 — Attributed Activity, 4 clickable cards     508-542
+    - maps over ACTIVITY_STATS (add_to_cart,
+      checkout_start, purchase, revisit)                 518-540
+    - reads activity?.summary?.[key]                      536
+
+  SECTION 4 — two column layout (60/40 desktop)           544-778
+    LEFT column (554-704):
+      insightsError banner (conditional)                  555-569
+      4A: Most Viewed Products table                       571-675
+        - header + SORT_TABS                                573-606
+        - column headers (#, Product, Views, Avg time)      608-631
+        - loading skeleton / empty state / rows              633-674
+          reads: sortedProducts (derived from
+          insightsProducts, NOT insightsStats)
+      4B: AI insight banner (conditional aiInsights.length) 677-703
+        reads aiInsights[0] only, under label "Weekly insight"
+    RIGHT column (706-777):
+      4C: Planned for today                                708-753
+        reads groupedSignals (from signals state)
+      4D: Yesterday performance                             755-776
+        reads todayStats?.messagesSent (always unset/bug)
+        and pushStats?.deliveredLast7d
+
+  todayError banner (conditional)                          780-794
+
+  SECTION 5 — new subscribers alert (conditional)          796-863
+    - header count + message                                799-804
+    - list of subscribers with Send now buttons             805-861
+      (sendNow / sendingTo / sendResults — unchanged logic)
+
+  </div>                                                    865
+  </Page>                                                   866
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified. This was a read-only audit of
+frontend/app/admin/dashboard/DashboardScreen.jsx.

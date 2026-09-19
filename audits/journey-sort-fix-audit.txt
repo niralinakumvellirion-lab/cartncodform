@@ -1,0 +1,60 @@
+=== JOURNEY SORT FIX AUDIT ===
+profileIds sorted by lastSeenAt descending: yes
+lastSeenAt in populate: yes (was it already there? yes — the
+  .populate('profileId', 'identifiers stage orders channels
+  lastSeenAt') call already included lastSeenAt before this task;
+  confirmed by reading the function in full first, no change made to
+  the populate line)
+node --check: pass
+npm test: 151/151 passing (19/19 suites)
+git push: done (commit 6c9fe5c, ba70fb1..6c9fe5c main -> main)
+
+
+EXACT DIFF
+=========================================================================
+     profileMap[pid].signals.push(sig);
+   });
+
+-  const profileIds = Object.keys(profileMap);
++  // Sort profiles by lastSeenAt descending (most recent first)
++  const profileIds = Object.keys(profileMap).sort((a, b) => {
++    const aDate = profileMap[a]?.profile?.lastSeenAt
++      ? new Date(profileMap[a].profile.lastSeenAt) : new Date(0);
++    const bDate = profileMap[b]?.profile?.lastSeenAt
++      ? new Date(profileMap[b].profile.lastSeenAt) : new Date(0);
++    return bDate - aDate;
++  });
+   const pageIds = profileIds.slice(page * limit, (page + 1) * limit);
+
+Matches the task's given code exactly. A profile with no lastSeenAt
+(null, the schema default) falls back to `new Date(0)` (epoch), so it
+sorts to the very end of the list rather than throwing or sorting
+unpredictably against a real date.
+
+
+VERIFIED SAFE, AS INSTRUCTED
+=========================================================================
+- Signal.find(...).sort({ strength: -1 }) (line 405): untouched. This
+  sort still determines profileMap's construction order (the
+  strongest-signal-first grouping the function's own doc comment,
+  lines 393-396, depends on for correctness — "the FIRST signal seen
+  per profile in that sorted list is guaranteed to already be that
+  profile's strongest"). The new pageIds sort runs strictly AFTER
+  profileMap is fully built (it only reorders the already-grouped
+  profile id keys for pagination/display), so it cannot affect which
+  signal ends up as each profile's topSignal/signals — confirmed by
+  reading the full function again after the edit: the forEach grouping
+  loop (lines 411-422) is entirely unchanged and unaffected by this
+  fix.
+- No other function in events.js was touched.
+- No frontend file was touched (this task's git add list only named
+  backend/routes/events.js, and nothing else was staged or committed).
+
+
+NOT TOUCHED
+=========================================================================
+- backend/routes/events.js's other routes (GET /:shopDomain/customer/
+  :sessionId, /summary, /ccfsession/:ccfSessionId, /resolve/:cartToken,
+  /product-analytics), and the POST / handler: unchanged.
+- Journey.jsx and every other frontend file: unchanged (confirmed via
+  git status — no pending changes outside backend/routes/events.js).

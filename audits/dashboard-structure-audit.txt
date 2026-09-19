@@ -1,0 +1,309 @@
+=== DASHBOARD STRUCTURE AUDIT ===
+Generated: 2026-09-16
+Scope: AUDIT ONLY, read-only. No files were modified while producing this.
+
+File read in full: frontend/app/admin/dashboard/DashboardScreen.jsx (1156 lines)
+Backend file read in full: backend/routes/profiles.js (583 lines)
+Backend files referenced from earlier audits (not re-read this pass,
+content already verified line-by-line in prior sessions):
+  - backend/routes/activity.js  (see audits/activity-data-audit.txt)
+  - backend/routes/events.js    (product-analytics route)
+
+
+====================================================================
+1. ALL STATE VARIABLES DECLARED
+====================================================================
+
+Today.jsx-derived state (lines 171-188):
+  todayStats,   setTodayStats    (171)  -- see NOTE A below: never set
+  pushStats,    setPushStats     (172)
+  signals,      setSignals       (173)
+  todayLoading, setTodayLoading  (174)
+  todayError,   setTodayError    (175)
+  dateFilter,   setDateFilter    (177)  -- default '7d'
+  activity,     setActivity      (178)
+  notifStats,   setNotifStats    (179)
+  notifLoading, setNotifLoading  (180)
+  refreshKey,   setRefreshKey    (181)
+  newSubscribers, setNewSubscribers (183)
+  subsLoading,  setSubsLoading   (184)  -- declared, never read or set anywhere
+                                          past this line; dead state carried
+                                          over verbatim from Today.jsx
+  sendingTo,    setSendingTo     (185)
+  sendResults,  setSendResults   (186)
+  isMobileView, setIsMobileView  (188)
+
+Insights.jsx-derived state (lines 192-197):
+  insightsStats,    setInsightsStats    (192)
+  insightsProducts, setInsightsProducts (193)
+  aiInsights,       setAiInsights       (194)
+  insightsLoading,  setInsightsLoading  (195)
+  insightsError,    setInsightsError    (196)
+  sortBy,           setSortBy           (197)  -- default 'views'
+
+Total: 21 useState declarations.
+
+NOTE A -- todayStats/setTodayStats is declared at line 171 but
+setTodayStats is called NOWHERE in the file. It stays null for the
+life of the component. This is a pre-existing bug inherited from
+Today.jsx (documented previously in audits/dashboard-merge-audit.txt)
+and it directly affects the "Yesterday" card and the "Recovered this
+week" chart -- see section 3 and section 4.
+
+
+====================================================================
+2. ALL useEffect HOOKS -- what they fetch and what they set
+====================================================================
+
+EFFECT 1 (lines 200-221)  deps: [shop, dateFilter, refreshKey]
+  Fetches (Promise.allSettled, 2 promises):
+    GET /api/activity?shop=...&from=...&to=...
+    GET /api/profiles/:shop/today-stats?from=...&to=...
+  Sets:
+    activity   <- 1st result (or null if rejected)
+    notifStats <- 2nd result (or null if rejected)
+    notifLoading -> false in .finally()
+  from/to come from getDateRange(dateFilter) (today/yesterday/7d/30d).
+
+EFFECT 2 (lines 224-242)  deps: [shop]
+  Fetches:
+    GET /api/profiles/:shop/new-subscribers
+    Polled via setInterval every 30000ms; cleared on unmount.
+  Sets:
+    newSubscribers <- data.subscribers || []
+
+EFFECT 3 (lines 276-281)  deps: []
+  No fetch. Sets isMobileView from window.innerWidth <= 768,
+  re-checked on a 'resize' listener.
+
+EFFECT 4 (lines 284-309)  deps: [shop]
+  Fetches (Promise.allSettled, 3 promises):
+    GET /api/profiles/:shop/push-stats
+    GET /api/profiles/:shop/signals?limit=20
+    GET /api/stores/:shop/orders
+  Destructures the result as ([ps, sg]) -- only 2 of the 3 settled
+  results are read; the orders result is silently discarded (same
+  bug already flagged in audits/dashboard-merge-audit.txt, carried
+  over unmodified from Today.jsx).
+  Sets:
+    pushStats <- ps.value (if fulfilled)
+    signals   <- sg.value?.signals array (if fulfilled), else []
+    todayError <- only if BOTH ps and sg rejected
+    todayLoading -> false unconditionally at the end
+
+EFFECT 5 (lines 357-359)  deps: [loadInsights]
+  Calls loadInsights(), a useCallback defined at lines 334-355
+  (deps: [shop]), which itself does:
+    Promise.allSettled([
+      GET /api/events/:shop/product-analytics,
+      GET /api/profiles/:shop/weekly-narrative,
+    ])
+  Sets:
+    insightsStats    <- product-analytics .stats (if fulfilled)
+    insightsProducts <- product-analytics .products array (if fulfilled), else []
+    insightsError     <- only if product-analytics rejected
+    aiInsights        <- weekly-narrative .insights array (if fulfilled), else unchanged
+    insightsLoading   -> false in finally()
+
+
+====================================================================
+3. FULL JSX STRUCTURE -- section by section (summarized)
+====================================================================
+
+<Page>
+  <div style=DS.page>
+
+    1. PageHeader
+       title="Dashboard", subtitle="Your store performance at a glance"
+       action = refreshButton (bumps refreshKey AND calls loadInsights())
+
+    2. Date filter bar
+       DATE_FILTERS buttons (today/yesterday/7d/30d), highlights dateFilter
+
+    3. Insights content (from Insights.jsx)
+       a. insightsError banner            (conditional on insightsError)
+       b. 4 stat tiles grid                (2 cols mobile / 4 cols desktop)
+          - Product views this week
+          - Allowed notifications
+          - Add-to-cart rate
+          - Sessions tracked
+       c. Products table card
+          - header row: "Products" label + 3 sort tabs (Views/Time on
+            page/Cart rate)
+          - column header row: Product, Views, Avg time, Avg scroll,
+            Cart rate
+          - body: loading skeleton (4 rows) OR empty-state text OR
+            sortedProducts rows (product title+price, views+unique
+            viewers, avg dwell, scroll/cart-rate bar, cart rate %)
+       d. AI insight banner                (conditional on aiInsights.length>0;
+                                             renders ONLY aiInsights[0], not
+                                             the full array)
+
+    4. Today stats section (from Today.jsx)
+       a. 2-column grid (1 col mobile / 2 cols desktop):
+          - LEFT: Notifications card -- header + NOTIF_STATS rows
+            (pushSent/emailsSent/popupsShown/emailsCaptured/pushSubscribers)
+            reading notifStats?.[key]
+          - RIGHT: Attributed Activity card -- header ("View all" link
+            to /admin/activity) + ACTIVITY_STATS rows (add_to_cart/
+            checkout_start/purchase/revisit) reading activity?.summary?.[key],
+            each row clickable -> navigates to /admin/activity?type=key
+       b. todayError banner                (conditional on todayError)
+       c. New subscriber alerts block      (conditional on newSubscribers.length>0)
+          - pulsing-dot header + count text
+          - one row per subscriber: email/"Anonymous subscriber",
+            subscribed-at time, Send-now button (POST /api/push/send-now)
+
+    5. Planned-for-today / Yesterday 2-column grid (1 col mobile / 2 cols desktop)
+       - LEFT: "Planned for today" card -- groupedSignals (signals grouped
+         by type, max strength kept, sorted desc), each row: label
+         (SIGNAL_LABELS[type] or raw type), channel badge, count.
+         Loading skeleton (5 bars) while todayLoading.
+       - RIGHT: "Yesterday" card -- 2x2 grid of Sent / Opened-or-clicked /
+         Came-back-and-bought / Recovered, all four reading todayStats
+         and/or pushStats. Since todayStats is never set (NOTE A), Sent,
+         Came-back-and-bought, and Recovered permanently render their
+         '--'/0 fallback values; only "Opened or clicked" (pushStats-based)
+         shows real numbers.
+
+    6. "Recovered this week" bar chart card
+       - subtitle line reads todayStats?.revenueRecovered (always 0,
+         NOTE A) and todayStats?.messagesSent (always 0)
+       - 7-day bar chart: bars for days before today are
+         Math.round(total * Math.random() * 0.3) where total is
+         todayStats?.revenueRecovered (always 0) -- so with the bug
+         in effect every bar is always 0 regardless of the Math.random()
+         call. This chart has never shown real data since todayStats
+         is never populated.
+
+  </div>
+</Page>
+
+
+====================================================================
+4. ALL DATA AVAILABLE -- API response shapes
+====================================================================
+
+--- /api/activity ---
+(backend/routes/activity.js, requireAuth-only, shop from req.shopDomain;
+ shape already fully documented in audits/activity-data-audit.txt,
+ summarized here for completeness)
+{
+  from, to,     // resolved Date objects
+  summary: {    // ALWAYS all 4 keys, numeric, defaulted to 0 -- from an
+                // UNLIMITED aggregate that is NOT filtered by eventType
+    revisit, add_to_cart, checkout_start, purchase
+  },
+  users: [ { eventType, email, sessionId, jobId, meta, ts }, ... ],
+                // up to 200, newest first, filtered by eventType if
+                // the query param was provided
+  total,        // === users.length (capped at 200 -- NOT a true count)
+}
+
+--- /api/profiles/:shop/today-stats ---
+(backend/routes/profiles.js lines 294-352, requireAuth + requireStoreOwner)
+Query: from, to (optional; default = last 7 days)
+{
+  pushSent,        // ScheduledJob count, channel=push, status=sent, sentAt in range
+  emailsSent,      // Profile.messages aggregate, channel=email, sentAt in range
+  popupsShown,     // StorefrontEvent count, type=push_prompt_shown, ts in range
+  emailsCaptured,  // Profile count, channels.email.capturedAt in range
+  pushSubscribers, // Profile count, channels.push.subscribed=true (ALL TIME,
+                   // ignores from/to)
+}
+IMPORTANT MISMATCH: the task's own wording implies this feeds
+"todayStats", but in the actual code this response is stored into
+notifStats (EFFECT 1), not todayStats. The variable named todayStats
+(NOTE A) is never populated by any fetch at all -- there is no
+endpoint in this codebase that fills messagesSent/conversions/
+revenueRecovered, the 3 fields the JSX reads off todayStats.
+
+--- Insights data ---
+The task assumed a single "/api/profiles/:shop/insights" endpoint.
+No such route exists in backend/routes/profiles.js. Insights (and
+therefore Dashboard) actually calls TWO different endpoints:
+
+  GET /api/events/:shop/product-analytics
+  (backend/routes/events.js; documented from a prior full read)
+  {
+    stats: {
+      productViewsThisWeek,
+      allowedNotifications,   // opt-in rate
+      addToCartRate,
+      sessionCount,
+    },
+    products: [
+      { productId, productTitle, productPrice, views, uniqueViewers,
+        addToCarts, cartRate, avgDwell },
+      ...
+    ]  // sorted by views desc, limited to 20
+  }
+
+  GET /api/profiles/:shop/weekly-narrative
+  (backend/routes/profiles.js lines 403-434, requireAuth + requireStoreOwner)
+  {
+    narrative,       // string
+    insights,        // array of strings -- DashboardScreen only ever
+                      // renders insights[0]
+    stats,           // object from computeWeeklyStats(shop) -- NOT
+                      // consumed anywhere in DashboardScreen.jsx
+  }
+  Cached in-process (Map keyed by shop) for 1 hour; a settings PATCH
+  invalidates the cache for that shop.
+
+--- /api/profiles/:shop/push-stats ---
+(backend/routes/profiles.js lines 267-286, requireAuth + requireStoreOwner)
+{
+  deliveredLast7d,  // from Store.pushStats, default 0
+  attemptedLast7d,  // default 0
+  rateLast7d,       // default 0
+  lastComputedAt,   // default null
+}
+This is the ONLY Today-side stat card that reliably shows non-zero
+data, since it does not depend on the never-set todayStats variable.
+
+--- /api/profiles/:shop/signals?limit=20 ---
+(backend/routes/profiles.js lines 21-47)
+{ signals: [ { type, strength, channel, profileId: {identifiers, stage}, ... } ] }
+Sorted by strength desc.
+
+--- /api/profiles/:shop/new-subscribers ---
+(backend/routes/profiles.js lines 354-400)
+{
+  count,
+  subscribers: [ { profileId, email, subscribedAt, lastSeenAt }, ... ]
+}
+Profiles that opted into push in the last 24h AND have not yet
+received any message in that window; capped at 50.
+
+--- /api/stores/:shop/orders ---
+Fetched in EFFECT 4 as the 3rd Promise.allSettled entry but its
+result is never read (destructured as ([ps, sg]), dropping the 3rd
+element) -- not read for this audit since DashboardScreen.jsx never
+consumes its response shape.
+
+
+====================================================================
+5. CURRENT SCREEN DIMENSIONS / MAXWIDTH
+====================================================================
+
+DS.page (lines 9-14):
+{
+  maxWidth: 960,
+  margin: '0 auto',
+  padding: '24px 20px',
+  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+}
+This is the only sizing applied at the top level; all content inside
+is constrained to a 960px-wide, horizontally centered column with
+24px top/bottom and 20px left/right padding. No other maxWidth is
+set anywhere else in the file (the 2-column grids inside use 1fr/1fr
+or repeat(N,1fr), which scale within that 960px column).
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified. This was a read-only audit of
+frontend/app/admin/dashboard/DashboardScreen.jsx and
+backend/routes/profiles.js.

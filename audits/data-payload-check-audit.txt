@@ -1,0 +1,119 @@
+=== DATA PAYLOAD CHECK AUDIT ===
+Generated: 2026-09-18
+Read-only investigation. No files were changed.
+
+Scope: backend/utils/pushNotification.js, sendPushToCustomers() only —
+the `data` block of the FCM `message` object, in both branches
+(cartToken-targeted branch and broadcast branch).
+
+
+====================================================================
+CARTTOKEN BRANCH — data block (lines 150-156)
+====================================================================
+          data: {
+            url: url || `https://${shopDomain}`,
+            imageUrl: imageUrl || '',
+            title: title,
+            body: body,
+            icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+          },
+
+
+====================================================================
+BROADCAST BRANCH — data block (lines 210-216)
+====================================================================
+      data: {
+        url: url || `https://${shopDomain}`,
+        imageUrl: imageUrl || '',
+        title: title,
+        body: body,
+        icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+      },
+
+The two blocks are byte-for-byte identical in shape (same 5 keys,
+same value expressions) — only the surrounding branch (targeted single
+subscriber vs. all subscribers for the shop) differs.
+
+
+====================================================================
+1. Does the `data` block include a `title` string field?
+====================================================================
+YES. `title: title` is present in both branches (line 153 cartToken
+branch, line 213 broadcast branch) — set directly to the function's
+own `title` parameter (sendPushToCustomers(shopDomain, title, body,
+url, imageUrl, ...)), a plain string, no transformation or fallback
+applied.
+
+
+====================================================================
+2. Does the `data` block include a `body` string field?
+====================================================================
+YES. `body: body` is present in both branches (line 154 cartToken
+branch, line 214 broadcast branch) — set directly to the function's
+own `body` parameter, same pattern as title: no transformation or
+fallback applied.
+
+
+====================================================================
+3. What is the exact key name used for the image field in `data`?
+====================================================================
+`imageUrl` — present in both branches as:
+  imageUrl: imageUrl || ''
+(line 152 cartToken branch, line 212 broadcast branch). Falls back to
+an empty string, never to null/undefined, if the function's own
+`imageUrl` parameter is falsy.
+
+Note: the `data` block also reuses the same `imageUrl` value as a
+fallback source for the separate `icon` key (`icon: imageUrl ||
+'https://img.icons8.com/color/96/shopping-cart--v1.png'`) — so a
+consumer that reads `data.icon` (rather than `data.imageUrl`) would
+also receive the image URL in that case, but the DEDICATED image key
+is `imageUrl`.
+
+
+====================================================================
+4. Every key present in the `data` block, verbatim
+====================================================================
+Identical set in both branches, in source order:
+  1. url
+  2. imageUrl
+  3. title
+  4. body
+  5. icon
+
+No other keys are present in either `data` block.
+
+
+====================================================================
+SELF-AUDIT
+====================================================================
+
+Line numbers read: 140-239 (targeted read of
+backend/utils/pushNotification.js), covering the cartToken branch's
+`data` block at lines 150-156 and the broadcast branch's `data` block
+at lines 210-216 — the two ranges named in this task's scope.
+
+Are data.title and data.body present? YES — in both branches, both
+keys are present as plain, unconditional assignments (`title: title`,
+`body: body`) with no fallback text and no omission in either code
+path.
+
+This directly resolves the open question raised at the end of
+audits/sw-push-audit.txt: the storefront service worker's fallback
+chain (`payload.notification?.title || payload.data?.title || <generic
+fallback>`) will correctly receive the real merchant-composed
+title/body via `payload.data.title` / `payload.data.body`, since the
+backend already populates both fields in the `data` block on every
+send. Combined with that audit's confirmation that `data.imageUrl` is
+also correctly read by the service worker, the backend-to-SW payload
+contract for title/body/image is fully correct end-to-end — the
+previously-suspected "backend isn't sending data.title/data.body" gap
+does NOT exist in this code.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+This was a read-only investigation limited to the exact code range
+requested. No files were modified. No git operations, builds, or
+deploys were performed, as none were requested for this task.

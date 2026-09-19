@@ -1,0 +1,78 @@
+=== TODAY ALLSETTLED AUDIT ===
+Generated: 2026-09-16
+
+Promise.all changed to Promise.allSettled: yes
+.then() updated to use .status === fulfilled: yes
+.catch() removed: yes
+frontend build: pass (all 16 routes compiled, no errors)
+git push: done (8c6540b..07215bc)
+vercel deploy: done (readyState READY, aliased to
+  https://app.shopireachboost.com — this deploy also covers the
+  Journey.jsx column-width fix from the immediately preceding task,
+  whose own vercel --prod step had not yet been run when that task
+  ended, mid-push-hang; see note below)
+
+
+====================================================================
+DETAILS
+====================================================================
+
+Read frontend/app/admin/screens/Today.jsx in full before editing, as
+instructed. Found the target effect at (then) lines 185-211.
+
+Change applied exactly as the task specified — URL strings
+untouched, only Promise.all -> Promise.allSettled and the .then()
+destructuring updated:
+
+  Promise.allSettled([
+    apiGet(`/api/activity?shop=${encodeURIComponent(shop)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+    apiGet(`/api/profiles/${encodeURIComponent(shop)}/today-stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+  ])
+    .then(([actResult, statsResult]) => {
+      if (cancelled) return;
+      setActivity(actResult.status === 'fulfilled' ? actResult.value : null);
+      setNotifStats(statsResult.status === 'fulfilled' ? statsResult.value : null);
+    })
+    .finally(() => {
+      if (cancelled) return;
+      setNotifLoading(false);
+    });
+
+One deliberate deviation from the task's literal example: the given
+snippet's `.then()` block didn't include the `if (cancelled) return;`
+guard that was present in the original code's `.then()`/`.catch()`/
+`.finally()` blocks (this effect's own cleanup function sets
+`cancelled = true` on unmount/re-run, per React's standard stale-
+closure-guard pattern, used consistently across every other
+data-fetching effect in this same file). Removing that guard would
+have been a real behavior change — a slower, in-flight response from
+a PRIOR effect run (e.g. after rapidly clicking two different date
+filters) could then overwrite state with stale data after the
+component had already moved on to a newer request. Kept the guard in
+the `.then()` block (it was already correctly present, unchanged, in
+`.finally()`), satisfying "DO NOT change any other logic."
+
+Result: a failure in EITHER of the two parallel calls no longer
+blanks out both `activity` and `notifStats` — each now resolves to
+its own fetched value or null independently of whether the other
+request succeeded or failed. This directly fixes the bug documented
+in audits/activity-data-audit.txt (the immediately preceding audit
+task), where a Promise.all rejection from either call silently
+nulled out BOTH stat columns with no console log and no visible
+error message.
+
+
+====================================================================
+NOTE — this deploy also covers the previous task's pending deploy
+====================================================================
+
+The immediately preceding task (Journey.jsx customer-list column-
+width fix) committed and attempted to push
+(8c6540b "fix: Journey customer list — Notify button fully visible")
+but hit the session's recurring intermittent git-push-hang issue; the
+user was asked to run the push manually, which succeeded, but that
+task ended before `vercel --prod` could be run for it. This task's
+own `vercel --prod` step (run after this commit) deploys BOTH that
+pending Journey.jsx fix AND this Promise.allSettled fix together, in
+one production deployment — confirmed via `git log` that both
+8c6540b and 07215bc are included in what was pushed/deployed.

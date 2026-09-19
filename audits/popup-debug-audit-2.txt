@@ -1,0 +1,124 @@
+POPUP DEBUG AUDIT 2 - read-only, no changes
+==============================================
+Generated: 2026-09-12
+
+This file re-extracts a narrower set of items directly from
+extensions/cartncodform-embed/blocks/push-notifications.liquid,
+confirmed against the file's current state (all line numbers below
+were re-checked in this pass, not copied from the prior audit).
+
+
+------------------------------------------------------------
+1. canPrompt() - full function (lines 60-67)
+------------------------------------------------------------
+60	  function canPrompt() {
+61	    if (!('Notification' in window)) return false;
+62	    if (Notification.permission !== 'default') return false; // already granted or denied
+63	    if (promptAlreadyShown()) return false;
+64	    if (localStorage.getItem(SUBSCRIBED_KEY) === '1') return false;
+65	    try { if (sessionStorage.getItem('ccf_denied_session')) return false; } catch (e) {}
+66	    return true;
+67	  }
+
+
+------------------------------------------------------------
+2. markPromptShown() - full function (lines 56-58)
+------------------------------------------------------------
+56	  function markPromptShown() {
+57	    try { sessionStorage.setItem(PROMPT_SHOWN_KEY, 'true'); } catch (e) {}
+58	  }
+
+
+------------------------------------------------------------
+3. start() - only the section that calls showSoftPrompt() or
+   initIntentTriggers() (lines 2308-2323; full start() is lines 2297-2328)
+------------------------------------------------------------
+2308	    // popup-customizer + discount-feature: load appearance + discount config
+2309	    // first, then wire the intent triggers (which is where the dwell timer
+2310	    // starts) and the product-page nudge -- both read popupConfig/
+2311	    // discountConfig, so both wait on this same Promise.all rather than a
+2312	    // bare setTimeout racing the config fetch (which can lose on a cold
+2313	    // backend and silently never show the nudge).
+2314	    Promise.all([fetchPopupConfig(), fetchDiscountConfig()]).then(function () {
+2315	      initIntentTriggers();
+2316
+2317	      // Inject product page discount nudge.
+2318	      setTimeout(function() {
+2319	        if (Notification.permission === 'granted') return;
+2320	        // already subscribed -- no nudge needed
+2321	        injectProductNudge();
+2322	      }, 1000);
+2323	    });
+
+NOTE: start() itself does not call showSoftPrompt() directly anywhere in
+the function body. This section is the only place inside start() that
+leads toward showSoftPrompt() -- via initIntentTriggers(), which contains
+the actual showSoftPrompt(...) call sites (see popup-debug-audit.txt
+section 1 for the full initIntentTriggers() body). The nested
+setTimeout() in this section calls injectProductNudge(), not
+showSoftPrompt() -- that is a separate, unrelated UI element.
+
+
+------------------------------------------------------------
+4. DWELL_MS value
+------------------------------------------------------------
+Line 43:
+  var DWELL_MS = 1500; // all intent triggers fire within 1-2s
+
+So DWELL_MS = 1500 (milliseconds).
+
+
+------------------------------------------------------------
+5. Lines reading sessionStorage.getItem('ccf_prompt_shown')
+------------------------------------------------------------
+NONE FOUND as a literal string. The key 'ccf_prompt_shown' is never
+written as a string literal in a sessionStorage.getItem(...) call
+anywhere in the file. Instead it is only ever accessed indirectly
+through the PROMPT_SHOWN_KEY variable:
+
+Line 41 (declaration):
+  var PROMPT_SHOWN_KEY = 'ccf_prompt_shown'; // sessionStorage
+
+Line 54 (the only read, via the variable, inside promptAlreadyShown()):
+  function promptAlreadyShown() {
+    try { return sessionStorage.getItem(PROMPT_SHOWN_KEY) === 'true'; } catch (e) { return false; }
+  }
+
+Line 57 (the only write, via the variable, inside markPromptShown()):
+    try { sessionStorage.setItem(PROMPT_SHOWN_KEY, 'true'); } catch (e) {}
+
+
+------------------------------------------------------------
+6. Lines reading localStorage.getItem('ccf_subscribed') or
+   localStorage.getItem with TOKEN_KEY
+------------------------------------------------------------
+localStorage.getItem('ccf_subscribed') as a literal string:
+  NONE FOUND. Same pattern as above -- only ever accessed indirectly
+  through the SUBSCRIBED_KEY variable:
+
+Line 30 (declaration):
+  var SUBSCRIBED_KEY = 'ccf_subscribed_' + SHOP_DOMAIN;
+
+Line 64 (the only read, via the variable, inside canPrompt()):
+    if (localStorage.getItem(SUBSCRIBED_KEY) === '1') return false;
+
+localStorage.getItem(TOKEN_KEY) -- 7 occurrences found:
+Line 1779:
+    var oldToken = localStorage.getItem(TOKEN_KEY);
+Line 1869:
+        var storedToken = localStorage.getItem(TOKEN_KEY);
+Line 1886:
+        var fallback = localStorage.getItem(TOKEN_KEY);
+Line 1910:
+      var token = localStorage.getItem(TOKEN_KEY);
+Line 2032:
+    var token = localStorage.getItem(TOKEN_KEY);
+Line 2099:
+        try { token = localStorage.getItem(TOKEN_KEY); } catch (e) {}
+Line 2261:
+          var existingToken = localStorage.getItem(TOKEN_KEY);
+
+(TOKEN_KEY = 'ccf_fcm_token_' + SHOP_DOMAIN, declared near the top of
+the file alongside SUBSCRIBED_KEY -- this stores the FCM push token
+itself, a different key/purpose from SUBSCRIBED_KEY, which is just a
+'1'/absent subscribed-flag.)

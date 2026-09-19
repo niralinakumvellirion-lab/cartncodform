@@ -1,0 +1,149 @@
+QUEUE EMAIL AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-14
+
+File read: backend/routes/queue.js, in full (111 lines).
+
+
+====================================================================
+Profile email enrichment section (GET /:shopDomain, lines 29-49)
+====================================================================
+29	    // Enrich with profile email
+30	    const profileIds = jobs
+31	      .map(j => j.profileId)
+32	      .filter(Boolean)
+33	      .map(String);
+34
+35	    const profiles = await Profile.find({
+36	      _id: { $in: profileIds }
+37	    }).select('identifiers.emails channels.email.address').lean();
+38
+39	    const profileMap = {};
+40	    profiles.forEach(p => {
+41	      profileMap[p._id.toString()] =
+42	        p.channels?.email?.address ||
+43	        p.identifiers?.emails?.[0] || null;
+44	    });
+45
+46	    const enriched = jobs.map(j => ({
+47	      ...j,
+48	      email: profileMap[j.profileId?.toString()] || null,
+49	    }));
+
+
+====================================================================
+1. What query it uses to find profiles
+====================================================================
+  Profile.find({ _id: { $in: profileIds } })
+-- a single batch lookup by `_id`, no `shopDomain` filter (not needed:
+`profileIds` was already derived only from the CURRENT page's job
+rows, which were themselves already scoped by `shopDomain: shop` in
+the earlier ScheduledJob.find() query, so every _id here already
+belongs to this shop). `profileIds` (lines 30-33) is built by mapping
+every job in the current page to its `profileId`, dropping any
+falsy/missing one (`.filter(Boolean)` -- jobs with no profileId, e.g.
+legacy rule-based jobs, are excluded here), and stringifying each
+(`.map(String)`) so they can be matched against Profile's `_id` (an
+ObjectId) via Mongoose's usual string-to-ObjectId cast in a query.
+
+
+====================================================================
+2. What fields it selects
+====================================================================
+  .select('identifiers.emails channels.email.address')
+Exactly 2 fields (plus `_id`, always included by default): the whole
+`identifiers.emails` array, and just the `address` sub-field of
+`channels.email` (not the sibling `channels.email.source`/
+`capturedAt` fields also present on that subdocument per the schema --
+see audits/profile-email-capture-audit.txt from earlier this session).
+`.lean()` is used, so `profiles` are plain JS objects, not Mongoose
+documents.
+
+
+====================================================================
+3. How it maps email to each job
+====================================================================
+Two-step map/lookup, not a per-job query:
+  1. `profileMap` (lines 39-44) is built ONCE from the small
+     `profiles` result set: for each profile, its resolved email
+     (see section 4 below) is stored keyed by `p._id.toString()`.
+  2. `enriched` (lines 46-49) maps every job in the current page to a
+     new object spreading the job's own fields (`...j`) plus one added
+     `email` field, looked up via `profileMap[j.profileId?.toString()]`
+     -- falling back to `null` if that key isn't present in the map at
+     all (covers both "job has no profileId" and "job's profileId
+     didn't match any profile", e.g. a stale/deleted profile
+     reference).
+This is a classic batch-enrichment pattern (one query for all jobs'
+profiles, then an in-memory map lookup per job) rather than N+1
+separate Profile queries per job -- efficient for the paginated list
+(max 20 jobs per page).
+
+
+====================================================================
+4. What fallback is used when email is null
+====================================================================
+Two-level fallback, applied per-profile inside profileMap's
+construction (lines 41-43), NOT per-job:
+  p.channels?.email?.address || p.identifiers?.emails?.[0] || null
+  1. First choice: `channels.email.address` (the single "current"
+     email address field).
+  2. If that's falsy: `identifiers.emails[0]` (the first entry in the
+     accumulating emails array).
+  3. If BOTH are falsy: the literal `null`.
+This exact 2-field fallback order (channels.email.address first, then
+identifiers.emails[0]) matches the same precedence already established
+elsewhere in this codebase for resolving "a profile's email" (see
+backend/server.js:430-431, backend/routes/push.js:398-399, and the
+test backend/__tests__/sendJourneyEmail.test.js, all noted in earlier
+audits this session) -- consistent, not a one-off choice specific to
+this file.
+Then, separately, at the per-JOB level (line 48):
+  profileMap[j.profileId?.toString()] || null
+-- if the job's profileId doesn't resolve to any key in profileMap at
+all (no profileId on the job, or no matching profile found), the
+job's `email` field is `null` too. So the final `email` value on an
+enriched job is `null` in three distinct cases: (a) the job has no
+profileId, (b) the job's profileId didn't match any Profile document,
+or (c) it matched a Profile that itself has neither
+channels.email.address nor any identifiers.emails entries. The API
+response gives no way to distinguish which of these three occurred --
+the frontend (QueueScreen.jsx, built in an earlier task this session)
+displays all three identically as "Anonymous", per its own
+`job.email || 'Anonymous'` fallback.
+
+
+====================================================================
+LIVE MONGODB CHECK - backend/check-queue-emails.js
+====================================================================
+Script created exactly as given and run: `node check-queue-emails.js`.
+
+Raw terminal output:
+
+=== LAST 10 JOBS ===
+job: new ObjectId('6aa78b244b939c759d40ea40') | signal: price_hesitation | status: sent | email: NO EMAIL
+job: new ObjectId('6aa672f3d8fcef0f1b768f2d') | signal: checkout_abandon | status: failed | email: NO EMAIL
+job: new ObjectId('6aa537714b93c5ba4992c16c') | signal: checkout_abandon | status: sent | email: NO EMAIL
+job: new ObjectId('6aa5295888cf1f3b833756d0') | signal: checkout_abandon | status: sent | email: NO EMAIL
+job: new ObjectId('6aa52650dddfcba53b2cbd50') | signal: email_capture | status: failed | email: NO EMAIL
+job: new ObjectId('6aa5264fdddfcba53b2cbd38') | signal: email_capture | status: failed | email: NO EMAIL
+job: new ObjectId('6aa5264fdddfcba53b2cbd36') | signal: email_capture | status: failed | email: NO EMAIL
+job: new ObjectId('6aa52618dddfcba53b2cbc89') | signal: email_capture | status: failed | email: NO EMAIL
+job: new ObjectId('6aa52618dddfcba53b2cbc7e') | signal: email_capture | status: failed | email: NO EMAIL
+job: new ObjectId('6aa52615dddfcba53b2cbc3c') | signal: email_capture | status: failed | email: NO EMAIL
+
+Observation (factual, not further investigated -- this task did not
+ask for a follow-up query): all 10 of the most recent jobs shop-wide
+resolved to "NO EMAIL". Per section 4 above, this script's own email
+resolution logic is identical to queue.js's per-profile fallback
+(channels.email.address, then identifiers.emails[0]), so this result
+is consistent with queue.js's own enrichment producing `email: null`
+for these same 10 rows if viewed in the Queue screen right now. The
+script as given does not distinguish between "job.profileId is unset"
+and "profileId is set but the profile has no email on file" (both
+print "NO EMAIL" identically) -- confirming WHICH of those applies to
+these 10 rows, or whether this is shop-wide/expected (e.g. most
+traffic is push-only, anonymous, or these particular jobs are
+checkout/price/email-capture signals that may legitimately run before
+an email was ever captured) versus a genuine enrichment bug, would
+require a follow-up query this task did not request.

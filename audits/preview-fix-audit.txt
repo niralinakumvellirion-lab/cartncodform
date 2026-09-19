@@ -1,0 +1,112 @@
+=== PREVIEW FIX AUDIT ===
+Generated: 2026-09-17
+
+Mobile: phone frame with status bar: yes
+Mobile: notification banner inside phone: yes
+Mobile: thumbnail shows uploaded image: yes
+Desktop: dark Mac-style notification: yes
+Desktop: thumbnail shows uploaded image: yes
+Both update live: yes
+frontend build: pass
+git push: done (1612ea1..c324e28)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full (1738
+lines, in two parts) before making any change, as instructed. Located
+the "Right: Live Preview" panel (the section built up across the
+previous several tasks — audits/dual-preview-audit.txt introduced the
+mobile+desktop split, audits/separate-images-audit.txt wired it to
+per-device state, audits/horizontal-upload-audit.txt touched only the
+upload boxes above it, not this panel).
+
+
+====================================================================
+IMPLEMENTATION
+====================================================================
+Replaced the entire "Right: Live Preview" `<div>` (previously a
+280px-wide `#f9fafb` panel with a simplified dark-rounded-rectangle
+"phone" and a light grey "desktop toast") with the given markup,
+verbatim:
+
+- Outer panel: `#f1f5f9` background, `borderLeft:'1px solid #e5e7eb'`,
+  now `display:'flex', flexDirection:'column', gap:20` (replacing the
+  prior per-section `marginBottom` spacing).
+- Mobile preview: a genuine phone-frame mockup — dark `#1c1c1e`
+  rounded-32 outer bezel, `#f2f2f7` "screen", a status bar row (9:41 +
+  a signal-dots glyph), a floating notification banner card
+  (app-icon-square + "ShopiReachBoost AI" + "now", then a text column
+  with title/2-line-clamped body next to a 40×40 thumbnail that shows
+  `editorMobileImageUrl` or a 🔔 placeholder), and a home-indicator bar
+  at the bottom of the screen.
+- Desktop preview: a translucent dark (`rgba(50,50,50,0.85)`,
+  `backdropFilter: blur(20px)`) Mac-notification-style card — app
+  header row (icon + name + "now" in low-opacity white), then a
+  content row with white title/body text (body also 2-line-clamped)
+  next to a 44×44 thumbnail showing `editorDesktopImageUrl` or a 🔔
+  placeholder.
+- Footer helper text changed from "Preview updates as you type" to
+  "Updates as you type", per the given markup.
+
+Both previews read the same `editorTitle`, `editorBody`,
+`editorMobileImageUrl`, and `editorDesktopImageUrl` state the prior
+task already wired up — no new state was introduced, and this task
+did not touch how any of those four values get set (the Title input,
+Message textarea, and both upload `<input type="file">` handlers
+above this panel are all unchanged), so both previews continue to
+update live as the merchant types or uploads, exactly as before.
+
+
+====================================================================
+DO NOT CHANGE COMPLIANCE
+====================================================================
+Only the "Right: Live Preview" panel was replaced. Re-read the file
+after editing to confirm the two upload boxes (Mobile/Desktop, with
+their FileReader-based onChange handlers), the Title/Message/Schedule
+Date fields, and all three action buttons (Send Now / Approve / Add to
+Queue) with their existing `mobileImageUrl`/`desktopImageUrl` request
+bodies are byte-for-byte unchanged from the version read at the start
+of this task.
+
+
+====================================================================
+DO-NOT-TOUCH-OTHER-FILES COMPLIANCE
+====================================================================
+Only frontend/app/admin/dashboard/DashboardScreen.jsx was staged and
+committed, per the task's own git-add line. `git status` after staging
+confirmed exactly this one path; the pre-existing unrelated dirty
+files (backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 15 static
+  routes + 1 dynamic route generated, no errors (/admin/dashboard:
+  10.3kB -> 10.5kB First Load JS).
+- git push origin main -- succeeded (1612ea1..c324e28), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+No backend changes were needed or made — this task is frontend-only,
+touching a single file, purely a preview-panel visual replacement.
+This app has no automated frontend test suite, so verification here is
+build-only, per the task's own stated verification step.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+1 file modified (frontend/app/admin/dashboard/DashboardScreen.jsx). No
+other file was touched. Manual visual verification in a live browser
+(confirming the phone-frame renders correctly, the status bar/home
+indicator look right, the Mac-style desktop card's blur/transparency
+renders as intended, and both thumbnails update on upload) was not
+performed as part of this task — this environment has no running dev
+server / authenticated Shopify session to click through; verification
+here is limited to a clean production build and the code review
+documented above.

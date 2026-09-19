@@ -1,0 +1,84 @@
+AUTOMATION STATE AUDIT — read-only
+=====================================
+Generated: 2026-09-12
+Script created: backend/check-automation.js (content matches what was
+  specified verbatim). Executed once via `node check-automation.js`.
+No other files modified.
+
+PII REDACTION NOTE (deviation, flagged): the script's own console.log
+calls print each profile's raw email address in full. Per CLAUDE.md's
+"Never log PII: no webhook bodies, profiles, emails, phones in
+console.log" rule, the two real customer email addresses returned by
+section 3 have been redacted below before writing them into this
+persisted, checked-into-the-repo audit file — a plaintext file is a much
+more durable/exposed home for that data than a transient terminal
+scrollback. The script file itself (backend/check-automation.js) was
+still created exactly as given, unmodified — only what gets WRITTEN to
+this audit file was redacted. Full domains are kept (both happen to be
+@gmail.com); local-parts are masked.
+
+
+=== STORE TOKEN ===
+Online token: shpat_089b...
+Expires at: 2026-09-13T07:07:07.508Z
+Needs reauth: false
+
+>>> FLAG: today is 2026-09-12 — this online token expires in
+    ~24 hours from when this script ran. When it expires,
+    backend/routes/discounts.js's generateDiscount() will detect the
+    expiry (store.onlineTokenExpiresAt check) and silently fall back to
+    the offline access token for Shopify Admin API calls — not a hard
+    failure, but worth knowing this token is on the verge of rolling
+    over. Not investigated further (audit only).
+
+=== PROFILES ===
+With email: 2
+With push: 45
+
+=== PROFILES WITH EMAIL ===
+Profile 1 | email: [redacted-local-part]@gmail.com
+  Last messages: []
+Profile 2 | email: [redacted-local-part]@gmail.com
+  Last messages: []
+
+>>> OBSERVATION: both email-carrying profiles have an EMPTY messages
+    array — neither has ever received a logged push or email send,
+    despite "With push: 45" showing plenty of push-subscribed profiles
+    overall and 24 ScheduledJob rows already marked 'sent' (see below).
+    This means neither of these 2 email-address profiles has been the
+    target of a completed automation send yet.
+
+=== RECENT JOBS (last 10) ===
+All 10 of the most recently created ScheduledJob rows are identical in
+shape:
+  failed | push | email_capture | cartncod-form.myshopify.com
+  | runAt: 2026-09-12T06:52:19.897Z | error: No active subscriber found
+
+>>> FLAG: all 10 share the exact same runAt timestamp
+    (2026-09-12T06:52:19.897Z), same channel ('push'), same signalType
+    ('email_capture' — the signal type added to EMAIL_SIGNAL_TYPES in
+    the immediately preceding task), and the exact same failure reason
+    ("No active subscriber found" — sendPushToCustomers found no
+    matching CustomerPushSubscription/token for the job's cartToken).
+    This pattern (identical timestamp + identical failure across 10
+    consecutive rows) suggests a batch of email_capture signals was
+    brain-scheduled for profiles that are not actually push-reachable
+    (stale/missing FCM tokens), all failing the same way in the same
+    poller tick. Not investigated further (audit only) — the underlying
+    cause (why brain.js picked 'push' as the channel for profiles
+    without a live push subscription, or why their tokens are stale) is
+    outside this task's scope.
+
+=== JOB COUNTS ===
+Pending: 0 | Sent: 24 | Failed: 194
+
+>>> FLAG: Failed (194) vs Sent (24) is roughly an 8:1 ratio — and has
+    grown substantially since the prior session's audit
+    (audits/session-sept12-audit.txt recorded Failed: 114 on the same
+    day), meaning ~80 additional jobs failed between that check and
+    this one. Consistent with the "No active subscriber found" pattern
+    above being a recurring, ongoing failure mode rather than a one-off.
+    Pending is now 0, meaning the queue is fully drained (nothing
+    currently waiting) — the poller is keeping up with volume, it's just
+    that a large majority of attempts are failing at the push-delivery
+    step specifically.

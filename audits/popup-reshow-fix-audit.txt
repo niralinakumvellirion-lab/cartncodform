@@ -1,0 +1,68 @@
+=== POPUP RESHOW FIX AUDIT ===
+
+Guard added: yes
+  alreadyRedirected check: yes
+  promptAlreadyShown() check: yes
+  Line changed: 1835 (original single-line if; now spans lines
+    1835-1839 after the edit — see EXACT CODE below)
+
+node --check: pass
+git push: done (commit 9adc41e, 831f0af..9adc41e main -> main)
+shopify deploy: done (cartncodform-101 [1], version
+  https://dev.shopify.com/dashboard/232824361/apps/415894044673/versions/1126078447617)
+
+
+EXACT CODE (extensions/cartncodform-embed/blocks/push-notifications.liquid,
+saveToken()'s discount-recapture block)
+=========================================================================
+        var alreadyRedirected = false;
+        try { alreadyRedirected = !!sessionStorage.getItem('ccf_disc_redirected'); } catch(e) {}
+
+        if (ccfDiscountEnabled() && canPromptForDiscount() && getPageType() !== 'product' &&
+            !alreadyRedirected && !promptAlreadyShown()) {
+          setTimeout(function() {
+            showSoftPrompt('page_load', null);
+          }, 1500);
+        }
+
+Matches the task's given replacement exactly, applied verbatim in place
+of the prior single-condition `if`.
+
+
+NOTE ON REDUNDANCY (observed, not a deviation — no fix applied beyond
+what was asked)
+=========================================================================
+Per audits/popup-reshow-audit.txt (this session's prior read-only
+audit), canPromptForDiscount() itself ALREADY checks both conditions
+this task adds explicitly:
+  - `sessionStorage.getItem('ccf_disc_redirected') === '1'` (line 79)
+  - `promptAlreadyShown()` (line 81)
+So the two new guards are redundant with canPromptForDiscount()'s own
+internal checks under the current code — the `if` will evaluate to the
+same result with or without them, for now. Two behavioral differences
+are worth noting for the record, not acted on since the task said DO
+NOT touch canPromptForDiscount() and DO NOT touch any other call site:
+  1. The new `alreadyRedirected` check is a truthy check (`!!...`),
+     matching the pattern used elsewhere in this file (e.g. line 65's
+     ccf_denied_session check) — canPromptForDiscount()'s own check is
+     a strict `=== '1'` match. Both currently behave identically since
+     the only value ever written to ccf_disc_redirected is the string
+     '1' (line 1528, injectProductNudge()'s redirect handler).
+  2. Belt-and-suspenders: if canPromptForDiscount() is ever changed
+     later (e.g. its internal checks loosened or removed) without
+     updating this call site, the two guards added here would still
+     independently block a re-show — which is presumably the intent
+     of adding them explicitly at the call site rather than relying
+     solely on the shared helper.
+
+
+NOT TOUCHED
+=========================================================================
+- canPromptForDiscount() function itself: untouched, confirmed via
+  git diff (only lines 1832-1839 changed).
+- All other showSoftPrompt() call sites (page_load/setTimeout at 1568,
+  return_visit at 1588, dwell at 1607, exit_intent at 1630, add_to_cart
+  at 1933 and 2251): untouched.
+- No file other than
+  extensions/cartncodform-embed/blocks/push-notifications.liquid was
+  staged or committed (git diff/add scoped to that single file only).

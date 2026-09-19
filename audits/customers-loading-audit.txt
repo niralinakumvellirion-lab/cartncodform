@@ -1,0 +1,194 @@
+=== CUSTOMERS LOADING AUDIT ===
+Generated: 2026-09-17
+Scope: AUDIT ONLY, read-only. No files were modified while producing this.
+
+File read in full: frontend/app/admin/screens/Customers.jsx (current
+state after the UI redesign, commit f3d034a)
+
+
+====================================================================
+1. loadData() — full try/catch/finally block
+====================================================================
+
+  const loadData = useCallback(
+    async (signal) => {
+      if (!shop) return;
+      setLoading(true);
+      setError('');
+      try {
+        const params = new URLSearchParams({ limit: '50' });
+        if (filter && filter !== 'everyone') params.set('filter', filter);
+        if (search.trim()) params.set('search', search.trim());
+
+        const [profRes, sigRes] = await Promise.all([
+          apiGet(`/api/profiles/${encodeURIComponent(shop)}/profiles?${params.toString()}`),
+          apiGet(`/api/profiles/${encodeURIComponent(shop)}/signals?limit=200`),
+        ]);
+        if (signal?.aborted) return;
+
+        setProfiles(Array.isArray(profRes?.profiles) ? profRes.profiles : []);
+        setTotal(Number.isFinite(profRes?.total) ? profRes.total : 0);
+
+        // strongest signal per profile + a per-profile signal count
+        const map = {};
+        const countMap = {};
+        for (const sig of Array.isArray(sigRes?.signals) ? sigRes.signals : []) {
+          const pid =
+            typeof sig.profileId === 'object' && sig.profileId
+              ? sig.profileId._id
+              : sig.profileId;
+          if (!pid) continue;
+          const key = String(pid);
+          countMap[key] = (countMap[key] || 0) + 1;
+          if (!map[key] || (sig.strength || 0) > (map[key].strength || 0)) {
+            map[key] = { type: sig.type, strength: sig.strength || 0 };
+          }
+        }
+        setSignalMap(map);
+        setSignalCountMap(countMap);
+      } catch (err) {
+        if (signal?.aborted) return;
+        setError(err.message || 'Failed to load customers');
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [shop, filter, search]
+  );
+
+
+====================================================================
+2. WHAT HAPPENS ON ERROR — does it setLoading(false)?
+====================================================================
+
+YES, in the normal case. The catch block sets `error`, then the
+finally block ALWAYS runs afterward (finally runs regardless of
+whether try succeeded, threw, or the catch itself ran) and calls
+setLoading(false) -- UNLESS `signal?.aborted` is true, in which case
+BOTH the catch body and the finally body skip their own action
+(catch returns early without setting error; finally's `if
+(!signal?.aborted)` guard skips setLoading(false)).
+
+So there are exactly two outcomes on a rejected promise:
+  - Not aborted (the normal "the API call itself failed" case):
+    error is set to err.message (or the fallback string), AND
+    loading is set back to false. The UI recovers correctly -- no
+    stuck loading state from a genuine fetch failure.
+  - Aborted (a newer loadData call superseded this one before it
+    finished, via the debounce effect's cleanup setting
+    controller.aborted = true): neither error nor loading is
+    touched by THIS call at all -- by design, since the newer call
+    already owns setLoading(true)/setLoading(false) for its own
+    lifecycle and this stale one must not stomp on it.
+
+
+====================================================================
+3. WHAT HAPPENS IF THE API RETURNS AN EMPTY ARRAY?
+====================================================================
+
+This is NOT an error path -- an empty `profiles` array from a
+successful response is handled entirely within the try block:
+  setProfiles(Array.isArray(profRes?.profiles) ? profRes.profiles : [])
+  -- if profRes.profiles is `[]`, Array.isArray([]) is true, so
+     profiles is set to that empty array (same result either way).
+  setTotal(...) is set from profRes.total as normal (likely 0).
+  signalMap/signalCountMap are still computed from the SEPARATE
+  signals response (independent of whether profiles was empty).
+  loading is set to false via the finally block, same as any
+  successful call.
+
+Downstream, the row-rendering JSX (section 6 below) checks
+`profiles.length` -- with profiles = [], this is falsy, so the
+"No customers match this view." empty-state message renders instead
+of any rows. This is a fully handled, correct state: not a bug, not
+a stuck-loading condition.
+
+
+====================================================================
+4. IS THERE ANY CONDITION THAT KEEPS loading: true FOREVER?
+====================================================================
+
+YES -- one real one, at the very first line of loadData:
+
+  if (!shop) return;
+
+This check runs BEFORE setLoading(true) is ever called, and there is
+no other code path that ever flips `loading` to false except inside
+loadData itself (no other setLoading call exists anywhere else in
+the file). So if `shop` is falsy (empty string, null, undefined) the
+very first time loadData is invoked, the function returns
+immediately without ever touching `loading` at all -- and since
+`loading`'s initial state is `true` (see section 5), it simply stays
+true forever, with no fetch ever attempted and no way for the UI to
+recover on its own (no timeout, no fallback render after N seconds).
+The list is stuck showing its 5 loading-skeleton rows indefinitely.
+
+This is exactly what was directly observed and documented in
+audits/customers-data-audit.txt: visiting
+https://app.shopireachboost.com/admin/customers without a `?shop=...`
+query param left the page rendering the skeleton state permanently,
+confirmed via read_network_requests showing zero /api/ calls were
+ever made. In normal operation this cannot happen -- every
+admin/*/page.js wrapper always reads `shop` from
+searchParams.get('shop') and this app is only ever opened from
+inside Shopify admin, which supplies that param automatically -- but
+it IS a real, reachable code path (a bare/malformed URL, or any
+future regression that lets `shop` reach this component empty) with
+no independent recovery mechanism.
+
+There is no OTHER infinite-loading path found -- once shop is
+truthy and loadData actually starts running, every remaining branch
+(success, non-aborted error, aborted) reaches a setLoading(false)
+per section 2/3 above.
+
+
+====================================================================
+5. INITIAL VALUE OF `loading` STATE
+====================================================================
+
+  const [loading, setLoading] = useState(true);
+
+`loading` starts as `true` (not false), so the skeleton rows render
+immediately on first mount, before loadData's debounced call (300ms
+via the useEffect in section 1's context) has even fired once.
+
+
+====================================================================
+6. SKELETON RENDER CONDITION -- what boolean controls it?
+====================================================================
+
+The single `loading` state variable, checked directly (no derived/
+combined condition) in the row-rendering ternary chain:
+
+  {loading ? (
+    [1, 2, 3, 4, 5].map((i) => (
+      <div key={i} style={{ height: '60px', borderBottom: '1px solid #f3f4f6',
+                             background: '#fff', display: 'flex',
+                             alignItems: 'center', padding: '0 16px' }}>
+        <div style={{ width: '60%', height: '14px', background: '#f3f4f6',
+                       borderRadius: '4px' }} />
+      </div>
+    ))
+  ) : profiles.length ? (
+    profiles.map((p, i) => { /* ... real rows ... */ })
+  ) : (
+    <div style={{ padding: '32px 16px', textAlign: 'center',
+                   fontSize: '13px', color: '#9ca3af' }}>
+      No customers match this view.
+    </div>
+  )}
+
+So the full render logic is a 3-way branch on (loading, then
+profiles.length): `loading` alone controls whether the 5 gray
+skeleton bars show at all -- it takes priority over everything else,
+including a genuinely empty `profiles` array (an empty list while
+loading is somehow still true, per section 4, would show skeletons
+forever rather than the "No customers match this view." message,
+since loading is checked first).
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified. This was a read-only audit of
+frontend/app/admin/screens/Customers.jsx.

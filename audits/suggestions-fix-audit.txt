@@ -1,0 +1,186 @@
+=== SUGGESTIONS FIX AUDIT ===
+Generated: 2026-09-17
+
+Sidebar scroll fixed: yes
+Image URL replaced with upload button: yes
+Image preview shows: yes
+Image dimensions shown on preview: yes
+Remove image button: yes
+Live preview updated: yes
+frontend build: pass
+git push: done (aa198da..cc99e47)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full
+(1479 lines) before making any change, as instructed.
+
+
+====================================================================
+FIX 1 — sidebar scroll: what was actually wrong vs. what the task
+described
+====================================================================
+The task's own diagnosis was "the parent sidebar div may have
+overflow: hidden preventing child scroll" and asked to "Fix the right
+sidebar container: Change to: overflowY: 'auto' (not hidden)".
+
+Checked the actual right sidebar container (the true outer 300px-wide
+div, directly under the `{/* RIGHT sidebar — Notification Suggestions
++ Quick Stats (Part B) */}` comment): it already had `overflowY:
+'auto'` — NOT `overflow: 'hidden'` — before this task started. No code
+change was made there since there was nothing to fix; verified by
+reading it directly rather than assuming the task's diagnosis was
+correct.
+
+The only actual `overflow: 'hidden'` anywhere near this area is on the
+"Notification Suggestions" CARD wrapper (the white bordered/rounded
+box that contains the header + festival list) — but that's a
+different div than "the right sidebar container," and its
+overflow:hidden serves a different, load-bearing purpose: clipping
+the header/list's flat corners against the card's own `borderRadius:
+12` (a very common, correct pattern — removing it would let sharp-
+cornered content peek out past the rounded card edge). It was left
+unchanged, since (a) the task's literal instruction named "the right
+sidebar container," not this card, and (b) removing this specific
+overflow:hidden risks a real visual regression (broken rounded-corner
+clipping) for no requested benefit — the actual scroll region the task
+names is the "suggestions card inner list div" (fixed below), which
+manages its own maxHeight/overflow independently of this ancestor's
+overflow:hidden in standard CSS (a child's own maxHeight+overflowY:
+auto is respected regardless of an ancestor's overflow:hidden, as long
+as the ancestor isn't itself height-constrained below the child's
+capped height — which it isn't here, since the card has no explicit
+height/maxHeight of its own).
+
+What WAS changed, per the task's second, more concrete instruction
+("Find the suggestions card inner list div. Make sure it has:
+maxHeight: 'calc(100vh - 300px)', overflowY: 'auto', overflowX:
+'hidden'"): the festival list div's style was updated from
+`{ maxHeight: 400, overflowY: 'auto' }` to `{ maxHeight: 'calc(100vh -
+300px)', overflowY: 'auto', overflowX: 'hidden' }`. This is a real,
+concrete improvement regardless of the sidebar-container question
+above: the previous hardcoded `400` px cap is now a viewport-relative
+value, giving the list meaningfully more visible room on taller
+screens (e.g. ~600px available on a 900px-tall viewport vs. the old
+fixed 400px) while still capping and scrolling correctly on shorter
+ones, and the added `overflowX: 'hidden'` prevents any stray
+horizontal scrollbar from a wide emoji/name combination.
+
+
+====================================================================
+FIX 2 — Image URL input replaced with Upload Image button
+====================================================================
+Replaced the `<input type="url" ...>` block (Image URL section) with
+the given upload-button + preview + remove-button JSX, applied
+essentially verbatim. Uses the file's existing `editorImageUrl` state
+— no new state was introduced.
+
+IMPORTANT BEHAVIORAL NOTE (not a bug in this fix, but a real
+consequence of it, flagged per this session's standing practice of
+disclosing send/approve/queue-adjacent side effects): `editorImageUrl`
+now holds a base64 `data:image/...;base64,...` URI (from
+FileReader.readAsDataURL) instead of a plain external image URL. Per
+this task's explicit "DO NOT change any send/approve/queue logic," the
+three action buttons (Send Now / Approve / Add to Queue) were left
+completely untouched — they still read `editorImageUrl` and send it
+as-is:
+  - Send Now -> POST /api/push/send-store { ..., imageUrl: editorImageUrl }
+  - Approve / Add to Queue -> POST /api/queue/:shop/festival
+    { ..., imageUrl: editorImageUrl }
+This means an uploaded image now travels as a (potentially large,
+hundreds of KB to a few MB) base64 string in the request body and, for
+Approve/Add to Queue, gets stored verbatim in FestivalQueue.imageUrl
+(a plain Mongoose String field — it will accept it, MongoDB's 16MB
+document cap is very unlikely to be hit by one photo, but this is not
+a true "image URL" any more — it's an inline blob, with no separate
+hosting/CDN). This is a foreseeable, real side effect of FIX 2's own
+literal design (converting file->data-URI client-side, matching
+exactly what the task's given code does), not something this task's
+scope asked to be solved (no backend upload/storage endpoint was
+requested or added), and it was not silently worked around — send/
+approve/queue logic is untouched, exactly as instructed.
+
+
+====================================================================
+FIX 3 — live preview image + dimensions note
+====================================================================
+Phone-mockup preview image updated exactly as given: wrapped in a
+`position: relative` div, image style changed from a fixed `height:
+80` to `height: 'auto', maxHeight: 100, display: 'block'` (so the
+preview now shows the image at its natural aspect ratio, capped at
+100px tall, instead of a forced 80px-tall crop).
+
+Added the "Image added ✓" note directly below the phone-mockup block
+(and above the existing "Preview updates as you type" helper text),
+gated on `editorImageUrl` truthiness, exactly as given.
+
+NOTE ON THE TASK'S OWN WORDING vs. WHAT THE GIVEN CODE ACTUALLY DOES:
+the task's heading for this block says "update the preview to show
+image dimensions below preview," but the literal JSX it provides just
+renders the static string "Image added ✓" — it does not compute or
+display any actual width×height value (no naturalWidth/naturalHeight
+binding here). Real, computed dimensions ARE shown elsewhere — in
+FIX 2's own upload-preview overlay (the `onLoad` handler that writes
+`${img.naturalWidth} × ${img.naturalHeight}px` into the
+`#img-dimensions` span) — but that is a separate preview (the editor's
+own upload-preview thumbnail), not this live phone-mockup preview.
+Implemented the phone-mockup note literally as given (static "Image
+added ✓" text) rather than expanding it to also compute real
+dimensions, since that specific enhancement wasn't asked for in code,
+only implied by the surrounding prose heading — flagging the mismatch
+rather than silently picking one interpretation over the other.
+
+
+====================================================================
+SEND/APPROVE/QUEUE LOGIC — untouched, verified
+====================================================================
+Confirmed via re-reading the three action button handlers after all
+edits: `apiSend('/api/push/send-store', ...)`,
+`apiSend(`/api/queue/${shop}/festival`, 'POST', {..., status:
+'approved'})`, and the same endpoint with `status: 'draft'` are
+byte-for-byte unchanged from before this task. Only the two editor
+sections above them (Image input -> upload button, and the live-
+preview image block) were modified, per the task's explicit scope.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+Only frontend/app/admin/dashboard/DashboardScreen.jsx was staged and
+committed, per the task's own git-add line. `git status` after staging
+confirmed exactly this one path; the pre-existing unrelated dirty
+files (backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice. No other file was read for editing
+purposes, and no other file was touched.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 15 static
+  routes + 1 dynamic route generated, no errors (/admin/dashboard:
+  9.25kB -> 9.68kB First Load JS, consistent with the added upload-
+  button/preview JSX).
+- git push origin main -- succeeded (aa198da..cc99e47), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+No backend changes were needed or made — this task is frontend-only,
+touching a single file. This app has no automated frontend test suite,
+so verification here is build-only, per the task's own stated
+verification step.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+1 file modified (frontend/app/admin/dashboard/DashboardScreen.jsx). No
+other file was touched. Manual visual verification in a live browser
+(clicking through the sidebar scroll, uploading an actual image file,
+checking the live preview) was not performed as part of this task —
+this environment has no running dev server / authenticated Shopify
+session to click through; verification here is limited to a clean
+production build and the code review documented above.

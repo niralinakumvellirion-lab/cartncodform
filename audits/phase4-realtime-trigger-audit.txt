@@ -1,0 +1,207 @@
+=== PHASE 4 REALTIME TRIGGER AUDIT ===
+Part A - realtimeTrigger.js created: yes
+  maybeScheduleRealtime() function: yes
+  Checks enabled flag: yes
+  Checks realtimeTriggers flag: yes
+  Applies delay from config: yes
+  Dedup check (no double scheduling): yes
+Part B - events.js wired: yes
+  REALTIME_SIGNALS loop added: yes
+  event type gating (add_to_cart/reached_checkout/product_view): yes
+Part C - brain.js updated: yes
+  Loads AutomationConfig: yes (in runBrainForShop — see DEVIATION 2,
+    the given snippet assumed this all happened in one function; it
+    doesn't)
+  Respects master switch: yes
+  Respects enabledSignals: yes
+  Applies delay: yes
+node --check all 3 files: pass
+npm test: 151/151 passing (19/19 suites — all 19 existing
+  runBrainForProfile('p1', SHOP) 2-arg test calls still pass unchanged,
+  confirming the new 3rd `cfg` parameter is fully backward-compatible)
+git push: done (commit 94d7b54, ca16355..94d7b54 main -> main)
+(no frontend changes in this task, so no `npm run build` / vercel
+  deploy step was requested or run)
+
+
+PART A - backend/services/realtimeTrigger.js
+=========================================================================
+Created exactly as given, byte-for-byte. Reviewed carefully against
+the real generateCopy(store, signalType, product, channel) signature
+(verified in the immediately preceding Phase-1-realtime task) before
+implementing — unlike that earlier task's given code, THIS task's
+`generateCopy(store, signalType, '', channel)` call is correctly
+shaped: `store` is `{shopDomain, voice: {}}` (has the `.shopDomain`/
+`.voice` the function reads), `signalType` is the plain string
+argument (not wrapped in an object), `''` as the product arg is
+falsy exactly like `null` would be (every internal `product &&
+product.x` check in generateCopy() short-circuits the same way for
+both), and `channel` ('push' or 'email') is actually passed this
+time. No fix was needed here.
+
+NOTE - verified the missing signal double-check is covered by an
+EXISTING mechanism, not a gap this task needed to close.
+maybeScheduleRealtime() never itself confirms a `cart_abandon`/
+`checkout_abandon` Signal document actually exists/fired for the
+profile — it schedules purely on the CALLER's say-so (Part B decides
+to call it based on the raw storefront event type just recorded, e.g.
+any add_to_cart -> assume cart_abandon is relevant). This means a
+customer who adds to cart and then completes checkout within seconds
+would still get a job created (with `runAt` in the future, per the
+configured delay). Checked whether anything else in this codebase
+protects against that job firing anyway: yes — backend/routes/
+webhooks.js's order webhook handler already cancels ANY pending
+ScheduledJob matching the shop's cartToken/customerId the moment an
+order is placed (`ScheduledJob.updateMany({shopDomain, status:
+'pending', $or: cancelOr}, {status:'cancelled', error:'order
+placed'})`), regardless of how that job was created — brain-scheduled,
+legacy-rule, or (now) realtime-triggered. Since maybeScheduleRealtime()
+sets `cartToken` on the job it creates (from the profile's own
+identifiers), a converting customer's realtime-triggered job is
+cancelled by this SAME existing mechanism, exactly like a normal
+brain-scheduled one would be. No additional signal-verification logic
+was added to realtimeTrigger.js as a result — it wasn't needed.
+
+
+PART B - backend/routes/events.js
+=========================================================================
+Read the full handler first, as instructed, specifically to find the
+real variable names before integrating (also explicitly instructed).
+Two real mismatches between the task's given snippet and the actual
+code:
+
+DEVIATION 1 - `shopDomain` -> `shop`. The given snippet called
+`maybeScheduleRealtime(shopDomain, profile._id, sig)`. In this
+handler, `shopDomain` (destructured from `body` at the top, line ~43)
+is the RAW, unnormalized value the client sent — every other call in
+this exact block (upsertProfile, computeSignalsForProfile,
+Profile.findOne) uses `shop` instead, the trimmed+lowercased version
+computed right after (`const shop = shopDomain.trim().toLowerCase();`).
+Using the raw `shopDomain` here would mean AutomationConfig/
+ScheduledJob queries inside maybeScheduleRealtime() could fail to
+match existing rows whenever a client sends inconsistent casing (e.g.
+a Shop.myshopify.com vs. the stored shop.myshopify.com) — every other
+piece of Automation-related code this session normalizes shop domains
+before querying, so this call now does too, matching the rest of the
+block.
+
+DEVIATION 2 - `eventTypes.includes(X)` -> `events.some((e) => e.type
+=== X)`. There is no `eventTypes` array anywhere in this file — the
+given snippet's assumption doesn't match the real code. The actual
+batch of incoming events is `events` (each an object with a `.type`
+field), and this exact block ALREADY uses `events.some((e) => e.type
+=== 'page_view')` a few lines below (the push-suppression-lift check)
+for precisely this kind of "does this batch contain an event of type
+X" test — reused that same established idiom for all 3 checks
+(add_to_cart / reached_checkout / product_view) instead of inventing
+a new array.
+
+Placement: the task said "After signals are computed for a profile...
+Add inside it (after computeSignalsForProfile resolves)." The
+original code called `computeSignalsForProfile(profile._id, shop)`
+with only a `.catch()` — no `.then()` at all (pure fire-and-forget).
+Added a `.then()` before the existing `.catch()` so the realtime-
+trigger block genuinely runs only after signal computation has
+resolved (not in parallel with it, which could check
+AutomationConfig's realtime flags against stale pre-computation
+state) — the existing `.catch()` still fires for signal-computation
+errors exactly as before, just chained one level deeper.
+
+
+PART C - backend/services/brain.js
+=========================================================================
+Read the full file first, as instructed. Found a structural mismatch
+between the task's literal Part C snippets and the real code that
+required adapting the implementation, not just the variable names:
+
+DEVIATION 1 (the significant one) - the task's 3 snippets ("load
+AutomationConfig at the start of runBrainForShop()", "add enabledSignals
+check where signalType is checked", "add delay where runAt is
+computed") all read as if they belong to ONE function. They don't:
+runBrainForShop(shopDomain) is a thin per-SHOP orchestrator — it only
+loads the shop's profile ids and batches calls to a COMPLETELY SEPARATE
+function, runBrainForProfile(profileId, shopDomain), which is where
+ALL of the real per-signal ranking, the `winner.type` check, and the
+`computeRunAt()` call actually live. Implementing the given snippets
+literally inside runBrainForShop() alone would be impossible (there is
+no `winner`/`runAt` in that function's scope at all) and would leave
+runBrainForProfile() — called independently by the nightly poller loop
+AND, per backend/__tests__/brain.test.js and weightsService.test.js,
+directly by tests — with no automation-config awareness whatsoever.
+Fixed by loading `cfg` ONCE in runBrainForShop() (matching the task's
+own framing of "at the start of the function" — this is also the more
+efficient design, avoiding a redundant per-profile AutomationConfig
+lookup for every profile in the same shop's batch) and THREADING it
+through as a new, OPTIONAL third parameter:
+  async function runBrainForProfile(profileId, shopDomain, cfg = null) { ... }
+  ...
+  runBrainForProfile(id, shop, cfg)   // inside runBrainForShop()'s batch loop
+Checked every call site of runBrainForProfile() before making this
+change (grepped the whole backend/ tree): all 19 are in
+__tests__/brain.test.js and __tests__/weightsService.test.js, every
+one calling it with exactly 2 arguments (`runBrainForProfile('p1',
+SHOP)`) — the new 3rd parameter defaulting to `null` is fully
+backward-compatible with every existing call site, and every new
+`cfg?.x` check added below is written to no-op cleanly when `cfg` is
+null (confirmed: 151/151 tests still pass unchanged).
+
+DEVIATION 2 (a real bug, not just structural) - the given delay-floor
+snippet reassigns `runAt`:
+  if (runAt < new Date(Date.now() + delayMs)) {
+    runAt = new Date(Date.now() + delayMs);
+  }
+but the existing code declared `const runAt = computeRunAt(...);`.
+Reassigning a `const` binding throws `TypeError: Assignment to
+constant variable` — and since `cartAbandonDelay`/`checkoutAbandonDelay`
+default to 60 minutes (a fairly long floor) while `computeRunAt()`'s
+own fallback (no personal/shop hour history) schedules for "the next
+non-quiet hour from now" (often much sooner than 60 minutes out), this
+branch would be reached routinely, not as a rare edge case — this was
+a near-guaranteed runtime crash the moment ANY shop had automation
+config with a real delay value AND a signal ranked without enough send-
+time history to push computeRunAt() past that delay on its own.
+Changed `const runAt` to `let runAt`, matching the given code's own
+(correct) intended behavior for everything else.
+
+Where each Part C snippet actually landed inside runBrainForProfile():
+  - enabledSignals check: inside the existing per-signal ranking loop
+    (`for (const { signal: s } of ranked) { ... }`), right after the
+    existing SignalConfig-based `continue`, before the `tooSoon`
+    cooldown check — an independent, additional skip condition, not a
+    replacement for the existing SignalConfig mechanism.
+  - delay floor: immediately after `let runAt = computeRunAt(...)`,
+    using `winner.type` (already resolved by that point in the
+    function) to look up the right delay field, exactly as the given
+    snippet specified.
+
+
+VERIFICATION
+=========================================================================
+node --check backend/services/realtimeTrigger.js: pass
+node --check backend/routes/events.js: pass
+node --check backend/services/brain.js: pass
+cd backend && npm test: 151/151 passing, 19/19 suites — including
+  every existing brain.test.js/weightsService.test.js call to
+  runBrainForProfile(), confirming the signature change and all new
+  cfg-gated logic are fully backward-compatible with shops that have
+  no AutomationConfig row (cfg = null throughout).
+
+
+NOT TOUCHED
+=========================================================================
+- backend/services/signalEngine.js: not touched — this task's scope
+  was the realtime-trigger service, events.js's wiring, and brain.js's
+  per-signal/delay logic; signalEngine.js's own signal-computation
+  logic (computeCartAbandon() etc.) is unrelated to what this task
+  asked for and was not modified.
+- Every other route/function in events.js: unchanged (the Phase 1
+  attribution block, the cartToken-link block, the page_view/push-
+  suppression block, and every other route in this file are untouched
+  — confirmed via git diff, only the one new `.then()` block differs).
+- Every other function in brain.js (selectChannel, computeRunAt,
+  isQuietHour, hourInTz, rateFromMap): unchanged.
+- backend/routes/webhooks.js (the order-cancellation mechanism this
+  audit relies on for safety): read to verify its existing behavior,
+  not modified.
+- No frontend file was touched — this task's scope and git-add list
+  were backend-only.

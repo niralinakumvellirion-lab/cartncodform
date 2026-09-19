@@ -1,0 +1,262 @@
+ACTIVITY DATA AUDIT - read-only, no changes
+==============================================
+Generated: 2026-09-16
+
+Files read: frontend/app/admin/screens/Today.jsx (in full, 838 lines,
+current state — reflects the vertical 2-column layout redesign and
+column-width fixes from the most recent tasks), backend/routes/
+activity.js (in full, 102 lines).
+
+
+====================================================================
+1. How activity data is fetched - the useEffect (lines 185-211)
+====================================================================
+
+  useEffect(() => {
+    if (!shop) return;
+    let cancelled = false;
+    const { from, to } = getDateRange(dateFilter);
+    setNotifLoading(true);
+    Promise.all([
+      apiGet(`/api/activity?shop=${encodeURIComponent(shop)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+      apiGet(`/api/profiles/${encodeURIComponent(shop)}/today-stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+    ])
+      .then(([actData, statsData]) => {
+        if (cancelled) return;
+        setActivity(actData);
+        setNotifStats(statsData);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setActivity(null);
+        setNotifStats(null);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setNotifLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [shop, dateFilter, refreshKey]);
+
+Runs whenever `shop`, `dateFilter`, or `refreshKey` changes (the
+Refresh button in the header bumps `refreshKey`, and clicking a date
+filter pill in SECTION 1 changes `dateFilter` — see getDateRange(),
+lines 130-141, which converts the filter key into `{from, to}` ISO
+date-string bounds). Fires TWO parallel requests via Promise.all:
+  1. GET /api/activity?shop=...&from=...&to=... (the one this audit
+     was asked to trace — see section 4 below for the actual
+     handler/response shape)
+  2. GET /api/profiles/:shop/today-stats?from=...&to=... (a
+     DIFFERENT endpoint, not part of this audit's file list — feeds
+     `notifStats`, used by the Notifications column, not the
+     Activity column)
+Both responses are awaited together; only on success are `activity`
+and `notifStats` state both set from the resolved array
+(`[actData, statsData]`). `notifLoading` is a SHARED loading flag
+for both halves of this one fetch — set true before the fetch
+starts, set false in `.finally()` regardless of success/failure.
+
+
+====================================================================
+2. How activity?.summary?.[key] is read for each ACTIVITY_STATS card
+   (lines 524-539)
+====================================================================
+
+          {ACTIVITY_STATS.map(({ key, label, color }) => (
+            <div key={key}
+              onClick={() => navigate(`/admin/activity?type=${key}`)}
+              style={{ display: 'flex', justifyContent: 'space-between',
+                       alignItems: 'center', padding: '12px 20px',
+                       borderBottom: '1px solid #f9fafb',
+                       cursor: 'pointer', transition: 'background 0.15s' }}
+              onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <span style={{ fontSize: 13, color: '#6b7280' }}>{label}</span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: color || '#111827' }}>
+                {notifLoading ? '—' : (activity?.summary?.[key] ?? 0)}
+              </span>
+            </div>
+          ))}
+
+ACTIVITY_STATS (lines 123-128) is a plain array of {key, label}
+objects (add_to_cart / checkout_start / purchase / revisit — no
+`color` field is actually present on any entry currently, so the
+`color` destructured above is always undefined and the fallback
+`|| '#111827'` always applies in practice). For each entry, the
+number shown is:
+  - `'—'` (an em dash) while `notifLoading` is true
+  - otherwise `activity?.summary?.[key] ?? 0` — optional-chained
+    read of the `summary` object inside whatever `activity` currently
+    holds, falling back to 0 if `activity` is null, `activity.summary`
+    is missing, or that specific key is missing/undefined on it.
+Each row is also clickable (`navigate(`/admin/activity?type=${key}`)`
+— filters the destination Activity page by this event type) with a
+light-gray hover background.
+
+
+====================================================================
+3. What the `activity` state variable looks like after fetch
+====================================================================
+
+Declared at line 171: `const [activity, setActivity] = useState(null);`
+
+After a SUCCESSFUL fetch, `setActivity(actData)` (line 196) sets it
+directly to the parsed JSON body of GET /api/activity's response —
+i.e. whatever backend/routes/activity.js's handler returns as-is (see
+section 4 below for the exact shape: `{ from, to, summary, users,
+total }`). So after a successful load, `activity.summary` is an
+object shaped like:
+  { revisit: <number>, add_to_cart: <number>,
+    checkout_start: <number>, purchase: <number> }
+(exactly the 4 keys ACTIVITY_STATS reads from, always present with a
+numeric default of 0 even if no matching events exist — see section 4).
+
+After a FAILED fetch (any rejection from either of the two
+Promise.all calls), `.catch()` (lines 199-203) sets BOTH `activity`
+and `notifStats` to `null` — not just the one that actually failed;
+a failure in the today-stats call also blanks out `activity`, and
+vice versa, since they're awaited together via Promise.all rather
+than Promise.allSettled. While `activity` is null,
+`activity?.summary?.[key] ?? 0` safely renders 0 (via the `?? 0`
+fallback) once `notifLoading` becomes false again, rather than
+crashing or showing 'undefined' — but this means a real fetch error
+is visually indistinguishable from "genuinely zero activity events"
+in the Activity column (both render as 0/'—' depending on loading
+state) — there is no separate visible error indicator for THIS
+fetch specifically (contrast with the OTHER `error` state used
+lower in the file, line 543, which belongs to a different effect —
+see section 4 of this audit's context and section 4 below).
+
+
+====================================================================
+4. Any console.error or error handling in the fetch
+====================================================================
+
+--- Frontend side (Today.jsx) ---
+
+No `console.error` (or any console logging at all) anywhere in the
+activity-fetching effect (lines 185-211). The `.catch()` block (line
+199) is silent — it only calls `setActivity(null)` and
+`setNotifStats(null)`, with no logging, no `setError(...)` call, and
+no user-visible error message tied to THIS specific fetch. The
+`error`/`setError` state used elsewhere in this file (declared line
+164, rendered at lines 543-557) belongs to a COMPLETELY SEPARATE
+effect (lines 284-309, fetching push-stats/signals/orders for the
+"Planned for today"/"Yesterday" cards) — that effect DOES call
+`setError(...)` on failure, but only when BOTH of its own two calls
+reject (`ps.status === 'rejected' && sg.status === 'rejected'`), and
+it has no connection to the activity/notifStats fetch at all. So a
+failure in `/api/activity` or `/api/profiles/:shop/today-stats`
+produces NO console output and NO visible error banner anywhere in
+the UI — the two stat columns simply show 0/'—' values as if there
+were no activity, indistinguishable from a genuinely quiet store.
+
+--- Backend side (backend/routes/activity.js) ---
+
+  } catch (err) {
+    console.error('[activity] GET error:', err.message);
+    return res.status(500).json({ error: 'Failed to load activity' });
+  }
+
+The GET / handler (lines 12-99) wraps its entire body in a try/catch
+(lines 13-99); any thrown error is logged via
+`console.error('[activity] GET error:', err.message)` (message only,
+not the full stack/error object) and answered with HTTP 500 and body
+`{ error: 'Failed to load activity' }`. No other error handling
+exists in this route — no field-level validation of `from/to` query
+params before constructing `new Date(...)` from them (an invalid
+date string would produce an Invalid Date, which Mongo's `$gte/$lte`
+comparison would silently treat as excluding everything rather than
+erroring, based on standard Mongoose/Mongo date-casting behavior —
+not independently verified against this exact aggregate call as part
+of this read-only audit).
+
+
+====================================================================
+BONUS — backend/routes/activity.js GET / handler, full behavior for
+"what it returns for summary"
+====================================================================
+
+Full handler already quoted in relevant parts above; the summary-
+specific logic (lines 36-53):
+
+    // Get counts per event type
+    const counts = await AttributedEvent.aggregate([
+      { $match: { shopDomain: shop, ts: { $gte: from, $lte: to } } },
+      { $group: { _id: '$eventType', count: { $sum: 1 },
+                  profiles: { $addToSet: '$profileId' } } }
+    ]);
+
+    // Format counts
+    const summary = {
+      revisit: 0,
+      add_to_cart: 0,
+      checkout_start: 0,
+      purchase: 0,
+    };
+    counts.forEach(c => {
+      if (summary[c._id] !== undefined) {
+        summary[c._id] = c.count;
+      }
+    });
+
+`summary` is ALWAYS initialized with exactly these 4 keys, each
+defaulted to 0, regardless of what's actually in the database (this
+is exactly why ACTIVITY_STATS's `?? 0` fallback in the frontend is
+rarely/never actually needed for a SUCCESSFUL response — the backend
+already guarantees all 4 keys exist with a numeric value; the `?? 0`
+only matters for a null/malformed `activity` object, i.e. the failed-
+fetch case described in section 3).
+
+The aggregate query groups ALL matching AttributedEvent documents
+(scoped by `shopDomain` + the `ts` date range — NOT filtered by
+`eventType` at this aggregate stage, even though `baseQuery` above it
+at lines 29-33 DOES conditionally add an `eventType` filter) by
+`eventType`, counting occurrences and collecting a `profiles` set
+(distinct profileId values) per group — though `profiles` is never
+actually read/used anywhere after this aggregate call; only `.count`
+is consulted in the `counts.forEach` loop. Each aggregate result's
+`_id` (the eventType string) is used to look up a matching key on the
+`summary` object; if it matches one of the 4 predefined keys, that
+key's value is overwritten with the real count. Any `eventType` in
+the data that ISN'T one of these 4 (revisit / add_to_cart /
+checkout_start / purchase) is silently ignored — counted by the
+aggregate, but never surfacing anywhere in the response, since
+`summary[c._id] !== undefined` is false for any other key name.
+
+Note: the `eventType` query param (`req.query.eventType`, lines 26,
+33) only affects the SEPARATE `users` list query below (baseQuery,
+used at line 56 for `AttributedEvent.find(baseQuery)...`) — it does
+NOT affect the `summary` aggregate at all (that aggregate's own
+`$match` only filters by shopDomain + date range, lines 36-38,
+independent of `baseQuery`/`eventType`). So `summary` in the JSON
+response is always the FULL breakdown across all 4 event types for
+the date range, even when a caller passes `?eventType=purchase` —
+only the `users` array (the per-event detail list) gets filtered by
+eventType, not the counts.
+
+Full response shape (lines 88-93):
+  {
+    from,      // the resolved Date object used for the query lower bound
+    to,        // the resolved Date object used for the query upper bound
+    summary,   // { revisit, add_to_cart, checkout_start, purchase } — always all 4 keys, numeric
+    users,     // array of { eventType, email, sessionId, jobId, meta, ts } — up to 200, newest first, optionally eventType-filtered
+    total,     // users.length (NOT a total count of all matching events — see below)
+  }
+
+Note: `total` is `users.length`, i.e. capped at the same 200-row
+limit as the `users` array itself (line 58: `.limit(200)`) — if more
+than 200 AttributedEvent rows exist in the date range, `total` under-
+reports the true total; it is NOT a separate `countDocuments()` call
+against the full matching set. This is a different, more limited
+"total" than what `summary`'s per-type counts represent (those come
+from the unlimited aggregate, not the capped find().limit(200)).
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified as part of this task.

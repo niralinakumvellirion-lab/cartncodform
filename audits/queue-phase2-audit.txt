@@ -1,0 +1,184 @@
+=== QUEUE PHASE 2 AUDIT ===
+Generated: 2026-09-17
+
+MonthCalendar component: yes
+  Festival dates shown on calendar: yes
+  Queued items shown on calendar: yes
+  Today highlighted: yes
+  Month navigation: yes
+Planning list view: yes
+  Status badges (approved/draft): yes
+  Approve button for drafts: yes
+  Delete button: yes
+GET /festival endpoint: yes
+PATCH /festival/:id endpoint: yes
+DELETE /festival/:id endpoint: yes
+node --check: pass
+npm test: 151/151 passing
+frontend build: pass
+git push: done (619d3b2..309bb97)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read backend/routes/queue.js in full (161 lines) and
+frontend/app/admin/queue/QueueScreen.jsx in full (478 lines) before
+making any change, as instructed. Also re-read
+frontend/app/admin/dashboard/DashboardScreen.jsx's FESTIVAL_CALENDAR /
+getUpcomingFestivals block (lines 165-220) to copy it verbatim, per
+Part C's explicit instruction.
+
+
+====================================================================
+PART B — BACKEND: 3 new routes added to backend/routes/queue.js
+====================================================================
+GET /:shopDomain/festival, PATCH /:shopDomain/festival/:id, and
+DELETE /:shopDomain/festival/:id were all added exactly as given,
+inserted after the existing POST /:shopDomain/festival route (added
+in Phase 1) and before module.exports.
+
+Unlike Phase 1's given POST /festival route (which was missing
+:shopDomain entirely and would have 403'd on every request -- see
+audits/dashboard-phase1-audit.txt), all three of these new routes
+already correctly included :shopDomain in their path as given, so
+none of them needed that fix. Confirmed requireStoreOwner's hard
+`req.shopDomain !== req.params.shopDomain` 403 check would pass for
+all three.
+
+PATCH's `{ $set: req.body }` was implemented literally as given, with
+NO field whitelisting added. Reasoning: the query itself is already
+scoped to `{ _id: req.params.id, shopDomain: shop }`, so even an
+unexpected field in the body can only ever be written onto a document
+the caller's own shop already owns -- there is no cross-shop write
+path here, only a same-shop field-injection risk. The only real-world
+caller (the Planning List's Approve button) only ever sends
+`{ status: 'approved' }`. Whitelisting would be defensible
+hardening, but it was not asked for and the actual blast radius is
+already bounded by the shop-scoped query, so it was left as given
+rather than silently expanding scope on a route the task presented as
+complete. Flagging this explicitly as a considered, not overlooked,
+decision.
+
+
+====================================================================
+PART C — FRONTEND: QueueScreen.jsx completely rewritten
+====================================================================
+FESTIVAL_CALENDAR (13 festivals) and getUpcomingFestivals(count) were
+copied verbatim from DashboardScreen.jsx into QueueScreen.jsx, per
+the explicit instruction to duplicate them (matches this app's
+established no-shared-layout, duplicate-per-screen convention).
+
+MonthCalendar was added before QueueScreen, essentially as given,
+with two deliberate deviations:
+
+1. DEVIATION -- `festivals` prop source. The task describes the prop
+   as "FESTIVAL_CALENDAR upcoming festivals" but doesn't literally
+   mandate getUpcomingFestivals()'s output. getUpcomingFestivals only
+   returns festivals within a 60-day-from-TODAY rolling window and
+   caps the result to `count` entries. Since the task also explicitly
+   requires month navigation (<- [Month Year] ->), a merchant browsing
+   to any month outside that 60-day window would see festival markers
+   silently disappear if the filtered/capped helper were used as the
+   `festivals` prop, even though MonthCalendar's own day-matching
+   logic has no such limitation. Passed the raw, unfiltered
+   FESTIVAL_CALENDAR array as the `festivals` prop instead, so
+   festival badges correctly show for whatever month is on screen.
+   getUpcomingFestivals is still copied into the file (per the literal
+   "copy them into QueueScreen.jsx as well" instruction) even though
+   MonthCalendar itself doesn't consume its output.
+
+2. DEVIATION (bug fix) -- React key collision in the day grid. The
+   given code keyed leading empty cells by `key={i}` (array index) and
+   real day cells by `key={day}` (day-of-month number) within the same
+   `.map()` over `days`. Since `i` and `day` are both small integers
+   starting near 0/1, an empty cell and a real day cell can end up
+   with the identical key within the same sibling array (e.g. index 1
+   is an empty leading cell in a month starting on Tuesday, but day 1
+   is also a real cell later in the same array) -- a genuine React key
+   collision that causes incorrect reconciliation on re-render (stale
+   DOM/state reuse), which would surface specifically when navigating
+   between months via the newly-added nav buttons. Fixed by keying
+   every cell (empty and real) by the array index `i`, which is
+   unique across the whole array regardless of cell type. This is the
+   same class of "given code has a real bug, fix it and document it"
+   deviation this session has made repeatedly (see e.g. the Phase 1
+   :shopDomain finding above).
+
+Also implemented (not given verbatim by the task, self-authored):
+- Month navigation prev/next handlers: setCurrentMonth shifted by
+  -1/+1 month via `new Date(y, m-1, 1)` / `new Date(y, m+1, 1)`.
+- Calendar/Planning tab switcher UI (pill buttons matching this
+  app's established STATUS_FILTERS-style pattern).
+- The collapsible "Sent Notifications" wrapper and its toggle state,
+  named `sentNotifsOpen` (default `false` = collapsed), since the
+  task specified the collapsible requirement but not an exact state
+  variable name or default value beyond "defaults to collapsed."
+- Added a `festivalLoading` gate to the Calendar tab's content (shows
+  "Loading..." instead of an empty calendar while data is still in
+  flight), for consistency with the Planning List view's own given
+  code, which already explicitly handles this same loading state.
+
+The existing "Sent Notifications" section (Refresh button, status
+filter tabs, stats row, table/card list, pagination) was preserved
+byte-for-byte in logic and moved, unchanged, inside the new
+collapsible wrapper. The original page-level Refresh button was moved
+from the (now removed) old page header down into this section's own
+sub-header, since it only ever refreshed this ScheduledJob-based list,
+not the festival calendar/planning data (which updates its own local
+state directly on Approve/Delete, with no separate refresh needed, per
+the given code).
+
+Page subtitle changed from "Manage scheduled and sent notifications"
+to "Plan and schedule festival notifications," per the task's
+explicit instruction.
+
+State/effects verified: 4 pre-existing state groups
+(isMobileView; statusFilter/page; jobs/total/loading;
+statusCounts/statsLoading; actionLoading/actionResults; refreshKey)
+kept unchanged, plus the 4 new Phase 2 state variables given
+(queueTab, festivalItems, festivalLoading, currentMonth) plus the
+1 invented one (sentNotifsOpen) = 5 new. All 4 original useEffects
+(mobile resize, job-list fetch, stats fetch, page-reset-on-filter)
+kept unchanged; 1 new useEffect added (festival queue fetch, given
+verbatim). sendNowJob/cancelJob functions kept unchanged.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+Only frontend/app/admin/queue/QueueScreen.jsx and
+backend/routes/queue.js were staged and committed. `git status`
+before staging confirmed only these two tracked files were modified
+by this task; the pre-existing unrelated dirty files
+(backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice, as were the dozens of untracked audit
+.txt files and backend debug scripts already present in the working
+tree.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- node --check backend/routes/queue.js -- pass
+- cd backend && npm test -- 19 suites, 151/151 passing
+- cd frontend && npm run build -- compiled successfully, all 15
+  static routes + 1 dynamic route generated, no errors
+  (/admin/queue: 6.39 kB, 106 kB First Load JS)
+- git push origin main -- succeeded (619d3b2..309bb97), no hang
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Files modified: backend/routes/queue.js,
+frontend/app/admin/queue/QueueScreen.jsx. No other file was touched.
+No backend model changes needed (FestivalQueue.js, created in Phase 1,
+already had every field these new routes/views read or write). This
+is Phase 2 only -- nothing yet automatically sends an approved
+FestivalQueue item at its scheduledAt time; the poller/send-side
+consumer for this queue is still unbuilt, consistent with this task's
+own "Phase 2" (view/plan/approve/delete only) framing, not a bug.

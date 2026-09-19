@@ -1,0 +1,251 @@
+DEVICE TARGETING AUDIT - read-only, no changes
+=================================================
+Generated: 2026-09-15
+
+Files read: backend/models/CustomerPushSubscription.js (in full,
+19 lines), backend/routes/push.js (in full, 524 lines),
+backend/utils/pushNotification.js (relevant section re-read,
+previously read in full for audits/push-targeting-audit.txt).
+
+
+====================================================================
+1. CustomerPushSubscription.js - full schema
+====================================================================
+
+ 1  const mongoose = require('mongoose');
+ 2
+ 3  const CustomerPushSubscriptionSchema = new mongoose.Schema({
+ 4    shopDomain: { type: String, required: true, lowercase: true },
+ 5    token: { type: String, required: true, unique: true },
+ 6    page: { type: String },
+ 7    deviceType: { type: String, enum: ['mobile', 'desktop',
+ 8      'unknown'], default: 'unknown' },
+ 9    cartToken: { type: String, trim: true, index: true },
+10    customerId: { type: String, index: true },
+11    ccfSessionId: { type: String, index: true },
+12    createdAt: { type: Date, default: Date.now },
+13    lastEvent: { type: String },
+14    lastActivityUrl: { type: String },
+15    lastActivityAt: { type: Date },
+16  });
+17
+18  module.exports = mongoose.model('CustomerPushSubscription',
+19    CustomerPushSubscriptionSchema);
+
+Fields: shopDomain (String, required, lowercased), token (String,
+required, unique - the FCM registration token, one row per token),
+page (String, optional - the storefront page the subscription was
+captured on), deviceType (String enum ['mobile','desktop',
+'unknown'], default 'unknown'), cartToken (String, trimmed,
+indexed), customerId (String, indexed), ccfSessionId (String,
+indexed), createdAt (Date, defaults to Date.now), lastEvent
+(String), lastActivityUrl (String), lastActivityAt (Date).
+
+No compound indexes, no TTL, no methods/statics/virtuals defined.
+
+
+--- How deviceType is set ---
+
+deviceType is NOT computed/detected anywhere in the backend (e.g.
+no User-Agent sniffing on the server side). It is set purely from
+whatever value the CLIENT sends in the request body.
+
+The only write path for this field is backend/routes/push.js,
+POST /api/push/subscribe-customer (lines 83-149):
+
+  Line 85:
+    const { shopDomain, token, oldToken, page, deviceType,
+      cartToken, customerId, ccfSessionId } = req.body;
+
+  Lines 105-118 (the upsert):
+    const result = await CustomerPushSubscription.findOneAndUpdate(
+      { token },
+      {
+        shopDomain: shop,
+        token,
+        page: page || undefined,
+        deviceType: deviceType || 'unknown',
+        cartToken: normalizedCartToken || undefined,
+        customerId: customerId || undefined,
+        ccfSessionId: ccfSessionId || undefined,
+        lastActivityAt: new Date()
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+So deviceType comes straight from req.body.deviceType (whatever the
+storefront theme-embed JS decided to send when calling this
+endpoint), falling back to the string 'unknown' only if the request
+omitted it or sent a falsy value. This route file was the only
+match for "deviceType" anywhere under backend/ besides its 3
+read-only usages inside pushNotification.js's query filters (see
+audits/push-targeting-audit.txt) and the schema definition itself
+- there is no other write path (e.g. no later PATCH/update route
+that revises deviceType after initial subscribe). The actual
+client-side detection logic that decides what string to send is in
+the theme extension (extensions/cartncodform-embed/...), not read
+as part of this audit (out of scope - task named these 3 backend
+files only).
+
+
+====================================================================
+2. sendJourneyPush() - full function, and its mobileOnly value
+====================================================================
+
+Location: backend/routes/push.js, lines 336-359 (POST
+/api/push/send-journey handler wraps this at lines 361-370).
+
+  336  async function sendJourneyPush(shopDomain, { profileId, title, body, url }) {
+  337    const Profile = require('../models/Profile');
+  338
+  339    if (!profileId || !title || !body) {
+  340      return { status: 400, payload: { error: 'profileId, title and body are required' } };
+  341    }
+  342
+  343    const shop = String(shopDomain || '').trim().toLowerCase();
+  344    const profile = await Profile.findOne({ _id: profileId, shopDomain: shop });
+  345
+  346    if (!profile || !profile.channels?.push?.subscribed) {
+  347      return { status: 400, payload: { error: 'No push subscription' } };
+  348    }
+  349
+  350    const cartToken = profile.identifiers?.cartTokens?.[0] || null;
+  351    const result = await sendPushToCustomers(
+  352      shop, title, body, url, null, false, cartToken
+  353    );
+  354
+  355    if (!result.success) {
+  356      return { status: 500, payload: { success: false, error: result.error } };
+  357    }
+  358    return { status: 200, payload: result };
+  359  }
+
+What it passes for mobileOnly: the LITERAL boolean `false`,
+hardcoded as the 6th positional argument to sendPushToCustomers()
+(sendPushToCustomers(shop, title, body, url, null, false,
+cartToken) -- matching the utils/pushNotification.js signature
+(shopDomain, title, body, url, imageUrl, mobileOnly, cartToken,
+skipStaleCleanup) documented in audits/push-targeting-audit.txt).
+So a Journey-screen manual push NEVER filters by device type --
+it always queries/attempts every device (mobile, desktop, and
+unknown alike) for the resolved cartToken, relying entirely on the
+cartToken-branch's per-candidate-row loop (see section 3) to find
+one that actually succeeds.
+
+Also worth noting: `imageUrl` (5th param) is passed as `null`
+literally, not resolved from anywhere -- sendJourneyPush() never
+looks up a product image, so any journey-screen push always uses
+pushNotification.js's hardcoded icons8.com shopping-cart fallback
+icon (per audits/push-targeting-audit.txt section 1), regardless of
+what product the customer was interested in.
+
+For comparison (not the function asked about, but useful context
+since it's the other call site of sendPushToCustomers with a
+cartToken): POST /api/push/send-customer (lines 202-207) also
+hardcodes mobileOnly to `false`:
+  const result = await sendPushToCustomers(
+    shopDomain, title, body, url, resolvedImageUrl,
+    false,
+    normalizedCartToken || null,
+    normalizedCartToken ? false : true
+  );
+No call site anywhere in push.js ever passes `true` for mobileOnly
+-- the mobileOnly=true branch in pushNotification.js (documented in
+audits/push-targeting-audit.txt) currently has no caller in this
+file.
+
+
+====================================================================
+3. pushNotification.js cartToken branch - query + sort/select logic
+====================================================================
+
+Location: backend/utils/pushNotification.js, inside
+sendPushToCustomers(), lines 106-194 (the `if (cartToken)` block).
+
+--- Initial query ---
+Lines 106-112:
+  if (cartToken) {
+    query.cartToken = cartToken;
+    console.log(`[push-customer] targeting cartToken: ${cartToken}`);
+
+    // Get ALL rows matching this cartToken, sorted by most recent.
+    let cartSubs = await CustomerPushSubscription.find(query)
+      .sort({ lastActivityAt: -1 });
+
+`query` at this point already has `shopDomain: shop` (always), plus
+`deviceType: { $in: ['mobile', 'unknown'] }` IF mobileOnly was
+true (it was not, for both call sites shown in section 2), plus now
+`cartToken: cartToken`. So this fetches every
+CustomerPushSubscription row for this shop+cartToken pair (there
+can be more than one, per the comment at lines 120-121 elsewhere in
+this file about preventing "same-cart multi-row accumulation" --
+though that cleanup is best-effort, not guaranteed), sorted by
+lastActivityAt DESCENDING -- i.e. the row whose device was most
+recently active on this cart is tried FIRST.
+
+--- Fallback when no row matches ---
+Lines 124-144: if `cartSubs.length === 0` (no live subscription row
+for this exact cartToken -- e.g. it was overwritten by a resync, as
+explained in this file's own comment at lines 114-123), it re-
+derives the profile from that same cartToken (matching it against
+`profile.identifiers.cartTokens`, which accumulates every cartToken
+a profile has ever had, unlike CustomerPushSubscription.cartToken
+which only tracks the CURRENT one) and retries with:
+  const fallbackQuery = { shopDomain: shop, cartToken: { $in: otherCartTokens } };
+  if (mobileOnly) { fallbackQuery.deviceType = ... }
+  cartSubs = await CustomerPushSubscription.find(fallbackQuery)
+    .sort({ lastActivityAt: -1 });
+Same sort: most-recently-active row first, but now matching ANY of
+that profile's historical cartTokens, not just the one originally
+given.
+
+--- Selecting which subscription to actually use ---
+Lines 146-188: NOT a single "pick the top row" selection -- it
+loops through every row in `cartSubs` (already sorted most-recent-
+first) and tries sending to each ONE AT A TIME until one succeeds:
+  for (const sub of cartSubs) {
+    ... build message with tokens: [sub.token] ...
+    const response = await getMessaging().sendEachForMulticast(message);
+    const result = response.responses[0];
+    if (result.success) {
+      return { success: true, sent: 1, tokensFound: cartSubs.length };
+    }
+    const code = result.error?.code || '';
+    if (isStaleCode(code)) {
+      await handleStaleToken(sub.token, shop);
+      console.log(`[push-customer] Stale token pruned, trying next...`);
+    } else {
+      console.error(`[push-customer] token FAILED: ${code || result.error?.message}`);
+      break;
+    }
+  }
+So: try the most-recently-active row's token first; if it sends
+successfully, stop and return immediately (1 device gets the
+notification, not all of them). If it fails with a STALE token
+code (per isStaleCode() from services/pushHygiene), prune that
+token (delete the subscription + related profile bookkeeping) and
+move on to the NEXT most-recently-active row. If it fails with any
+OTHER (non-stale) error, stop trying entirely (`break`) rather than
+continuing down the list -- a real, unrecoverable send error on one
+device is treated as a reason to give up on this cartToken rather
+than trying an older device.
+
+If every row is exhausted without a successful send (either the
+loop finishes naturally or `cartSubs` was empty even after the
+fallback), it returns without sending:
+  console.log(`[push-customer] cartToken: no valid token found for cart ${cartToken} — skipping`);
+  return { success: true, sent: 0, tokensFound: 0 };
+Note this returns success: true even when nothing was sent (0
+sent) -- distinguishing "no push subscription available for this
+customer" from "sending failed" (only the outer catch block, or the
+`break` case where a non-stale error stopped the loop but the
+function still returns this same success:true/sent:0 shape either
+way -- the specific error reason for that terminal failed attempt
+is only visible in the console.error log, not returned to the
+caller).
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified as part of this task.

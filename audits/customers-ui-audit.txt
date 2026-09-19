@@ -1,0 +1,318 @@
+=== CUSTOMERS UI AUDIT ===
+Generated: 2026-09-17
+Scope: AUDIT ONLY, read-only. No files were modified while producing this.
+
+File read in full: frontend/app/admin/screens/Customers.jsx (1777 lines,
+current state after the Journey-panel merge, commit 9702a90)
+
+
+====================================================================
+1. "HAS A CART" / STAGE BADGE — JSX, styles, driving data field
+====================================================================
+
+There are TWO separate implementations of the same stage logic in
+this file (a real duplication, not a shared helper used everywhere):
+
+A) Standalone helper functions (lines 140-180), used only by the
+   MOBILE row render path:
+     function getStageLabel(p) { ... }   (lines 140-152)
+     function getStageBg(p)    { ... }   (lines 154-166)
+     function getStageColor(p) { ... }   (lines 168-180)
+   Each one independently re-implements the SAME priority order:
+     1. p.orders?.count >= 2                                  -> "Repeat buyer" / bg #dbeafe / color #1d4ed8
+     2. p.orders?.count === 1                                 -> "Bought once"  / bg #dcfce7 / color #16a34a
+     3. p.identifiers?.cartTokens?.length > 0 AND
+        p.orders?.count === 0                                 -> "Has a cart"   / bg #fef9c3 / color #ca8a04
+     4. else: STAGE_CONFIG[p.stage]?.label / .bg / .color,
+        falling back to p.stage itself / '#f3f4f6' / '#6b7280'
+        if p.stage isn't one of customer/identified/anonymous/lapsed
+
+B) The exact same 4-branch logic, DUPLICATED INLINE (not calling the
+   helpers above) inside the DESKTOP row's map callback, lines
+   1229-1248:
+     let stageLabel = STAGE_CONFIG[p.stage]?.label || p.stage;
+     let stageBg = STAGE_CONFIG[p.stage]?.bg || '#f3f4f6';
+     let stageColor = STAGE_CONFIG[p.stage]?.color || '#6b7280';
+     if (p.orders?.count >= 2) { stageLabel='Repeat buyer'; stageBg='#dbeafe'; stageColor='#1d4ed8'; }
+     else if (p.orders?.count === 1) { stageLabel='Bought once'; stageBg='#dcfce7'; stageColor='#16a34a'; }
+     else if (p.identifiers?.cartTokens?.length > 0 && p.orders?.count === 0) {
+       stageLabel = 'Has a cart'; stageBg = '#fef9c3'; stageColor = '#ca8a04';
+     }
+   Byte-for-byte the same values as getStageLabel/Bg/Color above, just
+   written twice.
+
+Rendered JSX:
+
+  Desktop (lines 1434-1447):
+    <div style={{ display: 'flex', alignItems: 'center' }}>
+      <span style={{
+        padding: '3px 10px', borderRadius: '20px',
+        fontSize: '12px', fontWeight: '500',
+        background: stageBg, color: stageColor,
+      }}>
+        {stageLabel}
+      </span>
+    </div>
+
+  Mobile (lines 1303-1316):
+    <span style={{
+      padding: '3px 10px', borderRadius: '20px',
+      fontSize: '11px', fontWeight: '500',
+      background: getStageBg(p), color: getStageColor(p),
+      flexShrink: 0, marginLeft: '8px',
+    }}>
+      {getStageLabel(p)}
+    </span>
+    (fontSize is 11px here vs 12px on desktop; also has flexShrink/
+    marginLeft since it sits next to the customer name in a flex row,
+    unlike desktop's own grid cell)
+
+Data fields driving it: p.orders.count (number), p.identifiers.
+cartTokens (array — only its .length is used), and p.stage (string:
+'customer' | 'identified' | 'anonymous' | 'lapsed', matched against
+STAGE_CONFIG, lines 121-126). "Has a cart" specifically requires
+cartTokens.length > 0 AND orders.count === 0 exactly (not just
+p.stage === 'identified' — a profile could have stage 'identified'
+in the database yet still not show "Has a cart" if it has no
+cartTokens, since STAGE_CONFIG's own 'identified' entry already says
+the same label "Has a cart" too, bg #fef9c3 color #ca8a04 — same
+values either way, so the two paths never visibly disagree).
+
+
+====================================================================
+2. CUSTOMER ROW — full JSX of one row
+====================================================================
+
+Two structurally different row renders exist (branched on isMobileView,
+line 1263, both inside the same profiles.map() at line 1222). Desktop
+(non-mobile) row in full, lines 1396-1534:
+
+  return (
+    <div
+      key={p._id}
+      onClick={() => loadCustomerJourney(p.profileId || p._id)}
+      style={{
+        display: 'grid',
+        gridTemplateColumns: GRID_COLS,
+        padding: '12px 16px',
+        borderBottom:
+          i < profiles.length - 1 ? '1px solid #f9fafb' : 'none',
+        cursor: 'pointer',
+        background: isSel ? '#f5f3ff' : 'transparent',
+        transition: 'background 0.1s',
+      }}
+      onMouseEnter={(e) => {
+        if (!isSel) e.currentTarget.style.background = '#f9fafb';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = isSel ? '#f5f3ff' : '#fff';
+      }}
+    >
+      {/* Customer */}
+      <div>
+        <div style={{ fontSize: '14px', fontWeight: '500', color: '#111827' }}>
+          {displayName}
+        </div>
+        {lastSeen && (
+          <div style={{ fontSize: '12px', color: '#9ca3af', marginTop: '2px' }}>
+            seen {lastSeen}
+          </div>
+        )}
+      </div>
+
+      {/* Stage */}
+      <div style={{ display: 'flex', alignItems: 'center' }}>
+        <span style={{
+          padding: '3px 10px', borderRadius: '20px',
+          fontSize: '12px', fontWeight: '500',
+          background: stageBg, color: stageColor,
+        }}>
+          {stageLabel}
+        </span>
+      </div>
+
+      {/* Most interested in */}
+      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        {sig ? (
+          <>
+            <div style={{ fontSize: '13px', color: '#374151' }}>
+              {topInterest?.[0] || '—'}
+            </div>
+            <div style={{ fontSize: '12px', color: '#6366f1', marginTop: '2px' }}>
+              {SIGNAL_LABELS[sig.type] || sig.type}
+            </div>
+          </>
+        ) : (
+          <span style={{ color: '#d1d5db' }}>—</span>
+        )}
+      </div>
+
+      {/* Reach — channel icons */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <span style={{ opacity: p.channels?.push?.subscribed ? 1 : 0.2, fontSize: '16px' }}>🔔</span>
+        <span style={{ opacity: p.channels?.email?.address ? 1 : 0.2, fontSize: '16px' }}>✉️</span>
+        <span style={{ opacity: p.identifiers?.phones?.length > 0 ? 1 : 0.2, fontSize: '16px' }}>📱</span>
+      </div>
+
+      {/* Last messaged */}
+      <div style={{ display: 'flex', alignItems: 'center', fontSize: '13px', color: '#374151' }}>
+        {lastMsg ? getRelativeTime(new Date(lastMsg.sentAt)) : <span style={{ color: '#d1d5db' }}>Never</span>}
+      </div>
+
+      {/* Spent */}
+      <div style={{ display: 'flex', alignItems: 'center', fontSize: '13px', fontWeight: '500', color: '#111827' }}>
+        {p.orders?.ltv > 0 ? `₹${p.orders.ltv.toLocaleString('en-IN')}` : <span style={{ color: '#d1d5db' }}>—</span>}
+      </div>
+    </div>
+  );
+
+Note the onClick (line 1399): calls loadCustomerJourney(p.profileId
+|| p._id) — this is the row's ONLY click behavior now. Since profile
+objects from this endpoint never have a .profileId field, this always
+resolves to p._id in practice (added in the last implementation task,
+see audits/customers-journey-merge-build-audit.txt, deviation #3).
+
+The row's background (isSel-driven highlight) and cursor: 'pointer'
+were added in that same task — isSel = selectedCustomer?.profile?._id
+=== p._id (line 1227), true only while this row's journey panel is
+open on the right.
+
+A SEPARATE mobile row structure (isMobileView === true) exists at
+lines 1263-1394 — a 3-line stacked card instead of a 6-column grid
+(Row 1: name + stage badge; Row 2: last-seen + signal count; Row 3:
+channel icons + LTV), sharing the same onClick/isSel highlight
+pattern but different inner layout/typography than the desktop row
+shown above.
+
+
+====================================================================
+3. REACH COLUMN — what renders the push/email/phone icons
+====================================================================
+
+Desktop "Reach" column (lines 1473-1499), a flex row of 3 plain
+emoji <span> elements, each individually opacity-toggled by a
+boolean channel check — NOT actual icon components/SVGs, just emoji
+characters with a fontSize:
+
+  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+    <span style={{ opacity: p.channels?.push?.subscribed ? 1 : 0.2, fontSize: '16px' }}>
+      🔔
+    </span>
+    <span style={{ opacity: p.channels?.email?.address ? 1 : 0.2, fontSize: '16px' }}>
+      ✉️
+    </span>
+    <span style={{ opacity: p.identifiers?.phones?.length > 0 ? 1 : 0.2, fontSize: '16px' }}>
+      📱
+    </span>
+  </div>
+
+  push:  p.channels?.push?.subscribed        (boolean)
+  email: p.channels?.email?.address          (truthy string check)
+  phone: p.identifiers?.phones?.length > 0   (array length check)
+
+An unsubscribed/absent channel renders the SAME emoji at 20% opacity
+(dimmed, not hidden/greyed-out via a different icon) rather than
+being omitted — all 3 icons always render, only their opacity changes.
+
+Mobile equivalent (Row 3, lines 1354-1379) is functionally identical
+(same 3 emojis, same 3 boolean/length checks) but styled slightly
+differently: wrapped in its own flex row with gap: '6px' (vs 8px on
+desktop) and fontSize: '14px' (vs 16px on desktop), alongside the LTV
+figure in the same row rather than in a separate grid column.
+
+
+====================================================================
+4. STAGE COLUMN — what values can it have
+====================================================================
+
+The rendered label (stageLabel / getStageLabel(p)) can be exactly one
+of these 5 strings, evaluated in this priority order (first match
+wins — see section 1's 4-branch logic):
+
+  1. "Repeat buyer"   — p.orders?.count >= 2
+  2. "Bought once"    — p.orders?.count === 1
+  3. "Has a cart"     — p.identifiers?.cartTokens?.length > 0 AND
+                         p.orders?.count === 0
+  4. one of STAGE_CONFIG's 4 label values, keyed by the raw p.stage
+     field (lines 121-126):
+       p.stage === 'customer'   -> "Bought once"
+       p.stage === 'identified' -> "Has a cart"
+       p.stage === 'anonymous'  -> "Visitor"
+       p.stage === 'lapsed'     -> "Going quiet"
+  5. FALLBACK: the raw p.stage string itself, unmodified, if it is
+     truthy but not one of the 4 known keys above (STAGE_CONFIG[p.stage]
+     is undefined, so `STAGE_CONFIG[p.stage]?.label || p.stage`
+     evaluates to p.stage) — bg defaults to '#f3f4f6', color to
+     '#6b7280' in that case.
+
+So the FULL set of strings the UI can actually show is: "Repeat
+buyer", "Bought once", "Has a cart", "Visitor", "Going quiet", or
+(rarely, only for a p.stage value outside the 4 known ones) whatever
+raw string is stored in the profile's own .stage field in Mongo.
+
+Note branches 1-3 are computed FROM orders/cartTokens data and take
+priority OVER whatever p.stage itself says — e.g. a profile whose
+stored p.stage is still 'identified' but which has since placed 2
+orders would show "Repeat buyer" (branch 1), not "Has a cart".
+
+
+====================================================================
+5. CURRENT CUSTOMER LIST COLUMNS AND THEIR STYLES
+====================================================================
+
+Grid template (line 182): GRID_COLS = '2fr 1fr 2fr 1fr 1.5fr 1fr'
+(desktop only — mobile uses the 3-row stacked card layout instead,
+with no column grid at all).
+
+Header row (desktop only, lines 1168-1195): a <div style={{display:
+'grid', gridTemplateColumns: GRID_COLS, padding: '10px 16px',
+borderBottom: '1px solid #f3f4f6', background: '#f9fafb'}}> containing
+6 header cells, each styled identically:
+  { fontSize: '11px', fontWeight: '600', color: '#9ca3af',
+    textTransform: 'uppercase', letterSpacing: '0.5px' }
+
+The 6 columns, in order, with their header label and per-cell content
+style (all from the desktop row, lines 1396-1533):
+
+  1. "Customer"            (2fr) — name: fontSize 14px, fontWeight 500,
+     color #111827; "seen <relative>" sub-line (if lastSeenAt present):
+     fontSize 12px, color #9ca3af, marginTop 2px.
+
+  2. "Stage"                (1fr) — pill badge, see section 1 above
+     (padding 3px 10px, borderRadius 20px, fontSize 12px, fontWeight
+     500, background/color dynamic per stage).
+
+  3. "Most interested in"   (2fr) — top interest name: fontSize 13px,
+     color #374151; signal-type label under it (if a signal exists):
+     fontSize 12px, color #6366f1, marginTop 2px; else a plain
+     "—" in color #d1d5db.
+
+  4. "Reach"                (1fr) — 3 emoji icons, see section 3 above
+     (fontSize 16px, gap 8px, opacity 1 or 0.2 per channel).
+
+  5. "Last messaged"        (1.5fr) — fontSize 13px, color #374151;
+     relative time of the last message's sentAt, or "Never" in
+     color #d1d5db.
+
+  6. "Spent"                (1fr) — fontSize 13px, fontWeight 500,
+     color #111827; formatted as `₹{ltv.toLocaleString('en-IN')}` when
+     orders.ltv > 0, else "—" in color #d1d5db.
+
+Row-level styles (apply to the whole row, not one column): padding
+'12px 16px', borderBottom '1px solid #f9fafb' (omitted on the last
+row), cursor 'pointer', background '#f5f3ff' when selected/'transparent'
+otherwise (dynamic hover via onMouseEnter/onMouseLeave, see section 2).
+
+The whole table sits inside a card wrapper (line 1164-1166):
+  { ...DS.card, padding: 0, overflow: 'hidden' }
+i.e. DS.card's base (background #ffffff, border 1px solid #e5e7eb,
+borderRadius 14, boxShadow 0 1px 4px rgba(0,0,0,0.06)) with padding
+overridden to 0 (so the header/rows can each manage their own
+padding and touch the card's edges).
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified. This was a read-only audit of
+frontend/app/admin/screens/Customers.jsx.

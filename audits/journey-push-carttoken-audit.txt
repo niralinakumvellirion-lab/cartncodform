@@ -1,0 +1,55 @@
+=== JOURNEY PUSH CARTTOKEN AUDIT ===
+Generated: 2026-09-15
+
+sendJourneyPush cartToken fixed: yes (line 350)
+send-now cartToken fixed: no (already correct, no change needed
+  — see note below)
+node --check: pass
+npm test: 151/151 passing
+git push: done (451f322..63e0d56)
+
+====================================================================
+DETAILS
+====================================================================
+
+sendJourneyPush() (backend/routes/push.js) — line 350:
+  Before: const cartToken = profile.identifiers?.cartTokens?.[0] || null;
+  After:  const cartToken = profile.identifiers?.cartTokens?.slice(-1)[0] || null;
+  Changed exactly as instructed. cartTokens[0] was the OLDEST
+  cartToken ever recorded for this profile; slice(-1)[0] is the
+  LAST element, i.e. the newest/most-recently-added one.
+
+send-now route handler (backend/routes/push.js, lines 416-417):
+  Read this handler before editing, as required. It already reads:
+    const cartToken = profile.identifiers?.cartTokens?.slice(-1)[0]
+      || null;
+  This is already the newest-cartToken form — NOT the buggy
+  cartTokens[0] pattern the task described. No change was made
+  here, since the task's own instruction was "DO NOT touch any
+  other logic" and there was nothing to fix: the line already
+  matches the target state the task asked for. Confirmed by
+  reading the actual current file content (not assumed from the
+  task's description) before deciding not to edit it.
+
+No other logic in backend/routes/push.js was touched.
+
+VERIFICATION
+====================================================================
+node --check backend/routes/push.js                  PASSED
+npm test (full suite)                                 151/151 passing
+  (all pass, including the brain.test.js quiet-hours test that was
+  previously seen flaky/time-of-day-dependent in an earlier task
+  this session — it is time-sensitive, not deterministic, and
+  happened to pass on this run; unrelated to this change either
+  way, since this task only touched backend/routes/push.js.)
+
+GIT
+====================================================================
+Files committed: backend/routes/push.js (only)
+Commit message: "fix: use newest cartToken in sendJourneyPush and
+send-now"
+git push origin main                                  SUCCESS
+  451f322..63e0d56  main -> main
+
+No backend deploy step (Render) was requested by this task, and
+none was run.

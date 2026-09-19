@@ -1,0 +1,422 @@
+=== STOREFRONT PUSH AUDIT ===
+Generated: 2026-09-18
+Read-only investigation. No files were changed.
+
+File read: extensions/cartncodform-embed/blocks/push-notifications.liquid
+(2402 lines total). Given the file's size, the popup/UI-building
+sections (roughly lines 1-1650, mostly the soft-prompt card/split/
+banner layouts and discount-capture UI) were read in full first, then
+the push-subscription-specific sections were located via targeted
+search and read in full at their exact line ranges — registerSW()
+(1681-1758), getToken() (1764-1795), saveToken() (1797-1872),
+checkAndInit() (1878+), setupForegroundMessages() (1658-1675), and the
+second deviceType/resync call site (2205-2239). A full-file search
+confirmed no other occurrences of the terms this task asked about
+exist outside what's covered below.
+
+
+====================================================================
+1. HOW PUSH SUBSCRIPTION IS INITIALIZED
+====================================================================
+Neither the raw browser Push API directly, nor a native FCM SDK — it
+uses the FIREBASE JS SDK's (compat build) `messaging.getToken()`
+method, which internally wraps the browser's native Push API
+(pushManager.subscribe()) via the registered service worker, but
+returns an FCM-specific value rather than a raw PushSubscription.
+
+Two `<script>` tags load the Firebase compat SDK at the top of the
+file (lines 3-4):
+  https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js
+  https://www.gstatic.com/firebasejs/10.12.0/firebase-messaging-compat.js
+
+The actual flow (triggered from the Allow button's click handler,
+lines 1253-1264, and again on every return visit via checkAndInit(),
+lines 1878-1910):
+  1. registerSW() — registers/reuses a service worker from
+     `{origin}/apps/cartncodform/sw.js` (App Proxy, same-origin as the
+     store), scoped to `/apps/cartncodform/`. Also unregisters any
+     stale/wrong-scope SW registrations first (lines 1690-1702).
+  2. getToken(swReg) — lines 1764-1795:
+       var messaging = firebase.messaging(app);
+       messaging.getToken({ vapidKey: VAPID_KEY, serviceWorkerRegistration: swReg })
+     This is Firebase's own getToken(), not
+     navigator.serviceWorker.ready.pushManager.subscribe() called
+     directly. VAPID_KEY is a module-level constant (line 14).
+  3. saveToken(token) — POSTs the resulting token to the backend (see
+     section 3).
+  4. setupForegroundMessages() — wires messaging.onMessage() for the
+     case where the tab is already open/focused (see section 5).
+
+--- Note: two UNRELATED "isMobile" variables exist in this file ---
+  - showSoftPrompt()'s `isMobile = window.innerWidth <= 600` (line
+    599) — purely a viewport-width check, used ONLY to pick the
+    popup's UI layout (stacked mobile card vs. side-by-side desktop
+    split). Has nothing to do with device/subscription classification.
+  - saveToken()'s and resyncCartTokenBeacon()'s
+    `isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)`
+    (lines 1799 and 2212) — a User-Agent regex, used ONLY to set the
+    `deviceType` field sent to the backend (see section 4).
+  These two are easy to conflate (same variable name, same file) but
+  are completely independent signals computed differently in
+  different scopes.
+
+
+====================================================================
+2. WHAT KIND OF TOKEN/SUBSCRIPTION OBJECT IS STORED
+====================================================================
+A bare FCM REGISTRATION TOKEN STRING — NOT a raw Web Push
+PushSubscription object (which would have `.endpoint`, `.keys.p256dh`,
+`.keys.auth`, etc.).
+
+getToken()'s Promise resolves with whatever
+`messaging.getToken({...})` returns, which per the Firebase SDK is
+always a plain string. That string is passed straight into
+saveToken(token) (line 1780: `resolve(token)`) and from there directly
+into the POST body as `token: token` (line 1819) with no
+transformation. localStorage also stores it verbatim under
+`TOKEN_KEY = 'ccf_fcm_token_' + SHOP_DOMAIN` (line 1832). At no point
+in this file is `.endpoint`/`.keys` ever referenced or extracted —
+confirmed via search, zero occurrences of either term anywhere in the
+file. This matches exactly what backend/utils/pushNotification.js
+expects and stores in CustomerPushSubscription.token (per the prior
+mobile-push-audit.txt) — an FCM token string, sent to FCM's
+sendEachForMulticast({tokens: [...]}) API, which is the correct
+counterpart for this kind of token.
+
+
+====================================================================
+3. THE /subscribe-customer POST BODY
+====================================================================
+Two call sites POST to `BACKEND_URL + '/api/push/subscribe-customer'`
+(BACKEND_URL is the hardcoded constant at line 9:
+'https://api.shopireachboost.com') — both send the exact same field
+shape:
+
+  saveToken() — lines 1814-1827 (normal `fetch`, used right after a
+  fresh subscribe or on checkAndInit()'s token-rotation check):
+    {
+      shopDomain: SHOP_DOMAIN,
+      token: token,
+      oldToken: oldToken,
+      page: window.location.pathname,
+      deviceType: deviceType,
+      cartToken: cartToken,
+      customerId: customerId,
+      ccfSessionId: getSessionId()
+    }
+
+  resyncCartTokenBeacon() — lines 2217-2226 (uses navigator.sendBeacon
+  when available, falling back to a fire-and-forget fetch; called
+  after a cart add/change so the subscription's cartToken stays
+  current):
+    { shopDomain, token, oldToken: token (always equal to token itself
+      here — this call never rotates the token, only re-syncs
+      cartToken), page, deviceType, cartToken, customerId, ccfSessionId }
+
+Every field's source:
+  - shopDomain: SHOP_DOMAIN (window.Shopify.shop, or hostname fallback)
+  - token: the FCM registration token string from getToken()
+  - oldToken: the previously-stored token from localStorage (saveToken)
+    or the current token itself (resyncCartTokenBeacon, i.e. a no-op
+    rotation)
+  - page: window.location.pathname
+  - deviceType: see section 4
+  - cartToken: fetched fresh from /cart.js each time, with the
+    `?key=...` suffix stripped
+  - customerId: window.Shopify.customerId if the shopper is logged in,
+    else null
+  - ccfSessionId: from getSessionId() (not read in this task — a
+    session-id helper defined elsewhere in the file, out of this
+    audit's read scope)
+
+
+====================================================================
+4. HOW deviceType IS DETECTED AND WHAT VALUES IT CAN TAKE
+====================================================================
+Both call sites (saveToken() line 1799, resyncCartTokenBeacon() line
+2212) use the IDENTICAL detection logic:
+
+  var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  var deviceType = isMobile ? 'mobile' : 'desktop';
+
+This is the ONLY place deviceType is ever computed in this file. It
+can take EXACTLY TWO values, always lowercase, always one of these two
+literal strings: 'mobile' or 'desktop'. There is no third value (no
+'tablet', no 'unknown', no capitalized variant) ever sent from this
+file. This directly resolves an open question flagged in the prior
+mobile-push-audit.txt (backend/utils/pushNotification.js's mobileOnly
+filter does an exact match against `{$in:['mobile','unknown']}`) —
+the storefront's own deviceType values are consistently exactly
+'mobile' or 'desktop', so the exact-match filter risk previously
+flagged as "unconfirmed" is NOT an active mismatch source for THIS
+sender; 'mobile' rows from this file will always match a
+mobileOnly:true query's 'mobile' branch correctly if that parameter
+were ever wired up to a real caller (it currently isn't, per the
+previous audit).
+
+Caveat: the regex is a simple substring/OR match against
+navigator.userAgent — it will correctly classify the vast majority of
+real phones/tablets as 'mobile' (including iPads, which report
+"iPad" in their UA on older iOS/iPadOS, and increasingly report as
+desktop-Safari-like UAs on newer iPadOS by default unless the site
+requests the mobile UA — a known platform quirk this code does not
+account for) and everything else as 'desktop'. Modern iPadOS Safari
+(13+) defaults to a DESKTOP-class User-Agent string that does NOT
+match this regex at all (no "iPad", no "Mobile" token) — so recent
+iPads would be silently classified as 'desktop' by this code, despite
+being a mobile/tablet device. This is a real, concrete gap directly
+relevant to "mobile not receiving/displaying correctly," specific to
+iPadOS.
+
+
+====================================================================
+5. DOES THE SERVICE WORKER HANDLE THE push EVENT ITSELF, OR RELY ON
+FCM'S BACKGROUND HANDLING?
+====================================================================
+This file does NOT answer that question — because the service
+worker's own code is NOT part of this file at all. A full-file search
+for `self.addEventListener`, `self.registration`, `pushManager`, and
+`showNotification` returned ZERO matches anywhere in these 2402 lines.
+
+What this file DOES contain, relevant to background vs. foreground
+delivery:
+  - registerSW() only REGISTERS a service worker loaded from a URL
+    (`{origin}/apps/cartncodform/sw.js`, proxied through Shopify's App
+    Proxy to the backend) — it never defines or inlines the SW's own
+    event-handling logic. The SW's actual `push`/`notificationclick`
+    handlers, and whatever logic decides whether to call
+    self.registration.showNotification() itself vs. relying on
+    Firebase Messaging's default background-message handling, live in
+    that separate sw.js file — NOT requested for this audit, and not
+    read here. A prior session context note mentions a related file,
+    frontend/public/firebase-messaging-sw.js, which may or may not be
+    the same script actually served at the App Proxy URL — this was
+    not verified in this task and should be the subject of a
+    follow-up, targeted audit if the background/SW behavior itself
+    needs to be confirmed.
+  - setupForegroundMessages() (lines 1658-1675) is this file's ONLY
+    own notification-display code, and it only covers the FOREGROUND
+    case (the storefront tab already open and focused when a push
+    arrives) via Firebase's `messaging.onMessage(callback)` API — see
+    section 6 for exactly what it does and a concrete bug found there.
+
+So: for BACKGROUND delivery (tab closed or not focused — the common
+case on mobile), whether the SW handles the raw `push` event itself
+or leans on Firebase Messaging's own default background handler
+cannot be determined from this file; it depends entirely on the
+separate sw.js script's own content, out of scope for this specific
+audit.
+
+
+====================================================================
+6. FOREGROUND NOTIFICATION DISPLAY + imageUrl/icon HANDLING — A REAL,
+VERIFIED BUG
+====================================================================
+setupForegroundMessages() (lines 1658-1675):
+
+  function setupForegroundMessages() {
+    try {
+      var app = firebase.apps && firebase.apps.length > 0
+        ? firebase.apps[0] : firebase.initializeApp(firebaseConfig);
+      var messaging = firebase.messaging(app);
+      messaging.onMessage(function(payload) {
+        var title = payload.notification && payload.notification.title
+          ? payload.notification.title : 'ShopiReachBoost AI';
+        var body = payload.notification && payload.notification.body
+          ? payload.notification.body : 'New notification';
+        if (Notification.permission === 'granted') {
+          new Notification(title, { body: body, icon: '/favicon.ico' });
+        }
+      });
+    } catch(err) {}
+  }
+
+Two concrete problems, both verified against the exact backend
+message shape documented in audits/mobile-push-audit.txt:
+
+  (a) This handler reads `payload.notification.title` /
+      `payload.notification.body` — but backend/utils/
+      pushNotification.js's sendPushToCustomers() NEVER sends a
+      top-level `notification` field in the FCM message it builds
+      (only `data` and `webpush` blocks — see that audit's exact
+      payload dump). This means `payload.notification` will ALWAYS be
+      undefined for every push this app actually sends, so `title`
+      and `body` here ALWAYS fall back to the hardcoded generic
+      strings 'ShopiReachBoost AI' / 'New notification' — the
+      merchant's actual composed title/message is silently discarded
+      and NEVER shown to a customer whose tab happens to be in the
+      foreground when the push arrives. This is not a mobile-specific
+      symptom by itself (any foreground tab, mobile or desktop, hits
+      this), but it's a genuine, concrete, cross-file bug directly
+      relevant to "why doesn't my notification look right."
+  (b) Regardless of (a), this handler's own `new Notification(title,
+      { body: body, icon: '/favicon.ico' })` call NEVER reads or
+      passes an image at all — `icon` is hardcoded to '/favicon.ico',
+      and there is no `image` option anywhere in this call. Even if
+      (a) were fixed and payload.notification/data were read
+      correctly, this specific code path has no way to display
+      mobileImageUrl/desktopImageUrl/imageUrl under any circumstance —
+      it structurally cannot show an uploaded image, ever, for a
+      foreground-tab notification.
+
+Practical impact by device: mobile users are statistically much less
+likely to have the storefront tab open/focused when a push arrives
+(they've typically navigated away, locked the phone, or closed the
+browser) — most mobile deliveries would go through the BACKGROUND
+path (the separate, unaudited sw.js), not this foreground handler.
+Desktop users leaving a store tab open in the background are more
+likely to be affected by this specific bug. This file cannot confirm
+whether the SAME title/body/image-reading mistake also exists in the
+background SW path — that would require auditing sw.js directly.
+
+
+====================================================================
+7. MOBILE-SPECIFIC CODE PATHS, BROWSER CHECKS, iOS SAFARI HANDLING
+====================================================================
+Full-file search for "iOS", "Safari", "isSafari", "webkit",
+"standalone" (PWA-installed detection) returned ZERO matches anywhere
+in these 2402 lines. There is NO iOS/Safari-specific branching,
+messaging, or fallback UX anywhere in this file.
+
+This is notable because iOS Safari has well-known, version-gated Web
+Push limitations (no Web Push support at all before iOS 16.4; even on
+16.4+, Web Push only works for a site added to the Home Screen as a
+standalone PWA, not for an ordinary Safari tab). This file's only
+feature-detection is generic and browser-agnostic:
+  - canPrompt() (lines 93-100): `if (!('Notification' in window))
+    return false;` — the ONLY capability check gating whether the
+    soft-prompt popup shows at all.
+  - registerSW() (line 1683): `if (!('serviceWorker' in navigator))
+    return reject(...)` — the only capability check inside the actual
+    subscribe flow.
+  - No explicit check for `PushManager` support, no
+    `window.navigator.standalone` (the standard way to detect an
+    iOS home-screen PWA), and no messaging that tells an iOS Safari
+    visitor (running in a regular browser tab, pre-16.4, or not
+    installed to Home Screen) WHY the Allow flow silently fails.
+
+Consequence: on an iOS Safari version/context that doesn't support
+Web Push, `Notification.requestPermission()` may still resolve (iOS
+Safari's Notification API surface can differ subtly by version) and
+then registerSW()/getToken() would fail somewhere downstream; the only
+handling for that is the generic
+`.catch(function(err) { console.error(...); resetButton(); })` at
+lines 1304-1307 — the Allow button just resets to its original state
+with a console-only error, no user-facing explanation. A customer on
+an unsupported iOS Safari context would see the popup, tap Allow, and
+watch the button silently revert with no indication of why — easily
+mistaken for "the notification/subscribe feature is broken" rather
+than "this browser/context doesn't support it."
+
+
+====================================================================
+ADDITIONAL FINDING — saveToken() reports success before its own
+network call resolves
+====================================================================
+Not explicitly asked for in the task's 7 points, but directly relevant
+to "mobile not receiving notifications" and verified while reading
+this file, so included here:
+
+saveToken() (lines 1797-1872) kicks off its fetch chain
+(`fetch('/cart.js').then(...).then(...POST to /subscribe-
+customer...).then(...).catch(...)`) but does NOT return or await that
+chain. Instead, immediately after starting it, the function
+synchronously executes (line 1871):
+  return Promise.resolve({ success: true });
+This means the caller chain —
+  registerSW().then(getToken).then(saveToken).then(function() {
+    setupForegroundMessages();
+    allow.textContent = '✓ Subscribed!'; ...
+  })
+— proceeds to show "✓ Subscribed!" and treats the flow as complete
+BEFORE the actual POST to /subscribe-customer has necessarily
+completed, or even if it ultimately FAILS (network error, backend
+500, CORS issue, etc. — the fetch chain's own .catch at line
+1866-1868 only console.errors, it does not reject/propagate anything
+back to the outer Promise.resolve({success:true}) already returned).
+A customer could see "✓ Subscribed!" in their browser while the
+backend never actually received or stored their token+deviceType row
+at all — meaning every future push attempt to that customer would
+simply find no matching CustomerPushSubscription and skip them, with
+zero visible indication anywhere (browser or backend) that the
+original subscribe attempt silently failed.
+
+
+====================================================================
+SELF-AUDIT
+====================================================================
+
+File read: extensions/cartncodform-embed/blocks/push-notifications.liquid
+— 2402 lines total.
+
+Key finding — Web Push token or native FCM token?
+It is a Web Push flow mediated by the Firebase JS SDK: the SDK's
+messaging.getToken() call wraps the browser's native Push API via the
+registered service worker and hands back an FCM REGISTRATION TOKEN
+STRING (not a raw PushSubscription object with endpoint/keys). What
+gets stored and sent to the backend (`token` field in the
+/subscribe-customer POST body) is that bare FCM token string — which
+correctly matches what backend/utils/pushNotification.js expects and
+sends to FCM's sendEachForMulticast({tokens:[...]}) API (confirmed
+against audits/mobile-push-audit.txt). This part of the chain is
+internally consistent — no mismatch here.
+
+Is the service worker correctly reading imageUrl from the webpush data
+payload?
+Cannot be determined from this file — the service worker's own push-
+event handling code is not present anywhere in this file (confirmed,
+zero matches for self.addEventListener/showNotification/
+self.registration/pushManager). What COULD be checked in this file —
+the FOREGROUND message handler, setupForegroundMessages() — is
+confirmed BROKEN in two ways: it reads payload.notification.title/body
+(a field the backend never sends, so it always falls back to hardcoded
+generic text) and it never reads any image field at all, hardcoding
+icon to '/favicon.ico' with no `image` option whatsoever. Whether the
+BACKGROUND path (the actual sw.js script) reads webpush.data.imageUrl
+or webpush.notification.image correctly is unknown without auditing
+that separate file directly.
+
+What's most likely causing mobile to not display the image (or the
+notification at all) — ranked by how directly each was verified here:
+
+1. (Unverifiable without auditing sw.js) If the same title/body/image
+   reading mistake found in setupForegroundMessages() is ALSO present
+   in the separate service worker's push-event handler, that would be
+   the single most direct explanation for images (and possibly correct
+   titles) not showing on mobile background pushes — this is the
+   natural next file to audit to confirm or rule out.
+2. (Verified, but backend-side) Per audits/mobile-push-audit.txt, the
+   backend never sends a top-level `notification` field at all — only
+   `data` + `webpush` — so ANY handler (this file's foreground one, or
+   a naive SW handler) that expects `payload.notification` will always
+   get generic fallback text instead of the real message. This file
+   proves that exact mistake is present at least in the foreground
+   path.
+3. (Verified) saveToken()'s fire-and-forget POST (see "Additional
+   Finding" above) means a subscribe attempt can silently fail to ever
+   reach the backend while the UI still shows "✓ Subscribed!" — a
+   customer whose subscribe never actually registered would receive
+   NO pushes at all (not a wrong-image problem, a no-notification-
+   at-all problem), and there would be no error surfaced anywhere to
+   explain it.
+4. (Verified) Modern iPadOS Safari's default desktop-class
+   User-Agent does not match the `/Android|iPhone|iPad|iPod|Mobile/i`
+   regex used to set deviceType — so up-to-date iPads get classified
+   as 'desktop', which would matter if/when mobileOnly-style targeting
+   is ever actually used (currently it isn't, per
+   audits/mobile-push-audit.txt), and more generally muddies any
+   mobile-vs-desktop reporting/analytics built on this field.
+5. (Verified, but not mobile-specific) No iOS Safari / PWA-install
+   capability detection exists anywhere in this file — an iOS visitor
+   in an unsupported context (no Web Push support, or not installed
+   to Home Screen) would tap Allow and simply watch the button silently
+   reset with no explanation, easily read as "push notifications are
+   broken here" specifically on iPhone/iPad Safari.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+This was a read-only investigation. No files were modified. No git
+operations, builds, or deploys were performed, as none were requested
+for this task.

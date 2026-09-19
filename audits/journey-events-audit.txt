@@ -1,0 +1,180 @@
+JOURNEY EVENTS AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-14
+
+Files read: frontend/app/admin/screens/Journey.jsx (in full, 892
+lines), backend/routes/events.js (getJourneyData(), in full).
+
+
+====================================================================
+1. How recentEvents are rendered - the full map/render code
+====================================================================
+Journey.jsx, inside the right-hand customer detail panel's "Recent
+activity" section, lines 754-785:
+
+754	              {/* Recent events */}
+755	              <div style={{
+756	                fontSize: '11px', color: '#9ca3af', fontWeight: '600',
+757	                textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '6px',
+758	              }}>
+759	                Recent activity
+760	              </div>
+761	              <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+762	                {selectedCustomer.recentEvents?.length > 0
+763	                  ? selectedCustomer.recentEvents.map((e, i) => (
+764	                      <div key={i} style={{
+765	                        display: 'flex', gap: '8px', alignItems: 'flex-start',
+766	                        padding: '4px 0', borderBottom: '1px solid #f9fafb', fontSize: '12px',
+767	                      }}>
+768	                        <span style={{ flexShrink: 0 }}>{EVENT_ICONS[e.type] || '•'}</span>
+769	                        <div style={{ flex: 1 }}>
+770	                          <span style={{ color: '#374151' }}>{e.type.replace(/_/g, ' ')}</span>
+771	                          {e.meta?.productTitle && (
+772	                            <span style={{ color: '#6b7280' }}>{' — '}{e.meta.productTitle}</span>
+773	                          )}
+774	                        </div>
+775	                        <span style={{ color: '#9ca3af', flexShrink: 0, fontSize: '11px' }}>
+776	                          {new Date(e.ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+777	                        </span>
+778	                      </div>
+779	                    ))
+780	                  : (
+781	                    <div style={{ fontSize: '12px', color: '#9ca3af', padding: '4px 0' }}>
+782	                      No recent activity.
+783	                    </div>
+784	                  )}
+785	              </div>
+
+Structure per row: a flex row with 3 parts -- a fixed-width icon
+(left), a flexible middle section (event type text + optional product
+title), and a fixed-width time-of-day label (right). `key={i}` uses
+the array index (not e.g. a Mongo _id -- StorefrontEvent documents do
+have their own _id, but it is excluded by the backend's `.select('type
+path pageType meta ts')` projection, so it isn't available here to key
+on even if the frontend wanted to). Empty state: "No recent activity."
+when recentEvents is empty or absent. `e.meta?.productTitle` is shown
+only when present on that specific event's meta (most non-product
+events won't have it).
+
+
+====================================================================
+2. What event types are currently shown
+====================================================================
+Two different, DIFFERENT answers depending on what "shown" means here
+-- worth separating clearly:
+
+a) What event types the BACKEND query can return (i.e. what could
+   ever appear in recentEvents): ALL of them, unfiltered. The
+   StorefrontEvent.find() call (section 3 below) has no `type`
+   condition at all -- it matches purely on shopDomain + sessionId/
+   cartToken membership, so any event type ever recorded for that
+   profile's identifiers can appear, sorted newest-first, capped to
+   the 20 most recent. Grepping this codebase's storefront tracker
+   (extensions/cartncodform-embed/blocks/push-notifications.liquid)
+   for every `trackEvent('<type>', ...)` call site shows the following
+   are the types that actually ever get recorded in practice: page_view,
+   product_view, collection_view, search, cart_view, reached_checkout,
+   add_to_cart, page_exit, push_prompt_shown, push_prompt_accepted (and
+   whatever a customer's own denial path records -- not traced further
+   here since it wasn't part of what this task asked to read). Any of
+   these can show up in a given customer's Recent activity list.
+
+b) What event types have a DEDICATED icon/label mapping on the
+   frontend: only 6 -- see EVENT_ICONS (section 3 below). Every OTHER
+   type (collection_view, search, cart_view, reached_checkout, and any
+   future/unlisted type) still renders -- the row itself doesn't
+   disappear or error -- but falls back to a generic bullet icon ('•')
+   via `EVENT_ICONS[e.type] || '•'` (line 768), with its label
+   generated generically from the raw type string (see section 3
+   below, "How each event type is displayed").
+
+So: nothing is filtered out or hidden by type anywhere in this
+pipeline (backend or frontend) -- every event type that exists for a
+customer can appear in the list, and the frontend degrades gracefully
+(bullet + auto-generated label) for the 4+ types it doesn't have a
+custom icon for, rather than omitting them.
+
+
+====================================================================
+3. How each event type is displayed (label, icon, text)
+====================================================================
+EVENT_ICONS (Journey.jsx, lines 21-28) -- the only place icons are
+defined, a flat type-to-emoji map:
+
+21	const EVENT_ICONS = {
+22	  page_view: '👁',
+23	  product_view: '🔍',
+24	  add_to_cart: '🛒',
+25	  page_exit: '↗',
+26	  push_prompt_shown: '🔔',
+27	  push_prompt_accepted: '✅',
+28	};
+
+Per-type display, derived from the render code in section 1:
+  - Icon: EVENT_ICONS[e.type] if the type is one of the 6 above,
+    otherwise the fallback bullet character '•' (line 768).
+  - Label/text: NOT a lookup table -- generated generically from the
+    raw event `type` string for every type (including the 6 with
+    icons): `e.type.replace(/_/g, ' ')` (line 770), i.e. underscores
+    become spaces and nothing else changes (no capitalization, no
+    custom wording). So:
+      page_view            -> "page view"
+      product_view         -> "product view"
+      add_to_cart          -> "add to cart"
+      page_exit            -> "page exit"
+      push_prompt_shown    -> "push prompt shown"
+      push_prompt_accepted -> "push prompt accepted"
+      collection_view      -> "collection view"   (no icon -- bullet)
+      search               -> "search"            (no icon -- bullet)
+      cart_view            -> "cart view"          (no icon -- bullet)
+      reached_checkout     -> "reached checkout"   (no icon -- bullet)
+  - Optional product suffix: if `e.meta?.productTitle` exists on that
+    event, an em-dash + the product title is appended in a lighter
+    gray (`{' — '}{e.meta.productTitle}`, line 772) -- shown for
+    whichever events happen to carry a productTitle in their meta
+    (typically product_view and add_to_cart, per how the storefront
+    tracker populates meta for those types), not type-gated on the
+    frontend itself (it's just a presence check on the field).
+  - Time: the event's `ts` formatted as a locale time-of-day only
+    (`new Date(e.ts).toLocaleTimeString('en-IN', { hour: '2-digit',
+    minute: '2-digit' })`, line 776) -- no date shown, only hour:minute
+    in 24-hour or 12-hour form per the en-IN locale's default (no
+    explicit hour12 option set here, unlike some other time-formatting
+    call sites in this codebase).
+
+
+====================================================================
+Backend: getJourneyData() - the StorefrontEvent.find() call for
+recentEvents
+====================================================================
+backend/routes/events.js, inside the pageIds.map(...) loop, lines
+446-452:
+
+446	      const events = await StorefrontEvent.find({
+447	        shopDomain: shop,
+448	        sessionId: { $in: [...sessionIds, ...cartTokens] },
+449	      })
+450	        .sort({ ts: -1 })
+451	        .limit(20)
+452	        .select('type path pageType meta ts');
+
+No `type` field appears anywhere in this query -- confirmed by reading
+the full function again specifically looking for any filter/exclusion
+by event type: there is none. The match criteria are only:
+  - shopDomain: shop
+  - sessionId: { $in: [...sessionIds, ...cartTokens] } -- matches
+    EITHER identifier convention this collection uses (see the inline
+    comment at lines 439-442: "sessionId is overloaded in this
+    collection -- POST /api/events stores the storefront's ccfSessionId
+    there, while cartToken is a separate identifier on some rows.
+    Matching both catches events recorded under either convention.")
+Sorted `ts: -1` (newest first), capped to the 20 most recent, and
+projected down to only 5 fields via `.select('type path pageType meta
+ts')` -- notably excluding the document's own `_id` (relevant to
+section 1's note about the frontend keying its rows by array index
+instead), `customerId`, and `token`.
+
+So: every event type this profile has ever generated is eligible to
+appear in recentEvents -- the "what event types are included" answer
+at the backend layer is simply "all of them, most-recent-20 only,"
+with no allowlist/denylist of specific types anywhere in this query.

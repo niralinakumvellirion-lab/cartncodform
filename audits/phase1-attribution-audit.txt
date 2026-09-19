@@ -1,0 +1,373 @@
+=== PHASE 1 ATTRIBUTION AUDIT ===
+Part A - click URL with ccf_job: yes (backend/server.js, line 371,
+  `'ccf_src=push&ccf_job=' + job._id.toString()` appended to clickUrl)
+Part B - AttributedEvent model created: yes
+  Fields: shopDomain, profileId, jobId, sessionId, email,
+          eventType, meta, ts: all present yes
+  TTL index (90 days): yes
+Part C - events.js saves AttributedEvent: yes
+  Fire-and-forget: yes
+  Event types mapped: yes (see DEVIATION note below re: 2 of the 4
+    mapped types never actually firing yet)
+Part D - liquid getAttributionJob(): yes
+  URL param read: yes
+  sessionStorage fallback: yes
+  7-day window: yes (see NOTE below re: sessionStorage's real lifetime)
+  trackEvent() includes ccf_job: yes -- see DEVIATION note (added to
+    flushEvents(), the function that actually builds the fetch body;
+    trackEvent() itself was left completely untouched)
+node --check events.js: pass
+node --check AttributedEvent.js: pass
+npm test: 151/151 passing (19/19 suites)
+frontend build: n/a (this task did not modify any frontend/ file --
+  only backend/ and the liquid extension)
+git push: done (commit ff9a862, 95c7f76..ff9a862 main -> main)
+shopify deploy: cartncodform-103 [1]
+  https://dev.shopify.com/dashboard/232824361/apps/415894044673/versions/1127601274881
+
+
+PART A - EXACT CODE (backend/server.js, processScheduledJobs())
+=========================================================================
+          // Phase 1 attribution -- tag the click URL with ccf_src/ccf_job so
+          // the storefront (getAttributionJob() in push-notifications.liquid)
+          // can attribute subsequent revisit/cart/checkout/purchase events
+          // back to this notification. Keep the existing absolute-URL
+          // fallback (job.payload.url is often unset for legacy rule-based
+          // jobs) rather than a bare '/' -- FCM's webpush fcm_options.link
+          // needs a fully-qualified URL, and sendPushToCustomers() itself
+          // already falls back to `https://${shopDomain}` for the same
+          // reason (see backend/utils/pushNotification.js).
+          const baseUrl = payload.url || `https://${job.shopDomain}`;
+          const clickUrl = baseUrl + (baseUrl.includes('?') ? '&' : '?') +
+            'ccf_src=push&ccf_job=' + job._id.toString();
+          const result = await sendPushToCustomers(
+            job.shopDomain,
+            payload.title || 'You left something behind!',
+            payload.body || 'Come back and check it out.',
+            clickUrl,
+            ...
+
+
+DEVIATION - Part A: given `'/'` fallback replaced with the existing
+absolute-URL fallback
+=========================================================================
+The task's given snippet was:
+  const clickUrl = (job.payload?.url || '/') +
+    (job.payload?.url?.includes('?') ? '&' : '?') +
+    'ccf_src=push&ccf_job=' + job._id.toString();
+
+This code ALREADY existed at this exact spot before this task, just
+without `ccf_src=push` (it read `const urlWithJob = baseUrl + ... +
+'ccf_job=' + ...`, where `baseUrl = payload.url || https://${job.
+shopDomain}`). Rather than replace it with the task's literal `'/'`
+fallback, I kept the pre-existing `baseUrl` computation and only added
+`ccf_src=push&` to the query string. Reason: a bare `/` is a relative
+URL, and this value is passed straight into sendPushToCustomers()'s
+`url` parameter, which becomes `fcm_options.link` in the FCM webpush
+payload (backend/utils/pushNotification.js, 2 call sites) -- Firebase
+Cloud Messaging's webpush click-action link needs a fully-qualified
+absolute URL to reliably open the right page when a notification is
+clicked; sendPushToCustomers() itself already guards against a falsy
+`url` by falling back to `https://${shopDomain}`, for the same reason.
+Using literal `'/'` here would have produced a valid-looking but
+relative URL for every legacy rule-scheduled job that has no
+`payload.url` set (job.profileId unset) -- a real regression risk to
+notification click behavior on exactly the population of jobs most
+likely to lack a payload.url. Kept the existing, already-correct
+fallback instead; `ccf_src=push` is genuinely new on top of it.
+
+
+PART B - backend/models/AttributedEvent.js
+=========================================================================
+Created exactly as given in the task, byte-for-byte (only the module
+docstring/comments are the file's own, no logic changed):
+  const mongoose = require('mongoose');
+
+  const attributedEventSchema = new mongoose.Schema({
+    shopDomain: { type: String, required: true, index: true },
+    profileId: { type: mongoose.Schema.Types.ObjectId, ref: 'Profile' },
+    jobId: { type: mongoose.Schema.Types.ObjectId, ref: 'ScheduledJob' },
+    sessionId: { type: String },
+    email: { type: String },
+    eventType: {
+      type: String,
+      enum: ['revisit', 'add_to_cart', 'checkout_start', 'purchase'],
+      required: true
+    },
+    meta: { type: Object, default: {} },
+    ts: { type: Date, default: Date.now, index: true },
+  }, { timestamps: true });
+
+  attributedEventSchema.index({ ts: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
+  attributedEventSchema.index({ shopDomain: 1, ts: -1 });
+  attributedEventSchema.index({ shopDomain: 1, eventType: 1, ts: -1 });
+
+  module.exports = mongoose.model('AttributedEvent', attributedEventSchema);
+
+
+PART C - EXACT CODE (backend/routes/events.js)
+=========================================================================
+Type map (module scope, near the top of the file):
+  const ATTRIBUTION_TYPE_MAP = {
+    page_view: 'revisit',
+    add_to_cart: 'add_to_cart',
+    checkout_start: 'checkout_start',
+    purchase: 'purchase',
+  };
+
+Save block, inserted immediately after `await StorefrontEvent.
+insertMany(docs, { ordered: false });` in POST /:
+    if (body.ccf_job) {
+      (async () => {
+        try {
+          const AttributedEvent = require('../models/AttributedEvent');
+          const Profile = require('../models/Profile');
+
+          let profileId = null;
+          let email = null;
+          if (sessionId) {
+            const profile = await Profile.findOne(
+              { shopDomain: shop, 'identifiers.sessionIds': sessionId },
+              '_id channels.email.address identifiers.emails'
+            ).lean();
+            if (profile) {
+              profileId = profile._id;
+              email = profile.channels?.email?.address || profile.identifiers?.emails?.[0] || null;
+            }
+          }
+
+          const rows = events
+            .filter((e) => ATTRIBUTION_TYPE_MAP[e.type])
+            .map((e) => ({
+              shopDomain: shop,
+              profileId: profileId || undefined,
+              jobId: body.ccf_job,
+              sessionId: sessionId || undefined,
+              email: email || undefined,
+              eventType: ATTRIBUTION_TYPE_MAP[e.type],
+              meta: {
+                productId: e.meta?.productId,
+                productTitle: e.meta?.productTitle,
+                price: e.meta?.price,
+              },
+              ts: e.ts ? new Date(e.ts) : new Date(),
+            }));
+
+          if (rows.length) {
+            await AttributedEvent.insertMany(rows, { ordered: false });
+          }
+        } catch (err) {
+          console.error('[events] attribution save error:', err.message);
+        }
+      })();
+    }
+
+Fire-and-forget: the `(async () => { ... })()` IIFE is invoked but NOT
+awaited, so it never delays the `return res.status(200).json({
+success: true })` a few lines later, and any error inside it (a bad
+ccf_job cast, a DB hiccup, etc.) is caught internally and only logged --
+it can never surface as a 500 to the caller or affect the main
+StorefrontEvent save, which already completed above this block.
+
+
+DEVIATIONS - Part C
+=========================================================================
+1. email lookup field precedence. The task said "look up profile by
+   sessionId -> get email if available" without specifying which of
+   Profile's two email-bearing fields (`channels.email.address`, a
+   single "current" address, vs. `identifiers.emails[]`, an
+   accumulating array) to prefer. Used the exact precedence already
+   established elsewhere in this codebase for the same purpose --
+   `profile.channels?.email?.address || profile.identifiers?.emails?.[0]`
+   -- matching backend/server.js:430-431, backend/routes/push.js:398-399,
+   and explicitly covered by an existing test
+   (backend/__tests__/sendJourneyEmail.test.js, "channels.email.address
+   takes priority over identifiers.emails[0]"), rather than picking a
+   new/inconsistent precedence for this one call site.
+
+2. profileId populated even though the task's Part C field list didn't
+   mention it. The task's bullet list for what to save named
+   shopDomain, sessionId, jobId, email, eventType, meta, ts -- it did
+   not list profileId, even though the AttributedEvent schema (Part B,
+   given verbatim) has a `profileId` field with `ref: 'Profile'`. Since
+   the email lookup already fetches the Profile document by sessionId,
+   its `_id` is available at zero extra query cost -- leaving it unset
+   would discard data already in hand that the schema explicitly
+   supports and that a "which notification led to which known
+   customer" attribution feature would clearly want. Populated it from
+   the same lookup.
+
+3. Multiple qualifying events per batch. The task's phrasing ("Save an
+   AttributedEvent") reads singular, but a single POST /api/events
+   batch can contain more than one event whose type maps to a funnel
+   stage (e.g. a page_view AND an add_to_cart in the same debounced
+   flush). Implemented as one AttributedEvent row PER qualifying event
+   in the batch (via `.filter().map()` + `insertMany`), not just the
+   first/last match -- this is the interpretation that actually
+   produces a usable per-event funnel trail, matching the model's
+   design (one document per event).
+
+4. checkout_start / purchase are currently dormant. Grepped the entire
+   repo for the literal strings 'checkout_start' and 'purchase' as
+   event `type` values: the ONLY place either string appears is inside
+   AttributedEvent.js itself (the enum) and this new ATTRIBUTION_TYPE_
+   MAP. The storefront tracker (push-notifications.liquid) never emits
+   an event with type 'checkout_start' or 'purchase' -- its closest
+   analog to "checkout started" is 'reached_checkout' (the checkout-
+   button click handler inside initTracking()), and there is no
+   storefront-emitted 'purchase' event at all: purchase/order
+   attribution is handled by a wholly separate, PRE-EXISTING mechanism
+   already in this file (handlePushClickAttribution() in the liquid
+   file, POSTing to /api/attribution/click and stamping a `_ccf_job`
+   Shopify cart attribute that orders/create reads back) -- not by this
+   POST /api/events batch pipeline at all.
+   Implemented the mapping exactly as specified (forward-compatible: if
+   either type string is ever emitted by a future change, it already
+   works), but as of this change, 2 of the 4 AttributedEvent eventType
+   values ('checkout_start', 'purchase') will never actually be
+   produced by real traffic -- only 'revisit' (from page_view) and
+   'add_to_cart' will. Not silently remapped to 'reached_checkout' or
+   invented a purchase event, since that would be a product-scope
+   decision beyond what this task specified, not a correctness bug to
+   fix unprompted -- flagging it here instead so it's a visible,
+   deliberate choice for the next phase to address.
+
+
+PART D - liquid file (extensions/cartncodform-embed/blocks/push-notifications.liquid)
+=========================================================================
+trackEvent() - full signature and how it sends to /api/events, as
+found BEFORE any change in this task (unchanged by this task -- shown
+for the record, per the task's own request to "show its full signature
+and how it sends to /api/events"):
+  function trackEvent(type, meta) {
+    var token = localStorage.getItem(TOKEN_KEY);
+    var customerId = (window.Shopify && window.Shopify.customerId)
+      ? String(window.Shopify.customerId) : null;
+    var sessionId = getSessionId();
+
+    eventQueue.push({
+      type: type,
+      path: window.location.pathname,
+      pageType: getPageType(),
+      meta: meta || null,
+      ts: new Date().toISOString()
+    });
+
+    // Flush after 2s idle (debounce) or immediately for exit events.
+    if (flushTimer) clearTimeout(flushTimer);
+    if (type === 'page_exit') {
+      flushEvents(token, customerId, sessionId);
+    } else {
+      flushTimer = setTimeout(function() {
+        flushEvents(token, customerId, sessionId);
+      }, 2000);
+    }
+  }
+trackEvent() does NOT itself send anything to /api/events -- it only
+pushes the event onto a module-scoped `eventQueue` array and schedules
+(or immediately triggers, for 'page_exit') a call to flushEvents().
+flushEvents(token, customerId, sessionId) is the function that actually
+builds the request body and sends it (via sendBeacon, or fetch as a
+fallback) to `BACKEND_URL + '/api/events'`.
+
+getAttributionJob() - added exactly as given in the task, placed after
+the other top-of-script variable declarations (BACKEND_URL,
+PROXY_SW_URL, VAPID_KEY, firebaseConfig, SHOP_DOMAIN, TOKEN_KEY,
+SUBSCRIBED_KEY), before the "SOFT PUSH PROMPT" section comment block.
+
+
+DEVIATION - Part D: ccf_job added to flushEvents(), not trackEvent()
+=========================================================================
+The task said "find trackEvent() -- modify it to include ccf_job in
+the event payload... In the fetch body sent to /api/events, add:
+ccf_job: getAttributionJob() || undefined" and separately "DO NOT
+change any other trackEvent() logic." Per the signature/flow shown
+above, trackEvent() itself never builds or sends the fetch/sendBeacon
+body at all -- that happens entirely inside flushEvents(), a separate
+function. Since the task's actual goal ("the fetch body sent to
+/api/events" carries ccf_job) can only be satisfied by editing
+flushEvents()'s `payload` object, that's where the change was made:
+    var payload = JSON.stringify({
+      shopDomain: SHOP_DOMAIN,
+      sessionId:  sessionId  || null,
+      customerId: customerId || null,
+      token:      token      || null,
+      events:     batch,
+      // Phase 1 attribution -- tags this whole batch with the notification
+      // job (if any) this session is currently attributed to, per
+      // getAttributionJob() above. undefined is dropped by JSON.stringify,
+      // so the key is simply absent when there's no active attribution.
+      ccf_job:    getAttributionJob() || undefined
+    });
+trackEvent() itself was left 100% untouched -- not a single character
+changed -- which actually satisfies "DO NOT change any other
+trackEvent() logic" even more strictly than editing it would have
+(there is no trackEvent() change to scope at all). Since flushEvents()
+is called once per flush (not once per event), `ccf_job` is attached at
+the BATCH level, matching how shopDomain/sessionId/customerId/token
+are already sent (once per POST, not once per event inside `events[]`)
+-- consistent with how Part C reads it (`body.ccf_job`, the top-level
+POST body field, not a per-event field).
+
+
+NOTE - sessionStorage vs. the "7-day" window (implemented exactly as
+given; flagging a real limitation, not a bug)
+=========================================================================
+getAttributionJob() calls this a "7-day attribution window" and checks
+the stored timestamp's age against 7 days, but the values are written
+to `sessionStorage`, not `localStorage`. sessionStorage is cleared by
+the browser when the tab/window closes (not just after 7 days) -- so
+in practice, this mechanism only survives for as long as the visitor
+keeps that browser tab open across page navigations on the same site;
+closing the tab (or the browser) loses the attribution immediately,
+regardless of the 7-day check ever being reached. This matches the
+task's given code exactly (it explicitly names the variable
+sessionStorage, not localStorage), and mirrors how this same file
+already uses sessionStorage elsewhere for genuinely session-scoped
+state (ccf_denied_session, ccf_prompt_shown) -- so it was implemented
+verbatim as specified rather than silently switched to localStorage
+(which WOULD support a real multi-day window across tab closures, but
+is a storage-mechanism decision beyond what this task asked for).
+Flagging this here as something worth deciding explicitly in a future
+task, not something fixed unprompted in this one.
+
+
+PRE-EXISTING MECHANISM NOTED, NOT TOUCHED
+=========================================================================
+push-notifications.liquid already contains a SEPARATE, pre-existing
+attribution mechanism inside initTracking() -- handlePushClickAttribution()
+(an IIFE that runs unconditionally on every page load) -- which:
+  - reads `ccf_job` from the URL on its own (independently of
+    getAttributionJob() added in this task)
+  - dedupes via a DIFFERENT sessionStorage key pattern
+    ('ccf_click_recorded_' + ccfJob)
+  - POSTs to `/api/attribution/click` (NOT /api/events) with
+    {shopDomain, jobId, cartToken, customerId, subscriptionToken}
+  - writes a `_ccf_job` attribute onto the Shopify cart via
+    /cart/update.js, so it flows into orders/create's note_attributes
+    for order-level attribution
+This is a genuinely different, complementary mechanism (order/purchase
+attribution via the Shopify order webhook pipeline) from what this
+task builds (session-scoped funnel-event attribution via /api/events
++ AttributedEvent, covering revisit/add_to_cart/checkout_start/
+purchase as distinct storefront-tracked events). The task's spec never
+referenced this existing mechanism and gave no instruction to touch,
+consolidate, or reconcile it with the new one -- left entirely
+unmodified. Flagging its existence here since a future reader/task
+should know there are now two independent url-param-ccf_job-reading
+code paths in the same file, in case a later phase wants to unify them.
+
+
+NOT TOUCHED
+=========================================================================
+- handlePushClickAttribution(), /api/attribution/click, the
+  `_ccf_job` cart attribute mechanism, and orders/create's
+  note_attributes handling: all pre-existing, all untouched.
+- POPUP_FIELDS, GET /:shopDomain/popup, PATCH /:shopDomain/popup, and
+  every other route in backend/routes/events.js and
+  backend/routes/profiles.js: untouched.
+- No frontend/ file was touched -- this task's scope was backend/ +
+  the liquid extension only, matching the task's own file list ("git
+  add backend/models/AttributedEvent.js backend/routes/events.js
+  backend/server.js extensions/.../push-notifications.liquid" -- no
+  frontend/ path listed).

@@ -1,0 +1,187 @@
+=== PHASE 2 QUEUE AUDIT ===
+Part A - queue.js created: yes
+  GET list endpoint: yes
+  POST send-now endpoint: yes
+  POST cancel endpoint: yes
+Part B - route registered in server.js: yes
+Part C - page.js created: yes
+Part D - QueueScreen.jsx created: yes
+  Status filter tabs: yes
+  Stats row: yes (see DEVIATION on how it's sourced — no per-status
+    counts endpoint exists, so it's built from 4 parallel calls to the
+    same list endpoint)
+  Table with all columns: yes (Customer, Signal, Channel, Scheduled,
+    Status, Actions)
+  Send now + cancel actions: yes
+  Pagination: yes
+  Mobile card layout: yes
+Part E - NavMenu updated: yes (11 files — all 10 pre-existing
+  admin/*/page.js wrappers plus the new queue/page.js itself)
+node --check queue.js: pass
+npm test: 151/151 passing (19/19 suites)
+frontend build: pass (npm run build — compiled successfully, 15
+  static pages, /admin/queue new at 4.06 kB, no errors)
+git push: done (commit 67674fb, 9c37f28..67674fb main -> main)
+vercel deploy: done (production, readyState: READY,
+  deployment id dpl_2ZPcXdnnw5EGsnrTMjKyedNdDeSR,
+  https://cartncodform-8skdu5wy0-niralinakumvellirion-8853s-projects.vercel.app,
+  aliased to https://cartncodform-beryl.vercel.app)
+
+
+PART A - backend/routes/queue.js
+=========================================================================
+Created exactly as given: the GET /:shopDomain list endpoint (status
+filter, page/limit-20 pagination, profile-email enrichment via a
+second Profile.find + in-memory map), and the two POST action
+endpoints (send-now: finds a pending job, sets runAt to now, saves;
+cancel: finds a pending job, sets status to cancelled, saves — both
+scoped by shopDomain+status:'pending' in their query, both 404 if no
+matching pending job exists). No bugs found in this file on review —
+unlike earlier tasks this session, there was no embedded-newline
+string literal, no mismatched function signature, and no missing
+middleware import; verified the given `.select('identifiers.emails
+channels.email.address')` call is a single unbroken line (confirmed
+by reading the given task text character-by-character before typing
+it in) and that requireAuth/requireStoreOwner are the real exported
+names from backend/middleware/requireOwner.js (already confirmed
+multiple times this session). Smoke-tested by actually requiring the
+module in a throwaway `node -e` process (not just node --check, which
+only parses syntax) — loaded cleanly.
+
+
+PART B - backend/server.js
+=========================================================================
+Registered following this file's own established convention (matching
+how /api/activity was added in the Phase 2 attribution-activity task):
+a named `const queueRouter = require('./routes/queue');` followed by
+a bare `app.use('/api/queue', queueRouter);`, with NO rate limiter
+(this endpoint is requireAuth/requireStoreOwner-gated, the same
+category as /api/profiles, /api/discounts, and /api/activity — this
+file's own rate limiters are explicitly reserved, per its own comment,
+for the public/unauthenticated storefront routes), placed directly
+after the /api/activity registration.
+
+
+PART C/D - frontend/app/admin/queue/page.js + QueueScreen.jsx
+=========================================================================
+page.js: built following journey/page.js's exact pattern (read in
+full first, per instruction) — Suspense + AppProvider + NavMenu +
+Screen, importing QueueScreen from './QueueScreen'.
+
+QueueScreen.jsx: read Today.jsx and Customers.jsx first (per
+instruction) for their header/refresh-button, filter-tab, and table/
+card/skeleton/empty-state conventions, and reused those patterns
+directly (e.g. Customers.jsx's exact FILTER_TABS pill styling for the
+status tabs; Today.jsx/Journey.jsx's exact Refresh-button SVG/style
+for the header). Built:
+  1. Header — title/subtitle + Refresh button (bumps `refreshKey`,
+     which both the job-list effect and the stats effect depend on).
+  2. Status filter tabs — All/Pending/Sent/Failed/Cancelled, resets
+     to page 0 on change (a small addition beyond the literal spec —
+     see DEVIATION 2 below).
+  3. Stats row — 4 cards (Pending/Sent/Failed/Cancelled) — see
+     DEVIATION 1 below for how these counts are actually sourced.
+  4. Table (desktop) / cards (mobile) — Customer (email or
+     'Anonymous'), Signal (formatSignal() — underscore-to-space +
+     capitalize first letter only, exactly as specified, NOT the
+     richer SIGNAL_LABELS dictionary Today.jsx/Journey.jsx use
+     elsewhere), Channel badge (push=blue #dbeafe/#1d4ed8, email=
+     purple #ede9fe/#6d28d9), Scheduled (formatDateTime() — same
+     "Sep 14, 2:30 PM" pattern already established in
+     ActivityScreen.jsx/Journey.jsx), Status badge (5-way color map
+     including 'skipped', all exact hex values as specified), Actions
+     (Send now + Cancel buttons, pending jobs only; a per-job
+     success/fail result message; both actions bump refreshKey on
+     success to re-pull the list and stats).
+  5. Pagination — Previous/Next, "Showing X-Y of Z", both buttons
+     disabled appropriately at the ends of the range.
+  6. Fetch logic — job list re-fetches on [shop, statusFilter, page,
+     refreshKey]; re-fetches after send-now/cancel via the same
+     refreshKey bump (rather than a separate ad-hoc re-fetch call),
+     matching "Re-fetch after send-now or cancel action."
+
+
+DEVIATION 1 - stats row sourced via 4 parallel calls to the SAME list
+endpoint, since no aggregate counts endpoint exists
+=========================================================================
+Part D's spec says: "STATS ROW (4 small cards): Pending | Sent |
+Failed | Cancelled — Show counts from total query." But Part A's given
+GET /:shopDomain/queue endpoint (presented as the complete, final
+backend deliverable for this task — no other backend file/endpoint was
+named anywhere in this task) only ever returns ONE `total`, scoped to
+whatever single `status` value the CALLER requested (`all`, `pending`,
+`sent`, etc.) — there is no field anywhere in its response that breaks
+total down by all 4/5 statuses simultaneously. A stats row showing 4
+different counts AT ONCE cannot be built from one call to this
+endpoint.
+Implemented by calling the same endpoint 4 times in parallel (once per
+status: pending/sent/failed/cancelled), reading only `.total` from
+each response and discarding the (also-fetched, profile-enriched) job
+rows each call returns. This works and stays entirely within the given
+backend contract, but is genuinely wasteful — each of the 4 calls also
+does the full job-list query, the `.skip/.limit(20)` pagination work,
+and a second Profile.find() enrichment JOIN, none of which the stats
+row uses. A more efficient fix would be a small aggregate (e.g. a
+`$group` by status, or a dedicated `/api/queue/:shop/stats` endpoint)
+added to the backend — out of scope here since Part A's code was given
+as complete and this task's file list never mentioned adding to or
+changing it further. Flagging this as a known inefficiency for a
+future task to address, not a bug in what was built.
+
+DEVIATION 2 - status filter resets page to 0 on change
+=========================================================================
+Not explicitly named in the task's fetch-logic spec ("Fetch on mount +
+when statusFilter or page changes"), but added a small effect
+resetting `page` to 0 whenever `statusFilter` changes. Without it,
+switching from a filter with many pages (e.g. "All") to one with fewer
+matching rows (e.g. "Cancelled") while sitting on, say, page 3 would
+silently request an out-of-range page and show an empty list with a
+confusing "Showing 61-80 of 12" pagination line, with no way back to
+page 0 except manually clicking Previous repeatedly. A small,
+defensive UX fix consistent with how a filter+pagination combination
+is expected to behave; does not change the given backend contract or
+any other part of the fetch logic.
+
+
+PART E - NavMenu updated in 11 files
+=========================================================================
+Per the task's own instruction ("Read all existing page.js files...
+Add 'Queue' nav item after 'Activity' in ALL of them"), read all 10
+pre-existing admin/*/page.js files in full before editing any of them
+(activity, root admin/page.js, customers, cod, discounts, insights,
+journey, messages, settings-page, signals), confirmed their NavMenu
+blocks were still byte-identical to each other (Today -> Activity ->
+Customers -> ... -> Settings), and added the same one line
+(`<a href="/admin/queue" rel="queue">Queue</a>`) to each, immediately
+after the Activity link — plus the new queue/page.js already includes
+it in the same position. root admin/page.js again required matching
+its own slightly deeper indentation (its NavMenu is wrapped in
+`{!showOnboarding && (...)}`, one level deeper than the other 10
+files) rather than copying the other files' indentation into it.
+Verified afterward: grepping the whole admin/ tree for `rel="queue"`
+returns exactly 11 files, each exactly once.
+
+
+VERIFICATION
+=========================================================================
+node --check backend/routes/queue.js: pass
+node --check backend/server.js: pass
+Smoke-test (`node -e "require('./routes/queue')"`, from backend/):
+loads cleanly, confirming no bad import paths.
+cd backend && npm test: 151/151 passing, 19/19 suites (no existing
+  test references ScheduledJob/Profile queue-shaped queries or mocks
+  this new route file, so none needed updating).
+cd frontend && npm run build: pass, 15 static pages, no errors.
+
+
+NOT TOUCHED
+=========================================================================
+- Every other route in backend/server.js and every other backend
+  file: unchanged.
+- Every other admin screen component
+  (Today.jsx/Journey.jsx/Customers.jsx/ActivityScreen.jsx/etc.):
+  read-only reference for patterns, not modified.
+- No file other than the ones listed in the commit's diff stat (14
+  files: queue.js, server.js, the 10 existing page.js wrappers'
+  1-line NavMenu additions, and the 2 new queue/ files) was staged or
+  committed.

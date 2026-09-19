@@ -1,0 +1,77 @@
+=== NAV SWAP AUDIT ===
+Generated: 2026-09-16
+
+Files updated: 12
+  frontend/app/admin/page.js
+  frontend/app/admin/activity/page.js
+  frontend/app/admin/automation/page.js
+  frontend/app/admin/cod/page.js
+  frontend/app/admin/customers/page.js
+  frontend/app/admin/discounts/page.js
+  frontend/app/admin/insights/page.js
+  frontend/app/admin/journey/page.js
+  frontend/app/admin/messages/page.js
+  frontend/app/admin/queue/page.js
+  frontend/app/admin/settings-page/page.js
+  frontend/app/admin/signals/page.js
+
+Today and Insights swapped: yes
+
+frontend build: pass (all 16 routes compiled, no errors)
+git push: done (07215bc..2c0af60)
+vercel deploy: done (readyState READY, aliased to
+  https://app.shopireachboost.com)
+
+
+====================================================================
+DETAILS
+====================================================================
+
+Located all page.js files under frontend/app/admin/ via glob
+(frontend/app/admin/**/page.js) — exactly 12 files found, matching
+the "Files updated" count above. Read every one of them in full
+before editing, as instructed. All 12 contained the exact same
+12-item NavMenu list, in the exact same order, with Today always at
+position 1 (href="/admin") and Insights always at position 9
+(href="/admin/insights") — confirmed identical across every file via
+a targeted grep before touching anything, so no file needed special-
+casing beyond a whitespace/indentation difference in
+frontend/app/admin/page.js (10-space indent inside an
+`{!showOnboarding && (...)}` conditional, vs. 8-space indent in the
+other 11 files, which render NavMenu unconditionally).
+
+Original order (all 12 files):
+  Today, Activity, Queue, Automation, Customers, Journey,
+  What to act on, Messages, Insights, Cash on delivery,
+  Discounts, Settings
+
+Interpreted "swap their positions" as an exact positional swap of
+the two items (Today's list slot now holds Insights, and vice versa)
+— i.e. Insights moves to slot 1 and Today moves to slot 9 — rather
+than moving them next to each other, since the task's own wording
+("if Today comes before Insights, put Insights before Today, and
+vice versa") describes a relative-order flip, which a positional
+swap satisfies exactly while leaving every other item's position
+completely undisturbed.
+
+New order (all 12 files):
+  Insights, Activity, Queue, Automation, Customers, Journey,
+  What to act on, Messages, Today, Cash on delivery,
+  Discounts, Settings
+
+Every other nav item (Activity, Queue, Automation, Customers,
+Journey, What to act on, Messages, Cash on delivery, Discounts,
+Settings) — 10 items — kept its exact original position, href, rel
+attribute, and label text in every file; only the Today/Insights
+pair moved. No screen component file (frontend/app/admin/screens/*,
+AutomationScreen.jsx, QueueScreen.jsx, ActivityScreen.jsx, etc.) was
+opened or touched — this task only concerned the NavMenu list
+markup, which lives exclusively in the page.js wrapper files per
+this project's established (and previously documented,
+CLAUDE.md-noted) pattern of duplicating the nav block across every
+top-level admin route wrapper rather than a shared layout.
+
+Verified post-edit with the same targeted grep used before editing:
+all 12 files now show Insights at the first `rel="today"|rel=
+"insights"` match position and Today at the second, confirming the
+swap landed identically and completely across every file.

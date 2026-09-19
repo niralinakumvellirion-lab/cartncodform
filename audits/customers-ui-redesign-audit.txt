@@ -1,0 +1,211 @@
+=== CUSTOMERS UI REDESIGN AUDIT ===
+Generated: 2026-09-17
+
+StageBadge component added: yes
+  Duplicate helpers removed: yes (getStageLabel/getStageBg/getStageColor
+    all removed; the desktop row's separately-duplicated inline copy of
+    the same logic was also removed — see below)
+ReachIcons SVG component added: yes
+  Emoji icons replaced: yes (both desktop and mobile rows — see below)
+Customer avatar with initials: yes
+Row styling improved: yes
+Header row styled: yes
+frontend build: pass
+git push: done (9702a90..f3d034a)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+This file was already fully read moments earlier in this same session
+for the immediately preceding read-only audit
+(audits/customers-ui-audit.txt) and had not been touched since, so
+that content was current going into this task. Re-confirmed exact
+line numbers via targeted re-reads of the specific sections being
+edited (header row, both row-render branches) before each change.
+
+
+====================================================================
+TWO REAL BUGS FOUND IN THE GIVEN StageBadge CODE, FIXED
+====================================================================
+1. `const orders = customer.orders || 0;` then `if (orders > 1)` /
+   `else if (orders === 1)`. A profile's `orders` field is an OBJECT
+   ({ count, ltv }) in this codebase, never a plain number —
+   confirmed throughout this very file's pre-existing code
+   (p.orders?.count, p.orders?.ltv, used in numerous places both
+   before and after this change). `orders > 1` on an object coerces
+   via the default Object.prototype.toString -> "[object Object]" ->
+   NaN, so both comparisons would ALWAYS evaluate false. Every
+   customer, regardless of actual order count, would have fallen
+   through past "Repeat buyer" and "Bought once" straight to "Has
+   cart"/"Visitor" — the two most important stage labels in the whole
+   badge would never have appeared for ANY customer. Fixed to read
+   `customer.orders?.count || 0`.
+
+2. `label = customer.stage === 'lapsing' ? 'Going quiet' : 'Visitor';`
+   This file's own STAGE_CONFIG object (left in place, now otherwise
+   unused — see below) and every other stage check anywhere in this
+   codebase use the profile-stage value 'lapsed', not 'lapsing'.
+   'lapsing' is a SIGNAL TYPE elsewhere in this app (Signal.type
+   values include cart_abandon/lapsing/winback/etc. — a completely
+   different enum from Profile.stage). A real profile.stage field
+   would never equal 'lapsing', so the "Going quiet" branch could
+   never have fired — every non-buying, cart-less profile would show
+   "Visitor" even when genuinely lapsed. Fixed to check
+   `customer.stage === 'lapsed'`.
+
+Both fixes are called out with an inline comment directly above
+StageBadge in the file itself, pointing back to this audit.
+
+
+====================================================================
+OTHER GAPS FOUND AND HOW THEY WERE HANDLED
+====================================================================
+
+3. The given CUSTOMER column snippet used
+   `customer.email || customer.identifiers?.emails?.[0] || 'Anonymous'`
+   for the name text, and only email for the avatar initial. Profile
+   objects in this codebase never have a top-level `.email` field (so
+   `customer.email` is always undefined — harmless, just a dead first
+   check), but more importantly the given snippet DROPS the phone
+   fallback and the "Anonymous shopper · #12345" unique-suffix
+   fallback the existing code already had (`displayName`, computed
+   from `p.identifiers?.emails?.[0] || p.identifiers?.phones?.[0] ||
+   'Anonymous shopper · #<last5 of _id>'`). Following the given
+   snippet literally would have made every phone-only or fully
+   anonymous profile display the same bare word "Anonymous" with no
+   way to tell them apart in the list. Kept using the existing
+   `displayName` variable for the row's name text (preserving the
+   phone + unique-id fallback chain), and used the given avatar-initial
+   logic (email-only, falling back to '?') unchanged for the circle
+   glyph specifically, since a phone-number digit as an "initial"
+   would look odd and the task's own snippet only ever intended a
+   letter there.
+
+4. The given CUSTOMER column snippet's "seen X days ago" line used
+   `customer.lastSeenDays ?? '—'` — no such field (`lastSeenDays`)
+   exists anywhere on a profile object; the actual field is
+   `lastSeenAt` (a timestamp), and the file already computes a proper
+   relative-time string from it via `getRelativeTime()` (e.g. "5m
+   ago", "3h ago", "yesterday", "12 days ago"). Since
+   `customer.lastSeenDays` is always undefined, the literal given
+   code would have shown "seen — days ago" under every single row,
+   permanently, regardless of actual activity. Reused the file's
+   existing `lastSeen` variable (already computed via getRelativeTime
+   earlier in the row) instead, and — matching the existing,
+   pre-change convention in this same file — only render the "seen
+   ..." line at all when lastSeenAt is present, rather than showing a
+   permanent "seen — days ago" placeholder for profiles with no
+   recorded activity.
+
+5. "MOST INTERESTED IN column: Show product title truncated to 20
+   chars." No per-product data is available for every row in this
+   screen's own list fetch (GET /api/profiles/:shop/profiles + GET
+   /api/profiles/:shop/signals) — a customer's topProducts only gets
+   fetched once their Journey panel is opened (a separate, per-click
+   apiGet). The only "most interested in" value actually available
+   for all rows up front is the pre-existing `topInterest` (from
+   p.interests). Applied the requested 20-char truncation to that
+   existing value instead of a nonexistent "product title" field,
+   restyled to the requested fontSize 12/color #374151, and kept
+   the signal-type sub-label (which the task's Change 3 description
+   didn't mention removing) underneath it when a signal exists.
+
+6. Change 1/2 say "Replace ALL existing stage badge logic" and
+   "Replace the 3 emoji spans" without scoping to desktop only, and
+   Change 5 removes the 3 helper functions the MOBILE row directly
+   called (getStageBg/getStageColor/getStageLabel) — leaving the
+   mobile row unmodified would have made it throw ReferenceErrors the
+   moment those functions were deleted. Updated the mobile row's stage
+   badge and reach icons to use <StageBadge>/<ReachIcons> as well,
+   even though Change 3's detailed column-by-column restyle
+   instructions were explicitly scoped to "the desktop customer row
+   (6-column grid)" only — the mobile row's own 3-line stacked layout
+   (name+badge / last-seen+signal-count / icons+LTV) was otherwise
+   left exactly as it was.
+
+7. The desktop row's OWN separate, inline-duplicated copy of the
+   stage-label/bg/color logic (lines that recomputed the same 4-branch
+   logic a second time, independent of the getStageLabel/Bg/Color
+   helpers — see audits/customers-ui-audit.txt section 1 for the full
+   detail on this pre-existing duplication) was also removed as part
+   of "Replace ALL existing stage badge logic," since it's stage-badge
+   logic too, just a second undocumented copy of it.
+
+8. STAGE_CONFIG (the label/bg/color lookup object keyed by
+   customer/identified/anonymous/lapsed) is now UNREFERENCED anywhere
+   in the file — both of its former callers (the removed helper
+   functions and the removed inline desktop duplicate) are gone, and
+   StageBadge computes its own values independently rather than
+   consulting it. Change 5's removal list names only the 3 helper
+   functions specifically, not STAGE_CONFIG itself, so it was left in
+   place rather than also deleted — flagging it here as now-dead code
+   rather than silently removing something outside the explicit list.
+
+
+====================================================================
+CHANGE-BY-CHANGE SUMMARY
+====================================================================
+- CHANGE 1: StageBadge added (with the 2 fixes above), placed
+  immediately before `export default function Customers`. Both row
+  renders (desktop grid cell, mobile stacked card) now call
+  <StageBadge customer={p} />.
+- CHANGE 2: ReachIcons added alongside StageBadge, verbatim from the
+  given code (no bugs found in it — the 3 boolean/length checks
+  already matched this file's real data shape). Both row renders now
+  call <ReachIcons customer={p} /> in place of the 3 emoji spans.
+- CHANGE 3: desktop Customer column now shows a 32px avatar circle
+  (background #eef2ff, color #4f46e5, fontSize 13/weight 700) with
+  the customer's display name (13px/600/#111827) and relative
+  "seen ..." line (11px/#9ca3af, per the given code's literal
+  fontSize — note the task's own prose description said 12px while
+  its code block said 11px; followed the code). Stage/Reach columns
+  now use the new components. Most-interested-in truncated to 20
+  chars (12px/#374151). Last messaged restyled to 12px/#6b7280
+  ('Never' in #d1d5db unchanged). Spent restyled to 13px/600/#111827
+  ('—' in #d1d5db unchanged for the empty case).
+- CHANGE 4: row wrapper's borderBottom changed from #f9fafb to
+  #f3f4f6 per the new spec (kept the existing "omit border on the
+  last row" behavior, which the task didn't ask to remove); header
+  row padding 10px 16px -> 8px 16px, borderBottom #f3f4f6 -> #e5e7eb,
+  cell fontSize 11px/weight 600/letterSpacing 0.5px -> 10px/weight
+  700/letterSpacing 0.06em.
+- CHANGE 5: getStageLabel/getStageBg/getStageColor removed.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+Confirmed via `git diff`: grepped the full diff for every
+data-fetching/state/API/filter/search/panel-related identifier
+(apiGet, apiSend, useState, useEffect, useCallback, loadData,
+loadCustomerJourney, filter, search, notifTab, selectedCustomer,
+journeyLoading) — zero matching lines were added or removed. The
+diff (160 insertions, 171 deletions) touches only: the 3 removed
+helper functions, the 2 new components, the header row style block,
+and the two row renders' Stage/Reach/Customer/Most-interested-in/
+Last-messaged/Spent JSX. The right panel (Journey timeline + Send
+notification, NotificationComposer/EmailComposer) was not touched.
+`git status` after staging showed only
+frontend/app/admin/screens/Customers.jsx changed; the pre-existing
+unrelated dirty files (backend/__tests__/brain.test.js,
+frontend/lib/api.js) were left alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 17
+  routes generated (customers route: 11.2kB -> 11.1kB, essentially
+  unchanged size), no errors.
+- git push origin main -- succeeded (9702a90..f3d034a), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Only frontend/app/admin/screens/Customers.jsx was modified. No other
+file was changed.

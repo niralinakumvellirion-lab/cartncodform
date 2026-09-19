@@ -1,0 +1,171 @@
+=== SEND NOW URL AUDIT ===
+Generated: 2026-09-18
+AUDIT ONLY -- no files were changed. This is a read-only report.
+
+Files read in full:
+  frontend/app/admin/dashboard/DashboardScreen.jsx (1838 lines)
+  frontend/lib/api.js (139 lines)
+
+
+====================================================================
+1. THE SEND NOW BUTTON'S onClick HANDLER (full apiSend call)
+====================================================================
+There are two buttons in this file whose label starts with "Send
+now" -- documented separately below. The one the task is almost
+certainly asking about is the "Send Now" button inside the
+Notification Editor modal (Part C), since that is the button that
+actually sends the notification being composed with the mobile/
+desktop image uploads and live preview. Its exact code, as it exists
+in the file right now (approx. lines 1499-1524):
+
+  <button
+    onClick={async () => {
+      try {
+        await apiSend('/api/push/send-store', 'POST', {
+          shop,
+          title: editorTitle,
+          body: editorBody,
+          mobileImageUrl: editorMobileImageUrl,
+          desktopImageUrl: editorDesktopImageUrl,
+        });
+        setShowEditor(false);
+        setShowImageInfo(false);
+        setEditorMobileImageUrl('');
+        setEditorDesktopImageUrl('');
+        alert('Notification sent to all subscribers!');
+      } catch(e) {
+        alert('Failed to send');
+      }
+    }}
+    style={{
+      flex: 1, padding: '10px 0', borderRadius: 8,
+      border: 'none', background: '#4f46e5', color: '#fff',
+      fontSize: 13, fontWeight: 700, cursor: 'pointer',
+    }}>
+    Send Now
+  </button>
+
+The apiSend CALL ITSELF, exactly:
+  apiSend('/api/push/send-store', 'POST', {
+    shop,
+    title: editorTitle,
+    body: editorBody,
+    mobileImageUrl: editorMobileImageUrl,
+    desktopImageUrl: editorDesktopImageUrl,
+  })
+
+  path   = '/api/push/send-store'
+  method = 'POST'
+  body   = { shop, title, body, mobileImageUrl, desktopImageUrl }
+
+FOR COMPLETENESS -- the OTHER "Send now" in this file: a lowercase-n
+"Send now" button in the "new subscribers" alert card (line ~1041),
+wired to a local function `sendNow(profileId)` defined at line 321:
+
+  async function sendNow(profileId) {
+    setSendingTo(profileId);
+    try {
+      await apiSend(
+        `/api/push/send-now`, 'POST', { profileId }
+      );
+      ...
+    }
+    ...
+  }
+
+  path   = '/api/push/send-now'
+  method = 'POST'
+  body   = { profileId }
+
+This is a DIFFERENT endpoint (/api/push/send-now, not /api/push/
+send-store) powering a different feature (nudging one specific new
+subscriber, not the festival notification editor). Both are included
+here so the report is unambiguous about which "Send Now" is which.
+
+
+====================================================================
+2. DOES IT USE BACKEND_URL OR A HARDCODED URL?
+====================================================================
+Neither, directly. DashboardScreen.jsx never references BACKEND_URL
+itself -- confirmed by grep across the full file for the literal
+string "BACKEND_URL": zero matches.
+
+DashboardScreen.jsx also never hardcodes a full URL (no
+"http://" or "https://" string literal is passed to apiSend for
+either Send Now call). Both calls pass only a bare relative PATH
+string ('/api/push/send-store' and '/api/push/send-now') as the
+first argument to the imported apiSend() helper (imported at the top
+of the file: `import { apiGet, apiSend } from '../../../lib/api';`).
+
+The actual URL construction -- prepending BACKEND_URL to that path --
+happens entirely inside apiSend() in frontend/lib/api.js, not in
+DashboardScreen.jsx. See section 4 below.
+
+
+====================================================================
+3. WHAT IS BACKEND_URL SET TO IN THIS FILE?
+====================================================================
+Not applicable -- BACKEND_URL is not defined, imported, or referenced
+anywhere in frontend/app/admin/dashboard/DashboardScreen.jsx. It does
+not exist in this file's scope at all. It is defined only in
+frontend/lib/api.js (see section 4).
+
+
+====================================================================
+4. apiSend() IN frontend/lib/api.js -- HOW IT BUILDS THE URL
+====================================================================
+BACKEND_URL is defined at the top of this file (line 2-3):
+
+  export const BACKEND_URL =
+    process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
+
+So BACKEND_URL resolves to the NEXT_PUBLIC_BACKEND_URL environment
+variable if it is set at build time (this is how Next.js exposes
+client-side env vars -- it gets inlined into the bundle during
+`next build`), falling back to 'http://localhost:4000' if that env
+var is not set.
+
+apiSend() itself (lines 100-139) builds the request URL like this
+(line 101):
+
+  export async function apiSend(path, method, body) {
+    const url = `${BACKEND_URL}${path}`;
+    ...
+    const res = await fetchWithTimeout(url, {
+      method,
+      headers,
+      body: JSON.stringify(body),
+    }, method);
+    ...
+  }
+
+YES -- it prepends BACKEND_URL directly onto the given path via
+simple string template concatenation: `${BACKEND_URL}${path}`. There
+is no separate base-path normalization, no leading-slash handling
+beyond what the caller already supplies, and no other transformation
+of the URL. (apiGet(), the sibling helper just above it at line 40-41,
+builds its URL the identical way: `const url = \`${BACKEND_URL}${path}\`;`.)
+
+Putting it together for the Send Now button in the editor modal, the
+actual request URL at runtime is:
+
+  `${BACKEND_URL}/api/push/send-store`
+
+which resolves to (depending on environment):
+  - production (Vercel): whatever NEXT_PUBLIC_BACKEND_URL is set to
+    in the Vercel project's environment variables (expected to be the
+    Render backend's URL, e.g. something like
+    https://<render-service>.onrender.com/api/push/send-store) --
+    this audit did not check the actual configured Vercel env var
+    value, since that lives outside this repository's source files
+    and inspecting/changing deployment environment configuration was
+    out of scope for a read-only source-code audit.
+  - local dev with NEXT_PUBLIC_BACKEND_URL unset: falls back to
+    http://localhost:4000/api/push/send-store
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified. This is a plain-text, read-only report of
+the two files named in the task.

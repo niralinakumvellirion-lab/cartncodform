@@ -1,0 +1,265 @@
+SETTINGS SAVE AUDIT - read-only, no changes
+==============================================
+Generated: 2026-09-12
+
+Files read: frontend/app/admin/screens/Settings.jsx (full, 1917 lines),
+backend/routes/profiles.js (full, 457 lines).
+
+
+====================================================================
+1. The save/submit handler for popup settings
+====================================================================
+Settings.jsx, saveSettings() (lines 116-142) is the ONE handler behind
+BOTH Save buttons in this screen (the standalone saveCard, line 543,
+and the popup customizer's own pinned Save button, line 1797 -- both
+call the exact same `onClick={saveSettings}`):
+
+116	  async function saveSettings() {
+117	    setSaving(true);
+118	    setError('');
+119	    setSuccess(false);
+120	    try {
+121	      await apiSend(`/api/profiles/${encodeURIComponent(shop)}/settings`, 'PATCH', {
+122	        voice,
+123	        caps,
+124	        quietHours,
+125	        timezone,
+126	      });
+127	      console.log(
+128	        '[settings] saving popup device:', popupDevice,
+129	        'mobilePopup.layout:', mobilePopup.layout,
+130	        'mobilePopup.imageUrl:', mobilePopup.imageUrl ? 'SET' : 'EMPTY'
+131	      );
+132	      await apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', {
+133	        ...popup,
+134	        mobilePopup,
+135	      });
+136	      setSuccess(true);
+137	    } catch (e) {
+138	      setError(e.message || 'Save failed');
+139	    } finally {
+140	      setSaving(false);
+141	    }
+142	  }
+
+Note this ONE function saves BOTH voice/caps/quietHours/timezone AND
+the popup config -- not just "popup settings" specifically, even
+though the task named it that way. There is no separate,
+popup-only save handler in this file; the popup customizer's own Save
+button triggers the exact same two-request sequence.
+
+
+====================================================================
+2. What API call(s) it makes -- endpoint, method, payload
+====================================================================
+TWO sequential (awaited, not parallel) apiSend() calls per click:
+
+  Call 1: PATCH /api/profiles/{shop}/settings
+    Payload: { voice, caps, quietHours, timezone } -- the 4 pieces of
+    top-level React state this screen holds for those settings.
+
+  Call 2: PATCH /api/profiles/{shop}/popup
+    Payload: { ...popup, mobilePopup } -- the desktop popup config
+    object spread at the top level, plus the entire mobilePopup object
+    nested under a `mobilePopup` key.
+
+Both go through frontend/lib/api.js's apiSend() (not re-read in full
+for this task, but its shape is already established from earlier
+sessions: attaches the App Bridge session token as a Bearer header,
+retries once on a 401 after a 500ms wait, otherwise no retry and no
+explicit client-side request timeout -- it relies on the browser's own
+fetch() default behavior, which has no built-in timeout at all).
+
+Because these two calls are sequentially awaited (not
+Promise.all'd), the SECOND request (popup) never starts until the
+FIRST (settings) has fully resolved -- if the settings PATCH hangs or
+is slow, the popup PATCH (and therefore the whole save, and the
+`success`/`saving` state) is blocked behind it.
+
+
+====================================================================
+3. How it handles loading state and errors
+====================================================================
+- `saving` (boolean state) is set true at the very start of
+  saveSettings() and false in a `finally` block -- so it always clears
+  regardless of success or failure. While true, both Save buttons
+  render disabled, gray, with text "Saving..." (line 557 / 1811 use the
+  ellipsis character, ...).
+- `error` (string state) is cleared at the start of every save attempt
+  and set from `e.message || 'Save failed'` in the catch block -- so
+  only the LATEST attempt's error is ever shown; a stale error from a
+  previous failed save is cleared as soon as a new save begins, even
+  before the new one has resolved.
+- `success` (boolean state) is set true only after BOTH apiSend() calls
+  resolve without throwing; it is explicitly reset to false at the
+  start of every new save attempt. There is no auto-dismiss timer for
+  the "Saved" message anywhere in this file -- once shown, it stays
+  visible until the user triggers another save (unlike, for comparison,
+  other screens' `setTimeout` + `setSendResult('')` patterns seen in
+  earlier files this session, e.g. Journey.jsx's sendResult). This
+  screen's success banner has no such timeout.
+- If the FIRST call (settings) throws, the catch block fires
+  immediately and the SECOND call (popup) is never attempted at all --
+  a failure in the settings save silently prevents the popup save from
+  running, with no separate error message distinguishing which of the
+  two actually failed. The user only ever sees one generic error
+  string, never knowing whether their popup changes were saved or not
+  in that scenario.
+
+
+====================================================================
+4. How long it waits before timeout
+====================================================================
+No explicit timeout exists ANYWHERE in this flow -- not in
+saveSettings() itself (no setTimeout/AbortController/Promise.race
+wrapping either apiSend() call), and not in apiSend() (frontend/lib/api.js,
+per its established behavior from earlier reads this session):
+plain fetch() calls with no `signal`/timeout option set at all. The
+ONLY built-in delay in the whole chain is apiSend()'s single 500ms wait
+before a ONE-TIME retry, and only if the FIRST response comes back with
+HTTP 401 specifically -- that is a retry delay, not a timeout. If the
+backend hangs (e.g. a slow Mongo query) without ever returning any HTTP
+response at all, this UI would show "Saving..." indefinitely, with no
+client-side cutoff.
+
+
+====================================================================
+BACKEND: the two PATCH endpoints that save this config
+====================================================================
+
+--- PATCH /api/profiles/:shopDomain/settings (backend/routes/profiles.js,
+    lines 347-378) -- full handler ---
+347	router.patch('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req, res) => {
+348	  try {
+349	    const shop = req.params.shopDomain.trim().toLowerCase();
+350	    const set = {};
+351
+352	    const merge = (prefix, obj) => {
+353	      if (obj && typeof obj === 'object') {
+354	        for (const [k, v] of Object.entries(obj)) set[`${prefix}.${k}`] = v;
+355	      }
+356	    };
+357	    merge('voice', req.body.voice);
+358	    merge('caps', req.body.caps);
+359	    merge('quietHours', req.body.quietHours);
+360	    if (typeof req.body.timezone === 'string' && req.body.timezone) {
+361	      set.timezone = req.body.timezone;
+362	    }
+363
+364	    if (Object.keys(set).length === 0) {
+365	      return res.status(400).json({ error: 'No settings provided' });
+366	    }
+367
+368	    await Store.updateOne({ shopDomain: shop }, { $set: set });
+369
+370	    // A voice change invalidates the cached narrative for this shop.
+371	    narrativeCache.delete(shop);
+372
+373	    return res.json({ updated: true });
+374	  } catch (err) {
+375	    console.error('[profiles] PATCH settings error:', err.message);
+376	    return res.status(500).json({ error: 'Failed to update settings' });
+377	  }
+378	});
+
+--- PATCH /api/profiles/:shopDomain/popup (backend/routes/profiles.js,
+    lines 412-437) -- full handler, plus the POPUP_FIELDS allowlist
+    it references (lines 384-391) ---
+384	const POPUP_FIELDS = [
+385	  'position', 'theme', 'accentColor', 'bgColor', 'textColor', 'fontFamily',
+386	  'borderRadius', 'imageUrl', 'imagePosition', 'allowText', 'denyText',
+387	  'customTitle', 'showBranding',
+388	  // popup-redesign fields:
+389	  'layout', 'headline', 'subtext', 'brandName', 'textAlign', 'ctaStyle',
+390	  'overlayOpacity', 'showOverlay',
+391	];
+392
+393	router.get('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, res) => {
+394	  ... (GET handler, not the save path -- omitted here, see file for full text)
+406	});
+407
+408	/**
+409	 * PATCH /api/profiles/:shopDomain/popup
+410	 * Body: any subset of popup fields. Dot-notation $set on popup.* keys.
+411	 */
+412	router.patch('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, res) => {
+413	  try {
+414	    const shop = req.params.shopDomain.trim().toLowerCase();
+415	    const set = {};
+416	    for (const key of POPUP_FIELDS) {
+417	      if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+418	        set[`popup.${key}`] = req.body[key];
+419	      }
+420	    }
+421
+422	    // popup-responsive: the whole mobile-override object is replaced wholesale.
+423	    if (req.body.mobilePopup && typeof req.body.mobilePopup === 'object') {
+424	      set.mobilePopup = req.body.mobilePopup;
+425	    }
+426
+427	    if (Object.keys(set).length === 0) {
+428	      return res.status(400).json({ error: 'No popup fields provided' });
+429	    }
+430
+431	    await Store.updateOne({ shopDomain: shop }, { $set: set });
+432	    return res.json({ updated: true });
+433	  } catch (err) {
+434	    console.error('[profiles] PATCH popup error:', err.message);
+435	    return res.status(500).json({ error: 'Failed to update popup config' });
+436	  }
+437	});
+
+
+====================================================================
+DOES IT SAVE TO Store MODEL OR A SEPARATE CONFIG MODEL?
+====================================================================
+Store model -- BOTH endpoints. Neither uses a separate/dedicated popup
+or settings collection. Both call `Store.updateOne({ shopDomain: shop },
+{ $set: set })` (lines 368 and 431) against the same Store document
+that also holds accessToken/onlineAccessToken/caps/quietHours/timezone/
+voice/plan/etc. (established from many earlier reads this session).
+The popup fields are nested under a `popup.` (dot-notation, per-field)
+or `mobilePopup` (whole-object replace) path on that same Store
+document -- not a separate model.
+
+
+====================================================================
+DOES IT DO ANY SLOW OPERATIONS (IMAGE UPLOAD, SHOPIFY API CALL)?
+====================================================================
+No, for either endpoint. Both are a single `Store.updateOne(...)` --
+one MongoDB write, no external HTTP calls, no Shopify Admin API call,
+no image upload/processing of any kind on the BACKEND. There is no
+image-upload endpoint anywhere in this file at all.
+
+The apparent "image upload" in Settings.jsx (the "Upload image"
+<input type="file">, lines 756-769) is handled ENTIRELY client-side --
+it never touches the network:
+  760	    onChange={(e) => {
+  761	      const file = e.target.files?.[0];
+  762	      if (!file) return;
+  763	      const reader = new FileReader();
+  764	      reader.onload = (ev) => {
+  765	        setActivePopup((p) => ({ ...p, imageUrl: ev.target.result }));
+  766	      };
+  767	      reader.readAsDataURL(file);
+  768	    }}
+  FileReader.readAsDataURL() converts the chosen file into a base64
+  data: URI entirely in the browser, then stores that string directly
+  in React state (`activePopup.imageUrl`) -- there is no upload request
+  to any backend or storage service. When Save is clicked, this
+  potentially very large base64 string is simply included as a plain
+  string value in the PATCH /popup request body's `imageUrl` field
+  (or nested inside `mobilePopup`), and the backend just writes
+  whatever string it receives into Store.popup.imageUrl via `$set` --
+  no validation of size, format, or content, and no separate image
+  storage/CDN step anywhere in this flow. A large enough embedded image
+  (a raw JPEG/PNG re-encoded as base64 is roughly 33% larger than the
+  original file) could make this single PATCH request body large,
+  which is the closest thing to a genuinely "slow operation" in this
+  whole save path -- not a Shopify API call, not server-side image
+  processing, just a potentially large request body written straight
+  into MongoDB with no size guard on either the frontend (no file-size
+  check before reading it) or the backend (no body-size limit check
+  specific to this route beyond whatever server.js's global
+  express.json({ limit: '5mb' }) already imposes on every route in the
+  app).

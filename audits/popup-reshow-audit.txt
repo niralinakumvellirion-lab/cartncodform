@@ -1,0 +1,339 @@
+POPUP RESHOW AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-12
+
+
+====================================================================
+ALL showSoftPrompt() CALL SITES (7 total; line 558 is the function
+definition itself, not a call, and is excluded from this list)
+====================================================================
+
+--------------------------------------------------------------
+Call site 1 of 7 - line 1568 - inside initIntentTriggers(),
+the PAGE_LOAD trigger's setTimeout
+--------------------------------------------------------------
+1563	    } catch (e) {}
+1564
+1565	    if (!hasToken && canPrompt()) {
+1566	      setTimeout(function () {
+1567	        if (canPrompt()) {
+1568	          showSoftPrompt('page_load', null);
+1569	        }
+1570	      }, DWELL_MS);
+1571	      return; // Don't set up other triggers if we show on load
+1572	    }
+
+--------------------------------------------------------------
+Call site 2 of 7 - line 1588 - inside initIntentTriggers(),
+Trigger 2 (RETURN VISIT) -- per prior audits, unreachable dead code
+since this function already returns early whenever pageType ===
+'product' (see audits/popup-debug-audit.txt section 1 for the
+full explanation); shown here for completeness since it IS a real
+call site in the source.
+--------------------------------------------------------------
+1583	    if (pageType === 'product' && pid) {
+1584	      var viewed = [];
+1585	      try { viewed = JSON.parse(localStorage.getItem(VIEWED_KEY) || '[]'); } catch (e) { viewed = []; }
+1586	      if (!Array.isArray(viewed)) viewed = [];
+1587	      if (viewed.indexOf(pid) !== -1) {
+1588	        showSoftPrompt('return_visit', pid);
+1589	      } else {
+1590	        viewed.push(pid);
+1591	        if (viewed.length > 200) viewed = viewed.slice(-200);
+1592	        try { localStorage.setItem(VIEWED_KEY, JSON.stringify(viewed)); } catch (e) {}
+
+--------------------------------------------------------------
+Call site 3 of 7 - line 1607 - inside initIntentTriggers(),
+Trigger 1 (DWELL) -- same "unreachable dead code" caveat as call
+site 2 applies here too.
+--------------------------------------------------------------
+1602	        if (dwellTimer || dwellRemaining <= 0) return;
+1603	        dwellStartedAt = Date.now();
+1604	        dwellTimer = setTimeout(function () {
+1605	          dwellTimer = null;
+1606	          dwellRemaining = 0;
+1607	          showSoftPrompt('dwell', pid);
+1608	        }, dwellRemaining);
+1609	      }
+1610	      function pauseDwell() {
+1611	        if (!dwellTimer) return;
+
+--------------------------------------------------------------
+Call site 4 of 7 - line 1630 - inside initIntentTriggers(),
+Trigger 4 (EXIT INTENT, desktop only)
+--------------------------------------------------------------
+1625	    if (window.innerWidth > 768 && !ccfExitIntentBound) {
+1626	      ccfExitIntentBound = true;
+1627	      var onExitMove = function (e) {
+1628	        if (e.clientY < 20) {
+1629	          document.removeEventListener('mousemove', onExitMove);
+1630	          showSoftPrompt('exit_intent', null);
+1631	        }
+1632	      };
+1633	      document.addEventListener('mousemove', onExitMove);
+1634	    }
+
+--------------------------------------------------------------
+Call site 5 of 7 - line 1837 - inside saveToken()'s success handler,
+the discount-capture path for an ALREADY-subscribed customer
+(see section 3 below for the full surrounding context)
+--------------------------------------------------------------
+1832	        // getPageType() (not a bare `pageType` var -- saveToken() has no such
+1833	        // variable in scope; that'd throw a ReferenceError and silently kill
+1834	        // this whole discount-capture branch via the outer .catch below).
+1835	        if (ccfDiscountEnabled() && canPromptForDiscount() && getPageType() !== 'product') {
+1836	          setTimeout(function() {
+1837	            showSoftPrompt('page_load', null);
+1838	          }, 1500);
+1839	        }
+1840
+1841	        return data;
+
+--------------------------------------------------------------
+Call site 6 of 7 - line 1933 - inside trackCart(), Trigger 3
+(ADD TO CART) -- the click-listener-based add-to-cart tracker
+--------------------------------------------------------------
+1928
+1929	      // Trigger 3 -- ADD TO CART soft prompt (session-guarded internally).
+1930	      // Do not show on product pages, even when add-to-cart fires there.
+1931	      try {
+1932	        if (getPageType() !== 'product') {
+1933	          showSoftPrompt('add_to_cart', null);
+1934	        }
+1935	      } catch (e) {}
+1936	    });
+1937	  }
+
+--------------------------------------------------------------
+Call site 7 of 7 - line 2251 - inside initTracking()'s
+window.fetch monkey-patch, Trigger 3 (ADD TO CART) -- the newer,
+fetch-interception-based add-to-cart tracker (a SEPARATE mechanism
+from call site 6's click-listener version; both exist in this file
+and both can fire independently for the same add-to-cart action)
+--------------------------------------------------------------
+2246
+2247	          // Trigger 3 -- ADD TO CART soft prompt (session-guarded internally).
+2248	          // Do not show on product pages, even when add-to-cart fires there.
+2249	          try {
+2250	            if (getPageType() !== 'product') {
+2251	              showSoftPrompt('add_to_cart', addedPid ? String(addedPid) : null);
+2252	            }
+2253	          } catch (e) {}
+2254	        } catch(e) {}
+2255	      }
+
+
+====================================================================
+1. canPromptForDiscount() - full function (lines 75-83)
+====================================================================
+75	  function canPromptForDiscount() {
+76	    if (!('Notification' in window)) return false;
+77	    if (Notification.permission === 'denied') return false;
+78	    try {
+79	      if (sessionStorage.getItem('ccf_disc_redirected') === '1') return false;
+80	    } catch (e) {}
+81	    if (promptAlreadyShown()) return false;
+82	    return true;
+83	  }
+
+Notes: does NOT check 'default' or 'granted' explicitly -- only
+excludes 'denied'. Its real caller (saveToken(), call site 5 above)
+only reaches this check on an ALREADY-subscribed customer's success
+path, so in practice it only ever runs when permission is 'granted'.
+Also checks promptAlreadyShown() (see section 4) -- the SAME
+once-per-session guard canPrompt() uses.
+
+
+====================================================================
+2. setTimeout calls that call showSoftPrompt()
+====================================================================
+THREE of the 7 call sites are wrapped in a setTimeout (the other 4 --
+return_visit, exit_intent, and both add_to_cart sites -- fire
+synchronously/immediately when their trigger condition is met, no
+delay):
+
+  a) Call site 1 (line 1568) -- setTimeout(..., DWELL_MS) [1500ms],
+     inside initIntentTriggers()'s PAGE_LOAD trigger (lines 1566-1570).
+  b) Call site 3 (line 1607) -- setTimeout(..., dwellRemaining)
+     [starts at DWELL_MS, can be paused/resumed via
+     visibilitychange -- see startDwell()/pauseDwell(), not
+     reproduced here since it's outside what was asked], inside
+     initIntentTriggers()'s DWELL trigger (lines 1604-1608) -- per the
+     dead-code caveat on call site 3 above, unreachable in the current
+     file.
+  c) Call site 5 (line 1837) -- setTimeout(..., 1500) [1500ms, a
+     literal, not DWELL_MS], inside saveToken()'s success handler
+     (lines 1836-1838).
+
+
+====================================================================
+3. saveToken() - the section after token save that calls
+   showSoftPrompt() again (full surrounding function, lines 1778-1849)
+====================================================================
+1778	  function saveToken(token) {
+1779	    var oldToken = localStorage.getItem(TOKEN_KEY);
+1780	    var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+1781	    var deviceType = isMobile ? 'mobile' : 'desktop';
+1782
+1783	    var customerId = (window.Shopify && window.Shopify.customerId)
+1784	      ? String(window.Shopify.customerId)
+1785	      : null;
+1786
+1787	    // Fetch Shopify cart token to link this subscription to the cart.
+1788	    fetch('/cart.js')
+1789	      .then(function(r) { return r.json(); })
+1790	      .then(function(cart) {
+1791	        var rawCartToken = cart.token || null;
+1792	        var cartToken = rawCartToken ? rawCartToken.split('?')[0].trim() || null : null;
+1793
+1794	        return fetch(BACKEND_URL + '/api/push/subscribe-customer', {
+1795	          method: 'POST',
+1796	          headers: { 'Content-Type': 'application/json' },
+1797	          body: JSON.stringify({
+1798	            shopDomain: SHOP_DOMAIN,
+1799	            token: token,
+1800	            oldToken: oldToken,
+1801	            page: window.location.pathname,
+1802	            deviceType: deviceType,
+1803	            cartToken: cartToken,
+1804	            customerId: customerId,
+1805	            ccfSessionId: getSessionId()
+1806	          })
+1807	        });
+1808	      })
+1809	      .then(function(r) { return r.json(); })
+1810	      .then(function(data) {
+1811	        if (data.success) {
+1812	          localStorage.setItem(TOKEN_KEY, token);
+1813	          localStorage.setItem(SUBSCRIBED_KEY, '1');
+1814	          // Latch so the PAGE_LOAD trigger never re-prompts this browser.
+1815	          try { localStorage.setItem(PAGE_LOAD_TOKEN_KEY, '1'); } catch (e) {}
+1816	        } else {
+1817	          // Backend rejected the token -- clear latch so next visit
+1818	          // triggers a fresh getToken() instead of re-saving this one.
+1819	          localStorage.removeItem(SUBSCRIBED_KEY);
+1820	          console.warn('[CCF] Token save failed -- will retry on next visit');
+1821	        }
+1822
+1823	        // Discount is handled by the Allow button click handler
+1824	        // which correctly detects email/phone action type.
+1825
+1826	        // discount-feature: saveToken() also runs when permission was
+1827	        // ALREADY 'granted' (checkAndInit's returning-customer path), where
+1828	        // showSoftPrompt/finishDiscount never ran on this page load. Show
+1829	        // the main popup (email/phone fields) for discount capture there --
+1830	        // canPromptForDiscount() guards against showing it twice.
+1831	        // getPageType() (not a bare `pageType` var -- saveToken() has no such
+1832	        // variable in scope; that'd throw a ReferenceError and silently kill
+1833	        // this whole discount-capture branch via the outer .catch below).
+1834	        if (ccfDiscountEnabled() && canPromptForDiscount() && getPageType() !== 'product') {
+1835	          setTimeout(function() {
+1836	            showSoftPrompt('page_load', null);
+1837	          }, 1500);
+1838	        }
+1839
+1840	        return data;
+1841	      })
+1842	      .catch(function(err) {
+1843	        console.error('[CCF] saveToken error:', err.message);
+1844	      });
+1845
+1846	    // Return a resolved promise so the caller chain doesn't break.
+1847	    return Promise.resolve({ success: true });
+1848	  }
+
+(This block's line numbers are 1 lower than the earlier "Call site 5"
+excerpt above because that excerpt was taken from a slightly different
+read pass; both refer to the identical text -- the showSoftPrompt call
+itself is at line 1837 per the direct grep match used to build the
+call-site list, and 1836 in this full-function reproduction's own
+internal counting from its own offset. Reported both ways rather than
+silently picking one, since the two Read calls in this session
+returned the surrounding text at very slightly different starting
+offsets.)
+
+The GATE on this call: `ccfDiscountEnabled() && canPromptForDiscount()
+&& getPageType() !== 'product'`. Purpose (per the inline comment): this
+is the path for a customer whose Notification.permission was ALREADY
+'granted' on page load -- checkAndInit()'s returning-customer flow
+calls saveToken() directly in that case, bypassing showSoftPrompt()
+entirely on the initial load, so there is no other opportunity for this
+session to ever show the discount-capture popup to them. This block is
+what gives that already-subscribed customer a SECOND chance to see the
+popup (for email/phone discount capture only -- there's no push
+permission left to ask for).
+
+
+====================================================================
+4. sessionStorage keys that prevent re-showing
+====================================================================
+
+--- ccf_prompt_shown ---
+  Declared as PROMPT_SHOWN_KEY (line 41): var PROMPT_SHOWN_KEY =
+    'ccf_prompt_shown'; // sessionStorage
+  Read: only via the promptAlreadyShown() helper (not re-shown in full
+    here since it wasn't part of this task's numbered list, but per
+    audits/popup-debug-audit.txt: `sessionStorage.getItem(
+    PROMPT_SHOWN_KEY) === 'true'` -- an exact-string check against the
+    literal string 'true', not '1'). Used inside BOTH canPrompt() and
+    canPromptForDiscount() (section 1 above, line 81).
+  Set: via markPromptShown() (also not re-shown here in full; per the
+    same prior audit, sets the string 'true'), called once inside
+    showSoftPrompt() itself right after its own entry guard passes.
+  Effect: once ANY soft prompt (any of the 7 call sites) has been shown
+    once in this browser tab's session, both canPrompt() and
+    canPromptForDiscount() refuse to show another one for the rest of
+    that session -- this is the PRIMARY once-per-session guard shared
+    by every call site above.
+
+--- ccf_denied_session ---
+  Set at 3 places, all via literal `sessionStorage.setItem(
+    'ccf_denied_session', '1')`:
+    - line 1246 -- inside showSoftPrompt()'s Allow-button click
+      handler, in the branch where Notification.requestPermission()
+      resolves to a non-granted result.
+    - line 1304 -- inside showSoftPrompt()'s deny button click handler.
+    - line 1310 -- inside showSoftPrompt()'s close (X) button click
+      handler (a separate handler from deny, same effect).
+  Read at 2 places:
+    - line 65 (inside canPrompt(), a TRUTHY check -- `if
+      (sessionStorage.getItem('ccf_denied_session')) return false;` --
+      any non-empty string value blocks it, not just '1' specifically).
+    - line 1862 (inside checkAndInit(), the exact same truthy check,
+      used as a whole-function early bail-out on repeat page loads
+      within the same tab session).
+  Effect: once the customer has explicitly denied/dismissed the prompt
+    (via the native permission dialog resolving non-granted, or via
+    clicking Deny/Close on the soft prompt itself) ANYWHERE in this
+    tab's session, canPrompt() refuses to show it again AND
+    checkAndInit() stops running its own permission-check logic
+    entirely for the rest of that session. Note this key is NOT
+    checked by canPromptForDiscount() (section 1) -- only by canPrompt()
+    -- so the discount-capture path (call site 5) is NOT blocked by a
+    prior push-permission denial, only by ccf_disc_redirected and
+    promptAlreadyShown().
+
+--- ccf_disc_redirected ---
+  Set at 1 place: line 1528, inside injectProductNudge()'s
+    discount-success handler (`sessionStorage.setItem(
+    'ccf_disc_redirected', '1')`), immediately before its own redirect
+    -- injectProductNudge() is a SEPARATE, unrelated UI element (the
+    product-page discount nudge), not part of the showSoftPrompt()
+    popup flow at all, but it writes to the SAME sessionStorage key
+    canPromptForDiscount() reads.
+  Read at 2 places:
+    - line 79 (inside canPromptForDiscount(), section 1 above --
+      exact-match '1').
+    - line 1359 (inside injectProductNudge() itself, its own
+      discAlreadyClaimed guard, checked before building the nudge UI --
+      unrelated to showSoftPrompt()).
+  Effect: once a discount code has been claimed and redirected via
+    EITHER the product-page nudge OR the main popup's own discount flow
+    (renderDiscountCode() stashes a DIFFERENT pair of keys,
+    ccf_active_discount/ccf_active_pct, not this one -- so only the
+    NUDGE's own redirect sets this specific key), canPromptForDiscount()
+    refuses to show the discount-capture popup again for the rest of
+    the session. This means claiming a discount via the product nudge
+    will also suppress the SEPARATE showSoftPrompt()-based discount-
+    capture path (call site 5) for the rest of that session, even
+    though they are two different UI surfaces.

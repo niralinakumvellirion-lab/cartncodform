@@ -1,0 +1,128 @@
+=== PHASE 2 ACTIVITY API AUDIT ===
+Part A - activity.js created: yes
+  GET / route with requireAuth: yes
+  Date range default 7 days: yes
+  Counts per event type: yes
+  User list with email enrichment: yes
+  Limit 200: yes
+Part B - route registered in server.js: yes
+node --check activity.js: pass
+npm test: 151/151 passing (19/19 suites)
+git push: done (commit a7f1cff, bc59cc1..a7f1cff main -> main)
+
+
+DEVIATIONS FROM THE LITERAL TASK - verified, not guessed
+=========================================================================
+Two changes were needed to the task's given activity.js code before it
+would even load, let alone work correctly. Both were caught by actually
+requiring the module (node --check only parses syntax -- it does not
+resolve require() paths or execute the file), not assumed.
+
+1. Wrong middleware module path: the task's given code was
+     const { requireAuth } = require('../middleware/auth');
+   `backend/middleware/auth.js` does not exist -- the only middleware
+   file in this codebase is `backend/middleware/requireOwner.js`
+   (confirmed via a directory listing). Requiring the given path would
+   throw `Cannot find module '../middleware/auth'` the instant
+   server.js required this route file, crashing the whole app at boot
+   -- not a partial failure, the entire backend would fail to start.
+   Fixed to `require('../middleware/requireOwner')`, the real module,
+   and confirmed by actually requiring backend/routes/activity.js in a
+   throwaway `node -e` process (not just node --check) -- it now loads
+   cleanly.
+
+2. `req.shop` does not exist: the task's given code read
+   `const shop = req.shop;`. Read backend/middleware/requireOwner.js in
+   full -- requireAuth() verifies the Shopify session token and sets
+   `req.shopDomain` (never `req.shop`) after validating the token's
+   iss/dest/aud/exp/nbf claims. Using `req.shop` as given would always
+   be `undefined` -- every query in this endpoint would then filter by
+   `shopDomain: undefined`, silently matching zero AttributedEvent/
+   Profile documents for every shop, forever (not a crash or an error
+   response -- a 200 OK with an always-empty summary/users list, which
+   is arguably worse since nothing would visibly signal the bug).
+   Fixed to `const shop = req.shopDomain;` -- the verified value the
+   real middleware actually sets.
+   This fix also has a security dimension worth stating explicitly:
+   this route (as given) has no `:shopDomain` path segment and never
+   reads any client-supplied shop identifier at all (not `req.query.
+   shop` either, despite the route comment's `?shop=&from=&to=&
+   eventType=` -- the query param is never actually read in the given
+   code). Scoping by `req.shopDomain` (set only from a cryptographically
+   verified session token, per requireAuth()'s signature check) rather
+   than any client-controlled value means there is nothing for a
+   caller to spoof to read another shop's activity data -- consistent
+   with CLAUDE.md's rule ("Scope by shopDomain, never by email") and
+   with the one existing precedent in this codebase for a requireAuth-
+   only (no requireStoreOwner) route: backend/routes/push.js's
+   send-journey/send-journey-email endpoints, which scope the same way
+   for the same reason (see the comment at push.js:331).
+
+Everything else in activity.js -- the date-range defaulting/day-
+boundary logic, the two-stage aggregate (unfiltered type counts) +
+find (eventType-filtered user list) query split, the profile
+enrichment/email fallback logic, the 200-row limit, the response shape
+-- was kept byte-for-byte as given, since none of it referenced a
+broken path or field.
+
+
+PART B - route registration style, not literally
+`app.use('/api/activity', require('./routes/activity'))`
+=========================================================================
+The task's given registration was a single inline line:
+  app.use('/api/activity', require('./routes/activity'));
+Read server.js's existing route-registration block first (lines
+104-138) before adding anything. Every other route there follows one
+of two established patterns:
+  - Routers required at the TOP of the file as named consts (authRoutes,
+    webhookRoutes, storeRoutes, ..., discountRouter) OR required
+    inline right before their app.use (eventsRouter, attributionRouter,
+    profilesRouter) -- never as a bare anonymous require() inside the
+    app.use() call itself.
+  - Three specific routers (events, push, attribution) get a
+    dedicated rate limiter (eventsLimiter/pushLimiter/
+    attributionLimiter), explicitly commented "Rate limiters for the
+    high-volume / abusable public endpoints" (line 104) -- these are
+    all UNAUTHENTICATED storefront-facing routes, reachable by any
+    visitor's browser with no session token. /api/profiles and
+    /api/discounts (both requireAuth/requireStoreOwner-gated, admin-
+    only) get NO rate limiter, registered as plain `app.use('/api/
+    profiles', profilesRouter);`.
+/api/activity is entirely requireAuth-gated (admin-only, matching
+profiles/discounts' category, not the public/abusable one), so it was
+registered the same way -- a named `const activityRouter = require(
+'./routes/activity');` followed by a bare `app.use('/api/activity',
+activityRouter);`, with no rate limiter, placed directly after the
+existing profiles/discounts registrations. Functionally identical to
+the task's one-liner; just matching the file's own established
+conventions rather than introducing a third registration style.
+
+
+NOTED, NOT FIXED (out of scope for this task)
+=========================================================================
+Requiring backend/models/AttributedEvent.js (indirectly, via
+activity.js) prints a Mongoose warning at load time:
+  (node:...) [MONGOOSE] Warning: Duplicate schema index on {"ts":1}
+  found. This is often due to declaring an index using both "index:
+  true" and "schema.index()". Please remove the duplicate index
+  definition.
+This is pre-existing from the Phase 1 task (backend/models/
+AttributedEvent.js was created byte-for-byte per that task's given
+spec, unmodified since) -- its `ts` field declares `{ type: Date,
+default: Date.now, index: true }` AND a separate
+`attributedEventSchema.index({ ts: 1 }, { expireAfterSeconds: ... })`
+targets the same key. Functionally harmless (Mongoose still builds the
+TTL index correctly; the warning is about a redundant plain-index
+declaration alongside it), and outside this task's scope (Part A/B here
+only touch activity.js and server.js) -- flagging it here since this
+task's verification step is what surfaced it.
+
+
+NOT TOUCHED
+=========================================================================
+- backend/models/AttributedEvent.js, backend/models/Profile.js: read
+  only, not modified.
+- Every other route registration in server.js (auth, webhooks, stores,
+  cod, push, events, attribution, profiles, discounts, proxy): unchanged.
+- No frontend file was touched -- Part C explicitly said "no change
+  needed" and none was made.

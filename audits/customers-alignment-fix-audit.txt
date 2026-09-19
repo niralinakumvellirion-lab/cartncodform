@@ -1,0 +1,128 @@
+=== CUSTOMERS ALIGNMENT FIX AUDIT ===
+Generated: 2026-09-17
+
+StageBadge whiteSpace nowrap: yes (already present before this task —
+  see note below)
+Stage cell overflow hidden: yes
+ReachIcons gap inside component: yes (already present before this
+  task — see note below)
+Customer email truncates: yes
+Row alignItems center: yes
+GRID_COLS updated: yes ('2fr 100px 130px 80px 110px 70px')
+frontend build: pass
+git push: done (07da686..ccf9e1a)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+This file was fully read and every relevant section (StageBadge,
+ReachIcons, GRID_COLS, the full desktop customer row) quoted verbatim
+moments earlier in this same session, for the immediately preceding
+read-only audit (audits/customers-row-exact-audit.txt), and had not
+been touched since. Re-read the specific sections being edited fresh
+immediately before each change to confirm nothing had drifted.
+
+
+====================================================================
+TWO OF THE SIX FIXES' OWN PREMISES DID NOT MATCH THE ACTUAL CODE
+====================================================================
+
+FIX 1's premise: "Add: whiteSpace: 'nowrap'" to StageBadge's span.
+This was ALREADY present (added in an earlier task, see
+audits/customers-ui-redesign-audit.txt) — StageBadge's span already
+had `whiteSpace: 'nowrap'` before this task touched anything. No
+change was needed for that specific property; only the other two
+parts of FIX 1 (display: 'inline-block' -> 'inline-flex', and the
+new alignItems: 'center') were actual changes.
+
+FIX 3's premise: "The outer wrapper div currently has no gap (gap: 8
+is on the cell, not the component)." This was also incorrect —
+ReachIcons' own div already had `gap: 6` directly on it (confirmed
+in the immediately preceding audit's full quote of the component,
+and true since the component was first written). The cell wrapper's
+own separate `gap: 8` (added in an earlier task,
+audits/customers-columns-fix-audit.txt) is a different, additional
+gap on a different element — it does not mean ReachIcons itself
+lacked a gap. Since FIX 3's target style block
+(`{ display: 'flex', alignItems: 'center', gap: 6 }`) already matched
+ReachIcons' existing style byte-for-byte except for property order,
+only the property order was changed (functionally a no-op, done for
+literal traceability against the given code).
+
+Both mismatches are noted here rather than silently treated as "no
+action needed" without explanation, consistent with this session's
+practice of flagging when a task's stated premise doesn't match the
+code as it actually stands.
+
+
+====================================================================
+FIX-BY-FIX SUMMARY
+====================================================================
+
+FIX 1 (StageBadge): display changed from 'inline-block' to
+'inline-flex', alignItems: 'center' added. whiteSpace: 'nowrap' was
+already present (see above).
+
+FIX 2 (Stage cell div): changed from
+  { display: 'flex', alignItems: 'center', whiteSpace: 'nowrap' }
+to
+  { display: 'flex', alignItems: 'center', overflow: 'hidden' }
+exactly as specified (whiteSpace removed, overflow: 'hidden' added).
+
+FIX 3 (ReachIcons outer div): property order normalized to
+{ display: 'flex', alignItems: 'center', gap: 6 } — functionally
+identical to the pre-existing style (see mismatch note above).
+
+FIX 4 (Customer column):
+  - Email/name text div: added overflow: 'hidden',
+    textOverflow: 'ellipsis', whiteSpace: 'nowrap'.
+  - Its parent (the text container div, sibling to the avatar
+    circle): added minWidth: 0, overflow: 'hidden'.
+  Note: the task only specified truncation styles for the
+  email/name line; the secondary "seen X ago" line directly below it
+  was left with its original style (no explicit truncation
+  properties of its own) — it now sits inside the newly
+  minWidth:0/overflow:hidden parent, so an unusually long value would
+  be clipped by that parent rather than pushing the row wider, but it
+  won't show its own "…" ellipsis the way the email line will. Not
+  changed further since the task didn't ask for it on that line
+  specifically, and "seen X ago" strings are already short and fixed
+  in shape (from getRelativeTime()), so this is a low-risk gap.
+
+FIX 5 (Row container): added alignItems: 'center' to the row's own
+grid style, exactly as specified.
+
+FIX 6 (GRID_COLS): '2fr 120px 140px 90px 120px 80px' ->
+'2fr 100px 130px 80px 110px 70px', exactly as specified.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+`git diff` shows 10 insertions / 6 deletions across exactly 6 small,
+disjoint edits (GRID_COLS, StageBadge's span, ReachIcons' div, the
+row's own style object, the Customer column's two divs, and the
+Stage cell div). No state, effect, API call, filter/search logic, or
+right panel code was touched. `git status` after staging showed only
+frontend/app/admin/screens/Customers.jsx changed; the pre-existing
+unrelated dirty files (backend/__tests__/brain.test.js,
+frontend/lib/api.js) were left alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 17
+  routes generated, no errors.
+- git push origin main -- succeeded (07da686..ccf9e1a), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Only frontend/app/admin/screens/Customers.jsx was modified. No other
+file was changed.

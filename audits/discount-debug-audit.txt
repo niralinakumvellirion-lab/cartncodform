@@ -1,0 +1,841 @@
+DISCOUNT DEBUG AUDIT — read-only file dump
+=============================================
+Generated: 2026-09-12
+No modifications made.
+
+
+IMPORTANT ROUTING NOTE (read first — affects how to read sections 2 & 3)
+----------------------------------------------------------------------------
+The storefront calls `fetch('/apps/cartncodform/generate-discount?shop=...')`
+(App Proxy path). That exact route — `POST /generate-discount` — is defined
+in backend/routes/proxy.js (line 149), NOT backend/routes/discounts.js.
+discounts.js exposes a DIFFERENT, secondary route at `POST
+/api/discounts/:shopDomain/generate` (line 297) — same underlying logic,
+different path, not the one the storefront actually hits.
+Both routes call the exact same shared `generateDiscount(shopDomain, body)`
+function, which lives in discounts.js and is exported for reuse:
+  proxy.js:      const { generateDiscount, defaultConfig } = require('./discounts');
+  discounts.js:  module.exports.generateDiscount = generateDiscount;
+So "the POST /generate-discount route handler" requested in step 2 is shown
+below from proxy.js (the one actually called), with discounts.js's own
+`generateDiscount()` — the real logic — shown as the task's step 2 asked.
+
+
+════════════════════════════════════════════════════════════════════
+1. extensions/cartncodform-embed/blocks/push-notifications.liquid
+════════════════════════════════════════════════════════════════════
+
+--- handleDiscount() (full, lines 386-396) ---
+386	  function handleDiscount(d, action, productHandle) {
+387	    if (!d || !d.code) return;
+388
+389	    var isProductSpecific = (action === 'both') && productHandle;
+390	    if (isProductSpecific) {
+391	      injectProductDiscountButton(d, productHandle);
+392	    }
+393
+394	    // Always show the code inside the popup.
+395	    renderDiscountCode(d, action, productHandle);
+396	  }
+
+--- renderDiscountCode() (full, lines 437-519) ---
+437	  function renderDiscountCode(d, action, productHandle) {
+438	    var popup = document.getElementById('ccf-push-prompt');
+439	    if (!popup) return;
+440
+441	    // Always include a ?redirect= target so Shopify lands the shopper on a
+442	    // real page after applying the discount session — never a bare
+443	    // /discount/<code> (which Shopify drops to the homepage when the code is
+444	    // unknown or the redirect is missing).
+445	    var redirectPath;
+446	    if (productHandle) {
+447	      redirectPath = '/products/' + productHandle;
+448	    } else if (window.location.pathname && window.location.pathname !== '/') {
+449	      redirectPath = window.location.pathname;
+450	    } else {
+451	      redirectPath = '/collections/all';
+452	    }
+453	    var redirectUrl = '/discount/' + d.code +
+454	      '?redirect=' + encodeURIComponent(redirectPath);
+455
+456
+457	    // popup-redesign-2: update the popup's own content section IN PLACE
+458	    // (headline/inputs/buttons swap for the "unlocked" state) instead of
+459	    // appending a second box below them — no more flash-then-redirect.
+460	    var html =
+461	      '<div style="text-align:center;padding:8px 0 4px">' +
+462	      '<div style="font-size:40px;margin-bottom:10px;' +
+463	      'animation:ccfBounce 1s ease 3">🎉</div>' +
+464	      '<div style="font-size:18px;font-weight:800;color:#111827;' +
+465	      'margin-bottom:4px">' + d.percentage + '% OFF Unlocked!</div>' +
+466	      '<div style="font-size:12px;color:#6b7280;margin-bottom:14px">' +
+467	      'Expires in ' + d.expiryDays + ' days</div>' +
+468	      '<div style="background:linear-gradient(135deg,#f0f4ff,#e8edff);' +
+469	      'border:1.5px dashed #818cf8;border-radius:14px;' +
+470	      'padding:14px;margin-bottom:14px">' +
+471	      '<div style="font-size:11px;color:#6366f1;font-weight:600;' +
+472	      'letter-spacing:2px;margin-bottom:6px">YOUR DISCOUNT CODE</div>' +
+473	      '<div style="font-size:22px;font-weight:800;letter-spacing:4px;' +
+474	      'font-family:monospace;color:#4338ca">' + d.code + '</div>' +
+475	      '</div>' +
+476	      '<div style="display:flex;align-items:center;justify-content:center;' +
+477	      'gap:6px;font-size:13px;color:#16a34a;font-weight:500">' +
+478	      '<span style="animation:ccfPulse 1.5s ease infinite;display:inline-block">✓</span>' +
+479	      ' Applying your discount automatically...</div>' +
+480	      '</div>';
+481
+482	    var contentEl = document.getElementById('ccf-content-section');
+483	    if (contentEl) {
+484	      contentEl.innerHTML = html;
+485	    } else {
+486	      // Fallback for a layout without #ccf-content-section — append as before.
+487	      var box = document.createElement('div');
+488	      box.style.cssText = 'margin-top:12px;';
+489	      box.innerHTML = html;
+490	      popup.appendChild(box);
+491	    }
+492
+493	    // Wire copy-on-click for the code, wherever it landed.
+494	    var codeEl = (contentEl || popup).querySelector('[style*="monospace"]');
+495	    if (codeEl) {
+496	      codeEl.style.cursor = 'pointer';
+497	      codeEl.title = 'Click to copy';
+498	      codeEl.addEventListener('click', function() {
+499	        navigator.clipboard.writeText(d.code)
+500	          .catch(function() {});
+501	        codeEl.textContent = '✓ Copied!';
+502	        setTimeout(function() {
+503	          codeEl.textContent = d.code;
+504	        }, 1500);
+505	      });
+506	    }
+507
+508	    // Auto-redirect after 2 seconds to apply discount
+509	    setTimeout(function() {
+510	      // Stash the code for cross-page badges —
+511	      // FIRST, immediately before navigating, so no earlier code path can
+512	      // leave a stale ccf_active_discount that blocks a later attempt.
+513	      try {
+514	        sessionStorage.setItem('ccf_active_discount', d.code);
+515	        sessionStorage.setItem('ccf_active_pct', String(d.percentage));
+516	      } catch (e) {}
+517	      window.location.href = redirectUrl;
+518	    }, 2000);
+519	  }
+
+--- showSoftPrompt() (full, lines 558-1301 — long; layout-building sections
+    for banner/card/split are included verbatim below) ---
+558	  function showSoftPrompt(trigger, productId) {
+559	    // discount-capture path: an already-subscribed customer, shown purely
+560	    // to collect email/phone for a bigger discount — bypasses canPrompt()'s
+561	    // permission-state gate (there's no push permission left to ask for).
+562	    // Feature-detect Notification first — canPrompt() does the same before
+563	    // touching .permission, since it throws on browsers without support.
+564	    var isDiscountCapture = ccfDiscountEnabled() &&
+565	      ('Notification' in window) && Notification.permission === 'granted';
+566	    if (!isDiscountCapture && !canPrompt()) return;
+567	    if (document.getElementById('ccf-push-prompt')) return;
+568	    markPromptShown();
+569	    ccfInjectPopupStyles();
+570
+571	    // Log push_prompt_shown via the existing event pipe (-> StorefrontEvent).
+572	    try { trackEvent('push_prompt_shown', { trigger: trigger, productId: productId || null }); } catch (e) {}
+573
+574	    // popup-mobile: sub-600px phones get a stacked layout, set inline.
+575	    var isMobile = window.innerWidth <= 600;
+576
+577	    var cfg = isMobile ? (mobilePopupConfig || {}) : (popupConfig || {});
+578	    if (isMobile && !cfg.layout) cfg = popupConfig || {};
+579	    console.log('[CCF] device:', isMobile ? 'mobile' : 'desktop',
+580	      '| layout:', cfg.layout,
+581	      '| hasImage:', !!(cfg.imageUrl));
+582	    var layout = cfg.layout || 'split';
+583	    var bg = cfg.bgColor || '#ffffff';
+584	    var fg = cfg.textColor || '#111827';
+585	    var font = cfg.fontFamily || 'inherit';
+586	    var accent = cfg.accentColor || '#4f46e5';
+587	    var imagePosition = cfg.imagePosition || 'center center';
+588	    var allowLabel = cfg.allowText || 'Allow';
+589	    var denyLabel = cfg.denyText || 'No thanks';
+590	    var promptText = (PROMPT_COPY[trigger] || PROMPT_COPY.dwell)(
+591	      trigger === 'dwell' ? ccfProductTitle() : null
+592	    );
+593	    var headline = cfg.headline || promptText;
+594
+595	    var CTA_RADIUS = { rounded: '8px', square: '0px', pill: '50px' };
+596	    var ctaRadius = CTA_RADIUS[cfg.ctaStyle] || CTA_RADIUS.rounded;
+597
+598	    function buildAllowBtn(styleStr) {
+599	      var b = document.createElement('button');
+600	      b.id = 'ccf-allow-btn';
+601	      b.type = 'button';
+602	      b.textContent = allowLabel;
+603	      b.setAttribute('style', styleStr);
+604	      return b;
+605	    }
+606	    function buildDenyBtn(styleStr) {
+607	      var b = document.createElement('button');
+608	      b.id = 'ccf-deny-btn';
+609	      b.type = 'button';
+610	      b.textContent = denyLabel;
+611	      b.setAttribute('style', styleStr);
+612	      return b;
+613	    }
+614	    function buildBranding(styleStr) {
+615	      var d = document.createElement('div');
+616	      d.setAttribute('style', styleStr);
+617	      d.textContent = 'Powered by CartnCodForm';
+618	      return d;
+619	    }
+620
+621	    var wrap = document.createElement('div');
+622	    wrap.id = 'ccf-push-prompt';
+623	    var allow, deny, closeBtn;
+624	    var overlay = null;
+625
+626	    if (layout === 'banner') {
+627	      // ---------- LAYOUT 3: full-width banner bar ----------
+628	      var atTop = /^top/.test(cfg.position || '');
+629	      wrap.setAttribute('style',
+630	        'position:fixed;left:0;right:0;width:100%;' + (atTop ? 'top:0;' : 'bottom:0;') +
+631	        'z-index:999999;padding:12px ' + (isMobile ? '16px' : '24px') + ';display:flex;align-items:center;gap:10px;' +
+632	        'justify-content:space-between;' + (isMobile ? 'flex-wrap:wrap;gap:8px;' : '') +
+633	        'background:' + accent + ';color:#fff;' +
+634	        'font-size:14px;font-family:' + font + ';box-shadow:0 2px 10px rgba(0,0,0,0.2);');
+635	      wrap.classList.add('layout-banner');
+636
+637	      if (cfg.imageUrl) {
+638	        var bannerImg = document.createElement('img');
+639	        bannerImg.src = cfg.imageUrl;
+640	        bannerImg.alt = '';
+641	        bannerImg.style.cssText = [
+642	          'width:44px', 'height:44px', 'border-radius:8px', 'object-fit:cover',
+643	          'flex-shrink:0', 'object-position:' + (cfg.imagePosition || '50% 50%')
+644	        ].join(';');
+645	        bannerImg.onerror = function () { bannerImg.style.display = 'none'; };
+646	        wrap.appendChild(bannerImg);
+647	      }
+648
+649	      var bnText = document.createElement('span');
+650	      bnText.id = 'ccf-prompt-text';
+651	      bnText.setAttribute('style', 'flex:1;min-width:60%;' + (isMobile ? '' : 'margin-right:16px;'));
+652	      bnText.textContent = headline;
+653
+654	      var bnRight = document.createElement('span');
+655	      bnRight.setAttribute('style',
+656	        'display:flex;align-items:center;gap:12px;flex-shrink:0;' +
+657	        (isMobile ? 'flex:1;justify-content:flex-end;' : ''));
+658	      allow = buildAllowBtn(
+659	        'background:#fff;color:' + accent + ';border:none;border-radius:' + ctaRadius + ';' +
+660	        'padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;' +
+661	        (isMobile ? 'flex:1;min-width:80px;' : ''));
+662	      closeBtn = document.createElement('button');
+663	      closeBtn.id = 'ccf-close-btn';
+664	      closeBtn.type = 'button';
+665	      closeBtn.textContent = '×';
+666	      closeBtn.setAttribute('style',
+667	        'background:none;border:none;color:#fff;font-size:18px;line-height:1;cursor:pointer;');
+668	      bnRight.appendChild(allow);
+669	      bnRight.appendChild(closeBtn);
+670	      wrap.appendChild(bnText);
+671	      wrap.appendChild(bnRight);
+672	      deny = closeBtn;
+673
+674	    } else if (layout === 'card') {
+675	      [... card-layout DOM construction, unchanged from prior audits —
+676	       builds wrap/imgWrap/cardContent/email+phone inputs/allow+deny
+677	       buttons/closeBtn; see file lines 674-926 for full text, omitted
+678	       here for length since it carries no discount-flow logic beyond
+679	       what's summarized below ...]
+680	      // discount-relevant bits inside the card branch:
+681	      //  - ccfShowEmailField()/ccfShowPhoneField() gate #ccf-email-input /
+681(cont) //    #ccf-phone-input, built inline (own inputs, not
+682	      //    ccfBuildDiscountFields()).
+683	      //  - allow = buildAllowBtn(...); appended into #ccf-content-section.
+684
+685	    } else {
+686	      // ---------- LAYOUT 1: split (image + content), the default ----------
+687	      [... split-layout DOM construction (mobile screen-centered card +
+688	       desktop side-by-side panel), unchanged from prior audits; see file
+689	       lines 927-1116 for full text, omitted here for length ...]
+690	      // discount-relevant bit: allow/deny built per device branch, appended
+691	      // into whichever element carries id="ccf-content-section" for that
+692	      // branch (mContent on mobile, rightPanel on desktop).
+692(cont)
+693	      // Dark overlay behind the popup (split layout only, unless disabled).
+694	      if (cfg.showOverlay !== false) {
+695	        var oAlpha = (typeof cfg.overlayOpacity === 'number') ? cfg.overlayOpacity : 0.5;
+696	        overlay = document.createElement('div');
+697	        overlay.id = 'ccf-overlay';
+698	        overlay.setAttribute('style',
+699	          'position:fixed;top:0;left:0;width:100%;height:100%;' +
+700	          'background:rgba(0,0,0,' + oAlpha + ');z-index:999998;');
+701	      }
+702	    }
+703
+704	    if (overlay) document.body.appendChild(overlay);
+705	    document.body.appendChild(wrap);
+706
+707	    // discount-feature: the split layout still uses the shared field-builder,
+708	    // inserted right after the deny control. Card builds its own inline
+709	    // fields above (see the card branch); banner never shows a discount.
+710	    if (layout === 'split') {
+711	      var discountFields = ccfBuildDiscountFields();
+712	      if (discountFields && deny && deny.parentNode) {
+713	        if (deny.nextSibling) deny.parentNode.insertBefore(discountFields, deny.nextSibling);
+714	        else deny.parentNode.appendChild(discountFields);
+715	      }
+716	    }
+717	    var wantsDiscount = layout !== 'banner' && ccfDiscountEnabled();
+718
+719	    function cleanup() {
+720	      if (promptAutoDismissTimer) { clearTimeout(promptAutoDismissTimer); promptAutoDismissTimer = null; }
+721	      if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+722	      var ov = document.getElementById('ccf-overlay');
+723	      if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+724	    }
+725
+726	    // discount-feature: consume the /generate-discount response — tidy the
+727	    // popup, stash the code for cross-page badges, then hand off to the
+728	    // module-level handleDiscount (product button + in-popup code block).
+729	    function finishDiscount(d, action) {
+730	      if (!d || !d.code) { cleanup(); return; }
+731
+732	      var productHandle = null;
+733	      var pathParts = window.location.pathname.split('/');
+734	      var prodIdx = pathParts.indexOf('products');
+735	      if (prodIdx !== -1 && pathParts[prodIdx + 1]) {
+736	        productHandle = pathParts[prodIdx + 1].split('?')[0].split('#')[0];
+737	      }
+738
+739	      handleDiscount(d, action, productHandle);
+740	    }
+741
+742	    allow.addEventListener('click', function () {
+743	      var emailEl = document.getElementById('ccf-email-input');
+744	      var phoneEl = document.getElementById('ccf-phone-input');
+745	      var email = emailEl && emailEl.value ? emailEl.value.trim() : '';
+746	      var phone = phoneEl && phoneEl.value ? phoneEl.value.trim() : '';
+747	      var originalButtonText = allow.textContent;
+748	      var originalButtonBg = allow.style.background;
+749
+750	      function resetButton() {
+751	        allow.disabled = false;
+752	        allow.textContent = originalButtonText;
+753	        allow.style.opacity = '1';
+754	        allow.style.cursor = 'pointer';
+755	        allow.style.background = originalButtonBg;
+756	      }
+757
+758	      allow.disabled = true;
+759	      allow.textContent = '⏳ Setting up...';
+760	      allow.style.opacity = '0.8';
+761	      allow.style.cursor = 'not-allowed';
+762
+763	      // Already-subscribed customer (discount-capture path) — no native
+764	      // permission prompt to show, go straight to generating the discount.
+765	      if (Notification.permission === 'granted') {
+766	        var capAction = 'push';
+767	        if (email && phone) capAction = 'both';
+768	        else if (email) capAction = 'email';
+769	        else if (phone) capAction = 'phone';
+770
+771	        allow.textContent = '✓ Getting your discount...';
+772	        allow.style.background = '#16a34a';
+773
+774	        fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
+775	          method: 'POST',
+776	          headers: { 'Content-Type': 'application/json' },
+777	          body: JSON.stringify({
+778	            action: capAction, email: email, phone: phone, sessionId: getSessionId()
+779	          })
+780	        })
+781	          .then(function (r) { return r.json(); })
+782	          .then(function (d) {
+783	            if (d && d.code) allow.textContent = '🎉 Redirecting...';
+784	            finishDiscount(d, capAction);
+785	          })
+786	          .catch(function () { resetButton(); });
+787	        return;
+788	      }
+789
+790	      // Normal flow for new subscribers.
+791	      Notification.requestPermission().then(function (permission) {
+792	        var granted = permission === 'granted';
+793	        try { trackEvent('push_prompt_accepted', { trigger: trigger, granted: granted }); } catch (e) {}
+794	        if (!granted) {
+795	          try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+796	          cleanup();
+797	          return;
+798	        }
+799	        registerSW()
+800	          .then(function (reg) { return getToken(reg); })
+801	          .then(function (token) { return saveToken(token); })
+802	          .then(function () { setupForegroundMessages(); })
+803	          .then(function () {
+804	            allow.textContent = wantsDiscount
+805	              ? '✓ Subscribed! Getting your discount...'
+806	              : '✓ Subscribed!';
+807	            allow.style.background = '#16a34a';
+808
+809	            if (!wantsDiscount) {
+810	              setTimeout(cleanup, 900);
+811	              return;
+812	            }
+813	            var action = 'push';
+814	            if (email && phone) action = 'both';
+815	            else if (email) action = 'email';
+816	            else if (phone) action = 'phone';
+817	            return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
+818	              method: 'POST',
+819	              headers: { 'Content-Type': 'application/json' },
+820	              body: JSON.stringify({
+821	                action: action, email: email, phone: phone, sessionId: getSessionId()
+822	              })
+823	            })
+824	              .then(function (r) { return r.json(); })
+825	              .then(function (d) {
+826	                if (d && d.code) allow.textContent = '🎉 Redirecting...';
+827	                finishDiscount(d, action);
+828	              })
+829	              .catch(function () {
+830	                resetButton();
+831	              });
+832	          })
+833	          .catch(function (err) {
+834	            console.error('[CCF] subscribe after prompt failed:', err.message);
+835	            resetButton();
+836	          });
+837	      });
+838	    });
+839
+840	    deny.addEventListener('click', function () {
+841	      cleanup();
+842	      try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+843	    });
+844
+845	    if (closeBtn && closeBtn !== deny) {
+846	      closeBtn.addEventListener('click', function () {
+847	        cleanup();
+848	        try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+849	      });
+850	    }
+851	  }
+  (Note: line numbers above from 674 onward are re-numbered sequentially
+  for this excerpt after collapsing the card/split DOM-building sections;
+  actual file line numbers for those two collapsed regions are 692-942
+  [card layout] and 944-1134 [split layout] — see full file for exact
+  numbering. Everything discount/email/phone-relevant is reproduced above
+  in full; only decorative DOM/CSS construction was collapsed.)
+
+--- ccfShowEmailField() / ccfShowPhoneField() (full, lines 113-118) ---
+113	  function ccfShowEmailField() {
+114	    return ccfRuleOn('emailDiscount') || ccfRuleOn('bothDiscount');
+115	  }
+116	  function ccfShowPhoneField() {
+117	    return ccfRuleOn('phoneDiscount') || ccfRuleOn('bothDiscount');
+118	  }
+
+--- Email/phone form submit handling (the Allow button's click handler,
+    lines 742-838 above) — summary of what happens after the customer
+    types email/phone and clicks Allow ---
+  1. Reads #ccf-email-input / #ccf-phone-input values (trimmed).
+  2. Disables the button, shows "⏳ Setting up...".
+  3. Branch A — Notification.permission === 'granted' already (discount-
+     capture path, existing subscriber): skips requestPermission()
+     entirely, derives `capAction` from which of email/phone were filled
+     ('push'|'email'|'phone'|'both'), POSTs straight to
+     /apps/cartncodform/generate-discount, then calls finishDiscount(d,
+     capAction) on response.
+  4. Branch B — normal new-subscriber flow: calls
+     Notification.requestPermission() -> if granted, registerSW() ->
+     getToken() -> saveToken() -> setupForegroundMessages() -> derives
+     `action` from email/phone -> POSTs to /apps/cartncodform/
+     generate-discount -> finishDiscount(d, action).
+  5. finishDiscount() calls handleDiscount() (module scope) which calls
+     renderDiscountCode() to swap in the code UI and schedule the
+     redirect.
+  6. Any fetch/registerSW/getToken/saveToken rejection calls resetButton()
+     (Branch B) so the customer can retry — the popup does NOT silently
+     close on error.
+
+  OBSERVATION (not a bug being fixed here — audit only): saveToken()
+  (see below) returns `Promise.resolve({success:true})` immediately,
+  without waiting for its internal fetch chain to resolve. So in Branch
+  B, `.then(function() { setupForegroundMessages(); })` — and everything
+  after it, including the generate-discount POST — proceeds as soon as
+  saveToken() is *called*, not once the backend has actually confirmed
+  the subscription was saved. The subscribe-customer POST and the
+  generate-discount POST race each other; they are not sequenced.
+
+--- saveToken() (full, lines 1766-1837) ---
+1766	  function saveToken(token) {
+1767	    var oldToken = localStorage.getItem(TOKEN_KEY);
+1768	    var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+1769	    var deviceType = isMobile ? 'mobile' : 'desktop';
+1770
+1771	    var customerId = (window.Shopify && window.Shopify.customerId)
+1772	      ? String(window.Shopify.customerId)
+1773	      : null;
+1774
+1775	    // Fetch Shopify cart token to link this subscription to the cart.
+1776	    fetch('/cart.js')
+1777	      .then(function(r) { return r.json(); })
+1778	      .then(function(cart) {
+1779	        var rawCartToken = cart.token || null;
+1780	        var cartToken = rawCartToken ? rawCartToken.split('?')[0].trim() || null : null;
+1781
+1782	        return fetch(BACKEND_URL + '/api/push/subscribe-customer', {
+1783	          method: 'POST',
+1784	          headers: { 'Content-Type': 'application/json' },
+1785	          body: JSON.stringify({
+1786	            shopDomain: SHOP_DOMAIN,
+1787	            token: token,
+1788	            oldToken: oldToken,
+1789	            page: window.location.pathname,
+1790	            deviceType: deviceType,
+1791	            cartToken: cartToken,
+1792	            customerId: customerId,
+1793	            ccfSessionId: getSessionId()
+1794	          })
+1795	        });
+1796	      })
+1797	      .then(function(r) { return r.json(); })
+1798	      .then(function(data) {
+1799	        if (data.success) {
+1800	          localStorage.setItem(TOKEN_KEY, token);
+1801	          localStorage.setItem(SUBSCRIBED_KEY, '1');
+1802	          try { localStorage.setItem(PAGE_LOAD_TOKEN_KEY, '1'); } catch (e) {}
+1803	        } else {
+1804	          localStorage.removeItem(SUBSCRIBED_KEY);
+1805	          console.warn('[CCF] Token save failed — will retry on next visit');
+1806	        }
+1807
+1808	        if (ccfDiscountEnabled() && canPromptForDiscount() && getPageType() !== 'product') {
+1809	          setTimeout(function() {
+1810	            showSoftPrompt('page_load', null);
+1811	          }, 1500);
+1812	        }
+1813
+1814	        return data;
+1815	      })
+1816	      .catch(function(err) {
+1817	        console.error('[CCF] saveToken error:', err.message);
+1818	      });
+1819
+1820	    // Return a resolved promise so the caller chain doesn't break.
+1821	    return Promise.resolve({ success: true });
+1822	  }
+  (Line numbers 1766-1821 above match this read; the earlier full-file
+  read in this same audit numbered the closing brace at 1837 including
+  intervening comment lines already shown — both refer to the same
+  function, reproduced once here without duplicate comment lines.)
+
+
+════════════════════════════════════════════════════════════════════
+2. backend/routes/discounts.js
+════════════════════════════════════════════════════════════════════
+
+--- generateDiscount(shopDomain, body) — the actual discount-creation
+    logic (full, lines 59-236); this is what BOTH the storefront's
+    /apps/cartncodform/generate-discount (proxy.js) and the admin-facing
+    /api/discounts/:shopDomain/generate (discounts.js, below) call ---
+ 59	async function generateDiscount(shopDomain, body = {}) {
+ 60	  const shop = String(shopDomain || '').trim().toLowerCase();
+ 61	  const action = String(body.action || '').trim();
+ 62
+ 63	  if (!shop || ACTIONS.indexOf(action) === -1) {
+ 64	    return { code: null, error: 'Invalid action' };
+ 65	  }
+ 66
+ 67	  const [config, store] = await Promise.all([
+ 68	    DiscountConfig.findOne({ shopDomain: shop }),
+ 69	    Store.findOne({ shopDomain: shop }).select(
+ 70	      'accessToken onlineAccessToken onlineTokenExpiresAt'
+ 71	    ),
+ 72	  ]);
+ 73
+ 74	  if (!store || !store.accessToken) {
+ 75	    return { code: null, error: 'Store not connected' };
+ 76	  }
+ 77
+ 78	  // Prefer the online token (shpua_) — works with new Shopify API.
+ 79	  // Fall back to the offline token for backwards compatibility.
+ 80	  let apiToken = store.onlineAccessToken || store.accessToken;
+ 81
+ 82	  // Check if the online token is expired.
+ 83	  if (store.onlineAccessToken && store.onlineTokenExpiresAt) {
+ 84	    if (new Date() > store.onlineTokenExpiresAt) {
+ 85	      console.log('[discounts] online token expired for', shop);
+ 86	      apiToken = store.accessToken;
+ 87	    }
+ 88	  }
+ 89
+ 90	  console.log(
+ 91	    '[discounts] using token type:',
+ 92	    apiToken && apiToken.startsWith('shpua_') ? 'online' : 'offline'
+ 93	  );
+ 94
+ 95	  const cfg = config && config[action + 'Discount'];
+ 96	  if (!cfg || !cfg.enabled) {
+ 97	    return { code: null, shop };
+ 98	  }
+ 99
+100	  const code =
+101	    (cfg.prefix || action.toUpperCase()) +
+102	    '_' +
+103	    Math.random().toString(36).slice(2, 8).toUpperCase();
+104
+105	  const startsAt = new Date(Date.now() - 60 * 1000);
+106	  const endsAt = new Date();
+107	  endsAt.setDate(endsAt.getDate() + (cfg.expiryDays || 7));
+108
+109	  const mutation = `
+110	    mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
+111	      discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
+112	        codeDiscountNode {
+113	          id
+114	          codeDiscount {
+115	            ... on DiscountCodeBasic {
+116	              codes(first: 1) {
+117	                nodes { code }
+118	              }
+119	            }
+120	          }
+121	        }
+122	        userErrors { field message }
+123	      }
+124	    }
+125	  `;
+126
+127	  const variables = {
+128	    basicCodeDiscount: {
+129	      title: code,
+130	      code,
+131	      startsAt: startsAt.toISOString(),
+132	      endsAt: endsAt.toISOString(),
+133	      customerGets: {
+134	        value: { percentage: (cfg.percentage || 0) / 100 },
+135	        items: { all: true },
+136	      },
+137	      appliesOncePerCustomer: true,
+138	      usageLimit: cfg.maxUses || 100,
+139	      context: { all: 'ALL' },
+140	    },
+141	  };
+142
+143	  let data;
+144	  try {
+145	    const shopifyRes = await fetch(
+146	      `https://${shop}/admin/api/${API_VERSION}/graphql.json`,
+147	      {
+148	        method: 'POST',
+149	        headers: {
+150	          'Content-Type': 'application/json',
+151	          'X-Shopify-Access-Token': apiToken,
+152	        },
+153	        body: JSON.stringify({ query: mutation, variables }),
+154	      }
+155	    );
+156	    data = await shopifyRes.json();
+157	  } catch (err) {
+158	    console.error('[discounts] Shopify API error:', err.message);
+159	    return { code: null, error: 'Discount service unavailable' };
+160	  }
+161
+162	  if (Array.isArray(data && data.errors) && data.errors.length) {
+163	    const gqlCode =
+164	      (data.errors[0].extensions && data.errors[0].extensions.code) ||
+165	      data.errors[0].message;
+166	    console.error('[discounts] GraphQL error: ' + gqlCode);
+167	    if (gqlCode === 'ACCESS_DENIED') {
+168	      Store.updateOne({ shopDomain: shop }, { $set: { needsReauth: true } }).catch(() => {});
+169	    }
+170	    return { code: null, error: 'Discount creation failed' };
+171	  }
+172
+173	  const errors =
+174	    data && data.data && data.data.discountCodeBasicCreate &&
+175	    data.data.discountCodeBasicCreate.userErrors;
+176	  if (errors && errors.length) {
+177	    console.error('[discounts] discountCodeBasicCreate userErrors:', errors[0].message);
+178	    return { code: null, error: errors[0].message };
+179	  }
+180
+181	  const node =
+182	    data && data.data && data.data.discountCodeBasicCreate &&
+183	    data.data.discountCodeBasicCreate.codeDiscountNode;
+184	  if (!node || !node.id) {
+185	    console.error('[discounts] discountCodeBasicCreate returned no codeDiscountNode.id');
+186	    return { code: null, error: 'Discount creation failed' };
+187	  }
+188
+189	  const email = body.email ? String(body.email).trim() : '';
+190	  const phone = body.phone ? String(body.phone).trim() : '';
+191	  if (email || phone) {
+192	    try {
+193	      const { upsertProfile } = require('../services/profileService');
+194	      upsertProfile(
+195	        shop,
+196	        { email: email || null, phone: phone || null, sessionId: body.sessionId || null },
+197	        {
+198	          ...(email
+199	            ? { 'channels.email.address': email, 'channels.email.source': 'popup' }
+200	            : {}),
+201	          lastSeenAt: new Date(),
+202	        }
+203	      ).catch(() => {});
+204	    } catch (e) { /* profileService optional — ignore */ }
+205	  }
+206
+207	  return { code, percentage: cfg.percentage, expiryDays: cfg.expiryDays, shop };
+208	}
+
+Token type used: `store.onlineAccessToken || store.accessToken` — prefers
+the ONLINE token (`shpua_`-prefixed) when present and not expired
+(checked against `store.onlineTokenExpiresAt`), falls back to the OFFLINE
+token (`store.accessToken`) otherwise. Logged unconditionally on every
+call via `console.log('[discounts] using token type:', ...)`.
+
+GraphQL mutation sent to Shopify: `discountCodeBasicCreate` (Admin API,
+`https://{shop}/admin/api/{API_VERSION}/graphql.json`), variables built
+from the shop's DiscountConfig sub-doc for the requested action — see the
+full mutation/variables text above (lines 109-141).
+
+discounts.js's OWN route, `POST /api/discounts/:shopDomain/generate`
+(lines 297-310) — not the one the storefront actually calls, shown for
+completeness since it shares the identical generateDiscount() call:
+297	router.post('/:shopDomain/generate', async (req, res) => {
+298	  if (!verifyProxySignature(req.query)) {
+299	    console.warn('[discounts] Invalid or missing App Proxy signature on /generate — rejecting');
+300	    return res.status(403).json({ code: null, error: 'Invalid signature' });
+301	  }
+302	  try {
+303	    const shop = req.params.shopDomain.trim().toLowerCase();
+304	    const result = await generateDiscount(shop, req.body || {});
+305	    return res.json(result);
+306	  } catch (err) {
+307	    console.error('[discounts] POST generate error:', err.message);
+308	    return res.status(500).json({ code: null, error: 'Failed to generate discount' });
+309	  }
+310	});
+
+
+════════════════════════════════════════════════════════════════════
+3. backend/routes/proxy.js
+════════════════════════════════════════════════════════════════════
+
+--- GET /discount-config route handler (full, lines 103-140) ---
+103	router.get('/discount-config', async (req, res) => {
+104	  if (!verifyProxySignature(req.query)) {
+105	    console.warn('[proxy] Invalid or missing App Proxy signature on /discount-config — rejecting');
+106	    return res.status(403).json({ error: 'Invalid signature' });
+107	  }
+108
+109	  try {
+110	    const shop = String(req.query.shop || '').trim().toLowerCase();
+111	    const doc = (await DiscountConfig.findOne({ shopDomain: shop }).lean()) || defaultConfig(shop);
+112
+113	    const slim = (r) => ({
+114	      enabled: !!(r && r.enabled),
+115	      percentage: (r && r.percentage) || 0,
+116	    });
+117
+118	    res.setHeader('Content-Type', 'application/json');
+119	    res.setHeader('Access-Control-Allow-Origin', '*');
+120	    res.setHeader('Cache-Control', 'no-store');
+121	    return res.json({
+122	      pushDiscount: slim(doc.pushDiscount),
+123	      emailDiscount: slim(doc.emailDiscount),
+124	      phoneDiscount: slim(doc.phoneDiscount),
+125	      bothDiscount: slim(doc.bothDiscount),
+126	      offerHeadline: doc.offerHeadline || 'Get a discount on your first order!',
+127	    });
+128	  } catch (err) {
+129	    console.error('[proxy] GET /discount-config error:', err.message);
+130	    res.setHeader('Content-Type', 'application/json');
+131	    res.setHeader('Access-Control-Allow-Origin', '*');
+132	    return res.status(500).json({
+133	      pushDiscount: { enabled: false, percentage: 0 },
+134	      emailDiscount: { enabled: false, percentage: 0 },
+135	      phoneDiscount: { enabled: false, percentage: 0 },
+136	      bothDiscount: { enabled: false, percentage: 0 },
+137	      offerHeadline: 'Get a discount on your first order!',
+138	    });
+139	  }
+140	});
+
+--- Also captured, since it's the route actually hit by the storefront's
+    generate-discount fetch() calls (lines 149-167) ---
+149	router.post('/generate-discount', async (req, res) => {
+150	  if (!verifyProxySignature(req.query)) {
+151	    console.warn('[proxy] Invalid or missing App Proxy signature on /generate-discount — rejecting');
+152	    return res.status(403).json({ code: null, error: 'Invalid signature' });
+153	  }
+154
+155	  try {
+156	    const shop = String(req.query.shop || req.body.shop || '').trim().toLowerCase();
+157	    const result = await generateDiscount(shop, req.body || {});
+158	    res.setHeader('Access-Control-Allow-Origin', '*');
+159	    res.setHeader('Cache-Control', 'no-store');
+160	    return res.json({ shop, ...result });
+161	  } catch (err) {
+162	    console.error('[proxy] POST /generate-discount error:', err.message);
+163	    return res.status(500).json({ code: null, error: 'Failed to generate discount' });
+164	  }
+165	});
+  Note the liquid file's storefront call reads `shop` from the query
+  string only: `?shop=' + encodeURIComponent(SHOP_DOMAIN)`. This route
+  reads `req.query.shop || req.body.shop` (query first) — consistent.
+
+
+════════════════════════════════════════════════════════════════════
+4. Render logs for POST /apps/cartncodform/generate-discount
+════════════════════════════════════════════════════════════════════
+LIMITATION: this environment has no access to Render's live/hosted log
+stream (no Render API token, CLI, or SSH configured here) — I cannot
+fetch or tail actual production log output for this task. What follows
+is what the code guarantees will be logged on the backend for every such
+request, traced directly from the routes above, plus the one real,
+previously-observed data point available to me.
+
+Every call to generateDiscount() (regardless of entry route) logs, in
+this order:
+  1. (conditionally) '[discounts] online token expired for', shop
+     — only if store.onlineAccessToken exists AND
+     store.onlineTokenExpiresAt has passed.
+  2. UNCONDITIONALLY: '[discounts] using token type:', 'online'|'offline'
+     — this is the exact line referenced in the task ("We saw earlier:
+     [discounts] using token type: offline").
+  3. One of, depending on outcome:
+     - '[discounts] GraphQL error: ' + gqlCode  (top-level GraphQL error,
+       e.g. ACCESS_DENIED)
+     - '[discounts] discountCodeBasicCreate userErrors:', message
+       (field-level rejection — bad input/limits)
+     - '[discounts] discountCodeBasicCreate returned no
+       codeDiscountNode.id' (mutation "succeeded" with no error but also
+       no node — treated as failure)
+     - (nothing extra — success path returns the code with no further log)
+  4. If the request never reaches Shopify (network/fetch failure):
+     '[discounts] Shopify API error:', err.message
+  proxy.js itself only logs on its own failure path:
+     '[proxy] POST /generate-discount error:', err.message
+     (this fires only if generateDiscount() ITSELF throws — it currently
+     never throws, it always returns a {code, error} object — so this
+     proxy.js catch block is effectively dead code under normal
+     operation; the only way to hit it would be an unexpected exception
+     outside generateDiscount()'s own try/catch, e.g. in
+     verifyProxySignature() or JSON serialization of a malformed body).
+
+The one CONCRETE prior observation available to me: "[discounts] using
+token type: offline" was seen in this session's own `cd backend && npm
+test` output (Jest running backend/__tests__/discounts.test.js's mocked
+happy-path/error-path tests) — NOT confirmed as an actual Render
+production log line. It is strong evidence the code path that logs it
+is reachable and working as written, but it does not by itself confirm
+what a live storefront request currently logs on Render, nor whether
+production Shopify calls are hitting the online-token or offline-token
+branch. Confirming actual production behavior would require either
+Render dashboard/CLI access or a live test hit against the deployed
+generate-discount endpoint — neither performed here (audit-only, no
+changes, no live network calls beyond what was explicitly asked).

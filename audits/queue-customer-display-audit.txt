@@ -1,0 +1,118 @@
+=== QUEUE CUSTOMER DISPLAY AUDIT ===
+getCustomerLabel() added: yes
+Shows email when available: yes
+Shows Subscriber #XXXXXX when no email: yes
+Channel indicator added: yes
+  Desktop table: yes
+  Mobile card: yes
+frontend build: pass (npm run build — compiled successfully, 16
+  static pages, /admin/queue grew 4.08 kB -> 4.19 kB, no errors)
+git push: done (commit a220da1, 94d7b54..a220da1 main -> main)
+vercel deploy: done (production, readyState: READY,
+  deployment id dpl_GAuY9TBAXg4p66TE1ZfdVmyD6UL7,
+  https://cartncodform-ld5h4hoyl-niralinakumvellirion-8853s-projects.vercel.app,
+  aliased to https://cartncodform-beryl.vercel.app)
+
+
+FILE READ FIRST, AS INSTRUCTED
+=========================================================================
+Read frontend/app/admin/queue/QueueScreen.jsx in full (451 lines)
+before making any change, confirming the exact current shape of
+`const email = job.email || 'Anonymous';` and its two use sites (the
+mobile card's name line, the desktop table's first grid cell), and
+the existing pattern of pre-building `channelEl`/`statusEl`/`actionsEl`
+once per job and reusing them across both the mobile-card and
+desktop-table branches — followed that same pattern for the new
+customer-column markup.
+
+
+EXACT CHANGES
+=========================================================================
+1. getCustomerLabel(job) added at module scope, right after
+   formatDateTime() (matching where the file's other small formatter
+   functions already live), implemented verbatim as given:
+     function getCustomerLabel(job) {
+       if (job.email) return job.email;
+       if (job.profileId) {
+         return 'Subscriber #' + String(job.profileId).slice(-6);
+       }
+       return 'Anonymous';
+     }
+
+2. `const email = job.email || 'Anonymous';` removed entirely, replaced
+   with a single `customerEl` built once per job (alongside the
+   existing channelEl/statusEl/actionsEl), using the exact markup
+   given in the task, with getCustomerLabel(job) in place of the old
+   `email` variable:
+     const customerEl = (
+       <div>
+         <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+           {getCustomerLabel(job)}
+         </div>
+         <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2,
+                       display: 'flex', alignItems: 'center', gap: 4 }}>
+           <div style={{
+             width: 6, height: 6, borderRadius: '50%',
+             background: job.channel === 'push' ? '#3b82f6' : '#8b5cf6',
+             flexShrink: 0
+           }} />
+           {job.channel === 'push' ? 'Push subscriber' : 'Email subscriber'}
+         </div>
+       </div>
+     );
+
+3. Mobile card: the old `<div>{email}</div>` name line replaced with
+   `{customerEl}`, inside the same flex row as the status badge. Also
+   changed that row's `alignItems` from `center` to `flex-start` —
+   customerEl is now a 2-line block (label + dot/text indicator),
+   taller than the single-line status badge next to it, so top-
+   aligning reads better than the old vertical-centering did with a
+   single-line name. A minor style adaptation, not called out
+   explicitly in the task's given markup, but a natural consequence of
+   swapping a 1-line element for a 2-line one in the same flex row.
+
+4. Desktop table: the old `<div style={{fontSize:'14px',
+   color:'#111827'}}>{email}</div>` grid cell replaced with
+   `{customerEl}` directly (customerEl is already a `<div>`, so no
+   extra wrapper was needed for it to work as the grid cell's
+   content).
+
+
+DEVIATION - "Email subscriber" (the example code's literal text) used,
+not "Email only" (the bullet spec's text) — the task's own two
+descriptions of this feature disagree with each other
+=========================================================================
+The task's prose bullet list said:
+  "If job.channel === 'email' -> show small purple dot + 'Email only'"
+but the task's own "Example render for customer column" code block,
+given immediately below that bullet list as the literal JSX to use,
+says:
+  {job.channel === 'push' ? 'Push subscriber' : 'Email subscriber'}
+These two are genuinely inconsistent with each other within the same
+task description — "Email only" vs. "Email subscriber" are different
+strings. Used the example code block's literal text ("Email
+subscriber") since it was presented as ready-to-use JSX (the section
+is explicitly titled "Example render for customer column," not just
+descriptive prose), it's also what the desktop/mobile integration
+below it was built directly from, and it reads more consistently
+alongside "Push subscriber" (matching "X subscriber" phrasing on both
+branches, whereas "Email only" would break that parallel wording).
+Flagging this explicitly since the alternate reading ("Email only")
+is equally defensible from the bullet list alone.
+
+
+VERIFIED SAFE
+=========================================================================
+- Grepped the file after editing for any remaining reference to the
+  removed `email` variable (`{email}` or `const email =`): none found.
+- `git diff --stat` shows exactly one file changed, 32 insertions/6
+  deletions — no other section of QueueScreen.jsx (the header/refresh
+  button, filter tabs, stats row, pagination, the send-now/cancel
+  action handlers, the fetch effects) was touched.
+- No backend file was touched, per the task's explicit instruction —
+  this change only reads fields (`job.email`, `job.profileId`,
+  `job.channel`) the GET /api/queue/:shop endpoint already returns
+  (confirmed against that endpoint's response shape in the immediately
+  preceding read-only audit task, audits/queue-email-audit.txt), so no
+  backend change was needed for this to work.
+- No other file was staged or committed.

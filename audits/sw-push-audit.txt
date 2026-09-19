@@ -1,0 +1,334 @@
+=== SERVICE WORKER PUSH AUDIT ===
+Generated: 2026-09-18
+Read-only investigation. No files were changed.
+
+
+====================================================================
+FILE LOCATION — IMPORTANT DEVIATION FROM THE GIVEN SEARCH ORDER
+====================================================================
+The task's given search order was:
+  1. frontend/public/firebase-messaging-sw.js
+  2. frontend/public/sw.js
+  3. backend/public/sw.js
+  4. any other *sw.js / *service-worker* file in the repo
+
+Location 1, frontend/public/firebase-messaging-sw.js, DOES exist (36
+lines). Locations 2 and 3 (frontend/public/sw.js, backend/public/
+sw.js) do NOT exist — confirmed via direct path checks.
+
+However, stopping at location 1 would audit the WRONG file. A repo-
+wide glob for *sw.js / *service-worker* (satisfying the task's own
+"any other file" fallback clause) turned up a second, non-obvious
+candidate: backend/public/cartncodform-sw.js (60 lines). Tracing how
+each file is actually wired up:
+
+  - frontend/public/firebase-messaging-sw.js is a Next.js public
+    asset served at https://app.shopireachboost.com/firebase-
+    messaging-sw.js. Its own code (line 5, `DASHBOARD_URL =
+    'https://app.shopireachboost.com/dashboard'`, and its
+    notificationclick handler's `client.url.includes
+    ('app.shopireachboost.com')` check) shows it belongs to the ADMIN
+    DASHBOARD app itself (push notifications to the MERCHANT, not to
+    storefront customers) — a completely different notification
+    audience than what this audit chain (storefront-push-audit.txt,
+    mobile-push-audit.txt) has been investigating.
+
+  - The STOREFRONT's actual service worker — the one registered by
+    extensions/cartncodform-embed/blocks/push-notifications.liquid's
+    registerSW() via `PROXY_SW_URL = window.location.origin +
+    '/apps/cartncodform/sw.js'` (confirmed in the prior
+    storefront-push-audit.txt) — is served through Shopify's App
+    Proxy. Confirmed by reading backend/routes/proxy.js lines 28-54:
+      router.get('/sw.js', (req, res) => {
+        ...
+        const swPath = path.join(__dirname, '../public/cartncodform-sw.js');
+        ...
+        res.send(swContent);
+      });
+    This route is mounted such that `/apps/cartncodform/sw.js` on the
+    storefront resolves to this handler, which reads and serves
+    backend/public/cartncodform-sw.js verbatim as the response body.
+    (backend/server.js line 89 also sets CORS/Service-Worker-Allowed
+    headers specifically for a route literally named
+    `/cartncodform-sw.js` — the same file, reinforcing that this is
+    the file meant to be installable as a service worker at the root
+    scope for any storefront.)
+
+CONCLUSION: backend/public/cartncodform-sw.js is the file that
+actually answers this task's 6 questions for STOREFRONT/CUSTOMER
+mobile push (the subject of every prior audit in this chain). Per
+this task's own instruction to try locations 2/3 (which don't exist)
+and then fall back to "any other file matching *sw.js... anywhere in
+the repo" — this file qualifies under that fallback clause and is far
+more relevant than location 1's admin-only file. Both files were read
+in full and both are covered below, but the ANSWERS to the 6 numbered
+questions below are given for backend/public/cartncodform-sw.js as
+the primary subject, with frontend/public/firebase-messaging-sw.js
+noted separately afterward for completeness since it does technically
+match the literal location-1 instruction.
+
+
+====================================================================
+FILE A (PRIMARY SUBJECT): backend/public/cartncodform-sw.js
+(60 lines — the actual storefront/customer service worker, served via
+the /apps/cartncodform/sw.js App Proxy route)
+====================================================================
+
+Full content read (60 lines):
+  Lines 1-2: install/activate handlers (self.skipWaiting() /
+    clients.claim() — standard SW lifecycle boilerplate, takes control
+    immediately rather than waiting for the old SW to be released).
+  Lines 4-5: importScripts() for Firebase compat SDK (firebase-app-
+    compat.js, firebase-messaging-compat.js), same v10.12.0 CDN URLs
+    used by the storefront's own liquid file.
+  Lines 7-14: firebase.initializeApp({...}) with the same firebaseConfig
+    values as the storefront liquid file (apiKey, projectId,
+    messagingSenderId, appId, authDomain, storageBucket) — hardcoded
+    inline, matching.
+  Line 16: `const messaging = firebase.messaging();`
+  Lines 18-53: `messaging.onBackgroundMessage(function(payload) {...})`
+    — this is Firebase's own hook for handling messages that arrive
+    while no page is focused (the background/mobile-closed-tab case).
+  Lines 55-59: `self.addEventListener('notificationclick', ...)` —
+    closes the notification and opens `event.notification.data.url`
+    (falling back to `self.location.origin`) via `clients.openWindow()`.
+
+--- Q1: Does the SW handle the `push` event itself with
+    self.addEventListener('push', ...)? ---
+NO. There is no `self.addEventListener('push', ...)` anywhere in this
+file (confirmed by direct read of all 60 lines — the only
+self.addEventListener calls are for 'install', 'activate', and
+'notificationclick'). Raw push-event handling is NOT done manually;
+delivery is handled entirely through Firebase Messaging's own
+`onBackgroundMessage()` API (line 18), which Firebase's SDK wires up
+internally via its own push listener once `firebase.messaging()` is
+initialized in this SW context.
+
+--- Q2: How does it read the push payload? ---
+Neither `event.data.json()` nor `event.data.text()` is called anywhere
+in this file — there is no raw `event` object in scope at all, because
+there is no manual `push` event listener. Instead, the payload is
+handed directly to the `onBackgroundMessage(function(payload) {...})`
+callback (line 18) already parsed into a JS object by Firebase's own
+internal SDK code (which itself listens for the raw `push` event,
+calls `event.data.json()`, and reshapes the result before invoking
+this callback) — so yes, this SW relies on Firebase's own internal
+push-event handling to get from the raw browser push event to a
+usable `payload` object; only the FINAL DISPLAY step (title/body/
+image extraction + showNotification()) is this file's own code.
+
+--- Q3: Exactly what fields does it read for title, body, icon, image,
+    url? ---
+Lines 21-36, all with multi-level fallback chains:
+  title:  payload.notification?.title || payload.data?.title ||
+          'You left items in your cart!'
+  body:   payload.notification?.body || payload.data?.body ||
+          'Complete your order now'
+  image:  payload.notification?.image || payload.data?.imageUrl ||
+          payload.data?.image || null
+  icon:   payload.notification?.icon || payload.data?.icon ||
+          payload.data?.imageUrl ||
+          'https://img.icons8.com/color/96/shopping-cart--v1.png'
+  url:    payload.data?.url || '/'
+Note icon's fallback chain reuses `payload.data?.imageUrl` as an icon
+source too (line 34) if no dedicated icon field is present — so the
+uploaded banner image can end up used as BOTH the small icon and the
+large `image` (this is intentional-looking overlap, not a bug, since
+`icon` and `image` are visually different elements in a real OS
+notification).
+
+--- Q4: Does it call self.registration.showNotification() itself, or
+    let Firebase handle it? ---
+It calls `self.registration.showNotification(title, options)` ITSELF,
+explicitly, at line 52, inside the onBackgroundMessage callback — NOT
+left to any Firebase default behavior. `options` is built at lines
+38-45 (body, icon, badge, data:{url}, requireInteraction:false,
+vibrate array) plus a conditional `if (image) { options.image = image;
+}` at lines 48-50 that only adds the `image` option when one of the
+three image-fallback sources resolved to a truthy value.
+
+--- Q5: Is importScripts('firebase-messaging-sw.js') or similar
+    present, meaning Firebase's own DEFAULT background handler runs?
+    ---
+No — this file imports the general Firebase compat SDK scripts
+(firebase-app-compat.js, firebase-messaging-compat.js, lines 4-5), NOT
+a separate 'firebase-messaging-sw.js' helper script. Because this file
+explicitly registers its OWN `onBackgroundMessage()` callback (line
+18) that itself calls `showNotification()` (line 52), Firebase's
+built-in DEFAULT background notification display (the behavior you'd
+get if you registered NO onBackgroundMessage handler at all, where
+Firebase auto-displays using only the top-level `notification` payload
+field) is NOT what's running here — this file's own custom callback
+takes over that responsibility entirely, which is exactly why it's
+able to also check `payload.data?.imageUrl`/`payload.data?.title`/etc.
+(fields Firebase's own default auto-display would never look at).
+
+--- Q6: Does it read from payload.data.imageUrl (what the backend
+    sends) or payload.notification.image (which the backend does NOT
+    send)? ---
+It reads BOTH, in a fallback chain that tries the wrong one FIRST:
+  image: payload.notification?.image || payload.data?.imageUrl || payload.data?.image || null
+Per the backend's confirmed actual payload shape (audits/
+mobile-push-audit.txt: backend/utils/pushNotification.js's
+sendPushToCustomers() sends ONLY `data` + `webpush` blocks, NEVER a
+top-level `notification` field) — `payload.notification` will ALWAYS
+be undefined for every real push this app sends. So
+`payload.notification?.image` (the first, preferred branch) always
+evaluates to undefined, and the code correctly falls through to
+`payload.data?.imageUrl` (the second branch) — which IS the field the
+backend actually populates. So despite trying the "wrong" field first,
+the fallback chain is CORRECTLY SHAPED and DOES ultimately read the
+right field. This is the single correctly-working part of this whole
+push chain investigated across all three audits in this session.
+
+Title/body have the identical structural pattern (payload.notification
+?.title || payload.data?.title || <generic fallback>) and are
+similarly ROBUST to the backend's actual data-only payload shape —
+they will correctly read the real merchant-composed title/body from
+`payload.data.title`/`payload.data.body` PROVIDED the backend actually
+populates a `data.title` / `data.body` field.
+
+*** THIS IS WHERE A REAL CROSS-FILE GAP WAS FOUND: *** cross-checking
+against audits/mobile-push-audit.txt's exact dump of
+sendPushToCustomers()'s built FCM message, the backend's `data` block
+needs to actually include `title` and `body` string fields (not just
+`imageUrl`/other custom fields) for this SW's fallback chain to
+surface the real merchant message instead of the hardcoded generic
+'You left items in your cart!' / 'Complete your order now' text. This
+SW file's read logic is correctly written to consume whichever shape
+the backend sends — whether the currently-observed generic fallback
+text is showing on real devices depends entirely on whether
+`data.title`/`data.body` are actually present in the FCM payload the
+backend sends, which is outside this file and was not re-verified
+here (see mobile-push-audit.txt for the exact backend-side payload
+composition).
+
+
+====================================================================
+FILE B (FOR COMPLETENESS ONLY — NOT the storefront SW):
+frontend/public/firebase-messaging-sw.js
+(36 lines — serves the ADMIN DASHBOARD's own push notifications to
+the merchant, at https://app.shopireachboost.com/firebase-messaging-
+sw.js; unrelated to customer/storefront push, included here only
+because it literally matches the task's location-1 instruction)
+====================================================================
+
+--- Q1: self.addEventListener('push', ...)? ---
+No — same pattern as File A: only 'notificationclick' is a manual
+listener (lines 40-59); background delivery again goes through
+Firebase's `messaging.onBackgroundMessage()` (line 20).
+
+--- Q2: How is the payload read? ---
+Same as File A — no raw event.data.json()/text() call in this file;
+Firebase's SDK hands an already-parsed `payload` object to the
+onBackgroundMessage callback.
+
+--- Q3: title/body/icon/image/url fields ---
+  title: payload.notification?.title || 'ShopiReachBoost AI'
+  body:  payload.notification?.body || 'You have a new notification'
+  icon:  payload.notification?.icon || '/favicon.ico'
+  image: NOT READ AT ALL — no `image` variable, no `options.image`
+    anywhere in this file.
+  url:   not read from the payload at all for navigation purposes —
+    notificationclick always opens `event.notification.data.url`,
+    which is hardcoded to `DASHBOARD_URL` (line 30) inside
+    onBackgroundMessage's own showNotification call, never derived
+    from anything in the push payload itself.
+Critically, this file has NO `payload.data?.*` fallback branches
+ANYWHERE (unlike File A) — it reads ONLY `payload.notification.*`. If
+whatever sends pushes to this SW's audience (the merchant admin app)
+also only sends a `data`-only, no-`notification` payload (the same
+pattern confirmed for customer pushes), this file's title/body/icon
+would ALWAYS silently fall back to the generic hardcoded strings, with
+no data-field fallback to recover the real content at all — a strictly
+worse version of the bug already found in File A. This is flagged for
+awareness only; auditing the actual sender of ADMIN pushes (a
+different code path than sendPushToCustomers(), not requested or
+investigated in this task) would be needed to confirm whether this is
+an active bug for admin notifications.
+
+--- Q4: showNotification() itself or Firebase default? ---
+Called itself, explicitly, at line 26 — same pattern as File A.
+
+--- Q5: importScripts('firebase-messaging-sw.js')? ---
+No — same two general Firebase compat SDK imports as File A (lines
+2-3), not a separate default-handler helper script. Firebase's DEFAULT
+auto-display behavior is not in effect here either, for the same
+reason as File A (a custom onBackgroundMessage callback is registered).
+
+--- Q6: data.imageUrl vs notification.image? ---
+NEITHER is read — this file has no image-handling code path at all
+(see Q3). This SW would never display an image for ANY push, under
+any payload shape, background or otherwise.
+
+
+====================================================================
+SELF-AUDIT
+====================================================================
+
+File found at: backend/public/cartncodform-sw.js — confirmed via
+backend/routes/proxy.js (App Proxy route /sw.js serves this exact
+file's contents) to be the actual service worker installed by the
+storefront's push-notifications.liquid block. (A second file, frontend/
+public/firebase-messaging-sw.js, also exists and literally matches
+the task's first given search-order path, but serves the unrelated
+admin-dashboard push audience — both were read and reported above,
+with backend/public/cartncodform-sw.js treated as the primary subject
+since it is the file this audit chain has actually been investigating.)
+
+Line count: backend/public/cartncodform-sw.js — 60 lines. (frontend/
+public/firebase-messaging-sw.js — 36 lines, for reference.)
+
+Is imageUrl being read correctly from the data payload?
+YES, in the primary/storefront file (backend/public/
+cartncodform-sw.js). Its fallback chain — `payload.notification?.image
+|| payload.data?.imageUrl || payload.data?.image || null` — tries a
+field the backend never populates first (payload.notification.image),
+but correctly falls through to `payload.data?.imageUrl`, which IS the
+exact field name backend/utils/pushNotification.js populates (per
+audits/mobile-push-audit.txt). This is the one part of the full push
+pipeline, across all three audits in this session, confirmed to work
+correctly end-to-end for images. (The unrelated admin-only File B does
+NOT read any image field at all — but that file is not in the
+storefront/customer push path this session has been investigating.)
+
+Is title/body being read correctly?
+Structurally yes, by the same fallback-chain logic (`payload.
+notification?.title || payload.data?.title || <generic fallback>`) —
+IF the backend's `data` block actually includes `title` and `body`
+string fields. This SW's own code is not the blocker for title/body
+correctness; whether real merchant text appears on mobile depends on
+whether backend/utils/pushNotification.js's `data` object populates
+`title`/`body` keys (a backend-side question, addressed in
+audits/mobile-push-audit.txt, not re-verified line-by-line in this
+task since it was out of this task's file scope).
+
+What's the single fix needed to make mobile background push show the
+right content with images?
+Based on everything read across this file and the two prior audits in
+this chain (mobile-push-audit.txt, storefront-push-audit.txt), the
+service worker itself (backend/public/cartncodform-sw.js) is NOT the
+bottleneck for images — its imageUrl-reading logic is already correct.
+The single highest-leverage fix is on the BACKEND side: confirm/ensure
+backend/utils/pushNotification.js's sendPushToCustomers() always
+includes `title` and `body` as string values inside the FCM message's
+`data` block (not just `imageUrl` and whatever other custom fields it
+currently sets) — since this SW's title/body fallback chain already
+correctly reads `payload.data.title`/`payload.data.body` when present,
+that one backend-side addition (if not already there) would be enough
+to make BOTH the correct message text AND the correct image show up
+together on a real mobile background push, using the existing,
+already-correct client-side code in this file. (Separately, and lower
+priority: the mobile-push-audit.txt-documented cartToken-scoped retry-
+loop bug and the storefront-push-audit.txt-documented fire-and-forget
+saveToken() issue remain the two other concrete, previously-found
+explanations for a subscription never being correctly registered in
+the first place, independent of this SW's own display logic.)
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+This was a read-only investigation. No files were modified. No git
+operations, builds, or deploys were performed, as none were requested
+for this task.

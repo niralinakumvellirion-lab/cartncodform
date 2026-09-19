@@ -1,0 +1,95 @@
+=== BASE64 STRIP AUDIT ===
+Generated: 2026-09-18
+
+Base64 check added: yes
+Real URLs still passed through: yes
+node --check: pass
+npm test: 151/151 passing
+git push: done (41cdf94..4321604)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read backend/routes/push.js in full (587 lines) before making any
+change, as instructed. Located the POST /send-store handler and the
+exact line building `imageUrl` from `mobileImageUrl || desktopImageUrl
+|| ''` (previously added in audits/festival-image-backend-audit.txt).
+
+
+====================================================================
+IMPLEMENTATION
+====================================================================
+Changed:
+  const imageUrl = mobileImageUrl || desktopImageUrl || '';
+  const result = await sendPushToCustomers(shop, title, body, '/', imageUrl, false, null, false);
+
+To (exactly as given):
+  const rawImage = mobileImageUrl || desktopImageUrl || '';
+  const imageUrl = rawImage.startsWith('data:') ? '' : rawImage;
+  console.log('[push] send-store imageUrl:',
+    imageUrl ? imageUrl.substring(0,30)+'...' : 'none');
+  const result = await sendPushToCustomers(shop, title, body, '/', imageUrl, false, null, false);
+
+Added a short inline comment above it explaining WHY this check
+exists (FCM rejects base64 data: URIs; the Dashboard editor's file
+upload produces exactly that format, per
+audits/separate-images-audit.txt) — no other explanatory text or
+logic was added beyond the literal given code.
+
+Behavior:
+  - editorMobileImageUrl / editorDesktopImageUrl uploaded via the
+    Dashboard's file input (FileReader.readAsDataURL) start with
+    "data:image/..." -- rawImage.startsWith('data:') is true ->
+    imageUrl becomes '' -> sendPushToCustomers() is called with no
+    image, same as if the merchant hadn't uploaded one at all. FCM
+    never sees the base64 blob.
+  - Any future real CDN/hosted image URL (e.g. "https://...") would
+    NOT start with "data:" -> passes through unchanged -> still sent
+    to FCM normally, exactly as before this change.
+
+The console.log was added exactly as given, immediately after
+computing imageUrl and before the sendPushToCustomers() call, so it
+always reflects the final (possibly-stripped) value actually sent.
+
+
+====================================================================
+DO NOT CHANGE COMPLIANCE
+====================================================================
+No other route, handler, or logic in this file was touched. The rest
+of POST /send-store (title/body validation, shop from req.shopDomain,
+the sendPushToCustomers() call's other arguments, success/error
+response shapes) is unchanged. Every other route in the file
+(/subscribe, /send, /subscribe-customer, /send-customer,
+/cart-activity, /send-email-test, /send-journey, /send-now,
+/send-journey-email) is untouched.
+
+
+====================================================================
+DO-NOT-TOUCH-OTHER-FILES COMPLIANCE
+====================================================================
+Only backend/routes/push.js was staged and committed, per the task's
+own git-add line. `git status` after staging confirmed exactly this
+one path; the pre-existing unrelated dirty files
+(backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- node --check backend/routes/push.js -- pass
+- cd backend && npm test -- 19 suites, 151/151 passing (one
+  pre-existing, unrelated console.error in sendJourneyEmail.test.js
+  from a deliberately-invalid test Resend API key -- expected test
+  output, not a failure; present before this task too).
+- git push origin main -- succeeded (41cdf94..4321604), no hang.
+
+This task's own stated steps did not include a Vercel deploy
+(backend-only change, no frontend file touched), so none was run.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+1 file modified (backend/routes/push.js). No other file was touched.

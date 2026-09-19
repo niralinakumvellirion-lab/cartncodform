@@ -1,0 +1,241 @@
+=== CUSTOMERS DATA AUDIT ===
+Generated: 2026-09-17
+Scope: AUDIT ONLY, read-only. No files were modified while producing this.
+
+File read in full: frontend/app/admin/screens/Customers.jsx (current
+state after the UI redesign, commit f3d034a)
+
+
+====================================================================
+1. THE useEffect THAT FETCHES CUSTOMER DATA — full code
+====================================================================
+
+The actual fetch lives in a useCallback (loadData, lines 989-1033),
+which a separate, small useEffect (lines 1035-1043) calls on a debounce
+timer. Both together:
+
+  const loadData = useCallback(
+    async (signal) => {
+      if (!shop) return;
+      setLoading(true);
+      setError('');
+      try {
+        const params = new URLSearchParams({ limit: '50' });
+        if (filter && filter !== 'everyone') params.set('filter', filter);
+        if (search.trim()) params.set('search', search.trim());
+
+        const [profRes, sigRes] = await Promise.all([
+          apiGet(`/api/profiles/${encodeURIComponent(shop)}/profiles?${params.toString()}`),
+          apiGet(`/api/profiles/${encodeURIComponent(shop)}/signals?limit=200`),
+        ]);
+        if (signal?.aborted) return;
+
+        setProfiles(Array.isArray(profRes?.profiles) ? profRes.profiles : []);
+        setTotal(Number.isFinite(profRes?.total) ? profRes.total : 0);
+
+        // strongest signal per profile + a per-profile signal count
+        const map = {};
+        const countMap = {};
+        for (const sig of Array.isArray(sigRes?.signals) ? sigRes.signals : []) {
+          const pid =
+            typeof sig.profileId === 'object' && sig.profileId
+              ? sig.profileId._id
+              : sig.profileId;
+          if (!pid) continue;
+          const key = String(pid);
+          countMap[key] = (countMap[key] || 0) + 1;
+          if (!map[key] || (sig.strength || 0) > (map[key].strength || 0)) {
+            map[key] = { type: sig.type, strength: sig.strength || 0 };
+          }
+        }
+        setSignalMap(map);
+        setSignalCountMap(countMap);
+      } catch (err) {
+        if (signal?.aborted) return;
+        setError(err.message || 'Failed to load customers');
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [shop, filter, search]
+  );
+
+  useEffect(() => {
+    const controller = { aborted: false };
+    // debounce so typing in the search box doesn't fire a request per keystroke
+    const t = setTimeout(() => loadData(controller), 300);
+    return () => {
+      controller.aborted = true;
+      clearTimeout(t);
+    };
+  }, [loadData]);
+
+Trigger: the useEffect re-runs whenever `loadData` itself changes
+identity, which (via useCallback's own dependency array [shop, filter,
+search]) happens on mount and whenever shop, filter, or search change
+— i.e. on mount, on every filter-tab click, and on every search-box
+keystroke (debounced 300ms so rapid typing doesn't fire one request
+per keystroke). The `controller`/`signal.aborted` pattern cancels a
+still-in-flight response from a previous call if a newer one has
+since started (e.g. the user types again before the first request
+resolves), so state from a stale request can't overwrite fresher
+state.
+
+A separate, unrelated fetch also exists for the Journey side panel
+(loadCustomerJourney, lines 1061-1076) — triggered on row click, not
+on mount/filter/search, and not itself inside a useEffect; see
+sections 2 and 3 below for its own endpoint/error handling.
+
+
+====================================================================
+2. API ENDPOINTS CALLED
+====================================================================
+
+  GET  /api/profiles/:shop/profiles?limit=50[&filter=...][&search=...]
+       (loadData, customer list — main list data)
+
+  GET  /api/profiles/:shop/signals?limit=200
+       (loadData, in parallel with the above — used to compute each
+       profile's strongest signal + signal count client-side)
+
+  GET  /api/events/:shop/journey?profileId=<id>
+       (loadCustomerJourney — fired only when a row is clicked, not
+       part of the list-loading useEffect above)
+
+  POST /api/push/send-journey        (NotificationComposer's send())
+  POST /api/push/send-journey-email  (EmailComposer's send())
+  POST /api/push/send-journey        (sendJourneyPush() wrapper,
+                                       defined but not currently
+                                       called by anything)
+  POST /api/push/send-journey-email  (sendJourneyEmail() wrapper,
+                                       same — defined, unused)
+
+Only the first two (profiles + signals) are relevant to "customer
+data" / the list itself; the rest belong to the Journey right panel,
+not the list-loading path.
+
+
+====================================================================
+3. HOW THE CUSTOMER LIST STATE IS SET
+====================================================================
+
+  setProfiles(Array.isArray(profRes?.profiles) ? profRes.profiles : [])
+    -- always an array; falls back to [] if the response is missing
+       or malformed, never leaves `profiles` undefined/null.
+  setTotal(Number.isFinite(profRes?.total) ? profRes.total : 0)
+    -- same defensive pattern for the total count.
+  setSignalMap(map) / setSignalCountMap(countMap)
+    -- built by reducing the signals response into two plain objects
+       keyed by profile id string: signalMap[id] = { type, strength }
+       for that profile's single STRONGEST signal (kept via the
+       `(sig.strength||0) > (map[key].strength||0)` comparison as the
+       signals list is walked); signalCountMap[id] = total number of
+       signals for that profile.
+
+profiles/signalMap/signalCountMap are all set only inside loadData's
+try block (i.e. only on a successful pair of responses); on a
+rejected promise, none of them are touched — the list simply keeps
+showing whatever it last had (or the initial empty state) while
+`error` is set instead (see section 4).
+
+
+====================================================================
+4. ERROR HANDLING
+====================================================================
+
+loadData's try/catch/finally (lines 989-1032):
+  - catch (err): if the request was aborted (superseded by a newer
+    one), the catch body still returns early — an aborted/cancelled
+    request never sets an error message. Otherwise:
+    setError(err.message || 'Failed to load customers')
+  - finally: setLoading(false), again skipped if the signal was
+    aborted (so an aborted call doesn't clear the loading flag a
+    newer, still-in-flight call is relying on).
+  - error is reset to '' at the START of every loadData call (line
+    993, setError('')), so a stale error message doesn't linger once
+    a new attempt begins.
+
+Rendered error banner (lines 1120-1133):
+  {error && (
+    <div style={{
+      background: DS.dangerLight, border: '1px solid #fecaca',
+      borderRadius: '10px', padding: '12px 16px', marginBottom: '16px',
+      fontSize: '13px', color: '#b91c1c',
+    }}>
+      {error}
+    </div>
+  )}
+Shown directly above the search/filter row whenever `error` is a
+non-empty string; nothing else in the file clears it except the next
+loadData call's own setError('') reset.
+
+Note: the signals fetch failing does NOT get its own separate error
+path — both apiGet calls are awaited together via Promise.all, so
+either one rejecting throws the same way and produces the same
+generic error message; there's no way to tell from the UI whether the
+profiles call or the signals call was the one that failed.
+
+loadCustomerJourney's own error handling (lines 1061-1076) is
+separate and much quieter: on failure it only does
+`console.error('[customers] journey load error:', e.message)` — no
+`error` state is set, no banner or other visible feedback appears in
+the UI at all. If the journey fetch fails, journeyLoading returns to
+false (via the finally block) and selectedCustomer simply never gets
+set, so the right panel silently never appears — a merchant clicking
+a row during a network hiccup sees nothing happen, with no visible
+error message, only a console.error only visible via devtools.
+
+
+====================================================================
+5. BROWSER CONSOLE CHECK — https://app.shopireachboost.com/admin/customers
+====================================================================
+
+Opened the URL directly in a browser tab (not from within the
+Shopify admin iframe) and read the console. One error, occurring
+once per page load (same message on two separate navigations):
+
+  [EXCEPTION] (https://cdn.shopify.com/shopifycloud/app-bridge.js)
+  Uncaught Error: App Bridge Next: missing required configuration
+  fields: shop
+  Stack trace:
+      at <anonymous> (app-bridge.js:0:79109)
+      at <anonymous> (app-bridge.js:0:79186)
+      at <anonymous> (app-bridge.js:0:79216)
+      at <anonymous> (app-bridge.js:0:90957)
+      at <anonymous> (app-bridge.js:0:98178)
+
+This is thrown by Shopify's own app-bridge.js script, not by any code
+in this file. It is EXPECTED, not a bug in Customers.jsx: this app is
+a Shopify-embedded admin app that always expects a `?shop=...` query
+parameter (every page.js wrapper reads it via
+searchParams.get('shop') and passes it down as the `shop` prop). I
+visited the bare URL with no shop param at all (the normal way this
+app is actually opened is from inside a merchant's Shopify admin,
+which appends `?shop=<store>.myshopify.com` automatically), so
+AppProvider/NavMenu's own App Bridge initialization failed exactly as
+it's designed to when that field is missing.
+
+Because `shop` was empty, loadData's own `if (!shop) return;` guard
+(line 991) meant loadData never even attempted to run — confirmed via
+read_network_requests filtered to "/api/": zero matching requests
+were made on either page load. This is also why the customer table
+shows its loading-skeleton placeholders permanently in this state (a
+screenshot was taken confirming this) — `loading` starts as `true`
+and is only ever set to `false` inside loadData's own execution,
+which never began.
+
+No other console errors, warnings, or messages of any kind were
+present — just the single App Bridge "missing shop" exception, twice
+(once per navigation attempt), and nothing from this app's own code.
+This audit cannot say whether the list itself would load cleanly
+with a real shop param and valid session, since that requires the
+app's normal Shopify-embedded entry path (a session token cannot be
+supplied by visiting the bare URL directly).
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified. This was a read-only audit of
+frontend/app/admin/screens/Customers.jsx plus a live browser console
+check of https://app.shopireachboost.com/admin/customers.

@@ -1,0 +1,132 @@
+=== CUSTOMERS LOADING FIX AUDIT ===
+Generated: 2026-09-17
+
+Initial loading changed to false: yes
+setLoading(true) moved after shop check: n/a — already there
+  (see note below)
+setError(null) on success: yes
+frontend build: pass
+git push: done (f3d034a..2d93a9f)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/screens/Customers.jsx in full before making
+any edit, as instructed (the same file already fully read/quoted in
+the immediately preceding two read-only audits this session,
+audits/customers-data-audit.txt and audits/customers-loading-audit.txt,
+neither of which had touched it — re-confirmed the loadData() region
+was still exactly as documented before editing).
+
+
+====================================================================
+FIX 1 — applied as given
+====================================================================
+  const [loading, setLoading] = useState(true);
+  ->
+  const [loading, setLoading] = useState(false);
+Straightforward, applied exactly as specified.
+
+
+====================================================================
+FIX 2 — TASK'S PREMISE DID NOT MATCH THE ACTUAL CODE; NO CHANGE NEEDED
+====================================================================
+The task's instructions for this fix say:
+  "Find loadData() function. Find: if (!shop) return; Change to:
+   if (!shop) return; setLoading(true); Then find the existing
+   setLoading(true) that currently sits BEFORE the if (!shop) check
+   -- remove it."
+
+This describes a bug (setLoading(true) running before the shop guard,
+so it fires even when shop is empty) that does NOT exist in the
+current file. loadData's actual first three lines, unchanged since
+before this task and confirmed by the fresh full read above, already
+are:
+
+  const loadData = useCallback(
+    async (signal) => {
+      if (!shop) return;
+      setLoading(true);
+      setError('');
+      try {
+      ...
+
+setLoading(true) is already the very next line AFTER `if (!shop)
+return;` -- there is no earlier/duplicate setLoading(true) call
+anywhere before the shop check to remove. This exact ordering was
+already what audits/customers-loading-audit.txt (the read-only audit
+immediately preceding this task) quoted verbatim and confirmed is
+the actual root cause of the "stuck loading" bug being fixed here
+(that audit's section 4: "if (!shop) return; ... runs BEFORE
+setLoading(true) is ever called" -- describing the CURRENT ordering,
+already correct in the sense this task wants, not describing a bug
+in the ordering itself). The real bug FIX 1 addresses is the initial
+`useState(true)` value, not the ordering inside loadData.
+
+Made NO change for this step, since the "before" state the task
+describes wasn't present to fix -- flagging this mismatch explicitly
+rather than silently either making a no-op edit or inventing a
+change that wasn't needed. Verified via a full fresh read of the
+function immediately before editing (see "What was read" above) and
+via `git diff` after all edits (shown below), which touches nothing
+in this region beyond the useState default.
+
+
+====================================================================
+FIX 3 — applied, with a note on its practical effect
+====================================================================
+Added `setError(null);` immediately after the existing
+`setProfiles(...)` / `setTotal(...)` calls, inside loadData's try
+block (the success path):
+
+  setProfiles(Array.isArray(profRes?.profiles) ? profRes.profiles : []);
+  setTotal(Number.isFinite(profRes?.total) ? profRes.total : 0);
+  setError(null);
+
+NOTE: this is functionally redundant with existing code -- loadData
+already unconditionally resets `setError('')` at the very TOP of the
+function (right after the shop check, before the try block even
+starts), on EVERY call regardless of outcome. Since nothing sets
+`error` again between that reset and this new line (the only other
+setError call is in the catch block, which this code path never
+reaches), `error` was already guaranteed to be cleared by the time
+setProfiles runs successfully -- this addition doesn't change any
+observable behavior, it just resets the same state a second time
+(using `null` instead of the top-of-function reset's `''`; both are
+falsy so the `{error && (...)}` banner check treats them identically).
+Implemented anyway since it was explicitly requested and is
+harmless -- flagging the redundancy rather than silently omitting it
+or "fixing" it into something else.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+`git diff` shows exactly 2 lines changed (1 modified, 1 added):
+  - useState(true) -> useState(false)
+  - + setError(null); after setProfiles/setTotal
+Nothing else in loadData, the debounce useEffect, any other state,
+API calls, filter/search logic, or the Journey panel was touched.
+`git status` after staging showed only
+frontend/app/admin/screens/Customers.jsx changed; the pre-existing
+unrelated dirty files (backend/__tests__/brain.test.js,
+frontend/lib/api.js) were left alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 17
+  routes generated, no errors.
+- git push origin main -- succeeded (f3d034a..2d93a9f), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Only frontend/app/admin/screens/Customers.jsx was modified. No other
+file was changed.

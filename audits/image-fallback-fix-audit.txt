@@ -1,0 +1,49 @@
+SELF-AUDIT — image-fallback-fix
+File: backend/routes/push.js
+Route: POST /send-store
+
+CHANGE MADE
+-----------
+Removed the two-line cross-fallback block that previously sat between the
+mobileImage/desktopImage resolution and the "[push] send-store ..." console.log
+lines. Original line numbers (pre-edit file):
+
+  619  // Fallback: if one is missing, use the other.
+  620  if (!mobileImage) mobileImage = desktopImage;
+  621  if (!desktopImage) desktopImage = mobileImage;
+
+All three lines (the two `if` statements plus the comment describing them)
+were deleted as a single contiguous block. The comment was removed along
+with the code because it only existed to explain the two `if` lines; leaving
+it in place would describe logic that no longer exists.
+
+No other lines in the file were touched. Verified via `git diff` (not pasted
+here per instructions) that the only hunk is this one removed block —
+resolution logic (uploadToCloudinary calls, rawMobile/rawDesktop derivation),
+the two console.log lines, the mobile/desktop sendPushToCustomers calls, and
+everything else in the route is untouched.
+
+BEHAVIOR VERIFICATION (post-removal)
+-------------------------------------
+1. Only mobileImage set, desktopImage empty:
+   mobileImage = <uploaded/raw url>, desktopImage stays ''.
+   Mobile send gets the image; desktop send gets '' (no image). Correct.
+
+2. Only desktopImage set, mobileImage empty:
+   desktopImage = <uploaded/raw url>, mobileImage stays ''.
+   Desktop send gets the image; mobile send gets '' (no image). Correct.
+
+3. Both set:
+   mobileImage and desktopImage each resolve independently (upload or
+   passthrough), no cross-assignment. Mobile and desktop each get their own
+   distinct image. Correct.
+
+4. Neither set:
+   Both remain ''. Both sendPushToCustomers calls receive '' as the image
+   argument; FCM/service worker falls back to the default icon. Correct.
+
+TESTS
+-----
+`cd backend && npm test` run after the change: 19 test suites, 151 tests,
+all passing. No test in the suite asserted the old cross-fallback behavior,
+so no test updates were required.

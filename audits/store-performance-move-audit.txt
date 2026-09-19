@@ -1,0 +1,104 @@
+=== STORE PERFORMANCE MOVE AUDIT ===
+Generated: 2026-09-17
+
+Store Performance moved to top: yes
+Order after move:
+  1. Sticky top bar
+  2. Store Performance (4 insight cards)
+  3. KPI row (6 notification cards)
+  4. Activity row (4 activity cards)
+  5. Two column layout (products + planned/yesterday)
+  6. todayError banner (conditional)
+  7. New subscribers alert (conditional)
+frontend build: pass
+git push: done (36566fc..1ef622d)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full (930
+lines) before making any edit, as instructed.
+
+
+====================================================================
+THE MOVE
+====================================================================
+The Store Performance block (the comment starting "Insights Stats
+Row — restored...", through its closing </div>, previously sitting
+between the KPI row and the "Attributed Activity" section) was cut
+from its previous position and pasted immediately after the sticky
+top bar's closing </div>, before the KPI row.
+
+Verified via `git diff` that this was a pure block swap: the diff is
+34 lines removed + 34 lines added, and comparing the removed/added
+hunks line-by-line shows byte-identical content in both the KPI row
+block and the Store Performance block -- only their relative order
+changed. No style, JSX attribute, text, or logic inside either block
+was touched.
+
+
+====================================================================
+NOTE ON THE "New order" LIST vs. NEW SUBSCRIBER ALERT
+====================================================================
+The task's numbered "New order" list placed "New subscriber alert"
+at position 2 (before Store Performance), with the parenthetical
+"(keep at top if exists — or move below Store Performance)". This
+directly conflicts with two other explicit parts of the same task:
+  - The task's own title and Find/Move instructions only ever
+    describe moving the Store Performance section ("Move Store
+    Performance section to top of dashboard" / "Move it to be the
+    FIRST section after the sticky top bar").
+  - The explicit scope limiter: "DO NOT change any styles, logic,
+    state or data fetching. Only move the JSX block — cut and paste
+    to new position" (singular "the JSX block").
+
+Given that conflict, I did not move the New Subscribers alert block.
+Reasoning:
+  - The parenthetical's second option ("or move below Store
+    Performance") is already satisfied by the alert's EXISTING
+    position: it sits near the very end of the page (after the
+    two-column layout and the todayError banner), which is -- and
+    always was -- "below" where Store Performance now sits after
+    this move. No further action was needed to satisfy that
+    condition.
+  - Moving an unrelated second block would have violated the
+    explicit "Only move the JSX block" instruction and expanded
+    scope beyond what the task title and primary instructions
+    describe.
+
+Flagging this interpretation explicitly rather than silently picking
+one reading. If the intent was actually to relocate the New
+Subscribers alert to immediately after the sticky top bar (true
+position 2, before Store Performance), that was NOT done here and
+would need to be requested as its own explicit move.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+No state, effect, API call, click handler, or style value was
+changed -- confirmed via the git diff described above (pure
+line-for-line relocation of two already-existing blocks). No other
+file was touched. `git status` after staging showed only
+frontend/app/admin/dashboard/DashboardScreen.jsx changed; the
+pre-existing unrelated dirty files (backend/__tests__/brain.test.js,
+frontend/lib/api.js) were left alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 17
+  routes generated, no errors.
+- git push origin main -- succeeded (36566fc..1ef622d), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Only frontend/app/admin/dashboard/DashboardScreen.jsx was modified.
+No other file was changed.

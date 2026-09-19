@@ -1,0 +1,65 @@
+SELF-AUDIT — sw-ready-fix
+
+File: extensions/cartncodform-embed/blocks/push-notifications.liquid
+Function: registerSW(), the .then(function(reg) {...}) callback attached
+to navigator.serviceWorker.register(swUrl, {...}) (lines 1741-1772 post-edit).
+
+CHANGE MADE
+-----------
+Replaced the entire register().then(function(reg) {...}) body. Old logic
+branched three ways (reg.active -> resolve immediately; no installing/
+waiting -> wait on navigator.serviceWorker.ready; otherwise -> SKIP_WAITING
+postMessage + an 8s setTimeout that RESOLVED via ready + a statechange
+listener that resolved on 'activated'). New logic collapses this to two
+steps for every case:
+  1. If reg.active is already the controller with nothing installing/
+     waiting, resolve immediately (line 1746-1749).
+  2. Otherwise, if reg.waiting exists, postMessage SKIP_WAITING to it
+     (line 1752-1754), then unconditionally wait on
+     navigator.serviceWorker.ready (line 1762-1768) with a 15s timeout
+     that REJECTS (line 1758-1760), not resolves.
+The surrounding .catch(function(err) { console.error('[CCF] SW
+registration failed:', ...); reject(err); }) that follows this .then()
+(now lines 1769-1772), and the outer .catch(function(err) { console.error
+('[CCF] SW setup error:', ...); reject(err); }) further out (lines
+1773-1776), were both left untouched — only the .then(function(reg) {...})
+body itself was replaced, exactly as instructed.
+
+CONFIRMATIONS
+-------------
+- navigator.serviceWorker.ready is now used for ALL non-immediately-active
+  cases (installing, waiting, or any other pending state) instead of the
+  old three-way branch — confirmed by reading the replaced block: there is
+  now exactly one call to navigator.serviceWorker.ready in this function
+  (previously there were two: one in the "no sw" branch, one in the 8s
+  timeout fallback).
+- The new timeout (15s, up from 8s) calls reject(new Error('SW activation
+  timeout after 15s')), not resolve — confirmed at lines 1758-1760. This
+  means a stuck activation now propagates as a rejection through
+  registerSW()'s outer Promise, through registerSW().then(getToken)... in
+  the Allow button flow, into that flow's outer .catch (added in a
+  previous turn), which logs '[ccf] Allow flow failed' and — only when
+  ?ccf_debug=1 or localStorage ccf_debug='1' is set (per the earlier
+  debug-gating decision) — shows the alert() with the real error message.
+  On a normal (non-debug) visit, nothing pops; only the console.error
+  fires and resetButton() runs, same as before.
+- SKIP_WAITING is still sent when there's a waiting SW (line 1752-1754),
+  now reading reg.waiting directly rather than via the old `var sw =
+  reg.installing || reg.waiting` intermediate — reg.installing alone
+  (a worker still installing, not yet waiting) no longer receives a
+  SKIP_WAITING postMessage from this call site, since only a *waiting*
+  worker is a valid postMessage target for this purpose; an installing
+  worker will still complete installation and either activate directly (if
+  it's the only registration) or become 'waiting' and get caught by the
+  next call to registerSW(), which is consistent with how the SW's own
+  unconditional self.skipWaiting() call on 'install' (see the
+  sw-skip-waiting-audit.txt change) already handles that case regardless.
+
+TESTS / DEPLOY
+---------------
+`cd backend && npm test`: 19 test suites, 151 tests, all passing (no
+backend files were touched by this change; run as a sanity check).
+`shopify app deploy --allow-updates`: released as shopireachboost-ai-115.
+Theme-check reported the same pre-existing ParserBlockingScript/RemoteAsset
+warnings on the Firebase CDN <script> tags (lines 3-4), unrelated to this
+change; deploy succeeded.

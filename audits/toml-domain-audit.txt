@@ -1,0 +1,85 @@
+=== TOML DOMAIN AUDIT ===
+Generated: 2026-09-16
+
+application_url updated: yes (already present, no edit needed)
+  "https://app.shopireachboost.com/admin"
+redirect_urls updated: yes (already present, no edit needed)
+  ["https://api.shopireachboost.com/api/auth/callback"]
+app_proxy url updated: yes (already present, no edit needed)
+  "https://api.shopireachboost.com/apps/cartncodform"
+
+shopify deploy: NOT RUN — deliberately declined, see reasoning below
+
+====================================================================
+DETAILS
+====================================================================
+
+Read shopify.app.toml in full before making any changes, as
+instructed. Its current content already has all 3 named URL fields
+set to the requested new-domain values, PLUS all 4 webhook
+subscription uris (compliance, cart, checkout, order) already point
+at https://api.shopireachboost.com/... — these came from the earlier
+"feat: migrate to shopireachboost.com domain" commit (9f05120),
+already applied to this file locally as part of that task.
+
+Searched the full file for any remaining occurrence of
+"cartncodform-beryl.vercel.app" or "cartncodform-backend.onrender.com"
+(task item 4) — none found. The only remaining "cartncodform"
+strings in the file are NOT full URLs containing either old domain:
+subpath = "cartncodform", handle = "cartncodform-push", and
+path = "extensions/cartncodform-embed" — these are Shopify-registered
+identifiers/directory paths, not domain URLs, and were correctly
+out of scope per this task's own item 4 wording.
+
+No edits were made to shopify.app.toml in this task — its content
+already matched the requested target state exactly.
+
+====================================================================
+WHY `shopify app deploy --allow-updates` WAS NOT RUN
+====================================================================
+
+This command would register the new-domain URLs above with
+Shopify's LIVE platform configuration for the real installed app —
+not a local/git-reversible action. Once deployed, Shopify starts
+sending:
+  - OAuth install/reinstall callbacks to api.shopireachboost.com
+  - All 4 webhook deliveries (including the 3 GDPR-mandatory
+    compliance topics) to api.shopireachboost.com
+  - Every App Proxy request from the live storefront (the push-
+    notification prompt, automatic discount-code generation, and the
+    Cash-on-Delivery order form — all served through
+    extensions/cartncodform-embed/blocks/push-notifications.liquid's
+    App Proxy calls) to api.shopireachboost.com
+
+Earlier this session, when asked directly whether
+api.shopireachboost.com / app.shopireachboost.com / Resend are fully
+live, the user's explicit answer was "Not yet — hold off on
+deploying," with instructions to apply code changes but not push/
+deploy them (see audits/domain-migration-audit.txt and
+audits/ui-redesign-audit.txt for how the subsequent git push /
+Vercel deploy were scoped around that answer). Nothing since then
+has confirmed the backend/Render side is actually reachable at
+api.shopireachboost.com — a Vercel alias for app.shopireachboost.com
+was found to already exist (audits/ui-redesign-audit.txt), but that
+says nothing about whether Render has a matching custom domain
+configured for the backend.
+
+If api.shopireachboost.com does not yet resolve to the live Render
+backend, running this deploy would immediately break: OAuth install/
+reinstall (Shopify would redirect to a domain the backend may not be
+reachable at), all webhook delivery including GDPR compliance
+webhooks, and — most visibly to real customers — the storefront App
+Proxy, meaning the push-notification prompt, discount codes, and the
+COD order form would all stop working on the live store the moment
+this deploy completes. Unlike the git push handled in the previous
+task, there is no side-branch/partial-push equivalent available here
+— `shopify app deploy` either changes Shopify's live routing now, or
+it doesn't; there's no way to apply it "for later" without affecting
+the live app immediately.
+
+Given the user's own explicit, still-unretracted "not yet" answer on
+domain readiness, running this deploy now would directly contradict
+that instruction and risk breaking live storefront functionality for
+the real merchant. Declined to run it. Ready to run
+`shopify app deploy --allow-updates` as soon as the user confirms
+api.shopireachboost.com is actually live and reachable on Render.

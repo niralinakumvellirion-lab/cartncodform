@@ -1,0 +1,110 @@
+=== HORIZONTAL UPLOAD AUDIT ===
+Generated: 2026-09-17
+
+Two uploads side by side: yes
+Mobile box shows uploaded image thumbnail: yes
+Desktop box shows uploaded image thumbnail: yes
+Remove button under each: yes
+Green border/background when uploaded: yes
+frontend build: pass
+git push: done (6fc398f..1612ea1)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full (1687
+lines, in two parts) before making any change, as instructed. Located
+the two stacked upload sections (📱 Mobile Image, lines 1267-1348; 🖥️
+Desktop Image, lines 1350-1391 in the pre-edit file) — these were the
+sections added by the immediately preceding two tasks (Change 2 of
+audits/separate-images-audit.txt, unchanged since).
+
+
+====================================================================
+IMPLEMENTATION
+====================================================================
+Replaced the two separate, vertically-stacked `<div>` sections (each
+with its own "📱 Mobile Image"/"🖥️ Desktop Image" label + full-width
+dashed upload button + conditional "Remove [mobile|desktop] image"
+text link) with the single given wrapper:
+  - One shared label row ("Notification Images" + the existing info
+    "i" button, moved here from the old Mobile Image section's own
+    label row — its behavior (`onClick={() => setShowImageInfo(s =>
+    !s)}`), styling, and the info box that toggles beneath it are all
+    byte-for-byte the same JSX as before, just relocated to sit above
+    both upload boxes instead of only above the mobile one).
+  - A `display:'grid', gridTemplateColumns:'1fr 1fr', gap:10` row
+    containing two upload boxes.
+  - Mobile box: 📱 label, a compact dashed-border upload tile
+    (`minHeight:80`) that shows a small 60px-tall thumbnail + "✓
+    Uploaded" text when `editorMobileImageUrl` is set (background
+    turns `#f0fdf4`, a light green tint, in that state — satisfying
+    "Green border/background when uploaded"; the border itself stays
+    `#d1d5db` dashed grey in both states, matching the given code
+    exactly — only the background changes color, not the border color,
+    which is what the given style object actually specifies), or an
+    upload icon + "Upload" text when empty; a "Remove" text button
+    appears below the tile when an image is set.
+  - Desktop box: identical structure/behavior, wired to
+    `editorDesktopImageUrl`/`setEditorDesktopImageUrl`.
+
+Both upload tiles' hidden `<input type="file" accept="image/*">` +
+FileReader + `readAsDataURL` + `setState` logic is unchanged from the
+prior task — only the surrounding layout/JSX structure changed, not
+the upload mechanism itself.
+
+
+====================================================================
+DO NOT CHANGE COMPLIANCE
+====================================================================
+No state was added, removed, or renamed — `editorMobileImageUrl`,
+`editorDesktopImageUrl`, and `showImageInfo` are used exactly as
+before, just referenced from the new combined layout. The Title/
+Message/Schedule Date fields, the three action buttons (Send Now /
+Approve / Add to Queue) and their API call bodies, and the entire
+"Right: Live Preview" dual mobile+desktop preview panel were not
+touched — confirmed by re-reading the file after editing (the Send
+Now/Approve/Add to Queue button blocks and the Live Preview panel
+below them are unchanged from the version read at the start of this
+task).
+
+
+====================================================================
+DO-NOT-TOUCH-OTHER-FILES COMPLIANCE
+====================================================================
+Only frontend/app/admin/dashboard/DashboardScreen.jsx was staged and
+committed, per the task's own git-add line. `git status` after staging
+confirmed exactly this one path; the pre-existing unrelated dirty
+files (backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 15 static
+  routes + 1 dynamic route generated, no errors (/admin/dashboard:
+  10.2kB -> 10.3kB First Load JS).
+- git push origin main -- succeeded (6fc398f..1612ea1), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+No backend changes were needed or made — this task is frontend-only,
+touching a single file, purely layout. This app has no automated
+frontend test suite, so verification here is build-only, per the
+task's own stated verification step.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+1 file modified (frontend/app/admin/dashboard/DashboardScreen.jsx). No
+other file was touched. Manual visual verification in a live browser
+(confirming the two boxes render side by side at the modal's editor-
+column width, confirming thumbnails/green tint/remove buttons appear
+correctly per box) was not performed as part of this task — this
+environment has no running dev server / authenticated Shopify session
+to click through; verification here is limited to a clean production
+build and the code review documented above.

@@ -12,6 +12,7 @@ jest.mock('../models/SignalConfig');
 jest.mock('../models/ScheduledJob');
 jest.mock('../models/Store');
 jest.mock('../models/ShopWeights');
+jest.mock('../models/AbandonedCustomer');
 
 const Profile = require('../models/Profile');
 const Signal = require('../models/Signal');
@@ -19,6 +20,7 @@ const SignalConfig = require('../models/SignalConfig');
 const ScheduledJob = require('../models/ScheduledJob');
 const Store = require('../models/Store');
 const ShopWeights = require('../models/ShopWeights');
+const AbandonedCustomer = require('../models/AbandonedCustomer');
 
 const { runBrainForProfile } = require('../services/brain');
 
@@ -61,6 +63,10 @@ beforeEach(() => {
   ScheduledJob.findOne.mockResolvedValue(null);
   ScheduledJob.create.mockResolvedValue({ _id: 'job1' });
   ShopWeights.findOne.mockResolvedValue(null); // Phase H — no learned weights -> neutral
+  // Default: no abandoned-cart row on file -> imageUrl stays ''.
+  AbandonedCustomer.findOne.mockReturnValue({
+    select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(null) }),
+  });
 });
 
 test('1. returns null when the profile is not found', async () => {
@@ -191,4 +197,47 @@ test('13. SignalConfig.channelOverride wins over the signal-type default', async
   SignalConfig.findOne.mockResolvedValue({ enabled: true, channelOverride: 'email' });
   const r = await runBrainForProfile('p1', SHOP);
   expect(r.channel).toBe('email');
+});
+
+test('14. cart_abandon fetches the abandoned cart\'s product image onto the job payload', async () => {
+  AbandonedCustomer.findOne.mockReturnValue({
+    select: jest.fn().mockReturnValue({
+      lean: jest.fn().mockResolvedValue({ productImageUrl: 'https://cdn.example/shirt.jpg' }),
+    }),
+  });
+  await runBrainForProfile('p1', SHOP);
+  expect(AbandonedCustomer.findOne).toHaveBeenCalledWith({ sessionId: 'c1' });
+  expect(ScheduledJob.create).toHaveBeenCalledWith(
+    expect.objectContaining({
+      cartToken: 'c1',
+      payload: expect.objectContaining({ imageUrl: 'https://cdn.example/shirt.jpg' }),
+    })
+  );
+});
+
+test('15. imageUrl stays blank when the abandoned cart has no productImageUrl', async () => {
+  await runBrainForProfile('p1', SHOP);
+  expect(ScheduledJob.create).toHaveBeenCalledWith(
+    expect.objectContaining({ payload: expect.objectContaining({ imageUrl: '' }) })
+  );
+});
+
+test('16. imageUrl stays blank (and does not throw) when the image lookup errors', async () => {
+  AbandonedCustomer.findOne.mockImplementation(() => {
+    throw new Error('db unavailable');
+  });
+  const r = await runBrainForProfile('p1', SHOP);
+  expect(r).not.toBeNull();
+  expect(ScheduledJob.create).toHaveBeenCalledWith(
+    expect.objectContaining({ payload: expect.objectContaining({ imageUrl: '' }) })
+  );
+});
+
+test('17. non-cart/checkout-abandon signals never query AbandonedCustomer for an image', async () => {
+  Signal.find.mockResolvedValue([{ type: 'browse_abandon', strength: 0.9, productId: '42' }]);
+  await runBrainForProfile('p1', SHOP);
+  expect(AbandonedCustomer.findOne).not.toHaveBeenCalled();
+  expect(ScheduledJob.create).toHaveBeenCalledWith(
+    expect.objectContaining({ payload: expect.objectContaining({ imageUrl: '' }) })
+  );
 });

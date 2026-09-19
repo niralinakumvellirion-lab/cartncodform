@@ -1,0 +1,278 @@
+SETTINGS SLOW SAVE AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-12
+
+Files read: frontend/app/admin/screens/Settings.jsx (in full, relevant
+sections below), backend/routes/profiles.js (PATCH /popup handler in
+full), backend/models/Store.js (shopDomain field, for the index check
+in section on backend slow operations).
+
+
+====================================================================
+FRONTEND: frontend/app/admin/screens/Settings.jsx
+====================================================================
+
+--------------------------------------------------------------
+1. Image compression code (canvas resize/compress) - exact values
+--------------------------------------------------------------
+Lines 767-799, the file input's onChange handler:
+
+767	                      onChange={(e) => {
+768	                        const file = e.target.files?.[0];
+769	                        if (!file) return;
+770	                        if (file.size > 500 * 1024) {
+771	                          alert('Image too large - please use an image under 500KB for best performance.');
+772	                          return;
+773	                        }
+774	                        const reader = new FileReader();
+775	                        reader.onload = (ev) => {
+776	                          // Resize/compress via canvas before storing as base64 -
+777	                          // the raw file (up to 500KB) re-encoded losslessly would
+778	                          // otherwise bloat the popup config's PATCH body and the
+779	                          // Store document it's written into. Drag-to-focus and
+780	                          // the layout previews read activePopup.imageUrl /
+781	                          // imagePosition independently of how the URL was
+782	                          // produced, so neither is affected by this.
+783	                          const img = new Image();
+784	                          img.onload = () => {
+785	                            const canvas = document.createElement('canvas');
+786	                            const MAX = 800;
+787	                            let w = img.width, h = img.height;
+788	                            if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+789	                            if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+790	                            canvas.width = w;
+791	                            canvas.height = h;
+792	                            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+793	                            const compressed = canvas.toDataURL('image/jpeg', 0.7);
+794	                            setActivePopup((p) => ({ ...p, imageUrl: compressed }));
+795	                          };
+796	                          img.src = ev.target.result;
+797	                        };
+798	                        reader.readAsDataURL(file);
+799	                      }}
+
+  MAX dimension: 800 (px, on the longer side; the other side is scaled
+    to preserve aspect ratio -- line 786, applied at lines 788-789).
+  JPEG quality: 0.7 (line 793, canvas.toDataURL('image/jpeg', 0.7)).
+
+  Note: the 500KB check (line 770) is applied to the ORIGINAL uploaded
+  file, BEFORE compression -- there is no size check on the COMPRESSED
+  output (`compressed`, line 793) before it is stored into
+  activePopup.imageUrl. In the overwhelming majority of real photos,
+  800px-max + JPEG q0.7 compresses well below the original 500KB cap,
+  but this is not independently enforced or guaranteed by this code --
+  a pathological input (e.g. an already-small but very high-entropy/
+  noisy source image, or a browser whose canvas encoder behaves
+  atypically) could in theory still produce a comparably large or even
+  larger base64 string than the original file, with nothing in this
+  function to catch that case.
+
+--------------------------------------------------------------
+2. saveSettings() - what gets sent in the popup PATCH body
+--------------------------------------------------------------
+Lines 116-149, full function:
+
+116	  async function saveSettings() {
+117	    setSaving(true);
+118	    setError('');
+119	    setSuccess(false);
+120	    console.log(
+121	      '[settings] saving popup device:', popupDevice,
+122	      'mobilePopup.layout:', mobilePopup.layout,
+123	      'mobilePopup.imageUrl:', mobilePopup.imageUrl ? 'SET' : 'EMPTY'
+124	    );
+125	    try {
+126	      // Both PATCHes are independent (different Store sub-paths) - run them
+127	      // in parallel instead of sequentially so one being slow doesn't hold
+128	      // up the other, and so a failure in one no longer silently skips the
+129	      // other entirely (the old sequential version never attempted the
+130	      // popup save at all if the settings save threw first).
+131	      await Promise.all([
+132	        apiSend(`/api/profiles/${encodeURIComponent(shop)}/settings`, 'PATCH', {
+133	          voice,
+134	          caps,
+135	          quietHours,
+136	          timezone,
+137	        }),
+138	        apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', {
+139	          ...popup,
+140	          mobilePopup,
+141	        }),
+142	      ]);
+143	      setSuccess(true);
+144	    } catch (e) {
+145	      setError(e.message || 'Save failed');
+146	    } finally {
+147	      setSaving(false);
+148	    }
+149	  }
+
+  The popup PATCH body (line 138-141) is `{ ...popup, mobilePopup }` --
+  i.e. every field currently in the `popup` (desktop) state object,
+  spread at the top level, PLUS the entire `mobilePopup` state object
+  nested wholesale under its own `mobilePopup` key. Both `popup` and
+  `mobilePopup` are edited through the same `activePopup`/
+  `setActivePopup` abstraction (line 153-154: `activePopup = popupDevice
+  === 'desktop' ? popup : mobilePopup`), so they share an identical
+  field shape (confirmed by grepping every `activePopup.<field>` usage
+  in the JSX -- see field list in section 3 below), which matches the
+  file's own comment at line 151-152: "the customizer UI edits whichever
+  config the device tab selects -- same fields, different state."
+
+  How large could imageUrl be: imageUrl is a base64 data URI
+  (`data:image/jpeg;base64,...`) produced by the canvas compression in
+  section 1. Base64 encoding itself inflates the underlying binary size
+  by roughly 1.33x (4 output bytes per 3 input bytes) on top of
+  whatever the compressed JPEG bytes are. Since both popup and
+  mobilePopup carry their OWN independent imageUrl (desktop image and
+  mobile image are separate uploads, per the popup-responsive feature),
+  a single save can carry TWO such base64 strings at once -- one at the
+  top level (`popup.imageUrl`, spread in) and one nested inside
+  `mobilePopup.imageUrl`. In the typical case (a real photo compressed
+  to 800px/q0.7) each is commonly in the tens-of-KB range as base64
+  text, but this is not enforced by any explicit cap in this file (see
+  the note at the end of section 1) -- it is only as small as the
+  canvas compression happens to make it for a given input image.
+
+--------------------------------------------------------------
+3. How many fields are in the popup PATCH body total
+--------------------------------------------------------------
+Every distinct `activePopup.<field>` reference found in this file (a
+grep across the whole JSX, deduplicated) -- these are the fields that
+exist on BOTH the `popup` and `mobilePopup` state objects, since both
+are edited through the shared `activePopup` binding:
+
+  1. layout            (line 734)
+  2. imageUrl           (lines 780, 802, 825, 827, 849, 870)
+  3. imagePosition      (lines 872, 935)
+  4. headline           (line 971)
+  5. subtext            (line 982)
+  6. textAlign          (lines 1009, 1011, 1015, 1020)
+  7. brandName          (line 1037)
+  8. allowText          (line 1048)
+  9. denyText           (line 1058)
+  10. accentColor       (lines 1070, 1075)
+  11. bgColor           (lines 1088, 1093)
+  12. textColor         (lines 1106, 1111)
+  13. fontFamily        (line 1122)
+  14. borderRadius      (lines 1145, 1152)
+  15. ctaStyle          (line 1171)
+  16. position          (line 1183)
+  17. showOverlay       (lines 1207, 1217, 1228)
+
+= 17 distinct fields referenced directly in this file's JSX.
+
+The popup PATCH body sent by saveSettings() is therefore:
+  - 17 top-level fields spread in from `popup` (the desktop config) --
+    though see the backend section below: only fields present on
+    `popup` at save time are actually spread (whatever `...popup`
+    currently holds, which may include additional fields the backend
+    recognizes but this file's JSX never directly reads/writes, such
+    as `theme`, `customTitle`, `showBranding`, `overlayOpacity` -- see
+    POPUP_FIELDS in backend/routes/profiles.js, section below, which
+    lists 20 recognized fields, 3 more than the 17 found via direct
+    JSX field access in this file. This file was not searched for
+    indirect spread/passthrough of those extra fields -- they may
+    simply ride along unmodified inside the `popup` state object as
+    loaded from the initial GET, without ever being explicitly read or
+    written by name in this file's own JSX.)
+  - Plus 1 more top-level key, `mobilePopup`, itself an object carrying
+    the same field shape.
+  So: 18 top-level keys in the JSON body (17 spread fields + 1
+  `mobilePopup` object), with `mobilePopup` itself nesting a
+  same-shaped set of fields (up to 20, per the backend's own
+  POPUP_FIELDS list) one level deep.
+
+
+====================================================================
+BACKEND: backend/routes/profiles.js
+====================================================================
+
+--------------------------------------------------------------
+PATCH /:shopDomain/popup - full handler (lines 408-437), plus the
+POPUP_FIELDS constant it depends on (lines 384-391)
+--------------------------------------------------------------
+384	const POPUP_FIELDS = [
+385	  'position', 'theme', 'accentColor', 'bgColor', 'textColor', 'fontFamily',
+386	  'borderRadius', 'imageUrl', 'imagePosition', 'allowText', 'denyText',
+387	  'customTitle', 'showBranding',
+388	  // popup-redesign fields:
+389	  'layout', 'headline', 'subtext', 'brandName', 'textAlign', 'ctaStyle',
+390	  'overlayOpacity', 'showOverlay',
+391	];
+392
+393	router.get('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, res) => {
+394	  ... (GET handler, not the focus of this audit, included above the
+395	       PATCH handler for context only)
+396	});
+397
+408	/**
+409	 * PATCH /api/profiles/:shopDomain/popup
+410	 * Body: any subset of popup fields. Dot-notation $set on popup.* keys.
+411	 */
+412	router.patch('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, res) => {
+413	  try {
+414	    const shop = req.params.shopDomain.trim().toLowerCase();
+415	    const set = {};
+416	    for (const key of POPUP_FIELDS) {
+417	      if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+418	        set[`popup.${key}`] = req.body[key];
+419	      }
+420	    }
+421
+422	    // popup-responsive: the whole mobile-override object is replaced wholesale.
+423	    if (req.body.mobilePopup && typeof req.body.mobilePopup === 'object') {
+424	      set.mobilePopup = req.body.mobilePopup;
+425	    }
+426
+427	    if (Object.keys(set).length === 0) {
+428	      return res.status(400).json({ error: 'No popup fields provided' });
+429	    }
+430
+431	    await Store.updateOne({ shopDomain: shop }, { $set: set });
+432	    return res.json({ updated: true });
+433	  } catch (err) {
+434	    console.error('[profiles] PATCH popup error:', err.message);
+435	    return res.status(500).json({ error: 'Failed to update popup config' });
+436	  }
+437	});
+
+Does it do any processing on imageUrl before saving: NO. imageUrl is
+in POPUP_FIELDS (line 386) like every other scalar field -- it is
+copied verbatim from req.body.imageUrl into set['popup.imageUrl']
+(line 418) with no length check, no re-encoding, no validation of the
+data-URI format, and no size cap of any kind. Whatever base64 string
+the frontend's canvas compression (section 1 above) produced is
+written to MongoDB exactly as received. The nested mobilePopup.imageUrl
+receives the same treatment implicitly, since the entire mobilePopup
+object is replaced wholesale (line 424) with no per-field inspection
+at all.
+
+What does it write to MongoDB: a single `Store.updateOne({ shopDomain
+: shop }, { $set: set })` (line 431), where `set` is a flat object of
+dot-notation keys like `popup.imageUrl`, `popup.headline`, etc. (one
+per POPUP_FIELDS entry present in the request body) plus, if provided,
+a single `mobilePopup` key holding the entire nested object verbatim.
+This is one MongoDB update command carrying however many base64 image
+strings were included (potentially both `popup.imageUrl` and
+`mobilePopup.imageUrl` in the same $set, since saveSettings() always
+sends both `...popup` and `mobilePopup` together every save -- see
+frontend section 2 above).
+
+Any slow operations: no explicit slow operation was found in this
+handler itself -- no external API calls, no image processing/
+re-encoding, no loops over large data, nothing awaited besides the
+single Store.updateOne() call. Store.shopDomain has `unique: true` in
+the schema (backend/models/Store.js line 4-9), which Mongoose/MongoDB
+backs with a unique index, so the update's filter
+`{ shopDomain: shop }` is an indexed lookup, not a collection scan.
+The one plausible source of latency this handler does carry is
+BANDWIDTH/DOCUMENT-SIZE, not compute: the $set payload can include one
+or two multi-kilobyte-to-low-hundred-KB base64 strings (both
+popup.imageUrl and mobilePopup.imageUrl at once, per the note above),
+which MongoDB must write into the Store document and which the
+request itself must transmit over the network from browser to backend
+to MongoDB Atlas -- larger than a config-only PATCH with no images,
+but not an unbounded or pathological amount given the frontend's
+800px/q0.7 compression (barring the uncapped-output edge case noted in
+frontend section 1).

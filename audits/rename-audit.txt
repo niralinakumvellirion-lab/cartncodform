@@ -1,0 +1,223 @@
+RENAME AUDIT - read-only, no changes
+=======================================
+Generated: 2026-09-15
+
+Locations searched (per task instructions): frontend/ (*.js, *.jsx),
+backend/ (*.js), extensions/ (*.liquid), shopify.app.toml,
+package.json (root, frontend, backend), README (root, frontend,
+backend). Searches used ripgrep, which honors .gitignore, so build
+artifacts under frontend/.next/ (gitignored) were correctly
+excluded — a raw recursive grep without that filtering would
+otherwise flood results with minified build output; confirmed this
+during the search and switched tooling to avoid it. No root-level
+package.json exists (only frontend/package.json and
+backend/package.json).
+
+Note: no README.md exists to search under specifically named
+"README if exists" beyond the three found (root README.md,
+frontend/README.md, backend/README.md) — all three are covered
+below.
+
+Case-sensitive, exact-substring search performed for each of the 6
+requested terms.
+
+
+====================================================================
+1. "CartnCodForm" (exact case) — 28 occurrences
+====================================================================
+
+frontend\public\firebase-messaging-sw.js:22:    const title = payload.notification?.title || 'CartnCodForm';
+frontend\app\page.js:48:          CartnCodForm plugs into your Shopify stores, tracks every abandoned cart,
+frontend\app\page.js:104:        © {new Date().getFullYear()} CartnCodForm
+frontend\app\layout.js:4:  title: 'CartnCodForm',
+frontend\app\admin\screens\Onboarding.jsx:122:          Welcome to CartnCodForm
+backend\models\AbandonedCustomer.js:57:  // 'push'  -> a CartnCodForm automated push led to this order
+backend\server.js:98:  res.json({ service: 'CartnCodForm API', status: 'ok' });
+backend\server.js:605:    console.log(`[server] CartnCodForm API listening on port ${PORT}`);
+backend\routes\push.js:481:    from: 'CartnCodForm <onboarding@resend.dev>',
+backend\scripts\testPush.js:36:    'CartnCodForm push notification working!'
+backend\routes\proxy.js:63:  res.json({ success: true, service: 'CartnCodForm Proxy' });
+backend\scripts\testCustomerPush.js:17:    'CartnCodForm push working on real store!',
+backend\routes\attribution.js:11: * (i.e. the visitor clicked through from a CartnCodForm push).
+backend\utils\billing.js:3:const PLAN_NAME = 'CartnCodForm Pro';
+backend\utils\email.js:87:        `This reminder was sent by CartnCodForm</p>`
+backend\utils\email.js:142:        `<p style="margin:32px 0 0;font-size:12px;color:#9ca3af;">Powered by CartnCodForm</p>`
+backend\utils\email.js:180:    from: 'CartnCodForm <onboarding@resend.dev>',
+extensions\cartncodform-embed\blocks\push-notifications.liquid:649:      d.textContent = 'Powered by CartnCodForm';
+extensions\cartncodform-embed\blocks\push-notifications.liquid:1666:          ? payload.notification.title : 'CartnCodForm';
+extensions\cartncodform-embed\blocks\push-notifications.liquid:2112:    // If this page load came from a CartnCodForm automated push, the URL
+extensions\cartncodform-embed\blocks\push-notifications.liquid:2391:  "name": "CartnCodForm Push",
+shopify.app.toml:1:name = "CartnCodForm"
+backend\package.json:4:  "description": "Backend for CartnCodForm - multi-store Shopify abandoned cart + COD platform",
+README.md:1:# CartnCodForm
+frontend\README.md:1:# CartnCodForm — Frontend
+frontend\README.md:24:| `/` | Landing page (CartnCodForm branding) |
+backend\README.md:1:# CartnCodForm — Backend
+backend\README.md:3:Node.js + Express + MongoDB (Mongoose) API for the CartnCodForm multi-store Shopify platform.
+
+
+====================================================================
+2. "cartncodform" (lowercase, exact) — 38 occurrences
+====================================================================
+
+frontend\public\firebase-messaging-sw.js:5:const DASHBOARD_URL = 'https://cartncodform-beryl.vercel.app/dashboard';
+frontend\public\firebase-messaging-sw.js:9:  projectId: "cartncodform",
+frontend\public\firebase-messaging-sw.js:12:  authDomain: "cartncodform.firebaseapp.com",
+frontend\public\firebase-messaging-sw.js:13:  storageBucket: "cartncodform.appspot.com",
+frontend\public\firebase-messaging-sw.js:50:          if (client.url.includes('cartncodform-beryl.vercel.app') && 'focus' in client) {
+backend\public\cartncodform-sw.js:9:  projectId: "cartncodform",
+backend\public\cartncodform-sw.js:12:  authDomain: "cartncodform.firebaseapp.com",
+backend\public\cartncodform-sw.js:13:  storageBucket: "cartncodform.appspot.com",
+backend\server.js:39:  'https://cartncodform-beryl.vercel.app',
+backend\server.js:89:app.use('/cartncodform-sw.js', (req, res, next) => {
+backend\server.js:152:app.use('/apps/cartncodform', proxyRouter);
+backend\routes\auth.js:20:// set (e.g. https://cartncodform-backend.onrender.com) so the OAuth redirect_uri
+backend\routes\auth.js:123:    const dashboardUrl = `https://admin.shopify.com/store/${shopDomain.replace('.myshopify.com', '')}/apps/cartncodform`;
+backend\routes\auth.js:242:    const dashboardUrl = `https://admin.shopify.com/store/${shop.replace('.myshopify.com', '')}/apps/cartncodform`;
+backend\routes\proxy.js:29:// URL: https://cartncod-form.myshopify.com/apps/cartncodform/sw.js
+backend\routes\proxy.js:36:  const swPath = path.join(__dirname, '../public/cartncodform-sw.js');
+backend\routes\proxy.js:45:  res.setHeader('Service-Worker-Allowed', '/apps/cartncodform/');
+backend\routes\proxy.js:69://   https://{shop}/apps/cartncodform/popup-config?shop={shop}
+backend\routes\proxy.js:100://   https://{shop}/apps/cartncodform/discount-config?shop={shop}
+backend\routes\proxy.js:145://   https://{shop}/apps/cartncodform/generate-discount?shop={shop}
+backend\routes\proxy.js:171:// App Proxy:  https://{shop}/apps/cartncodform/cod-form?productName=..&price=..
+backend\routes\proxy.js:337:    fetch('/apps/cartncodform/cod-order', {
+backend\scripts\testPush.js:34:    'cartncodform-demo.myshopify.com',
+backend\scripts\seedData.js:34:const SHOP = 'cartncodform-demo.myshopify.com';
+extensions\cartncodform-embed\blocks\push-notifications.liquid:9:  var BACKEND_URL = 'https://cartncodform-backend.onrender.com';
+extensions\cartncodform-embed\blocks\push-notifications.liquid:12:  var PROXY_SW_URL = window.location.origin + '/apps/cartncodform/sw.js';
+extensions\cartncodform-embed\blocks\push-notifications.liquid:18:    projectId: "cartncodform",
+extensions\cartncodform-embed\blocks\push-notifications.liquid:21:    authDomain: "cartncodform.firebaseapp.com",
+extensions\cartncodform-embed\blocks\push-notifications.liquid:22:    storageBucket: "cartncodform.appspot.com",
+extensions\cartncodform-embed\blocks\push-notifications.liquid:1234:            return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
+extensions\cartncodform-embed\blocks\push-notifications.liquid:1282:                return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
+extensions\cartncodform-embed\blocks\push-notifications.liquid:1338:    var url = window.location.origin + '/apps/cartncodform/popup-config';
+extensions\cartncodform-embed\blocks\push-notifications.liquid:1356:    var url = window.location.origin + '/apps/cartncodform/discount-config?shop=' +
+extensions\cartncodform-embed\blocks\push-notifications.liquid:1508:      fetch('/apps/cartncodform/generate-discount?shop=' +
+extensions\cartncodform-embed\blocks\push-notifications.liquid:1687:      var swUrl = window.location.origin + '/apps/cartncodform/sw.js';
+extensions\cartncodform-embed\blocks\push-notifications.liquid:1692:          var swScope = window.location.origin + '/apps/cartncodform/';
+extensions\cartncodform-embed\blocks\push-notifications.liquid:1695:            reg.active.scriptURL.indexOf('/apps/cartncodform/sw.js') !== -1;
+extensions\cartncodform-embed\blocks\push-notifications.liquid:1711:            reg.active.scriptURL.indexOf('/apps/cartncodform/sw.js') !== -1 &&
+extensions\cartncodform-embed\blocks\push-notifications.liquid:1712:            reg.scope === window.location.origin + '/apps/cartncodform/'
+extensions\cartncodform-embed\blocks\push-notifications.liquid:1721:          scope: '/apps/cartncodform/',
+shopify.app.toml:3:application_url = "https://cartncodform-beryl.vercel.app/admin"
+shopify.app.toml:8:  "https://cartncodform-backend.onrender.com/api/auth/callback"
+shopify.app.toml:16:  uri = "https://cartncodform-backend.onrender.com/api/webhooks/compliance"
+shopify.app.toml:20:  uri = "https://cartncodform-backend.onrender.com/api/webhooks/cart"
+shopify.app.toml:24:  uri = "https://cartncodform-backend.onrender.com/api/webhooks/checkout"
+shopify.app.toml:28:  uri = "https://cartncodform-backend.onrender.com/api/webhooks/order"
+shopify.app.toml:34:url = "https://cartncodform-backend.onrender.com/apps/cartncodform"
+shopify.app.toml:35:subpath = "cartncodform"
+shopify.app.toml:40:  handle = "cartncodform-push"
+shopify.app.toml:41:  path = "extensions/cartncodform-embed"
+frontend\package.json:2:  "name": "cartncodform-frontend",
+backend\package.json:2:  "name": "cartncodform-backend",
+backend\README.md:53:Creates one demo store (`cartncodform-demo.myshopify.com`) with 3 abandoned
+
+(Note: proxy.js line 29 also contains the hyphenated
+"cartncod-form.myshopify.com" domain alongside the contiguous
+"cartncodform" in "/apps/cartncodform/sw.js" — counted once here,
+also appears under section 6 below.)
+
+
+====================================================================
+3. "PushDaddy" — 0 occurrences
+====================================================================
+
+No matches anywhere in frontend/, backend/, extensions/,
+shopify.app.toml, package.json (frontend/backend), or any of the
+three README files. This name does not appear in the codebase at
+all in the searched locations.
+
+
+====================================================================
+4. "PushDaddy AI" — 0 occurrences
+====================================================================
+
+No matches anywhere in the searched locations (subsumed by section
+3 — since "PushDaddy" alone has zero hits, "PushDaddy AI" also has
+zero).
+
+
+====================================================================
+5. "CartnCod" (exact case) — 28 occurrences (identical set to #1)
+====================================================================
+
+Every case-sensitive occurrence of "CartnCod" in the searched
+locations is immediately followed by "Form" — there is no line
+anywhere containing exact-case "CartnCod" without "Form" right
+after it. So this pattern's result set is IDENTICAL to section 1's
+28 lines above; not re-listed here to avoid duplicating the same 28
+lines twice. See section 1 for the full file/line/text list.
+
+
+====================================================================
+6. "cartncod" (lowercase, exact) — 56 occurrences
+====================================================================
+
+All 38 lines from section 2 above, PLUS these 18 additional lines
+where only the HYPHENATED lowercase form "cartncod-form" appears
+(the live Shopify store's actual myshopify.com domain used in
+backend diagnostic/test scripts — contains "cartncod" but the
+hyphen breaks contiguity with "form", so these did NOT match
+section 2's "cartncodform" pattern):
+
+backend\check-automation.js:12:  const store = await Store.findOne({ shopDomain: 'cartncod-form.myshopify.com' })
+backend\check-fcm-status.js:41:      shopDomain: 'cartncod-form.myshopify.com',
+backend\check-fcm-status.js:60:    .find({ shopDomain: 'cartncod-form.myshopify.com' })
+backend\check-token-live.js:9:    shopDomain: 'cartncod-form.myshopify.com'
+backend\check-token-live.js:24:    'https://cartncod-form.myshopify.com/admin/api/2025-01/shop.json',
+backend\check-webhooks.js:9:    shopDomain: 'cartncod-form.myshopify.com'
+backend\check-webhooks.js:13:  const shop = 'cartncod-form.myshopify.com';
+backend\scripts\updateToken.js:12:    shopDomain: 'cartncod-form.myshopify.com'
+backend\scripts\updateToken.js:17:    'https://cartncod-form.myshopify.com/admin/api/2025-07/graphql.json',
+backend\scripts\testCustomerPush.js:15:    'cartncod-form.myshopify.com',
+backend\scripts\testCustomerPush.js:18:    'https://cartncod-form.myshopify.com',
+backend\scripts\checkToken.js:9:    shopDomain: 'cartncod-form.myshopify.com'
+backend\scripts\testDiscount.js:9:    shopDomain: 'cartncod-form.myshopify.com'
+backend\scripts\testDiscount.js:28:    'https://cartncod-form.myshopify.com/admin/api/2025-01/graphql.json',
+backend\scripts\testDiscountOnline.js:9:    shopDomain: 'cartncod-form.myshopify.com'
+backend\scripts\testDiscountOnline.js:35:    'https://cartncod-form.myshopify.com/admin/api/2025-01/graphql.json',
+backend\test-fetch-image.js:9:    shopDomain: 'cartncod-form.myshopify.com'
+backend\test-fetch-image.js:14:  const shop = 'cartncod-form.myshopify.com';
+backend\test-push-direct.js:33:      'cartncod-form.myshopify.com',
+
+All 18 additional lines are in backend/ only (diagnostic/one-off
+scripts and test utilities) — no frontend, extensions, toml, or
+package.json/README line uses the hyphenated form. See section 2
+above for the other 38 lines making up this pattern's full 56-line
+total (this section lists only the 18 NOT already shown in section
+2, to avoid duplicating 38 identical lines).
+
+
+====================================================================
+SUMMARY / OBSERVATIONS RELEVANT TO A RENAME
+====================================================================
+
+- Brand name "CartnCodForm" / "cartncodform" appears across product
+  copy (page titles, email sender names, onboarding text, README
+  files), infrastructure identifiers (Vercel domain
+  cartncodform-beryl.vercel.app, Render domain
+  cartncodform-backend.onrender.com, Firebase projectId
+  "cartncodform" and its derived authDomain/storageBucket), Shopify
+  app config (shopify.app.toml name/application_url/redirect URLs/
+  webhook URIs/app-proxy subpath/extension handle+path), the theme
+  extension's own directory name (extensions/cartncodform-embed/)
+  and its shopify.extension.toml name field (not counted above —
+  out of the requested .liquid-only extensions scope, but directly
+  relevant to any rename), package.json "name" fields in both
+  frontend and backend, and a live store's actual myshopify.com
+  domain (cartncod-form.myshopify.com — hyphenated, distinct from
+  the brand spelling) hardcoded into ~19 backend diagnostic/test
+  scripts.
+- "PushDaddy" / "PushDaddy AI" do not exist anywhere in this
+  codebase's searched locations — no prior/alternate branding
+  under that name was found to clean up.
+- Two distinct kinds of "cartncod(form)" occurrences exist: (a) the
+  BRAND name, which a rename would target, and (b) the ACTUAL live
+  Shopify store domain cartncod-form.myshopify.com used only in
+  ad-hoc backend scripts for manual testing/debugging — renaming
+  the brand would NOT need to touch (b), since that's a real
+  external store domain, not app branding.
+
+No files were modified as part of this task.

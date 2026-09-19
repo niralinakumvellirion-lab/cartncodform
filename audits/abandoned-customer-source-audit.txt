@@ -1,0 +1,365 @@
+ABANDONED CUSTOMER SOURCE AUDIT - read-only, no changes
+==========================================================
+Generated: 2026-09-12
+
+
+====================================================================
+1. backend/models/AbandonedCustomer.js - full schema (lines 1-68)
+====================================================================
+  1	const mongoose = require('mongoose');
+  2
+  3	const abandonedCustomerSchema = new mongoose.Schema({
+  4	  shopDomain: {
+  5	    type: String,
+  6	    required: true,
+  7	    trim: true,
+  8	    lowercase: true,
+  9	    index: true,
+ 10	  },
+ 11	  email: {
+ 12	    type: String,
+ 13	    trim: true,
+ 14	    lowercase: true,
+ 15	  },
+ 16	  phone: {
+ 17	    type: String,
+ 18	    trim: true,
+ 19	  },
+ 20	  cartItems: [
+ 21	    {
+ 22	      title: String,
+ 23	      quantity: Number,
+ 24	      price: Number,
+ 25	      imageUrl: String,
+ 26	      productId: mongoose.Schema.Types.Mixed,
+ 27	      variantId: mongoose.Schema.Types.Mixed,
+ 28	    },
+ 29	  ],
+ 30	  // First available cart-item image, used as the push notification image.
+ 31	  productImageUrl: {
+ 32	    type: String,
+ 33	    trim: true,
+ 34	  },
+ 35	  cartValue: {
+ 36	    type: Number,
+ 37	    default: 0,
+ 38	  },
+ 39	  sessionId: {
+ 40	    type: String,
+ 41	    trim: true,
+ 42	  },
+ 43	  customerId: {
+ 44	    type: String,
+ 45	  },
+ 46	  status: {
+ 47	    type: String,
+ 48	    enum: ['abandoned', 'recovered'],
+ 49	    default: 'abandoned',
+ 50	  },
+ 51	  // --- Revenue attribution (set by handleOrderWebhook on orders/create) ---
+ 52	  recoveredAt: { type: Date },
+ 53	  recoveredOrderId: { type: String },
+ 54	  recoveredOrderName: { type: String },
+ 55	  recoveredRevenue: { type: Number },
+ 56	  recoveredCurrency: { type: String },
+ 57	  // 'push'  -> a CartnCodForm automated push led to this order
+ 58	  // 'organic' -> recovered without an attributable push click
+ 59	  attributionSource: { type: String, enum: ['push', 'organic', null], default: null },
+ 60	  attributedJobId: { type: mongoose.Schema.Types.ObjectId, ref: 'ScheduledJob' },
+ 61	  createdAt: {
+ 62	    type: Date,
+ 63	    default: Date.now,
+ 64	  },
+ 65	});
+ 66
+ 67	module.exports = mongoose.model('AbandonedCustomer', abandonedCustomerSchema);
+
+NOTE: no `updatedAt` field exists in this schema at all (confirmed
+directly here) - this matches signalEngine.js's own comment
+("AbandonedCustomer has no updatedAt field -- createdAt is the abandon
+clock") and explains why the prior audit's script printed `updatedAt:
+undefined` for every row: the field genuinely does not exist, it is not
+a query bug.
+
+
+====================================================================
+2. Every place AbandonedCustomer is created or upserted
+====================================================================
+Search: "new AbandonedCustomer", "AbandonedCustomer.create",
+"AbandonedCustomer.findOneAndUpdate", "AbandonedCustomer.updateOne"
+across backend/ -- 3 matches found (a 4th, AbandonedCustomer.updateMany,
+was also found while reading full context and is included below since
+it is directly relevant, even though "updateOne" was the literal search
+term and updateMany is a different method).
+
+--------------------------------------------------------------
+2a. backend/scripts/seedData.js:68 -- AbandonedCustomer.create()
+--------------------------------------------------------------
+(10 lines context, lines 58-77)
+ 58	  ...
+ 60	  const store = await Store.create({
+ 61	    shopDomain: SHOP,
+ 62	    accessToken: 'demo-access-token-not-real',
+ 63	    installedAt: new Date(),
+ 64	  });
+ 65	  console.log(`Created Store: ${store.shopDomain} (_id=${store._id})`);
+ 66
+ 67	  // --- 3 AbandonedCustomer docs ---
+ 68	  const customers = await AbandonedCustomer.create([
+ 69	    {
+ 70	      shopDomain: SHOP,
+ 71	      email: 'jordan.buyer@example.com',
+ 72	      cartItems: [{ title: 'Wireless Earbuds', quantity: 1, price: 59.99 }],
+ 73	      cartValue: 59.99,
+ 74	      sessionId: 'seed-session-1',
+ 75	      status: 'abandoned',
+ 76	    },
+ 77	    {
+ 78	      shopDomain: SHOP,
+ 79	      phone: '+91 90000 11111',
+ 80	    (...2 more seed docs follow, sessionId 'seed-session-2' /
+ 80	     'seed-session-3' per the previous task's abandoned-audit.txt output)
+
+This is a ONE-OFF LOCAL DEV SEED SCRIPT (backend/scripts/seedData.js),
+run manually, not part of any live request path. This directly explains
+the 'seed-session-1' / 'seed-session-2' / 'seed-session-3' placeholder
+rows found in the previous audit (audits/abandoned-audit.txt) -- they
+are fixture data from this script, not real storefront activity.
+
+--------------------------------------------------------------
+2b. backend/routes/webhooks.js:160-166 -- inside handleWebhook()
+    (shared cart + checkout webhook handler)
+--------------------------------------------------------------
+(full surrounding function context, lines 127-167 -- the relevant
+create/upsert lines are 158-167)
+127	async function handleWebhook(source, req, res) {
+128	  // --- Enforce Shopify webhook HMAC verification before anything else ---
+129	  const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+130	  if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+131	    console.warn(
+132	      `[webhook:${source}] Rejected -- invalid or missing X-Shopify-Hmac-Sha256 header`
+133	    );
+134	    return res.status(401).json({ error: 'Unauthorized: webhook HMAC verification failed' });
+135	  }
+136
+137	  try {
+138	    const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shopDomain || '')
+139	      .toString()
+140	      .trim()
+141	      .toLowerCase();
+142	    const topic = req.get('X-Shopify-Topic') || source;
+143
+144	    console.log(`\n[webhook:${source}] Received "${topic}" from ${shopDomain || 'unknown shop'}`);
+145
+146	    if (!shopDomain) {
+147	      // Still acknowledge so Shopify doesn't retry forever.
+148	      return res.status(200).json({ received: true, warning: 'no shop domain' });
+149	    }
+150
+151	    const doc = mapPayloadToCustomer(shopDomain, req.body);
+152
+153	    console.log('[webhook] Mapped customer productImageUrl:', doc.productImageUrl);
+154	    console.log('[webhook] Mapped customer cartItems[0]:',
+155	      JSON.stringify(doc.cartItems?.[0], null, 2)
+156	    );
+157
+158	    let savedCustomer;
+159	    if (doc.sessionId) {
+160	      savedCustomer = await AbandonedCustomer.findOneAndUpdate(
+161	        { shopDomain, sessionId: doc.sessionId },
+162	        doc,
+163	        { upsert: true, new: true, setDefaultsOnInsert: true }
+164	      );
+165	    } else {
+166	      savedCustomer = await AbandonedCustomer.create(doc);
+167	    }
+
+The doc.sessionId value being upserted on comes from
+mapPayloadToCustomer() (same file, lines 21-59):
+  55	    sessionId: (payload.token || payload.cart_token || payload.id || '').toString(),
+i.e. the Shopify cart/checkout webhook payload's own `token` (carts/*)
+or `cart_token` (checkouts/*) field, falling back to the payload's `id`.
+This is the SAME cart token the storefront's own /cart.js also returns
+as `cart.token` -- so in principle these should be comparable values,
+assuming the webhook actually fires for the same cart.
+
+Directly below this (line 175, inside the SAME handler, not reproduced
+above since it is a few lines further down):
+  upsertProfile(shopDomain, {
+    ...
+    cartToken: doc.sessionId || null,
+  }, { lastSeenAt: new Date() })
+This IS a working, correct cartToken-linking path onto
+profile.identifiers.cartTokens -- distinct from (and pre-existing,
+unrelated to) the two cartToken-linking fixes added in the two
+immediately preceding tasks (events.js's add_to_cart handling and
+discounts.js's popup email-capture handling).
+
+--------------------------------------------------------------
+2c. backend/routes/webhooks.js:331 -- AbandonedCustomer.updateMany()
+    inside handleOrderWebhook() (orders/create)
+--------------------------------------------------------------
+(surrounding context, lines 301-334)
+301	    // Mark the matching AbandonedCustomer as recovered + join attribution.
+302	    if (cartToken) {
+303	      const normalizedToken = cartToken.split('?')[0].trim();
+304	      ...
+320	      const updateFields = { status: 'recovered' };
+321	      if (!isTestOrder) {
+322	        updateFields.recoveredAt = new Date();
+323	        updateFields.recoveredOrderId = order.id ? String(order.id) : null;
+324	        updateFields.recoveredOrderName = order.name || null;
+325	        updateFields.recoveredRevenue = revenueAmount != null ? Number(revenueAmount) : null;
+326	        updateFields.recoveredCurrency = revenueCurrency;
+327	        updateFields.attributionSource = attributedJobId ? 'push' : 'organic';
+328	        updateFields.attributedJobId = attributedJobId;
+329	      }
+330
+331	      await AbandonedCustomer.updateMany(
+332	        { shopDomain, sessionId: normalizedToken, status: 'abandoned' },
+333	        updateFields
+334	      );
+
+This does not CREATE a new AbandonedCustomer row -- it only flips an
+EXISTING abandoned row (matched by sessionId = cartToken from the
+order) to status: 'recovered' once an order comes in for that cart.
+Included here because it was found while reading the full surrounding
+function, and is relevant context: it means an AbandonedCustomer row
+that gets an order placed against it disappears from future
+status:'abandoned' matches (computeCartAbandon() only ever queries
+status:'abandoned') -- consistent with the model design, not a bug.
+
+No other AbandonedCustomer creation/upsert site was found anywhere else
+in backend/.
+
+
+====================================================================
+3. Webhook handlers in backend/routes/ for the 5 named topics
+====================================================================
+All 5 are handled by backend/routes/webhooks.js -- there is no other
+webhook handler file in backend/routes/.
+
+- carts/create   -> router.post('/cart', ...) -> handleWebhook('cart', req, res)
+- carts/update   -> router.post('/cart', ...) -> handleWebhook('cart', req, res)  (SAME route/handler as carts/create)
+- checkouts/create -> router.post('/checkout', ...) -> handleWebhook('checkout', req, res)
+- checkouts/update -> router.post('/checkout', ...) -> handleWebhook('checkout', req, res)  (SAME route/handler as checkouts/create)
+- orders/create  -> router.post('/order', ...) -> handleOrderWebhook(req, res)
+
+Route declarations (lines 604-620):
+604	/**
+605	 * POST /api/webhooks/cart
+606	 * Handles carts/create and carts/update.
+607	 */
+608	router.post('/cart', (req, res) => handleWebhook('cart', req, res));
+609
+610	/**
+611	 * POST /api/webhooks/checkout
+612	 * Handles checkouts/create and checkouts/update.
+613	 */
+614	router.post('/checkout', (req, res) => handleWebhook('checkout', req, res));
+615
+616	/**
+617	 * POST /api/webhooks/order
+618	 * Handles orders/create.
+619	 */
+620	router.post('/order', (req, res) => handleOrderWebhook(req, res));
+
+So carts/create and carts/update share ONE route + ONE handler
+function (handleWebhook, source='cart'); checkouts/create and
+checkouts/update likewise share ONE route + handler (source='checkout').
+Full handleWebhook() body is reproduced in section 2b above (it is the
+shared cart+checkout handler). handleOrderWebhook()'s full body was
+read in this task (lines 255-389 of webhooks.js) -- the
+AbandonedCustomer-relevant portion is reproduced in section 2c; the
+rest of that function (job cancellation on order, revenue/attribution
+bookkeeping, profile order-stat increments) was read but is outside
+what this task asked to show.
+
+
+====================================================================
+4. shopify.app.toml - full [webhooks] section
+====================================================================
+ 11	[webhooks]
+ 12	api_version = "2025-01"
+ 13
+ 14	  [[webhooks.subscriptions]]
+ 15	  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+ 16	  uri = "https://cartncodform-backend.onrender.com/api/webhooks/compliance"
+
+That is the ENTIRE [webhooks] section of shopify.app.toml. It declares
+exactly ONE subscription block, and it is ONLY for the three GDPR
+compliance topics (customers/data_request, customers/redact,
+shop/redact) -- pointed at /api/webhooks/compliance, matching
+webhooks.js's router.post('/compliance', ...) dispatcher (section 3).
+
+IMPORTANT: carts/create, carts/update, checkouts/create,
+checkouts/update, and orders/create are NOT declared anywhere in this
+TOML file. They do NOT go through Shopify's declarative
+app-config webhook registration at all.
+
+Cross-reference (found while tracing this, not explicitly asked for in
+this task's numbered list, but directly relevant to interpreting the
+TOML gap correctly -- included so the finding isn't misread as "these
+webhooks are simply missing/broken"):
+  backend/utils/shopify.js defines registerAllWebhooks(shop, accessToken,
+  backendUrl), which loops over a hardcoded topic list --
+    'carts/create', 'carts/update', 'checkouts/create', 'checkouts/update',
+    'orders/create', 'app_subscriptions/update', 'app/uninstalled'
+  -- and registers each one individually via the classic REST Admin API
+  (POST https://{shop}/admin/api/{version}/webhooks.json), NOT the TOML
+  mechanism. This function IS called, from backend/routes/auth.js line
+  120, inside the OAuth callback:
+    // Register webhooks (best-effort, non-blocking failures are logged).
+    await registerAllWebhooks(shopDomain, accessToken, getBackendUrl(req));
+  So these 5 topics are registered dynamically, per-shop, at
+  install/reconnect time via a live Admin API call -- a DIFFERENT,
+  legitimate mechanism from the declarative TOML subscriptions used for
+  the GDPR topics. The TOML file being silent on these 5 topics is
+  therefore not itself evidence they are unregistered -- but the
+  comment "best-effort, non-blocking failures are logged" means a
+  failed registerWebhook() call for any one topic is only ever logged
+  (utils/shopify.js's registerWebhook(), on failure: "console.error(...
+  Failed to register webhook ...)") and never retried or surfaced
+  anywhere else (no stored flag, no admin-visible warning) -- so if this
+  registration silently failed for this store at some point (e.g. an
+  expired/invalid token at registration time, a scope mismatch, or the
+  webhook already existing under stale settings), there would be no
+  ongoing visible sign of it, and the only way to know would be a
+  historical Render log line or checking Shopify's own webhook
+  subscription list for the shop directly. Not verified further here --
+  this is scope beyond what this audit-only task asked to check (it
+  would require either digging through historical Render logs or a live
+  Shopify Admin API call against the actual store, neither performed in
+  this task).
+
+
+====================================================================
+SUMMARY (read-only synthesis, no code changed)
+====================================================================
+- AbandonedCustomer rows are created/updated from exactly one live
+  request path: webhooks.js's handleWebhook() (carts/checkout webhooks),
+  keyed by sessionId = the cart/checkout token from the Shopify payload.
+  A second path (seedData.js) only ever runs manually for local dev
+  fixtures and produced the 'seed-session-N' rows seen in the prior
+  audit. A third site (handleOrderWebhook's updateMany) only recovers
+  existing rows, never creates new ones.
+- The 5 cart/checkout/order webhook topics are NOT declared in
+  shopify.app.toml -- they rely entirely on the runtime
+  registerAllWebhooks() REST call made during OAuth (routes/auth.js).
+  That call's own failures are only logged, never retried or surfaced,
+  so a silent registration failure for this specific store cannot be
+  ruled out from the code alone -- would need direct verification
+  against Shopify or historical logs, not done here.
+- Given the previous task's finding that AbandonedCustomer only has 36
+  total documents (several of them the seed fixtures) and that ZERO of
+  the 2 email-profiles' 32 cartTokens matched any AbandonedCustomer row,
+  the most likely explanations remain, now narrowed by this pass: either
+  (a) carts/create and carts/update webhooks are not actually arriving
+  for this store (registration failure, uninstalled/reinstalled without
+  re-registering, or a HMAC/shop-domain mismatch silently rejecting them
+  at the top of handleWebhook()), or (b) they ARE arriving but the token
+  value Shopify sends in the webhook payload (payload.token /
+  payload.cart_token / payload.id) does not actually match what the
+  storefront's own /cart.js reports as cart.token for the same cart in
+  this store's checkout flow. Neither hypothesis was tested in this
+  task; both would require live/log verification beyond a code read.

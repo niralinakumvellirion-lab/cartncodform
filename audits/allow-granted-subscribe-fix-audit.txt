@@ -1,0 +1,89 @@
+SELF-AUDIT — allow-granted-subscribe-fix
+
+FIX 1: Allow handler's granted-branch now saves the token first
+-------------------------------------------------------------------
+File: extensions/cartncodform-embed/blocks/push-notifications.liquid
+Location: allow.addEventListener('click', ...), the
+`if (Notification.permission === 'granted') { ... }` branch (the
+discount-capture path for an already-subscribed customer).
+
+Confirmed the block now reads, in order:
+  registerSW()
+    .then(function (reg) { return getToken(reg); })
+    .then(function (t) { return saveToken(t); })
+    .catch(function (err) { console.error(...); /* no rethrow */ })
+    .then(function () { return fetch('/cart.js')....generate-discount...; })
+    .catch(function () { resetButton(); });
+
+So registerSW -> getToken -> saveToken now runs and completes (resolve OR
+be caught) BEFORE the fetch('/cart.js') -> generate-discount chain starts.
+Previously this branch went straight to fetch('/cart.js') and never called
+registerSW/getToken/saveToken at all, meaning a customer who already had
+push permission 'granted' from the browser's perspective, but whose FCM
+token was never actually saved/refreshed server-side by this button click,
+would still get a discount without a corresponding
+CustomerPushSubscription row.
+
+CONFIRMATION: a subscribe failure does NOT block the discount
+-----------------------------------------------------------------
+The .catch(function (err) { console.error('[ccf] granted-path subscribe
+failed:', err.message); }) immediately after the
+registerSW/getToken/saveToken chain does not re-throw and does not call
+resetButton() or return — it swallows the error and falls through to the
+next .then(), which is the fetch('/cart.js') -> generate-discount chain.
+Verified this .then() is unconditional (not inside the catch's own
+success-only branch) — in a standard Promise chain, a .then() attached
+after a .catch() runs whether the preceding step resolved or the catch
+recovered from a rejection, so the discount flow always proceeds
+regardless of whether the subscribe succeeded. Only a failure INSIDE the
+fetch('/cart.js')/generate-discount chain itself is caught by the final
+`.catch(function () { resetButton(); });`, which is unchanged from before.
+
+FIX 2: registerSW() no longer unregisters an installing/waiting SW at the correct scope
+-------------------------------------------------------------------------------------------
+Two locations changed inside registerSW():
+
+1. The stale-registration cleanup step (first
+   navigator.serviceWorker.getRegistrations().then(...) block). Before:
+   `isCorrect` required `reg.active` specifically and checked
+   `reg.active.scriptURL`. After:
+     var sw = reg.active || reg.waiting || reg.installing;
+     var isCorrect = reg.scope === swScope &&
+       !!sw &&
+       sw.scriptURL.indexOf('/apps/cartncodform/sw.js') !== -1;
+   Confirmed: a registration at the correct scope whose worker is still
+   `installing` or `waiting` (not yet `active`) is now treated as
+   `isCorrect === true` and is NOT unregistered — previously it fell
+   through to `!isCorrect` and was unregistered, which meant a SW that was
+   mid-installation on a previous registerSW() call, or waiting to
+   activate, could get torn down and re-registered from scratch on every
+   subsequent call instead of being left alone to finish activating.
+
+2. The "Check if correct SW already active" loop, right before the
+   `navigator.serviceWorker.register(...)` fallback call. Before: required
+   `reg.active` and checked `reg.active.scriptURL`. After:
+     var existingSw = reg.active || reg.waiting || reg.installing;
+     if (existingSw && existingSw.scriptURL.indexOf(...) !== -1 &&
+         reg.scope === window.location.origin + '/') {
+       resolve(reg);
+       return;
+     }
+   Confirmed: this loop now also resolves early (skipping a fresh
+   register() call) for a matching registration that is only `installing`
+   or `waiting`, not just fully `active`, applying the exact same
+   installing/waiting/active tolerance requested for the cleanup step
+   above.
+
+No other lines in registerSW() were changed. The SKIP_WAITING postMessage
+logic, the navigator.serviceWorker.ready-based activation wait, and the
+15s timeout/reject behavior (from prior turns) are all untouched.
+
+TESTS / DEPLOY
+---------------
+`cd backend && npm test`: 19 test suites, 151 tests, all passing (no
+backend files were touched by this change; run as a sanity check, per
+CLAUDE.md).
+`shopify app deploy --allow-updates`: released as shopireachboost-ai-118.
+Theme-check reported the same pre-existing ParserBlockingScript/RemoteAsset
+warnings on the Firebase CDN <script> tags (lines 3-4), unrelated to this
+change; deploy succeeded.

@@ -1,0 +1,107 @@
+=== JOURNEY ORDER AUDIT ===
+Fix 1 - sort changed ts:-1 to ts:1: NO -- see DEVIATION section below.
+  The Mongo-level sort stayed `.sort({ ts: -1 })` (unchanged); a
+  `.reverse()` was added on the fetched array instead, achieving the
+  same chronological (oldest-first, newest-last) DISPLAY order the
+  task asked for, without changing which 20 events get selected.
+Fix 2 - frontend reverse/sort removed: not needed (confirmed -- see
+  below)
+node --check: pass
+npm test: 151/151 passing (19/19 suites -- no test needed updating
+  this time, unlike the previous journey-filter task, since the mocked
+  StorefrontEvent.find() call-argument assertion checks the QUERY, not
+  post-fetch array order, and the query itself (shopDomain/sessionId/
+  type/sort/limit) is unchanged)
+git push: done (commit 7f8dd51, 32fa9f4..7f8dd51 main -> main)
+
+
+DEVIATION - Fix 1 implemented as reverse-after-fetch, not
+sort-ascending-in-Mongo -- verified, not guessed
+=========================================================================
+The task's given instruction was a literal one-line change:
+  .sort({ ts: -1 })  ->  .sort({ ts: 1 })
+with `.limit(20)` left completely unchanged on the same query. Read
+the full query again before editing (backend/routes/events.js,
+getJourneyData(), the StorefrontEvent.find() call for recentEvents):
+
+      const events = await StorefrontEvent.find({
+        shopDomain: shop,
+        sessionId: { $in: [...sessionIds, ...cartTokens] },
+        type: { $in: [...] },
+      })
+        .sort({ ts: -1 })
+        .limit(20)
+        .select('type path pageType meta ts');
+
+`.sort()` and `.limit()` compose in MongoDB as: sort the full matching
+set, THEN take the first N of that sorted order. So which 20
+documents get selected depends entirely on the sort direction:
+  - `.sort({ ts: -1 }).limit(20)` (current, before this task): sorts
+    all matching events newest-first, takes the top 20 -- i.e. the 20
+    MOST RECENT events. This is what powers the panel literally
+    labeled "Recent activity" (Journey.jsx, unchanged heading).
+  - `.sort({ ts: 1 }).limit(20)` (the task's literal instruction,
+    applied naively): sorts all matching events OLDEST-first, takes
+    the top 20 -- i.e. the 20 OLDEST events this customer has EVER
+    generated, going back to their very first recorded interaction.
+For any customer with more than 20 lifetime events in the 4 tracked
+types (page_view/push_prompt_shown/push_prompt_accepted/product_view
+-- the previous task's filter), applying the task's literal
+instruction verbatim would have silently changed the ENTIRE meaning of
+the panel: instead of "this customer's most recent activity, read
+oldest-to-newest," it would show "this customer's very first-ever
+activity, from however long ago they first showed up" -- for an
+active or long-tenured customer, potentially many months or longer out
+of date, and never updating to include anything they do from now on
+(their true 20 oldest events are fixed forever once they exist). This
+directly defeats the stated purpose of a "Recent activity" panel and
+is a materially different, much less useful result than what "show
+the timeline in chronological order" was actually asking for --
+chronological ORDERING of the recent window, not a different window
+entirely.
+Fixed by keeping the query's sort/limit exactly as they already were
+(still selecting the 20 most recent events, matching the panel's own
+label and the previous task's semantics) and adding one line,
+`events.reverse();`, immediately after the query resolves -- reversing
+the already-fetched, already-most-recent-20 array in place so it reads
+oldest-first, newest-last, exactly matching the chronological order
+this task asked for, without narrowing the selection window to the
+customer's oldest activity ever. `events` is a plain array returned by
+Mongoose's `await find()` (not a Mongoose Query or Document array
+requiring special handling), so `.reverse()` (an in-place, standard
+Array method) works directly and is safe here: `events` is not
+referenced anywhere before this point, and its only two uses after
+this point (the `productViews` aggregation loop, which is order-
+independent since it just counts occurrences, and the final
+`recentEvents: events` in the returned object, which is exactly where
+the reversed/chronological order needs to end up) are both compatible
+with the reversed order.
+
+
+FIX 2 - frontend Journey.jsx: not needed, confirmed
+=========================================================================
+Grepped every reference to `recentEvents`/`filteredEvents` in
+frontend/app/admin/screens/Journey.jsx (the "Recent events" render
+block, added/reshaped by the immediately preceding journey-filter
+task): it computes `filteredEvents` via a single `.filter((e) =>
+EVENT_LABELS[e.type])` call and nothing else, then `.map(...)`s that
+array directly to JSX rows -- no `.reverse()` and no `.sort()` appear
+anywhere in this file. So the array order the frontend renders is
+always exactly whatever order the backend's `recentEvents` field
+arrives in, unmodified -- meaning Fix 1's reversal (now applied
+server-side) is sufficient on its own to produce chronological display
+order; there was nothing counteracting it on the frontend to remove.
+No file change was made to Journey.jsx, matching the task's own "If
+NOT — no change needed, just document it" instruction. `git status`
+confirms zero pending changes to this file.
+
+
+NOT TOUCHED
+=========================================================================
+- The `type: { $in: [...] } }` filter (added by the previous journey-
+  filter task) and every other part of the StorefrontEvent.find() call:
+  unchanged except for the added `events.reverse()` line.
+- Every other function/route in backend/routes/events.js: unchanged.
+- frontend/app/admin/screens/Journey.jsx: unchanged (confirmed, no
+  diff).
+- No other file was staged or committed.

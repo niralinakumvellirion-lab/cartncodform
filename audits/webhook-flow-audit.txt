@@ -1,0 +1,300 @@
+WEBHOOK FLOW AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-12
+
+File read: backend/routes/webhooks.js, in full.
+
+
+====================================================================
+1. handleWebhook() - full function, every line (lines 154-275)
+====================================================================
+154	async function handleWebhook(source, req, res) {
+155	  // --- Enforce Shopify webhook HMAC verification before anything else ---
+156	  const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
+157	  if (!verifyWebhookHmac(req.rawBody || '', hmacHeader)) {
+158	    console.warn(
+159	      `[webhook:${source}] Rejected -- invalid or missing X-Shopify-Hmac-Sha256 header`
+160	    );
+161	    return res.status(401).json({ error: 'Unauthorized: webhook HMAC verification failed' });
+162	  }
+163
+164	  try {
+165	    const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shopDomain || '')
+166	      .toString()
+167	      .trim()
+168	      .toLowerCase();
+169	    const topic = req.get('X-Shopify-Topic') || source;
+170
+171	    console.log(`\n[webhook:${source}] Received "${topic}" from ${shopDomain || 'unknown shop'}`);
+172
+173	    if (!shopDomain) {
+174	      // Still acknowledge so Shopify doesn't retry forever.
+175	      return res.status(200).json({ received: true, warning: 'no shop domain' });
+176	    }
+177
+178	    const doc = mapPayloadToCustomer(shopDomain, req.body);
+179
+180	    console.log('[webhook] Mapped customer productImageUrl:', doc.productImageUrl);
+181	    console.log('[webhook] Mapped customer cartItems[0]:',
+182	      JSON.stringify(doc.cartItems?.[0], null, 2)
+183	    );
+184
+185	    let savedCustomer;
+186	    if (doc.sessionId) {
+187	      savedCustomer = await AbandonedCustomer.findOneAndUpdate(
+188	        { shopDomain, sessionId: doc.sessionId },
+189	        doc,
+190	        { upsert: true, new: true, setDefaultsOnInsert: true }
+191	      );
+192	    } else {
+193	      savedCustomer = await AbandonedCustomer.create(doc);
+194	    }
+195
+196	    // Identity resolution + signal computation -- fire-and-forget, off the
+197	    // webhook critical path.
+198	    upsertProfile(shopDomain, {
+199	      customerId: req.body.customer?.id?.toString() || null,
+200	      email: req.body.customer?.email || null,
+201	      phone: req.body.customer?.phone || null,
+202	      cartToken: doc.sessionId || null,
+203	    }, {
+204	      lastSeenAt: new Date(),
+205	    }).then((profile) => {
+206	      if (profile?._id) {
+207	        computeSignalsForProfile(profile._id, shopDomain)
+208	          .catch((err) => console.error('[signals] compute error:', err.message));
+209	      }
+210	    }).catch((err) => console.error('[profile] upsert error:', err.message));
+211
+212	    // Fire the abandoned-cart reminder email if we have an address to send to.
+213	    if (savedCustomer && savedCustomer.email) {
+214	      sendAbandonedCartEmail(savedCustomer);
+215	      console.log(`Abandoned cart email triggered for: ${savedCustomer.email}`);
+216	    }
+217
+218	    // Push-notify the store owner only on new carts (not updates).
+219	    const isNewCart = !savedCustomer.createdAt ||
+220	      (new Date() - new Date(savedCustomer.createdAt)) < 10000;
+221	    if (isNewCart) {
+222	      sendPushToStore(
+223	        shopDomain,
+224	        '[cart emoji] New Abandoned Cart',
+225	        `A customer left items worth [Rupee]${doc.cartValue} in their cart`
+226	      );
+227	    }
+228
+229	    // Resolve a product image for the customer notification. carts/* line_items
+230	    // have no image, so fall back to the Admin API using the first productId.
+231	    const store = await Store.findOne({ shopDomain });
+232	    const firstItem = savedCustomer.cartItems && savedCustomer.cartItems[0];
+233	    const productId = (firstItem && firstItem.productId)
+234	      ? String(firstItem.productId)
+235	      : null;
+236
+237	    // Always resolve the image for the CURRENT first cart item.
+238	    // The cached productImageUrl may belong to a different product if the
+239	    // customer updated their cart, so we re-fetch whenever the productId
+240	    // is available. fetchProductImage returns null on error (safe).
+241	    let productImageUrl = null;
+242
+243	    if (store && productId) {
+244	      productImageUrl = await fetchProductImage(
+245	        shopDomain,
+246	        store.accessToken,
+247	        productId
+248	      );
+249	      if (productImageUrl) {
+250	        await AbandonedCustomer.findByIdAndUpdate(
+251	          savedCustomer._id,
+252	          { productImageUrl }
+253	        );
+254	      }
+255	    }
+256
+257	    // Fallback: use whatever image is already stored if Admin API returned nothing
+258	    if (!productImageUrl) {
+259	      productImageUrl = savedCustomer.productImageUrl || null;
+260	    }
+261
+262	    console.log('[webhook] Final productImageUrl before push:', productImageUrl);
+263
+264	    // Manual push only -- no automatic timer.
+265	    // Owner uses the dashboard "push" button to send notifications.
+266	    // (Automated cart-abandon scheduling is handled by the Brain now -- the
+267	    //  legacy AutomationRule scheduler was retired.)
+268
+269	    return res.status(200).json({ received: true });
+270	  } catch (err) {
+271	    console.error(`[webhook:${source}] error:`, err.message);
+272	    // Acknowledge to avoid aggressive Shopify retries; error is logged for debugging.
+273	    return res.status(200).json({ received: true, error: err.message });
+274	  }
+275	}
+(Emoji in the original source at lines 224 and 265 replaced with bracketed
+text here only for this plain-ASCII audit file; the source file itself
+is untouched and still has the real emoji characters.)
+
+
+====================================================================
+2. Where fetchProductImage() is called inside handleWebhook()
+====================================================================
+Lines 243-248, inside a single `if (store && productId) { ... }` block:
+
+    if (store && productId) {
+      productImageUrl = await fetchProductImage(
+        shopDomain,
+        store.accessToken,
+        productId
+      );
+      ...
+    }
+
+Called exactly once per webhook delivery, only when BOTH a Store
+document was found (line 231, no .select() -- loads every field) AND a
+productId was resolved from the just-saved cart's first item (lines
+232-235, `savedCustomer.cartItems[0].productId`).
+
+
+====================================================================
+3. What happens with the return value - is it saved back to
+   AbandonedCustomer after the fetch?
+====================================================================
+Yes, conditionally. The full sequence (lines 241-260):
+
+    let productImageUrl = null;
+
+    if (store && productId) {
+      productImageUrl = await fetchProductImage(
+        shopDomain, store.accessToken, productId
+      );
+      if (productImageUrl) {
+        await AbandonedCustomer.findByIdAndUpdate(
+          savedCustomer._id,
+          { productImageUrl }
+        );
+      }
+    }
+
+    // Fallback: use whatever image is already stored if Admin API returned nothing
+    if (!productImageUrl) {
+      productImageUrl = savedCustomer.productImageUrl || null;
+    }
+
+So: the AbandonedCustomer row IS updated with the freshly-fetched
+productImageUrl (line 250-253), but ONLY if fetchProductImage()
+returned a truthy value. If it returns null (product genuinely has no
+image, the API call failed, or -- before the token fix -- an auth
+error silently produced null), NOTHING is written back to the
+database at all -- the `if (productImageUrl)` guard at line 249 simply
+skips the update entirely. In that case, `productImageUrl` (the local
+variable) falls through to line 258-259 and is reassigned from
+whatever was ALREADY stored on `savedCustomer.productImageUrl` (which,
+for a first-time cart with no prior successful fetch, is undefined/
+null) -- this local variable is then only used for the
+console.log at line 262 and is NOT sent anywhere else (no push/email
+uses it directly in this function -- the "Manual push only" comment at
+line 264 confirms no automatic send happens here at all).
+
+
+====================================================================
+4. Is there any await missing? (fire-and-forget vs awaited)
+====================================================================
+The entire product-image resolution path (lines 231-260) is FULLY
+awaited, in order, with no gaps:
+  - `await Store.findOne({ shopDomain })` (line 231) -- awaited.
+  - `await fetchProductImage(...)` (line 244-248) -- awaited.
+  - `await AbandonedCustomer.findByIdAndUpdate(...)` (line 250-253) --
+    awaited.
+No missing await was found anywhere in this specific chain.
+
+The ONE deliberately fire-and-forget block in this whole function is
+UNRELATED to the image path -- lines 198-210, the identity-resolution/
+signal-recompute chain:
+    upsertProfile(shopDomain, {...}, {...})
+      .then((profile) => { ... computeSignalsForProfile(...) ... })
+      .catch((err) => console.error(...));
+This is a `.then()/.catch()` chain with NO `await` in front of it,
+explicitly commented "fire-and-forget, off the webhook critical path"
+(line 196-197) -- a deliberate design choice, not a bug, and it plays
+no role in resolving or saving productImageUrl.
+
+`sendAbandonedCartEmail(savedCustomer)` (line 214) and
+`sendPushToStore(...)` (line 222) are ALSO called without `await` --
+both are genuinely fire-and-forget notification sends, and neither
+touches productImageUrl or AbandonedCustomer either.
+
+
+====================================================================
+5. The exact upsert/update call that saves productImageUrl to
+   AbandonedCustomer - full query
+====================================================================
+Two different AbandonedCustomer writes exist in this function; only
+the SECOND one can write productImageUrl.
+
+--- Write 1: the initial upsert (lines 186-194) -- creates/updates the
+    whole document, INCLUDING whatever productImageUrl
+    mapPayloadToCustomer() already put on `doc` (from the webhook
+    payload's own line_items, per Mechanism A discussed in
+    audits/webhook-image-audit.txt -- often null/undefined per that
+    file's own code comment) ---
+    let savedCustomer;
+    if (doc.sessionId) {
+      savedCustomer = await AbandonedCustomer.findOneAndUpdate(
+        { shopDomain, sessionId: doc.sessionId },
+        doc,
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    } else {
+      savedCustomer = await AbandonedCustomer.create(doc);
+    }
+
+--- Write 2: the targeted follow-up update, ONLY when
+    fetchProductImage() returned something truthy (lines 249-254) ---
+    if (productImageUrl) {
+      await AbandonedCustomer.findByIdAndUpdate(
+        savedCustomer._id,
+        { productImageUrl }
+      );
+    }
+  This is the ONLY place in the entire file that writes a
+  Admin-API-resolved productImageUrl onto an EXISTING AbandonedCustomer
+  row. It is scoped by `savedCustomer._id` (the document's own Mongo
+  _id, obtained from Write 1 a few lines above) -- a simple, correctly-
+  targeted single-document update with no query-shape issue found.
+
+
+====================================================================
+SUMMARY (read-only synthesis, no code changed)
+====================================================================
+Nothing structurally wrong was found in this function for the
+image-resolution path: no missing await, a correctly-scoped follow-up
+update, and a conditional write that only skips when
+fetchProductImage() itself returns null. Combined with the immediately
+preceding tasks in this same investigation --
+  - audits/check-token-live.txt-equivalent test: BOTH the offline and
+    "online" tokens on file currently return HTTP 200 against
+    Shopify's Admin API.
+  - a direct call to the SAME endpoint fetchProductImage() itself calls
+    (https://.../admin/api/2025-01/products/9561899499757.json),
+    using the same current token, for the SAME productId that appears
+    on 3 real (non-seed) AbandonedCustomer rows -- succeeded: HTTP 200,
+    product found, 4 images, a real src URL.
+  - yet those exact 3 rows (hWNGk9xKT51pJmNxtGSf38MO,
+    3e9af47bd1f3df3c83d63e09cad0b9e7, hWNGk4gcbJm3IHibIrQYJBHo) still
+    show productImageUrl: MISSING as of the last check.
+The most likely explanation, given the code itself checks out cleanly:
+these 3 rows were last written by a REAL Shopify webhook delivery that
+happened BEFORE fetchProductImage()'s token-preference fix was applied
+(or before the token itself became valid) -- at that point in time the
+fetch would have failed (or, pre-fix, silently misread an auth-error
+response as "no image", per the earlier res.ok-check fix), so
+productImageUrl was correctly left unset by this function's own logic
+(Write 2 never firing, since fetchProductImage() returned null then).
+Since Shopify only re-sends a carts/* webhook on a genuinely NEW cart
+mutation (add-to-cart, quantity change, etc.), not retroactively, these
+already-abandoned carts' rows will not automatically get a fresh
+productImageUrl until the SAME customer's cart is touched again (a real
+storefront event) or the row is otherwise manually reprocessed. This
+was not independently re-verified by triggering a fresh live webhook in
+this task -- it is the most consistent explanation given everything
+checked out in the code itself, not a certainty.

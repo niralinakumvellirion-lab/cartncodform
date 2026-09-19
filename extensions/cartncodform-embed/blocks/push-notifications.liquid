@@ -91,6 +91,12 @@
   }
 
   function canPrompt() {
+    console.log('[ccf:lifecycle] canPrompt check:', {
+      notificationInWindow: 'Notification' in window,
+      permission: typeof Notification !== 'undefined' ? Notification.permission : 'N/A',
+      promptAlreadyShown: promptAlreadyShown(),
+      subscribedKey: localStorage.getItem(SUBSCRIBED_KEY),
+    });
     if (!('Notification' in window)) return false;
     if (Notification.permission !== 'default') return false; // already granted or denied
     if (promptAlreadyShown()) return false;
@@ -580,6 +586,7 @@
   }
 
   function showSoftPrompt(trigger, productId) {
+    console.log('[ccf:lifecycle] showSoftPrompt called, trigger:', arguments[0]);
     // discount-capture path: an already-subscribed customer, shown purely
     // to collect email/phone for a bigger discount — bypasses canPrompt()'s
     // permission-state gate (there's no push permission left to ask for).
@@ -1197,6 +1204,7 @@
     }
 
     allow.addEventListener('click', function () {
+      console.log('[ccf:lifecycle] Allow button clicked');
       // Read the discount inputs BEFORE any teardown.
       var emailEl = document.getElementById('ccf-email-input');
       var email = emailEl && emailEl.value ? emailEl.value.trim() : '';
@@ -1227,23 +1235,48 @@
         allow.textContent = '✓ Getting your discount...';
         allow.style.background = '#16a34a';
 
-        fetch('/cart.js')
-          .then(function (r) { return r.json(); })
-          .then(function (cart) {
-            var cartToken = cart.token ? cart.token.split('?')[0].trim() : null;
-            return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                action: capAction, email: email,
-                sessionId: getSessionId(), cartToken: cartToken
-              })
-            });
+        registerSW()
+          .then(function (reg) { return getToken(reg); })
+          .then(function (t) { return saveToken(t); })
+          .catch(function (err) {
+            console.error('[ccf] granted-path subscribe failed:', err.message);
+            // Report to backend so the error is visible in server logs
+            try {
+              fetch(window.location.origin + '/apps/cartncodform/subscribe-customer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  shopDomain: SHOP_DOMAIN,
+                  token: 'DEBUG_ERROR_REPORT',
+                  deviceType: /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
+                  debugError: (err && err.message) || String(err),
+                  debugCode: (err && err.code) || null,
+                  debugUA: navigator.userAgent.slice(0, 120)
+                })
+              }).catch(function(){});
+            } catch(e) {}
+            // do not block the discount on a subscribe failure
           })
-          .then(function (r) { return r.json(); })
-          .then(function (d) {
-            if (d && d.code) allow.textContent = '🎉 Redirecting...';
-            finishDiscount(d, capAction);
+          .then(function () {
+            return fetch('/cart.js')
+              .then(function (r) { return r.json(); })
+              .catch(function () { return { token: '' }; })
+              .then(function (cart) {
+                var cartToken = cart.token ? cart.token.split('?')[0].trim() : null;
+                return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    action: capAction, email: email,
+                    sessionId: getSessionId(), cartToken: cartToken
+                  })
+                });
+              })
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                if (d && d.code) allow.textContent = '🎉 Redirecting...';
+                finishDiscount(d, capAction);
+              });
           })
           .catch(function () { resetButton(); });
         return;
@@ -1303,6 +1336,15 @@
           })
           .catch(function (err) {
             console.error('[CCF] subscribe after prompt failed:', err.message);
+            console.error('[ccf] Allow flow failed:', err.message);
+            var ccfDebug = false;
+            try {
+              ccfDebug = /[?&]ccf_debug=1/.test(window.location.search) ||
+                localStorage.getItem('ccf_debug') === '1';
+            } catch (e) {}
+            if (ccfDebug) {
+              alert('[CCF Error] ' + err.message);
+            }
             resetButton();
           });
       });
@@ -1680,6 +1722,7 @@
 
   function registerSW() {
     return new Promise(function(resolve, reject) {
+      console.log('[ccf:lifecycle] registerSW: starting...');
       if (!('serviceWorker' in navigator)) {
         return reject(new Error('SW not supported'));
       }
@@ -1688,11 +1731,13 @@
 
       // Unregister any stale SWs (blob URLs, wrong scope) before registering
       navigator.serviceWorker.getRegistrations().then(function(regs) {
+        console.log('[ccf:lifecycle] existing SW registrations:', regs.length, regs.map(function(r) { return { scope: r.scope, active: !!r.active, installing: !!r.installing, waiting: !!r.waiting }; }));
         var unregisterPromises = regs.map(function(reg) {
-          var swScope = window.location.origin + '/';
+          var swScope = window.location.origin + '/apps/cartncodform/';
+          var sw = reg.active || reg.waiting || reg.installing;
           var isCorrect = reg.scope === swScope &&
-            reg.active &&
-            reg.active.scriptURL.indexOf('/apps/cartncodform/sw.js') !== -1;
+            !!sw &&
+            sw.scriptURL.indexOf('/apps/cartncodform/sw.js') !== -1;
           if (!isCorrect) {
             return reg.unregister();
           }
@@ -1701,27 +1746,16 @@
 
         return Promise.all(unregisterPromises);
       }).then(function() {
-        // Unregister old scoped SW if present
-        return navigator.serviceWorker.getRegistrations();
-      }).then(function(existingRegs) {
-        var unregisterOldScopePromises = existingRegs.map(function(reg) {
-          if (reg.scope && reg.scope.indexOf('/apps/cartncodform/') !== -1) {
-            return reg.unregister();
-          }
-          return Promise.resolve(false);
-        });
-
-        return Promise.all(unregisterOldScopePromises);
-      }).then(function() {
         // Check if correct SW already active
         return navigator.serviceWorker.getRegistrations();
       }).then(function(regs) {
         for (var i = 0; i < regs.length; i++) {
           var reg = regs[i];
+          var existingSw = reg.active || reg.waiting || reg.installing;
           if (
-            reg.active &&
-            reg.active.scriptURL.indexOf('/apps/cartncodform/sw.js') !== -1 &&
-            reg.scope === window.location.origin + '/'
+            existingSw &&
+            existingSw.scriptURL.indexOf('/apps/cartncodform/sw.js') !== -1 &&
+            reg.scope === window.location.origin + '/apps/cartncodform/'
           ) {
             resolve(reg);
             return;
@@ -1729,11 +1763,11 @@
         }
 
         // Register fresh
+        console.log('[ccf:lifecycle] registering SW at:', swUrl, 'scope: /apps/cartncodform/');
         navigator.serviceWorker.register(swUrl, {
-          scope: '/',
+          scope: '/apps/cartncodform/',
           updateViaCache: 'none'
         }).then(function(reg) {
-
           if (reg.active) {
             resolve(reg);
             return;
@@ -1741,19 +1775,36 @@
 
           var sw = reg.installing || reg.waiting;
           if (!sw) {
-            // Wait for active
-            navigator.serviceWorker.ready.then(function(readyReg) {
-              resolve(readyReg);
-            });
+            resolve(reg); // FCM can work with the reg as-is
             return;
           }
 
-          var timeout = setTimeout(function() {
-            navigator.serviceWorker.ready.then(resolve);
-          }, 8000);
+          // Force skip waiting if stuck
+          if (reg.waiting) {
+            reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+          }
 
-          sw.addEventListener('statechange', function(e) {
-            if (e.target.state === 'activated') {
+          if (sw.state === 'activated') {
+            resolve(reg);
+            return;
+          }
+
+          // Watch the registration's own installing/waiting worker directly —
+          // never navigator.serviceWorker.ready, which only resolves for the
+          // CURRENT page's controller and never fires for a page outside this
+          // SW's scope (e.g. any normal storefront page, since our scope is
+          // the /apps/cartncodform/ proxy path, not the page itself).
+          var done = false;
+          var timeout = setTimeout(function () {
+            if (done) return;
+            done = true;
+            resolve(reg); // resolve, not reject — FCM often works anyway
+          }, 10000);
+
+          sw.addEventListener('statechange', function () {
+            if (done) return;
+            if (sw.state === 'activated' || sw.state === 'redundant') {
+              done = true;
               clearTimeout(timeout);
               resolve(reg);
             }
@@ -1786,17 +1837,20 @@
 
         var messaging = firebase.messaging(app);
 
+        console.log('[ccf] getToken: calling FCM getToken...');
         messaging.getToken({
           vapidKey: VAPID_KEY,
           serviceWorkerRegistration: swReg
         }).then(function(token) {
           if (token) {
             resolve(token);
+            console.log('[ccf:lifecycle] FCM token obtained:', token.slice(-8));
           } else {
             reject(new Error('No token returned'));
           }
         }).catch(function(err) {
           console.error('[CCF] getToken error:', err.code, err.message);
+          console.error('[ccf] getToken failed:', err.message, err.code);
           reject(err);
         });
       } catch(err) {
@@ -1810,20 +1864,33 @@
     var oldToken = localStorage.getItem(TOKEN_KEY);
     var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
     var deviceType = isMobile ? 'mobile' : 'desktop';
+    console.log('[ccf:lifecycle] saveToken called, deviceType:', deviceType);
 
     var customerId = (window.Shopify && window.Shopify.customerId)
       ? String(window.Shopify.customerId)
       : null;
 
     // Fetch Shopify cart token to link this subscription to the cart.
-    fetch('/cart.js')
+    // Falls back to no cartToken rather than blocking the subscribe POST
+    // if /cart.js is unavailable.
+    return fetch('/cart.js')
       .then(function(r) { return r.json(); })
+      .catch(function(err) {
+        console.warn('[ccf] cart fetch failed, subscribing without cartToken');
+        return { token: '' };
+      })
       .then(function(cart) {
         // Normalize: strip ?key=... suffix so it matches the webhook token.
         var rawCartToken = cart.token || null;
         var cartToken = rawCartToken ? rawCartToken.split('?')[0].trim() || null : null;
 
-        return fetch(BACKEND_URL + '/api/push/subscribe-customer', {
+        console.log('[ccf:lifecycle] POSTing to subscribe-customer, body:', {
+          shopDomain: SHOP_DOMAIN,
+          tokenSnippet: token.slice(-8),
+          deviceType: deviceType,
+          cartToken: cartToken
+        });
+        return fetch(window.location.origin + '/apps/cartncodform/subscribe-customer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1838,8 +1905,12 @@
           })
         });
       })
-      .then(function(r) { return r.json(); })
+      .then(function(r) {
+        console.log('[ccf:lifecycle] subscribe POST response status:', r.status);
+        return r.json();
+      })
       .then(function(data) {
+        console.log('[ccf:lifecycle] subscribe POST data:', JSON.stringify(data));
         if (data.success) {
           localStorage.setItem(TOKEN_KEY, token);
           localStorage.setItem(SUBSCRIBED_KEY, '1');
@@ -1873,14 +1944,13 @@
           }, 1500);
         }
 
-        return data;
+        console.log('[ccf] subscribe POST success');
+        return { success: true };
       })
       .catch(function(err) {
-        console.error('[CCF] saveToken error:', err.message);
+        console.error('[ccf] subscribe POST failed', err);
+        throw err;
       });
-
-    // Return a resolved promise so the caller chain doesn't break.
-    return Promise.resolve({ success: true });
   }
 
   // ============================================
@@ -1888,6 +1958,8 @@
   // ============================================
 
   function checkAndInit() {
+    console.log('[ccf:lifecycle] checkAndInit called, permission:',
+      typeof Notification !== 'undefined' ? Notification.permission : 'N/A');
     if (!('Notification' in window)) {
       return;
     }
@@ -2239,9 +2311,9 @@
 
           if (navigator.sendBeacon) {
             var blob = new Blob([payload], { type: 'application/json' });
-            navigator.sendBeacon(BACKEND_URL + '/api/push/subscribe-customer', blob);
+            navigator.sendBeacon(window.location.origin + '/apps/cartncodform/subscribe-customer', blob);
           } else {
-            fetch(BACKEND_URL + '/api/push/subscribe-customer', {
+            fetch(window.location.origin + '/apps/cartncodform/subscribe-customer', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: payload

@@ -1,0 +1,271 @@
+=== PHASE 3 AUTOMATION AUDIT ===
+Part A - AutomationConfig model: yes
+  All fields present: yes (shopDomain, enabled, brainRunHour,
+    brainRunMinute, 5 delay fields, enabledSignals [12 keys],
+    realtimeTriggers [2 keys], timestamps)
+Part B - automation.js routes: yes
+  GET + PATCH: yes
+Part C - route registered + nightly gate updated: yes
+  Per-shop brain run time: yes (see also: master switch now gates the
+    actual run, not just named by Part C's literal comment sketch —
+    see DEVIATION 1 below)
+Part D - page.js created: yes
+Part E - AutomationScreen.jsx created: yes
+  Master switch: yes
+  Brain run time picker: yes
+  Signal delays: yes
+  Real-time triggers: yes
+  Signal controls (12 toggles): yes
+  Save button: yes
+Part F - NavMenu updated: yes (12 files — all 11 pre-existing
+  admin/*/page.js wrappers, including the queue/page.js added in the
+  immediately preceding task, plus the new automation/page.js itself)
+node --check: pass (automation.js, AutomationConfig.js, server.js —
+  all 3 checked)
+npm test: 151/151 passing (19/19 suites)
+frontend build: pass (npm run build — compiled successfully, 16
+  static pages, /admin/automation new at 4.23 kB, no errors)
+git push: done (commit ca16355, 67674fb..ca16355 main -> main)
+vercel deploy: done (production, readyState: READY,
+  deployment id dpl_2o8eJyoBoGi1No66D6VJKd7Pe88Y,
+  https://cartncodform-qihmwe9yv-niralinakumvellirion-8853s-projects.vercel.app,
+  aliased to https://cartncodform-beryl.vercel.app)
+
+
+PART A/B - backend/models/AutomationConfig.js, backend/routes/automation.js
+=========================================================================
+Both created exactly as given, byte-for-byte. Verified with node
+--check and, since this task's Part A/B code (unlike some earlier
+tasks this session) contained no embedded-newline strings or wrong
+middleware names on inspection, no correction was needed to either
+file.
+
+
+DEVIATION - PATCH's wholesale `$set: req.body` on nested objects is
+safe ONLY because the frontend always sends both nested objects
+complete
+=========================================================================
+backend/routes/automation.js's PATCH handler applies `{ $set: req.body
+}` directly — for a top-level scalar field (enabled, brainRunHour,
+etc.) this is fine, but for the 2 NESTED object fields
+(enabledSignals, realtimeTriggers), MongoDB's $set REPLACES THE WHOLE
+SUBDOCUMENT with whatever object the caller sent under that key — any
+key the subdocument previously had that ISN'T in the new object is
+lost, not merged. This is the exact same class of bug traced and fixed
+in an earlier task this session (audits/mobile-popup-merge-audit.txt,
+the popup.email/mobilePopup PATCH handler) — but here, since the
+task's given Part B code was presented as complete and did not ask for
+a per-field dot-notation merge, and per-field merging server-side is a
+bigger structural change than this task's scope covers, the FRONTEND
+was the piece I controlled: AutomationScreen.jsx's saveConfig() always
+sends the COMPLETE current enabledSignals (all 12 keys) and
+realtimeTriggers (both keys) objects in every PATCH call, never a
+partial diff of just the one toggle the merchant clicked — since this
+screen has a single "Save automation settings" button for the whole
+form (Section 6), not per-toggle auto-save, this is also the natural,
+correct way to build it regardless of the backend's behavior. Net
+effect: no data loss occurs from how THIS screen actually uses the
+endpoint, but the endpoint itself would still silently drop sibling
+keys if some future caller ever sent a partial nested update — flagged
+here for visibility, not fixed, since fixing the backend route wasn't
+asked for and the given Part B code was presented as final.
+
+Also deliberately excluded `_id`/`shopDomain`/`createdAt`/`updatedAt`/
+`__v` from the PATCH body construction (the GET response, which
+becomes local `config` state, includes all of these) — sending `_id`
+back through `$set` risks MongoDB's "Performing an update on the path
+'_id' would modify the immutable field '_id'" error (behavior can
+vary by MongoDB version even when the value is unchanged), and
+`shopDomain`/timestamps/`__v` simply aren't meant to be merchant-
+editable. saveConfig() builds an explicit object naming only the 10
+real mutable fields.
+
+
+PART C - backend/server.js: nightly gate + master switch
+=========================================================================
+Read the existing nightly gate code in full first, as instructed,
+before changing anything. The original gate:
+  const target2am = new Date(`${todayStr}T02:00:00`);
+  const alreadyRanToday = s.lastSignalRunAt && s.lastSignalRunAt >= target2am;
+  if (nowD >= target2am && !alreadyRanToday) { ...claim, run, reset stats... }
+
+Changed to load each shop's AutomationConfig BEFORE computing the gate
+threshold (since the threshold itself must now depend on the
+configured hour/minute, not a hardcoded "02:00"):
+  const autoConfig = await AutomationConfig.findOne(
+    { shopDomain: s.shopDomain },
+    'brainRunHour brainRunMinute enabled'
+  ).lean();
+  const runHour = autoConfig?.brainRunHour ?? 2;
+  const runMinute = autoConfig?.brainRunMinute ?? 0;
+  const automationEnabled = autoConfig ? autoConfig.enabled !== false : true;
+  const hh = String(runHour).padStart(2, '0');
+  const mm = String(runMinute).padStart(2, '0');
+  const targetTime = new Date(`${todayStr}T${hh}:${mm}:00`);
+  const alreadyRanToday = s.lastSignalRunAt && s.lastSignalRunAt >= targetTime;
+A shop with no AutomationConfig row yet (never visited the Automation
+screen) falls back to hour=2/minute=0/enabled=true — the exact same
+defaults the schema itself declares — so this change is a complete
+no-op for every existing shop until a merchant actually saves
+something, exactly matching Part C's own given fallback instruction.
+
+DEVIATION 1 - the master `enabled` switch was also wired into this
+gate, not just brainRunHour/brainRunMinute.
+Part C's own literal template only sketched loading brainRunHour/
+brainRunMinute ("Use AutomationConfig.brainRunHour/brainRunMinute...
+Fall back to default hour=2, minute=0 if no config exists") — it never
+explicitly said to also check `enabled` here. But Part E's own Section
+1 spec gives this switch a specific, load-bearing description: "When
+off, no automated notifications will be sent. Manual sends from
+Journey screen still work." If the nightly gate ignored `enabled`
+entirely, that toggle would be a complete no-op in the running system
+— a merchant could switch "Automation enabled" off and every nightly
+signal/brain run would continue exactly as before, directly
+contradicting the UI's own stated behavior. Wired it in:
+  if (automationEnabled) {
+    runNightlySignals(s.shopDomain)
+      .then(() => runBrainForShop(s.shopDomain))
+      .then(() => computeWeights(s.shopDomain))
+      .catch((err) => console.error('[signals] nightly error:', err.message));
+  } else {
+    console.log(`[signals] automation disabled for ${s.shopDomain} — skipping nightly run`);
+  }
+Manual sends (Journey screen's send-journey/send-journey-email, Today
+screen's send-now, Queue screen's send-now) all go through entirely
+separate endpoints that never touch AutomationConfig at all — none of
+them were modified by this task, so "Manual sends... still work" is
+already true by construction, matching the UI's own description
+exactly without any further change needed there.
+`lastSignalRunAt` is still claimed/updated even when automationEnabled
+is false, so a disabled shop is correctly marked "checked for today"
+and isn't re-evaluated on every subsequent 30s tick for the rest of
+that day — only the actual runNightlySignals/runBrainForShop/
+computeWeights chain is skipped. The 7-day push-stats reset
+(unrelated data hygiene, not itself part of "automation") still runs
+regardless of the enabled flag.
+
+NOTE - pre-existing timezone-interpretation nuance, observed but not
+touched.
+The gate builds `targetTime` from a bare `` `${todayStr}T${hh}:${mm}:00`
+`` string with no timezone designator — per the ECMAScript spec, a
+date-time string with no explicit zone offset is parsed in the JS
+engine's LOCAL time (Render's server environment, likely UTC), not
+necessarily the store's configured `timezone` field that `todayStr`
+itself was computed in. This subtlety already existed in the ORIGINAL
+"T02:00:00" code before this task and is unrelated to what this task
+asked for (making the HOUR/MINUTE configurable, not fixing how the
+resulting string gets interpreted) — preserved exactly, not touched,
+but flagged here for visibility since a careful reader configuring a
+non-UTC-aligned run time should know this pre-existing behavior still
+applies.
+
+NOTE - minor added per-tick cost.
+Computing `targetTime` now requires one extra AutomationConfig.findOne
+per shop per 30-second poller tick (previously `target2am` needed no
+DB lookup beyond the already-batched Store.find). This lookup is
+efficiently indexed (AutomationConfig.shopDomain has `unique: true`,
+which creates an index), and this app is explicitly scoped to a small-
+to-medium shop count per CLAUDE.md ("small Indian D2C stores"), so no
+caching/pre-check optimization was added — flagged as a known,
+accepted minor cost rather than silently left unmentioned.
+
+
+PART D/E - frontend/app/admin/automation/page.js, AutomationScreen.jsx
+=========================================================================
+page.js: built following queue/page.js's exact pattern, per
+instruction — Suspense + AppProvider + NavMenu + Screen, importing
+AutomationScreen from './AutomationScreen'.
+
+AutomationScreen.jsx: read Settings.jsx and Today.jsx first, per
+instruction, for their card/toggle/header-refresh/save-button
+conventions (and separately referenced Discounts.jsx's exact toggle-
+switch visual, since Section 1/4/5 all need the same ON/OFF control
+Discounts.jsx already established in this codebase — reimplemented
+locally as a small `ToggleSwitch` component rather than importing it,
+since "DO NOT touch any other component" and each screen in this
+codebase already independently defines its own local style constants
+rather than cross-importing). All 6 sections built as specified:
+  1. Master switch — toggle + the exact description text given.
+  2. Brain run time — hour (0-23, "H AM/PM" format, e.g. "2 AM") and
+     minute (0/15/30/45) dropdowns, plus the "Runs daily at H:MM AM/PM
+     IST" summary line.
+  3. Signal delays — 3 dropdowns (Cart/Checkout abandoned use the
+     5-option 30min/1hr/2hr/6hr/Next-brain-run set; Browse abandoned
+     uses the 4-option 15min/30min/1hr/Next-brain-run set), mapped to
+     minutes exactly per the task's given table. lapsingDelay/
+     winbackDelay (in the schema, no UI control specified by this
+     task) are left untouched in state and still round-tripped through
+     save — see below.
+  4. Real-time triggers — 2 toggles (cart_abandon, checkout_abandon
+     inside realtimeTriggers), exact label/description text given.
+  5. Signal controls — 12 toggle cards in a genuine 2-column CSS grid
+     (1 column on mobile), exact label text given for all 12; each
+     card's description line was NOT given by the task (only labels
+     were specified) — authored short copy matching this app's
+     existing tone (see the file's own comment on this).
+  6. Save button — full-width, "Saving..." while in flight, a
+     green "Saved!" / red error message below the button for 3s on
+     success (auto-clears via setTimeout) or indefinitely on failure
+     (until the next save attempt), matching the spec's "Shows red
+     error on failure" (no auto-clear timer was specified for the
+     error case, unlike the success case's explicit "for 3s").
+
+FETCH: GET /api/automation/:shop on mount, with a DEFAULT_CONFIG
+fallback (matching the schema's own defaults) if the GET fails
+entirely, so the form is never left broken/unusable.
+SAVE: PATCH /api/automation/:shop on button click — see the PATCH
+wholesale-$set DEVIATION section above for why saveConfig() always
+sends the two nested objects complete.
+
+
+PART F - NavMenu updated in 12 files
+=========================================================================
+Per the task's instruction ("Read all existing page.js files... Add
+'Automation' nav item after 'Queue' and before 'Settings'... in ALL of
+them"), read all 11 pre-existing admin/*/page.js files in full before
+editing any of them (the 10 from before Phase 2 plus queue/page.js,
+added in the immediately preceding task), confirmed their NavMenu
+blocks were still byte-identical to each other (... -> Activity ->
+Queue -> Customers -> ... -> Settings), and added the same one line
+(`<a href="/admin/automation" rel="automation">Automation</a>`) to
+each, immediately after the Queue link — satisfying both "after Queue"
+and "before Settings" at once, matching how Activity and Queue were
+each placed immediately after their own reference point in the
+preceding two tasks. root admin/page.js again required matching its
+own slightly deeper indentation. Verified afterward: grepping the
+whole admin/ tree for `rel="automation"` returns exactly 12 files,
+each exactly once.
+
+
+VERIFICATION
+=========================================================================
+node --check backend/routes/automation.js: pass
+node --check backend/models/AutomationConfig.js: pass
+node --check backend/server.js: pass
+Smoke-test (`node -e "require('./routes/automation')"`, from backend/):
+loads cleanly.
+cd backend && npm test: 151/151 passing, 19/19 suites (no existing
+  test covers the nightly gate section of processScheduledJobs() or
+  mocks AutomationConfig, so none needed updating).
+cd frontend && npm run build: pass, 16 static pages, no errors.
+
+
+NOT TOUCHED
+=========================================================================
+- Every other route in backend/server.js, and every other backend
+  file: unchanged.
+- Every other admin screen component
+  (Settings.jsx/Today.jsx/Discounts.jsx/QueueScreen.jsx/etc.):
+  read-only reference for patterns, not modified.
+- backend/services/signalEngine.js, backend/services/brain.js: not
+  touched — this task's Part C scope was the nightly GATE (when brain
+  runs), not the signal-computation or scheduling logic those files
+  contain (e.g. cartAbandonDelay/checkoutAbandonDelay/
+  browseAbandonDelay and enabledSignals are stored by this task's new
+  model but are NOT yet read by signalEngine.js/brain.js anywhere —
+  those two services still use whatever delay/enablement logic they
+  already had before this task; wiring THEM up to AutomationConfig
+  would be a separate, larger change this task's explicit Part C scope
+  (the nightly gate only) did not ask for).
+- No other file besides the ones in the commit's 16-file diff stat was
+  staged or committed.

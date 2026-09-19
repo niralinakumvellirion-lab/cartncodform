@@ -1,0 +1,93 @@
+FRONTEND API KEY AUDIT - read-only, no changes
+=================================================
+Generated: 2026-09-15
+
+Files read: frontend/app/layout.js (in full, 32 lines). Full-repo
+search of frontend/ for "NEXT_PUBLIC_SHOPIFY" (unrestricted file
+extension, gitignore-respecting — so build artifacts under
+frontend/.next/ were correctly excluded, and any real .env/.env.local
+files are also excluded by .gitignore and were not read/exist to
+search).
+
+
+====================================================================
+1. frontend/app/layout.js - the exact meta tag line
+====================================================================
+
+Full relevant block (lines 12-24):
+
+        {/* App Bridge reads this meta on load — it must be in the real <head>,
+            not rendered from a client component inside <Suspense> (Next.js
+            App Router does not reliably hoist those). layout.js is a Server
+            Component, so the public env var is inlined at build time. */}
+        <meta
+          name="shopify-api-key"
+          content={process.env.NEXT_PUBLIC_SHOPIFY_CLIENT_ID || ''}
+        />
+        {/* App Bridge must load synchronously (no async/defer) — a plain
+            <script> in the root layout <head> is the only reliable way in
+            the Next.js App Router. Do NOT switch this to next/script. */}
+        <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
+
+The exact meta tag line (line 17-20 in the file):
+
+        <meta
+          name="shopify-api-key"
+          content={process.env.NEXT_PUBLIC_SHOPIFY_CLIENT_ID || ''}
+        />
+
+--- Which environment variable it reads ---
+
+process.env.NEXT_PUBLIC_SHOPIFY_CLIENT_ID
+
+NOT process.env.NEXT_PUBLIC_SHOPIFY_API_KEY, and no other variant —
+this is the ONLY environment variable referenced on this line, or
+anywhere else in this file. Falls back to an empty string (`|| ''`)
+if the variable is unset at build time.
+
+
+====================================================================
+2. Every file/line in frontend/ referencing any NEXT_PUBLIC_SHOPIFY_*
+   variable
+====================================================================
+
+Exactly 2 occurrences in the entire frontend/ directory (searched
+with no file-extension restriction; .next/ build output correctly
+excluded via .gitignore):
+
+frontend\.env.example:2:NEXT_PUBLIC_SHOPIFY_CLIENT_ID=your_shopify_api_key_here
+frontend\app\layout.js:19:          content={process.env.NEXT_PUBLIC_SHOPIFY_CLIENT_ID || ''}
+
+Both reference the SAME single variable name:
+NEXT_PUBLIC_SHOPIFY_CLIENT_ID. There is no
+NEXT_PUBLIC_SHOPIFY_API_KEY (or any other NEXT_PUBLIC_SHOPIFY_*
+variant) anywhere in the frontend codebase — only this one name is
+used, consistently, in both the actual consuming code (app/layout.js)
+and the example env template (.env.example) that documents which
+variables a developer needs to set locally.
+
+Full contents of frontend/.env.example (4 real variables + 2 blank/
+unrelated NextAuth ones), for context on where the one match sits
+among the file's other variables:
+
+  NEXT_PUBLIC_BACKEND_URL=http://localhost:4000
+  NEXT_PUBLIC_SHOPIFY_CLIENT_ID=your_shopify_api_key_here
+
+  GOOGLE_CLIENT_ID=your_google_client_id
+  GOOGLE_CLIENT_SECRET=your_google_client_secret
+  NEXTAUTH_SECRET=your_random_secret_string
+  NEXTAUTH_URL=https://cartncodform-beryl.vercel.app
+
+(The GOOGLE_*/NEXTAUTH_* lines are unrelated leftovers from a prior
+NextAuth-based auth system — per audits/SESSION_TOKEN_SWAP_AUDIT.txt
+from earlier in this session's history, auth was hard-swapped to
+Shopify session tokens; these variables are not used by the current
+App Bridge / session-token flow documented in
+audits/frontend-auth-audit.txt, and were not otherwise investigated
+here since they don't reference NEXT_PUBLIC_SHOPIFY_*.)
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified as part of this task.

@@ -80,6 +80,23 @@ export async function apiGet(path) {
   return res.json();
 }
 
+// 30s client-side cutoff so a hung backend request doesn't leave the UI
+// showing "Saving..." indefinitely — fetch() has no built-in timeout.
+const REQUEST_TIMEOUT_MS = 30000;
+
+async function fetchWithTimeout(url, options, method) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Request timed out');
+    throw new Error(describeNetworkError(err, method, url));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function apiSend(path, method, body) {
   const url = `${BACKEND_URL}${path}`;
   const token = await getAuthToken();
@@ -88,35 +105,25 @@ export async function apiSend(path, method, body) {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 
-  let res;
-  try {
-    res = await fetch(url, {
-      method,
-      headers,
-      body: JSON.stringify(body),
-    });
-  } catch (err) {
-    throw new Error(describeNetworkError(err, method, url));
-  }
+  const res = await fetchWithTimeout(url, {
+    method,
+    headers,
+    body: JSON.stringify(body),
+  }, method);
 
   // App Bridge session tokens live ~1 minute. On a 401, wait briefly then
   // retry ONCE with a fresh token.
   if (res.status === 401) {
     await new Promise((r) => setTimeout(r, 500));
     const freshToken = await getAuthToken();
-    let retryRes;
-    try {
-      retryRes = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${freshToken}`,
-        },
-        body: JSON.stringify(body),
-      });
-    } catch (err) {
-      throw new Error(describeNetworkError(err, method, url));
-    }
+    const retryRes = await fetchWithTimeout(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${freshToken}`,
+      },
+      body: JSON.stringify(body),
+    }, method);
     if (!retryRes.ok) {
       const err = await retryRes.json().catch(() => ({}));
       throw new Error(err.error || `${method} ${path} failed (${retryRes.status})`);

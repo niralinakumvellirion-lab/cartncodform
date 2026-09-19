@@ -1,0 +1,177 @@
+=== SUGGESTIONS SECTION AUDIT ===
+Generated: 2026-09-17
+
+FESTIVAL_CALENDAR added: yes (13 festivals)
+getUpcomingFestivals() added: yes
+Suggestions grid (3 col desktop): yes
+Compose modal: yes
+  Default message pre-filled: yes
+  Send button: yes
+send-store backend endpoint: yes
+sendPushToStore utility: existed already — NOT re-added/overwritten
+  (reused existing sendPushToCustomers() instead — see deviation below)
+node --check push.js: pass
+node --check pushNotification.js: pass
+npm test: 151/151 passing
+frontend build: pass
+git push: done (743467e..9fe917d)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full (930
+lines) before making any edit, as instructed. Read
+backend/routes/push.js in full (524 lines) per PART E's instruction.
+Also read backend/utils/pushNotification.js in full (272 lines) —
+required to actually carry out PART E's own conditional instruction
+("Check if sendPushToStore exists ... If it does NOT exist, add it"),
+which cannot be answered without reading the file.
+
+
+====================================================================
+CRITICAL FINDING — sendPushToStore ALREADY EXISTS, with a DIFFERENT
+signature and purpose, and is used by a live route
+====================================================================
+PART E's own text anticipates this ("Check if sendPushToStore exists
+in pushNotification.js. If it does NOT exist, add it") — and it DOES
+exist:
+
+  backend/utils/pushNotification.js line 40:
+    async function sendPushToStore(shopDomain, title, body) { ... }
+  exported at line 271: module.exports = { sendPushToStore, sendPushToCustomers };
+
+This existing function sends to the STORE OWNER's own admin-device
+PushSubscription (the `PushSubscription` model — separate from
+`CustomerPushSubscription`), and is already used by the existing
+POST /api/push/send route (backend/routes/push.js line 50-75) with
+3 positional string arguments: sendPushToStore(shopDomain, title, body).
+
+The task's given "if missing, add it" implementation is a COMPLETELY
+DIFFERENT function under the SAME name:
+  async function sendPushToStore(shopDomain, { title, body, url }) { ... }
+(object-destructured second parameter, queries CustomerPushSubscription
+instead of PushSubscription — i.e. "all storefront customers" rather
+than "the store owner's own device").
+
+Since sendPushToStore already exists, PART E's own stated condition
+("If it does NOT exist, add it") is not met — so nothing should be
+added under that name. Beyond just following that literal condition,
+actually adding the given function under this name would have been
+actively destructive: `module.exports.sendPushToStore = sendPushToStore`
+would have OVERWRITTEN the real export, and the existing /send route's
+positional call `sendPushToStore(shopDomain, title, body)` would then
+destructure `{ title, body, url }` off the STRING `title`, silently
+yielding `title: undefined, body: undefined, url: undefined` for
+every future call to that route — no thrown error, just silently
+broken owner-device notifications from then on.
+
+RESOLUTION: backend/utils/pushNotification.js was NOT modified at
+all. The new POST /api/push/send-store route instead reuses the
+ALREADY-EXISTING `sendPushToCustomers(shopDomain, title, body, url,
+imageUrl, mobileOnly, cartToken, skipStaleCleanup)` helper (already
+imported at the top of push.js, already used by /send-customer and
+/send-journey). Called with `cartToken: null`, it already queries
+every CustomerPushSubscription row for the shop with no cart-specific
+filter — i.e. exactly "all subscribers" — which is precisely what the
+Suggestions feature needs. This is documented inline in push.js at
+the new route, and is a direct application of this session's standing
+practice: implement the given feature's actual intent, not a literal
+snippet that would silently break existing, live functionality, and
+flag the substitution explicitly.
+
+
+====================================================================
+PART A — Festival calendar data
+====================================================================
+Added FESTIVAL_CALENDAR (13 entries, verbatim from the task) and
+getUpcomingFestivals(count) (verbatim from the task) at module scope,
+immediately before `export default function DashboardScreen`.
+
+
+====================================================================
+PART B — Compose modal state
+====================================================================
+Added the 4 given useState declarations (showSuggestModal,
+modalFestival, modalSending, modalSent) immediately after the
+existing `sortBy` state declaration — the last of the pre-existing
+state variables — so all prior state stays in its original order and
+untouched.
+
+
+====================================================================
+PART C — Compose modal component
+====================================================================
+Added the given modal JSX verbatim at the very end of the return
+statement, immediately after the new-subscribers alert block and
+before the closing `</div></Page>`. Uses the existing `apiSend` import
+(already imported at the top of the file) and existing `shop` prop
+and `notifStats` state — no new imports needed.
+
+
+====================================================================
+PART D — Suggestions section JSX
+====================================================================
+Added the given section verbatim, positioned exactly where specified:
+after the Store Performance row's closing tags, before the
+"SECTION 2 — KPI row" comment.
+
+
+====================================================================
+PART E — backend
+====================================================================
+Added POST /api/push/send-store to backend/routes/push.js (requireAuth
+only, shop taken from req.shopDomain per this file's established IDOR
+pattern — never from req.body — consistent with every other route in
+this file). Did NOT modify backend/utils/pushNotification.js — see the
+critical finding above for why.
+
+
+====================================================================
+DO-NOT-CHANGE / SCOPE COMPLIANCE
+====================================================================
+- No existing state variable, useEffect, or function in
+  DashboardScreen.jsx was touched — confirmed via `git diff`, which
+  shows only pure additions (271 insertions, 0 deletions across both
+  changed files).
+- backend/utils/pushNotification.js has zero diff — deliberately, per
+  the finding above.
+- backend/routes/push.js diff is a pure addition (one new route, 52
+  lines) at the end of the file, before `module.exports = router;`;
+  every existing route, the sendPushToStore/sendPushToCustomers
+  imports at the top, and all other exports are untouched.
+- `git status` after staging showed only backend/routes/push.js and
+  frontend/app/admin/dashboard/DashboardScreen.jsx as changed
+  (pushNotification.js had nothing to stage); pre-existing unrelated
+  dirty files (backend/__tests__/brain.test.js, frontend/lib/api.js)
+  were left alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- node --check backend/routes/push.js -- pass
+- node --check backend/utils/pushNotification.js -- pass (file
+  unchanged; ran anyway per the task's explicit instruction)
+- cd backend && npm test -- 19 suites, 151/151 tests passing
+- cd frontend && npm run build -- compiled successfully, all 17
+  routes generated (dashboard route size grew 4.72kB -> 7.99kB from
+  the new calendar data + modal JSX), no errors
+- git push origin main -- succeeded (743467e..9fe917d), no hang
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com. Note: this deploys the FRONTEND
+  only (Next.js/Vercel). The backend change (push.js's new
+  /send-store route) is not deployed by this command — per
+  CLAUDE.md, backend/ deploys to Render, which auto-deploys on push
+  to main; no separate manual Render deploy step was requested by
+  this task or run here.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Files modified: frontend/app/admin/dashboard/DashboardScreen.jsx,
+backend/routes/push.js. backend/utils/pushNotification.js was
+deliberately left unmodified (see Critical Finding above). No other
+file was changed.

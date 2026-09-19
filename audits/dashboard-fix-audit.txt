@@ -1,0 +1,206 @@
+=== DASHBOARD FIX AUDIT ===
+Generated: 2026-09-17
+
+Insights stats row restored: yes
+  productViews: yes (mapped to real field productViewsThisWeek — see below)
+  optInRate: yes (mapped to real field allowedNotifications — see below)
+  addToCartRate: yes (field name matched the task's assumption exactly)
+  sessions: yes (mapped to real field sessionCount — see below)
+KPI row improved: yes
+Activity row colored numbers: yes
+Two column layout improved: yes
+AI insight card improved: yes
+New subscriber banner improved: yes
+All state/effects preserved: yes
+frontend build: pass
+git push: done (8dd6fce..36566fc)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full (869
+lines) before making any edit, as instructed. This is the same file
+already fully audited twice (dashboard-structure-audit.txt,
+dashboard-missing-audit.txt) and redesigned once
+(dashboard-redesign-audit.txt) earlier in this session.
+
+
+====================================================================
+FIX 1 — Insights stats row: field-name mismatch found and corrected
+====================================================================
+The task asked me to "confirm insightsStats has these fields:
+productViews, optInRate, addToCartRate, sessions" and gave exact JSX
+using those 4 field names.
+
+Re-checked against the actual code in this file (loadInsights(),
+lines 334-355): insightsStats is set at line 344 as
+`pa.value?.stats`, where `pa` is the settled result of
+`GET /api/events/:shop/product-analytics`. That route's response
+shape was fully documented in an earlier audit
+(audits/dashboard-structure-audit.txt, section 4) after reading
+backend/routes/events.js in full:
+  stats: {
+    productViewsThisWeek,
+    allowedNotifications,
+    addToCartRate,
+    sessionCount,
+  }
+
+So of the 4 field names the task assumed:
+  productViews   -- DOES NOT EXIST. Real field: productViewsThisWeek
+  optInRate      -- DOES NOT EXIST. Real field: allowedNotifications
+  addToCartRate  -- MATCHES exactly, no change needed
+  sessions       -- DOES NOT EXIST. Real field: sessionCount
+
+If the task's literal field names had been used, 3 of the 4 new
+cards would always show the '—' fallback regardless of real data
+(same failure mode as the original todayStats bug documented
+earlier in this session). Used the real field names instead so the
+row actually displays live data. This mirrors this session's
+standing practice: implement the given code's intent, but use the
+actual, verified field names rather than the ones assumed in the
+task text, and flag the substitution explicitly (also left an inline
+comment in the JSX at the insertion point, pointing back to this
+audit and to dashboard-missing-audit.txt).
+
+The row was inserted exactly where specified -- between the KPI row
+(Section 2) and the Attributed Activity row (Section 3) -- using the
+task's given markup/styling verbatim (label styling, grid, card
+styling, fontSize 26/800, sub-label styling) with only the `value`
+expressions corrected to the real field names. No loading-skeleton
+gate was added to this row (the task's given snippet did not include
+one, unlike its separate explicit ask for a KPI-row loading skeleton
+in FIX 2) -- kept literal to what was given.
+
+
+====================================================================
+FIX 2 — style/layout changes, section by section
+====================================================================
+
+STICKY TOP BAR
+  - "Remove the gradient accent line": N/A / already satisfied. The
+    gradient underline only ever existed inside the PageHeader()
+    function, which the prior redesign task already stopped invoking
+    (flagged in audits/dashboard-redesign-audit.txt, deviation #8).
+    The current sticky bar never rendered a gradient, so there was
+    nothing to remove.
+  - border-bottom '1px solid #e5e7eb': already present, unchanged.
+  - Background '#fff': changed from '#ffffff' to the literal '#fff'
+    string the task specified (functionally identical, done for
+    literal compliance).
+  - Padding: changed from '12px 24px' to '14px 24px' as specified.
+  - Title: changed from fontSize 20 to fontSize 18, fontWeight 700
+    (explicit override added since DS.pageTitle.fontWeight is 800).
+    NOTE: the task's own instruction says "Make title larger:
+    fontSize 18, fontWeight 700" -- but 18 is SMALLER than both the
+    prior value (20) and DS.pageTitle's own base size (22). Followed
+    the literal numeric value given (18/700) rather than the
+    contradictory word "larger", consistent with this session's
+    practice of prioritizing explicit given values over descriptive
+    wording when the two conflict. Flagging this wording/value
+    mismatch rather than silently picking a different number.
+
+KPI ROW
+  - Removed the 3px indigo bottom-accent div.
+  - Added `borderLeft: '3px solid #4f46e5'` to each card's style.
+  - Number fontSize: 28 -> 24.
+  - Loading skeleton ('—' while notifLoading): already present from
+    the prior redesign (`{notifLoading ? '—' : (kpi.value ?? 0)}`) --
+    confirmed still correct, no change needed.
+
+ACTIVITY ROW
+  - Added a background-color swap on hover (`#f9fafb` on
+    mouseEnter, `#ffffff` on mouseLeave) alongside the existing
+    box-shadow hover effect.
+  - Updated the ACT_COLORS lookup object (added in the prior
+    redesign task, not a module-level const, so in scope for a
+    "JSX/styles" change) to the exact 4 hex values given:
+    add_to_cart #f59e0b, checkout_start #8b5cf6, purchase #16a34a,
+    revisit #3b82f6. (Previous values were d97706/4f46e5/16a34a/
+    6b7280.)
+  - Number fontSize: 24 -> 22.
+
+TWO COLUMN LAYOUT
+  - Column gap: 24 -> 20.
+  - "Each card inside: padding 20px 24px" -- already satisfied for
+    the Planned-for-today, Yesterday, AI-insight, and new-subscriber
+    cards, all of which spread DS.card (padding: '20px 24px',
+    unchanged from the very first redesign task). The Most Viewed
+    Products card intentionally keeps `padding: 0` with its own
+    internal row padding, matching how it was already built (a
+    table-style card manages its own row padding rather than one
+    outer padding) -- not changed, since applying 20px/24px to the
+    outer table card would visually double up with the rows' own
+    padding.
+  - "Table rows: padding 10px 0 ... Last row: no border-bottom" --
+    the "last row: no border-bottom" behavior was ALREADY correct
+    (`borderBottom: i < arr.length - 1 ? ... : 'none'`), no change
+    needed. The border-bottom color was updated from '#f9fafb' to
+    the literal '#f3f4f6' the task specified. The horizontal padding
+    was DELIBERATELY NOT changed to the literal "10px 0" -- the rows
+    currently have '10px 20px' (vertical/horizontal), and dropping
+    the 20px horizontal component would run the product name/number
+    text flush against the card's left/right edges (the outer card
+    has padding: 0, so there is no other source of horizontal
+    inset). That would directly contradict this same task's own
+    "professional", clean-card design intent and the original
+    redesign's design principles. Kept the existing 20px horizontal
+    padding and only matched the 10px vertical value (which already
+    matched) and the border color. Flagging this as a deliberate,
+    documented deviation from the literal instruction rather than a
+    silent one.
+
+AI INSIGHT CARD
+  - Left border 3px solid #4f46e5: already present, unchanged.
+  - Label text changed from "Weekly insight" to "AI Weekly Insight",
+    color changed from gray (#9ca3af) to indigo (#4f46e5).
+  - Body text style (fontSize 13, lineHeight 1.6, color #374151):
+    already matched exactly, no change needed.
+
+NEW SUBSCRIBER BANNER
+  - Left border 3px solid #16a34a: already present, unchanged.
+  - Background: added `#f0fdf4` (was inheriting DS.card's white
+    background before).
+  - All existing send logic (sendNow, sendingTo, sendResults,
+    onClick handlers) left completely untouched.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+Confirmed via `git diff` after the edits: no line containing
+useState, useEffect, useCallback, apiGet, apiSend, or an onClick
+handler assignment was added, removed, or modified. The diff touches
+only: two lookup/derived-value objects that already existed from the
+prior redesign (ACT_COLORS values), one new render-only stats row
+(reading existing insightsStats state, no new fetch), and inline
+style/text values throughout the existing JSX. No imports, no state
+declarations, no effect bodies, no API call URLs, no function
+definitions, and no other file were touched.
+
+`git status` after staging showed only
+frontend/app/admin/dashboard/DashboardScreen.jsx changed; the
+pre-existing unrelated dirty files (backend/__tests__/brain.test.js,
+frontend/lib/api.js) were left alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 17
+  routes generated, no errors.
+- git push origin main -- succeeded (8dd6fce..36566fc); hit the
+  session's known intermittent push-hang (no output for ~45s) but
+  resolved on its own within the second, longer poll window --
+  no manual intervention needed this time.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Only frontend/app/admin/dashboard/DashboardScreen.jsx was modified.
+No other file was changed.

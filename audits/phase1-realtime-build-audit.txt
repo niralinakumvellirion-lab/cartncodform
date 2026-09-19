@@ -1,0 +1,228 @@
+=== PHASE 1 REALTIME BUILD AUDIT ===
+Part A - new-subscribers endpoint: yes
+  Returns profileId, email, subscribedAt, lastSeenAt: yes
+  Filters out already-notified: yes
+Part B - send-now endpoint: yes
+  Cancels existing pending jobs: yes
+  Creates new job with runAt:now: yes
+  Uses AI copy: yes (see DEVIATION 1 — the given generateCopy() call
+    was broken and had to be corrected for it to work at all)
+Part C - Today.jsx:
+  New subscriber list section: yes
+  30s polling: yes
+  Send now button per subscriber: yes
+  Refresh button in header: yes (see NOTE on placement below)
+node --check profiles.js: pass
+node --check push.js: pass
+npm test: 151/151 passing (19/19 suites)
+frontend build: pass (npm run build — compiled successfully, 14
+  static pages, /admin grew 6.46 kB -> 7.25 kB, no errors)
+git push: done (commit 9c37f28, 74e6fb7..9c37f28 main -> main)
+vercel deploy: done (production, readyState: READY,
+  deployment id dpl_GDWqf7gJuNuAbmQ3j2jzmLEgsZy8,
+  https://cartncodform-hh955mv7p-niralinakumvellirion-8853s-projects.vercel.app,
+  aliased to https://cartncodform-beryl.vercel.app)
+
+
+PART A - EXACT IMPLEMENTATION (backend/routes/profiles.js)
+=========================================================================
+Added directly after the today-stats endpoint, matching the task's
+given code almost verbatim -- one fix was required:
+
+DEVIATION - `.select(...)` string literal had an embedded line break.
+The given code was:
+    .select('identifiers channels.push channels.email
+             lastSeenAt messages')
+A single-quoted JS string cannot contain a literal newline -- this
+would be a SyntaxError ("Invalid or unexpected token" /
+"Unterminated string literal") the moment the file is loaded,
+crashing the whole route module (and therefore the backend, since
+profiles.js is required unconditionally by server.js). Collapsed onto
+one line: `.select('identifiers channels.push channels.email
+lastSeenAt messages')`. This is the same class of copy-paste line-wrap
+artifact caught in earlier tasks this session (the Phase 4
+ActivityScreen fetch URL, the journey-panel-layout Send-notification
+card's template literal) -- clearly a formatting artifact from how the
+task text was wrapped for display, not intended literal source.
+
+Everything else implemented exactly as given: the 24h `since` window,
+the push-subscribed + subscribedAt-in-range query, the .sort/.limit(50)/
+.lean() chain, the in-memory filter excluding any profile with ANY
+message (not just push) sent within the same 24h window, and the
+response shape ({ count, subscribers: [{profileId, email,
+subscribedAt, lastSeenAt}] }).
+
+
+PART B - EXACT IMPLEMENTATION (backend/routes/push.js)
+=========================================================================
+Added directly after send-journey. One necessary fix, verified against
+the real function signature before implementing (not guessed):
+
+DEVIATION 1 - generateCopy() was called with the wrong argument shape.
+The given code:
+    const voice = {};
+    const signal = { type: 'email_capture', strength: 0.5 };
+    const { title, body } = await generateCopy(shop, signal, voice);
+Read backend/services/aiService.js's actual generateCopy() definition
+first: `async function generateCopy(store, signalType, product,
+channel)` -- 4 positional params, not 3, and shaped very differently
+from what the given code passes:
+  - `store` must be an object exposing `.shopDomain` and `.voice`
+    (used to build the cache key and the AI prompt) -- the given code
+    passed the bare `shop` STRING in this position. A string's
+    `.shopDomain`/`.voice` properties are both undefined, so
+    `shopDomain` internally would resolve to `''` for every call --
+    meaning the copy CACHE KEY (built from shopDomain + signalType +
+    productId + channel + voiceHash) would be blank-shopDomain for
+    every shop, opening a cross-tenant cache-collision risk (two
+    different merchants' generated notification copy could hash to
+    the same cache key and one shop could see another's generated
+    text).
+  - `signalType` must be a plain STRING (it's concatenated directly
+    into the prompt text, e.g. `Signal: ${signalType}`, and into the
+    cache key) -- the given code passed the OBJECT `{ type:
+    'email_capture', strength: 0.5 }` in this position, which would
+    stringify to the literal text "[object Object]" inside the AI
+    prompt and corrupt the cache key.
+  - `channel` ('push' or 'email') was not passed AT ALL in the given
+    3-arg call -- it would be `undefined` inside generateCopy(),
+    which controls BOTH which fallback copy is used
+    (`channel === 'email' ? FALLBACK_EMAIL : FALLBACK_PUSH` -- always
+    resolves to FALLBACK_PUSH when undefined) AND which JSON shape the
+    prompt asks the AI to return (`channel === 'push' ? '{"title":
+    ...}' : '{"subject":...}'` -- with channel undefined, ALWAYS asks
+    for the EMAIL {subject,body} shape, never {title,body}, regardless
+    of whether this was actually meant to be a push notification).
+    Combined with the given code's own destructuring
+    (`const { title, body } = ...`), a push-channel send-now call
+    would silently end up with `title: ''` (FALLBACK_PUSH is never
+    reached; the live-generated result's `title` stays empty since the
+    prompt never asked the AI for one) -- an empty-title push
+    notification going out to a real customer, every time.
+  Fixed by building an actual `store`-shaped object
+  (`{ shopDomain: shop, voice: {} }` -- kept `voice` empty, matching
+  the given code's own apparent intent of not fetching the merchant's
+  real voice config for this quick manual-send path, just nested where
+  the function actually reads it from) and passing the plain string
+  `'email_capture'` and the already-computed `channel` variable (see
+  DEVIATION 2) as the 2nd/4th arguments:
+    const { title, body, subject } = await generateCopy(store, 'email_capture', null, channel);
+  Also captured `subject` (silently dropped by the given code's
+  2-field destructure) and included it in the job's payload (see
+  below) -- cheap, zero-risk, and matches what a channel:'email' job
+  actually needs downstream.
+
+DEVIATION 2 - `channel` computed once and reused, not recomputed.
+The given code computed `profile.channels?.push?.subscribed ? 'push'
+: 'email'` only once, inline inside the ScheduledJob.create() call
+(for the job's own `channel` field) -- it was never available earlier
+for the generateCopy() call itself (which needs it too, per DEVIATION
+1). Hoisted this into a single `const channel = profile.channels
+?.push?.subscribed ? 'push' : 'email';` right after loading `profile`,
+reused for both the generateCopy() call and the ScheduledJob's
+`channel` field, rather than computing the same ternary twice
+independently.
+
+DEVIATION 3 (documented, not fixed — out of scope) - the 'email'
+branch of `channel` selection is effectively unreachable from the
+Today screen's own new-subscriber flow, and if it WERE reached by a
+different caller, the underlying poller's email-send path (server.js,
+`channel === 'email'` branch) would very likely skip the job anyway.
+Traced this precisely: server.js's poller, for `channel === 'email'`
+jobs, looks up `AbandonedCustomer.findOne({shopDomain, sessionId:
+job.cartToken})` and requires `customer.email` to exist -- it does
+NOT use `Profile.channels.email.address` or the job's own `payload`
+at all for finding a recipient (payload.subject/payload.body are only
+used as a fallback for the COPY TEXT if the poller's own live
+generateCopy() call fails, never as the actual send target). Every
+profile returned by Part A's new-subscribers endpoint has
+`channels.push.subscribed === true` (it's the endpoint's own filter
+condition), so `send-now`, when invoked from THIS Today-screen flow,
+will always compute `channel === 'push'` and never actually exercise
+the email branch — this specific new-feature's happy path is
+unaffected. Flagging this as a genuine, pre-existing structural gap in
+the broader system (a "send-now" call against a profile that has an
+email but is NOT push-subscribed and has no linked AbandonedCustomer
+row would silently produce a permanently-skipped job, no email ever
+sent) that this task's explicit file scope (routes/profiles.js,
+routes/push.js, Today.jsx — not server.js) does not cover fixing.
+
+Everything else in send-now matches the given code exactly: the 400/
+404 guards, the cartToken derivation
+(`identifiers.cartTokens.slice(-1)[0]`), cancelling existing pending
+jobs before creating the new one (necessary given ScheduledJob's own
+partial-unique index on {shopDomain, profileId, signalType} scoped to
+status:'pending' — confirmed by re-reading backend/models/
+ScheduledJob.js, read in full in the immediately preceding read-only
+audit this session), `runAt: new Date()`, and the response shape.
+
+
+PART C - frontend/app/admin/screens/Today.jsx
+=========================================================================
+Read the full file first, as instructed (it had not changed since the
+prior read-only audit task in this session, so that read was used
+directly as the basis for every edit below).
+
+- Added `apiSend` to the existing `apiGet` import (needed for
+  sendNow()'s POST call — the file previously only imported apiGet).
+- ADD 1 (state) added exactly as given, plus `refreshKey` (needed for
+  the header Refresh button — the task's own later instruction says to
+  add this state and its dependency-array wiring, listed here for
+  grouping since it's declared alongside the other new state).
+- ADD 2 (30s polling effect) and ADD 3 (sendNow) added exactly as
+  given, with one trivial, behavior-preserving cleanup: dropped the
+  given code's unused `const result = await apiSend(...)` down to a
+  bare `await apiSend(...)` (the given code assigned the response to
+  `result` but never read it afterward).
+- ADD 4 (new-subscriber JSX section) inserted verbatim, in the exact
+  position specified: between the date filter bar and "SECTION 2 —
+  Row 1: Notification stats".
+- Refresh button: the task said "Find the header section and add a
+  Refresh button (same pattern as Journey screen)" without citing a
+  line number this time. This file's date-filter-bar + stat rows sit
+  ABOVE the literal `{/* Header */}` block (`<h1>Today</h1>` + date
+  subtitle) as a result of an earlier "Today screen redesign" task
+  this session, which intentionally moved them there — so there are
+  two candidate "header-like" regions. Added the button to the actual,
+  explicitly-commented `{/* Header */}` block (the h1+subtitle), since
+  that is the one place in this file literally called "Header," and
+  restructured it into the same flex row + right-aligned button
+  pattern Journey.jsx uses. Wired `onClick={() => setRefreshKey(k =>
+  k + 1)}` and tied the button's disabled/text-swap state to the
+  existing `notifLoading` flag (the loading state that actually
+  reflects whether the data this button refreshes — the today-stats/
+  activity fetch — is in flight), rather than introducing a new,
+  redundant loading flag, mirroring how Journey's own Refresh button
+  is tied to ITS relevant loading state (`loading`, gating the same
+  fetch `load()` triggers).
+- `refreshKey` added to the main stats useEffect's dependency array
+  (`[shop, dateFilter, refreshKey]`) exactly as specified, so clicking
+  Refresh re-runs that effect (re-fetching both /api/activity and
+  /api/profiles/:shop/today-stats for the currently selected date
+  range) without any separate fetch logic of its own.
+
+
+VERIFICATION
+=========================================================================
+node --check backend/routes/profiles.js: pass
+node --check backend/routes/push.js: pass
+cd backend && npm test: 151/151 passing, 19/19 suites (no test needed
+  updating — no existing test mocks/asserts against
+  Profile.find/ScheduledJob.create/generateCopy call shapes for these
+  2 new routes)
+cd frontend && npm run build: pass, 14 static pages, no errors
+
+
+NOT TOUCHED
+=========================================================================
+- backend/server.js (the poller) and every other backend file: not
+  touched, matching the task's explicit file scope, even though
+  DEVIATION 3 above identifies a real gap there.
+- Every other route in profiles.js and push.js: unchanged.
+- Every other section of Today.jsx (the date-filter bar's own
+  buttons/logic, the 2 stat-row grids, the Planned-for-today/Yesterday/
+  chart sections below): unchanged, confirmed via git diff — only the
+  import line, the new state block, the 2 new effects/sendNow
+  function, the Header block, and the new JSX section between Section
+  1 and Section 2 differ.
+- No other file was staged or committed.

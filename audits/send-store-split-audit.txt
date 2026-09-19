@@ -1,0 +1,210 @@
+=== SEND-STORE SPLIT AUDIT ===
+Generated: 2026-09-18
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read backend/routes/push.js lines 560-639 (the /send-store route and
+its preceding comment block) and backend/utils/pushNotification.js
+lines 89-118 (sendPushToCustomers()'s signature and the start of its
+query-building/cartToken logic), exactly the two ranges this task
+named, before making any change.
+
+
+====================================================================
+FILES CHANGED — WITH LINE NUMBERS TOUCHED
+====================================================================
+1. backend/utils/pushNotification.js
+   - Line 89: function signature — added `desktopOnly = false` as a
+     new 9th parameter, after the existing 8th (`skipStaleCleanup =
+     false`).
+   - Lines 102-107 (previously 102-105): query-building block —
+     changed the `if (mobileOnly) {...}` block into an `if (mobileOnly)
+     {...} else if (desktopOnly) {...}` chain, adding
+     `query.deviceType = { $in: ['desktop'] };` as the new else-if
+     branch. No filter is applied when neither flag is set (unchanged
+     "all devices" behavior).
+
+2. backend/routes/push.js
+   - Lines 600-646 (previously 600-629): the /send-store route's
+     image-resolution and send logic was fully rewritten — replaced
+     the single shared `rawImage`/`imageUrl`/`sendPushToCustomers()`
+     call with two independent per-device image resolutions (mobile,
+     desktop), two independent sendPushToCustomers() calls (mobile-
+     only, desktop-only), and a combined JSON response.
+   No other route, handler, or file was touched.
+
+
+====================================================================
+NEW PARAMETER ADDED TO sendPushToCustomers — CONFIRMED SIGNATURE
+====================================================================
+backend/utils/pushNotification.js line 89, current signature:
+
+  async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobileOnly = false, cartToken = null, skipStaleCleanup = false, desktopOnly = false) {
+
+`desktopOnly` is the 9th parameter, defaults to `false`. Existing
+callers that don't pass a 9th argument (e.g. sendJourneyPush, or any
+other call site in the codebase that predates this change) are
+unaffected — `desktopOnly` defaults to `false`, and the query-building
+logic's `else if (desktopOnly)` branch is simply never reached for
+them, preserving their original "no filter" or "mobileOnly filter"
+behavior exactly as before.
+
+Query-building logic (lines 102-107):
+
+  const query = { shopDomain: shop };
+  if (mobileOnly) {
+    query.deviceType = { $in: ['mobile', 'unknown'] };
+  } else if (desktopOnly) {
+    query.deviceType = { $in: ['desktop'] };
+  }
+
+Confirmed else-if (not additive), matching the task's explicit
+instruction — `mobileOnly` and `desktopOnly` are mutually exclusive at
+the query level; a call passing both `true` would only apply the
+`mobileOnly` filter (first branch wins), and a call passing neither
+applies no deviceType filter at all (unchanged "all devices" default
+behavior for every other existing caller in the codebase).
+
+
+====================================================================
+TWO CLOUDINARY UPLOADS — CONFIRMED INDEPENDENT
+====================================================================
+backend/routes/push.js, current /send-store body:
+
+  const rawMobile = mobileImageUrl || '';
+  const rawDesktop = desktopImageUrl || '';
+
+  let mobileImage = rawMobile.startsWith('data:')
+    ? (await uploadToCloudinary(rawMobile)) || ''
+    : rawMobile;
+
+  let desktopImage = rawDesktop.startsWith('data:')
+    ? (await uploadToCloudinary(rawDesktop)) || ''
+    : rawDesktop;
+
+Each of `mobileImageUrl` and `desktopImageUrl` from the request body is
+resolved through its OWN `uploadToCloudinary()` call, independently —
+neither reuses the other's upload result, and neither is skipped just
+because the other ran. Each only calls `uploadToCloudinary()` at all if
+its own raw value starts with `data:` (a base64 data URI); an
+already-real URL (or an empty string) is passed straight through
+without a network call, same short-circuit behavior as the
+single-image version this replaced. `uploadToCloudinary()` itself
+(defined at push.js line 24, unchanged by this task) already resolves
+to `null` on any failure/misconfiguration, so a failed mobile upload
+cannot block or affect the desktop upload's own independent attempt,
+and vice versa.
+
+
+====================================================================
+TWO FCM SENDS — CONFIRMED MOBILE GETS mobileImage, DESKTOP GETS
+desktopImage
+====================================================================
+  const mobileResult = await sendPushToCustomers(
+    shop, title, body, '/', mobileImage, true, null, false, false
+  );
+
+  const desktopResult = await sendPushToCustomers(
+    shop, title, body, '/', desktopImage, false, null, false, true
+  );
+
+- Mobile call: `imageUrl` arg = `mobileImage`, `mobileOnly` = `true`,
+  `desktopOnly` = `false` -> queries `deviceType: {$in:['mobile',
+  'unknown']}` and sends the mobile-resolved image to exactly those
+  subscribers.
+- Desktop call: `imageUrl` arg = `desktopImage`, `mobileOnly` = `false`,
+  `desktopOnly` = `true` -> queries `deviceType: {$in:['desktop']}`
+  (via the new else-if branch) and sends the desktop-resolved image to
+  exactly those subscribers.
+Each call's `cartToken` arg is `null` in both (this route always
+targets "all subscribers of the shop", never a single cart — matches
+the pre-existing single-call behavior), and `skipStaleCleanup` is
+`false` in both, unchanged from the original single call.
+
+Response combines both results, as given:
+  const totalSent = (mobileResult.sent || 0) + (desktopResult.sent || 0);
+  return res.json({ success: true, sent: totalSent, mobile: mobileResult, desktop: desktopResult });
+
+DEVIATION FROM LITERAL GIVEN CODE, DISCLOSED: the task's own given
+final snippet returns `{success:true, ...}` unconditionally, with no
+error branch. The route's PRE-EXISTING code (before this task) had an
+explicit `if (!result.success) return res.status(500)...` failure
+path. Dropping that entirely would mean a total failure (e.g. Firebase
+Admin not configured, both queries erroring) now returns HTTP 200 with
+`success:true` and `sent:0`, silently masking a real failure from the
+Dashboard UI. To preserve the pre-existing safety behavior without
+deviating from the intent of the given response shape, a minimal
+guard was added ahead of the given response line:
+  if (!mobileResult.success && !desktopResult.success) {
+    return res.status(500).json({ success:false, error: mobileResult.error || desktopResult.error });
+  }
+This only changes behavior for the "both sends failed outright" case
+(e.g. misconfiguration) — it does NOT fire when either send partially
+succeeds (e.g. mobile succeeds with 0 tokens found, desktop fails), in
+which case the given unconditional success response still runs
+exactly as specified. Flagging this as a deliberate, disclosed
+addition beyond the task's literal final snippet, not a silent
+rewrite.
+
+
+====================================================================
+FALLBACK LOGIC — CONFIRMED
+====================================================================
+  if (!mobileImage) mobileImage = desktopImage;
+  if (!desktopImage) desktopImage = mobileImage;
+
+Implemented exactly as given, in the same order (mobile-from-desktop
+first, then desktop-from-mobile). Confirmed behavior for all cases:
+  - Both present: each keeps its own resolved value, neither line's
+    condition is true, no change.
+  - Only mobile present: line 1's condition is false (mobileImage is
+    truthy) so it's untouched; line 2's condition is true
+    (desktopImage is falsy) so desktopImage becomes mobileImage's
+    value. Both ultimately equal mobileImage.
+  - Only desktop present: line 1's condition is true (mobileImage is
+    falsy) so mobileImage becomes desktopImage's value; line 2's
+    condition is then false (desktopImage is already truthy) so it's
+    untouched. Both ultimately equal desktopImage.
+  - Neither present (both uploads failed or neither was ever set):
+    both lines' conditions are true but there's nothing to copy from
+    either side — both remain `''`, and both sendPushToCustomers()
+    calls run with `imageUrl: ''` (unchanged prior no-image graceful
+    behavior; FCM sends still proceed, just without an image).
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- node --check backend/routes/push.js — pass
+- node --check backend/utils/pushNotification.js — pass
+- cd backend && npm test — 19 suites, 151/151 passing (same
+  pre-existing, unrelated console.warn/console.error noise from
+  intentionally-unavailable-DB/invalid-signature/invalid-API-key test
+  cases seen in prior sessions — not failures, and not introduced by
+  this change).
+
+
+====================================================================
+DO-NOT-TOUCH-OTHER-FILES COMPLIANCE
+====================================================================
+Only the 2 files this task named were edited: backend/routes/push.js
+and backend/utils/pushNotification.js. No other route, model, or
+frontend file was touched. Per this task's own instructions this is a
+code-change task with no given commit message and no explicit git/
+deploy steps requested — per CLAUDE.md's standing rule ("Pre-audit
+before edits, self-audit after. Stop after writing the self-audit."),
+changes were made and verified locally (syntax check + full test
+suite) but were NOT staged, committed, or pushed, and no deploy was
+run. The two files remain as local, uncommitted working-tree changes,
+ready to be committed once a commit message/confirmation is given.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+2 files modified: backend/routes/push.js (lines 600-646 rewritten),
+backend/utils/pushNotification.js (line 89 signature + lines 102-107
+query logic). No other file was touched. No git or deploy actions were
+taken (see DO-NOT-TOUCH-OTHER-FILES COMPLIANCE above).

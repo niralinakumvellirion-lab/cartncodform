@@ -1,0 +1,119 @@
+=== PROFILE DETAIL AUDIT ===
+Generated: 2026-09-12
+Script created: backend/check-profile-detail.js (content matches what was
+  specified verbatim). Executed once via `node check-profile-detail.js`.
+No other files modified.
+
+PII REDACTION NOTE: per CLAUDE.md's "never log PII" rule, the two real
+email addresses returned below have their local-part redacted before
+being written into this persisted, checked-into-the-repo audit file.
+Push tokens are shown exactly as the script itself already truncates
+them (substring(0,15)+'...') — that truncation is the script's own
+design, not an additional redaction applied here. cartTokens/sessionIds
+are opaque Shopify/UUID identifiers, not personal data, so are shown in
+full as returned.
+
+=== Profile 1 ===
+sessionIds: [ 'b5e5c0da-7148-4d64-8311-99a3b61cd6dc' ]
+cartTokens: [ '31b31f2c2dd8036f6f0e181c408e380e', 'hWNGfP8tvHDcBWpdeRUO0fK8' ]
+pushTokens: [ 'cdacvViVwwpviWV...' ]
+emails: [ '[redacted-local-part]@gmail.com' ]
+stage: identified
+
+=== Profile 2 ===
+sessionIds: [
+  '256558d9-04b0-499b-a00e-3a0a513f3d3b',
+  '5c2656bd-d33e-4200-acb4-3f68c8747acd',
+  '1c8b8d3a-eab6-4f31-9cfa-29a088d30c72',
+  '64f47804-6161-4b5d-a50e-661713c6d3db',
+  '8eee4fef-7ace-411b-bfb0-1d40e43b96ce',
+  '2a4b5746-61f6-4373-b2de-dbee3b6f4970',
+  'e71b0569-f5a0-472f-9dab-b6a933b47edb',
+  '0a058f62-deab-4d2e-936c-9aaff7ffacb1',
+  '8fbcbd2d-3389-466f-a10c-f8f2b97c735b',
+  '068aca1e-76de-46f6-a249-54c66a9f8495',
+  'b5fdb0d8-ca0d-46b7-a967-bcca2d653f22',
+  '0842ab55-26c4-403b-8814-e0590b2b7e6f',
+  'e697fc54-38cc-4070-99d8-938cf1dd8404',
+  'a5aaf1a6-ee41-491c-a8ac-aecd0f058710',
+  '5fb459bf-8d02-4590-971c-32fd32097e10'
+]
+cartTokens: [
+  '6d4f31737b682f6453a7ea9ad7501e9c',
+  'hWNGh9il7ZCWOaHsSQn3JZZ6',
+  'ee3e88df74bb50e3482257a7516b863a',
+  'hWNGhAsbpDN1DLL83xINj1nQ',
+  '6aabbe4b7353184bfe7ba479cdf3be27',
+  'hWNGhGqu6fJNVUcz5rEA1Lfg',
+  'hWNGhHSmr0nTEEdZAA1aaGY8',
+  '225600deeab6b1ba03e633ecd952069a',
+  'hWNGhHufzhPmPG3iTeHrKpsK',
+  '4f49a462747be4a1319536478c54b929',
+  'hWNGhIggoyUoEAy6mN8xc9yO',
+  '69c5c058a4e4e728a48ccb37ca028e7b',
+  'hWNGhIpeDVrxxtZxxvrlxPUa',
+  '7f33ebe7a8079bec2129e1972872c034',
+  'hWNGjdm95Zn2Gs53nQWz5RjA',
+  'd288e774a67c2d9926ca243cc479ecbd',
+  'hWNGjmsvkFeynpDjBRMLkcOy',
+  'e8284b8e84c8eba180d157482d88942e',
+  'hWNGjnebLlkeFOnjc8DIU9Lw',
+  'ab5615e50bbd04e505ec8cfbb18a5552',
+  'a330c683b9203e3a548f78e7c8ad3c8a',
+  'hWNGjrXtE5ST3ICviF5lEJ8e',
+  'e70de9b8e0749dd207f626d9f97a3535',
+  '0f8f1d26df492cb76eb674d7374ed7c2',
+  'hWNGju7oMTQq1LXcrBYewoEe',
+  'd8fa8959bf4415139d3cac04558e5fc1',
+  '65afd7da401a49ce71b2730d001f5787',
+  'hWNGjuznuRHcxxf9thEHduS4',
+  '7b1a9f76bd706199ff90be0368dd1d00',
+  '993d5f9550fe206e66b7dfc55cf8f93f',
+  'hWNGjwh3XWybrkxmQv53UQNg'
+]
+pushTokens: [
+  'cIL51EdiQpGh1-Y...',
+  'fwwUVxLOZWlYQmh...',
+  'feqMqNxs3UalOGq...',
+  'fHXeQrYkmWJgDzv...',
+  'el20pcWjkHMYq0L...',
+  'fsquBmcLSELXVPI...',
+  'fZIgY1XqHYEqL10...',
+  'dMU2x-AiGArLs6i...',
+  'c7ybCKOjczM4bWT...',
+  'e-S11pO5Saa20X8...',
+  'dcgOwb-yOCXiqqa...',
+  'eiUx16o-oX5APub...',
+  'c_1YgQ9nYgLLfnT...',
+  'c_1YgQ9nYgLLfnT...'
+]
+emails: [ '[redacted-local-part]@gmail.com' ]
+stage: identified
+
+
+OBSERVATIONS (audit only, not acted on here)
+-------------------------------------------------
+- Profile 1 (only 1 sessionId, only 1 pushToken) now has 2 cartTokens
+  populated. This is new since the last time this profile's identifiers
+  were inspected (audits/signal-check-audit.txt and earlier showed it
+  only had price_hesitation/high_intent signals and empty messages) --
+  consistent with the cartToken-linking fixes applied in the two
+  preceding tasks (backend/routes/discounts.js passing cartToken through
+  on discount-popup email capture, and backend/routes/events.js linking
+  cartToken from add_to_cart events onto the profile). Worth a follow-up
+  signal recompute check to see if cart_abandon now actually fires for
+  this profile, but that recompute was not run as part of this task.
+- Profile 2 has an unusually large identifier footprint for a single
+  profile: 15 sessionIds, 31 cartTokens, 14 pushTokens (with one
+  duplicate value -- 'c_1YgQ9nYgLLfnT...' appears twice in the
+  pushTokens array). The cartTokens array shows two distinct value
+  shapes interleaved -- 32-character hex strings (e.g.
+  '6d4f31737b682f6453a7ea9ad7501e9c') and ~24-character
+  alphanumeric-with-hyphens tokens starting 'hWNG...' (e.g.
+  'hWNGh9il7ZCWOaHsSQn3JZZ6') -- these look like two different Shopify
+  cart-token formats/eras rather than one consistent shape; not
+  investigated further here.
+- Both profiles' `messages` array was not requested by this script (only
+  identifiers + stage), so message/signal history for these 2 profiles
+  is not re-confirmed in this pass -- see prior audits
+  (signal-check-audit.txt) for that data as of its own run.

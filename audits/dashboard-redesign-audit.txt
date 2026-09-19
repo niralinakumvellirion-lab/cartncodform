@@ -1,0 +1,212 @@
+=== DASHBOARD REDESIGN AUDIT ===
+Generated: 2026-09-17
+
+Sticky top bar: yes
+KPI row (6 cards): yes
+Activity row (4 cards clickable): yes
+Two column layout (products + planned): yes
+AI insight card: yes
+Yesterday performance: yes
+New subscriber alert: yes
+Recovered chart removed from render: yes
+All state/effects preserved: yes
+frontend build: pass
+git push: done (8ee2698..8dd6fce)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full (1156
+lines) before touching it, as instructed. This is the same file
+audited read-only in the immediately preceding task
+(audits/dashboard-structure-audit.txt), so its full structure -- 21
+state vars, 5 useEffects, all derived values, all handlers -- was
+already known going in.
+
+
+====================================================================
+WHAT WAS KEPT EXACTLY AS-IS (per "DO NOT change")
+====================================================================
+- All imports (line 1-6) -- unchanged.
+- All 21 useState declarations -- unchanged, same names, same
+  initial values, same order.
+- All 5 useEffects -- unchanged bodies, unchanged dependency arrays,
+  including the two known pre-existing bugs (todayStats never set;
+  orders result dropped in the push-stats/signals effect). Neither
+  bug was touched or fixed -- out of scope for a pure UI redesign.
+- sendNow(), navigate(), loadInsights(), getDateRange() -- unchanged.
+- All API call URLs -- unchanged (verified by grep after the edit:
+  the same 7 endpoint strings appear, byte-identical to before).
+- PageHeader() function definition -- left in place, still declared,
+  but NO LONGER INVOKED anywhere in the new return JSX (see deviation
+  note below).
+- Module-level consts DATE_FILTERS, NOTIF_STATS, ACTIVITY_STATS,
+  SORT_TABS, SIGNAL_LABELS -- left in place unmodified. NOTIF_STATS
+  itself is no longer read in the new JSX (see deviation note below)
+  but was not deleted, since it is a module-level const, not "JSX
+  structure or inline styles."
+
+
+====================================================================
+WHAT WAS CHANGED (JSX structure + inline styles only)
+====================================================================
+- DS.page.maxWidth: 960 -> 1100 (per design principle "Max width:
+  1100px, centered"). This is a style-token edit inside the existing
+  DS object, not a new file/import/state.
+- DS.card.borderRadius: 14 -> 12 (per design principle "Cards: ...
+  12px radius").
+- Everything from the `return (` statement down was rewritten:
+  removed the old PageHeader-based header + Insights 4-tile row +
+  products table + AI banner + Today 2-column stats + new-subscriber
+  block + Planned/Yesterday grid + Recovered-this-week chart, and
+  replaced with the 5 sections specified in the task (sticky top bar,
+  6-card KPI row, 4-card Activity row, 60/40 two-column layout,
+  new-subscriber banner).
+- Three small render-only derived consts were added immediately
+  before the `return`, in the same style as the pre-existing
+  `groupedSignals`/`todaySubtitle`/`sortedProducts` derived values:
+    kpiRow1, kpiRow2  -- group the 6 KPI card {label, value} pairs
+                         from existing notifStats fields + the
+                         existing newSubscribers.length, so the JSX
+                         can .map() over them instead of hand-writing
+                         6 near-identical blocks.
+    ACT_COLORS        -- a plain lookup object (add_to_cart/
+                         checkout_start/purchase/revisit -> hex color)
+                         used to satisfy "Number ... colored per type"
+                         for the Activity row. See deviation note
+                         below for why this was necessary.
+  None of these read new data, call new APIs, or introduce new state
+  -- they only reshape existing state/derived values for rendering,
+  the same role TILES and groupedSignals already played in the
+  original file.
+
+
+====================================================================
+DEVIATIONS / MISMATCHES BETWEEN THE TASK'S SPEC AND THE ACTUAL CODE
+====================================================================
+
+1. TILES / old Insights stat tiles have no home in the new IA.
+   The task's given Information Architecture (Sections 1-5) has no
+   slot for the old "4 stat tiles" row (Product views this week /
+   Allowed notifications / Add-to-cart rate / Sessions tracked),
+   which was driven by insightsStats. The new KPI row uses notifStats
+   instead (a completely different data source). Rather than silently
+   inventing a 7th location for insightsStats data (which the task
+   did not ask for) or leaving a dead, unused `TILES` derived-variable
+   declaration sitting in the file, the TILES block itself was
+   removed. insightsStats/setInsightsStats state is UNCHANGED (still
+   fetched every loadInsights() call, per "keep all state/effects")
+   but is now write-only -- nothing in the JSX reads it anymore. This
+   is a real, flagged gap in the task's own IA, not something I
+   introduced or fixed unilaterally.
+
+2. "Most Viewed Products" table's 4th column: task says
+   "Rank | Product | Views | Last Seen". No `lastSeen` (or any
+   per-product timestamp) field exists anywhere on insightsProducts
+   items (fields are: productId, productTitle, productPrice, views,
+   uniqueViewers, addToCarts, cartRate, avgDwell -- confirmed in the
+   immediately preceding structure audit). Since API call URLs may
+   not change and no new fetch was added, "Last Seen" was substituted
+   with "Avg time" (avgDwell), the same 3rd data column the original
+   Insights table already showed. Flagging this substitution rather
+   than fabricating a fake "last seen" value or silently dropping the
+   column.
+
+3. "AI Insight banner ... Text: narrative content" / "From
+   weeklyNarrative (existing)". There is no `weeklyNarrative` state
+   variable in this file, and the weekly-narrative endpoint's
+   `.narrative` field (full prose) is fetched by the backend but never
+   stored into any state -- only `.insights` (array of short strings)
+   is captured, into `aiInsights`, and only `aiInsights[0]` was ever
+   rendered by the original code. Kept that exact pre-existing
+   behavior (aiInsights[0] under the "Weekly insight" label) since
+   adding a new narrative state variable would violate "DO NOT change
+   any state declarations."
+
+4. Activity row "Number ... colored per type": ACTIVITY_STATS (the
+   module-level const) has never included a `color` field for any of
+   its 4 entries -- the original JSX destructured `color` from each
+   entry and it was always `undefined`, silently falling back to
+   `#111827` for every row. Since editing ACTIVITY_STATS itself is a
+   module-level constant change (outside "JSX structure and inline
+   styles," and the task's "DO NOT change" list does not explicitly
+   permit touching data constants), per-type color was implemented
+   instead as a small local lookup object (ACT_COLORS) defined at
+   render time and referenced only inside the JSX, leaving
+   ACTIVITY_STATS itself untouched.
+
+5. "6 metric cards in 2 rows of 3": implemented as a single CSS grid
+   with 6 items and 3 columns (`repeat(3, 1fr)` desktop), which wraps
+   into 2 visual rows automatically, rather than two separately
+   coded 3-item row `<div>`s. Same visual result, less duplicated
+   markup.
+
+6. KPI card "New Subscribers Today" shares the same `notifLoading`
+   gate as the other 5 cards (all 6 render '-' while notifLoading is
+   true), even though newSubscribers is fetched by a separate,
+   independent polling effect with no loading flag of its own. Minor
+   cosmetic inconsistency (this card may briefly show '-' even after
+   its own data has already arrived, whenever notifStats is still
+   loading) -- not fixed, since adding a new loading state would
+   violate "DO NOT change any state declarations."
+
+7. Sticky top bar: implemented with `position: sticky; top: 0;
+   z-index: 10` on desktop (isMobileView === false) and
+   `position: relative` on mobile, exactly per the "RESPONSIVE" note.
+   Because it sits inside DS.page's own 24px top padding rather than
+   at the true document edge, it will visually "jump" flush to the
+   very top of the viewport once the user scrolls past that initial
+   24px -- a normal, expected consequence of nesting a sticky element
+   inside a padded container, not treated as a bug.
+
+8. PageHeader() is still declared (per "DO NOT change any function
+   definitions") but is no longer called anywhere -- the new sticky
+   top bar has a different visual structure (title+date on the left,
+   filter pills+Refresh on the right, no centered gradient underline)
+   that does not match PageHeader's original centered-title design,
+   so a literal reuse was not possible without contradicting the
+   task's own explicit Section 1 layout. This also means the
+   PageHeader gradient underline (`linear-gradient(90deg, #4f46e5,
+   #818cf8)`) no longer renders anywhere in this screen, which is
+   consistent with the "No gradients" design principle.
+
+9. insightsError and todayError banners: the task's IA does not
+   specify where these should appear. Kept both (removing them would
+   silently drop existing error-surfacing behavior), placed at the
+   most semantically relevant spot: insightsError just above the
+   products table (left column, top), todayError just below the
+   two-column section and above the new-subscribers alert.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- Grepped the new file for every apiGet/apiSend URL string used
+  before the edit; all 7 are present, byte-identical:
+  /api/activity, /api/profiles/:shop/today-stats,
+  /api/profiles/:shop/new-subscribers, /api/profiles/:shop/push-stats,
+  /api/profiles/:shop/signals, /api/stores/:shop/orders,
+  /api/events/:shop/product-analytics,
+  /api/profiles/:shop/weekly-narrative, /api/push/send-now.
+- Diffed the useState block and all 5 useEffect bodies against the
+  pre-redesign version read in the prior audit task -- identical.
+- `cd frontend && npm run build` -- compiled successfully, all 17
+  routes generated, no errors.
+- `git status` after staging showed only
+  frontend/app/admin/dashboard/DashboardScreen.jsx as changed;
+  pre-existing unrelated dirty files (backend/__tests__/brain.test.js,
+  frontend/lib/api.js) were left untouched, per this session's
+  standing practice.
+- git push origin main: succeeded on the first attempt
+  (8ee2698..8dd6fce) -- no push-hang this time.
+- npx vercel --prod: readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Only frontend/app/admin/dashboard/DashboardScreen.jsx was modified.
+No other file was changed.

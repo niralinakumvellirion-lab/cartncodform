@@ -1,0 +1,76 @@
+=== WEBHOOK DEBUG AUDIT ===
+
+node --check: pass
+
+git push: done
+  Commit: c576878 "debug: add image fetch logging to webhooks"
+  Pushed: f73f4ca..c576878  main -> main
+
+Log points added: 6
+  1. fetchProductImage() -- after apiToken resolved (before the null-token
+     guard's existing log line): logs productId, shop, token type
+     (online/offline, per the shpua_ prefix check).
+  2. fetchProductImage() -- immediately after the fetch() call, before the
+     res.ok check: logs res.status + productId.
+  3. fetchProductImage() -- inside the `if (!res.ok)` block, alongside the
+     existing console.warn: logs res.status.
+  4. fetchProductImage() -- right before the final `return imageUrl;`
+     (after the cache-write try/catch): logs the resolved imageUrl (or
+     the literal string 'null' when falsy).
+  5. fetchProductImage()'s catch block: logs err.message.
+  6. handleWebhook(), immediately before the `productImageUrl = await
+     fetchProductImage(...)` call site: logs the cart's first item's
+     productId and the cartItems array length.
+
+All 6 are plain console.log additions only -- no existing logic,
+control flow, or return values were changed anywhere in this file.
+
+
+DEVIATION FROM THE LITERAL GIVEN CODE (verified, not guessed)
+=========================================================================
+Two of the six given log snippets referenced variables that do not
+exist in their stated scope, and would have thrown ReferenceError if
+pasted verbatim:
+
+1. Point 6 (in handleWebhook()) was given as:
+     console.log('[webhook-img] calling fetchProductImage for productId:',
+       customer.cartItems?.[0]?.productId, 'cartItems count:', customer.cartItems?.length);
+   `customer` is not declared anywhere in handleWebhook()'s scope --
+   only `req.body.customer` exists, and that is the Shopify CUSTOMER
+   object from the webhook payload, a completely different thing from
+   the cart. The actual variable holding the cart/AbandonedCustomer
+   document at that point in the function is `savedCustomer` (returned
+   by the upsert earlier in the same function). Using the given
+   `customer` reference would have thrown ReferenceError: customer is
+   not defined the moment this line ran on every single webhook
+   delivery that reaches this point -- caught by handleWebhook()'s own
+   outer try/catch (still 200-OK'ing Shopify per that catch's design),
+   but silently aborting the rest of the function every time, INCLUDING
+   the productImageUrl resolution this debug logging exists to
+   diagnose. Fixed by using `savedCustomer.cartItems` instead --
+   identical diagnostic content (productId of the first cart item, cart
+   item count), just referencing the variable that actually exists.
+
+2. Point 5 (fetchProductImage()'s catch block) was given as:
+     console.log('[webhook-img] error:', e.message);
+   but the function's actual catch clause is `catch(err) { ... }` -- the
+   bound parameter is named `err`, not `e`. `e` is not defined in that
+   scope. Fixed by using `err.message`, matching the real catch
+   parameter (also matches the file's own established convention of
+   naming caught errors `err` throughout, not `e`).
+
+All other four log points matched the real code as given and were
+added verbatim (with a `[webhook-img]` prefix as specified) at the
+exact positions requested.
+
+
+NOT TOUCHED
+=========================================================================
+- No control flow, conditionals, return values, or existing log lines
+  were changed, removed, or reordered -- only new console.log lines
+  were inserted (each marked "// DEBUG (temporary)" so they're easy to
+  find and strip later).
+- No file other than backend/routes/webhooks.js was staged or
+  committed (git status confirms only that one file was `git add`ed;
+  the many other modified/untracked files accumulated earlier this
+  session were left exactly as they were, untouched by this commit).

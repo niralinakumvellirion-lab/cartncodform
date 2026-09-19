@@ -1,0 +1,146 @@
+=== FESTIVAL IMAGE BACKEND AUDIT ===
+Generated: 2026-09-17
+
+queue.js POST festival:
+  mobileImageUrl destructured: yes
+  desktopImageUrl destructured: yes
+  Both saved to FestivalQueue.create: yes
+push.js send-store:
+  mobileImageUrl destructured: yes
+  desktopImageUrl destructured: yes
+  Image passed to push message: yes
+PATCH already works with req.body: yes
+node --check both files: pass
+npm test: 151/151 passing
+git push: done (749c3fb..6fc398f)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read backend/routes/queue.js in full (220 lines) and
+backend/routes/push.js in full (576 lines) before making any change,
+as instructed. This closes the gap flagged in the immediately
+preceding task's own audit (audits/separate-images-audit.txt, "Critical
+Finding" section), which explicitly predicted that Approve/Add to
+Queue/Send Now would silently fail to persist or send uploaded
+mobile/desktop images until these two route files were updated.
+
+
+====================================================================
+FIX 1 — backend/routes/queue.js, POST /:shopDomain/festival
+====================================================================
+Destructuring updated exactly as given:
+  const { title, body, imageUrl, scheduledAt, festival,
+          status, mobileImageUrl, desktopImageUrl } = req.body;
+
+FestivalQueue.create() call updated to also write both new fields:
+  mobileImageUrl: mobileImageUrl || '',
+  desktopImageUrl: desktopImageUrl || '',
+(placed directly after the existing `imageUrl: imageUrl || ''` line,
+which was left unchanged — the model already keeps `imageUrl` for
+backward compat, per the prior task's Change 4).
+
+This route already had `:shopDomain` in its path and read shop from
+the verified `req.shopDomain` token (not the body) — both correct and
+unrelated to this task, re-confirmed while reading the file, no change
+needed there.
+
+
+====================================================================
+FIX 2 — backend/routes/push.js, POST /send-store
+====================================================================
+Destructuring updated exactly as given:
+  const { title, body, mobileImageUrl, desktopImageUrl } = req.body;
+
+The `sendPushToCustomers()` call's previously-hardcoded 5th argument
+(`null`, meaning this route has NEVER sent an image before — confirmed
+via this file's own doc comment above the route and matching the gap
+already documented in audits/dashboard-phase1-audit.txt) was replaced
+with a computed `imageUrl` local:
+  const imageUrl = mobileImageUrl || desktopImageUrl || '';
+  const result = await sendPushToCustomers(shop, title, body, '/', imageUrl, false, null, false);
+
+NOTE ON WHY ONE IMAGE, NOT TWO: sendPushToCustomers() (and the
+underlying FCM push payload it builds) takes a single positional
+image argument — a push notification has one image slot, rendered by
+whichever device the subscribed token belongs to; there is no
+per-device image field to fill at send time the way the editor's two
+live previews visually mock two different surfaces. The task's own
+given formula (`mobileImageUrl || desktopImageUrl || ''`) already
+reflects this — mobile is preferred when both are set, falling back to
+desktop, falling back to empty string (matching the pre-existing
+`null`-effectively-no-image behavior when neither is uploaded).
+Implemented literally as given; documented the reasoning inline in the
+route's own doc comment as well, so a future reader doesn't wonder why
+only one of the two uploaded images is actually used here.
+
+Confirmed the route's own updated doc comment now lists the new body
+shape (`Body: { title, body, mobileImageUrl, desktopImageUrl }`) and
+references this audit file.
+
+
+====================================================================
+PATCH /:shopDomain/festival/:id — confirmed already correct, no
+change needed
+====================================================================
+Re-read the handler:
+  const item = await FestivalQueue.findOneAndUpdate(
+    { _id: req.params.id, shopDomain: shop },
+    { $set: req.body },
+    { new: true }
+  );
+`{ $set: req.body }` forwards every key present in the request body
+verbatim into the update — it is not scoped to a fixed destructured
+field list the way the POST handler is, so it already passes through
+`mobileImageUrl`/`desktopImageUrl` (or any other field) whenever the
+caller includes them, with zero code changes needed. This was already
+true before this task and remains true now that FestivalQueue's schema
+has both fields (added in the prior task) — Mongoose will persist them
+correctly since they're now real schema paths, not just whatever-goes
+plain-object writes. Confirmed, not modified, per the task's own "no
+change needed if already works" instruction. The current live caller
+of this endpoint (Queue Phase 2's Planning List "Approve" button) only
+ever sends `{ status: 'approved' }`, so this route doesn't yet have a
+live caller that sends image fields through PATCH — but it will work
+correctly the moment one does, with no further backend change required.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+Only the fields/lines described above were touched in each file — no
+other route, helper, or logic in either file was modified. Only
+backend/routes/queue.js and backend/routes/push.js were staged and
+committed, per the task's own git-add line. `git status` after staging
+confirmed exactly these 2 paths; the pre-existing unrelated dirty
+files (backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- node --check backend/routes/queue.js -- pass
+- node --check backend/routes/push.js -- pass
+- cd backend && npm test -- 19 suites, 151/151 passing (one pre-
+  existing, unrelated console.error in sendJourneyEmail.test.js from a
+  deliberately-invalid test Resend API key — expected test output, not
+  a failure; present before this task too).
+- git push origin main -- succeeded (749c3fb..6fc398f), no hang.
+
+This task's own stated steps did not include a frontend build or a
+Vercel deploy (backend-only change, no frontend file touched), so
+neither was run.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+2 files modified (backend/routes/queue.js, backend/routes/push.js). No
+other file was touched. This closes the "Critical Finding" gap from
+audits/separate-images-audit.txt: Approve and Add to Queue now
+correctly persist mobileImageUrl/desktopImageUrl to FestivalQueue
+documents, and Send Now now correctly forwards one of the two uploaded
+images (mobile preferred) into the actual push notification, instead
+of silently dropping all uploaded images as before.

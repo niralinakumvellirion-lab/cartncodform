@@ -1,0 +1,96 @@
+=== JOURNEY PANEL LAYOUT AUDIT ===
+Outer wrapper height fixed: yes (height: 'calc(100vh - 120px)')
+Journey card flex-grow: yes (flex: '1 1 0', minHeight: 0)
+Journey card internal scroll: yes (overflowY: 'auto', retained from
+  before — only the maxHeight:380px sibling property was removed)
+Notification card pinned bottom: yes (maxHeight: '45vh') — applied to
+  BOTH of its two mutually-exclusive render branches (see NOTE below)
+Old maxHeight 380px removed: yes
+frontend build: pass (npm run build — compiled successfully, 14
+  static pages, /admin/journey grew 8.96 kB -> 9.02 kB, no errors)
+git push: done (commit 74e6fb7, bd2ca98..74e6fb7 main -> main)
+vercel deploy: done (production, readyState: READY,
+  deployment id dpl_CsWn1CLfXKby9t4eWE6uxo3aM4sc,
+  https://cartncodform-4ntbwa1jl-niralinakumvellirion-8853s-projects.vercel.app,
+  aliased to https://cartncodform-beryl.vercel.app)
+
+
+FULL RIGHT PANEL SECTION READ FIRST, AS INSTRUCTED
+=========================================================================
+Read the right panel JSX in full (lines ~1008-1180 as of this task,
+shifted from the task's cited "~768"/"~772"/"~876" since the previous
+task in this session added the Refresh button, EmailComposer
+suggestions, and product-thumbnail code above this section) before
+editing, and confirmed the outer sticky wrapper, the Journey timeline
+card, and the Send notification section's exact current line
+positions before making any change.
+
+
+EXACT DIFF
+=========================================================================
+Outer wrapper (was: `display:'flex', flexDirection:'column',
+gap:'12px', position:'sticky', top:'16px'`):
+  <div style={{
+    position: 'sticky',
+    top: 16,
+    height: 'calc(100vh - 120px)',
+    overflowY: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 12,
+  }}>
+
+Journey timeline card (was: `..., maxHeight:'380px', overflowY:'auto'`):
+  <div style={{
+    background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px',
+    flex: '1 1 0', minHeight: 0, overflowY: 'auto',
+  }}>
+
+Send notification card — BOTH branches (see NOTE below):
+  ..., flex: '0 0 auto', overflowY: 'auto', maxHeight: '45vh',
+
+All values match the task's given code exactly.
+
+
+NOTE - applied to both of the Send-notification section's two
+mutually-exclusive branches, not just one
+=========================================================================
+The task said "Find the Send notification card (second card, ~line
+876)" as if there is a single card. Reading the actual code (the IIFE
+starting at "Send notification panel"), there are actually TWO
+different divs that can render as this second card, chosen by an
+if/else that never renders both at once:
+  1. The no-channels fallback (`if (!hasPush && !hasEmail) return
+     (<div style={{background:'#f9fafb', ...}}>...No push
+     subscription or email on file...</div>)`) -- shown when the
+     selected customer has neither push nor email.
+  2. The real composer card (`return (<div style={{background:'#fff',
+     ...}}>...Send notification heading, tab switcher,
+     NotificationComposer/EmailComposer...</div>)`) -- shown
+     otherwise.
+Applying the flex/scroll styling to only one of these two would leave
+the OTHER one still using the old plain block sizing whenever it's the
+one that happens to render -- for the specific case this task exists
+to fix (a customer with a lot of journey timeline content AND an
+available notification composer), branch 2 is what actually matters
+most, but branch 1 can just as easily render for a different selected
+customer and would then sit inside the same fixed-height, flex-column
+sticky wrapper without a matching `flex: '0 0 auto'` of its own,
+potentially disrupting the same layout the fix is meant to guarantee.
+Applied the identical 3 style properties to both, so the fix holds
+regardless of which customer is selected.
+
+
+VERIFIED SAFE
+=========================================================================
+- `git diff` shows exactly 3 hunks, matching the 3 places named by the
+  task (outer wrapper, Journey timeline card, Send notification card)
+  plus the one extra branch covered by the NOTE above -- nothing in
+  the customer list, filter tabs, header, NotificationComposer,
+  EmailComposer, or any other section was touched.
+- The Journey timeline card's internal content (top products list,
+  recent-activity timeline, the getFriendlyPath()-based labels from an
+  earlier task) is unchanged -- only the card's own outer style object
+  differs (maxHeight removed, flex/minHeight added, overflowY kept as
+  it already was).
+- No other file was staged or committed.

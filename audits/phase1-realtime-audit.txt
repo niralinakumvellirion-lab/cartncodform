@@ -1,0 +1,414 @@
+PHASE 1 REALTIME AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-14
+
+Files read in full: frontend/app/admin/screens/Today.jsx (710 lines),
+backend/routes/profiles.js (the today-stats endpoint section),
+backend/routes/push.js (the send-journey endpoint section),
+backend/models/ScheduledJob.js (75 lines, in full).
+
+
+====================================================================
+1. frontend/app/admin/screens/Today.jsx
+====================================================================
+
+--- How is today-stats data currently fetched? ---
+A single combined useEffect (lines 177-203), keyed on `[shop,
+dateFilter]`, fires both the activity and today-stats requests
+together via Promise.all whenever the component mounts (once `shop`
+is available) or whenever the merchant clicks a different date-filter
+button:
+
+177	  useEffect(() => {
+178	    if (!shop) return;
+179	    let cancelled = false;
+180	    const { from, to } = getDateRange(dateFilter);
+181	    setNotifLoading(true);
+182	    Promise.all([
+183	      apiGet(`/api/activity?shop=${encodeURIComponent(shop)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+184	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/today-stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+185	    ])
+186	      .then(([actData, statsData]) => {
+187	        if (cancelled) return;
+188	        setActivity(actData);
+189	        setNotifStats(statsData);
+190	      })
+191	      .catch(() => {
+192	        if (cancelled) return;
+193	        setActivity(null);
+194	        setNotifStats(null);
+195	      })
+196	      .finally(() => {
+197	        if (cancelled) return;
+198	        setNotifLoading(false);
+199	      });
+200	    return () => {
+201	      cancelled = true;
+202	    };
+203	  }, [shop, dateFilter]);
+
+Both requests use apiGet() (frontend/lib/api.js) -- a plain fetch
+wrapper with session-token auth, not any realtime transport. No
+manual "Refresh" button or similar re-fetch trigger exists in THIS
+file (Today.jsx) -- the only way this effect re-runs is a `shop`
+change (essentially never, once mounted) or a `dateFilter` change (the
+merchant clicking Today/Yesterday/Last 7 days/Last 30 days). Note: a
+"Refresh" button DOES exist elsewhere in this codebase -- it was added
+to the Journey screen (frontend/app/admin/screens/Journey.jsx) in an
+earlier task this session, calling that screen's own `load()`
+callback -- but Today.jsx has no equivalent of its own.
+
+A SEPARATE, second useEffect (lines 227-252) independently fetches
+push-stats/signals/orders via Promise.allSettled, keyed only on
+`[shop]` -- this one has existed since before the "Today screen
+redesign" task and is unrelated to the date-filtered stats; it also
+has no refresh/polling trigger.
+
+--- What state variables exist? ---
+  const [stats, setStats] = useState(null);                (line 162)
+  const [pushStats, setPushStats] = useState(null);         (line 163)
+  const [signals, setSignals] = useState([]);               (line 164)
+  const [loading, setLoading] = useState(true);             (line 165)
+  const [error, setError] = useState('');                   (line 166)
+  const [dateFilter, setDateFilter] = useState('7d');        (line 172)
+  const [activity, setActivity] = useState(null);            (line 173)
+  const [notifStats, setNotifStats] = useState(null);        (line 174)
+  const [notifLoading, setNotifLoading] = useState(true);    (line 175)
+  const [isMobileView, setIsMobileView] = useState(false);   (line 219)
+9 useState calls total, plus one useRouter() (line 161, not state but
+listed for completeness -- it's how the "View all"/tile-click
+navigation is implemented, see section on navigate() below).
+
+NOTE (carried over from an earlier read-only audit this session,
+audits/phase3-today-audit.txt, still true as of this read): `stats`
+(line 162) is declared but `setStats` is never called anywhere in this
+file -- neither of the two data-fetching effects sets it. It stays
+`null` for the lifetime of the component, so every UI element reading
+`stats?.x` (Sent/Came back and bought/Recovered/the bar chart, all in
+the untouched-by-this-session lower half of the screen) permanently
+shows its `'—'`/0/placeholder fallback. Still unfixed, out of scope
+for this read-only task.
+
+--- How is the date filter implemented? ---
+Client-side only, no server involvement beyond what params are sent
+in the fetch URLs:
+  - `dateFilter` state (default '7d'), set by 4 pill buttons (Today /
+    Yesterday / Last 7 days / Last 30 days -- DATE_FILTERS, lines
+    91-96) rendered in "SECTION 1 — Date filter bar" (lines 284-313).
+  - `getDateRange(f)` (module-scope function, lines 132-143) converts
+    the selected key into concrete `{ from, to }` ISO-string
+    boundaries entirely in the browser (new Date() math, no API call)
+    -- 'today' = midnight today to now; 'yesterday' = midnight
+    yesterday to 23:59:59.999 yesterday; '7d'/'30d' = N days back
+    (current time-of-day) to now.
+  - Those `from`/`to` strings are then passed as query params on both
+    fetch URLs in the combined effect (section above) -- the actual
+    date filtering happens server-side, inside the /api/activity and
+    /api/profiles/:shop/today-stats handlers (the latter shown in
+    full in section 2 below), which apply them as MongoDB
+    `$gte`/`$lte` range queries.
+  - Changing `dateFilter` re-runs the combined effect (it's a
+    dependency), which re-fetches both endpoints with the new range.
+    There is no debounce -- each button click fires an immediate
+    fetch (acceptable here since only 4 discrete buttons exist, not a
+    free-text input).
+
+--- Is there any WebSocket or polling currently? ---
+No. Grepped the full file for "WebSocket", "EventSource", "setInterval",
+and "poll" (case-insensitive): zero matches. Every fetch in this file
+is a one-shot request triggered by a React effect dependency change
+(mount, `shop` change, or `dateFilter` change) -- there is no
+timer-based re-fetching, no push-based (WebSocket/SSE) live-update
+mechanism, and no manual refresh control specific to this screen. Data
+goes stale until the merchant navigates away and back (remounting the
+component) or clicks a different date-filter button (which happens to
+also re-fetch the SAME range's data fresh, since the effect always
+re-runs the fetch regardless of whether the range actually changed
+value -- e.g. clicking "Last 7 days" while it's already selected still
+re-triggers the effect only if React treats the state as genuinely
+changing, which it wouldn't here since setDateFilter('7d') when
+already '7d' does not trigger a re-render/effect -- so in practice
+there is currently no way to force a re-fetch of the SAME range at all
+from this screen).
+
+
+====================================================================
+2. backend/routes/profiles.js - the today-stats endpoint
+====================================================================
+Full handler, lines 288-352 (added in the "Today screen redesign"
+task earlier this session; unchanged since):
+
+288	/**
+289	 * GET /api/profiles/:shopDomain/today-stats?from=&to=
+290	 * Powers the Today screen's notification-stats row. Defaults to the last
+291	 * 7 days when from/to are omitted.
+292	 * -> { pushSent, emailsSent, popupsShown, emailsCaptured, pushSubscribers }
+293	 */
+294	router.get('/:shopDomain/today-stats', requireAuth, requireStoreOwner, async (req, res) => {
+295	  try {
+296	    const shop = req.params.shopDomain.trim().toLowerCase();
+297	    const from = new Date(req.query.from || Date.now() - 7 * 24 * 60 * 60 * 1000);
+298	    const to = new Date(req.query.to || Date.now());
+299
+300	    const [pushSent, emailsSent, popupsShown, emailsCaptured, pushSubscribers] =
+301	      await Promise.all([
+302	        // Push sent in range — sentAt (set at the moment ScheduledJob is
+303	        // claimed/sent, server.js processScheduledJobs()) rather than
+304	        // updatedAt, which can be nudged forward later by an unrelated
+305	        // outcome/clickedAt update and would then misattribute the send
+306	        // to the wrong date range.
+307	        ScheduledJob.countDocuments({
+308	          shopDomain: shop,
+309	          channel: 'push',
+310	          status: 'sent',
+311	          sentAt: { $gte: from, $lte: to },
+312	        }),
+313	        // Emails sent in range (from Profile.messages)
+314	        Profile.aggregate([
+315	          { $match: { shopDomain: shop } },
+316	          { $unwind: '$messages' },
+317	          { $match: {
+318	            'messages.channel': 'email',
+319	            'messages.sentAt': { $gte: from, $lte: to },
+320	          } },
+321	          { $count: 'total' },
+322	        ]).then((r) => r[0]?.total || 0),
+323	        // Popups shown in range
+324	        StorefrontEvent.countDocuments({
+325	          shopDomain: shop,
+326	          type: 'push_prompt_shown',
+327	          ts: { $gte: from, $lte: to },
+328	        }),
+329	        // Emails captured in range
+330	        Profile.countDocuments({
+331	          shopDomain: shop,
+332	          'channels.email.capturedAt': { $gte: from, $lte: to },
+333	        }),
+334	        // Total push subscribers (all time)
+335	        Profile.countDocuments({
+336	          shopDomain: shop,
+337	          'channels.push.subscribed': true,
+338	        }),
+339	      ]);
+340
+341	    return res.json({
+342	      pushSent,
+343	      emailsSent,
+344	      popupsShown,
+345	      emailsCaptured,
+346	      pushSubscribers,
+347	    });
+348	  } catch (err) {
+349	    console.error('[profiles] GET today-stats error:', err.message);
+350	    return res.status(500).json({ error: 'Failed to load stats' });
+351	  }
+352	});
+
+--- What data does it currently return? ---
+A flat JSON object with exactly 5 integer counts, all computed fresh
+on every request (no caching layer) via 5 parallel Mongo
+queries/aggregations:
+  - pushSent: ScheduledJob rows for this shop with channel:'push',
+    status:'sent', sentAt within [from, to].
+  - emailsSent: count of Profile.messages subdocuments (across every
+    profile in the shop) with channel:'email' and sentAt within
+    [from, to] (via $unwind + $match + $count).
+  - popupsShown: StorefrontEvent rows of type 'push_prompt_shown'
+    within [from, to].
+  - emailsCaptured: Profile documents whose channels.email.capturedAt
+    falls within [from, to] (this field was added in an earlier task
+    this session, audits/email-capturedat-audit.txt).
+  - pushSubscribers: Profile documents with channels.push.subscribed
+    === true -- NOT date-ranged (queried without any ts/sentAt/
+    capturedAt filter at all, so this one is always an ALL-TIME total,
+    regardless of the from/to the caller passed -- the only one of the
+    5 stats that ignores the date filter entirely, by design per its
+    own inline comment "Total push subscribers (all time)").
+`from`/`to` default to now minus 7 days / now when the query params
+are omitted. No pagination, no per-row detail -- purely aggregate
+counts, matching what Today.jsx's 5 stat tiles need (section 1 above).
+
+
+====================================================================
+3. backend/routes/push.js - the send-journey endpoint, full handler
+====================================================================
+Lines 324-369 (the shared function + its thin route wrapper):
+
+324	/**
+325	 * POST /api/push/send-journey
+326	 * Body: { profileId, title, body, url }
+327	 * Sends a one-off push to a single customer from the Journey screen.
+328	 *
+329	 * There is no :shopDomain in this route's path, so requireStoreOwner (which
+330	 * compares req.shopDomain to req.params.shopDomain) doesn't apply here — the
+331	 * route uses requireAuth only and scopes the Profile lookup by the verified
+332	 * shopDomain from the session token itself (never a client-supplied value),
+333	 * which is what actually prevents one shop from pushing to another shop's
+334	 * customer via a guessed/leaked profileId.
+335	 */
+336	async function sendJourneyPush(shopDomain, { profileId, title, body, url }) {
+337	  const Profile = require('../models/Profile');
+338
+339	  if (!profileId || !title || !body) {
+340	    return { status: 400, payload: { error: 'profileId, title and body are required' } };
+341	  }
+342
+343	  const shop = String(shopDomain || '').trim().toLowerCase();
+344	  const profile = await Profile.findOne({ _id: profileId, shopDomain: shop });
+345
+346	  if (!profile || !profile.channels?.push?.subscribed) {
+347	    return { status: 400, payload: { error: 'No push subscription' } };
+348	  }
+349
+350	  const cartToken = profile.identifiers?.cartTokens?.[0] || null;
+351	  const result = await sendPushToCustomers(
+352	    shop, title, body, url, null, false, cartToken
+353	  );
+354
+355	  if (!result.success) {
+356	    return { status: 500, payload: { success: false, error: result.error } };
+357	  }
+358	  return { status: 200, payload: result };
+359	}
+360
+361	router.post('/send-journey', requireAuth, async (req, res) => {
+362	  try {
+363	    const { profileId, title, body, url } = req.body;
+364	    const { status, payload } = await sendJourneyPush(req.shopDomain, { profileId, title, body, url });
+365	    return res.status(status).json(payload);
+366	  } catch (err) {
+367	    console.error('[push] POST /send-journey error:', err.message);
+368	    return res.status(500).json({ error: 'Failed to send journey notification' });
+369	  }
+370	});
+
+--- What does it accept and do? ---
+Accepts (POST body): { profileId, title, body, url }. All 3 of
+profileId/title/body are required (400 if any is missing); `url` is
+optional (passed straight through to sendPushToCustomers(), which
+itself defaults to `https://${shopDomain}` when falsy -- per
+pushNotification.js's own fallback, not reproduced here since this
+task only asked for push.js's handler).
+
+Behavior:
+  1. Looks up the target Profile by `_id` AND `shopDomain` together
+     (the shopDomain comes from the VERIFIED session token,
+     `req.shopDomain`, not from the request body -- this is the IDOR
+     protection the doc comment describes, since this route has no
+     `:shopDomain` path segment for requireStoreOwner to check
+     against).
+  2. Rejects (400 "No push subscription") if no profile matches OR
+     the matched profile's channels.push.subscribed is not true --
+     i.e. even a profileId that legitimately belongs to a DIFFERENT
+     shop, or a real profile that simply isn't push-subscribed, both
+     produce the same 400.
+  3. Takes the profile's first cartToken (identifiers.cartTokens[0],
+     if any) to pass to sendPushToCustomers() as its targeting
+     cartToken.
+  4. Calls sendPushToCustomers(shop, title, body, url, null, false,
+     cartToken) -- imageUrl hardcoded to null (no image support on
+     this send path) and mobileOnly hardcoded to false.
+  5. Returns 500 with `{success:false, error}` if the send itself
+     fails (result.success falsy); otherwise 200 with the raw result
+     object from sendPushToCustomers() (whatever shape that function
+     returns -- e.g. {success, sent, tokensFound, ...} per earlier
+     audits this session, audits/push-query-audit.txt).
+Notably: this handler does NOT call recordProfileMessage() (the
+helper server.js's poller uses to log a message onto
+Profile.messages after a brain-scheduled send) -- a journey-composer
+push sent through this endpoint does not appear to get logged into
+the customer's own message history the same way an automated/brain
+send does. Not confirmed further since tracing recordProfileMessage's
+other call sites was outside this task's scope; noted as an
+observation from reading this handler in full.
+
+
+====================================================================
+4. backend/models/ScheduledJob.js - full schema
+====================================================================
+1	const mongoose = require('mongoose');
+2
+3	const scheduledJobSchema = new mongoose.Schema({
+4	  shopDomain: { type: String, required: true, lowercase: true, index: true },
+5	  // Legacy field. The AutomationRule model was retired; kept so historical
+6	  // rows (and the "is this a brain job?" test `ruleId == null`) still work.
+7	  ruleId: { type: mongoose.Schema.Types.ObjectId, default: null },
+8	  stepIndex: { type: Number, required: true, default: 0 },
+9
+10	  // --- Phase C: brain targeting / explainability ---
+11	  profileId: { type: mongoose.Schema.Types.ObjectId, ref: 'Profile', default: null },
+12	  signalType: { type: String, default: null },
+13	  reason: { type: String, default: '' }, // human-readable why
+14
+15	  // Targeting — at least one of these should be present.
+16	  subscriptionToken: { type: String },  // FCM token, if already resolved
+17	  sessionId: { type: String, index: true },  // stable UUID (StorefrontEvent.sessionId)
+18	  cartToken: { type: String, index: true },  // Shopify cart token, for cancellation matching
+19	  customerId: { type: String, index: true },
+20
+21	  runAt: { type: Date, required: true, index: true },
+22	  status: {
+23	    type: String,
+24	    enum: ['pending', 'sent', 'cancelled', 'failed', 'skipped'],
+25	    default: 'pending',
+26	    index: true,
+27	  },
+28	  channel: { type: String, enum: ['push', 'email'], default: 'push' },
+29	  payload: { type: mongoose.Schema.Types.Mixed },  // resolved title/body/imageUrl at send time
+30
+31	  // Phase C2: outcome of the send, updated by attribution (click) + order webhook (convert).
+32	  outcome: {
+33	    type: String,
+34	    enum: ['delivered', 'clicked', 'converted', 'failed', 'skipped'],
+35	    default: null,
+36	  },
+37	  clickedAt: { type: Date, default: null },
+38
+39	  // Phase G3: createdAt + updatedAt are managed by { timestamps: true } below.
+40	  sentAt: { type: Date },
+41	  error: { type: String },
+42	}, { timestamps: true });
+43
+44	// Compound index for the sender's poll query.
+45	scheduledJobSchema.index({ status: 1, runAt: 1 });
+46
+47	// Prevent duplicate first-step scheduling for the same rule+cart+step
+48	// when carts/create and carts/update fire near-simultaneously.
+49	// Phase C: scoped to rule-based jobs (ruleId is an ObjectId) so brain jobs,
+50	// which have ruleId=null and share cartToken+stepIndex, are NOT deduped here.
+51	scheduledJobSchema.index(
+52	  { shopDomain: 1, ruleId: 1, cartToken: 1, stepIndex: 1 },
+53	  {
+54	    unique: true,
+55	    partialFilterExpression: {
+56	      status: { $in: ['pending', 'sent'] },
+57	      ruleId: { $type: 'objectId' },
+58	    },
+59	  }
+60	);
+61
+62	// Phase C: one pending brain job per (profile, signal) at a time.
+63	scheduledJobSchema.index(
+64	  { shopDomain: 1, profileId: 1, signalType: 1 },
+65	  {
+66	    unique: true,
+67	    partialFilterExpression: {
+68	      status: 'pending',
+69	      profileId: { $type: 'objectId' },
+70	    },
+71	  }
+72	);
+73
+74	module.exports = mongoose.model('ScheduledJob', scheduledJobSchema);
+
+Notes: `{ timestamps: true }` (line 42) means Mongoose auto-manages
+`createdAt`/`updatedAt` on every save -- this is the field the
+today-stats endpoint's own comment (section 2) explicitly avoids using
+for "push sent" counting, in favor of the separately-managed `sentAt`
+(set once, manually, only at actual send time -- never touched by
+Mongoose's automatic timestamp machinery). Two partial unique indexes
+enforce de-duplication rules (one for legacy rule-based jobs keyed by
+cartToken+stepIndex, one for brain-scheduled jobs keyed by
+profileId+signalType) -- both scoped to `status` via
+partialFilterExpression so a cancelled/failed/skipped job doesn't
+block a fresh one from being created for the same target.

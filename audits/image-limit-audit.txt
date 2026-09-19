@@ -1,0 +1,47 @@
+=== IMAGE LIMIT AUDIT ===
+Size limit changed: 500KB -> 2MB: yes (line 799,
+  `if (file.size > 2 * 1024 * 1024) {`)
+Alert message updated: yes (line 800,
+  'Image too large — please use an image under 2MB.')
+frontend build: pass (npm run build — compiled successfully, all 13
+  static pages generated, no errors)
+git push: done (commit f0d3298, 01411ce..f0d3298 main -> main)
+vercel deploy: done (production, readyState: READY,
+  deployment id dpl_9Ab45GKvJQKnBCftVNRhuNa2AcTe,
+  https://cartncodform-crdlx68k6-niralinakumvellirion-8853s-projects.vercel.app,
+  aliased to https://cartncodform-beryl.vercel.app)
+
+
+EXACT DIFF
+=========================================================================
+                       onChange={(e) => {
+                         const file = e.target.files?.[0];
+                         if (!file) return;
+-                        if (file.size > 500 * 1024) {
+-                          alert('Image too large — please use an image under 500KB for best performance.');
++                        if (file.size > 2 * 1024 * 1024) {
++                          alert('Image too large — please use an image under 2MB.');
+                           return;
+                         }
+                         const reader = new FileReader();
+
+
+NOTE ON THE COMMIT'S SCOPE
+=========================================================================
+git status showed only these 2 lines pending in Settings.jsx before
+this task -- the earlier uncommitted image-compression and
+"skip-imageUrl-if-unchanged" work from prior tasks this session had
+already landed separately (commit 01411ce, "fix: skip imageUrl in
+popup PATCH when image unchanged — faster save", present in git log
+before this task started). So this commit (f0d3298) contains ONLY the
+2-line size-limit/message change, nothing else riding along.
+
+
+NOT TOUCHED
+=========================================================================
+- No other logic in the file's upload handler was changed -- the 500KB
+  check's position, the canvas compression (800px/quality 0.7), and
+  the markImageChanged() call added by the previous task are all
+  unchanged, confirmed via git diff (only the 2 lines shown above).
+- No file other than
+  frontend/app/admin/screens/Settings.jsx was staged or committed.

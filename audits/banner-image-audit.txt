@@ -1,0 +1,107 @@
+=== BANNER IMAGE AUDIT ===
+Generated: 2026-09-17
+
+Large banner image added below content: yes
+Banner only shows when image uploaded: yes
+Square thumbnail hidden when banner shows: yes
+Desktop thumbnail unchanged: yes
+frontend build: pass
+git push: done (c324e28..9fb2faa)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full (1786
+lines, in three parts) before making any change, as instructed.
+Located the mobile phone-frame's "Notification banner" card (added in
+the immediately preceding task, audits/preview-fix-audit.txt): an app-
+name row followed by a "Content row: text + image" row (title/2-line
+body on the left, a 40×40 thumbnail on the right showing
+editorMobileImageUrl or a 🔔 placeholder).
+
+Also confirmed the desktop preview's own 44×44 thumbnail block (a
+separate, sibling section further down the same file, wired to
+editorDesktopImageUrl) so it could be left untouched, per the task's
+explicit "Desktop notifications show square thumbnails, not banners"
+instruction.
+
+
+====================================================================
+IMPLEMENTATION
+====================================================================
+1. Mobile thumbnail container: added `display: editorMobileImageUrl ?
+   'none' : 'flex'` to its existing style object (previously had no
+   `display` property set at all — the div relied on its default
+   block-level rendering and its children's own `display:flex`
+   styling for centering the 🔔ojo placeholder). Now the thumbnail
+   collapses out of the layout entirely once a mobile image is
+   uploaded, per "no need for both thumbnail AND banner."
+
+2. Large banner image: added the given
+   `{editorMobileImageUrl && (<div style={{width:'100%', height:80,
+   overflow:'hidden'}}><img .../></div>)}` block as a new sibling
+   directly after the "Content row: text + image" div's closing tag,
+   still inside the "Notification banner" outer card (so it spans the
+   banner's full width, edge-to-edge, below the title/body/thumbnail
+   row) and before that outer card's own closing tag. Verified the
+   resulting JSX nesting by re-reading the edited region: the banner
+   image div is a sibling of the content-row div, not nested inside
+   it — confirmed via a targeted re-read after editing.
+
+Desktop preview section (the separate Mac-style notification card
+further down) was not touched at all — its 44×44 thumbnail still
+unconditionally shows editorDesktopImageUrl or the 🔔 placeholder,
+exactly as before this task.
+
+
+====================================================================
+DO NOT CHANGE COMPLIANCE
+====================================================================
+No state was added, removed, or renamed. The upload boxes, Title/
+Message/Schedule Date fields, the three action buttons (Send Now /
+Approve / Add to Queue) and their request bodies, and the desktop
+preview section were not touched — confirmed by re-reading the
+surrounding code after editing.
+
+
+====================================================================
+DO-NOT-TOUCH-OTHER-FILES COMPLIANCE
+====================================================================
+Only frontend/app/admin/dashboard/DashboardScreen.jsx was staged and
+committed, per the task's own git-add line. `git status` after staging
+confirmed exactly this one path; the pre-existing unrelated dirty
+files (backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 15 static
+  routes + 1 dynamic route generated, no errors (/admin/dashboard:
+  10.5kB First Load JS, unchanged from the prior task — this change is
+  small enough not to move the rounded kB figure).
+- git push origin main -- succeeded (c324e28..9fb2faa), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+No backend changes were needed or made — this task is frontend-only,
+touching a single file, a small addition to the mobile preview markup.
+This app has no automated frontend test suite, so verification here is
+build-only, per the task's own stated verification step.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+1 file modified (frontend/app/admin/dashboard/DashboardScreen.jsx). No
+other file was touched. Manual visual verification in a live browser
+(uploading a mobile image and confirming the thumbnail disappears
+while a full-width 80px banner appears below the title/body, and that
+removing the image restores the thumbnail) was not performed as part
+of this task — this environment has no running dev server /
+authenticated Shopify session to click through; verification here is
+limited to a clean production build and the code review documented
+above.

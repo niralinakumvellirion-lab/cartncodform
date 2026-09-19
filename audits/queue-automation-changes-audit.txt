@@ -1,0 +1,135 @@
+=== QUEUE AUTOMATION CHANGES AUDIT ===
+Generated: 2026-09-15
+
+TASK: Three changes -- Queue sort, Automation website visit
+trigger, custom delay timer
+
+====================================================================
+CHANGE 1: Queue sort by most recent activity
+File: backend/routes/queue.js
+====================================================================
+Sort changed from .sort({ createdAt: -1 }) to
+.sort({ updatedAt: -1 })?                                   YES
+Any other logic in queue.js touched?                         NO
+node --check backend/routes/queue.js passed?                YES
+
+====================================================================
+CHANGE 2: Website Visit trigger added to AutomationConfig
+File: backend/models/AutomationConfig.js
+====================================================================
+pageVisitDelay field added (Number, default 60)?            YES
+realtimeTriggers.page_visit added (Boolean, default
+false)?                                                      YES
+enabledSignals.page_visit added (Boolean, default true)?     YES
+node --check backend/models/AutomationConfig.js passed?     YES
+Migration script needed for existing shops?                  NO
+  Reason: GET /api/automation/:shopDomain (backend/routes/
+  automation.js) does NOT use .lean(), so it returns real
+  Mongoose documents. Mongoose applies schema defaults to any
+  path missing from the stored BSON, including newly added
+  fields on old documents, at read time. Existing
+  AutomationConfig rows will automatically pick up
+  pageVisitDelay=60, realtimeTriggers.page_visit=false, and
+  enabledSignals.page_visit=true on next read -- no backfill
+  needed.
+
+====================================================================
+CHANGE 3: Custom delay timer in AutomationScreen
+File: frontend/app/admin/automation/AutomationScreen.jsx
+====================================================================
+STEP 1 -- CART_CHECKOUT_DELAY_OPTIONS and
+BROWSE_DELAY_OPTIONS removed entirely?                       YES
+
+STEP 2 -- DelayInput component added before
+AutomationScreen function?                                   YES
+  Placed directly after the cardStyle object (was line 85),
+  before "export default function AutomationScreen({ shop
+  })" -- exact code from the task, unmodified.
+
+STEP 3 -- All 3 existing delay <select> dropdowns (Cart
+abandoned, Checkout abandoned, Browse abandoned) replaced
+with <DelayInput>?                                           YES
+  This was REQUIRED, not optional -- after STEP 1 deleted the
+  two option constants, SECTION 3's JSX still referenced them
+  and the file would not have built until this step was done.
+
+STEP 4 -- Website visit delay row added in SECTION 3, after
+Browse abandoned?                                             YES
+  Uses config.pageVisitDelay || 60 and <DelayInput>, exact
+  JSX from the task.
+
+STEP 5 -- Website visit real-time toggle added in SECTION 4,
+after the two existing toggles?                              YES
+  Implemented exactly as given (hand-rolled checkbox-based
+  toggle), NOT using the existing ToggleSwitch component.
+  FLAG: this toggle's "on" color is #4f46e5 (indigo), which
+  is VISUALLY INCONSISTENT with every other toggle on this
+  screen (master switch, the 2 existing realtime toggles, all
+  13 signal toggles), all of which use ToggleSwitch's #16a34a
+  green. Implemented literally per the task's explicit given
+  code rather than silently substituting ToggleSwitch, but
+  flagging here in case a color fix is wanted in a follow-up.
+
+STEP 6 -- page_visit added to signal controls (SECTION 5)
+with label "Website visit" and description "Send when
+customer visits the store"?                                  YES
+  DEVIATION: the task said "Find the SIGNAL_LABELS constant
+  or the signals grid." This file has no SIGNAL_LABELS
+  constant -- the real array is SIGNAL_ITEMS ({key, label,
+  desc} objects), which SECTION 5 already maps over. Added
+  the new entry there instead:
+    { key: 'page_visit', label: 'Website visit',
+      desc: 'Send when customer visits the store' }
+
+ADDITIONAL DEVIATIONS (beyond the task's literal text, own
+judgment calls):
+1. DEFAULT_CONFIG (the frontend-only fallback used when GET
+   /api/automation/:shop fails) was updated to include
+   pageVisitDelay: 60, enabledSignals.page_visit: true, and
+   realtimeTriggers.page_visit: false. Not explicitly
+   requested, but needed for consistency -- otherwise a
+   merchant hitting the GET-failure fallback would see a
+   config object missing the new fields entirely.
+2. saveConfig()'s PATCH body previously listed every
+   top-level scalar delay field by name (enabled,
+   brainRunHour, brainRunMinute, cartAbandonDelay,
+   checkoutAbandonDelay, browseAbandonDelay, lapsingDelay,
+   winbackDelay) plus the two nested objects (enabledSignals,
+   realtimeTriggers) sent whole. pageVisitDelay is a new
+   top-level scalar field, structurally identical to the
+   other 5 delay fields, so it was NOT automatically included
+   just because enabledSignals/realtimeTriggers were updated.
+   Added `pageVisitDelay: config.pageVisitDelay,` to this
+   list explicitly -- without this fix, the Website visit
+   delay value set via the new DelayInput would have been
+   silently dropped on every save.
+
+VERIFICATION
+====================================================================
+node --check backend/routes/queue.js                        PASSED
+node --check backend/models/AutomationConfig.js              PASSED
+cd frontend && npm run build                                 PASSED
+  (Compiled successfully, all 16 routes generated, no errors)
+
+GIT / DEPLOY
+====================================================================
+Files committed (exactly these 3, nothing else staged):
+  backend/routes/queue.js
+  backend/models/AutomationConfig.js
+  frontend/app/admin/automation/AutomationScreen.jsx
+Commit message: "feat: Queue sort by activity, website visit
+trigger, custom delay timer"
+git push origin main                                        SUCCESS
+  a220da1..1556033  main -> main
+cd frontend && npx vercel --prod                             SUCCESS
+  readyState: READY
+  Production: https://cartncodform-onbm8y6xj-niralinakumvellirion-8853s-projects.vercel.app
+  Aliased:    https://cartncodform-beryl.vercel.app
+
+Note: several other files in the working tree were already
+modified/untracked before this task started (backend/
+__tests__/brain.test.js, frontend/lib/api.js, many audits/*
+and backend/check-*.js scripts from earlier tasks this
+session) -- none of these were touched or included in this
+commit; only the 3 files named by this task were staged and
+committed.

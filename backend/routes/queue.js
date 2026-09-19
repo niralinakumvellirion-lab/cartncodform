@@ -139,7 +139,7 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
     }
 
     const FestivalQueue = require('../models/FestivalQueue');
-    const item = await FestivalQueue.create({
+    const fields = {
       shopDomain: shop,
       title,
       body: body || '',
@@ -149,7 +149,25 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
       scheduledAt: new Date(scheduledAt),
       festival: festival || '',
       status: status || 'draft',
-    });
+    };
+
+    // Idempotent per festival: a repeat Approve/Add-to-Queue for the same
+    // shop+festival (e.g. re-clicking, or Add-to-Queue after an earlier
+    // Approve) updates the existing draft/approved item instead of
+    // creating a second one. A festival that's already 'sent' or
+    // 'cancelled' doesn't match here, so it can be queued fresh — same
+    // rule the Suggestions sidebar uses to decide what's re-suggestible.
+    let item = null;
+    if (festival) {
+      item = await FestivalQueue.findOneAndUpdate(
+        { shopDomain: shop, festival, status: { $in: ['draft', 'approved'] } },
+        { $set: fields },
+        { new: true }
+      );
+    }
+    if (!item) {
+      item = await FestivalQueue.create(fields);
+    }
 
     return res.json({ success: true, id: item._id });
   } catch (err) {
@@ -180,16 +198,39 @@ router.get('/:shopDomain/festival', requireAuth, requireStoreOwner,
 });
 
 // PATCH /api/queue/:shopDomain/festival/:id
-// Partial update (used by the Planning List's "Approve" button to set
-// status: 'approved').
+// Partial update — used by the Planning List's "Approve" button (sets
+// status: 'approved') and its "Edit" modal (title/body/images/
+// scheduledAt).
+//
+// Previously did `{ $set: req.body }` with no field whitelist at all —
+// not "only some of the needed fields", but the opposite: every field in
+// the request body was blindly persisted, including ones that should
+// never be client-writable (e.g. shopDomain — since the query filter
+// only uses shopDomain to find the doc, a body containing a different
+// shopDomain would still match-then-reassign it, silently moving the
+// item off this shop). Replaced with an explicit whitelist covering
+// exactly the 6 fields the Edit modal and Approve button need
+// (title, body, mobileImageUrl, desktopImageUrl, scheduledAt, status);
+// everything else in the body is now ignored.
+const FESTIVAL_PATCH_FIELDS = [
+  'title', 'body', 'mobileImageUrl', 'desktopImageUrl', 'scheduledAt', 'status',
+];
 router.patch('/:shopDomain/festival/:id', requireAuth,
   requireStoreOwner, async (req, res) => {
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
     const FestivalQueue = require('../models/FestivalQueue');
+
+    const updates = {};
+    for (const key of FESTIVAL_PATCH_FIELDS) {
+      if (req.body[key] !== undefined) {
+        updates[key] = key === 'scheduledAt' ? new Date(req.body[key]) : req.body[key];
+      }
+    }
+
     const item = await FestivalQueue.findOneAndUpdate(
       { _id: req.params.id, shopDomain: shop },
-      { $set: req.body },
+      { $set: updates },
       { new: true }
     );
     return res.json({ success: true, item });

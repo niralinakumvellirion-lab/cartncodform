@@ -1,0 +1,180 @@
+=== PHASE 4 ACTIVITY SCREEN AUDIT ===
+Part A - page.js created: yes
+Part B - ActivityScreen.jsx created: yes
+  Date filter bar: yes
+  4 summary tiles: yes
+  Table with email/activity/jobId/date: yes
+  Mobile card layout: yes
+  Loading skeleton: yes
+  Empty state: yes
+Part C - NavMenu item added: yes (added to all 9 EXISTING admin
+  page.js wrapper files, not just the new one -- see PART C note
+  below for why), placed right after Today, before Customers, in
+  every file
+Part D - backend NavMenu: not needed -- frontend-only (see PART D
+  section below)
+frontend build: pass (npm run build -- compiled successfully, 14
+  static pages generated (was 13), /admin/activity is new at 3.6 kB,
+  no errors)
+git push: done (commit 553c8f1, b7c0617..553c8f1 main -> main)
+vercel deploy: done (production, readyState: READY,
+  deployment id dpl_EfQt6NQp96DfesMU9zWpm3xqjmoV,
+  https://cartncodform-l2uf3nd11-niralinakumvellirion-8853s-projects.vercel.app,
+  aliased to https://cartncodform-beryl.vercel.app)
+
+
+FILES READ FIRST, AS INSTRUCTED
+=========================================================================
+- frontend/app/admin/journey/page.js (Part A's named reference) -- full
+  Suspense+AppProvider+NavMenu+Screen pattern confirmed.
+- frontend/app/admin/screens/Today.jsx and
+  frontend/app/admin/screens/Customers.jsx (Part B's named references)
+  -- confirmed isMobileView resize-listener pattern, `shop` as a prop
+  (not read via searchParams inside the screen itself -- only in the
+  page.js wrapper), apiGet usage, card/table/skeleton/empty-state/
+  badge styling conventions. Customers.jsx's bare-div + manual <h1>/<p>
+  header (no Polaris <Page>) was used as the structural template for
+  ActivityScreen, since that's the convention every other top-level nav
+  screen follows except Today.jsx (the dashboard-tile outlier that
+  wraps in <Page>) and Profile.jsx (a sub-detail screen with a back
+  action).
+- All 9 existing admin/*/page.js files (cod, customers, discounts,
+  insights, journey, messages, the root admin/page.js, settings-page,
+  signals) were read in full before editing any of them (see PART C).
+- backend/ and shopify.app.toml were grepped for any NavMenu/nav-
+  related definition (see PART D).
+
+
+PART A - frontend/app/admin/activity/page.js
+=========================================================================
+Created following journey/page.js's exact pattern (Suspense wrapper,
+AppProvider, NavMenu with the same 9-link list plus the new Activity
+link, useSearchParams for shop, imports ActivityScreen from
+'./ActivityScreen' as specified).
+
+
+PART B - frontend/app/admin/activity/ActivityScreen.jsx
+=========================================================================
+All 5 sections implemented as specified:
+  1. Header -- "Activity" / "Users who engaged after receiving a
+     notification".
+  2. Date filter bar -- Today | Yesterday | Last 7 days | Last 30 days
+     | Custom pill buttons (styled after Customers.jsx's FILTER_TABS),
+     default '7d'; Custom reveals two <input type="date"> fields.
+     getDateRange() implemented verbatim as given.
+  3. Summary tiles -- same 4 types/icons/colors as the Today screen's
+     tiles (Phase 3), clicking toggles activeType (click the active
+     tile again to clear back to "show all" -- a reasonable toggle
+     behavior filling a gap the task didn't explicitly specify either
+     way), active tile gets a 2px colored border vs. the default 1px
+     gray.
+  4. Table/card list -- desktop: CSS-grid table (Email | Activity |
+     Notification sent | Date & Time), mobile: stacked cards, using
+     the same header-row/skeleton/hover-row conventions as
+     Customers.jsx's table. Badges use the task's specified colors
+     (amber/purple/green/blue) via the `color + '22'` tint-background
+     trick already used elsewhere in this codebase (Settings.jsx's
+     getCtaStyle 'soft' variant). "No activity found" empty state,
+     3-row grey-bar loading skeleton (task specified 3, not
+     Customers.jsx's 5 -- implemented as given).
+  5. Fetch logic -- useEffect on [shop, filter, customFrom, customTo,
+     activeType], matching the given dependency array and early-return
+     guard for an incomplete custom range.
+
+
+DEVIATIONS - Part B
+=========================================================================
+1. Collapsed a template literal that embedded a raw newline. The
+   task's given fetch call wrapped mid-string:
+     apiGet(`/api/activity?shop=${encodeURIComponent(shop)}&from=${from}&to=${to}
+       ${activeType ? '&eventType=' + activeType : ''}`)
+   A JS template literal preserves an embedded line break as a literal
+   "\n" character in the resulting string -- pasted verbatim, this
+   would produce a URL with a raw newline in the middle of the query
+   string (something like "...&to=2024-01-15T00:00:00.000Z\n
+   &eventType=..."), which is invalid/unreliable. Read as an obvious
+   formatting artifact from wrapping the line for display, not
+   intended literal source -- written as a normal single-line template
+   string (`url += ...` for the optional eventType part) instead.
+
+2. Encoded `from`/`to` with encodeURIComponent, matching how `shop` was
+   already encoded in the same given line and how every other
+   dynamic query value elsewhere in this codebase is encoded. The
+   ISO date strings getDateRange() produces (e.g.
+   "2024-01-15T00:00:00.000Z") don't strictly require it (":" and "."
+   are valid unencoded in a query-string value per RFC 3986), but this
+   matches the codebase's own consistent convention rather than
+   introducing the one unencoded interpolation in this file.
+
+3. BADGE_CONFIG label text kept exactly as the task specified for this
+   section ("Checkout started"), which reads slightly differently from
+   Today.jsx's tile label for the same event type ("Started checkout",
+   Phase 3). Not reconciled -- the task gave this exact wording
+   specifically for the table badge, so it was used verbatim; flagging
+   the inconsistency here rather than silently "fixing" it into
+   matching Today's wording, since that would be a product-copy
+   decision beyond this task's literal spec.
+
+Everything else (state shape, filter tabs, getDateRange, the fetch
+effect's guard/dependency array, the 4 tile definitions, the table
+columns, empty/loading states) was implemented to match the task's
+given spec as closely as the actual codebase's conventions allow.
+
+
+PART C - NavMenu item, added to ALL 9 EXISTING page.js files (not
+just the new one)
+=========================================================================
+The task's Part C said "Read frontend/app/admin/layout.jsx or wherever
+NavMenu items are defined" -- read frontend/app/admin/layout.js (note:
+the real filename is layout.js, not layout.jsx) first: it is a bare
+passthrough (`export default function AdminLayout({ children }) {
+return children; }`), NOT where NavMenu is defined. Grepped the whole
+admin/ tree for `<a href="/admin/customers"` (a link that would only
+appear inside a NavMenu block) and found it duplicated identically in
+all 9 existing admin/*/page.js wrapper files -- there is no shared
+layout that renders NavMenu once; each route's own page.js
+independently renders its own <AppProvider><NavMenu>...</NavMenu>
+<Screen /></AppProvider>, because layout.js does not wrap children in
+either of those.
+Given that, adding the Activity link to only the NEW activity/page.js
+would mean the nav item only appears while a merchant is ALREADY on
+the Activity screen, and disappears again on every other screen --
+clearly not the intent of "Add 'Activity' as a new nav item." Read all
+9 existing page.js files in full (cod, customers, discounts, insights,
+journey, messages, admin/page.js, settings-page, signals) before
+editing any of them, confirmed their NavMenu blocks are byte-identical,
+and added the same one line
+(`<a href="/admin/activity" rel="activity">Activity</a>`) to each, in
+the same position (immediately after the Today link, before
+Customers) -- the "after Today" placement the task listed first among
+the two options given ("after Today, before or after Customers").
+admin/page.js has a different indentation level than the other 8 (it
+wraps NavMenu in `{!showOnboarding && (...)}`, one level deeper) --
+matched that file's own existing indentation rather than copying the
+other 8 files' indentation into it.
+Verified afterward: grepping the whole admin/ tree for `rel="activity"`
+returns all 10 files (9 existing + the new activity/page.js), each
+exactly once.
+
+
+PART D - backend NavMenu: not needed (frontend-only)
+=========================================================================
+Grepped backend/ for "NavMenu", "nav_menu", "navigation": zero matches
+in any file. Grepped shopify.app.toml for "nav" (case-insensitive):
+zero matches. Shopify's NavMenu (@shopify/app-bridge-react) is a
+purely client-side component that registers the embedded app's nav
+items with the Shopify Admin shell at render time -- there is no
+server-side or shopify.app.toml-level nav configuration mechanism in
+this codebase (or in how App Bridge's NavMenu generally works), so
+there was nothing to add on the backend. Documented here per the
+task's own instruction to document this conclusion if the answer is
+"no."
+
+
+NOT TOUCHED
+=========================================================================
+- Every backend file: untouched (this was a frontend-only phase).
+- Every other screen component under frontend/app/admin/screens/: read
+  only where instructed (Today.jsx, Customers.jsx), not modified.
+- frontend/app/admin/layout.js: read, confirmed to be irrelevant to
+  NavMenu, not modified.

@@ -1,0 +1,179 @@
+POPUP DELAY AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-12
+
+File read: extensions/cartncodform-embed/blocks/push-notifications.liquid
+
+
+====================================================================
+start() - full function (lines 2318-2349), with the Promise.all block
+that calls fetchPopupConfig() and fetchDiscountConfig()
+====================================================================
+2318	  function start() {
+2319	    if (ccfStarted) return;
+2320	    ccfStarted = true;
+2321	    trackCart();
+2322	    checkAndInit();
+2323	    initTracking();
+2324
+2325	    // discount-feature: if a CCF discount was minted earlier this session,
+2326	    // badge every product price on this page (collection / home / search / PDP).
+2327	    checkActiveDiscount();
+2328
+2329	    // popup-customizer + discount-feature: load appearance + discount config
+2330	    // first, then wire the intent triggers (which is where the dwell timer
+2331	    // starts) and the product-page nudge -- both read popupConfig/
+2332	    // discountConfig, so both wait on this same Promise.all rather than a
+2333	    // bare setTimeout racing the config fetch (which can lose on a cold
+2334	    // backend and silently never show the nudge).
+2335	    Promise.all([fetchPopupConfig(), fetchDiscountConfig()]).then(function () {
+2336	      initIntentTriggers();
+2337
+2338	      // Inject product page discount nudge.
+2339	      setTimeout(function() {
+2340	        if (Notification.permission === 'granted') return;
+2341	        // already subscribed -- no nudge needed
+2342	        injectProductNudge();
+2343	      }, 1000);
+2344	    });
+2345
+2346	    if (Notification.permission === 'granted') {
+2347	      setupForegroundMessages();
+2348	    }
+2349	  }
+
+Key point: initIntentTriggers() -- which owns the PAGE_LOAD/DWELL/
+EXIT_INTENT soft-prompt triggers covered in audits/popup-reshow-audit.txt
+-- does NOT run until BOTH fetchPopupConfig() and fetchDiscountConfig()
+have resolved (successfully or not; both functions' own .catch()
+blocks resolve rather than reject, so Promise.all always settles).
+There is no fallback/race timer here -- if either fetch hangs
+indefinitely (see section 4 below: neither has a client-side timeout),
+initIntentTriggers() never runs at all for that page load, and none of
+the soft-prompt triggers (page_load, dwell, exit_intent) can fire.
+
+start() itself is invoked either on DOMContentLoaded (if the document
+is still loading) or immediately, plus a safety net on window's `load`
+event (lines 2351-2359, shown for context though outside what was
+asked):
+2351	  if (document.readyState === 'loading') {
+2352	    document.addEventListener('DOMContentLoaded', start);
+2353	  } else {
+2354	    start();
+2355	  }
+2356
+2357	  window.addEventListener('load', function() {
+2358	    if (!ccfStarted) start();
+2359	  });
+
+
+====================================================================
+1. fetchPopupConfig() - full function (lines 1318-1331)
+====================================================================
+1315	  // popup-customizer: pull the merchant's appearance config from the App Proxy
+1316	  // (same origin as the store -- Shopify signs & appends `shop` automatically).
+1317	  // Any failure leaves popupConfig = {} so showSoftPrompt uses its defaults.
+1318	  function fetchPopupConfig() {
+1319	    var url = window.location.origin + '/apps/cartncodform/popup-config';
+1320	    return fetch(url)
+1321	      .then(function (r) { return r.ok ? r.json() : null; })
+1322	      .then(function (data) {
+1323	        if (data && data.popup && typeof data.popup === 'object') {
+1324	          popupConfig = data.popup;
+1325	        }
+1326	        if (data && data.mobilePopup && typeof data.mobilePopup === 'object') {
+1327	          mobilePopupConfig = data.mobilePopup;
+1328	        }
+1329	      })
+1330	      .catch(function () { /* keep defaults */ });
+1331	  }
+
+Notes: uses a relative, same-origin URL via the Shopify App Proxy
+(`window.location.origin + '/apps/cartncodform/popup-config'`), NOT
+BACKEND_URL (see section 3). Any non-ok response or any error is
+swallowed by `.catch()`, leaving popupConfig at its outer-scope
+default ({}), so the promise this function returns ALWAYS resolves
+(never rejects) -- it just may resolve having done nothing.
+
+
+====================================================================
+2. fetchDiscountConfig() - full function (lines 1336-1345)
+====================================================================
+1333	  // discount-feature: pull the shop's discount rules (enabled flags + %) and
+1334	  // offer headline from the App Proxy. Failure leaves discountConfig = {} so
+1335	  // no email/phone fields render.
+1336	  function fetchDiscountConfig() {
+1337	    var url = window.location.origin + '/apps/cartncodform/discount-config?shop=' +
+1338	      encodeURIComponent(SHOP_DOMAIN);
+1339	    return fetch(url)
+1340	      .then(function (r) { return r.ok ? r.json() : null; })
+1341	      .then(function (data) {
+1342	        if (data && typeof data === 'object') discountConfig = data;
+1343	      })
+1344	      .catch(function () { /* keep defaults */ });
+1345	  }
+
+Notes: same shape as fetchPopupConfig() -- same-origin App Proxy URL
+(with an explicit `?shop=` query param here, unlike fetchPopupConfig()
+which relies on Shopify's proxy auto-appending `shop`), same
+"swallow-and-keep-defaults" catch, same always-resolves guarantee.
+
+
+====================================================================
+3. BACKEND_URL - what value is it set to?
+====================================================================
+9	  var BACKEND_URL = 'https://cartncodform-backend.onrender.com';
+
+Declared once, near the top of the script (line 9), as a hardcoded
+absolute URL pointing directly at the Render-hosted backend. Used
+elsewhere in the file for direct backend calls (e.g.
+subscribe-customer, cart-activity, generate-discount -- all POSTs seen
+in earlier audits this session). NEITHER fetchPopupConfig() NOR
+fetchDiscountConfig() uses BACKEND_URL -- both instead go through the
+Shopify App Proxy at the storefront's own origin
+(window.location.origin + '/apps/cartncodform/...'), which Shopify
+then forwards server-side to the backend with an HMAC signature. This
+means these two calls' latency/availability depends on Shopify's
+proxy layer (and, behind that, the same Render backend) rather than a
+direct browser-to-Render connection.
+
+
+====================================================================
+4. Any timeout on these fetch calls?
+====================================================================
+No. Neither fetchPopupConfig() nor fetchDiscountConfig() sets any
+client-side timeout, deadline, or AbortController on its fetch() call
+-- a plain `fetch(url).then(...).then(...).catch(...)` chain in both
+cases, with no `signal` option passed to fetch() and no
+setTimeout/clearTimeout anywhere in either function body.
+
+A file-wide search for "AbortController" (case-insensitive) and
+"timeout" turned up no AbortController usage anywhere in this file,
+and exactly one unrelated timeout construct: a service-worker
+"activated" wait inside the push-subscription setup code (lines
+1720-1726), which has nothing to do with either config fetch:
+1720	          var timeout = setTimeout(function() {
+1721	            navigator.serviceWorker.ready.then(resolve);
+1722	          }, 8000);
+1723
+1724	          sw.addEventListener('statechange', function(e) {
+1725	            if (e.target.state === 'activated') {
+1726	              clearTimeout(timeout);
+1727	              resolve(reg);
+1728	            }
+1729	          });
+
+Practical consequence: if the App Proxy / backend is slow to respond
+(cold start, network issue, etc.), fetch() will wait as long as the
+browser's own default fetch timeout allows (typically very long / no
+enforced ceiling in most browsers) before either resolving or the
+underlying network layer itself gives up. Since start()'s
+Promise.all() (section above) gates initIntentTriggers() on BOTH
+promises settling, a slow/hanging config fetch directly delays -- or,
+in the worst case (a fetch that never settles at the network layer),
+indefinitely blocks -- every soft-prompt trigger and the product-page
+discount nudge for that entire page load. Both functions' own
+.catch() blocks only run on an actual fetch rejection (e.g. a network
+error) or a thrown error in the .then() chain -- they do not create a
+timeout of their own, so a fetch that is merely SLOW (not erroring)
+has nothing forcing it to give up early.

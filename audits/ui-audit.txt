@@ -1,0 +1,270 @@
+UI AUDIT - read-only, no changes
+==================================
+Generated: 2026-09-16
+
+Directory searched: frontend/app/admin/screens/
+11 screen files found (glob frontend/app/admin/screens/*, all read
+in full):
+
+  1. Profile.jsx
+  2. WhatToActOn.jsx
+  3. Insights.jsx
+  4. CodOrders.jsx
+  5. Messages.jsx
+  6. Customers.jsx
+  7. Settings.jsx
+  8. Discounts.jsx
+  9. Today.jsx
+  10. Onboarding.jsx
+  11. Journey.jsx
+
+Note: AutomationScreen.jsx, QueueScreen.jsx, and the Activity screen
+live in their own directories (frontend/app/admin/automation/,
+frontend/app/admin/queue/, frontend/app/admin/activity/), not under
+screens/ — out of scope for this task, which named screens/
+specifically.
+
+For each screen below: (1) outermost container div style, (2) page
+header/title style, (3) card style(s) used. "Card style" means the
+white/bordered/rounded box pattern this app uses for section
+containers — most screens define it inline per-instance rather than
+as a named constant; where a screen DOES define a reusable style
+object or constant, that is called out explicitly.
+
+
+====================================================================
+1. Profile.jsx
+====================================================================
+1. Outermost container: NONE — this screen is 100% Polaris
+   components (<Page>, <Layout>, <Card>). No custom div/style
+   anywhere in the file.
+2. Header: <Page title={title} backAction={{...}}> — Polaris's own
+   Page title, no custom h1/style.
+3. Card style: Polaris <Card> component used as-is (4 instances:
+   Identity, Orders, Active signals, Message history) — no custom
+   style object, relies entirely on Polaris's default Card styling.
+
+
+====================================================================
+2. WhatToActOn.jsx
+====================================================================
+1. Outermost container (line 183):
+     style={{ padding: '0 24px 24px', maxWidth: '900px', margin: '0 auto' }}
+2. Header (lines 186-207):
+     h1: { fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 8px' }
+     p:  { fontSize: '14px', color: '#6b7280', margin: 0, lineHeight: '1.5' }
+3. Card style: no named constant — each section's row-list wrapper
+   (lines 242-250) is styled inline:
+     { background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px',
+       overflow: 'hidden', opacity: loading ? 0.6 : 1 }
+
+
+====================================================================
+3. Insights.jsx
+====================================================================
+1. Outermost container (line 77):
+     style={{ padding: '0 24px 24px', maxWidth: '1100px', margin: '0 auto' }}
+2. Header (lines 80-93):
+     h1: { fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }
+     p:  { fontSize: '13px', color: '#9ca3af', margin: 0 }
+3. Card style(s): no named constant, three variants, all inline:
+   - Stat tile (lines 124-129):
+       { background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px 18px' }
+   - Products table wrapper (lines 161-167): same background/border/
+     radius, plus { overflow: 'hidden', marginBottom: '16px' }
+   - AI insight card (lines 340-348) — a DIFFERENT color scheme from
+     every other card in this file:
+       { background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '10px',
+         padding: '16px 20px', display: 'flex', gap: '12px', alignItems: 'flex-start' }
+
+
+====================================================================
+4. CodOrders.jsx
+====================================================================
+1. Outermost container (lines 106-112):
+     style={{ padding: isMobileView ? '0 12px 24px' : '0 24px 24px',
+       maxWidth: '1100px', margin: '0 auto' }}
+2. Header (lines 115-129):
+     h1: { fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }
+     p:  { fontSize: '13px', color: '#9ca3af', margin: 0 }
+3. Card style: no named constant — same pattern repeated 5 times
+   (4 stat tiles + orders table), all inline, identical shape:
+     { background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px',
+       padding: '16px 18px' }   (stat tiles)
+     { background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px',
+       overflow: 'hidden' }     (orders table wrapper)
+
+
+====================================================================
+5. Messages.jsx
+====================================================================
+1. Outermost container (lines 142-147):
+     style={{ padding: isMobileView ? '0 12px 24px' : '0 24px 24px',
+       maxWidth: '1000px', margin: '0 auto' }}
+2. Header (lines 151-163):
+     h1: { fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }
+     p:  { fontSize: '13px', color: '#9ca3af', margin: 0 }
+3. Card style: no named constant — message list wrapper (lines
+   217-223) inline:
+     { background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden' }
+
+
+====================================================================
+6. Customers.jsx
+====================================================================
+1. Outermost container (lines 179-184):
+     style={{ padding: isMobileView ? '0 12px 24px' : '0 24px 24px',
+       maxWidth: '1200px', margin: '0 auto' }}
+2. Header (lines 187-204):
+     h1: { fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 4px' }
+     p:  { fontSize: '13px', color: '#9ca3af', margin: 0 }
+3. Card style: no named constant — customer table wrapper (lines
+   293-299) inline:
+     { background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', overflow: 'hidden' }
+   (Renders ProfileScreen — Polaris-only, see #1 — instead of its own
+   layout when a profile row is selected.)
+
+
+====================================================================
+7. Settings.jsx
+====================================================================
+1. Outermost container (line 1888):
+     style={{ padding: '0 24px 24px', maxWidth: '1100px', margin: '0 auto' }}
+2. Header (lines 1891-1904):
+     h1: { fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }
+     p:  { fontSize: '13px', color: '#9ca3af', margin: 0 }
+3. Card style: THE ONLY screen with an explicit, reusable, named
+   style object for this (lines 255-260):
+     const card = {
+       background: '#fff',
+       border: '1px solid #e5e7eb',
+       borderRadius: '10px',
+       padding: isMobileView ? '16px' : '20px 24px',
+     };
+   Reused via <div style={card}> for voiceCard, howOftenCard,
+   pushPreviewCard, channelsCard, popupPreviewCard, and the
+   collapsed popupCard trigger. saveCard and the expanded popupCard
+   panel each inline the same 3 properties (background/border/
+   borderRadius) separately rather than spreading `card`, with their
+   own padding/flex additions.
+
+
+====================================================================
+8. Discounts.jsx
+====================================================================
+1. Outermost container (line 77):
+     style={{ padding: '0 24px 24px', maxWidth: '800px', margin: '0 auto' }}
+2. Header (lines 79-84):
+     h1: { fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }
+     p:  { fontSize: '13px', color: '#9ca3af', margin: 0 }
+3. Card style: no named constant — same inline shape repeated for
+   the offer-headline card (lines 92-99) and each discount-type card
+   (lines 132-140):
+     { background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px',
+       padding: '20px 24px', marginBottom: '16px' (or '12px' for discount cards) }
+
+
+====================================================================
+9. Today.jsx
+====================================================================
+1. Outermost container: wrapped in Polaris <Page> (line 331), with
+   an inner custom div (lines 332-337):
+     style={{ maxWidth: '1100px', margin: '0 auto',
+       padding: isMobileView ? '0 12px 24px' : '0 0 24px' }}
+2. Header: TWO header-shaped things in this file:
+   - STAT_LABEL_STYLE (lines 113-120, a named constant, used above
+     both stat-grid sections as a small section label, not a page
+     title):
+       { fontSize: 12, color: '#6b7280', fontWeight: 600, letterSpacing: '0.05em',
+         textTransform: 'uppercase', marginBottom: 8 }
+   - The actual page title block (lines 521-533):
+       h1: { fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 4px' }
+       p:  { fontSize: '13px', color: '#9ca3af', margin: 0 }
+3. Card style: THE ONLY OTHER screen with a named, reusable card
+   constant besides Settings.jsx (lines 122-130):
+     const STAT_CARD_STYLE = {
+       background: '#fff',
+       border: '1px solid #e5e7eb',
+       borderRadius: 10,
+       padding: 16,
+       display: 'flex',
+       flexDirection: 'column',
+       gap: 4,
+     };
+   Used for both the Notifications row and the Attributed Activity
+   row's tiles. Other cards on this screen (new-subscriber rows,
+   "Planned for today"/"Yesterday" panels, the bar-chart panel) each
+   inline the same background/border/borderRadius shape separately
+   rather than reusing STAT_CARD_STYLE, with padding '18px 20px'
+   instead of 16.
+
+
+====================================================================
+10. Onboarding.jsx
+====================================================================
+1. Outermost container (lines 102-110) — DIFFERENT shape from every
+   other screen: a full-viewport centered layout, not the
+   padding+maxWidth pattern used everywhere else:
+     { minHeight: '100vh', display: 'flex', alignItems: 'center',
+       justifyContent: 'center', backgroundColor: '#f9fafb', padding: '40px 20px' }
+   (with an inner `{ maxWidth: '680px', width: '100%' }` wrapper,
+   line 112)
+2. Header (lines 114-133) — also styled differently from the other
+   10 screens (larger h1, no wrapping header div, marginBottom
+   instead of margin shorthand):
+     h1: { fontSize: '28px', fontWeight: '700', color: '#111827', marginBottom: '8px' }
+     p:  { fontSize: '15px', color: '#6b7280', marginBottom: '32px' }
+3. Card style: no named constant — the single progress card (lines
+   136-144) is the only card-shaped element, and it's the only card
+   in any of the 11 screens with a boxShadow:
+     { background: '#ffffff', borderRadius: '12px', border: '1px solid #e5e7eb',
+       overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', marginBottom: '24px' }
+
+
+====================================================================
+11. Journey.jsx
+====================================================================
+1. Outermost container (line 796):
+     style={{ padding: '0 24px 24px', maxWidth: '1200px', margin: '0 auto' }}
+2. Header (lines 798-808, wrapped in a flex row with the Refresh
+   button):
+     h1: { fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }
+     p:  { fontSize: '13px', color: '#9ca3af', margin: 0 }
+3. Card style: no named constant — 3 card instances, 2 share the
+   standard shape, 1 varies:
+   - Customer list wrapper: { background: '#fff', border: '1px solid #e5e7eb',
+       borderRadius: '10px', overflow: 'hidden' }
+   - Journey timeline panel (right column): same background/border/
+     radius, plus { padding: '16px', flex: '1 1 0', minHeight: 0, overflowY: 'auto' }
+   - Send-notification panel: same background/border/radius, plus
+     { padding: '16px', flex: '0 0 auto', overflowY: 'auto', maxHeight: '45vh' }
+
+
+====================================================================
+CROSS-SCREEN OBSERVATIONS
+====================================================================
+
+- 9 of the 11 screens (all except Profile.jsx and Onboarding.jsx)
+  use the exact same header pattern: h1 fontSize 24px/fontWeight
+  700/color #111827, paired with a p at fontSize 13px (or 14px in
+  WhatToActOn.jsx)/color #9ca3af (or #6b7280 in WhatToActOn.jsx).
+- The "card" look (#fff background, 1px solid #e5e7eb border,
+  10px/12px borderRadius) is completely consistent across every
+  custom-styled screen — but is re-declared inline at nearly every
+  call site rather than centralized. Only 2 of the 11 screens
+  extract it into a named, reusable constant: Settings.jsx (`card`)
+  and Today.jsx (`STAT_CARD_STYLE`) — and even within those two
+  files, several OTHER cards on the same screen still inline the
+  identical shape separately instead of reusing the constant.
+- Profile.jsx is the only screen built entirely from Polaris
+  components (Page/Layout/Card) with zero custom inline styling.
+- Onboarding.jsx is the only screen with a fundamentally different
+  outer-container shape (full-viewport centered) and the only card
+  anywhere in screens/ with a boxShadow.
+- Container maxWidth varies screen to screen with no evident system:
+  800px (Discounts), 900px (WhatToActOn), 1000px (Messages), 1100px
+  (Insights, CodOrders, Settings, Today), 1200px (Customers,
+  Journey), 680px (Onboarding's inner wrapper, no maxWidth on its
+  full-viewport outer container).
+
+No files were modified as part of this task.

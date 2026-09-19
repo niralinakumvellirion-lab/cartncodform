@@ -1,0 +1,350 @@
+TODAY LAYOUT AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-16
+File read: frontend/app/admin/screens/Today.jsx (in full, 940 lines,
+current state — reflects the DS/PageHeader redesign and the icon
+removal from the two immediately preceding tasks this session).
+
+
+====================================================================
+1. NOTIF_STATS array - full (lines 198-204)
+====================================================================
+
+const NOTIF_STATS = [
+  { key: 'pushSent', label: 'Push Sent', Icon: BellIcon },
+  { key: 'emailsSent', label: 'Emails Sent', Icon: EnvelopeIcon },
+  { key: 'popupsShown', label: 'Popups Shown', Icon: CursorIcon },
+  { key: 'emailsCaptured', label: 'Emails Captured', Icon: UserPlusIcon },
+  { key: 'pushSubscribers', label: 'Push Subscribers', Icon: UsersIcon },
+];
+
+Note: each entry still carries an `Icon` property (BellIcon,
+EnvelopeIcon, CursorIcon, UserPlusIcon, UsersIcon — all defined
+earlier in the file, lines 111-154) even though the JSX that maps
+over this array (section 3 below) no longer destructures or renders
+`Icon` at all, following the immediately preceding "remove icons"
+task. This makes `Icon` here dead data — present in the array,
+never read. See audits/today-icons-removed-audit.txt for the
+reasoning (left in place deliberately, out of that task's narrow
+scope).
+
+
+====================================================================
+2. ACTIVITY_STATS array - full (lines 206-211)
+====================================================================
+
+const ACTIVITY_STATS = [
+  { key: 'add_to_cart', label: 'Added to Cart', Icon: CartIcon },
+  { key: 'checkout_start', label: 'Started Checkout', Icon: CreditCardIcon },
+  { key: 'purchase', label: 'Purchased', Icon: CheckCircleIcon },
+  { key: 'revisit', label: 'Revisited', Icon: RepeatIcon },
+];
+
+Same situation as NOTIF_STATS: each entry keeps an unused `Icon`
+property (CartIcon, CreditCardIcon, CheckCircleIcon, RepeatIcon).
+
+
+====================================================================
+3. JSX that renders both rows - full (lines 576-643)
+====================================================================
+
+      {/* SECTION 2 — Row 1: Notification stats */}
+      <div style={{ marginBottom: 24 }}>
+        <div style={STAT_LABEL_STYLE}>Notifications</div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)',
+            gap: 12,
+          }}
+        >
+          {NOTIF_STATS.map(({ key, label }) => (
+            <div key={key} style={STAT_CARD_STYLE}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>
+                {notifLoading ? '...' : (notifStats?.[key] ?? 0)}
+              </div>
+              <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
+                {label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* SECTION 3 — Row 2: Attributed activity stats (clickable) */}
+      <div style={{ marginBottom: 24 }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 8,
+          }}
+        >
+          <div style={{ ...STAT_LABEL_STYLE, marginBottom: 0 }}>
+            Attributed Activity
+          </div>
+          <button
+            onClick={() => navigate('/admin/activity')}
+            style={{ fontSize: 13, color: '#6366f1', background: 'none',
+                     border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+            View all →
+          </button>
+        </div>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+            gap: 12,
+          }}
+        >
+          {ACTIVITY_STATS.map(({ key, label }) => (
+            <div
+              key={key}
+              onClick={() => navigate(`/admin/activity?type=${key}`)}
+              style={{ ...STAT_CARD_STYLE, cursor: 'pointer', transition: 'box-shadow 0.15s' }}
+              onMouseEnter={(e) => { e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.08)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'none'; }}
+            >
+              <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>
+                {notifLoading ? '...' : (activity?.summary?.[key] ?? 0)}
+              </div>
+              <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
+                {label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+Both rows share the same `notifLoading` flag for their "..."
+placeholder and the same per-card component shape (number div +
+label div, no icon). The only structural differences: the
+Attributed Activity row's section header includes an extra
+"View all →" button (navigates to /admin/activity), and each of its
+4 cards has onClick/onMouseEnter/onMouseLeave handlers the
+Notifications row's 5 cards don't have (Notifications cards are
+purely informational, non-interactive).
+
+
+====================================================================
+4. Current grid/layout styles for both rows
+====================================================================
+
+--- STAT_LABEL_STYLE (lines 213-220), the small section heading
+    above each row ("Notifications" / "Attributed Activity") ---
+
+const STAT_LABEL_STYLE = {
+  fontSize: 12,
+  color: '#6b7280',
+  fontWeight: 600,
+  letterSpacing: '0.05em',
+  textTransform: 'uppercase',
+  marginBottom: 8,
+};
+
+--- STAT_CARD_STYLE (lines 222-229), applied to every individual
+    card in both rows ---
+
+const STAT_CARD_STYLE = {
+  ...DS.card,
+  padding: 16,
+  marginBottom: 0,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 4,
+};
+
+Where DS.card (defined at the top of the file, lines 15-22) is:
+  {
+    background: '#ffffff',
+    border: '1px solid #e5e7eb',
+    borderRadius: 14,
+    padding: '20px 24px',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+    marginBottom: 16,
+  }
+So STAT_CARD_STYLE = DS.card's background/border/borderRadius/
+boxShadow, with padding overridden to 16 (from '20px 24px'),
+marginBottom overridden to 0 (from 16 — grid `gap` handles spacing
+between cards instead), plus flex/flexDirection/gap added for the
+number+label vertical stack. The Activity row's cards additionally
+spread `cursor: 'pointer', transition: 'box-shadow 0.15s'` on top of
+this at the JSX call site (section 3 above), not in the shared
+constant, since only that row's cards are clickable.
+
+--- The two grid containers themselves ---
+
+Notifications row grid (line 579-584):
+  {
+    display: 'grid',
+    gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)',
+    gap: 12,
+  }
+
+Attributed Activity row grid (line 619-624):
+  {
+    display: 'grid',
+    gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+    gap: 12,
+  }
+
+Both use the same `isMobileView` boolean (state set from a
+`window.innerWidth <= 768` check, lines 377-383) to collapse to a
+2-column grid on narrow viewports; on desktop the Notifications row
+is 5 columns (matching its 5 stat entries) and the Attributed
+Activity row is 4 columns (matching its 4 stat entries) — i.e. one
+column per stat card on desktop either way, only the column COUNT
+differs between the two rows because the two arrays have different
+lengths. Both share the same 12px gap value.
+
+
+====================================================================
+5. Date filter bar JSX - full (lines 470-500)
+====================================================================
+
+      {/* SECTION 1 — Date filter bar */}
+      <div
+        style={{
+          display: 'flex',
+          gap: 4,
+          padding: 4,
+          background: '#f3f4f6',
+          borderRadius: 8,
+          width: 'fit-content',
+          marginBottom: 20,
+        }}
+      >
+        {DATE_FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setDateFilter(f.key)}
+            style={{
+              padding: '6px 14px',
+              fontSize: 13,
+              fontWeight: 600,
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+              background: dateFilter === f.key ? '#4f46e5' : 'transparent',
+              color: dateFilter === f.key ? '#fff' : '#6b7280',
+            }}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+Backed by DATE_FILTERS (lines 191-196: today / yesterday / 7d / 30d)
+and the `dateFilter` state (default '7d', line 271). This bar is a
+pill-group container (light gray #f3f4f6 background, fit-content
+width) with one button per filter option; the currently-selected
+filter's button gets solid indigo (#4f46e5) background + white text,
+all others stay transparent with gray (#6b7280) text. Selecting a
+filter updates `dateFilter`, which is a dependency of the stats-
+fetching effect (lines 286-312) — changing it triggers a refetch of
+both the notification stats and the attributed-activity stats for
+the newly selected date range.
+
+
+====================================================================
+6. New subscriber section JSX - full (lines 502-574)
+====================================================================
+
+      {/* Phase 1 — new subscriber alerts */}
+      {newSubscribers.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center',
+                        gap: 8, marginBottom: 10 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%',
+                          background: '#10b981',
+                          boxShadow: '0 0 0 3px rgba(16,185,129,0.2)',
+                          animation: 'pulse 2s infinite' }} />
+            <span style={{ fontSize: 13, fontWeight: 600,
+                            color: '#111827' }}>
+              {newSubscribers.length} new subscriber
+              {newSubscribers.length > 1 ? 's' : ''} — send them
+              a welcome notification
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column',
+                        gap: 8 }}>
+            {newSubscribers.map(sub => (
+              <div key={sub.profileId}
+                style={{ ...DS.card, display: 'flex', alignItems: 'center',
+                         justifyContent: 'space-between',
+                         padding: '10px 14px', marginBottom: 0,
+                         gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600,
+                                color: '#111827' }}>
+                    {sub.email || 'Anonymous subscriber'}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#9ca3af',
+                                marginTop: 2 }}>
+                    Subscribed {sub.subscribedAt
+                      ? new Date(sub.subscribedAt).toLocaleTimeString(
+                          [], {hour: '2-digit', minute: '2-digit'})
+                      : 'recently'}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center',
+                              gap: 8 }}>
+                  {sendResults[sub.profileId] && (
+                    <span style={{
+                      fontSize: 12, fontWeight: 600,
+                      color: sendResults[sub.profileId].success
+                        ? '#10b981' : '#ef4444'
+                    }}>
+                      {sendResults[sub.profileId].msg}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => sendNow(sub.profileId)}
+                    disabled={sendingTo === sub.profileId}
+                    style={{
+                      padding: '7px 14px', borderRadius: 7,
+                      border: 'none', cursor: sendingTo === sub.profileId
+                        ? 'not-allowed' : 'pointer',
+                      background: sendingTo === sub.profileId
+                        ? '#e5e7eb' : '#4f46e5',
+                      color: sendingTo === sub.profileId
+                        ? '#9ca3af' : '#fff',
+                      fontSize: 12, fontWeight: 600,
+                      opacity: sendingTo === sub.profileId ? 0.7 : 1,
+                    }}
+                  >
+                    {sendingTo === sub.profileId
+                      ? 'Sending...' : 'Send now'}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+Conditionally rendered only when `newSubscribers.length > 0`
+(newSubscribers is polled every 30s from
+/api/profiles/:shop/new-subscribers, lines 317-335, independent of
+the date filter). Header row shows a pulsing green dot (width/height
+8px, 2s infinite CSS pulse animation, relies on a `pulse` keyframe
+defined outside this file, e.g. globals.css — not verified as part
+of this read-only audit) plus a count + call-to-action line. Below
+that, one card per pending subscriber (styled with DS.card, 10px/14px
+padding, 0 marginBottom since the column flex `gap: 8` handles inter-
+card spacing) showing the subscriber's email (or "Anonymous
+subscriber") and a relative subscribe time on the left, and a
+"Send now" button on the right — disabled + relabeled "Sending..."
+while `sendingTo` matches that profile, and replaced/accompanied by a
+green "Queued!" or red "Failed" result message (from `sendResults`)
+after the click resolves. `sendNow()` (lines 337-361) POSTs to
+/api/push/send-now and removes the subscriber from the list 3
+seconds after a successful queue.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified as part of this task.

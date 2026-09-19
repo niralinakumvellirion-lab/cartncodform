@@ -1,0 +1,403 @@
+=== MOBILE PUSH AUDIT ===
+Generated: 2026-09-18
+Read-only investigation. No files were changed.
+
+Files read in full or in the requested scope:
+  1. backend/utils/pushNotification.js — full file (271 lines)
+  2. backend/routes/push.js — full file (638 lines)
+  3. backend/server.js — scoped read: the sendPushToStore/
+     sendPushToCustomers call sites and any Cloudinary-related logic
+     (grepped the full 612-line file for "sendPushToStore",
+     "sendPushToCustomers", and "cloudinary" case-insensitive, then
+     read the matched region with surrounding context)
+
+
+====================================================================
+1. backend/utils/pushNotification.js (271 lines)
+====================================================================
+
+FIREBASE INIT (lines 10-38)
+Guarded by FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL /
+FIREBASE_PRIVATE_KEY env vars. If any is missing, `firebaseReady`
+stays false and BOTH exported functions short-circuit to a no-op
+failure (`{success:false, error:'Firebase Admin not configured'}` /
+`{..., tokensFound:0}`) — logged, never thrown. This is a total-outage
+condition affecting mobile AND desktop identically, not a mobile-
+specific cause, but worth ruling out first since it would look exactly
+like "nothing is being delivered."
+
+sendPushToStore(shopDomain, title, body) — lines 40-83
+Sends to the STORE OWNER's own admin-device PushSubscription tokens,
+NOT storefront customers. Message shape: `{ notification: {title,
+body}, tokens }` — a bare FCM `notification` block, no image field at
+all, no webpush block, no mobile/desktop distinction of any kind.
+Stale-token cleanup only on
+messaging/registration-token-not-registered or
+messaging/invalid-registration-token. Not relevant to customer-facing
+mobile delivery — included for completeness since the task asked for
+the full file.
+
+sendPushToCustomers(shopDomain, title, body, url, imageUrl,
+mobileOnly=false, cartToken=null, skipStaleCleanup=false) —
+lines 89-269. This is the function that actually delivers to
+storefront customers (mobile and desktop alike).
+
+--- How image URLs are passed to FCM ---
+A single `imageUrl` parameter is fanned out into THREE places in the
+same message object, identically in both the cartToken-scoped branch
+(lines 149-171) and the broadcast-to-all-subs branch (lines 209-235):
+  - data.imageUrl:            imageUrl || ''
+  - data.icon:                imageUrl || '<hardcoded shopping-cart icon URL>'
+  - webpush.notification.icon:  imageUrl || '<same hardcoded fallback>'
+  - webpush.notification.image: imageUrl || undefined   <- NOTE: this
+    one omits the key entirely when imageUrl is falsy (`undefined` in
+    a JS object literal means the key is absent once JSON-serialized),
+    whereas every other field above falls back to a real string. This
+    is an inconsistency, not obviously a bug, but worth noting: `icon`
+    always has SOME value (real image or the fallback icon); `image`
+    can be entirely absent.
+There is no per-recipient/per-device branching anywhere in this
+function when building the message — every token in the `tokens`
+array (or the single `[sub.token]` in the cartToken branch) receives
+byte-for-byte the same `data`/`webpush` payload.
+
+--- Whether mobile vs desktop tokens are handled differently ---
+Only via the `mobileOnly` boolean parameter, which changes the MongoDB
+QUERY used to select which CustomerPushSubscription rows to target
+(line 103-105):
+  if (mobileOnly) query.deviceType = { $in: ['mobile', 'unknown'] };
+There is no equivalent "desktopOnly" filter anywhere — desktop rows
+are only ever included as part of the unfiltered ("everyone") case
+when mobileOnly is false. Once a set of tokens is selected, the FCM
+MESSAGE ITSELF is constructed identically regardless of device type —
+no `android`/`apns` payload block exists anywhere in this file; every
+send goes out exclusively via FCM's `webpush` protocol. This is only
+correct if every stored token is a genuine Web Push (browser Push
+API / service worker) registration, not a native mobile app FCM
+token — see Key Findings below.
+
+--- Conditions that might cause mobile tokens to be skipped or fail
+silently ---
+(a) !firebaseReady (see above) — affects everyone, not mobile-specific.
+(b) deviceType exact-string matching: `deviceType` is stored verbatim
+    from whatever the storefront client sends (see push.js's
+    /subscribe-customer route below — no validation, no enum), and
+    `mobileOnly`'s filter does an EXACT match against the literal
+    strings 'mobile' or 'unknown'. Any row whose deviceType was
+    written as something else (different casing, 'phone', 'ios',
+    'android', etc.) would silently fail to match a mobileOnly:true
+    query. IMPORTANT: across all three files read for this audit, NO
+    call site ever passes mobileOnly:true — every caller passes
+    false or omits it (defaulting to false). This risk is therefore
+    currently dormant, not an active cause of any present failure —
+    flagged for completeness/future-proofing only.
+(c) THE MOST CONCRETE BUG FOUND — the cartToken-scoped retry loop
+    (lines 147-193). When a cartToken is supplied, this function:
+      1. Finds ALL CustomerPushSubscription rows for that cart (or,
+         if none, falls back to every cartToken the owning profile has
+         ever had — lines 124-144), sorted most-recently-active first.
+      2. Tries tokens ONE AT A TIME (lines 147-188). On a STALE token
+         error, it prunes that token and tries the next. On ANY OTHER
+         (non-stale) FCM error, it immediately `break`s out of the
+         loop — no other token for that same customer is ever tried,
+         even if older-but-still-valid tokens exist in `cartSubs`.
+      3. After the loop (whether it broke early or simply ran out of
+         rows), execution falls through to line 192-193:
+           console.log(...'no valid token found'...);
+           return { success: true, sent: 0, tokensFound: 0 };
+         `success: true` even though a genuine send FAILURE may have
+         just occurred on the most-recent token. `tokensFound: 0` is
+         also wrong whenever cartSubs.length was actually > 0 — this
+         return path hardcodes 0 regardless of how many rows were
+         found/tried. No `error` field is set at all, so whatever the
+         real FCM error code/message was (e.g. a malformed payload,
+         a rate-limit error, a server error) is discarded entirely —
+         only visible in the `console.error` at line 185, not in the
+         returned result object callers actually act on.
+    This is the SAME code path exercised by server.js's automated
+    poller (see section 3) for every scheduled job that carries a
+    cartToken — i.e., most brain.js-driven signal sends. See Key
+    Findings for how this manifests downstream.
+(d) skipStaleCleanup: when true (only ever passed as `true` by
+    push.js's /send-customer route when there's no cartToken — see
+    section 2), stale tokens found during a broadcast send are
+    logged but NOT deleted (lines 252-259). Dead tokens (including
+    mobile ones whose browser/PWA subscription has expired or been
+    revoked) can accumulate indefinitely on that specific call path
+    without ever being pruned — not a delivery failure per se, but a
+    hygiene gap that could make "how many mobile subscribers do we
+    actually have" numbers increasingly inaccurate over time.
+
+--- Exact FCM payload structure (both branches, identical shape) ---
+  {
+    data: {
+      url: url || `https://${shopDomain}`,
+      imageUrl: imageUrl || '',
+      title: title,
+      body: body,
+      icon: imageUrl || '<fallback icon URL>',
+    },
+    webpush: {
+      headers: { Urgency: 'high' },
+      notification: {
+        title,
+        body,
+        icon: imageUrl || '<fallback icon URL>',
+        image: imageUrl || undefined,
+        badge: '<fallback icon URL>',
+        requireInteraction: false,
+        vibrate: [200, 100, 200],
+      },
+      fcm_options: { link: url || `https://${shopDomain}` },
+    },
+    tokens: [...],   // or tokens: [sub.token] in the cartToken branch
+  }
+No top-level `notification` field, no `android` block, no `apns`
+block — everything is carried inside `data` + `webpush`.
+
+
+====================================================================
+2. backend/routes/push.js (638 lines)
+====================================================================
+
+uploadToCloudinary(base64Data) — lines 24-47 (added in a recent
+task; see audits/sendnow-fixes-audit.txt)
+Converts a base64 data: URI to a real Cloudinary URL via
+CLOUDINARY_CLOUD_NAME / CLOUDINARY_UPLOAD_PRESET env vars. Returns
+null (never throws) if unconfigured or on any upload error. This is
+the ONLY place in the entire codebase (across all 3 files read here)
+where a base64 data: URI ever gets converted into a real, FCM-usable
+URL before a send.
+
+--- How image URLs are passed to FCM, per route ---
+
+POST /send-store (lines 591-634) — the Dashboard "Send Now" button's
+target. Takes `mobileImageUrl` and `desktopImageUrl` SEPARATELY from
+the request body, but immediately collapses them (line 607):
+  const rawImage = mobileImageUrl || desktopImageUrl || '';
+mobileImageUrl wins whenever both are set; desktopImageUrl is only
+ever used as a fallback when mobileImageUrl is empty. If the
+resolved rawImage starts with 'data:', it's sent through
+uploadToCloudinary(); otherwise passed straight through. The single
+resulting `imageUrl` — there is no second image value anywhere past
+this point — is handed to:
+  sendPushToCustomers(shop, title, body, '/', imageUrl, false, null, false)
+mobileOnly=false (broadcasts to every device type), cartToken=null
+(broadcasts to every subscriber for the shop, not one targeted cart).
+
+POST /send-customer (lines 186-252) — takes a single `imageUrl` from
+the body (this route predates the mobile/desktop split entirely — no
+mobileImageUrl/desktopImageUrl fields exist here at all). May
+re-resolve it via a Shopify Admin API product-image lookup when
+productId+cartToken are both present (lines 210-231). Passed to:
+  sendPushToCustomers(shopDomain, title, body, url, resolvedImageUrl,
+    false, normalizedCartToken || null, normalizedCartToken ? false : true)
+Note the last argument: skipStaleCleanup is `true` whenever there is
+NO cartToken (a broadcast-style call) — see section 1(d) above.
+
+POST /send-journey -> sendJourneyPush() (lines 367-390) — passes
+`imageUrl: null` UNCONDITIONALLY, hardcoded (line 383). Journey-screen
+one-off sends never include an image regardless of anything else in
+the request.
+
+POST /send-now (lines 413-477) — does not call sendPushToCustomers at
+all; it creates a ScheduledJob for the 30s poller to pick up, with
+`payload: { title, body, subject, imageUrl: '' }` (line 464) — always
+an empty string, by construction, for this specific path.
+
+--- Whether mobile vs desktop tokens are handled differently ---
+No route in this file ever passes `mobileOnly: true` to
+sendPushToCustomers — every call site passes `false` explicitly (or
+lets it default to false). The mobileOnly targeting capability that
+exists in pushNotification.js is therefore unused by every caller in
+this file today.
+
+The /send-store route's mobileImageUrl/desktopImageUrl collapse (see
+above) means: even though the Dashboard editor UI collects and
+previews two SEPARATE images (one mobile-styled preview, one
+desktop-styled preview — see frontend/app/admin/dashboard/
+DashboardScreen.jsx from prior tasks), only ONE of the two ever
+survives to reach FCM, and it is sent identically to EVERY recipient
+regardless of their own device type. A mobile device can receive the
+merchant's "desktop" image (if no mobile image was uploaded) and vice
+versa is impossible to happen the other way (mobile always wins when
+both exist) — there is no code path anywhere that sends
+desktopImageUrl specifically to desktop-tagged tokens and
+mobileImageUrl specifically to mobile-tagged tokens.
+
+--- Conditions that might cause mobile tokens to be skipped or fail
+silently ---
+Beyond what's inherited from pushNotification.js (section 1), nothing
+new was found specific to this file's own routes — the routes here are
+thin wrappers that resolve an image URL and call the shared helper.
+The Cloudinary conversion itself is defensive (never throws, degrades
+to no-image), so a Cloudinary outage cannot itself cause a "failed"
+send — only a "sent with no image" one.
+
+--- Exact FCM payload structure ---
+Not built in this file — every route ultimately delegates to
+sendPushToCustomers() / sendPushToStore() in pushNotification.js (see
+section 1 for the exact shape). This file's job is only to resolve
+which single imageUrl string to pass in.
+
+
+====================================================================
+3. backend/server.js — sendPushToStore/sendPushToCustomers calls +
+Cloudinary logic (scoped read)
+====================================================================
+
+sendPushToStore: NOT imported and NEVER called anywhere in
+server.js. It is imported and used exclusively inside
+backend/routes/push.js's own POST /send route (admin/owner device
+push) — the automated poller in server.js has no relationship to it
+at all.
+
+sendPushToCustomers: imported once (line 18:
+`const { sendPushToCustomers } = require('./utils/pushNotification');`)
+and called exactly ONCE in the entire file, inside
+processScheduledJobs() — the 30-second poller that drives every
+automated/brain.js-scheduled send (lines 411-420):
+
+  const result = await sendPushToCustomers(
+    job.shopDomain,
+    payload.title || 'You left something behind!',
+    payload.body || 'Come back and check it out.',
+    clickUrl,
+    payload.imageUrl || null,
+    false,
+    job.cartToken || null,
+    false
+  );
+
+Argument-by-argument:
+  - imageUrl = payload.imageUrl || null — sourced from the
+    ScheduledJob's own `payload` object, set whenever the job was
+    originally scheduled. Whether brain.js (the signal-scheduling
+    service, NOT read in this task — out of the stated scope) ever
+    actually populates payload.imageUrl with a real value for
+    signal-driven jobs could not be confirmed from the 3 files read
+    here; push.js's OWN /send-now route explicitly always sets it to
+    '' (empty string) for ITS OWN job-creation path (a different,
+    manual-trigger path, not brain.js's). Flagged as an open question
+    for a follow-up audit of backend/services/brain.js if the image
+    question needs a definitive answer for automated sends.
+  - mobileOnly = false — same as literally every other call site
+    found across all 3 files in this audit. mobileOnly is never true
+    anywhere in this codebase today.
+  - cartToken = job.cartToken || null — THIS is the one call site
+    that reliably supplies a cartToken for most automated jobs (since
+    brain.js schedules jobs against a specific customer's cart/
+    profile), meaning THIS is the call site that most often exercises
+    the cartToken-scoped, single-most-recent-token, break-on-
+    non-stale-error code path described in section 1(c). Immediately
+    after this call (line 422), server.js itself checks
+    `if (!result.success || result.sent === 0)` and marks the
+    ScheduledJob status 'failed' with error `result.error || 'No
+    active subscriber found'` when either condition is true. Because
+    the cartToken-branch failure path returns `{success:true, sent:0}`
+    with NO `error` field, this DOES get correctly caught by server.js's
+    own `sent === 0` check and marked failed — so it is not a fully
+    silent, invisible failure. However, the RECORDED REASON is
+    misleading: the job's `error` field ends up as the generic
+    fallback string "No active subscriber found" even in cases where a
+    subscriber (and a valid, recently-active token) genuinely WAS
+    found, and the real failure was a specific FCM error that never
+    gets surfaced past the pushNotification.js `console.error` at
+    pushNotification.js:185. Anyone debugging "why isn't push working"
+    from the ScheduledJob collection's own error field would be misled
+    into thinking there's simply no subscriber, when the true cause
+    (a genuine, un-logged-to-the-job FCM send error) is different.
+
+Cloudinary: zero references anywhere in server.js — grepped the full
+file for "cloudinary" (case-insensitive), no matches. All Cloudinary
+logic lives exclusively in backend/routes/push.js's
+uploadToCloudinary(), used only by the /send-store route. The
+automated poller path in server.js has NO Cloudinary integration at
+all: if payload.imageUrl were ever set to a base64 data: URI for a
+scheduled job (not confirmed either way without reading brain.js),
+it would be passed straight to sendPushToCustomers() and into FCM's
+webpush image/icon fields completely unconverted — the exact same
+failure mode the Send Now button used to have before the Cloudinary
+fix was added to push.js specifically, except nothing in this
+automated path would catch or convert it.
+
+
+====================================================================
+SELF-AUDIT
+====================================================================
+
+Files read:
+  - backend/utils/pushNotification.js — 271 lines (full file)
+  - backend/routes/push.js — 638 lines (full file)
+  - backend/server.js — 612 lines total; scoped read via grep for
+    "sendPushToStore", "sendPushToCustomers", and "cloudinary"
+    (case-insensitive), then the matched region (lines 12-24,
+    399-422) read with surrounding context, per the task's own
+    narrowed scope for this file
+
+Key findings — what's most likely causing mobile delivery failure,
+ranked by how directly each was verified in the code read for this
+audit:
+
+1. (Most concrete, verified bug) The cartToken-scoped retry loop in
+   sendPushToCustomers() (pushNotification.js lines 147-193) tries
+   only the single most-recently-active device token per customer and
+   aborts entirely on the first non-stale FCM error, rather than
+   trying any older-but-valid token for the same customer. This is
+   the code path server.js's automated poller exercises for nearly
+   every signal-driven send (it always supplies job.cartToken). The
+   resulting ScheduledJob does get marked 'failed' (server.js's own
+   `result.sent === 0` check catches it), but with the misleading
+   generic reason "No active subscriber found" — the real FCM error
+   code/message is discarded, never reaching the job record. If a
+   merchant's mobile subscribers tend to be the most-recently-active
+   token for their cart (a very plausible pattern — mobile browsers/
+   PWAs churn tokens more than desktop), this would manifest as
+   intermittent, hard-to-diagnose mobile non-delivery that LOOKS like
+   "no subscriber" in the admin UI when it isn't.
+
+2. (Structural, not a failure but likely the source of any
+   "wrong/missing image on mobile" complaint) mobileImageUrl and
+   desktopImageUrl are collapsed into one shared imageUrl (mobile
+   preferred) before ever reaching FCM (push.js /send-store, line
+   607) — there is no code path anywhere in the 3 files read that
+   sends a different image to mobile-tagged vs desktop-tagged tokens.
+   The two-image upload UI's promise and the single-image backend
+   reality are mismatched.
+
+3. (Unconfirmed but plausible, needs verification outside this
+   audit's file scope) The entire FCM payload is built exclusively
+   via the `webpush` block (pushNotification.js) with no top-level
+   `notification`, `android`, or `apns` block anywhere. This is
+   correct ONLY if every registered CustomerPushSubscription token is
+   a genuine Web Push (browser/PWA) subscription. If any tokens are
+   actually native mobile app FCM registrations, this payload shape
+   would silently fail to display anything on those devices — native
+   clients don't read `webpush.notification`. Could not confirm or
+   rule this out from the files in scope for this audit; would
+   require reading the storefront subscription/theme-embed code
+   (extensions/cartncodform-embed) to verify what kind of token is
+   actually being registered.
+
+4. (Ruled dormant, not currently active) deviceType-based mobileOnly
+   filtering has an exact-string-match risk (section 1(b)), but no
+   call site anywhere in the 3 files read ever sets mobileOnly:true —
+   so this cannot be an active cause of today's mobile delivery
+   issues, only a latent risk if that parameter is ever wired up to a
+   real caller in the future.
+
+5. (Simplest explanation, rule out first) If FIREBASE_PROJECT_ID /
+   FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY are unset or invalid
+   in the Render environment, EVERY push — mobile and desktop alike —
+   silently no-ops. This wouldn't explain a mobile-SPECIFIC symptom
+   (desktop would fail too), but is the cheapest thing to check first
+   if the actual observed symptom is "no pushes at all" rather than
+   "mobile specifically."
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+This was a read-only investigation. No files were modified. No git
+operations, builds, or deploys were performed, as none were requested
+for this task.

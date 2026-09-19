@@ -1,0 +1,79 @@
+=== TODAY ICONS REMOVED AUDIT ===
+Generated: 2026-09-16
+
+Notification row icons removed: yes (5)
+  Push Sent, Emails Sent, Popups Shown, Emails Captured, Push
+  Subscribers — the `<Icon style={{ color: '#6366f1', marginBottom: 8 }} />`
+  element removed from each of the 5 NOTIF_STATS cards; `Icon` also
+  dropped from the .map() destructuring since it's no longer read.
+Activity row icons removed: yes (4)
+  Added to Cart, Started Checkout, Purchased, Revisited — same
+  removal for each of the 4 ACTIVITY_STATS cards.
+Numbers and labels preserved: yes
+  Both rows now render exactly:
+    <div style={{ fontSize: 28, fontWeight: 800, color: '#111827' }}>{number}</div>
+    <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>{label}</div>
+  matching the task's given layout spec exactly (number/label sizes
+  changed from the prior 24/700 and 12/marginTop:2 to the specified
+  28/800 and 13/marginTop:4).
+Click handlers preserved: yes
+  The ACTIVITY_STATS cards' onClick={() => navigate(...)} and the
+  onMouseEnter/onMouseLeave hover-shadow handlers are untouched —
+  only the <Icon .../> element inside each card was removed.
+
+frontend build: pass (all 16 routes compiled, no errors; no lint
+  warnings from the now-unused Icon-related destructuring since it
+  was removed from the .map() parameter lists)
+git push: done (32286d1..a4ce313 — see note below on why this was a
+  plain, non-diverged push this time)
+vercel deploy: done (readyState READY, aliased to
+  https://app.shopireachboost.com)
+
+
+====================================================================
+NOTE ON THE PUSH — a divergence from earlier tasks resolved itself
+====================================================================
+
+In the two immediately preceding tasks (UI redesign, then the toml/
+deploy task), origin/main and local main had diverged: local main
+carried an unpushed "feat: migrate to shopireachboost.com domain"
+commit (9f05120) that the user had explicitly asked to hold back,
+while origin/main only had a cherry-picked redesign-only commit
+(a7b10d0).
+
+Before pushing THIS task's commit, `git log`/`git reflog` showed
+that had changed: the user had run `git pull origin main --rebase`
+on this same local repo (outside this session — not something this
+session ran) at 12:15:59 today, which replayed the held-back domain-
+migration commit on top of origin's a7b10d0 (producing a new commit,
+32286d1, same content/message as 9f05120 but a fresh hash from the
+rebase), and that result had already been pushed to origin/main
+(origin/main's tip was 32286d1 before this task's push).
+
+This was flagged to the user directly before proceeding, since it
+meant the domain-migration changes were now on GitHub — the user
+confirmed shopireachboost.com is now fully live (Render, Vercel, and
+Resend all confirmed working) and that a normal push/deploy is fine
+going forward. With that confirmed, local main was no longer
+diverged from origin/main (local main = origin/main's 32286d1 plus
+exactly one new local commit, this task's icon-removal fix), so this
+task's `git push origin main` completed as a plain fast-forward with
+no cherry-pick workaround needed, and `vercel --prod` was run
+normally from local main's actual working tree (no temporary file
+reverting needed, unlike the previous two tasks).
+
+DO NOT touch any other section: verified — no other part of
+Today.jsx (date filter bar, new-subscriber alerts, Planned-for-today/
+Yesterday panels, Recovered-this-week chart) was modified.
+DO NOT touch any other file: verified — only
+frontend/app/admin/screens/Today.jsx was staged/committed.
+
+Not removed (left in place, out of this task's narrow scope): the 9
+inline SVG icon function components (BellIcon, EnvelopeIcon,
+CursorIcon, UserPlusIcon, UsersIcon, CartIcon, CreditCardIcon,
+CheckCircleIcon, RepeatIcon, lines ~111-189) and the now-unused
+`Icon:` keys still present in the NOTIF_STATS/ACTIVITY_STATS array
+literals are now dead code — nothing references them anymore. Left
+in place rather than deleted, per this task's own explicit "DO NOT
+touch any other section" instruction; flagging as a follow-up
+cleanup opportunity if a future task wants it.

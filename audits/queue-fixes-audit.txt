@@ -1,0 +1,137 @@
+SELF-AUDIT — queue-fixes
+
+FIX 1: Redirect to Queue after saving (DashboardScreen.jsx)
+-----------------------------------------------------------------
+Both the Approve handler (was lines ~1918-1943) and the Add to Queue
+handler (was lines ~1951-1975) confirmed updated. Navigation reuses the
+file's own existing `navigate(path)` helper (defined earlier in the
+component, around line 555 — already wraps `router.push` from
+`next/navigation`'s `useRouter`, already imported and instantiated at the
+top of the file, and already used elsewhere in this same file, e.g. the
+Activity KPI cards' onClick at line ~941) — no new import was needed, and
+no second/different navigation mechanism was introduced. Path used is
+'/admin/queue', matching the NavMenu's Queue link in
+frontend/app/admin/page.js (`<a href="/admin/queue" rel="queue">Queue</a>`).
+navigate() appends `?shop=...` (or `&shop=...`) automatically, consistent
+with how every other admin screen reads `shop` from the URL.
+
+Both handlers now, on success: close the modal + reset editor state
+(unchanged from before), then `setSuccessMsg(...)`, then
+`setTimeout(() => { setSuccessMsg(''); navigate('/admin/queue'); }, 1200)`.
+The 1200ms delay is a deliberate addition (not explicitly specified in
+the task) — navigating immediately after setSuccessMsg would very likely
+unmount DashboardScreen (client-side route change) before the toast ever
+painted, making it invisible; the short delay lets the merchant actually
+see the toast before landing on the Queue screen. Confirmed the toast's
+own render block (position: fixed, top-right, outside the modal's
+conditional JSX) is unaffected by setShowEditor(false), so it stays
+visible during that window.
+
+CONFIRM NO BLOCKING alert() REMAINS IN EITHER SUCCESS PATH
+----------------------------------------------------------------
+Approve: `alert('Added to queue as approved!')` replaced with
+`setSuccessMsg('Added to queue as approved!')` (same message text,
+different presentation — matches the Send Now flow's toast pattern
+exactly, including the 3-arg call shape).
+Add to Queue: previously had NO feedback at all; now shows
+`setSuccessMsg('Added to queue')` before navigating.
+Neither success path calls alert() anymore.
+
+NOT changed (out of the task's stated scope): the two `catch` blocks
+(`alert('Failed to approve')` / `alert('Failed to save')`) still use
+alert() for the FAILURE path. The task only asked to replace "the Approve
+button's alert('Added to queue as approved!')" (the success message) and
+to give Add to Queue "the same toast... before navigating" — it did not
+ask to touch error handling, so the failure alerts were left as-is.
+
+FIX 2: QueueScreen's stale hardcoded calendar replaced (QueueScreen.jsx)
+------------------------------------------------------------------------------
+`FESTIVAL_CALENDAR` renamed to `FESTIVAL_CALENDAR_FALLBACK`; its contents
+replaced wholesale with all 36 current entries from backend/data/
+festivals.json (name/date/emoji/suggestion/message/searchTerm/imageUrl on
+every entry — the old copy only had the first 5 fields on 13 entries with
+stale dates).
+
+Added `const [festivalCalendar, setFestivalCalendar] = useState([]);` and
+a mount-only useEffect that calls `apiGet('/api/push/festivals')`,
+falling back to `FESTIVAL_CALENDAR_FALLBACK` on failure or a non-array
+response — same pattern as DashboardScreen's equivalent fetch.
+
+`<MonthCalendar ... festivals={FESTIVAL_CALENDAR} />` updated to
+`festivals={festivalCalendar}` (the fetched state, not the constant).
+
+Incidental fix required by the rename: `getUpcomingFestivals()` (defined
+in this file but never actually called anywhere in it — dead code
+carried over from an earlier task) referenced `FESTIVAL_CALENDAR` by
+name internally. Left un-renamed, this would have thrown a
+ReferenceError the moment anything ever called it, since that binding no
+longer exists. Updated its one internal reference to
+`FESTIVAL_CALENDAR_FALLBACK` so the dead function stays syntactically and
+referentially correct, even though it's still unused.
+
+CONFIRM FALLBACK MATCHES backend/data/festivals.json (36 entries)
+------------------------------------------------------------------------
+Verified programmatically (not by eye): extracted the
+FESTIVAL_CALENDAR_FALLBACK array literal from QueueScreen.jsx via regex +
+eval on the isolated array text, and diffed it field-by-field (name,
+date, emoji, suggestion, message, searchTerm, imageUrl) against
+require('./backend/data/festivals.json') for all entries. Result:
+"QueueScreen FALLBACK MATCHES festivals.json EXACTLY (36 entries)" — zero
+diffs. (DashboardScreen's own FESTIVAL_CALENDAR_FALLBACK, updated in a
+prior turn, was re-verified the same way and still matches too — this
+task didn't touch it further.)
+
+FIX 3: One-shot month-jump logic
+-------------------------------------
+Added `const hasSetInitialMonth = useRef(false);` (new `useRef` import
+added to the existing `react` import line) and a useEffect depending on
+`[festivalItems, festivalLoading]`.
+
+CONFIRM IT DOESN'T FIGHT MANUAL NAVIGATION
+------------------------------------------------
+The effect's very first lines are:
+  if (hasSetInitialMonth.current) return;
+  if (festivalLoading) return;
+  hasSetInitialMonth.current = true;
+The ref is set to true BEFORE any decision about whether to actually jump
+the month — so this block of logic (the "does any item fall in the
+displayed month" check, the sort-by-scheduledAt, the upcoming-vs-earliest
+selection, and the setCurrentMonth call) executes at most once per page
+load, the first time festivalLoading flips to false with items already
+present. Deliberately did NOT include `currentMonth` in the dependency
+array: the prev/next month buttons call `setCurrentMonth`, which would
+otherwise re-trigger this effect on every manual navigation — omitting it
+means manual navigation never even re-enters the effect body in a way
+that could re-evaluate or override the user's choice (and even if it did
+re-run, the ref guard at the top would immediately bail). The "jump"
+itself only fires when NONE of festivalItems fall in the month that was
+showing at the moment this ran (real-world "now", since currentMonth's
+initial state is `new Date()`); if the merchant already has something
+scheduled in the current month, no jump happens at all.
+
+FIX 4: Festival image thumbnails
+-------------------------------------
+Planning list: confirmed each row now renders a 32x32px thumbnail
+(`borderRadius: 8`, `objectFit: 'cover'`) at the left of the row, before
+the title/status block, conditionally on `item.mobileImageUrl ||
+item.desktopImageUrl` being truthy (mobile preferred, falling back to
+desktop). `onError={e => { e.target.style.display = 'none'; }}` hides the
+broken image on load failure — the row's layout doesn't collapse oddly
+since the thumbnail is simply removed from view, the rest of the row
+(status badge, title, scheduled time, action buttons) is unaffected.
+
+Calendar chip: left unchanged, per the task's explicit instruction ("too
+small for an image") — verified no image-related code was added to the
+chip's rendering inside MonthCalendar.
+
+BUILD / DEPLOY
+------------------
+`cd frontend && npm run build`: compiled successfully, all 17 routes
+generated, no type/lint errors. /admin/dashboard grew slightly (existing
+size from the prior festival-images task); /admin/queue grew from its
+prior size to 9.43 kB, consistent with the much larger inlined
+FESTIVAL_CALENDAR_FALLBACK (36 entries with full imageUrl strings vs. the
+previous 13-entry, 5-field version) plus the new fetch/ref/thumbnail
+logic.
+`cd frontend && npx vercel --prod`: build succeeded again on Vercel's
+infrastructure, deployed and aliased to https://app.shopireachboost.com.

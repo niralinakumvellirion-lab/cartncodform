@@ -1,0 +1,368 @@
+POPUP SAVE/LOAD AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-14
+
+File read: frontend/app/admin/screens/Settings.jsx, in full (the
+relevant sections are reproduced verbatim below with their current
+line numbers).
+
+
+====================================================================
+1. The full useEffect that loads settings on mount
+====================================================================
+Lines 79-119:
+
+79	  useEffect(() => {
+80	    if (!shop) return;
+81	    let cancelled = false;
+82	    Promise.allSettled([
+83	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/settings`),
+84	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/signal-configs`),
+85	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/popup`),
+86	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/push-stats`),
+87	      apiGet(`/api/profiles/${encodeURIComponent(shop)}/profiles?limit=1`),
+88	      apiGet(`/api/discounts/${encodeURIComponent(shop)}/config`),
+89	    ]).then(([s, c, pop, ps, prof, disc]) => {
+90	      if (cancelled) return;
+91	      if (disc.status === 'fulfilled') {
+92	        setNeedsReauth(!!disc.value?.needsReauth);
+93	      }
+94	      if (s.status === 'fulfilled') {
+95	        setVoice(s.value?.voice || {});
+96	        setCaps(s.value?.caps || {});
+97	        setQuietHours(s.value?.quietHours || {});
+98	        setTimezone(s.value?.timezone || 'Asia/Kolkata');
+99	      } else {
+100	        setError(s.reason?.message || 'Failed to load settings');
+101	      }
+102	      if (c.status === 'fulfilled') {
+103	        setConfigs(Array.isArray(c.value?.configs) ? c.value.configs : []);
+104	      }
+105	      if (pop.status === 'fulfilled') {
+106	        setPopup(pop.value?.popup || {});
+107	        setMobilePopup(pop.value?.mobilePopup || {});
+108	      }
+109	      if (ps.status === 'fulfilled') {
+110	        setPushCount(ps.value?.attemptedLast7d || 0);
+111	      }
+112	      if (prof.status === 'fulfilled') {
+113	        setEmailCount(prof.value?.total || 0);
+114	      }
+115	    });
+116	    return () => {
+117	      cancelled = true;
+118	    };
+119	  }, [shop]);
+
+Endpoints called (6 total, all fired together in one Promise.allSettled
+array, all GETs):
+  1. /api/profiles/:shop/settings       -> voice, caps, quietHours,
+     timezone config
+  2. /api/profiles/:shop/signal-configs -> the Signals grid's configs
+     array (loaded but not rendered on this screen per the comment at
+     lines 47-49 -- "Signals grid moved to 'What to act on'")
+  3. /api/profiles/:shop/popup          -> popup + mobilePopup
+     appearance config
+  4. /api/profiles/:shop/push-stats     -> attemptedLast7d, used for
+     pushCount
+  5. /api/profiles/:shop/profiles?limit=1 -> used only for its `total`
+     count (emailCount) -- NOT the profile list itself
+  6. /api/discounts/:shop/config        -> used only for its
+     needsReauth flag
+
+State set (one setter per successfully-fulfilled result; a rejected
+result is skipped for everything except settings, which sets `error`
+instead):
+  setVoice, setCaps, setQuietHours, setTimezone   (from #1)
+  setConfigs                                       (from #2)
+  setPopup, setMobilePopup                         (from #3)
+  setPushCount                                     (from #4)
+  setEmailCount                                    (from #5)
+  setNeedsReauth                                   (from #6)
+
+This effect depends only on `[shop]` -- it runs once shop becomes
+available (component mount, or if `shop` itself changes), not on any
+user interaction like opening a tab or panel. It is the ONLY effect in
+the file besides the unrelated isMobileView resize listener (lines
+72-77, window resize only, no network calls).
+
+
+====================================================================
+2. saveSettings() - full function, including the popup PATCH body
+====================================================================
+Lines 121-174:
+
+121	  async function saveSettings() {
+122	    setSaving(true);
+123	    setError('');
+124	    setSuccess(false);
+125	    console.log(
+126	      '[settings] saving popup device:', popupDevice,
+127	      'mobilePopup.layout:', mobilePopup.layout,
+128	      'mobilePopup.imageUrl:', mobilePopup.imageUrl ? 'SET' : 'EMPTY'
+129	    );
+130	    try {
+131	      // Both PATCHes are independent (different Store sub-paths) - run them
+132	      // in parallel instead of sequentially so one being slow doesn't hold
+133	      // up the other, and so a failure in one no longer silently skips the
+134	      // other entirely (the old sequential version never attempted the
+135	      // popup save at all if the settings save threw first).
+136
+137	      // settings-image-skip: only re-send popup.imageUrl (a base64 string
+138	      // that can run to tens/hundreds of KB) when it actually changed this
+139	      // session - otherwise every save, even a color/text-only edit, was
+140	      // re-uploading the full image for no reason.
+141	      //
+142	      // mobilePopup.imageUrl is deliberately NOT stripped the same way: the
+143	      // backend's PATCH /popup handler (backend/routes/profiles.js) writes
+144	      // `popup.<field>` one field at a time via dot-notation $set (so
+145	      // omitting popup.imageUrl safely leaves the stored value untouched),
+146	      // but it replaces the ENTIRE mobilePopup subdocument wholesale with
+147	      // whatever object is sent - omitting imageUrl from that object would
+148	      // erase the merchant's saved mobile image on every save that doesn't
+149	      // also touch it, which is worse than the slowness this task fixes.
+150	      // See audits/settings-image-skip-audit.txt for the full reasoning.
+151	      const popupBody = { ...popup };
+152	      if (!popupImageChanged) delete popupBody.imageUrl;
+153
+154	      await Promise.all([
+155	        apiSend(`/api/profiles/${encodeURIComponent(shop)}/settings`, 'PATCH', {
+156	          voice,
+157	          caps,
+158	          quietHours,
+159	          timezone,
+160	        }),
+161	        apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', {
+162	          ...popupBody,
+163	          mobilePopup,
+164	        }),
+165	      ]);
+166	      setSuccess(true);
+167	      setPopupImageChanged(false);
+168	      setMobileImageChanged(false);
+169	    } catch (e) {
+170	      setError(e.message || 'Save failed');
+171	    } finally {
+172	      setSaving(false);
+173	    }
+174	  }
+
+The popup PATCH body sent (lines 161-164): `{ ...popupBody,
+mobilePopup }` -- every field of the desktop `popup` state EXCEPT
+imageUrl when it was not changed this session (popupBody, built at
+lines 151-152), plus the entire `mobilePopup` state object nested
+under its own key, sent complete every time regardless of whether its
+image changed (the deliberate asymmetry explained in the inline
+comment at lines 142-150, and covered in a prior audit,
+audits/settings-image-skip-audit.txt).
+
+
+====================================================================
+3. How activePopup state is structured; initial state; mapping to
+   popup/mobilePopup
+====================================================================
+Initial state (lines 51, 53-54):
+  51	  const [popup, setPopup] = useState({});
+  53	  const [mobilePopup, setMobilePopup] = useState({});
+  54	  const [popupDevice, setPopupDevice] = useState('desktop');
+
+Both `popup` and `mobilePopup` start as empty objects `{}` and are
+populated from the mount-time GET (section 1 above, lines 105-108)
+once it resolves. `popupDevice` starts as the string 'desktop'.
+
+The mapping (lines 176-179):
+  176	  // popup-responsive: the customizer UI edits whichever config the device
+  177	  // tab selects - same fields, different state.
+  178	  const activePopup = popupDevice === 'desktop' ? popup : mobilePopup;
+  179	  const setActivePopup = popupDevice === 'desktop' ? setPopup : setMobilePopup;
+
+`activePopup`/`setActivePopup` are NOT separate state -- they are a
+derived alias, recomputed on every render, that points at whichever of
+`popup`/`mobilePopup` matches the currently-selected `popupDevice` tab
+('desktop' or 'mobile', switched via the device-tab buttons elsewhere
+in the file, e.g. `onClick={() => setPopupDevice(tab.key)}`). All of
+the customizer's controls (image upload, colors, text fields, layout,
+etc.) read and write through `activePopup`/`setActivePopup`, which is
+why both configs share an identical field shape -- editing "the image"
+while on the desktop tab writes to `popup.imageUrl` via
+`setPopup(...)`; switching to the mobile tab and editing "the image"
+there writes to `mobilePopup.imageUrl` via `setMobilePopup(...)`
+instead, through the exact same JSX/handlers.
+
+Also derived alongside it (lines 180-183):
+  180	  // settings-image-skip: mark whichever config's image was just touched
+  181	  // (upload, remove, or paste-URL - all three mutate activePopup.imageUrl).
+  182	  const markImageChanged = () =>
+  183	    popupDevice === 'desktop' ? setPopupImageChanged(true) : setMobileImageChanged(true);
+This mirrors the same popupDevice-based branching to decide which of
+the two "image changed" flags (section covered in a prior audit) to
+set.
+
+
+====================================================================
+4. The canvas compression block - what it produces, and a size
+   estimate for a typical 800px JPEG at quality 0.7 in base64
+====================================================================
+Lines 796-825, the file input's onChange handler in full:
+
+796	                      onChange={(e) => {
+797	                        const file = e.target.files?.[0];
+798	                        if (!file) return;
+799	                        const reader = new FileReader();
+800	                        reader.onload = (ev) => {
+801	                          // Resize/compress via canvas before storing as base64 -
+802	                          // the raw file (up to 500KB) re-encoded losslessly would
+803	                          // otherwise bloat the popup config's PATCH body and the
+804	                          // Store document it's written into. Drag-to-focus and
+805	                          // the layout previews read activePopup.imageUrl /
+806	                          // imagePosition independently of how the URL was
+807	                          // produced, so neither is affected by this.
+808	                          const img = new Image();
+809	                          img.onload = () => {
+810	                            const canvas = document.createElement('canvas');
+811	                            const MAX = 800;
+812	                            let w = img.width, h = img.height;
+813	                            if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+814	                            if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+815	                            canvas.width = w;
+816	                            canvas.height = h;
+817	                            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+818	                            const compressed = canvas.toDataURL('image/jpeg', 0.7);
+819	                            setActivePopup((p) => ({ ...p, imageUrl: compressed }));
+820	                            markImageChanged();
+821	                          };
+822	                          img.src = ev.target.result;
+823	                        };
+824	                        reader.readAsDataURL(file);
+825	                      }}
+
+Note: the comment at line 802 still says "up to 500KB" -- this refers
+to the ORIGINAL file-size guard that a prior task (audits/
+popup-load-fix-audit.txt) deliberately removed entirely (per that
+task's explicit instruction, "Remove image size limit entirely" -- see
+CHANGE 1 in that audit). The comment text itself was not part of that
+task's specified diff and was left as-is; it is now stale/inaccurate
+(there is no size limit, 500KB or otherwise, enforced on the input
+file any more -- confirmed by grepping this whole file for "500" and
+"1024": no match remains anywhere). Not fixed here since this is a
+read-only audit.
+
+What it produces: `compressed` is a base64 DATA URI string in the form
+`data:image/jpeg;base64,<base64 text>` -- the browser's Canvas
+`toDataURL('image/jpeg', 0.7)` call JPEG-encodes the canvas contents
+(already resized so neither dimension exceeds 800px, aspect ratio
+preserved) at quality 0.7 (on Canvas's 0-1 scale), then base64-encodes
+the resulting binary JPEG bytes, and prefixes the MIME-type header.
+This full string is what gets stored into activePopup.imageUrl and,
+eventually, sent in the popup PATCH body (section 2) and persisted as
+the `popup.imageUrl` or `mobilePopup.imageUrl` field in MongoDB.
+
+Size estimate (width x height x bytes-per-pixel / compression, as
+asked) -- worst case for this code path is a source image whose
+SHORTER side is already >= 800px too, so both output dimensions land
+at the 800px cap (a portrait or landscape source only caps the longer
+side, producing a smaller canvas on the other axis, so 800x800 is the
+upper bound this code can ever produce, not the typical case):
+
+  Pixel count (worst case): 800 x 800 = 640,000 pixels
+  Raw (uncompressed) bitmap equivalent: 640,000 px x 3 bytes/px (RGB)
+    = 1,920,000 bytes (~1.83 MB) -- this is NOT what gets sent; it is
+    the baseline JPEG compression works from.
+  JPEG at quality ~0.7 (a "medium-high" quality setting) typically
+  yields somewhere around 0.1-0.3 compressed bytes per source pixel
+  for ordinary photographic content (product photos, lifestyle
+  images) -- this is an empirical range from how JPEG's DCT/quantization
+  behaves at that quality level, not a value this codebase configures
+  or guarantees.
+    Low end:  640,000 x 0.10 = ~64,000 bytes  (~62 KB) compressed JPEG
+    Mid:      640,000 x 0.15 = ~96,000 bytes  (~94 KB) compressed JPEG
+    High end: 640,000 x 0.30 = ~192,000 bytes (~188 KB) compressed JPEG
+  Base64 encoding inflates binary size by ~4/3 (33%), plus the
+  `data:image/jpeg;base64,` prefix (~23 bytes, negligible):
+    Low end:  ~64,000  x 1.33 = ~85 KB  base64 text
+    Mid:      ~96,000  x 1.33 = ~128 KB base64 text
+    High end: ~192,000 x 1.33 = ~255 KB base64 text
+
+So a realistic estimate for a typical 800x800 JPEG at quality 0.7,
+stored as this code's base64 data URI, is roughly 85 KB to 255 KB of
+text, with something around 100-150 KB being a reasonable "typical
+photo" midpoint. A simpler/flatter image (solid colors, less detail --
+e.g. a graphic or logo rather than a photo) compresses far better than
+this range; a very high-detail/noisy photo can run higher. This is an
+estimate based on general JPEG compression behavior, not a value
+measured against an actual file in this session.
+
+
+====================================================================
+5. After save succeeds - does it reload popup config from backend, or
+   just keep local state?
+====================================================================
+It does NOT reload from the backend. Per the full saveSettings()
+function shown in section 2, the only things that happen after the
+`await Promise.all([...])` succeeds are:
+  166	      setSuccess(true);
+  167	      setPopupImageChanged(false);
+  168	      setMobileImageChanged(false);
+No apiGet call, no re-fetch of /api/profiles/:shop/popup, and no other
+state setter touches `popup` or `mobilePopup` here -- they simply keep
+whatever value was already in local state (the same value that was
+just PATCHed to the backend, since popup/mobilePopup are the source
+the PATCH body itself was built from). `setSuccess(true)` only toggles
+a success banner (grepped every use of the `success` state in this
+file -- it appears at declaration (line 65) and at 2 render sites
+(lines 595 and 1874, both `{success && (...)}` conditional banners) --
+it is never used as a dependency of any effect, so it cannot trigger a
+reload as a side effect either).
+
+This is safe/correct as long as the PATCH succeeded and the local
+state accurately reflects what was sent (which it does, since the
+PATCH body is built directly from `popup`/`mobilePopup`/`popupBody`,
+themselves derived from local state) -- there is no scenario in the
+current code where the backend's stored value could end up different
+from what local state believes was just saved, EXCEPT for the
+asymmetry already flagged in section 2 / audits/settings-image-skip-
+audit.txt: `popup.imageUrl` is sometimes omitted from the outgoing
+PATCH (when unchanged), but that's fine here too, because when it's
+omitted, local `popup.imageUrl` also still holds the correct
+(unchanged) value the backend already had -- nothing diverges.
+
+
+====================================================================
+6. When the popup customizer opens - instant (already-loaded state)
+   or a fresh fetch?
+====================================================================
+(a) Already-loaded state - instant. No fetch is involved in opening
+the customizer panel.
+
+The "Customize popup" button that opens it (lines 637-653):
+  637	              <button
+  638	                onClick={() => setShowPopupCustomizer(true)}
+  ...
+  652	                Customize popup
+  653	              </button>
+And the back button that closes it (lines 666-679):
+  666	                <button
+  667	                  onClick={() => setShowPopupCustomizer(false)}
+  ...
+  678	                  ←
+  679	                </button>
+
+`showPopupCustomizer` (declared at line 62,
+`useState(false)`) is a plain boolean React state flag with no
+associated effect anywhere in the file (grepped every occurrence of
+`showPopupCustomizer` -- it only appears in its own useState
+declaration and in ternary/conditional JSX that picks which panel to
+render, e.g. `const popupCard = !showPopupCustomizer ? (...) : (...)`
+at line 610, plus a few `{showPopupCustomizer && ...}` /
+`{!showPopupCustomizer && ...}` render guards further down). Setting it
+to true simply swaps which pre-rendered React tree is shown; it does
+not call apiGet, does not depend on any network state, and does not
+even reference `shop`. Because the mount-time useEffect (section 1)
+already loaded `popup`/`mobilePopup` into state before the merchant
+could plausibly have clicked into the customizer (the effect fires as
+soon as the whole Settings screen mounts, well before any button
+click), `activePopup` is already populated with real data (or `{}`
+defaults, if the GET hadn't resolved yet on a very fast click) the
+instant the customizer panel renders -- there is no loading spinner,
+skeleton state, or fetch-on-open code path in this file for the
+customizer.

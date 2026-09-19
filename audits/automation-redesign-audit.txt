@@ -1,0 +1,95 @@
+=== AUTOMATION REDESIGN AUDIT ===
+Generated: 2026-09-15
+
+Section 1 — master switch card: yes
+Section 2 — brain run time with time display: yes
+Section 3 — delay rows with descriptions: yes
+  Website visit row added: yes (already present from prior task,
+  kept as the 4th DELAY_ROWS entry)
+Section 4 — realtime triggers with icons: yes
+Section 5 — signal grid 2-col with colored dots: yes
+  page_visit added: yes (already present in SIGNAL_ITEMS from
+  prior task; DOT_COLOR includes page_visit: #0d9488 teal per spec)
+Section 6 — sticky save bar: yes
+DelayInput redesigned: yes
+ToggleSwitch uses indigo: yes
+
+frontend build: pass
+git push: done (1556033..b43d0a2)
+vercel deploy: done (readyState READY, aliased to
+  https://cartncodform-beryl.vercel.app)
+
+====================================================================
+DEVIATIONS FROM LITERAL TASK TEXT (own judgment calls, documented)
+====================================================================
+
+1. ToggleSwitch prop signature changed from {on, onClick} to
+   {checked, onChange}. The task's given per-section JSX
+   (Section 1's master switch, Section 4's realtime rows, Section
+   5's signal rows) all call <ToggleSwitch checked={...}
+   onChange={(v) => ...}/>, which only works if the component
+   itself is rewritten to accept those prop names. Rewrote
+   ToggleSwitch's internals accordingly (onClick={() =>
+   onChange(!checked)}), keeping the exact same visual shape/
+   animation, only changing the "on" color from #16a34a green to
+   #4f46e5 indigo as instructed.
+
+2. Section 5 header (icon + title + subtitle) was not given in
+   the task text — only the signal dot colors and row markup were
+   specified. Authored a header matching the established pattern
+   from Sections 2/3/4 (36x36 rounded-square icon box + title +
+   subtitle), using the primary indigo color (#eef2ff bg, #4f46e5
+   stroke) and a simple activity/pulse-line SVG icon, since no
+   icon or accent color was specified for this section. Kept the
+   existing title "Active signals" and subtitle "Choose which
+   signals trigger automated notifications" (copy was not part of
+   this task's scope).
+
+3. Top-level design-system spec said "Section icon: 24x24 colored
+   circle with SVG icon inside," but the concrete header code
+   given for Sections 2/3/4 all used a 36x36 rounded-square (not
+   circle) icon box. Followed the concrete, repeated given code
+   (36x36 square) rather than the more abstract top-of-task
+   spec line, for consistency across all 4 icon headers.
+
+4. Section 6's given code references a `saved` boolean that does
+   not exist as its own state variable anywhere in the task text
+   or the prior file. Rather than adding a new `saved` state (and
+   a second timer to clear it), derived it inline as `const saved
+   = !!saveResult?.success;` from the existing saveResult state
+   (which already auto-clears via its own 3s setTimeout in
+   saveConfig()). This reproduces the intended "Saved!" button
+   flash for the same duration without duplicating timer logic.
+
+5. The old success/failure message line below the save button was
+   not part of the given Section 6 redesign (which only shows
+   state via the button label). Since the new button label only
+   distinguishes saving/saved/idle and has no way to surface a
+   save *failure*, kept a trimmed version of the old message div
+   — now rendering only on failure (saveResult set and
+   saveResult.success === false) in red — so save errors are not
+   silently lost. Successful saves now rely solely on the button's
+   "✓ Saved!" state, matching the given design.
+
+6. Removed now-dead code that nothing in the redesigned JSX calls
+   anymore: formatHour12() and formatRunTime() (Section 2's new
+   design computes hour/AM-PM and the time display inline, per the
+   given code), toggleSignal()/toggleRealtime() helper functions
+   (Sections 4/5's given rows call setConfig directly inline
+   instead), and the selectStyle constant (Section 2's new selects
+   use their own inline style objects; nothing else referenced
+   selectStyle after Section 3 had already moved to DelayInput in
+   the prior task). Removed rather than left as unused dead code,
+   consistent with this project's conventions.
+
+7. Extracted the Section 3 delay-row and Section 4 realtime-row
+   inline arrays (given as literal array literals inside the JSX
+   in the task text) into two module-level consts, DELAY_ROWS and
+   REALTIME_ROWS, defined once above the component instead of
+   being re-created as new array literals on every render inside
+   the JSX. Content and field names are identical to what was
+   given — this is purely a placement change, not a logic change.
+
+No backend files were touched. No other frontend files were
+touched — only frontend/app/admin/automation/AutomationScreen.jsx
+was modified, staged, and committed.

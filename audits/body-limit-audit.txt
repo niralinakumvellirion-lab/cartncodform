@@ -1,0 +1,101 @@
+=== BODY LIMIT AUDIT ===
+Generated: 2026-09-18
+AUDIT ONLY -- no files were changed. This is a read-only report.
+
+File read in full:
+  backend/server.js (613 lines)
+
+
+====================================================================
+1. express.json() MIDDLEWARE -- WHAT IS THE LIMIT SET TO?
+====================================================================
+Found at lines 59-66:
+
+  app.use(
+    express.json({
+      limit: '5mb',
+      verify: (req, _res, buf) => {
+        req.rawBody = buf.toString('utf8');
+      },
+    })
+  );
+
+LIMIT = '5mb'
+
+This is the ONLY express.json() call in the file (registered once,
+globally, before all routes). It also carries a `verify` callback
+that stashes the raw request body text onto `req.rawBody` -- the
+comment directly above it (line 58) explains this exists so Shopify
+webhook HMAC signatures can be verified against the exact raw bytes
+later in the webhook route handler.
+
+
+====================================================================
+2. express.urlencoded() -- WHAT LIMIT?
+====================================================================
+Found at line 69:
+
+  app.use(express.urlencoded({ extended: true }));
+
+NO limit option is set here at all -- only `extended: true` is
+passed. With no explicit `limit` key, this falls back to Express's
+own built-in default, which is '100kb'. So:
+
+  express.json()       -> limit explicitly set to 5mb
+  express.urlencoded() -> no limit key present -> defaults to 100kb
+
+This is a real asymmetry: JSON request bodies are allowed up to 50x
+larger than urlencoded ones on this server, with no comment in the
+file explaining why. Flagging this as an observation only, per the
+task's read-only/audit-only scope -- not proposing or making a
+change.
+
+
+====================================================================
+3. ANY BODY-PARSER CONFIGURATION
+====================================================================
+Three body-parsing middleware registrations exist in this file, all
+using Express's own built-in parsers (Express 4.16+ bundles
+body-parser internally and exposes it as express.json/express.text/
+express.urlencoded) -- there is no separate `require('body-parser')`
+anywhere in this file (confirmed via a targeted search: zero matches
+for the literal string "body-parser").
+
+All three are registered globally (via app.use(), no path prefix),
+in this exact order, lines 59-69:
+
+  1. express.json({ limit: '5mb', verify: ... })       -- line 59-66
+  2. express.text({ type: 'text/plain' })               -- line 68
+  3. express.urlencoded({ extended: true })              -- line 69
+
+Details on each:
+
+  - express.json({ limit: '5mb', verify })
+    Parses application/json request bodies. limit=5mb. Also captures
+    the raw body onto req.rawBody via the verify callback (see
+    section 1 above) -- this exists specifically for Shopify webhook
+    HMAC verification (per the inline comment at line 58: "Capture
+    the raw body so Shopify webhook HMAC can be verified if needed").
+
+  - express.text({ type: 'text/plain' })
+    Parses text/plain request bodies (the inline comment at line 67
+    says this is for bodies "sent by navigator.sendBeacon"). No
+    `limit` option is passed here either, so this also falls back to
+    Express's built-in default of 100kb for this parser.
+
+  - express.urlencoded({ extended: true })
+    Parses application/x-www-form-urlencoded bodies, with the
+    "extended" (qs library) parsing mode enabled. No limit set, so
+    defaults to 100kb (see section 2 above).
+
+No other body-parsing configuration (custom middleware, raw-body
+parsers, multipart/form-data handling such as multer, or a second/
+route-scoped body-parser instance) appears anywhere else in this
+file.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified. This is a plain-text, read-only report of
+backend/server.js only, per the task's stated scope.

@@ -1,0 +1,158 @@
+OAUTH STATE AUDIT - read-only, no changes
+============================================
+Generated: 2026-09-15
+
+File read: backend/routes/auth.js (in full, current state — includes
+the token-fix changes from the immediately preceding task, i.e.
+refreshAccessTokenIfNeeded import and its use in registerAllWebhooks,
+tokenData destructuring, accessTokenExpiresAt — none of that affects
+the state-handling code shown below). Also searched backend/models/
+for any OAuth/State-related model.
+
+
+====================================================================
+1. Where OAuthState is stored during /install
+====================================================================
+
+NOT in-memory (no Map/object), NOT in an HTTP session — it is stored
+in MongoDB, via a real Mongoose model (backend/models/OAuthState.js,
+see section 3).
+
+Exact storage code, GET /api/auth/install handler (lines 34-63),
+the relevant lines:
+
+  4    const OAuthState = require('../models/OAuthState');
+  ...
+  46    // Optional: link the store to the dashboard account that started the install.
+  47    const ownerEmail =
+  48      (req.query.owner_email || '').toString().trim().toLowerCase() || undefined;
+  49
+  50    const state = crypto.randomBytes(16).toString('hex');
+  51    await OAuthState.create({ nonce: state, ownerEmail });
+  52
+  53    const redirectUri = `${getBackendUrl(req)}/api/auth/callback`;
+  54    const authUrl = buildAuthUrl(shop, redirectUri, state);
+
+A random 16-byte hex string (`crypto.randomBytes(16).toString('hex')`,
+32 hex characters) is generated as the nonce, then persisted as a new
+OAuthState document via `OAuthState.create({ nonce: state, ownerEmail })`
+— a genuine MongoDB insert (awaited, so /install does not redirect
+to Shopify until the write has completed). The same `state` string is
+then passed into buildAuthUrl() to become the `state` query param on
+the Shopify authorize redirect (backend/utils/shopify.js's
+buildAuthUrl(), not itself part of this audit's file list, but this
+is where `state` ends up appended to the outgoing URL).
+
+
+====================================================================
+2. Where OAuthState is read/verified during /callback
+====================================================================
+
+Exact read + delete code, GET /api/auth/callback handler (lines
+70-159), the relevant lines:
+
+  72    const { shop, code, state } = req.query;
+  73
+  74    if (!shop || !code || !state) {
+  75      return res.status(400).json({ error: 'Missing shop, code or state in callback' });
+  76    }
+  77
+  78    // Validate + consume the state nonce (single use).
+  79    const savedState = await OAuthState.findOneAndDelete({ nonce: state });
+  80    if (!savedState) {
+  81      return res.status(400).json({ error: 'Invalid or expired OAuth state' });
+  82    }
+
+The incoming `state` query param (Shopify echoes back whatever value
+was sent on the original authorize redirect) is looked up AND deleted
+in a single atomic operation, `OAuthState.findOneAndDelete({ nonce:
+state })` — this is a combined read+consume: if a document with that
+exact nonce exists, it is returned AND removed from the collection in
+one step (so the same nonce cannot be replayed a second time). If no
+matching document is found (`savedState` is null/falsy — either the
+nonce never existed, was already consumed by a prior callback, or its
+TTL index expired it), the callback rejects with 400 "Invalid or
+expired OAuth state" and does not proceed to exchange the code or
+touch Store at all. If found, `savedState.ownerEmail` (whatever was
+optionally passed at /install time) is read a few lines later (line
+94 area, not shown here — outside the scope of this audit's 3
+questions) to prefer-fill the Store's ownerEmail field.
+
+The HMAC check (`verifyHmac(req.query)`, line 85) is a SEPARATE
+verification that runs AFTER the state check succeeds — it only logs
+a warning and continues on failure ("continuing in dev mode"), unlike
+the state check which hard-rejects with a 400. These are two distinct
+security checks: HMAC verifies the request was genuinely signed by
+Shopify (using SHOPIFY_API_SECRET); the state nonce verifies this
+specific callback corresponds to an install THIS SERVER initiated
+and that it has not been used before.
+
+
+====================================================================
+3. Is there an OAuthState model/collection?
+====================================================================
+
+Yes. backend/models/OAuthState.js exists (searched backend/models/
+for "OAuthState" and "OAuth" — exactly 2 files matched: this model
+itself, and backend/models/Store.js, where "OAuth" only appears
+inside 3 unrelated comments, not as a real second model — see below).
+
+Full schema, backend/models/OAuthState.js:
+
+   1  const mongoose = require('mongoose');
+   2
+   3  const oAuthStateSchema = new mongoose.Schema({
+   4    nonce: {
+   5      type: String,
+   6      required: true,
+   7      unique: true,
+   8    },
+   9    // Optional: dashboard owner's email, passed as ?owner_email= on /install and
+  10    // carried through OAuth so the connected store can be linked to that account.
+  11    ownerEmail: {
+  12      type: String,
+  13      lowercase: true,
+  14      trim: true,
+  15    },
+  16    createdAt: {
+  17      type: Date,
+  18      default: Date.now,
+  19      // TTL index: Mongo automatically removes the document 3600 seconds
+  20      // (1 hour) after createdAt, giving the OAuth flow more time to complete
+  21      // before the nonce is considered stale.
+  22      expires: 3600,
+  23    },
+  24  }, {});
+  25
+  26  module.exports = mongoose.model('OAuthState', oAuthStateSchema);
+
+Fields: nonce (String, required, UNIQUE — a second layer of
+single-use enforcement beyond the findOneAndDelete pattern: even a
+concurrent duplicate nonce could never be inserted twice), ownerEmail
+(String, optional, lowercased/trimmed), createdAt (Date, defaults to
+Date.now, with a TTL index of 3600 seconds — Mongo auto-deletes the
+document exactly 1 hour after creation, which is what "expired"
+means in the callback's "Invalid or expired OAuth state" error
+message: either genuinely not found because it was never created
+with that nonce/was already consumed, or found-but-since-deleted by
+this TTL index after sitting unused for over an hour).
+
+Cross-reference to the 3 incidental "OAuth" mentions in
+backend/models/Store.js (none of them define or reference a second
+OAuthState-like model — all 3 are plain comments on unrelated Store
+fields):
+  line 156: "...write_discounts). The admin surfaces a "reconnect"
+    banner; OAuth clears it." (comment on the needsReauth field)
+  line 160: "...via OAuth Token Exchange from the admin's live App
+    Bridge session..." (comment on the onlineAccessToken field)
+  line 170: "...gets). Populated alongside `accessToken` at OAuth
+    callback time." (comment on the accessTokenExpiresAt field, added
+    by the immediately preceding token-fix task)
+
+No other OAuth/State-shaped model exists anywhere under backend/models/.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified as part of this task.

@@ -1,0 +1,144 @@
+=== EMAIL CAPTUREDAT AUDIT ===
+Fix 1 - capturedAt added to schema: yes (backend/models/Profile.js)
+Fix 1 - popup added to enum: yes (enum now
+  ['cod', 'form', 'checkout', 'popup'])
+Fix 2 - capturedAt set in discounts.js: yes
+Fix 3 - other email capture sites found: TWO
+  1. backend/routes/cod.js (POST /api/cod/order, the authenticated/
+     direct COD order endpoint) - sets channels.email.address /
+     channels.email.source: 'cod' conditionally on req.body.email
+  2. backend/routes/proxy.js (POST /cod-order, the App Proxy's public
+     storefront-facing COD order endpoint - the same form's other
+     entry point, per its own comment "same fire-and-forget
+     notifications as routes/cod.js POST /order") - sets
+     channels.email.address / channels.email.source: 'cod'
+     conditionally on cleanEmail
+  capturedAt added there too: yes, both sites (see FIX 3 section below)
+node --check: pass (all 4 touched files: Profile.js, discounts.js,
+  cod.js, proxy.js)
+npm test: 151/151 passing (19/19 suites)
+git push: done (commit 3af4271, 553c8f1..3af4271 main -> main)
+
+
+FIX 1 - EXACT DIFF (backend/models/Profile.js)
+=========================================================================
+     push: { subscribed: Boolean, lastToken: String, subscribedAt: Date },
+     email: {
+       address: String,
+-      source: { type: String, enum: ['cod', 'form', 'checkout'] },
++      source: { type: String, enum: ['cod', 'form', 'checkout', 'popup'] },
++      capturedAt: { type: Date },
+     },
+
+
+FIX 2 - EXACT DIFF (backend/routes/discounts.js)
+=========================================================================
+         {
+           ...(email
+-            ? { 'channels.email.address': email, 'channels.email.source': 'popup' }
++            ? {
++                'channels.email.address': email,
++                'channels.email.source': 'popup',
++                'channels.email.capturedAt': new Date(),
++              }
+             : {}),
+           lastSeenAt: new Date(),
+         }
+
+
+FIX 3 - other channels.email.address write sites, found and fixed
+=========================================================================
+Grepped the whole backend/ tree for `channels.email.address` (and the
+related `channels: { ... email` shape used in test fixtures, to
+exclude those from consideration). Excluding read-only queries
+(check-*.js diagnostic scripts, activity.js's .select(), events.js's
+.select(), and various __tests__/*.test.js fixture objects that only
+READ or MOCK this shape, never write it via upsertProfile), exactly 2
+real write sites exist beyond discounts.js (Fix 2):
+
+1. backend/routes/cod.js, POST /order (lines 54-62) - the customer-
+   facing COD order form's own backend endpoint. Diff:
+     }, {
+       'channels.email.address': req.body.email || undefined,
+       'channels.email.source': req.body.email ? 'cod' : undefined,
+  +    'channels.email.capturedAt': req.body.email ? new Date() : undefined,
+       lastSeenAt: new Date(),
+     }).catch((err) => console.error('[profile] upsert error:', err.message));
+   Matches this file's own existing conditional style (a bare
+   `? value : undefined` per field, relying on profileService.js's
+   splitUpdates() to drop any key whose value is undefined -- see
+   audits/profile-email-capture-audit.txt, which traced this exact
+   mechanism in the prior read-only audit) rather than the
+   ternary-wrapped-object-spread style discounts.js/proxy.js use.
+
+2. backend/routes/proxy.js, POST /cod-order (lines 435-442) - the
+   Shopify App Proxy's version of the SAME COD form (its own comment,
+   line 444-445, confirms: "Notify the store owner -- same
+   fire-and-forget notifications as routes/cod.js POST /order"; this
+   is the public, HMAC-verified storefront-facing entry point for the
+   identical form, a parallel/duplicate code path to routes/cod.js's
+   own POST /order rather than a different feature). Diff:
+     upsertProfile(shop, { phone: String(phone).trim(), email: cleanEmail || null }, {
+       ...(cleanEmail
+  -      ? { 'channels.email.address': cleanEmail, 'channels.email.source': 'cod' }
+  +      ? {
+  +          'channels.email.address': cleanEmail,
+  +          'channels.email.source': 'cod',
+  +          'channels.email.capturedAt': new Date(),
+  +        }
+         : {}),
+       lastSeenAt: new Date(),
+     }).catch((err) => console.error('[profile] cod-proxy upsert error:', err.message));
+   Matches discounts.js's own ternary-object-spread style, since this
+   file already used that exact pattern for the same field pair.
+
+Both required the fix for the capturedAt tracking to be complete and
+consistent: without them, a Profile whose email came in through either
+COD form would have channels.email.source === 'cod' but no
+channels.email.capturedAt at all, while a popup-captured email would
+have both -- an inconsistent, source-dependent gap that would have
+undermined the whole point of this task (being able to trust
+capturedAt as "when this email was added," regardless of which
+capture path was used).
+
+NOTE -- backend/utils/email.js (the location the task's own Fix 3 text
+suggested checking) does NOT write to Profile/channels.email at all --
+it is purely the outbound EMAIL-SENDING utility (Resend integration),
+unrelated to capturing/storing an email address onto a profile. The
+real "other" capture sites (per the actual data flow: a form
+submission -> upsertProfile()) live in the two ROUTE handlers above,
+not in the mailer utility.
+
+NOTE -- the schema's enum also declares 'form' and 'checkout' as valid
+source values (unchanged by this task), but grepping the whole
+backend/ tree found no write site that ever sets source to either of
+those two strings -- only 'cod' (cod.js, proxy.js) and 'popup'
+(discounts.js) are actually used anywhere in the current code. Not
+something this task asked to address; noted for completeness since it
+was directly visible while tracing every write site.
+
+
+DEVIATION - git add included cod.js and proxy.js, beyond the task's
+literal `git add backend/models/Profile.js backend/routes/discounts.js`
+=========================================================================
+The task's given git-add list only named the two files Fix 1/Fix 2
+touch, consistent with its own uncertainty about Fix 3 ("If none
+found — document it"). Since Fix 3 DID find and required changes to
+2 additional files (cod.js, proxy.js) to make the feature complete and
+consistent (per the NOTE above), leaving those two uncommitted would
+have meant only 1 of 3 real capture paths reliably sets capturedAt
+after this task, silently contradicting the task's own stated goal.
+Staged and committed all 4 touched files together in one commit
+(3af4271) rather than following the shorter literal list.
+
+
+NOT TOUCHED
+=========================================================================
+- backend/utils/email.js: read (grepped), confirmed unrelated to
+  channels.email writes, not modified.
+- The schema's 'form'/'checkout' enum values and every other field on
+  Profile.js: unchanged.
+- No other file that only READS channels.email.address (check-*.js
+  diagnostic scripts, activity.js, events.js, every __tests__/*.test.js
+  fixture) was touched -- none of them needed a capturedAt change since
+  they don't write this field.

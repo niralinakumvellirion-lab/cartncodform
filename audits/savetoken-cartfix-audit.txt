@@ -1,0 +1,65 @@
+SELF-AUDIT — savetoken-cartfix
+
+File: extensions/cartncodform-embed/blocks/push-notifications.liquid
+Function: saveToken(token)
+
+WAS cartToken AVAILABLE IN OUTER SCOPE?
+-----------------------------------------
+No. Grepped every occurrence of `cartToken` in the file (lines 1233, 1281,
+1824 pre-edit, 2145, 2222, 2278). Every single one is a `var cartToken =
+...` declared inside its own local function/callback, each re-derived from
+its own fresh `fetch('/cart.js')` call. There is no module-level or
+closure-level `cartToken` variable that saveToken() could read directly —
+each call site fetches its own copy independently. This confirmed branch 3
+of the instructions (wrap the fetch with a fallback) applies, not branch 2
+(reuse an outer-scope variable, which does not exist).
+
+EXACT CHANGE MADE
+------------------
+In saveToken() (function starts at line 1809), between the existing
+`fetch('/cart.js').then(function(r) { return r.json(); })` step and the
+existing `.then(function(cart) {...})` step that builds the POST body,
+inserted one `.catch()` stage:
+
+  return fetch('/cart.js')
+    .then(function(r) { return r.json(); })
+    .catch(function(err) {
+      console.warn('[ccf] cart fetch failed, subscribing without cartToken');
+      return { token: '' };
+    })
+    .then(function(cart) {
+      // unchanged: builds cartToken from cart.token, POSTs to
+      // /api/push/subscribe-customer
+      ...
+    })
+
+No other lines in saveToken() were changed — the subscribe-customer POST
+body construction, the data.success handling, the discount-capture
+scheduling, and the terminal `.catch(function(err) { console.error(...);
+throw err; })` (from the previous saveToken fix) are all untouched.
+
+Two comment lines were added directly above the `return fetch('/cart.js')`
+line explaining the new fallback behavior.
+
+CONFIRMATION: SUBSCRIBE POST FIRES EVEN WHEN /cart.js FAILS
+--------------------------------------------------------------
+Traced the chain: if `fetch('/cart.js')` rejects (network failure) or its
+`.then(r => r.json())` step throws (e.g. non-JSON/error response), the new
+`.catch()` intercepts it, logs the warning, and returns a plain
+`{ token: '' }` object instead of re-throwing. The next `.then(function(cart)
+{...})` stage receives this fallback object exactly as it would a real
+parsed cart response: `cart.token` is `''`, so `rawCartToken = cart.token ||
+null` evaluates to `null` (empty string is falsy), and `cartToken` in the
+POST body ends up `null` — the same shape as a legitimate customer with no
+cart token, not a special/broken value. The chain then proceeds
+unconditionally to `fetch(BACKEND_URL + '/api/push/subscribe-customer', ...)`
+regardless of whether /cart.js succeeded or failed. Only a genuine failure
+of the subscribe-customer POST itself now reaches the function's terminal
+`.catch` (unchanged from the prior fix).
+
+DEPLOY
+------
+`shopify app deploy --allow-updates` run after the change — released as
+shopireachboost-ai-111. Theme-check reported the same pre-existing
+ParserBlockingScript/RemoteAsset warnings on the Firebase CDN <script> tags
+(lines 3-4), unrelated to this change; deploy succeeded.

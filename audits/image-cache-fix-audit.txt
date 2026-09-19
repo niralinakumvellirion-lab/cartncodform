@@ -1,0 +1,119 @@
+=== IMAGE CACHE FIX AUDIT ===
+
+Fix 1 — null not cached: yes (line 140, the guard `if (imageUrl) { ... }`
+  now wraps the ProductImageCache.findOneAndUpdate() write call)
+Fix 2 — null cache cleared on lookup: yes (lines 78-87, inside the
+  cache-read try block)
+
+node --check: pass
+npm test: 151/151 passing (19 test suites, 0 failures — unchanged from
+  before this task; no existing test covers fetchProductImage() or
+  ProductImageCache)
+git push: done (commit 831f0af, c576878..831f0af main -> main)
+
+
+DEVIATION FROM THE LITERAL TASK PREMISE (verified, not guessed)
+=========================================================================
+The task's stated premise for BOTH fixes was that the cache is "likely
+a Map or object at module scope" and that Fix 2 exists because "the
+cache is a module-level Map — it resets on server restart. But Render's
+dyno may not have restarted." Read directly against the actual file
+(re-read in full before editing, and cross-checked against
+backend/models/ProductImageCache.js): neither is true.
+
+The real cache is ProductImageCache — a MONGOOSE MODEL backed by a
+MongoDB collection, queried via `ProductImageCache.findOne(...)` /
+`ProductImageCache.findOneAndUpdate(...)` (webhooks.js lines 74-77 and
+143-147 before this fix). It is:
+  - NOT an in-memory Map or object — there is no `imageCache.get()` /
+    `imageCache.set()` / `imageCache.delete()` anywhere in this file or
+    anywhere else in the codebase. A literal `imageCache.set(productId,
+    imageUrl)` or `imageCache.delete(productId)` as given in the task
+    would have thrown ReferenceError: imageCache is not defined,
+    immediately, on every single call.
+  - NOT reset by a server restart — it is persistent MongoDB storage,
+    survives restarts, dyno sleeps, and deploys equally. The task's
+    entire "Render's dyno may not have restarted" reasoning does not
+    apply to this mechanism at all.
+  - Already has a REAL 24h TTL index
+    (productImageCacheSchema.index({ cachedAt: 1 }, { expireAfterSeconds:
+    24 * 60 * 60 }), ProductImageCache.js line 14) — so a stale row
+    genuinely does self-expire after 24h regardless of anything done in
+    this task. The problem this task fixes is what happens WITHIN that
+    24h window: a null result written before this fix would keep
+    returning as a cache hit (and blocking every retry) for up to 24h,
+    which is exactly the failure mode traced across the last several
+    audits in this investigation (a null cached before the token/res.ok
+    fixes landed, still being served back as a "cache hit" of null
+    afterwards).
+
+Given this, both fixes were implemented against the REAL persistence
+layer, preserving the exact intent described in the task (never
+persist a null result; discard/ignore an existing null result and
+retry) rather than the literal Map-based code, which would not have
+compiled/run at all.
+
+
+EXACT CODE — Fix 1 (webhooks.js, the cache-write block)
+=========================================================================
+    // Cache the result — only when truthy. A null result (product genuinely
+    // has no image, or the API call failed for any reason) is intentionally
+    // NOT cached: doing so would freeze that "no image" verdict in place
+    // for up to 24h (this model's TTL index), silently blocking every
+    // retry in that window even after whatever caused the null (e.g. an
+    // auth failure) is fixed.
+    if (imageUrl) {
+      try {
+        await ProductImageCache.findOneAndUpdate(
+          { shopDomain: shopKey, productId: productKey },
+          { imageUrl, cachedAt: new Date() },
+          { upsert: true }
+        );
+      } catch (cacheWriteErr) {
+        console.log('[webhook] Cache write error (non-fatal):', cacheWriteErr.message);
+      }
+    }
+
+
+EXACT CODE — Fix 2 (webhooks.js, the cache-read block)
+=========================================================================
+    // Check cache first — avoids a redundant Admin API call within 24h.
+    try {
+      const cached = await ProductImageCache.findOne({
+        shopDomain: shopKey,
+        productId: productKey,
+      });
+      if (cached && cached.imageUrl) {
+        console.log(`[webhook] Product image for ${productId}: cache hit`);
+        return cached.imageUrl;
+      }
+      if (cached && !cached.imageUrl) {
+        // Stale null entry — delete it and fall through to re-fetch live,
+        // instead of freezing "no image" in place until this row's TTL
+        // index expires it (up to 24h). See FIX 1 below: new null results
+        // are no longer written here at all, but rows written before that
+        // fix still exist and would otherwise keep short-circuiting every
+        // future attempt for this product.
+        console.log(`[webhook] Discarding stale null-image cache entry for ${productId}, retrying`);
+        await ProductImageCache.deleteOne({ shopDomain: shopKey, productId: productKey }).catch(() => {});
+      }
+    } catch (cacheErr) {
+      console.log('[webhook] Cache lookup error (proceeding to fetch):', cacheErr.message);
+    }
+
+Net effect matches the task's literal instruction: "if cached value is
+null/undefined, delete it and re-fetch. If cached value is a real URL,
+use it." — achieved via ProductImageCache.deleteOne() (async, awaited,
+non-fatal on its own failure via .catch(() => {})) instead of a
+synchronous Map.delete(), since the real cache is an async DB call, not
+an in-memory structure.
+
+
+NOT TOUCHED
+=========================================================================
+- No other logic in fetchProductImage() or handleWebhook() was changed
+  — the token-preference block, the res.ok check, the debug logging
+  added in the immediately preceding task, and everything else in this
+  file are unchanged.
+- No file other than backend/routes/webhooks.js was staged or
+  committed.

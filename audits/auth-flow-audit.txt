@@ -1,0 +1,366 @@
+AUTH FLOW AUDIT - read-only, no changes
+==========================================
+Generated: 2026-09-15
+
+Files read: backend/routes/auth.js (in full, 278 lines) and
+backend/utils/shopify.js (in full, 241 lines) — both were already
+read in full earlier in this session (for
+audits/token-status-audit.txt); re-verified no edits have been made
+to either file since, so the content below reflects their current
+state.
+
+
+====================================================================
+1. GET /api/auth/install - full handler (lines 29-62)
+====================================================================
+
+/**
+ * GET /api/auth/install?shop=example.myshopify.com
+ * Kicks off the Shopify OAuth flow by redirecting to the merchant's consent screen.
+ */
+router.get('/install', async (req, res) => {
+  try {
+    const shop = (req.query.shop || process.env.SHOP_DOMAIN || '').toString().trim().toLowerCase();
+
+    if (!shop || !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop)) {
+      return res.status(400).json({ error: 'Missing or invalid ?shop=your-store.myshopify.com' });
+    }
+
+    if (!SHOPIFY_API_KEY) {
+      return res.status(500).json({ error: 'SHOPIFY_API_KEY is not configured on the backend' });
+    }
+
+    // Optional: link the store to the dashboard account that started the install.
+    const ownerEmail =
+      (req.query.owner_email || '').toString().trim().toLowerCase() || undefined;
+
+    const state = crypto.randomBytes(16).toString('hex');
+    await OAuthState.create({ nonce: state, ownerEmail });
+
+    const redirectUri = `${getBackendUrl(req)}/api/auth/callback`;
+    const authUrl = buildAuthUrl(shop, redirectUri, state);
+
+    console.log(`[auth] Starting OAuth for ${shop}`);
+    console.log(`[auth] redirect_uri: ${redirectUri}`);
+    return res.redirect(authUrl);
+  } catch (err) {
+    console.error('[auth] /install error:', err.message);
+    return res.status(500).json({ error: 'Failed to start OAuth' });
+  }
+});
+
+Validates the shop param against a strict *.myshopify.com regex,
+generates a random 16-byte hex `state` nonce and persists it (plus
+an optional ownerEmail) in an OAuthState document (single-use,
+validated/consumed at callback time), then builds the redirect_uri
+pointing back at this same backend's /api/auth/callback and hands
+off to buildAuthUrl() (see section 4/6 below for exactly what that
+URL contains) before redirecting the merchant's browser there.
+
+
+====================================================================
+2. GET /api/auth/callback - full handler (lines 64-159)
+====================================================================
+
+/**
+ * GET /api/auth/callback
+ * Handles the OAuth redirect from Shopify, exchanges the code for a token,
+ * saves the store, and registers webhooks.
+ */
+router.get('/callback', async (req, res) => {
+  try {
+    const { shop, code, state } = req.query;
+
+    if (!shop || !code || !state) {
+      return res.status(400).json({ error: 'Missing shop, code or state in callback' });
+    }
+
+    // Validate + consume the state nonce (single use).
+    const savedState = await OAuthState.findOneAndDelete({ nonce: state });
+    if (!savedState) {
+      return res.status(400).json({ error: 'Invalid or expired OAuth state' });
+    }
+
+    // Validate HMAC (skipped gracefully if secret missing, but logged).
+    if (!verifyHmac(req.query)) {
+      console.warn(`[auth] HMAC verification failed for ${shop} — continuing in dev mode`);
+    }
+
+    // Normalise: lowercase, no surrounding whitespace, no trailing slash.
+    const shopDomain = shop.toString().trim().toLowerCase().replace(/\/+$/, '');
+    const accessToken = await exchangeCodeForToken(shopDomain, code);
+
+    // Owner email: prefer the one passed at install time, otherwise pull the
+    // shop's contact email from the Shopify Admin API (GET /admin/api/<v>/shop.json).
+    let ownerEmail = savedState.ownerEmail || null;
+    if (!ownerEmail) {
+      ownerEmail = await fetchShopEmail(shopDomain, accessToken);
+    }
+
+    const update = {
+      shopDomain,
+      accessToken,
+      installedAt: new Date(),
+      // Fresh grant — clear the "reconnect to enable discounts" flag that a
+      // prior ACCESS_DENIED (token predating write_discounts) may have set.
+      needsReauth: false,
+    };
+    if (ownerEmail) update.ownerEmail = ownerEmail;
+
+    const store = await Store.findOneAndUpdate(
+      { shopDomain },
+      update,
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    console.log(
+      `[auth] Store connected: ${shopDomain}${ownerEmail ? ` (owner: ${ownerEmail})` : ''}`
+    );
+
+    // Register webhooks (best-effort, non-blocking failures are logged).
+    await registerAllWebhooks(shopDomain, accessToken, getBackendUrl(req));
+
+    // Return the merchant into the embedded app inside Shopify Admin.
+    const dashboardUrl = `https://admin.shopify.com/store/${shopDomain.replace('.myshopify.com', '')}/apps/cartncodform`;
+
+    // Check for an existing active subscription. If found, sync it
+    // locally and go straight to the dashboard.
+    try {
+      const activeSub = await getActiveSubscription(shopDomain, accessToken);
+      if (activeSub) {
+        await Store.findOneAndUpdate(
+          { shopDomain },
+          {
+            plan: 'pro',
+            subscriptionId: activeSub.id,
+            subscriptionStatus: activeSub.status,
+            planUpdatedAt: new Date(),
+          }
+        );
+        console.log(`[auth] Active subscription found for ${shopDomain} — redirecting to dashboard`);
+        return res.redirect(dashboardUrl);
+      }
+    } catch (billingCheckErr) {
+      console.error(`[auth] Billing check failed for ${shopDomain}:`, billingCheckErr.message);
+      // Fall through to dashboard on free plan — don't block install on a billing API hiccup.
+      return res.redirect(dashboardUrl);
+    }
+
+    // No active subscription — the merchant stays on the free plan
+    // for now. They can upgrade later from the dashboard (a separate
+    // "Upgrade" button/route will trigger createSubscription + redirect
+    // to Shopify's hosted confirmation page).
+    console.log(`[auth] No active subscription for ${shopDomain} — redirecting to dashboard on free plan`);
+    return res.redirect(dashboardUrl);
+  } catch (err) {
+    const detail = err.response ? JSON.stringify(err.response.data) : err.message;
+    console.error('[auth] /callback error:', detail);
+    return res.status(500).json({ error: 'OAuth callback failed' });
+  }
+});
+
+Validates shop/code/state are present, consumes the single-use
+OAuthState nonce (400 if missing/already used), checks the HMAC
+(logs a warning and continues rather than rejecting if it fails —
+"continuing in dev mode"), normalizes shopDomain, exchanges the code
+via exchangeCodeForToken() (section 6), resolves an ownerEmail,
+upserts the Store document, registers webhooks, then checks/syncs
+billing subscription status before redirecting to the embedded
+admin dashboard.
+
+
+====================================================================
+3. Where accessToken is saved after OAuth
+====================================================================
+
+Inside the callback handler above, in the `update` object passed to
+Store.findOneAndUpdate() (lines 99-113):
+
+    const update = {
+      shopDomain,
+      accessToken,
+      installedAt: new Date(),
+      needsReauth: false,
+    };
+    if (ownerEmail) update.ownerEmail = ownerEmail;
+
+    const store = await Store.findOneAndUpdate(
+      { shopDomain },
+      update,
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+`accessToken` (the raw string returned directly from
+exchangeCodeForToken(), unmodified) is written straight onto
+Store.accessToken, upserted by shopDomain. This is the ONLY place
+in this file that writes to Store.accessToken — no other route in
+auth.js ever sets it again after initial install (a re-install/
+re-auth through this same /callback route is what refreshes it,
+via the same upsert). This matches what was already documented in
+audits/token-status-audit.txt.
+
+
+====================================================================
+4. Does it request offline or online token? ('per-user' / 'offline'
+   search)
+====================================================================
+
+Searched auth.js and shopify.js for the literal strings "per-user"
+and "offline":
+
+- "per-user" does NOT appear anywhere in either file.
+- "offline" appears only in comments/docstrings, never as an actual
+  parameter value sent to Shopify:
+  - shopify.js line 105: "Exchange a temporary OAuth `code` for a
+    permanent access token." (docstring for exchangeCodeForToken(),
+    no literal "offline" string here actually — see correction
+    below)
+  - shopify.js line 119: "...for a fresh OFFLINE Admin API access
+    token..." (docstring for exchangeSessionToken())
+  - shopify.js line 159 comment: "data.access_token = online token
+    (shpua_)..." (this is about the ONLINE function, mentions
+    "online" not "offline")
+  - shopify.js's requested_token_type strings for the two OTHER
+    token functions (exchangeSessionToken/getOnlineToken) DO contain
+    the literal substrings 'offline-access-token' and
+    'online-access-token' respectively — but those are Token
+    Exchange grant functions, NOT exchangeCodeForToken() (see
+    section 6).
+
+The classic authorization-code flow used by /install + /callback
+(buildAuthUrl() + exchangeCodeForToken()) never sends ANY
+grant_options[] or access_mode parameter at all — neither
+'per-user' (which is Shopify's documented flag for requesting an
+ONLINE token in the classic OAuth flow) nor any explicit 'offline'
+value. Per Shopify's own OAuth documentation, OMITTING
+grant_options[]=per-user from the authorization URL is exactly what
+causes Shopify to default to issuing an OFFLINE (non-expiring, by
+the old model) access token from the /admin/oauth/access_token
+exchange. So: this flow requests an OFFLINE token, by omission
+rather than by an explicit 'offline' flag anywhere in the code.
+See section 6 for the exact request body confirming no such
+parameter is sent.
+
+
+====================================================================
+5. POST /api/auth/refresh-token - full handler (lines 161-195)
+====================================================================
+
+/**
+ * POST /api/auth/refresh-token
+ * Called from the embedded admin. Uses OAuth Token Exchange to mint a fresh
+ * ONLINE Admin API token (shpua_) from the caller's live App Bridge session
+ * token and stores it alongside its expiry — this is how an existing install
+ * can pick up newly-added scopes (e.g. write_discounts) without a browser
+ * re-install, for as long as an admin has the app open.
+ * -> { success: true } | { success: false, error? }
+ */
+router.post('/refresh-token', requireAuth, async (req, res) => {
+  const sessionToken = req.headers.authorization?.split(' ')[1];
+  if (!sessionToken) return res.status(400).json({ success: false });
+
+  try {
+    const { token, expiresAt } = await getOnlineToken(req.shopDomain, sessionToken);
+    if (!token) return res.status(502).json({ success: false });
+
+    await Store.updateOne(
+      { shopDomain: req.shopDomain },
+      {
+        $set: {
+          onlineAccessToken: token,
+          onlineTokenExpiresAt: expiresAt,
+          needsReauth: false,
+        },
+      }
+    );
+    console.log('[auth] online token refreshed for', req.shopDomain);
+    return res.json({ success: true });
+  } catch (err) {
+    // err.response.data is Shopify's OAuth error JSON (no PII); never log the token.
+    console.error('[auth] token exchange error:', err.message);
+    return res.status(502).json({ success: false, error: err.message });
+  }
+});
+
+Protected by requireAuth. Reads the raw session token out of the
+Authorization header, calls getOnlineToken() (Token Exchange grant,
+requesting an ONLINE token — see audits/token-status-audit.txt
+section 1 for its full code), and on success writes
+onlineAccessToken + onlineTokenExpiresAt + resets needsReauth to
+false. This is a completely separate mechanism from
+exchangeCodeForToken()/the browser OAuth flow — it never touches
+Store.accessToken.
+
+
+====================================================================
+6. backend/utils/shopify.js - exchangeCodeForToken() full function,
+   and offline vs. online request details
+====================================================================
+
+/**
+ * Exchange a temporary OAuth `code` for a permanent access token.
+ */
+async function exchangeCodeForToken(shop, code) {
+  const url = `https://${shop}/admin/oauth/access_token`;
+  const { data } = await axios.post(url, {
+    client_id: SHOPIFY_API_KEY,
+    client_secret: SHOPIFY_API_SECRET,
+    code,
+  });
+  return data.access_token;
+}
+
+Full POST body sent to Shopify: { client_id, client_secret, code }
+— exactly 3 fields, nothing else. No `grant_type` field. No
+`access_mode` field. No `grant_options[]` field. This is the
+classic/legacy Authorization Code Grant exchange — it is
+structurally distinct from the OTHER two token functions in this
+same file (exchangeSessionToken() and getOnlineToken()), which DO
+send an explicit grant_type
+('urn:ietf:params:oauth:grant-type:token-exchange') plus
+subject_token/subject_token_type/requested_token_type fields (the
+newer Token Exchange API). exchangeCodeForToken() sends none of
+those — it is the plain code-for-token swap that pairs with the
+`/admin/oauth/authorize` redirect built by buildAuthUrl() (also in
+this file, lines 13-21):
+
+function buildAuthUrl(shop, redirectUri, state) {
+  const params = new URLSearchParams({
+    client_id: SHOPIFY_API_KEY,
+    scope: SCOPES,
+    redirect_uri: redirectUri,
+    state,
+  });
+  return `https://${shop}/admin/oauth/authorize?${params.toString()}`;
+}
+
+buildAuthUrl()'s query params are also exactly 4 fields:
+client_id, scope, redirect_uri, state — no grant_options[]=per-user
+anywhere. Per Shopify's documented OAuth behavior, the ABSENCE of
+grant_options[]=per-user on the initial authorize redirect is what
+causes the subsequent access_token exchange to issue an OFFLINE
+token by default.
+
+CONCLUSION: exchangeCodeForToken() (and the /install + /callback
+routes that drive it) requests and receives an OFFLINE access
+token, via the classic authorization-code grant, with no explicit
+'per-user'/'offline' parameter anywhere — the offline behavior comes
+entirely from what is NOT sent (no grant_options[]=per-user), not
+from any parameter that IS sent. This is consistent with the
+403 "Non-expiring access tokens are no longer accepted" error found
+against the live store's accessToken in
+audits/api-token-test-audit.txt — the classic/legacy grant flow
+this code uses issues Shopify's older non-expiring offline-token
+format, which Shopify has since deprecated on the receiving end
+(rejecting calls made WITH such a token), even though the
+authorization/exchange endpoints themselves apparently still issue
+one when asked this way (no error was reported by
+exchangeCodeForToken() at OAuth-callback time in the code read here
+— the rejection only surfaces later, when that token is actually
+used to call the Admin API, per the previous audit's test).
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified as part of this task.

@@ -1,0 +1,183 @@
+=== JOURNEY IMPROVEMENTS AUDIT ===
+Change 1 - Refresh button: yes
+Change 2 - Journey card max-height scroll: yes (maxHeight: '380px',
+  overflowY: 'auto' — exact values given)
+Change 3 - EmailComposer suggestions: yes
+  EMAIL_SUGGESTIONS categories: Cart & Purchase, Offers,
+  Re-engagement, Post Purchase (4 categories, 2 suggestions each — 8
+  total)
+  Toggle UI matching NotificationComposer: yes (same collapse/expand
+    pattern, category tabs, suggestion cards; label/click-to-use
+    detail row omitted per the task's own given markup, which shows
+    only label + subject preview per card, unlike
+    NotificationComposer's label + "click to use ->" + title + body)
+Change 4 - Product thumbnail:
+  imageUrl in topProducts: NOT FOUND (confirmed — see DEVIATION/NOTE
+    section below)
+  Placeholder shown: yes
+frontend build: pass (npm run build — compiled successfully, 14
+  static pages, /admin/journey grew 7.72 kB -> 8.96 kB, no errors)
+git push: done (commit bd2ca98, e4d6c1d..bd2ca98 main -> main)
+vercel deploy: done (production, readyState: READY,
+  deployment id dpl_8rtqDHgMgi1vjxEkc45JyiFtVVY8,
+  https://cartncodform-j4rllfi1b-niralinakumvellirion-8853s-projects.vercel.app,
+  aliased to https://cartncodform-beryl.vercel.app)
+
+
+FULL FILE READ FIRST, AS INSTRUCTED
+=========================================================================
+Read frontend/app/admin/screens/Journey.jsx in full immediately before
+this task (it was also the exact subject of the previous read-only
+audit task in this same session, journey-layout-audit.txt, so its
+structure was already fully mapped: header at lines 584-592, Journey
+timeline card at ~772, NotificationComposer/EmailComposer full bodies,
+etc.) — confirmed no changes had landed on this file between that
+audit and this task, so those line numbers were used directly as the
+basis for every edit below.
+
+
+CHANGE 1 - Refresh button (EXACT DIFF)
+=========================================================================
+Header div changed from a plain `<div style={{marginBottom:'20px'}}>`
+wrapping the h1+p directly, to a flex row (`display:'flex',
+justifyContent:'space-between', alignItems:'flex-start'`) with the
+h1+p now wrapped in their own inner `<div>` on the left, and the new
+Refresh `<button>` on the right — implemented exactly as given,
+including its inline SVG refresh-arrows icon, wired to the existing
+`load` callback (`onClick={load}`) and `loading` state
+(`disabled={loading}`, text/opacity/cursor all switch on it). `load`
+was already a `useCallback` defined in JourneyScreen (used by the
+mount effect) — reused directly, no new fetch logic was added.
+
+
+CHANGE 2 - Journey timeline scroll fix (EXACT DIFF)
+=========================================================================
+     <div style={{
+       background: '#fff', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '16px',
++      maxHeight: '380px', overflowY: 'auto',
+     }}>
+Matches the task's given values exactly (380px cap). Nothing else in
+the Journey timeline card's internals (top products / recent activity
+sections) was touched — the cap simply makes the card itself
+independently scrollable once its content exceeds 380px, so the "Send
+notification" panel below it in the sticky right-column wrapper stays
+reachable without scrolling the whole page.
+
+
+CHANGE 3 - EmailComposer suggestion library (EXACT IMPLEMENTATION)
+=========================================================================
+EMAIL_SUGGESTIONS (module scope, placed directly after
+NOTIFICATION_SUGGESTIONS) added verbatim as given — 4 categories
+(Cart & Purchase / Offers / Re-engagement / Post Purchase), 2
+suggestions each, 8 total.
+EmailComposer gained `showSuggestions`/`activeCategory` state
+(useState(false)/useState(0), matching NotificationComposer's own
+naming exactly) and the toggle+panel UI, placed immediately above the
+subject `<input>` as instructed — collapsible "Email ideas" row with
+a rotating chevron SVG, category tabs styled per-category
+(color/textColor), and suggestion cards that set `subject`/`body` on
+click and close the panel. Implemented exactly as given, including the
+per-card content shape the task specified (label + subject preview
+only — no separate "click to use ->" hint text and no body preview,
+unlike NotificationComposer's cards which show both a "click to use"
+hint AND a title+body preview). This asymmetry is intentional/as-given,
+not an oversight — the task's own EmailComposer suggestion-card markup
+block literally only included `{s.label}` and `{s.subject}`, nothing
+else.
+
+
+CHANGE 4 - Product thumbnail (VERIFIED, NOT GUESSED)
+=========================================================================
+Per the task's own instruction ("Check selectedCustomer.topProducts[0]
+for any image field... If no image URL is available in current data —
+skip the image for now and add a TODO comment"): re-confirmed
+topProducts' real shape by re-reading backend/routes/events.js's
+getJourneyData() (not re-modified in this task, read-only reference) —
+its productViews extraction only ever builds
+`{ productId, title, count, lastSeen }` per product; there is no
+imageUrl field anywhere in that object, and nothing else in the
+journey pipeline (the GET /:shopDomain/journey route, the Signal/
+Profile population) adds one either. So `customer?.topProducts?.[0]
+?.imageUrl` is always undefined today — confirmed by inspection, not
+assumed.
+
+Implementation:
+  - A shared `ProductThumbnail({ imageUrl })` component (module scope,
+    used by BOTH composers — the task's Change 4 explicitly said "For
+    BOTH NotificationComposer and EmailComposer", so a shared helper
+    was the natural way to satisfy that without duplicating the same
+    3 render branches twice) — renders a real 40x40 `<img>` when
+    `imageUrl` is truthy, otherwise a 40x40 grey (#f3f4f6) rounded box
+    with a generic image-outline SVG icon inside, per the task's exact
+    spec for both branches.
+  - A TODO comment sits directly above ProductThumbnail's definition,
+    explaining exactly why imageUrl is always absent today (topProducts'
+    real shape, cited above) and noting that once the backend adds one
+    (e.g. via the existing ProductImageCache model, already used
+    elsewhere in this codebase for push notification images — see
+    backend/routes/webhooks.js fetchProductImage() — an existing
+    mechanism this task did not touch or extend), this same component
+    picks it up automatically with no further frontend change needed.
+    No new API call was added anywhere — `productImage` is read
+    directly off the already-fetched `customer.topProducts[0]` prop in
+    both composers.
+  - "Product-specific" gating: implemented as `category === 'Cart &
+    Purchase' || hasTopProduct` (computed once per render, reused
+    across every suggestion card in the active category), where
+    `hasTopProduct` reuses the same numeric-Shopify-ID guard already
+    used elsewhere in this file for topProducts[0].title (so a
+    productId that never got a real tracked title — per
+    audits/journey-events-audit.txt's earlier finding that
+    productTitle isn't always present — doesn't count as "having a
+    product"). This reading of the task's own condition ("Cart &
+    Purchase category, or any suggestion where the customer has a top
+    product") is spelled out as a DEVIATION/interpretation note below,
+    since the wording admits more than one reading.
+
+DEVIATION - interpretation of Change 4's "product-specific" condition
+=========================================================================
+The task's exact wording: "Show the thumbnail only on suggestions that
+are product-specific (Cart & Purchase category, or any suggestion
+where the customer has a top product)." Two readings are possible:
+  (a) thumbnail shows when EITHER the card's category is Cart &
+      Purchase, OR (independently, any category) the customer has a
+      top product — i.e. an OR of two independent triggers, which in
+      practice collapses to "show whenever hasTopProduct is true"
+      (since that alone covers every category once true), with Cart &
+      Purchase as a redundant special case that would ALSO show a
+      (placeholder) thumbnail even for a customer with NO top product
+      at all, purely because of category.
+  (b) thumbnail shows only on the Cart & Purchase category, further
+      narrowed to only when the customer additionally has a top
+      product.
+Implemented reading (a) — the literal OR — since the sentence's
+grammar reads as two alternatives ("X, or Y"), not a further
+restriction of X by Y. Net effect: every suggestion card in the Cart &
+Purchase category always shows a thumbnail (image today, always the
+grey placeholder since imageUrl is never populated); every suggestion
+card in any OTHER category also shows one whenever the selected
+customer has a real (non-numeric-ID) top product title. Flagging this
+explicitly since the alternate reading (b) would have produced
+visibly different behavior (no thumbnail at all on Offers/Re-
+engagement/Post Purchase suggestions, regardless of the customer's
+product history) and the task's phrasing does not unambiguously rule
+it out.
+
+
+NOT TOUCHED
+=========================================================================
+- The customer list (left panel), filter tabs, the send-notification
+  panel's push/email tab switcher and channel-availability logic, the
+  "No push subscription or email on file" fallback, sendResult
+  banner: all unchanged — confirmed via git diff hunks (7 hunks total,
+  each exactly matching one of the 4 named changes' locations: module
+  scope after NOTIFICATION_SUGGESTIONS, NotificationComposer's
+  state/useEffect area, its suggestion-card render, EmailComposer's
+  state area, its render, JourneyScreen's header, and the Journey
+  timeline card's style — nothing outside those 7 spots differs).
+- No backend file was touched, and no new API call was added anywhere
+  in this file (grepped for new `apiGet`/`apiSend` call sites after
+  the edits — none besides the pre-existing `load()`, `send()` in
+  NotificationComposer, and `send()` in EmailComposer, all unchanged).
+- No file other than frontend/app/admin/screens/Journey.jsx was staged
+  or committed.

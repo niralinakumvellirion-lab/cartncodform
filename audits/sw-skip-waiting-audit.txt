@@ -1,0 +1,65 @@
+SELF-AUDIT — sw-skip-waiting
+
+CHANGE 1: backend/public/cartncodform-sw.js
+--------------------------------------------
+Confirmed the SW did NOT already have a 'message' event listener for
+SKIP_WAITING (only lines 1-2 existed: 'install' -> self.skipWaiting(),
+'activate' -> clients.claim()). Added the requested handler immediately
+after those two lines (now lines 4-8):
+
+  self.addEventListener('message', function(event) {
+    if (event.data && event.data.type === 'SKIP_WAITING') {
+      self.skipWaiting();
+    }
+  });
+
+Note: the SW's existing 'install' handler already calls
+self.skipWaiting() unconditionally (e.waitUntil(self.skipWaiting());),
+so every new SW version already skips the waiting phase on its own without
+needing a message trigger. The new message handler is additive/defensive,
+not filling a gap that was actually blocking activation — but it was added
+exactly as requested since it did not previously exist. No other lines in
+the file were changed.
+
+CHANGE 2: extensions/cartncodform-embed/blocks/push-notifications.liquid
+---------------------------------------------------------------------------
+Confirmed the postMessage call was added inside registerSW(), in the
+`reg.installing || reg.waiting` branch, immediately before the existing
+8-second timeout/statechange-listener block:
+
+  // Force the waiting SW to activate immediately
+  if (sw.state === 'waiting') {
+    sw.postMessage({ type: 'SKIP_WAITING' });
+  }
+
+  var timeout = setTimeout(function() {
+    navigator.serviceWorker.ready.then(resolve);
+  }, 8000);
+
+  sw.addEventListener('statechange', function(e) {
+    if (e.target.state === 'activated') {
+      clearTimeout(timeout);
+      resolve(reg);
+    }
+  });
+
+This only fires when `sw.state === 'waiting'` (i.e. a previous SW version
+is already controlling the page and the new one is stuck waiting for all
+tabs to close) — the `sw.postMessage({ type: 'SKIP_WAITING' })` call reaches
+the new SW's 'message' listener added in Change 1, which calls
+self.skipWaiting() to let it activate immediately instead of waiting.
+No other lines in registerSW() were changed.
+
+TESTS / DEPLOY
+---------------
+`cd backend && npm test` run after the changes: 19 test suites, 151 tests,
+all passing.
+`shopify app deploy --allow-updates` run — released as shopireachboost-ai-114.
+Theme-check reported the same pre-existing ParserBlockingScript/RemoteAsset
+warnings on the Firebase CDN <script> tags (lines 3-4), unrelated to this
+change; deploy succeeded.
+`git add backend/public/cartncodform-sw.js`, committed as
+"fix: force SW activation via SKIP_WAITING message" (5caeb7e), and pushed to
+origin/main successfully (this push also carried the previously-committed-
+but-unpushed CORS allowedOrigins commit, 43a6b6f, since neither had reached
+the remote yet).

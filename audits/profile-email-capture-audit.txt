@@ -1,0 +1,219 @@
+PROFILE EMAIL CAPTURE AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-14
+
+Files read: backend/models/Profile.js (in full), backend/routes/discounts.js
+(the email-capture section), backend/services/profileService.js (in full).
+
+
+====================================================================
+1. The channels.email subdocument - all fields (backend/models/Profile.js,
+   lines 24-30)
+====================================================================
+24	  channels: {
+25	    push: { subscribed: Boolean, lastToken: String, subscribedAt: Date },
+26	    email: {
+27	      address: String,
+28	      source: { type: String, enum: ['cod', 'form', 'checkout'] },
+29	    },
+30	  },
+
+channels.email has exactly 2 fields:
+  - address (String)
+  - source (String, enum: ['cod', 'form', 'checkout'])
+
+For comparison, channels.push (the sibling subdocument, shown for
+context) has 3 fields, one of which IS a timestamp
+(subscribedAt: Date) -- channels.email has no equivalent.
+
+
+====================================================================
+2. Is there a capturedAt or addedAt or source field on email?
+====================================================================
+source: YES -- channels.email.source exists (line 28), typed as a
+  String with a declared enum of exactly 3 values: 'cod', 'form',
+  'checkout'.
+
+capturedAt / addedAt: NO -- neither field name (nor any similarly-named
+  field) exists anywhere on channels.email, or anywhere else in the
+  Profile schema in relation to email specifically. Grepped the full
+  schema (reproduced above, section 1) -- only address and source
+  exist under channels.email.
+
+
+====================================================================
+3. Is there any timestamp on when email was added?
+====================================================================
+No per-field timestamp exists for the email address specifically. The
+only timestamps anywhere on the Profile document are document-level,
+not field-level:
+  67	  createdAt: { type: Date, default: Date.now },
+  68	  updatedAt: { type: Date, default: Date.now },
+These are plain schema-default fields -- NOT Mongoose's built-in
+`{ timestamps: true }` schema option (which would auto-manage both on
+every save). Confirmed by reading backend/services/profileService.js
+(section below): updatedAt IS explicitly reset to `new Date()` on
+every write that goes through applyToProfile() (used by every
+upsertProfile() call, including the email-capture path from
+discounts.js) -- so updatedAt DOES get refreshed at email-capture
+time. However, updatedAt reflects "this profile was last written to
+for ANY reason", not "this is when the email specifically was added"
+-- any later, unrelated update (a new push token, a new order, a
+signal-driven message log entry, etc.) will move updatedAt forward
+again, permanently overwriting any trace of when the email itself was
+actually captured.
+createdAt is set once, at Profile.create() time (profileService.js
+line 181), and only coincides with "when the email was added" if the
+profile did not already exist before the email-capture call -- if the
+same visitor already had a profile (e.g. from an earlier push
+subscription or storefront session) before ever giving an email,
+createdAt reflects that earlier, unrelated first-seen moment instead.
+Net answer: no reliable timestamp of when an email was specifically
+added exists anywhere in this schema or its current write paths.
+
+
+====================================================================
+backend/routes/discounts.js - where email is saved to profile
+(the popup-driven discount-generation flow)
+====================================================================
+Found inside generateDiscount() (or its equivalent internal function --
+this is the shared function called by both POST /api/discounts/:shop/
+generate and the App Proxy's POST /generate-discount, per
+audits/discount-debug-audit.txt from earlier this session), immediately
+after a Shopify discount code is successfully created, lines 211-237:
+
+211	  // Best-effort: attach the captured email/phone to a profile. Never blocks
+212	  // the response and never logs the PII.
+213	  const email = body.email ? String(body.email).trim() : '';
+214	  const phone = body.phone ? String(body.phone).trim() : '';
+215	  const cartToken = body.cartToken ? String(body.cartToken).trim() : null;
+216	  if (email || phone) {
+217	    try {
+218	      const { upsertProfile } = require('../services/profileService');
+219	      upsertProfile(
+220	        shop,
+221	        {
+222	          email: email || null,
+223	          phone: phone || null,
+224	          sessionId: body.sessionId || null,
+225	          cartToken: cartToken || null,
+226	        },
+227	        {
+228	          ...(email
+229	            ? { 'channels.email.address': email, 'channels.email.source': 'popup' }
+230	            : {}),
+231	          lastSeenAt: new Date(),
+232	        }
+233	      ).catch(() => {});
+234	    } catch (e) {
+235	      /* profileService optional -- ignore */
+236	    }
+237	  }
+
+What gets set on channels.email when captured from the popup:
+  - channels.email.address <- the raw captured email string (trimmed,
+    NOT lowercased here -- lowercasing only happens to the SEPARATE
+    identifiers.emails array entry, inside upsertProfile's own
+    cleanIdentifiers() helper, not to this channels.email.address
+    write, which is passed straight through in the `updates` object
+    and applied via a raw $set -- see NOTE below)
+  - channels.email.source <- the literal string 'popup'
+  - (also, unconditionally alongside it) lastSeenAt <- new Date()
+
+NOTE -- 'popup' is not a valid value for channels.email.source's
+declared schema enum:
+=========================================================================
+Profile.js's schema (section 1 above) declares:
+  source: { type: String, enum: ['cod', 'form', 'checkout'] }
+'popup' is not in that list. This write still succeeds and is not
+silently corrected to some other value -- confirmed by reading how
+upsertProfile()/applyToProfile() actually applies the `updates` object
+in profileService.js: it goes through
+`Profile.findOneAndUpdate({...}, update, { new: true })` (line 144)
+with no `runValidators: true` option. Mongoose does NOT run schema
+validators (including enum checks) on findOneAndUpdate/update-family
+calls unless runValidators is explicitly passed -- validators only run
+automatically on .save()/.create(). So this write bypasses the enum
+constraint entirely: a real Profile document can end up with
+channels.email.source === 'popup' in the live database even though the
+schema's own declared enum says only 'cod'/'form'/'checkout' are
+allowed. This is a genuine mismatch between the schema's stated
+contract and what the actual code paths write -- not something this
+audit was asked to fix (read-only task), flagged here since it was
+directly observed while tracing this exact code path.
+
+
+====================================================================
+backend/services/profileService.js - how channels.email fields (and
+any dot-notation `updates` field in general) are actually updated
+====================================================================
+upsertProfile(shopDomain, identifiers, updates) delegates the actual
+write to applyToProfile() (called from all 3 of its own branches: 0
+matches / 1 match / multiple matches -- see full function, lines
+161-249). applyToProfile() itself (lines 128-159):
+
+128	async function applyToProfile(profileId, shopDomain, ids, updates, existingCustomerId) {
+129	  const { set, operators } = splitUpdates(updates);
+130
+131	  const update = { ...operators };
+132	  update.$set = { ...(operators.$set || {}), ...set, updatedAt: new Date() };
+133
+134	  // customerId is a scalar -- only set it if the profile doesn't already have one.
+135	  if (ids.customerId && !existingCustomerId) {
+136	    update.$set['identifiers.customerId'] = ids.customerId;
+137	  }
+138
+139	  const addToSet = addToSetForIds(ids);
+140	  if (Object.keys(addToSet).length > 0) {
+141	    update.$addToSet = { ...(operators.$addToSet || {}), ...addToSet };
+142	  }
+143
+144	  let doc = await Profile.findOneAndUpdate({ _id: profileId, shopDomain }, update, { new: true });
+145	  if (!doc) return null;
+146	  ...
+147	  (stage recompute + message cap -- a second lightweight
+148	   findOneAndUpdate call, unrelated to channels.email)
+149	  ...
+150	  return doc;
+151	}
+
+Mechanics for `channels.email.address`/`channels.email.source`
+specifically:
+  1. splitUpdates() (lines 49-60) splits the raw `updates` object the
+     caller passed in (e.g. discounts.js's
+     `{ 'channels.email.address': email, 'channels.email.source':
+     'popup', lastSeenAt: new Date() }`) into a plain dot-notation
+     `set` bag (any key not starting with `$`) and a separate
+     `operators` bag (any key starting with `$`, e.g. a caller-supplied
+     `$inc`). Since discounts.js's call passes plain dot-notation keys
+     (no `$`-prefixed operators), both `channels.email.address` and
+     `channels.email.source` land in `set` verbatim, unchanged.
+  2. applyToProfile() merges that `set` bag directly into
+     `update.$set` (line 132), alongside `updatedAt: new Date()` --
+     so the final Mongo command ends up containing
+     `$set: { 'channels.email.address': <email>, 'channels.email.
+     source': 'popup', lastSeenAt: <now>, updatedAt: <now> }`.
+  3. This whole `update` object is applied via a single
+     `Profile.findOneAndUpdate({ _id, shopDomain }, update, { new:
+     true })` call (line 144) -- a plain MongoDB $set on the given
+     dot-notation paths, with NO transformation, validation
+     (runValidators not set, per the NOTE above), or normalization
+     applied to either value by profileService.js itself. Whatever
+     string the CALLER passes for channels.email.address or
+     channels.email.source is written to MongoDB exactly as given.
+
+Separately (NOT the same field): the EMAIL VALUE the caller passes as
+part of the `identifiers` argument (`{ email: ... }`, the FIRST
+parameter to upsertProfile(), used for identity resolution) goes
+through a completely different path -- cleanIdentifiers() (lines
+35-46) trims it and lowercases it (`if (key === 'email') val =
+val.toLowerCase();`, line 42) before it's used to search for/create a
+profile and, via addToSetForIds() (lines 117-124), $addToSet'd onto
+identifiers.emails[]. This lowercasing/trimming does NOT carry over to
+channels.email.address, which is a totally separate value supplied by
+the caller through the second (`updates`) argument and written
+verbatim as shown above -- so identifiers.emails[] and
+channels.email.address can end up holding differently-cased (or
+otherwise differently-formatted) representations of what was intended
+to be the same email address, since they are populated via two
+independent code paths with different normalization rules.

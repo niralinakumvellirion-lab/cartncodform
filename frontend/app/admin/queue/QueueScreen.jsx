@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
 import { ShimmerCard } from '../components/Shimmer';
+import { ImageUploadPair } from '../components/ImageUploadPair';
 
 const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
@@ -58,59 +59,203 @@ function getCustomerLabel(job) {
   return 'Anonymous';
 }
 
-// --- Phase 2: festival calendar data, copied verbatim from
-// DashboardScreen.jsx per the task's own instruction ("Also add
-// FESTIVAL_CALENDAR and getUpcomingFestivals from DashboardScreen — copy
-// them into QueueScreen.jsx as well"), matching this app's established
-// no-shared-layout convention of duplicating such module-level constants
-// per screen file rather than extracting a shared module. See
-// audits/queue-phase2-audit.txt.
-const FESTIVAL_CALENDAR = [
-  { name: 'Navratri', date: '2026-10-02', emoji: '🪷',
+// --- Phase 2: festival calendar data. Was a private, stale hardcoded
+// copy that drifted from backend/data/festivals.json (old dates like
+// Navratri 2026-10-02, Diwali 2026-10-29). Now the canonical source is
+// fetched at runtime via GET /api/push/festivals (see festivalCalendar
+// state + its useEffect in QueueScreen below); this array only remains
+// as FESTIVAL_CALENDAR_FALLBACK for when that fetch fails, kept in sync
+// with backend/data/festivals.json's current contents (all 36 entries,
+// including searchTerm/imageUrl). getUpcomingFestivals below is unused
+// in this file (kept from the original copy) but updated to reference
+// the renamed constant so it isn't left pointing at a removed binding.
+const FESTIVAL_CALENDAR_FALLBACK = [
+  { name: 'Navratri', date: '2026-10-11', emoji: '🪷',
     suggestion: 'Send festive Navratri offers to all subscribers',
-    message: 'Celebrate Navratri with us! Get special festive discounts on your favorite products. 🪷' },
-  { name: 'Dussehra', date: '2026-10-12', emoji: '🏹',
+    message: 'Celebrate Navratri with us! Get special festive discounts on your favorite products. 🪷',
+    searchTerm: 'navratri garba dance',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796311/ausgezfhwyivcswmojmi.jpg' },
+  { name: 'Dussehra', date: '2026-10-20', emoji: '🏹',
     suggestion: 'Send Dussehra sale notification',
-    message: 'Happy Dussehra! Victory of good over evil — and great deals for you! Shop now. 🏹' },
-  { name: 'Dhanteras', date: '2026-10-28', emoji: '🪙',
+    message: 'Happy Dussehra! Victory of good over evil — and great deals for you! Shop now. 🏹',
+    searchTerm: 'dussehra festival celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796313/rmqgg4kqkz0yhuxy1c1k.jpg' },
+  { name: 'Dhanteras', date: '2026-11-06', emoji: '🪙',
     suggestion: 'Promote Dhanteras shopping with special offer',
-    message: 'Dhanteras is here! Bring prosperity home with our exclusive festive collection. 🪙' },
-  { name: 'Diwali', date: '2026-10-29', emoji: '🪔',
+    message: 'Dhanteras is here! Bring prosperity home with our exclusive festive collection. 🪙',
+    searchTerm: 'dhanteras gold diya',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796315/lt9va3uqcullbw3ils5g.jpg' },
+  { name: 'Diwali', date: '2026-11-08', emoji: '🪔',
     suggestion: 'Send Diwali offer — biggest sale of the year',
-    message: 'Happy Diwali! Light up your celebrations with our biggest sale of the year. 🪔✨' },
-  { name: 'Bhai Dooj', date: '2026-10-31', emoji: '❤️',
+    message: 'Happy Diwali! Light up your celebrations with our biggest sale of the year. 🪔✨',
+    searchTerm: 'diwali diya lamps',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796317/ll2muraxgo6pmdf2bi5d.jpg' },
+  { name: 'Bhai Dooj', date: '2026-11-11', emoji: '❤️',
     suggestion: 'Send Bhai Dooj gifting ideas notification',
-    message: 'Bhai Dooj special! Find the perfect gift for your siblings. Shop now. ❤️' },
+    message: 'Bhai Dooj special! Find the perfect gift for your siblings. Shop now. ❤️',
+    searchTerm: 'bhai dooj celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796320/p0urc4wemgbt3vgbwyyo.jpg' },
   { name: 'Christmas', date: '2026-12-25', emoji: '🎄',
     suggestion: 'Send Christmas sale notification',
-    message: 'Merry Christmas! Spread joy with our festive deals. 🎄🎁' },
+    message: 'Merry Christmas! Spread joy with our festive deals. 🎄🎁',
+    searchTerm: 'christmas decoration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796322/sgziyovm50lpwwdwquog.jpg' },
   { name: 'New Year', date: '2027-01-01', emoji: '🎆',
     suggestion: 'Send New Year offer to re-engage customers',
-    message: 'Happy New Year! Start 2027 with amazing deals. 🎆' },
+    message: 'Happy New Year! Start 2027 with amazing deals. 🎆',
+    searchTerm: 'new year fireworks celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796324/yv2sxsk4cdbpvtfi1ntd.jpg' },
   { name: 'Makar Sankranti', date: '2027-01-14', emoji: '🪁',
     suggestion: 'Send Sankranti festive notification',
-    message: 'Happy Makar Sankranti! Celebrate with our special festive offers. 🪁' },
+    message: 'Happy Makar Sankranti! Celebrate with our special festive offers. 🪁',
+    searchTerm: 'makar sankranti kite flying',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796327/ryt1bfbk82dezeinpkxp.jpg' },
   { name: 'Republic Day', date: '2027-01-26', emoji: '🇮🇳',
     suggestion: 'Send Republic Day sale notification',
-    message: 'Happy Republic Day! Celebrate with patriotic deals. 🇮🇳' },
-  { name: 'Holi', date: '2027-03-01', emoji: '🎨',
+    message: 'Happy Republic Day! Celebrate with patriotic deals. 🇮🇳',
+    searchTerm: 'indian republic day flag',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796330/xkdnhkhnsqwrbdvq8zpu.jpg' },
+  { name: 'Holi', date: '2027-03-22', emoji: '🎨',
     suggestion: 'Send colorful Holi offers to all subscribers',
-    message: 'Happy Holi! Color your celebrations with amazing festive deals. 🎨🌈' },
-  { name: 'Eid ul-Fitr', date: '2027-03-20', emoji: '🌙',
+    message: 'Happy Holi! Color your celebrations with amazing festive deals. 🎨🌈',
+    searchTerm: 'holi colors festival',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796332/iuwmfsgnkt9rxatg0x9f.jpg' },
+  { name: 'Eid ul-Fitr', date: '2027-03-05', emoji: '🌙',
     suggestion: 'Send Eid special offers notification',
-    message: 'Eid Mubarak! Celebrate with our special Eid collection and offers. 🌙✨' },
-  { name: 'Raksha Bandhan', date: '2027-08-09', emoji: '🧡',
+    message: 'Eid Mubarak! Celebrate with our special Eid collection and offers. 🌙✨',
+    searchTerm: 'eid mubarak celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796334/jxghs20chs6r7jg0rqlk.jpg' },
+  { name: 'Raksha Bandhan', date: '2027-08-17', emoji: '🧡',
     suggestion: 'Send Raksha Bandhan gifting notification',
-    message: 'Raksha Bandhan special! Find the perfect gift for your siblings. 🧡' },
+    message: 'Raksha Bandhan special! Find the perfect gift for your siblings. 🧡',
+    searchTerm: 'rakhi raksha bandhan',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796336/cayk6kbkvbzvu7bu7tsu.jpg' },
   { name: 'Independence Day', date: '2027-08-15', emoji: '🇮🇳',
     suggestion: 'Send Independence Day sale notification',
-    message: 'Happy Independence Day! Celebrate freedom with amazing deals. 🇮🇳' },
+    message: 'Happy Independence Day! Celebrate freedom with amazing deals. 🇮🇳',
+    searchTerm: 'indian independence day flag',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789796338/f4y1pt4wklyalvvlsiro.jpg' },
+  { name: 'Ganesh Chaturthi', date: '2027-09-04', emoji: '🐘',
+    suggestion: 'Ganesh Chaturthi sale — festive offers',
+    message: 'Ganpati Bappa Morya! Celebrate Ganesh Chaturthi with special festive deals. 🐘',
+    searchTerm: 'ganesh chaturthi idol festival',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797138/qbvdkmc2zzm6vcjraxyz.jpg' },
+  { name: 'Janmashtami', date: '2027-09-04', emoji: '🦚',
+    suggestion: 'Janmashtami offer — Krishna Janmashtami sale',
+    message: 'Happy Janmashtami! Celebrate Lord Krishna\'s birth with festive discounts. 🦚',
+    searchTerm: 'janmashtami krishna festival',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797140/ciggs111tdqkd1sb1dtn.jpg' },
+  { name: 'Maha Shivratri', date: '2027-03-06', emoji: '🔱',
+    suggestion: 'Maha Shivratri notification — festive offers',
+    message: 'Har Har Mahadev! Celebrate Maha Shivratri with special festive deals. 🔱',
+    searchTerm: 'maha shivratri shiva temple',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797143/etenxn6oneucxrgs1vfx.jpg' },
+  { name: 'Karva Chauth', date: '2026-10-20', emoji: '🌕',
+    suggestion: 'Karva Chauth gifting notification',
+    message: 'Karva Chauth special! Find the perfect gift for your loved one. 🌕',
+    searchTerm: 'karva chauth moon celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797145/yudwvhtztdqbfazfhzfp.jpg' },
+  { name: 'Chhath Puja', date: '2026-11-04', emoji: '🌅',
+    suggestion: 'Chhath Puja festive notification',
+    message: 'Happy Chhath Puja! Celebrate with our special festive collection. 🌅',
+    searchTerm: 'chhath puja sunset ritual',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797147/yaz52icxiueuplhdh0lx.jpg' },
+  { name: 'Onam', date: '2027-09-15', emoji: '🌼',
+    suggestion: 'Onam sale — festive offers for Kerala customers',
+    message: 'Happy Onam! Celebrate with our special festive discounts. 🌼',
+    searchTerm: 'onam pookalam flower rangoli',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797150/mzediieihrbuukczbywi.jpg' },
+  { name: 'Pongal', date: '2027-01-14', emoji: '🌾',
+    suggestion: 'Pongal harvest festival sale',
+    message: 'Happy Pongal! Celebrate the harvest festival with festive deals. 🌾',
+    searchTerm: 'pongal harvest festival',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797152/vulsjz2m8wrjd7vmcrcl.jpg' },
+  { name: 'Baisakhi', date: '2027-04-13', emoji: '🪘',
+    suggestion: 'Baisakhi sale notification',
+    message: 'Happy Baisakhi! Celebrate the harvest festival with special offers. 🪘',
+    searchTerm: 'baisakhi bhangra celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797154/gdokf4u4zrezgbqczowq.jpg' },
+  { name: 'Gudi Padwa', date: '2027-03-28', emoji: '🚩',
+    suggestion: 'Gudi Padwa new year sale',
+    message: 'Happy Gudi Padwa! Celebrate the Maharashtrian New Year with deals. 🚩',
+    searchTerm: 'gudi padwa flag celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797156/lbbna1lj54xjmxn6jefg.jpg' },
+  { name: 'Ugadi', date: '2027-03-28', emoji: '🥭',
+    suggestion: 'Ugadi new year offer',
+    message: 'Happy Ugadi! Celebrate the Telugu New Year with festive discounts. 🥭',
+    searchTerm: 'ugadi pachadi new year',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797159/tlqoerkq1be2tnkrnxcs.jpg' },
+  { name: 'Durga Puja', date: '2026-10-10', emoji: '🎊',
+    suggestion: 'Durga Puja festive sale',
+    message: 'Happy Durga Puja! Celebrate with our special festive collection. 🎊',
+    searchTerm: 'durga puja pandal festival',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797161/y4tn0pcsp9qhrfu8ukfv.jpg' },
+  { name: 'Lohri', date: '2027-01-13', emoji: '🔥',
+    suggestion: 'Lohri bonfire festival sale',
+    message: 'Happy Lohri! Celebrate with warm festive deals. 🔥',
+    searchTerm: 'lohri bonfire celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797163/xdmkbu4rqagarvyf01kd.jpg' },
+  { name: 'Guru Nanak Jayanti', date: '2026-11-24', emoji: '🙏',
+    suggestion: 'Guru Nanak Jayanti notification',
+    message: 'Happy Guru Nanak Jayanti! Celebrate with our special festive offers. 🙏',
+    searchTerm: 'guru nanak jayanti gurudwara',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797165/c97fdkeszhuh7431xp10.jpg' },
+  { name: 'Eid ul-Adha (Bakrid)', date: '2027-05-28', emoji: '🐐',
+    suggestion: 'Eid ul-Adha special offers',
+    message: 'Eid Mubarak! Celebrate Bakrid with our special collection and offers. 🐐',
+    searchTerm: 'eid al adha celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797167/fxevfpwgmp3ttnhfrjag.jpg' },
+  { name: 'Muharram', date: '2027-07-17', emoji: '🕌',
+    suggestion: 'Muharram notification',
+    message: 'Muharram Mubarak. Explore our thoughtful collection this season. 🕌',
+    searchTerm: 'muharram islamic new year',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797170/o40ouswvnmoqemdplvhs.jpg' },
+  { name: 'Good Friday', date: '2027-03-26', emoji: '✝️',
+    suggestion: 'Good Friday notification',
+    message: 'Good Friday blessings. Explore our special seasonal collection. ✝️',
+    searchTerm: 'good friday church cross',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797172/papwwzne8ljinzz6bsba.jpg' },
+  { name: 'Easter', date: '2027-03-28', emoji: '🐣',
+    suggestion: 'Easter sale — festive offers',
+    message: 'Happy Easter! Celebrate with our special spring collection and deals. 🐣',
+    searchTerm: 'easter eggs spring celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797174/yrgajnwskwxd3movwp5z.jpg' },
+  { name: 'Valentine\'s Day', date: '2027-02-14', emoji: '💝',
+    suggestion: 'Valentine\'s Day sale notification',
+    message: 'Happy Valentine\'s Day! Find the perfect gift for your loved one. 💝',
+    searchTerm: 'valentines day gift romance',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797176/k3feozivl8dl1t7ppthg.jpg' },
+  { name: 'Mother\'s Day', date: '2027-05-09', emoji: '💐',
+    suggestion: 'Mother\'s Day gifting notification',
+    message: 'Happy Mother\'s Day! Find the perfect gift to celebrate Mom. 💐',
+    searchTerm: 'mothers day flowers gift',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797178/xts7wthyutqopqaabxbd.jpg' },
+  { name: 'Father\'s Day', date: '2027-06-20', emoji: '👔',
+    suggestion: 'Father\'s Day gifting notification',
+    message: 'Happy Father\'s Day! Find the perfect gift to celebrate Dad. 👔',
+    searchTerm: 'fathers day gift celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797182/ma4qy7dbda8dvovufzwx.jpg' },
+  { name: 'Friendship Day', date: '2027-08-01', emoji: '🤝',
+    suggestion: 'Friendship Day gifting notification',
+    message: 'Happy Friendship Day! Find the perfect gift for your best friend. 🤝',
+    searchTerm: 'friendship day gift celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797184/f3sesbauw1yeb5ut798s.jpg' },
+  { name: 'Children\'s Day', date: '2026-11-14', emoji: '🎈',
+    suggestion: 'Children\'s Day sale notification',
+    message: 'Happy Children\'s Day! Special deals on gifts for the little ones. 🎈',
+    searchTerm: 'childrens day balloons celebration',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797186/luygup3vempztbmdpu5h.jpg' },
+  { name: 'Gandhi Jayanti', date: '2026-10-02', emoji: '🕊️',
+    suggestion: 'Gandhi Jayanti notification',
+    message: 'Remembering Mahatma Gandhi. Explore our thoughtful collection today. 🕊️',
+    searchTerm: 'gandhi jayanti peace',
+    imageUrl: 'https://res.cloudinary.com/y0kktn9f/image/upload/v1789797188/ytmidkcp8tju6bzsohat.jpg' },
 ];
 
 function getUpcomingFestivals(count) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  return FESTIVAL_CALENDAR
+  return FESTIVAL_CALENDAR_FALLBACK
     .map(f => {
       const fDate = new Date(f.date);
       const diffMs = fDate - today;
@@ -120,6 +265,20 @@ function getUpcomingFestivals(count) {
     .filter(f => f.diffDays >= 0 && f.diffDays <= 60)
     .sort((a, b) => a.diffDays - b.diffDays)
     .slice(0, count);
+}
+
+// Duplicated from DashboardScreen.jsx (same no-shared-layout convention
+// as FESTIVAL_CALENDAR_FALLBACK above) — formats a 'YYYY-MM-DD' festival
+// date as local midnight so it never shifts a day in non-UTC timezones.
+function formatFestivalDate(dateStr) {
+  const parts = dateStr.split('-');
+  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  return d.toLocaleDateString('en-IN', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
 }
 
 // MonthCalendar — renders one month grid. `festivals` is passed the raw,
@@ -244,6 +403,11 @@ export default function QueueScreen({ shop }) {
   const [festivalItems, setFestivalItems] = useState([]);
   const [festivalLoading, setFestivalLoading] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  // The shared, image-enriched festival calendar (backend/data/
+  // festivals.json), fetched once on mount — same pattern as
+  // DashboardScreen. Falls back to FESTIVAL_CALENDAR_FALLBACK if the
+  // request fails, so the calendar still shows festival markers.
+  const [festivalCalendar, setFestivalCalendar] = useState([]);
   // Not given an exact name/default by the task ("wrapped in a
   // collapsible 'Sent Notifications' section that defaults to
   // collapsed") — invented, defaulting to false (collapsed).
@@ -319,6 +483,105 @@ export default function QueueScreen({ shop }) {
       .catch(() => setFestivalItems([]))
       .finally(() => setFestivalLoading(false));
   }, [shop]);
+
+  // Festival calendar fetch — same pattern as DashboardScreen.
+  useEffect(() => {
+    let cancelled = false;
+    apiGet('/api/push/festivals')
+      .then((data) => {
+        if (cancelled) return;
+        setFestivalCalendar(Array.isArray(data) ? data : FESTIVAL_CALENDAR_FALLBACK);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setFestivalCalendar(FESTIVAL_CALENDAR_FALLBACK);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // One-shot: once festivalItems first loads, if none of them fall in the
+  // month the calendar happens to be showing (the current real-world
+  // month, at mount), jump to the month of the earliest upcoming item
+  // (or the earliest item overall if nothing is upcoming) so the
+  // merchant doesn't land on an empty calendar. Guarded by a ref rather
+  // than state so it truly only ever fires once and never re-triggers or
+  // overrides the user's own prev/next month navigation afterwards.
+  const hasSetInitialMonth = useRef(false);
+  useEffect(() => {
+    if (hasSetInitialMonth.current) return;
+    if (festivalLoading) return;
+    hasSetInitialMonth.current = true;
+
+    if (!festivalItems.length) return;
+
+    const inDisplayedMonth = festivalItems.some((item) => {
+      const d = new Date(item.scheduledAt);
+      return d.getFullYear() === currentMonth.getFullYear() &&
+             d.getMonth() === currentMonth.getMonth();
+    });
+    if (inDisplayedMonth) return;
+
+    const sorted = [...festivalItems].sort(
+      (a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt)
+    );
+    const now = new Date();
+    const upcoming = sorted.filter((item) => new Date(item.scheduledAt) >= now);
+    const target = upcoming.length ? upcoming[0] : sorted[0];
+    const targetDate = new Date(target.scheduledAt);
+    setCurrentMonth(new Date(targetDate.getFullYear(), targetDate.getMonth(), 1));
+  }, [festivalItems, festivalLoading]);
+
+  // Edit modal state — Planning List's "Edit" action.
+  const [editingItem, setEditingItem] = useState(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editBody, setEditBody] = useState('');
+  const [editMobileImageUrl, setEditMobileImageUrl] = useState('');
+  const [editDesktopImageUrl, setEditDesktopImageUrl] = useState('');
+  const [editScheduledAt, setEditScheduledAt] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
+  function openEditModal(item) {
+    setEditingItem(item);
+    setEditTitle(item.title || '');
+    setEditBody(item.body || '');
+    setEditMobileImageUrl(item.mobileImageUrl || '');
+    setEditDesktopImageUrl(item.desktopImageUrl || '');
+    setEditScheduledAt(item.scheduledAt || '');
+  }
+
+  function closeEditModal() {
+    setEditingItem(null);
+  }
+
+  async function saveEdit() {
+    if (!editingItem) return;
+    setEditSaving(true);
+    try {
+      await apiSend(
+        `/api/queue/${encodeURIComponent(shop)}/festival/${editingItem._id}`,
+        'PATCH',
+        {
+          title: editTitle,
+          body: editBody,
+          mobileImageUrl: editMobileImageUrl,
+          desktopImageUrl: editDesktopImageUrl,
+          scheduledAt: editScheduledAt,
+        }
+      );
+      setEditingItem(null);
+      // Refresh festivalItems so both the calendar and planning list show
+      // the saved changes.
+      apiGet(`/api/queue/${encodeURIComponent(shop)}/festival`)
+        .then((data) => setFestivalItems(data.items || []))
+        .catch(() => {});
+    } catch (e) {
+      alert('Failed to save changes');
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   async function sendNowJob(jobId) {
     setActionLoading(jobId);
@@ -431,7 +694,7 @@ export default function QueueScreen({ shop }) {
             Loading...
           </div>
         ) : (
-          <MonthCalendar month={currentMonth} items={festivalItems} festivals={FESTIVAL_CALENDAR} />
+          <MonthCalendar month={currentMonth} items={festivalItems} festivals={festivalCalendar} />
         )
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -455,6 +718,17 @@ export default function QueueScreen({ shop }) {
               padding: '14px 16px', display: 'flex', justifyContent: 'space-between',
               alignItems: 'center', gap: 12,
             }}>
+              {(item.mobileImageUrl || item.desktopImageUrl) && (
+                <img
+                  src={item.mobileImageUrl || item.desktopImageUrl}
+                  alt=""
+                  style={{
+                    width: 32, height: 32, borderRadius: 8,
+                    objectFit: 'cover', flexShrink: 0,
+                  }}
+                  onError={e => { e.target.style.display = 'none'; }}
+                />
+              )}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <span style={{
@@ -493,6 +767,13 @@ export default function QueueScreen({ shop }) {
                       fontWeight: 600, cursor: 'pointer',
                     }}>Approve</button>
                 )}
+                <button
+                  onClick={() => openEditModal(item)}
+                  style={{
+                    padding: '6px 12px', borderRadius: 7,
+                    border: '1px solid #e5e7eb', background: '#fff',
+                    color: '#374151', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                  }}>Edit</button>
                 <button
                   onClick={async () => {
                     await apiSend(
@@ -815,6 +1096,195 @@ export default function QueueScreen({ shop }) {
           </div>
         )}
       </div>
+
+      {/* Edit modal — mirrors the Dashboard editor's structure (read-only
+          festival header, editable title/body/images/date, Save/Cancel),
+          minus the live phone/desktop preview panel, which wasn't part
+          of this task's spec. */}
+      {editingItem && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+          zIndex: 1000, display: 'flex', alignItems: 'center',
+          justifyContent: 'center', padding: 20,
+        }}
+          onClick={e => { if (e.target === e.currentTarget) closeEditModal(); }}
+        >
+          <div style={{
+            background: '#fff', borderRadius: 16,
+            width: '100%', maxWidth: 480,
+            boxShadow: '0 8px 40px rgba(0,0,0,0.15)',
+            display: 'flex', flexDirection: 'column',
+            maxHeight: '90vh', overflow: 'hidden',
+          }}>
+            {/* Modal header */}
+            <div style={{
+              padding: '16px 20px', borderBottom: '1px solid #f3f4f6',
+              display: 'flex', justifyContent: 'space-between',
+              alignItems: 'center',
+            }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
+                Edit Notification
+              </div>
+              <button onClick={closeEditModal}
+                style={{ background: 'none', border: 'none',
+                         fontSize: 20, cursor: 'pointer', color: '#9ca3af' }}>
+                ✕
+              </button>
+            </div>
+
+            <div style={{ padding: 20, overflowY: 'auto' }}>
+              {/* Festival header — thumbnail + name + date, read only */}
+              {(() => {
+                const meta = festivalCalendar.find(f => f.name === editingItem.festival);
+                return (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    marginBottom: 20, paddingBottom: 16,
+                    borderBottom: '1px solid #f3f4f6',
+                  }}>
+                    <div style={{
+                      width: 48, height: 48, borderRadius: '50%',
+                      background: '#f3f4f6', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center',
+                      fontSize: 22, flexShrink: 0, overflow: 'hidden',
+                    }}>
+                      {meta?.imageUrl ? (
+                        <>
+                          <img
+                            src={meta.imageUrl}
+                            alt=""
+                            style={{
+                              width: '100%', height: '100%',
+                              borderRadius: '50%', objectFit: 'cover',
+                            }}
+                            onError={e => {
+                              e.target.style.display = 'none';
+                              if (e.target.nextSibling) {
+                                e.target.nextSibling.style.display = 'flex';
+                              }
+                            }}
+                          />
+                          <span style={{
+                            display: 'none', alignItems: 'center',
+                            justifyContent: 'center', width: '100%', height: '100%',
+                          }}>
+                            {meta?.emoji || '📢'}
+                          </span>
+                        </>
+                      ) : (
+                        meta?.emoji || '📢'
+                      )}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 600, color: '#111827' }}>
+                        {editingItem.festival || 'Notification'}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
+                        {meta
+                          ? formatFestivalDate(meta.date)
+                          : new Date(editingItem.scheduledAt).toLocaleDateString('en-IN', {
+                              weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+                            })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Title */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, fontWeight: 600,
+                                color: '#374151', display: 'block',
+                                marginBottom: 6 }}>
+                  Notification Title
+                </label>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={e => setEditTitle(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px',
+                           borderRadius: 8, border: '1px solid #e5e7eb',
+                           fontSize: 13, boxSizing: 'border-box' }}
+                />
+              </div>
+
+              {/* Body */}
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, fontWeight: 600,
+                                color: '#374151', display: 'block',
+                                marginBottom: 6 }}>
+                  Message
+                </label>
+                <textarea
+                  value={editBody}
+                  onChange={e => setEditBody(e.target.value)}
+                  rows={4}
+                  style={{ width: '100%', padding: '8px 12px',
+                           borderRadius: 8, border: '1px solid #e5e7eb',
+                           fontSize: 13, resize: 'vertical',
+                           fontFamily: 'inherit', boxSizing: 'border-box' }}
+                />
+              </div>
+
+              {/* Mobile Image + Desktop Image — shared widget, same as
+                  the Dashboard editor. */}
+              <ImageUploadPair
+                mobileImageUrl={editMobileImageUrl}
+                desktopImageUrl={editDesktopImageUrl}
+                onMobileChange={setEditMobileImageUrl}
+                onDesktopChange={setEditDesktopImageUrl}
+              />
+
+              {/* Scheduled date */}
+              <div style={{ marginBottom: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 600,
+                                color: '#374151', display: 'block',
+                                marginBottom: 6 }}>
+                  Schedule Date & Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={editScheduledAt ?
+                    new Date(editScheduledAt).toISOString().slice(0,16) : ''}
+                  onChange={e => setEditScheduledAt(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px',
+                           borderRadius: 8, border: '1px solid #e5e7eb',
+                           fontSize: 13, boxSizing: 'border-box' }}
+                />
+              </div>
+            </div>
+
+            {/* Save / Cancel */}
+            <div style={{
+              padding: '16px 20px', borderTop: '1px solid #f3f4f6',
+              display: 'flex', gap: 8,
+            }}>
+              <button
+                onClick={closeEditModal}
+                disabled={editSaving}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: 8,
+                  border: '1px solid #e5e7eb', background: '#fff',
+                  color: '#374151', fontSize: 13, fontWeight: 700,
+                  cursor: editSaving ? 'not-allowed' : 'pointer',
+                }}>
+                Cancel
+              </button>
+              <button
+                onClick={saveEdit}
+                disabled={editSaving}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: 8,
+                  border: 'none', background: editSaving ? '#818cf8' : '#4f46e5',
+                  color: '#fff', fontSize: 13, fontWeight: 700,
+                  cursor: editSaving ? 'not-allowed' : 'pointer',
+                }}>
+                {editSaving ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

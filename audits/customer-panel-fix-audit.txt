@@ -1,0 +1,191 @@
+=== CUSTOMER PANEL FIX AUDIT ===
+Generated: 2026-09-17
+
+Push tab hidden when no push: yes
+Email tab hidden when no email: yes
+Tab resets on customer change: yes
+Right panel header improved: yes
+Most interested section compact: yes
+Send notification tabs styled: yes
+Column spacing fixed: yes
+frontend build: pass
+git push: done (2d93a9f..da85ee7)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/screens/Customers.jsx in full (1767 lines)
+before making any edit, as instructed.
+
+
+====================================================================
+FIX 1 — Push/Email tab visibility
+====================================================================
+Reused the file's EXISTING `notifTab`/`setNotifTab` state rather than
+introducing a separately-named `activeTab`/`setActiveTab` as the
+task's own illustrative code used — notifTab is already the single
+source of truth wired into the composer-rendering conditions
+(`notifTab === 'push' && hasPush`, etc.) a few lines below; adding a
+second, differently-named state for the same purpose would only
+create two states that could disagree. Functionally identical to
+what was asked.
+
+Replaced the old always-both-tabs-shown switcher (which greyed out
+and labeled an unavailable channel "Not available") with the given
+hide-based version: the Push button only renders when `hasPush`, the
+Email button only renders when `hasEmail`, and a
+"No contact channels available" message renders when neither is true.
+
+NOTE — that third branch is effectively DEAD CODE in the current
+file, flagged inline in the source and here: the "Send notification"
+section is wrapped in an outer
+`if (!hasPush && !hasEmail) return (<div>...No push subscription or
+email on file...</div>)` guard (pre-existing, not part of this task)
+that already short-circuits BEFORE the tab switcher is ever reached
+in that exact case, showing its own distinct message instead. So the
+switcher's own "No contact channels available" branch can never
+actually render given the current structure. Implemented it anyway,
+verbatim, since it was explicitly requested and is harmless — did
+not touch the outer guard, since altering "cannot send a
+notification" messaging logic wasn't asked for and risked expanding
+scope into send-panel logic the task said not to touch.
+
+Replaced the reset useEffect with the given simpler version (default
+to 'push' if hasPush else 'email', every time selectedCustomer
+itself changes) in place of the previous, more conservative
+"only switch if the currently active tab becomes unavailable" logic.
+This is a real behavior change from before: selecting a NEW customer
+now always resets the tab to that customer's preferred default (push
+if available) rather than preserving whichever tab was last viewed —
+matches the task's explicit given code, not flagged as a bug since
+it's clearly the intended behavior of the requested change, just
+noting for the record that it changes existing behavior deliberately.
+
+
+====================================================================
+FIX 2 — Right panel header
+====================================================================
+Replaced the old bare floating "✕" button (positioned absolutely,
+with no accompanying name/title at the panel level) with the given
+header block (customer email or "Anonymous customer" as the
+title, "Customer journey" as a subtitle, and the close button
+inline). Since the OLD "Customer journey" title text lived inside the
+Journey-timeline card itself (not "the panel header" the task
+describes, which didn't actually exist as a combined element before
+this fix), that inner title line was removed to avoid showing
+"Customer journey" twice — it's now shown once, as this new header's
+subtitle.
+
+The new header (and its close button) only renders once
+`selectedCustomer` is actually set. The separate "Loading journey..."
+placeholder state (shown between a row click and the journey data
+arriving) previously had its close button living in this same
+now-removed unconditional spot, which would have made it disappear
+entirely with nothing asked about that state specifically. Kept that
+state closable by moving its own small "✕" button inside the loading
+placeholder card itself (absolutely positioned within that card,
+which was given `position: relative` for this purpose) — flagging
+this as a deliberate, minimal addition to avoid silently regressing
+the ability to dismiss the panel while a journey fetch is still in
+flight, which the task didn't mention either way.
+
+
+====================================================================
+FIX 3 — Most interested in section (right panel)
+====================================================================
+Restyled the label (fontSize 11->10, letterSpacing 0.5px->0.06em,
+color/uppercase/marginBottom unchanged) and the product title
+(fontSize 13->12, fontWeight/color unchanged) exactly as specified.
+Views line was already fontSize 11/color #9ca3af — no change needed
+there, already matched.
+
+For the product image (36x36, borderRadius 6, vs. the existing fixed
+40x40/8), extended the shared ProductThumbnail component to accept
+optional `size`/`radius` props defaulting to 40/8 (its original fixed
+values), rather than hardcoding 36/6 directly inside the component.
+This was necessary because ProductThumbnail is also used by
+NotificationComposer and EmailComposer for their own suggestion-card
+thumbnails, which the task did not ask to resize — a global 36/6
+change to the component itself would have shrunk those too. Only the
+"Most interested in" panel's own call site now passes
+`size={36} radius={6}`; every other call site is unaffected.
+
+
+====================================================================
+FIX 4 — Send notification section
+====================================================================
+"Send notification" title restyled from fontSize 14/weight 600/
+marginBottom 12 to fontSize 13/weight 700/marginBottom 10, exactly as
+specified.
+
+Tab buttons restyled to the given spec: active = background #4f46e5/
+color #fff, inactive = background #f3f4f6/color #6b7280, both with
+borderRadius 7, padding '7px 16px', fontSize 12, fontWeight 600,
+border none, cursor pointer. The old shared gray "pill strip"
+container (background #f3f4f6, borderRadius 10, padding 4, with each
+button filling `flex:1` and only the active one getting a white
+background) was simplified to a plain flex row with an 8px gap, since
+each button now carries its own full background color — keeping the
+old pill-strip wrapper background would have looked redundant behind
+solid-colored buttons. This wrapper-level simplification wasn't
+explicitly specified either way by the task (which only gave button
+styles), so it's a reasonable minimal extrapolation, not a deviation
+from anything explicit.
+
+
+====================================================================
+FIX 5 — Column spacing
+====================================================================
+GRID_COLS changed from '2fr 1fr 2fr 1fr 1.5fr 1fr' to
+'2fr 1fr 2fr minmax(80px, 1fr) 1.5fr 1fr' — the 4th track (Reach)
+now uses minmax(80px, 1fr) so it never shrinks below 80px, the CSS
+Grid equivalent of a per-track "minWidth: 80px" (a bare template-
+columns string has no other way to express a per-column minimum).
+
+Added overflow: hidden / textOverflow: ellipsis to the "Most
+interested in" column's outer wrapper, plus (necessarily)
+white-space: nowrap to its two inner text lines (interest name and
+signal-type label) — textOverflow: ellipsis has no visual effect
+without white-space: nowrap also set (per the CSS spec, truncation
+with "…" only applies to non-wrapping text); adding only the 2
+properties the task named would have made the ellipsis silently
+inert (long text would still wrap across lines instead of truncating
+with "…"). Added the third property to make the requested behavior
+actually work, flagged here per this session's standing practice of
+completing under-specified CSS combinations rather than implementing
+something visually inert.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+Confirmed via `git diff`: grepped for apiGet, apiSend, loadData,
+loadCustomerJourney, sendJourneyPush, sendJourneyEmail, filter,
+search across the full diff — zero matching lines added or removed.
+The diff (110 insertions, 62 deletions) touches only: GRID_COLS,
+ProductThumbnail's prop signature, the Most-interested-in column's
+overflow styling, the notifTab reset useEffect's body, the right
+panel header/close-button structure, and the Send-notification
+section's title/tab-switcher JSX. `git status` after staging showed
+only frontend/app/admin/screens/Customers.jsx changed; the
+pre-existing unrelated dirty files (backend/__tests__/brain.test.js,
+frontend/lib/api.js) were left alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 17
+  routes generated, no errors.
+- git push origin main -- succeeded (2d93a9f..da85ee7), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Only frontend/app/admin/screens/Customers.jsx was modified. No other
+file was changed.

@@ -1,0 +1,197 @@
+JOURNEY SORT AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-14
+
+Files read: frontend/app/admin/screens/Journey.jsx (in full, 892 lines),
+backend/routes/events.js (the getJourneyData() function and its GET
+route, in full).
+
+
+====================================================================
+1. The API call that fetches the customer/journey list
+====================================================================
+Journey.jsx, inside the `load` callback (lines 512-525):
+
+512	  const load = useCallback(async () => {
+513	    if (!shop) return;
+514	    setLoading(true);
+515	    setError('');
+516	    try {
+517	      const data = await apiGet(`/api/events/${encodeURIComponent(shop)}/journey?limit=50`);
+518	      setCustomers(data.customers || []);
+519	      setTotal(data.total || 0);
+520	    } catch (err) {
+521	      setError(err.message);
+522	    } finally {
+523	      setLoading(false);
+524	    }
+525	  }, [shop]);
+526
+527	  useEffect(() => {
+528	    load();
+529	  }, [load]);
+
+Call: GET /api/events/:shopDomain/journey?limit=50 (no `page` param
+sent, so the backend defaults to page 0 -- see section 4 below). Fires
+once, in a useEffect keyed on the `load` callback (itself keyed on
+`shop`), i.e. on mount / whenever shop changes. There is no polling,
+no manual refresh button, and no re-fetch triggered by the filter tabs
+(filtering is done entirely client-side against the same fetched list
+-- see section 3).
+
+
+====================================================================
+2. The sort order used - ascending or descending by date
+====================================================================
+The customer/journey LIST ITSELF is NOT sorted by date at all, on
+either the frontend or the backend. Journey.jsx never calls `.sort()`
+on `customers` or `filteredCustomers` anywhere in the file (the only
+`.sort()` calls in Journey.jsx operate on a DIFFERENT, per-customer
+list -- see the NOTE below). The backend's getJourneyData() (traced in
+full in section 4) sorts the underlying Signal documents by
+`strength: -1` -- i.e. by signal STRENGTH, descending (strongest
+signal first), not by any date/timestamp field. So: the customer rows
+in the main Journey list are ordered strongest-signal-first, not
+newest-first or oldest-first.
+
+NOTE -- two OTHER lists in this same screen ARE date-sorted, but
+neither is "the customer/journey list" the question is asking about:
+  - Each customer's "Recent activity" timeline (rendered in the right-
+    hand detail panel when a customer is selected, from
+    `selectedCustomer.recentEvents`) is populated by the backend via
+    `StorefrontEvent.find(...).sort({ ts: -1 })` (backend/routes/
+    events.js line 443) -- DESCENDING by ts (newest event first). This
+    is a per-customer EVENT list, not the customer list itself.
+  - `topProducts` (the "Most interested in" section) is sorted by view
+    `count` descending (events.js line 470, `.sort((a, b) => b.count -
+    a.count)`) -- not a date sort either.
+
+
+====================================================================
+3. Where the list is rendered - map/render code
+====================================================================
+Journey.jsx, inside the "Customer list" panel. The list rendered is
+`filteredCustomers` (lines 531-533), a purely client-side filter over
+the fetched `customers` state -- no re-sort, order preserved exactly
+as received from the API:
+
+531	  const filteredCustomers = filter === 'all'
+532	    ? customers
+533	    : customers.filter((c) => c.signals?.some((s) => s.type === filter));
+
+The render/map itself (lines 629-717, inside the loading/empty-state
+ternary chain at line 614):
+
+629	              : filteredCustomers.map((c, i) => {
+630	                  const profile = c.profile;
+631	                  const identifier =
+632	                    profile?.identifiers?.emails?.[0] ||
+633	                    profile?.identifiers?.phones?.[0] ||
+634	                    `Anonymous ${profile?._id?.toString().slice(-6)}`;
+635	                  const isSelected = selectedCustomer?.profile?._id === profile?._id;
+636	                  const hasPush = profile?.channels?.push?.subscribed;
+637	                  const productTitle = c.topProducts?.[0]?.title || '';
+638	                  const displayTitle = /^\d+$/.test(productTitle) ? '—' : productTitle;
+639
+640	                  return (
+641	                    <div
+642	                      key={profile?._id || i}
+643	                      onClick={() => setSelectedCustomer(isSelected ? null : c)}
+644	                      style={{
+645	                        display: 'grid',
+646	                        gridTemplateColumns: '1fr 140px 120px 100px',
+647	                        padding: '12px 16px', alignItems: 'center',
+648	                        borderBottom: i < filteredCustomers.length - 1 ? '1px solid #f9fafb' : 'none',
+649	                        cursor: 'pointer',
+650	                        background: isSelected ? '#f0f4ff' : '#fff',
+651	                        transition: 'background 0.1s',
+652	                      }}
+653	                      ...
+654	                    >
+655	                      {/* Customer / Top signal / Top product / Action columns */}
+656	                      ...
+657	                    </div>
+658	                  );
+659	                })
+
+Each row renders: the customer's identifier (email, phone, or an
+"Anonymous <id suffix>" fallback), an active-signal count + push-
+subscribed indicator, a color-coded "Top signal" badge (red/yellow/
+gray by strength threshold), the top product title, and either a
+"Notify" button (if push-subscribed) or a "No push" label. Clicking a
+row toggles `selectedCustomer`, which opens the right-hand detail/
+send panel.
+
+
+====================================================================
+Backend: GET /api/events/:shopDomain/journey - the sort/order query
+used in MongoDB
+====================================================================
+Route handler (events.js, lines 479-498):
+
+479	/**
+480	 * GET /api/events/:shopDomain/journey
+481	 * Query params: limit (default 50, max 200), page (default 0).
+482	 */
+483	router.get('/:shopDomain/journey', requireAuth, requireStoreOwner, async (req, res) => {
+484	  try {
+485	    let limit = parseInt(req.query.limit, 10);
+486	    if (!Number.isFinite(limit) || limit <= 0) limit = 50;
+487	    limit = Math.min(limit, 200);
+488
+489	    let page = parseInt(req.query.page, 10);
+490	    if (!Number.isFinite(page) || page < 0) page = 0;
+491
+492	    const data = await getJourneyData(req.params.shopDomain, { limit, page });
+493	    return res.json(data);
+494	  } catch (err) {
+495	    console.error('[events] journey error:', err.message);
+496	    return res.status(500).json({ error: 'Failed to fetch journey data' });
+497	  }
+498	});
+
+The actual data assembly is in getJourneyData() (exported separately
+"so it's testable without an HTTP layer" per its own doc comment),
+lines 388-477. The MongoDB sort/order query:
+
+404	  const signals = await Signal.find({ shopDomain: shop })
+405	    .sort({ strength: -1 })
+406	    .limit(200)
+407	    .populate('profileId', 'identifiers stage orders channels lastSeenAt');
+
+This is the ONLY sort that determines the order of the customer list
+itself: `Signal.find(...).sort({ strength: -1 })` -- descending by
+`strength` (a 0-1 float on the Signal model), capped to the 200
+strongest signals shop-wide. The function's own doc comment (lines
+393-396) explains why this specific sort matters beyond just display
+order: "Grouping relies on Signal.find(...).sort({ strength: -1 }):
+the FIRST signal seen per profile in that sorted list is guaranteed to
+already be that profile's strongest, so profileMap[pid] is only ever
+created once per profile" -- i.e., the strength-descending sort is
+load-bearing for the grouping algorithm itself (lines 409-422), not
+just cosmetic ordering.
+
+After that grouping step, profiles are paginated via plain array
+slicing (NOT a second MongoDB query/sort):
+  424	  const profileIds = Object.keys(profileMap);
+  425	  const pageIds = profileIds.slice(page * limit, (page + 1) * limit);
+Since `profileMap` is built by iterating the strength-sorted `signals`
+array in order, and each profile's FIRST appearance in that iteration
+becomes its entry in `profileMap` (a plain JS object), the resulting
+`Object.keys(profileMap)` preserves that same strength-descending
+insertion order (per the ECMAScript spec's guarantee that plain-object
+string keys iterate in insertion order) -- so the pagination slice
+also ends up strongest-first, without a second explicit sort.
+
+The only OTHER MongoDB sort inside getJourneyData() is the per-profile
+events lookup used for `recentEvents` (section 2's NOTE above),
+scoped inside the `pageIds.map(...)` loop:
+  439	      const events = await StorefrontEvent.find({
+  440	        shopDomain: shop,
+  441	        sessionId: { $in: [...sessionIds, ...cartTokens] },
+  442	      })
+  443	        .sort({ ts: -1 })
+  444	        .limit(20)
+  445	        .select('type path pageType meta ts');
+This is `ts: -1` (descending, newest first) -- but it sorts each
+customer's individual EVENT history, not the list of customers itself.

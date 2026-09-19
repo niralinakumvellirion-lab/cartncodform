@@ -1,0 +1,172 @@
+=== DASHBOARD MERGE AUDIT ===
+Generated: 2026-09-16
+
+DashboardScreen.jsx created: yes (frontend/app/admin/dashboard/DashboardScreen.jsx)
+page.js created: yes (frontend/app/admin/dashboard/page.js)
+Insights content included: yes (4 stat tiles, sortable products table,
+  AI insight banner — all full content, not summarized)
+Today stats included: yes (Notifications + Attributed Activity 2-column
+  layout, error banner, Planned-for-today / Yesterday cards, and the
+  Recovered-this-week bar chart — see note below on the last one)
+New subscriber alerts included: yes
+Planned for today included: yes
+
+NavMenu updated in all files: yes (13 files — the 12 pre-existing
+  page.js files plus the newly-created dashboard/page.js, which was
+  written with the correct final nav list from the start rather than
+  created-then-edited)
+Today and Insights removed from nav: yes
+
+frontend build: pass (17 routes now, up from 16 — /admin/dashboard
+  added; no errors)
+git push: done (1a46173..8ee2698)
+vercel deploy: done (readyState READY, aliased to
+  https://app.shopireachboost.com — this deploy also covers the
+  Queue Failed/Cancelled-tabs fix from the immediately preceding
+  task, whose own vercel --prod had not yet been run when that task
+  ended mid-push-hang)
+
+
+====================================================================
+PART A — DashboardScreen.jsx construction details
+====================================================================
+
+Read both frontend/app/admin/screens/Insights.jsx (441 lines) and
+frontend/app/admin/screens/Today.jsx (833 lines, current state
+including the earlier Promise.allSettled fix) in full before writing
+anything, as instructed.
+
+Merged in the order the task specified:
+  1. Page header — title "Dashboard", subtitle "Your store
+     performance at a glance", via the same DS/PageHeader pattern
+     both source files already used (copied once, not duplicated).
+  2. Date filter bar — copied verbatim from Today.jsx, unchanged.
+  3. Insights content — the full 4-tile stats row, the sortable
+     products table (all 3 sort tabs, all 5 columns, loading
+     skeleton, empty state), and the AI-insight banner, all copied
+     with their exact original styling. Insights' own error banner
+     was also brought along (renamed insightsError) so an analytics-
+     load failure still surfaces somewhere, matching "no
+     functionality lost."
+  4. Today stats section — the Notifications/Attributed-Activity
+     2-column layout, THEN the new-subscriber alerts block, in that
+     literal order per the task's own step 4 bullet list. Note this
+     is a DIFFERENT order than Today.jsx's own original layout
+     (which showed new-subscriber alerts BEFORE the 2-column stats
+     row) — followed the task's explicit ordering instruction here
+     rather than Today.jsx's original order, since it was stated
+     unambiguously.
+  5. Planned for today + Yesterday stats — the two-column
+     "Planned for today"/"Yesterday" cards, exactly as in Today.jsx.
+
+STATE VARIABLE COLLISIONS — both source screens independently
+declare `stats`, `loading`, and `error` state. Renamed each side's
+copy to avoid silently merging into one shared variable (which would
+have broken both screens' independent loading/error behavior):
+  Today.jsx's stats/loading/error  -> todayStats/todayLoading/todayError
+  Insights.jsx's stats/loading/error -> insightsStats/insightsLoading/insightsError
+  Insights.jsx's products/insights -> insightsProducts/aiInsights
+All other state (dateFilter, activity, notifStats, notifLoading,
+refreshKey, newSubscribers, subsLoading, sendingTo, sendResults,
+isMobileView, sortBy) kept its original name — no collisions there.
+Every one of Today's 4 useEffects and Insights' 1 useCallback+
+useEffect were carried over completely, unmodified apart from the
+state-variable renames above.
+
+PRE-EXISTING BUG PRESERVED, NOT FIXED — Today.jsx's own push-stats/
+signals/orders effect destructures its Promise.allSettled result as
+`([ps, sg]) => {...}`, even though 3 promises are passed (push-stats,
+signals, AND orders) — the 3rd result (orders) is silently dropped,
+and `stats`/`setStats` (now `todayStats`/`setTodayStats`) is NEVER
+actually set anywhere in the original file, so the Yesterday card's
+Sent/Came-back-and-bought/Recovered numbers and the Recovered-this-
+week chart have always rendered their `null`-coalesced fallback
+values ('—'/0), regardless of real data. This is a real, pre-existing
+bug in Today.jsx, discovered while reading it in full for this merge
+— NOT something introduced by this task. Reproduced it faithfully in
+DashboardScreen.jsx rather than fixing it, since this task's scope
+was explicitly to COMBINE the two screens' existing behavior, not to
+fix bugs found along the way; flagging it here rather than silently
+either fixing it or leaving it undocumented.
+
+HEADER REFRESH BUTTON — added a merged action to the "Dashboard"
+PageHeader that, on click, both bumps Today's `refreshKey` (its
+existing refresh mechanism) AND calls `loadInsights()` directly.
+Today.jsx's header already had a manual refresh button; Insights.jsx
+had NONE at all (it only ever loaded once on mount, useCallback-
+wrapped as `load`). Wiring the one merged button to refresh both
+halves adds capability rather than losing any, and was the most
+natural way to give a single dashboard header ONE refresh action
+that actually refreshes everything on the page.
+
+RECOVERED-THIS-WEEK CHART — the task's step 5 heading only said
+"Planned for today + Yesterday stats", not mentioning the bar chart
+that sits directly below that row in Today.jsx. Included it anyway,
+under the task's own overriding instruction "Make sure no
+functionality is lost from either screen" — omitting it would have
+silently dropped a real piece of Today.jsx's UI.
+
+<Page> WRAPPER — kept Today.jsx's Polaris <Page> wrapper around the
+whole screen (Insights.jsx had none). Reasonable since DashboardScreen
+is now this app's de facto "home" screen, matching Today's prior role.
+
+
+====================================================================
+PART B — NavMenu updates
+====================================================================
+
+Located all page.js files under frontend/app/admin/ via glob before
+this task's own new dashboard/page.js existed — 12 files found, all
+read in full, all confirmed to share the exact same NavMenu list
+(post the earlier nav-swap task's reordering: Insights, Activity,
+Queue, Automation, Customers, Journey, What to act on, Messages,
+Today, Cash on delivery, Discounts, Settings).
+
+In every one of those 12 files: removed the Insights `<a>` and the
+Today `<a>`, and inserted a new Dashboard `<a href="/admin/dashboard"
+rel="dashboard">Dashboard</a>` as the very first item. Every other
+nav item (Activity, Queue, Automation, Customers, Journey, What to
+act on, Messages, Cash on delivery, Discounts, Settings) kept its
+exact position, href, rel, and label. The 13th page.js (the new
+frontend/app/admin/dashboard/page.js) was written with this same
+final nav list from the start, so all 13 page.js files in the repo
+now carry an identical NavMenu.
+
+Verified post-edit via the same targeted grep used to confirm the
+starting state: no `rel="today"` or `rel="insights"` remains
+anywhere under frontend/app/admin/, and `rel="dashboard"` appears
+exactly once, first, in all 13 files.
+
+
+====================================================================
+PART C — old screens kept, not deleted
+====================================================================
+
+frontend/app/admin/screens/Today.jsx and
+frontend/app/admin/screens/Insights.jsx were NOT touched or deleted,
+per instruction. Their own page.js wrappers
+(frontend/app/admin/page.js and frontend/app/admin/insights/page.js)
+also still render them via <TodayScreen>/<InsightsScreen> exactly as
+before — only their NavMenu contents changed (per Part B). This
+means /admin and /admin/insights remain live, reachable routes that
+still show the old, now-unlinked Today/Insights screens if visited
+directly (e.g. by URL, or via the "Dashboard" NavMenu item that
+happens to point to /admin/dashboard rather than /admin) — this is
+an intentional, literal consequence of "remove them from nav" rather
+than "delete or redirect the old routes", which the task explicitly
+did not ask for.
+
+
+====================================================================
+NOTE — this deploy also covers the previous task's pending deploy
+====================================================================
+
+The immediately preceding task (Queue screen Failed/Cancelled tabs
+removal) committed and pushed
+(1a46173 "fix: remove Failed and Cancelled tabs from Queue screen")
+but hit the session's recurring intermittent git-push-hang issue on
+its first push attempt; the user re-ran it manually and it
+succeeded, but that task ended before `vercel --prod` could be run
+for it. This task's own `vercel --prod` step deploys BOTH that
+pending Queue fix AND this Dashboard merge together, in one
+production deployment.

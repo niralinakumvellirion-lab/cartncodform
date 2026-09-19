@@ -1,0 +1,236 @@
+PUSH TARGETING AUDIT - read-only, no changes
+==============================================
+Generated: 2026-09-15
+File read: backend/utils/pushNotification.js (in full, 272 lines).
+
+sendPushToCustomers() signature (line 89):
+  async function sendPushToCustomers(shopDomain, title, body, url,
+    imageUrl, mobileOnly = false, cartToken = null,
+    skipStaleCleanup = false)
+
+There are actually TWO separate FCM sends inside this one function,
+depending on whether a cartToken argument was given: the cartToken
+branch (lines 106-194, tries each matching subscription row one at a
+time until one succeeds) and the "all subscribers" branch (lines
+195-264, one multicast call to every matching token at once). Both
+branches build the SAME payload shape (just for 1 token vs. many),
+so sections 1-2 below show that one shared shape, noting the one
+place they differ (tokens: [sub.token] vs tokens: tokens).
+
+
+====================================================================
+1. Full webpush payload it builds
+====================================================================
+
+The "webpush" sub-object of the FCM message (identical shape built
+in both branches -- cartToken branch at lines 157-169, all-
+subscribers branch at lines 217-233):
+
+  webpush: {
+    headers: {
+      Urgency: 'high',
+    },
+    notification: {
+      title,
+      body,
+      icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+      image: imageUrl || undefined,
+      badge: 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+      requireInteraction: false,
+      vibrate: [200, 100, 200],
+    },
+    fcm_options: {
+      link: url || `https://${shopDomain}`,
+    },
+  }
+
+Field-by-field:
+  headers.Urgency        - hardcoded 'high' (push priority hint,
+                            asks the browser/OS to deliver promptly
+                            even under battery-saver conditions)
+  notification.title     - the `title` argument, unmodified
+  notification.body      - the `body` argument, unmodified
+  notification.icon      - `imageUrl` if given, else a hardcoded
+                            fallback shopping-cart icon (icons8.com
+                            CDN URL) - this is the small icon shown
+                            in the notification/tray
+  notification.image     - `imageUrl` if given, else `undefined`
+                            (i.e. omitted from the payload rather
+                            than falling back to the placeholder
+                            icon like `icon` does) - this is the
+                            large banner image shown inside the
+                            notification body, when supported
+  notification.badge     - hardcoded to the SAME icons8.com
+                            shopping-cart URL regardless of
+                            imageUrl - the small monochrome-style
+                            badge icon shown in the status bar on
+                            some platforms
+  notification.requireInteraction - hardcoded `false` (notification
+                            auto-dismisses instead of staying
+                            pinned until the user interacts with it)
+  notification.vibrate   - hardcoded `[200, 100, 200]` (vibrate
+                            200ms, pause 100ms, vibrate 200ms again
+                            - only takes effect on platforms/
+                            browsers that honor the Web Push
+                            vibrate pattern, mainly Android Chrome)
+  fcm_options.link       - `url` argument if given, else
+                            `https://${shopDomain}` - the URL opened
+                            when the user clicks the notification
+
+Note: there is also a separate `data` object at the top level of
+the FCM message (NOT inside `webpush`), built identically in both
+branches (lines 150-156 and 210-216):
+  data: {
+    url: url || `https://${shopDomain}`,
+    imageUrl: imageUrl || '',
+    title: title,
+    body: body,
+    icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+  }
+This is a separate custom-data payload (all values coerced to
+strings by FCM, as `data` payloads require) sent alongside
+`webpush`, presumably for a service-worker to read directly rather
+than relying on the browser's native webpush.notification auto-
+display. Not part of "the webpush payload" strictly speaking, but
+included here since it's the other half of what actually gets sent
+for every push.
+
+
+====================================================================
+2. The FCM message object sent to Firebase
+====================================================================
+
+All-subscribers branch (lines 209-235), the complete object passed
+to getMessaging().sendEachForMulticast(message):
+
+  const message = {
+    data: {
+      url: url || `https://${shopDomain}`,
+      imageUrl: imageUrl || '',
+      title: title,
+      body: body,
+      icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+    },
+    webpush: {
+      headers: {
+        Urgency: 'high',
+      },
+      notification: {
+        title,
+        body,
+        icon: imageUrl || 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+        image: imageUrl || undefined,
+        badge: 'https://img.icons8.com/color/96/shopping-cart--v1.png',
+        requireInteraction: false,
+        vibrate: [200, 100, 200],
+      },
+      fcm_options: {
+        link: url || `https://${shopDomain}`,
+      },
+    },
+    tokens,
+  };
+
+`tokens` here is the full array of every matching
+CustomerPushSubscription's `.token` field (line 200:
+`const tokens = subs.map((s) => s.token);`) -- sent as ONE
+multicast call via sendEachForMulticast, one FCM API round-trip for
+however many subscribers matched `query`.
+
+cartToken branch (lines 149-171) builds the exact same object shape
+but with `tokens: [sub.token]` (a single-element array) instead,
+and calls sendEachForMulticast per candidate row inside a loop
+(lines 147-188), trying rows one at a time (most-recent
+lastActivityAt first) until one send succeeds or a non-stale error
+stops the loop -- so this is N separate FCM API calls in the worst
+case (one per candidate subscription row), not one multicast call,
+unlike the all-subscribers branch.
+
+No other fields (no `android`, no `apns`, no top-level
+`notification` object outside of `webpush.notification`) are set on
+either message object -- this function only ever targets web push
+via the `webpush` block; there is no native Android/iOS FCM
+notification block being sent.
+
+
+====================================================================
+3. Is there any mobile/desktop targeting currently?
+====================================================================
+
+Partial targeting exists, but only mobile-vs-not, and only as a
+DATABASE QUERY FILTER -- there is no payload-level
+mobile/desktop branching (the webpush/data payload built is
+identical regardless of device type; see sections 1-2).
+
+Lines 102-105:
+  const query = { shopDomain: shop };
+  if (mobileOnly) {
+    query.deviceType = { $in: ['mobile', 'unknown'] };
+  }
+
+This `query` is what both CustomerPushSubscription.find() calls
+(the cartToken-fallback query at line 134's fallbackQuery, and the
+main all-subscribers query at line 195) use to select WHICH
+subscriber rows to fetch and send to -- it does not affect what is
+sent, only who receives it. When mobileOnly is NOT set (the
+default, `false`), the query is unfiltered by deviceType --
+EVERY subscription row for the shop is targeted, mobile and desktop
+alike, in one send. There is no equivalent "desktopOnly" flag or
+`deviceType: 'desktop'` filter anywhere in this file.
+
+CustomerPushSubscription itself is not read in this audit (out of
+scope -- the task named pushNotification.js only), so the exact set
+of possible `deviceType` values ('mobile', 'desktop', 'unknown', or
+others) and how that field gets populated is not confirmed here;
+only what this file does with it (an $in filter against ['mobile',
+'unknown']) is documented.
+
+
+====================================================================
+4. What does the mobileOnly parameter do?
+====================================================================
+
+mobileOnly is the 6th positional parameter of sendPushToCustomers(),
+defaulting to `false` (line 89):
+  async function sendPushToCustomers(shopDomain, title, body, url,
+    imageUrl, mobileOnly = false, cartToken = null, skipStaleCleanup = false)
+
+Its ONLY effect anywhere in this function is the query-filter shown
+in section 3 above, applied in exactly two places:
+  - Line 103-105: the main `query` object used both by the
+    cartToken-targeted lookup (line 111's initial `cartSubs` query,
+    since `query` already has `deviceType` merged in before that
+    find() runs) and by the plain "all subscribers" query at line
+    195, when no cartToken is given.
+  - Line 135-137: the cartToken FALLBACK query (when the original
+    cartToken has no live subscription and the code retries across
+    the profile's OTHER cartTokens) -- mobileOnly is applied here
+    too, so the fallback path still respects it.
+
+When mobileOnly is true, only CustomerPushSubscription rows whose
+`deviceType` is either 'mobile' OR 'unknown' are matched --
+'unknown' is included alongside 'mobile', presumably so a
+subscription whose device type was never successfully detected
+isn't silently excluded from a "mobile-only" send (treated as
+"maybe mobile" rather than "known not mobile"). Any row with
+deviceType explicitly set to something else (e.g. 'desktop') is
+excluded when mobileOnly is true.
+
+When mobileOnly is false (the default, and the value used by every
+call site not shown in this file since callers are out of scope for
+this audit), no deviceType filtering happens at all -- the query
+only ever has `shopDomain: shop` (plus `cartToken` when targeting a
+specific cart).
+
+mobileOnly does NOT affect: the message payload content (title,
+body, icon, image, vibrate, etc. are identical either way), which
+branch of the function runs (cartToken vs. all-subscribers is
+controlled by the separate `cartToken` parameter), or stale-token
+cleanup behavior (`skipStaleCleanup`, a different parameter
+entirely).
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified as part of this task.

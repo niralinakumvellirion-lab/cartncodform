@@ -1,0 +1,131 @@
+=== CUSTOMERS SCROLL FIX AUDIT ===
+Generated: 2026-09-17
+
+Left panel minWidth: 0: yes
+Grid template uses minmax: yes
+Right panel overflowX hidden: yes
+Outer container overflowX hidden: yes
+Composers width constrained: yes
+frontend build: pass
+git push: done (4a4f7fb..07da686)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/screens/Customers.jsx in full (across two
+Read calls, due to file size) before making any edit, as instructed.
+
+
+====================================================================
+FIX 1 — Left panel container
+====================================================================
+Applied minWidth: 0 and overflow: 'hidden' to the OUTER wrapper div
+(the direct child of the 2-panel CSS Grid, previously a bare
+`<div>` with no style at all) rather than the inner card div one
+level down. This distinction matters: the outer wrapper is the
+actual CSS Grid ITEM here — grid items default to `min-width: auto`,
+which is exactly the browser behavior the task's own comment
+describes ("without minWidth: 0, CSS grid children don't shrink
+below their content size"), so this had to go on the grid item
+itself to have any effect. The inner `...DS.card` div is a normal
+block child of that wrapper, not a grid item, so putting minWidth:0
+there instead would not have addressed the actual grid-shrinking
+behavior.
+
+NOTE on how this interacts with the PREVIOUS task's fix (see
+audits/customers-columns-fix-audit.txt): that task deliberately gave
+the INNER card div its own `minWidth: 600` + `overflowX: 'auto'`, so
+the cramped 6-column table could scroll horizontally within itself
+on narrow viewports instead of squishing. This task's new outer
+wrapper now has `minWidth: 0` + `overflow: 'hidden'`. These are NOT
+in conflict — this is the standard nested-overflow pattern for
+exactly this situation: the outer grid item shrinks to fit its
+allotted grid track (minWidth: 0) and clips anything that doesn't
+fit (overflow: hidden), while the inner card still provides its own
+scrollable viewport (overflowX: auto) for the wider table content
+inside that clipped boundary. The net effect: the customer list's
+own internal table can still be scrolled horizontally to see all 6
+columns on a narrow screen, but that scrolling stays CONTAINED
+within the left panel's card — it no longer forces the whole page
+(or the 2-panel grid) to overflow horizontally. This is exactly what
+this task's title asks for ("no horizontal scroll" at the page level,
+while the previous task's own internal-table-scroll fix is
+preserved).
+
+
+====================================================================
+FIX 2 — Right panel width
+====================================================================
+gridTemplateColumns changed from '1fr 380px' to 'minmax(0, 1fr)
+360px' (desktop, when a customer is selected/loading), exactly as
+specified.
+
+
+====================================================================
+FIX 3 — Right panel overflow
+====================================================================
+Added width: '100%' and overflowX: 'hidden' to the sticky right-panel
+container (the `position: 'sticky', height: 'calc(100vh - 120px)', ...`
+div), exactly as specified. Left its existing overflowY: 'hidden'
+and all other properties untouched.
+
+
+====================================================================
+FIX 4 — Outer container
+====================================================================
+The outermost page container is the single `<div style={DS.page}>`
+wrapping the entire return statement. Rather than editing the shared
+DS.page token OBJECT itself (defined near the top of the file, in the
+same per-file duplicated-design-system-object pattern used by every
+other screen in this codebase), the two new properties were merged in
+at this one JSX call site via spread: `style={{ ...DS.page,
+overflowX: 'hidden', width: '100%' }}`. DS.page is only referenced
+once in this file (this exact element), so the practical effect is
+identical either way — spreading was chosen to keep the change
+scoped to "the outermost page container" as literally asked, without
+touching the reusable token object's own definition (consistent with
+how one-off overrides are already handled everywhere else in this
+file, e.g. `{...DS.card, borderLeft: ...}`).
+
+
+====================================================================
+FIX 5 — NotificationComposer and EmailComposer
+====================================================================
+Added width: '100%', boxSizing: 'border-box', overflowX: 'hidden' to
+both composers' own outer div (each component's top-level returned
+element), exactly as specified. Both composers' internal content
+(inputs, textareas, suggestion panels, send buttons) and all
+send()/apiSend logic were left completely untouched.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+`git diff` shows 9 insertions / 5 deletions across exactly 6 small,
+disjoint style edits (the 2 composer outer divs, the outer page div,
+the grid's gridTemplateColumns value, the left panel wrapper, and the
+right panel sticky div). No state, effect, API call, filter/search
+logic, StageBadge/ReachIcons, or any send/journey-loading logic was
+touched. `git status` after staging showed only
+frontend/app/admin/screens/Customers.jsx changed; the pre-existing
+unrelated dirty files (backend/__tests__/brain.test.js,
+frontend/lib/api.js) were left alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 17
+  routes generated, no errors.
+- git push origin main -- succeeded (4a4f7fb..07da686), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Only frontend/app/admin/screens/Customers.jsx was modified. No other
+file was changed.

@@ -1,0 +1,67 @@
+SELF-AUDIT — proxy-subscribe
+
+DEVIATION FROM LITERAL REQUEST
+--------------------------------
+Before implementing, read the full existing handler for
+backend/routes/push.js POST /subscribe-customer (lines 114-179, as this
+task instructed) and compared it against the literal proxy.js route given
+in the prompt. The literal snippet was missing two pieces of behavior
+present in the original:
+  1. The same-cartToken dedup cleanup (deleteMany of other rows sharing
+     cartToken but a different FCM token — prevents same-cart multi-row
+     accumulation).
+  2. The upsertProfile(...) identity-resolution call that feeds
+     subscriptions into the profile/journey/attribution system.
+Since this task also repoints ALL production subscribe traffic
+(saveToken() and resyncCartTokenBeacon() in the liquid file) to this new
+route, these omissions would have been a live functional regression, not
+a parallel/unused path. Flagged to user via AskUserQuestion; user selected
+"Add the route with full parity." Change below reflects that.
+
+One additional deviation NOT flagged (informational only): unlike every
+other route in proxy.js, the new /subscribe-customer route does not call
+verifyProxySignature(req.query). This was left as given in the prompt and
+not added, because the route it mirrors — backend/routes/push.js POST
+/subscribe-customer — is also unauthenticated (confirmed in a prior
+session turn), so this does not lower the actual security posture versus
+today; it's simply inconsistent with this file's own established pattern
+of guarding every other route with the App Proxy signature check.
+
+FILE 1: backend/routes/proxy.js
+---------------------------------
+Added a new route, POST /subscribe-customer, immediately before
+`module.exports = router;` (was the last line of the file). Body: the
+literal route given in the prompt (shop/token validation, oldToken
+deleteOne, findOneAndUpdate upsert), PLUS the two parity additions:
+  - after the upsert: the same cartToken-based deleteMany dedup cleanup
+    as routes/push.js, guarded by `if (normalizedCartToken)`.
+  - after that: the same upsertProfile(shop, {...}, {...}).catch(...)
+    fire-and-forget call as routes/push.js, requiring
+    ../services/profileService inline (matching how routes/proxy.js
+    already inline-requires ../services/profileService inside POST
+    /cod-order, rather than a top-level require).
+No other routes or lines in proxy.js were touched.
+
+FILE 2: extensions/cartncodform-embed/blocks/push-notifications.liquid
+-------------------------------------------------------------------------
+Three occurrences of the subscribe-customer URL changed from
+BACKEND_URL + '/api/push/subscribe-customer' (cross-origin, api.
+shopireachboost.com) to window.location.origin + '/apps/cartncodform/
+subscribe-customer' (same-origin App Proxy path):
+  1. saveToken() — the main POST call.
+  2. resyncCartTokenBeacon() — the navigator.sendBeacon(...) call.
+  3. resyncCartTokenBeacon() — the sendBeacon-unavailable fetch() fallback.
+No other lines in either function were changed.
+
+TESTS / COMMIT / DEPLOY
+-------------------------
+`cd backend && npm test`: 19 test suites, 151 tests, all passing.
+`git add backend/routes/proxy.js`, committed as "fix: add App Proxy
+subscribe-customer route to avoid CORS block on mobile" (2997c25), pushed
+to origin/main successfully — this push also carried the previous turn's
+unpushed commit (0abec9f, subscribe-customer debug logs), since neither
+had reached the remote yet.
+`shopify app deploy --allow-updates`: released as shopireachboost-ai-117.
+Theme-check reported the same pre-existing ParserBlockingScript/RemoteAsset
+warnings on the Firebase CDN <script> tags (lines 3-4), unrelated to this
+change; deploy succeeded.

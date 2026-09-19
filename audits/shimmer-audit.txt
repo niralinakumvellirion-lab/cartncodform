@@ -1,0 +1,281 @@
+=== SHIMMER AUDIT ===
+Generated: 2026-09-17
+
+Shimmer.jsx created: yes
+  ShimmerBox: yes
+  ShimmerCard: yes
+  ShimmerRow: yes
+  ShimmerTable: yes
+DashboardScreen shimmer: yes
+Customers shimmer: yes
+QueueScreen shimmer: yes
+ActivityScreen shimmer: yes
+AutomationScreen shimmer: yes
+frontend build: pass
+git push: done (309bb97..aa198da)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read all 6 listed files in full before making any change: Today.jsx
+(478 lines — reference only, not modified; note below), Dashboard
+Screen.jsx (1443 lines), Customers.jsx (1813 lines, in two parts),
+QueueScreen.jsx (already fully in context from the immediately
+preceding Phase 2 task — re-confirmed its `loading` block via a
+targeted grep rather than a full re-read, since nothing had touched
+the file since it was written this same session), AutomationScreen.jsx
+(472 lines), ActivityScreen.jsx (477 lines).
+
+NOTE ON "Today.jsx (already has skeleton)": Today.jsx's loading state
+(the "Planned for today" section, lines 584-595) is a set of plain
+grey `#f3f4f6` boxes with NO animation — there is no shimmer/animated
+effect anywhere in Today.jsx today, despite the task's own parenthetical
+suggesting it already has one. Today.jsx was given as reference only —
+the task's Parts A-F never list it as a file to modify — so it was
+correctly left untouched, but flagging this since "already has
+skeleton" reads as if it already has the animated effect this task
+adds everywhere else, and it does not.
+
+
+====================================================================
+PART A — Shimmer.jsx
+====================================================================
+Created frontend/app/admin/components/Shimmer.jsx (new directory) with
+all 4 exports exactly as given: ShimmerBox, ShimmerCard, ShimmerRow,
+ShimmerTable, plus the module-load-time stylesheet injection guarded
+by `document.getElementById('shimmer-style')`. No changes made to the
+given code.
+
+
+====================================================================
+PART B — DashboardScreen.jsx
+====================================================================
+Import added exactly as given: `import { ShimmerRow, ShimmerCard }
+from '../components/Shimmer';`. ShimmerCard ends up UNUSED in this
+file — Part B's own enumerated instructions only ever call for
+ShimmerRow (3 times: Store Performance cols=4, KPI cols=3, Activity
+cols=4), and never describe a ShimmerCard usage anywhere in Dashboard.
+Rather than manufacture an unrequested ShimmerCard placement (the
+closest candidates — "Most Viewed Products" and "Planned for today" —
+already have their own existing grey-bar skeletons tied to
+insightsLoading/todayLoading, which are separate loading flags this
+task never mentioned, and nesting ShimmerCard's own bordered/rounded
+box inside those sections' existing DS.card wrapper would create a
+card-inside-a-card visual artifact for no requested benefit), the
+import was kept literally as given and ShimmerCard was left unused.
+Next.js's build (see Verification below) does not fail or warn on
+this.
+
+Added `isRefreshing` state, and a small watcher effect (not given
+verbatim — the task's own sketch was just two comments, "// existing
+refresh logic" and "// after data loads: setIsRefreshing(false)"
+inside the click handler, which can't literally work: bumping
+refreshKey only triggers the date-filtered effect asynchronously and
+isn't awaitable at the click site, and loadInsights() is awaited
+internally but its own call site here isn't `await`ed either).
+Implemented the actual "after data loads" signal as a `useEffect`
+that watches `[isRefreshing, notifLoading, insightsLoading]` and
+clears isRefreshing once both flags have returned to false following
+a refresh — this correctly fires once BOTH of the refresh button's two
+underlying fetches (the date-filtered notifStats/activity effect and
+loadInsights()) have actually settled, not just one of them.
+
+Refresh button onClick updated to call `setIsRefreshing(true)` before
+the existing `setRefreshKey`/`loadInsights()` calls, per the given
+comment skeleton.
+
+All 3 named sections wrapped in `{isRefreshing ? <ShimmerRow cols={N}
+/> : (...)}`: Store Performance (cols=4), KPI row (cols=3 — note: the
+KPI row has 6 real tiles across repeat(3,1fr) i.e. 2 rows of 3; a
+ShimmerRow always renders exactly `cols` shimmer tiles in ONE row, so
+during a refresh the shimmer shows only 3 placeholder tiles where 6
+real ones will reappear — implemented literally per the given
+"cols={3}" spec rather than inventing a 2-row shimmer grid not asked
+for), Activity (cols=4, matches its real 4-tile grid exactly).
+
+On first load (isRefreshing stays false, only notifLoading/
+todayLoading/insightsLoading are true), the existing `notifLoading ?
+'—' : ...` per-tile fallbacks are unchanged and still show '—' as
+before — the shimmer only appears on an explicit Refresh click, per
+the task's own framing ("AND it's a refresh (not first load)").
+
+
+====================================================================
+PART C — Customers.jsx
+====================================================================
+Import added: `import { ShimmerTable } from '../components/Shimmer';`.
+Replaced the `loading ? [1,2,3,4,5].map(...) : ...` grey-bar skeleton
+(the only loading skeleton in this 1813-line file — confirmed via
+grep for "loading ?"/"skeleton"/"animate", one match) with
+`<ShimmerTable rows={8} />`, exactly as instructed.
+
+NOTE: this skeleton sits inside an existing outer card
+(`{...DS.card, padding:0, overflow:'hidden', overflowX:'auto',
+minWidth:600}`) that already has its own border/radius and a real
+column-header row rendered above it (unconditionally, for desktop).
+ShimmerTable renders its OWN white/bordered/rounded box, so during
+loading there is a card-within-a-card visual nesting (outer card's
+border, then ShimmerTable's own border immediately inside it) directly
+under the real header row. This is a minor cosmetic nesting, not a
+functional bug — implemented literally per the given instruction
+rather than stripping ShimmerTable's own border/radius to fit flush,
+since that wasn't asked for.
+
+A second, separate loading indicator exists in this file
+(journeyLoading, rendering a plain "Loading journey…" text panel in
+the right-hand customer-journey sidebar) — left untouched, since the
+task's Part C only describes "the loading skeleton (grey bars
+currently showing)" (singular), which matches only the profile-list
+skeleton just replaced, not this unrelated text-based indicator.
+
+
+====================================================================
+PART D — QueueScreen.jsx
+====================================================================
+Import added: `import { ShimmerCard } from '../components/Shimmer';`.
+Replaced the `loading ? [1,2,3].map(...) : ...` grey-bar skeleton
+(inside the collapsible "Sent Notifications" section added in the
+immediately preceding Phase 2 task) with 5 `<ShimmerCard key={i} />`
+components, exactly as instructed — no style overrides added (an
+earlier draft of this edit added inline style overrides to flatten
+ShimmerCard to look like table rows; reverted that in favor of the
+literal, unstyled component per the given instruction, accepting the
+resulting visual look — 5 stacked bordered/rounded cards rather than
+flat table rows — as the intended behavior).
+
+This `loading` flag is scoped to the ScheduledJob-based job list only
+(inside the collapsible section); the separate `festivalLoading` flag
+for the Calendar/Planning views (added last task) already has its own
+"Loading..." text state from that prior task and was not in scope for
+this task's Part D, which named only "loading state" (the file's
+pre-existing, singular `loading` variable).
+
+
+====================================================================
+PART E — ActivityScreen.jsx
+====================================================================
+Import added: `import { ShimmerRow, ShimmerTable } from
+'../components/Shimmer';`. Both used.
+
+Stat tiles: wrapped the whole 4-tile grid in `loading ? <ShimmerRow
+cols={...} /> : (...)`. DEVIATION FROM THE LITERAL SPEC: used
+`cols={isMobileView ? 2 : 4}` rather than a fixed `cols={4}`. The real
+(non-loading) tile grid is itself responsive (`repeat(2,1fr)` on
+mobile, `repeat(4,1fr)` on desktop, same file, few lines below), and
+every other section on this exact page (filter tabs, table/card list)
+is deliberately mobile-responsive too. A fixed 4-column shimmer row on
+a ~375px mobile viewport would render noticeably more cramped than the
+real content it's standing in for, immediately before/after it. Kept
+the shimmer responsive to match its own real counterpart's existing
+behavior; flagging as a deliberate, minor deviation from the literal
+"cols={4}" instruction rather than a silent change.
+
+Since the entire tile grid is now swapped for ShimmerRow during
+loading, the tiles' own inline `{loading ? '...' : (summary?.[key] ??
+0)}` fallback became dead code (that branch is only reached once
+`loading` is already false) — simplified to `{summary?.[key] ?? 0}`,
+a direct consequence of wrapping the section, not a separate change.
+
+Table: replaced the `loading ? [1,2,3].map(...) : ...` grey-bar
+skeleton with `<ShimmerTable rows={6} />`, exactly as instructed.
+
+
+====================================================================
+PART F — AutomationScreen.jsx
+====================================================================
+Import added: `import { ShimmerCard } from '../components/Shimmer';`.
+
+The task's Part F reads as two distinct behaviors under one heading:
+(1) "Find loading state (when config is being fetched)" + the
+ShimmerCard import, and (2) "When saving (saving state is true): show
+a subtle loading overlay on the save button area only (keep form
+visible, just disable inputs)" — these are two different state flags
+(`loading` vs `saving`) with two different treatments, not one
+instruction restated. Implemented both:
+
+1. Config-fetch loading (`loading || !config`): replaced the plain
+   one-line "Loading…" text with 4 stacked `<ShimmerCard rows={N} />`
+   components (rows 2/4/3/5), loosely mirroring the page's real
+   section structure (header+master-toggle, Send-delay section,
+   Real-time-triggers section, Active-signals section) once loaded.
+   The exact row counts are an approximation for visual density, not
+   a literal per-field mapping — the task didn't specify a count.
+
+2. Saving (`saving === true`): DID NOT reuse ShimmerCard/the shimmer
+   gradient for this — a content-shimmer placeholder does not fit
+   "keep form visible": the form's real values are already known and
+   already rendered; hiding them behind shimmer boxes while saving
+   would contradict "keep form visible, just disable inputs" (shimmer
+   boxes ARE a form of hiding content). Instead:
+   - Disabled inputs: added `opacity: saving ? 0.6 : 1, pointerEvents:
+     saving ? 'none' : 'auto'` to the master-toggle header row and to
+     all 3 `cardStyle` sections (Send delay, Real-time triggers,
+     Active signals) — this keeps every value visibly on screen
+     (satisfying "keep form visible") while making the ToggleSwitch/
+     DelayInput controls genuinely non-interactive during a save,
+     without threading a new `disabled` prop through those two
+     reusable components.
+   - Subtle overlay on the save button area only: added a light
+     `rgba(79,70,229,0.05)` tint scrim, absolutely positioned
+     (`inset:0`) inside the SECTION 6 save bar only, shown only when
+     `saving` is true. The save bar's existing `position: sticky`
+     already establishes a containing block for an absolutely-
+     positioned child (per the CSS spec, any position other than
+     static — sticky included — does), so no extra `position:
+     relative` wrapper was needed. The Save button's own pre-existing
+     "⏳ Saving..." text/color/disabled state does the primary
+     progress communication; this scrim is intentionally subtle
+     (5% opacity tint, no spinner/keyframe) per the task's own word
+     "subtle" and to avoid introducing a second animation dependency
+     (e.g. a `spin` keyframe) that Part A never defined.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+Only the 6 files this task's own git-add list names were staged and
+committed: frontend/app/admin/components/Shimmer.jsx (new),
+frontend/app/admin/dashboard/DashboardScreen.jsx,
+frontend/app/admin/screens/Customers.jsx,
+frontend/app/admin/queue/QueueScreen.jsx,
+frontend/app/admin/activity/ActivityScreen.jsx,
+frontend/app/admin/automation/AutomationScreen.jsx. `git status` after
+staging confirmed exactly these 6 paths; the pre-existing unrelated
+dirty files (backend/__tests__/brain.test.js, frontend/lib/api.js)
+were left alone, per standing practice. Today.jsx (read for reference
+per the task's own instruction) was not modified — it was never listed
+in Parts A-F or the git-add list.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 15 static
+  routes + 1 dynamic route generated, no errors, no unused-import
+  warnings surfaced for DashboardScreen's unused ShimmerCard import
+  (route sizes: /admin/dashboard 8.62kB->9.25kB, /admin/customers
+  11.1kB->11.6kB, /admin/queue 6.39kB->6.93kB, /admin/activity
+  3.94kB->4.51kB, /admin/automation 4.71kB->5.36kB — all modest
+  increases consistent with adding the shared Shimmer import + JSX).
+- git push origin main -- succeeded (309bb97..aa198da), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+No backend changes were needed or made — this task is frontend-only.
+This app has no automated frontend test suite (`cd backend && npm
+test` covers the backend only, unaffected by these changes and not
+re-run since no backend file was touched), so verification here is
+build-only, per the task's own stated verification step.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+6 files touched (5 modified, 1 created). No other file was touched.
+Manual visual verification of the shimmer animation in a live browser
+was not performed as part of this task (not requested, and this
+environment has no running dev server /authenticated Shopify session
+to click through) — verification here is limited to a clean production
+build and the code review documented above.

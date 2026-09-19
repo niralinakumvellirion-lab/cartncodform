@@ -1,0 +1,341 @@
+CART SIGNAL AUDIT - read-only, no changes
+============================================
+Generated: 2026-09-12
+
+NOTE ON CHARACTER SET: this file's own headings/prose are plain ASCII
+(dashes and equals signs only), per the request. Quoted CODE below is
+reproduced byte-for-byte from the source files as "EXACT CODE" was
+asked for, so a few source lines that themselves contain an em-dash in
+a comment or a Rupee sign (INR) inside a template literal are kept
+verbatim rather than substituted, since changing them would mean the
+code shown is no longer exactly what is in the file.
+
+
+====================================================================
+PART A - backend/services/signalEngine.js
+====================================================================
+
+--------------------------------------------------------------
+A1. How cart_abandon signal is computed - full function (lines 42-71)
+--------------------------------------------------------------
+Supporting helper used inside it, tokensOf() (lines 24-27), and the
+module-level requires (lines 1-4) are included first for context.
+
+  1	const Profile = require('../models/Profile');
+  2	const Signal = require('../models/Signal');
+  3	const AbandonedCustomer = require('../models/AbandonedCustomer');
+  4	const StorefrontEvent = require('../models/StorefrontEvent');
+  ...
+ 18	const MIN = 60 * 1000;
+ 19	const HOUR = 60 * MIN;
+ 20	const DAY = 24 * HOUR;
+ ...
+ 24	function tokensOf(profile) {
+ 25	  const ids = (profile && profile.identifiers) || {};
+ 26	  return [...(ids.sessionIds || []), ...(ids.cartTokens || [])].filter(Boolean);
+ 27	}
+ ...
+ 42	async function computeCartAbandon(profile, shopDomain) {
+ 43	  const carts = (profile.identifiers && profile.identifiers.cartTokens) || [];
+ 44	  if (!carts.length) return null;
+ 45
+ 46	  const cart = await AbandonedCustomer.findOne(
+ 47	    { shopDomain, sessionId: { $in: carts }, status: 'abandoned' },
+ 48	    null,
+ 49	    { sort: { createdAt: -1 } }
+ 50	  );
+ 51	  if (!cart) return null;
+ 52
+ 53	  // AbandonedCustomer has no updatedAt field -- createdAt is the abandon clock.
+ 54	  const ageMs = Date.now() - new Date(cart.createdAt).getTime();
+ 55	  if (ageMs < 60 * MIN) return null;
+ 56
+ 57	  let strength;
+ 58	  if (ageMs < 2 * HOUR) strength = 1.0;
+ 59	  else if (ageMs < 6 * HOUR) strength = 0.8;
+ 60	  else if (ageMs < 24 * HOUR) strength = 0.6;
+ 61	  else strength = 0.3;
+ 62
+ 63	  const item = (cart.cartItems && cart.cartItems[0]) || {};
+ 64	  const evidence = [
+ 65	    `Cart abandoned ${Math.round(ageMs / MIN)} minutes ago`,
+ 66	    `Cart value: [Rupee]${cart.cartValue != null ? cart.cartValue : 0}`,
+ 67	  ];
+ 68	  if (item.title) evidence.push(`Item: ${item.title}`);
+ 69
+ 70	  return sig('cart_abandon', strength, item.productId != null ? item.productId : null, evidence, 48 * HOUR);
+ 71	}
+
+(Line 66 in the actual file uses a literal Rupee sign character
+immediately before the template-literal ${...} -- replaced with
+"[Rupee]" here only in this ASCII-only audit file to honor the
+plain-ASCII instruction for this file; the source file itself is
+untouched and still contains the real character.)
+
+
+--------------------------------------------------------------
+A2. What query it uses to find the profile / cart
+--------------------------------------------------------------
+computeCartAbandon() does NOT itself query for the Profile -- it
+RECEIVES an already-loaded `profile` object as its first argument (the
+caller, computeSignalsForProfile(), does `Profile.findById(profileId)`
+elsewhere in this same file -- see module-scope orchestration further
+down, not reproduced here since it wasn't part of what was asked).
+
+What computeCartAbandon() DOES query is AbandonedCustomer, using:
+
+  const carts = (profile.identifiers && profile.identifiers.cartTokens) || [];
+  ...
+  const cart = await AbandonedCustomer.findOne(
+    { shopDomain, sessionId: { $in: carts }, status: 'abandoned' },
+    null,
+    { sort: { createdAt: -1 } }
+  );
+
+So the identifier used is profile.identifiers.CARTTOKENS (an array of
+Shopify cart tokens already resolved onto the Profile document), matched
+against AbandonedCustomer's own `sessionId` field via $in.
+
+IMPORTANT NAMING NOTE: despite being called `sessionId`, the
+AbandonedCustomer.sessionId field actually stores a SHOPIFY CART TOKEN
+in this codebase, not the ccfSessionId UUID used everywhere else. This
+was confirmed by tracing this exact query: it matches AbandonedCustomer
+.sessionId against profile.identifiers.cartTokens (cart tokens), never
+against profile.identifiers.sessionIds (the ccfSessionId UUIDs). This
+is a pre-existing, overloaded field name in the AbandonedCustomer model,
+not something introduced by this query.
+
+Does it use cartToken? YES (via profile.identifiers.cartTokens, matched
+  against AbandonedCustomer.sessionId).
+Does it use sessionId (the ccfSessionId UUID)? NO -- explicitly NOT used
+  by this function (tokensOf(), which combines both, is used by OTHER
+  signal functions in this same file -- checkout_abandon, browse_abandon,
+  high_intent, price_hesitation -- but NOT by computeCartAbandon()).
+Does it use customerId? NO -- customerId is never referenced anywhere
+  inside computeCartAbandon().
+
+
+--------------------------------------------------------------
+A3. How StorefrontEvents are linked to profiles for cart signals
+--------------------------------------------------------------
+computeCartAbandon() itself never touches the StorefrontEvent
+collection at all -- it only queries AbandonedCustomer (see A2). The
+StorefrontEvent model IS used by other signal functions in this same
+file (computeCheckoutAbandon, computeBrowseAbandon, computeHighIntent,
+computePriceHesitation), all via the shared tokensOf(profile) helper:
+
+  function tokensOf(profile) {
+    const ids = (profile && profile.identifiers) || {};
+    return [...(ids.sessionIds || []), ...(ids.cartTokens || [])].filter(Boolean);
+  }
+
+Example call site (computeCheckoutAbandon, for context on the pattern --
+not the cart_abandon function itself, since cart_abandon doesn't use
+StorefrontEvent):
+
+  const tokens = tokensOf(profile);
+  ...
+  const evt = await StorefrontEvent.findOne(
+    { shopDomain, type: 'reached_checkout', sessionId: { $in: tokens }, ts: { $gte: inMs(-24 * HOUR) } },
+    null,
+    { sort: { ts: -1 } }
+  );
+
+So for the signals that DO use StorefrontEvent, the link is
+StorefrontEvent.sessionId matched against EITHER
+profile.identifiers.sessionIds OR profile.identifiers.cartTokens
+(tokensOf() concatenates both arrays into one $in list). This is a
+SEPARATE mechanism from cart_abandon's own AbandonedCustomer-based
+lookup in A2.
+
+
+====================================================================
+PART B - backend/routes/events.js
+====================================================================
+
+--------------------------------------------------------------
+B1. POST /api/events handler - full (lines 13-83, plus the doc
+    comment above it, lines 6-12)
+--------------------------------------------------------------
+  6	/**
+  7	 * POST /api/events
+  8	 * Body: { shopDomain, sessionId?, customerId?, token?, events: [...] }
+  9	 * Each event: { type, path, pageType, meta, ts }
+ 10	 * Accepts a batch of events from the storefront JS.
+ 11	 * Also callable via navigator.sendBeacon (text/plain body).
+ 12	 */
+ 13	router.post('/', async (req, res) => {
+ 14	  try {
+ 15	    let body = req.body;
+ 16
+ 17	    // sendBeacon sends text/plain -- parse it manually if needed.
+ 18	    if (typeof body === 'string') {
+ 19	      try { body = JSON.parse(body); } catch { return res.status(400).end(); }
+ 20	    }
+ 21
+ 22	    const { shopDomain, sessionId, customerId, token, events } = body;
+ 23
+ 24	    if (!shopDomain || !Array.isArray(events) || events.length === 0) {
+ 25	      return res.status(400).json({ error: 'shopDomain and events[] required' });
+ 26	    }
+ 27
+ 28	    const shop = shopDomain.trim().toLowerCase();
+ 29	    const docs = events.map(e => ({
+ 30	      shopDomain: shop,
+ 31	      sessionId:  sessionId  || undefined,
+ 32	      customerId: customerId || undefined,
+ 33	      token:      token      || undefined,
+ 34	      type:       e.type     || 'unknown',
+ 35	      path:       e.path     || undefined,
+ 36	      pageType:   e.pageType || undefined,
+ 37	      meta:       e.meta     || undefined,
+ 38	      ts:         e.ts ? new Date(e.ts) : new Date(),
+ 39	    }));
+ 40
+ 41	    await StorefrontEvent.insertMany(docs, { ordered: false });
+ 42	    console.log(`[events] Saved ${docs.length} event(s) for ${shop}`);
+ 43
+ 44	    // Phase C2 -- on-ingest identity resolution + signal recompute. Fire-and-
+ 45	    // forget: the beacon response must not wait on this.
+ 46	    {
+ 47	      const { upsertProfile } = require('../services/profileService');
+ 48	      const { computeSignalsForProfile } = require('../services/signalEngine');
+ 49	      upsertProfile(shop, {
+ 50	        sessionId: sessionId || null,
+ 51	        customerId: customerId || null,
+ 52	        pushToken: token || null,
+ 53	      }, { lastSeenAt: new Date() })
+ 54	        .then((profile) => {
+ 55	          if (profile?._id) {
+ 56	            computeSignalsForProfile(profile._id, shop)
+ 57	              .catch((err) => console.error('[signals] events ingest error:', err.message));
+ 58	          }
+ 59	        })
+ 60	        .catch((err) => console.error('[profile] events upsert error:', err.message));
+ 61	    }
+ 62
+ 63	    // Phase F -- a page_view from a suppressed profile lifts push suppression.
+ 64	    // Fully fire-and-forget: the beacon response goes out immediately.
+ 65	    if (sessionId && events.some((e) => e.type === 'page_view')) {
+ 66	      const { clearPushSuppression } = require('../services/pushHygiene');
+ 67	      const Profile = require('../models/Profile');
+ 68	      Profile.findOne({ shopDomain: shop, 'identifiers.sessionIds': sessionId })
+ 69	        .then((profile) => {
+ 70	          if (profile) {
+ 71	            clearPushSuppression(profile._id, shop)
+ 72	              .catch((err) => console.error('[hygiene] resubscribe error:', err.message));
+ 73	          }
+ 74	        })
+ 75	        .catch((err) => console.error('[hygiene] resubscribe lookup error:', err.message));
+ 76	    }
+ 77
+ 78	    return res.status(200).json({ success: true });
+ 79	  } catch (err) {
+ 80	    console.error('[events] POST /api/events error:', err.message);
+ 81	    return res.status(500).json({ error: 'Failed to save events' });
+ 82	  }
+ 83	});
+
+
+--------------------------------------------------------------
+B2. How it links an incoming event to a profile - what identifiers
+--------------------------------------------------------------
+Two separate identity-linking things happen in this one handler:
+
+  1. Every StorefrontEvent DOCUMENT (docs array, lines 29-39) is saved
+     with whatever `sessionId`, `customerId`, `token` the storefront's
+     top-level request body supplied -- these are NOT per-event, they
+     are the SAME three values applied to every event in the batch.
+     No cartToken field exists on StorefrontEvent at all (confirmed:
+     not present in the docs mapping).
+
+  2. Separately (lines 46-61), it calls:
+       upsertProfile(shop, { sessionId: sessionId||null, customerId: customerId||null, pushToken: token||null }, { lastSeenAt: new Date() })
+     This is what actually links the event batch's sessionId/customerId/
+     token into a Profile document's identifiers (via
+     services/profileService.js's identity-resolution logic, which
+     merges by customerId -> email -> phone -> cartToken -> sessionId ->
+     pushToken priority -- not shown here since that file wasn't part of
+     this task, but its identifier list is directly relevant: it never
+     receives a cartToken from this call site AT ALL, since this route
+     never extracts one from the request body).
+
+So: identifiers used to link an incoming event to a profile = sessionId,
+customerId, pushToken (called `token` in the request body). cartToken is
+NEVER used or even read anywhere in this file's POST / handler.
+
+
+--------------------------------------------------------------
+B3. What happens specifically for event type 'add_to_cart'
+--------------------------------------------------------------
+Nothing type-specific happens for 'add_to_cart' inside this handler.
+The docs.map() at lines 29-39 treats every event identically regardless
+of `e.type` -- 'add_to_cart' is stored exactly like any other event type
+(page_view, product_view, etc.), just with `type: 'add_to_cart'` and
+whatever `meta` the storefront sent (per earlier audits, e.g.
+{ productId, quantity, url }).
+
+The ONLY type-conditional branch in this whole handler checks for
+'page_view', not 'add_to_cart' (lines 65-76, the push-suppression-lift
+logic) -- add_to_cart events do not trigger any special-cased logic in
+this file. In particular, add_to_cart does NOT cause a cartToken to be
+attached to the Profile from this route (consistent with B2 -- this
+route never reads or forwards a cartToken at all, for any event type).
+
+
+====================================================================
+PART C - backend/models/Profile.js
+====================================================================
+
+--------------------------------------------------------------
+C1. identifiers field definition - full (lines 15-22, with the
+    model's own priority-order doc comment above it, lines 9-10)
+--------------------------------------------------------------
+  9	 * Merge priority (identity resolution):
+ 10	 *   customerId -> email -> phone -> cartToken -> ccfSessionId -> pushToken
+ ...
+ 15	  identifiers: {
+ 16	    customerId: { type: String, default: null },
+ 17	    emails: [{ type: String, lowercase: true, trim: true }],
+ 18	    phones: [{ type: String }],
+ 19	    sessionIds: [{ type: String }], // ccfSessionIds (stable UUIDs)
+ 20	    cartTokens: [{ type: String }],
+ 21	    pushTokens: [{ type: String }], // FCM tokens
+ 22	  },
+
+Arrays stored: emails, phones, sessionIds (ccfSessionId UUIDs, per the
+inline comment), cartTokens, pushTokens (FCM tokens). customerId is a
+single scalar String, not an array (only one Shopify customer per
+profile). All array fields are indexed sparsely for identity-resolution
+lookups (lines 71-77, not reproduced in full here since only the field
+definition itself was asked for):
+
+ 71	// Identity-resolution lookups -- one per identifier field, all sparse.
+ 72	profileSchema.index({ shopDomain: 1, 'identifiers.customerId': 1 }, { sparse: true });
+ 73	profileSchema.index({ shopDomain: 1, 'identifiers.emails': 1 }, { sparse: true });
+ 74	profileSchema.index({ shopDomain: 1, 'identifiers.phones': 1 }, { sparse: true });
+ 75	profileSchema.index({ shopDomain: 1, 'identifiers.cartTokens': 1 }, { sparse: true });
+ 76	profileSchema.index({ shopDomain: 1, 'identifiers.sessionIds': 1 }, { sparse: true });
+ 77	profileSchema.index({ shopDomain: 1, 'identifiers.pushTokens': 1 }, { sparse: true });
+
+
+====================================================================
+SUMMARY - how this all connects (read-only synthesis, no code changed)
+====================================================================
+- cart_abandon (Part A) depends ENTIRELY on profile.identifiers.cartTokens
+  being populated -- it never looks at sessionIds, and it never queries
+  StorefrontEvent at all (it queries AbandonedCustomer instead).
+- The generic event-ingest route, POST /api/events (Part B), is one of
+  the main paths that calls upsertProfile() to build up a profile's
+  identifiers -- but it ONLY ever supplies sessionId, customerId, and
+  pushToken to that call. It never reads or forwards a cartToken, for
+  ANY event type, including 'add_to_cart'.
+- Profile.identifiers.cartTokens (Part C) is therefore populated by some
+  OTHER ingest path than this one (e.g. the push-subscription routes,
+  per earlier audits) -- not by the generic /api/events pipe that
+  add_to_cart events flow through.
+- Net effect: an add_to_cart event alone, ingested via POST /api/events,
+  does not by itself cause profile.identifiers.cartTokens to gain an
+  entry -- so cart_abandon cannot fire off of that ingestion path alone,
+  regardless of how many add_to_cart events a profile has, unless a
+  cartToken reached that profile via a different route.

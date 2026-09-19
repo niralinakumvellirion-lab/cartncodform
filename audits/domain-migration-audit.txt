@@ -1,0 +1,133 @@
+=== DOMAIN MIGRATION AUDIT ===
+Generated: 2026-09-16
+
+STATUS: Code changes applied and committed LOCALLY only. git push
+and vercel --prod were deliberately NOT run — see "HELD BACK" section
+below. This deviates from the task's literal steps by design, per
+explicit user confirmation mid-task.
+
+Files changed (8):
+  shopify.app.toml
+  extensions/cartncodform-embed/blocks/push-notifications.liquid
+  backend/routes/auth.js
+  backend/server.js
+  backend/utils/email.js
+  backend/routes/push.js
+  frontend/public/firebase-messaging-sw.js
+  frontend/app/admin/screens/Journey.jsx
+
+Replacement 1 (backend URL, cartncodform-backend.onrender.com ->
+api.shopireachboost.com): 8 occurrences in 3 files
+  shopify.app.toml: 6 (redirect_urls, 4 webhook uris, app_proxy url)
+  extensions/cartncodform-embed/blocks/push-notifications.liquid: 1
+    (BACKEND_URL constant)
+  backend/routes/auth.js: 1 (a code comment documenting the expected
+    BACKEND_URL value — not a functional change, since the real
+    value is read from process.env.BACKEND_URL at runtime, not
+    hardcoded here)
+
+Replacement 2 (frontend URL, cartncodform-beryl.vercel.app ->
+app.shopireachboost.com): 4 occurrences in 3 files
+  shopify.app.toml: 1 (application_url)
+  frontend/public/firebase-messaging-sw.js: 2 (DASHBOARD_URL
+    constant, and the notification-click "focus existing tab" origin
+    match)
+  backend/server.js: 1 (CORS allowedOrigins entry)
+
+Replacement 3 (plain email, onboarding@resend.dev ->
+notifications@shopireachboost.com): 2 occurrences in 2 files
+  backend/utils/email.js: 1 (the FROM constant's fallback value)
+  frontend/app/admin/screens/Journey.jsx: 1 (static "Sent from: ..."
+    display line in EmailComposer)
+
+Replacement 4 (combined, "ShopireachboostAI <onboarding@resend.dev>"
+-> "ShopireachboostAI <notifications@shopireachboost.com>"):
+2 occurrences in 2 files
+  backend/routes/push.js: 1 (sendJourneyEmail's resend.emails.send
+    `from` field)
+  backend/utils/email.js: 1 (a second, separate resend.emails.send
+    call's `from` field)
+
+Excluded per task instructions (verified, not just assumed): .env
+files (backend/.env.example, frontend/.env.example both still
+contain the old values — untouched), audits/ directory (all matches
+left as historical record), node_modules/ and .next/ (never
+searched/matched — ripgrep respects .gitignore, which excludes
+both), no check-*.js/test-*.js scripts contained any of the 4
+target values in the first place (confirmed via search — none
+needed excluding in practice), README files (none of the 4 target
+values appear in any README currently, since the earlier brand-
+rename task already updated README wording separately from these
+URLs/emails).
+
+Also confirmed NOT touched, correctly out of scope per the task's
+own replacement list (these are DIFFERENT strings, not literal
+matches for any of the 4 given old values): the
+`cartncodform`-branded subpath/handle/path strings in
+shopify.app.toml (subpath = "cartncodform", handle =
+"cartncodform-push", path = "extensions/cartncodform-embed") and the
+extensions/cartncodform-embed/ directory name itself — none of the
+4 replacement patterns match these (they're not full URLs), so per
+a strict literal search-and-replace scope they were correctly left
+alone. (Whether they SHOULD also change as part of a full domain/
+brand migration is a separate question outside this task's literal
+4 replacements — not addressed here.)
+
+node --check: pass
+  backend/routes/auth.js, backend/server.js, backend/utils/email.js,
+  backend/routes/push.js — all 4 changed backend .js files passed.
+
+npm test: 151/151 passing
+
+frontend build: pass (Compiled successfully, all 16 routes
+generated, no errors)
+
+git push: NOT DONE — held back deliberately, see below.
+vercel deploy: NOT DONE — held back deliberately, see below.
+
+
+====================================================================
+HELD BACK — git push and vercel --prod deliberately not run
+====================================================================
+
+Before making any change, I flagged that these 4 replacements are
+NOT just display-text/branding (unlike the earlier CartnCodForm ->
+ShopireachboostAI rename task) — they are load-bearing
+infrastructure URLs and a sending-email domain:
+
+- shopify.app.toml's backend-URL entries are the actual OAuth
+  redirect_uri, all 4 webhook delivery URIs (including the 3
+  GDPR-mandatory compliance topics), and the app_proxy URL Shopify
+  calls for live storefront traffic (push prompt, discount
+  generation, COD form).
+- backend/server.js's frontend-URL entry is the CORS allowlist entry
+  that lets the real admin dashboard call the backend at all.
+- The email replacements require shopireachboost.com to be a Resend-
+  verified sending domain (SPF/DKIM), or every outgoing transactional
+  email (abandoned-cart reminders, COD order alerts, journey emails)
+  starts failing at send time.
+
+If api.shopireachboost.com / app.shopireachboost.com are not yet
+real, DNS-configured custom domains pointed at the actual Render/
+Vercel deployments, and shopireachboost.com is not yet verified in
+Resend, then pushing this commit and deploying it live would break
+OAuth install/reinstall, all webhook delivery (including GDPR
+compliance webhooks), the storefront app proxy, CORS-gated admin API
+calls, and all outgoing email — for the real installed merchant —
+immediately, with no way to observe or verify any of that
+infrastructure state from inside this repo/session.
+
+I asked the user directly whether shopireachboost.com is already
+live on Render/Vercel/Resend. Their answer: "Not yet -- hold off on
+deploying" -- with explicit instruction to apply the code
+replacements now (so they're ready) but NOT push to origin/main or
+run vercel --prod until the domain is actually live.
+
+Per that explicit instruction: all 8 files were edited and verified
+(node --check, npm test, frontend build all passing) and committed
+to the LOCAL main branch (commit 9f05120, on top of 3b3679c) -- but
+NOT pushed to origin, and `cd frontend && npx vercel --prod` was NOT
+run. The working tree is clean (everything is committed locally);
+the only outstanding step is `git push origin main` followed by the
+Vercel deploy, once api.shopireachboost.com / app.shopireachboost.com
+are confirmed live and shopireachboost.com is verified in Resend.

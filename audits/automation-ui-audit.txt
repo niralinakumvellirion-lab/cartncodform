@@ -1,0 +1,240 @@
+AUTOMATION UI AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-15
+File read: frontend/app/admin/automation/AutomationScreen.jsx
+(in full, 502 lines)
+
+====================================================================
+1. SIX SECTIONS - layout hierarchy summary
+====================================================================
+
+Overall wrapper (lines 243-494):
+  <div> padding, maxWidth 900px, centered
+    Header (lines 245-253): <h1>Automation</h1> +
+      subtitle paragraph "Control when and how notifications are
+      sent automatically"
+
+--- SECTION 1 - Master switch (lines 255-272) ---
+  <div style={cardStyle}>
+    flex row, space-between:
+      left: title "Automation enabled" + description text
+        (explains manual sends from Journey still work when off)
+      right: <ToggleSwitch on={config.enabled} .../>
+
+--- SECTION 2 - Brain run time (lines 274-305) ---
+  <div style={cardStyle}>
+    title "Daily automation time" + description
+    flex row (wraps): two <select style={selectStyle}>
+      - hour select (24 options, via formatHour12())
+      - minute select (4 options: :00/:15/:30/:45)
+    footer line: "Runs daily at {formatRunTime(...)} IST"
+
+--- SECTION 3 - Signal delays (lines 307-353) ---
+  <div style={cardStyle}>
+    title "Send delay after trigger" + description
+    flex column, gap 12px, 4 rows:
+      1. Cart abandoned    -> <DelayInput value={cartAbandonDelay}/>
+      2. Checkout abandoned -> <DelayInput value={checkoutAbandonDelay}/>
+      3. Browse abandoned  -> <DelayInput value={browseAbandonDelay}/>
+      4. Website visit (label + "Send when customer visits the
+         store" sub-line) -> <DelayInput value={pageVisitDelay||60}/>
+    All 4 rows use the same DelayInput component (see section 4
+    below) instead of a fixed-option <select>.
+
+--- SECTION 4 - Real-time triggers (lines 355-430) ---
+  <div style={cardStyle}>
+    title "Send immediately" + description
+    flex column, gap 12px, 3 rows:
+      1. Cart abandon (title+desc) -> <ToggleSwitch
+         on={realtimeTriggers.cart_abandon}/>
+      2. Checkout abandon (title+desc) -> <ToggleSwitch
+         on={realtimeTriggers.checkout_abandon}/>
+      3. Website visit (title+desc) -> hand-rolled checkbox-based
+         toggle (NOT the ToggleSwitch component): a <label> wrapping
+         a visually-hidden <input type="checkbox"> plus two styled
+         <span> elements (track + thumb) that react to
+         realtimeTriggers.page_visit. Track color is #4f46e5
+         (indigo) when on, #d1d5db when off.
+
+--- SECTION 5 - Signal controls (lines 432-466) ---
+  <div style={cardStyle}>
+    title "Active signals" + description
+    CSS grid (2 columns desktop / 1 column mobile via
+    isMobileView), gap 12px
+    Maps SIGNAL_ITEMS (13 entries) to a card each:
+      background #f9fafb, border, rounded, flex row space-between:
+        left: label (bold) + desc (muted, small)
+        right: <ToggleSwitch on={enabledSignals[item.key]}/>
+
+--- SECTION 6 - Save button (lines 468-492) ---
+  flex row: single full-width <button onClick={saveConfig}>
+    text toggles "Save automation settings" / "Saving..." while
+    saving; disabled while saving; background goes gray (#9ca3af)
+    while saving, else dark (#111827)
+  Below it, conditional <div> showing saveResult.msg in green
+  (#16a34a) on success or red (#dc2626) on failure, auto-clears
+  after 3s via setTimeout.
+
+Sections not related to any <select>/<DelayInput>/<ToggleSwitch>
+control: only the Header and the loading state (lines 235-241,
+a simple "Loading..." div shown while config is null or loading
+is true, rendered instead of all 6 sections).
+
+====================================================================
+2. SHARED STYLES CURRENTLY DEFINED
+====================================================================
+
+cardStyle (lines 82-85, module-level const, used by all 6 section
+wrappers - SECTION 1 through SECTION 5, not SECTION 6 which has
+its own inline flex style instead):
+  {
+    background: '#fff', border: '1px solid #e5e7eb',
+    borderRadius: '10px', padding: '20px 24px', marginBottom: '16px',
+  }
+
+selectStyle (lines 497-501, module-level const, defined at the
+VERY BOTTOM of the file, after the component's closing brace -
+only used by the two <select> elements in SECTION 2, hour/minute;
+no longer used in SECTION 3 since DelayInput replaced those
+selects, though DelayInput's own internal <select> for
+minutes/hours has its own separate inline style object, not this
+one):
+  {
+    padding: '8px 12px', fontSize: '13px', color: '#111827',
+    border: '1px solid #e5e7eb', borderRadius: '8px',
+    outline: 'none', background: '#fff',
+  }
+
+No other shared/module-level style objects exist in this file.
+DelayInput's internal input/select styles (lines 119-123 and
+131-135) and the Website-visit realtime toggle's track/thumb
+styles (lines 414-425) are both defined inline, per-instance,
+not hoisted to shared constants.
+
+====================================================================
+3. ToggleSwitch COMPONENT - full code (lines 10-27)
+====================================================================
+
+function ToggleSwitch({ on, onClick }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        width: '44px', height: '24px', borderRadius: '12px', cursor: 'pointer',
+        background: on ? '#16a34a' : '#d1d5db', position: 'relative',
+        transition: 'background 0.2s', flexShrink: 0,
+      }}
+    >
+      <div style={{
+        position: 'absolute', top: '3px', left: on ? '23px' : '3px',
+        width: '18px', height: '18px', borderRadius: '50%', background: '#fff',
+        transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+      }} />
+    </div>
+  );
+}
+
+Used 15 times total across the file: SECTION 1 master switch,
+SECTION 4's first 2 real-time toggles (cart_abandon,
+checkout_abandon - NOT the 3rd, Website visit, which uses its
+own separate hand-rolled markup instead), and all 13 SECTION 5
+signal toggles. "On" color is #16a34a (green).
+
+====================================================================
+4. DelayInput COMPONENT - full code (lines 90-142)
+====================================================================
+
+function DelayInput({ value, onChange }) {
+  // value is in minutes
+  // Convert to display: if divisible by 60 show hours, else minutes
+  const [amount, setAmount] = useState(
+    value >= 60 && value % 60 === 0 ? value / 60 : value
+  );
+  const [unit, setUnit] = useState(
+    value >= 60 && value % 60 === 0 ? 'hours' : 'minutes'
+  );
+
+  function handleChange(newAmount, newUnit) {
+    const mins = newUnit === 'hours'
+      ? newAmount * 60
+      : newAmount;
+    onChange(mins);
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+      <input
+        type="number"
+        min="1"
+        max="999"
+        value={amount}
+        onChange={(e) => {
+          const v = Math.max(1, parseInt(e.target.value) || 1);
+          setAmount(v);
+          handleChange(v, unit);
+        }}
+        style={{
+          width: 64, padding: '6px 8px', borderRadius: 6,
+          border: '1px solid #d1d5db', fontSize: 13,
+          textAlign: 'center',
+        }}
+      />
+      <select
+        value={unit}
+        onChange={(e) => {
+          setUnit(e.target.value);
+          handleChange(amount, e.target.value);
+        }}
+        style={{
+          padding: '6px 8px', borderRadius: 6,
+          border: '1px solid #d1d5db', fontSize: 13,
+          background: '#fff',
+        }}
+      >
+        <option value="minutes">minutes</option>
+        <option value="hours">hours</option>
+      </select>
+    </div>
+  );
+}
+
+Used 4 times in SECTION 3: cartAbandonDelay, checkoutAbandonDelay,
+browseAbandonDelay, pageVisitDelay. Local amount/unit state is
+initialized once from the incoming `value` prop (minutes) on
+mount and does not re-sync if `value` changes externally after
+that (no useEffect watching `value`) - not currently an issue
+since config is only ever set once per screen load (GET response
+or DEFAULT_CONFIG) and these fields are only otherwise mutated by
+this same component's own onChange, but noting it as a structural
+fact of the component, not a bug being fixed under this audit-only
+task.
+
+====================================================================
+5. SIGNAL_ITEMS ARRAY - full (lines 53-67)
+====================================================================
+
+const SIGNAL_ITEMS = [
+  { key: 'cart_abandon', label: 'Cart left behind', desc: "Customer added items but didn't complete checkout" },
+  { key: 'checkout_abandon', label: 'Checkout left behind', desc: "Customer reached checkout but didn't finish" },
+  { key: 'browse_abandon', label: "Browsed, didn't add", desc: 'Customer viewed products without adding to cart' },
+  { key: 'high_intent', label: 'Keeps coming back', desc: 'Customer has viewed the same product multiple times' },
+  { key: 'price_hesitation', label: 'Stopped at price', desc: 'Customer viewed the price and left without buying' },
+  { key: 'lapsing', label: 'Going quiet', desc: "Customer hasn't been active in a while" },
+  { key: 'winback', label: 'Been a while', desc: "Long-time customer who hasn't returned recently" },
+  { key: 'email_capture', label: 'Ask for email', desc: 'Prompt anonymous visitors for their email' },
+  { key: 'post_purchase_d3', label: '3 days after buying', desc: 'Follow up a few days after a purchase' },
+  { key: 'price_drop', label: 'Price dropped', desc: "Notify when a saved item's price goes down" },
+  { key: 'back_in_stock', label: 'Back in stock', desc: 'Notify when an out-of-stock item is available again' },
+  { key: 'cod_to_prepaid', label: 'Offer prepaid on COD', desc: 'Encourage COD customers to pay online next time' },
+  { key: 'page_visit', label: 'Website visit', desc: 'Send when customer visits the store' },
+];
+
+13 entries total. Mapped in SECTION 5 to render the signal-toggle
+grid; item.key is also used elsewhere in the file wherever a
+signal-keyed lookup is needed (enabledSignals[item.key] in
+SECTION 5's ToggleSwitch).
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified as part of this task.

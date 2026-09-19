@@ -1,0 +1,158 @@
+=== REMOVE PHONE AUDIT ===
+Fix 1 - liquid:
+  ccfShowPhoneField() returns false: yes
+  Phone input removed from ccfBuildDiscountFields(): yes
+  Phone var removed from allow handler: yes
+  Action simplified to email only: yes (both Branch A/capAction and
+    Branch B/action)
+Fix 2 - Settings.jsx phone hidden: NOT FOUND -- grepped the whole file
+  for "phone"/"Phone" (case-insensitive): zero matches anywhere.
+  Settings.jsx only handles popup APPEARANCE (colors, layout, images,
+  text) and voice/frequency settings -- it has no discount-rule UI at
+  all (that lives entirely in Discounts.jsx, per the codebase's own
+  separation of concerns). No change made to this file, per the task's
+  own "hide it from UI" instruction having nothing to act on. See
+  DEVIATION section below re: what WAS found and fixed instead.
+Fix 3 - Discounts.jsx phone hidden: yes -- both phoneDiscount ("Phone
+  number") AND bothDiscount ("Email + Phone") toggle cards hidden from
+  render (see DEVIATION section below for why both, not just the one
+  literally named).
+node --check liquid: pass
+frontend build: pass (npm run build -- compiled successfully, 14
+  static pages, /admin/discounts grew 2.99 kB -> 3.03 kB, no errors)
+git push: done (commit 8b7a78e, 7f8dd51..8b7a78e main -> main)
+shopify deploy: cartncodform-105 [1]
+  https://dev.shopify.com/dashboard/232824361/apps/415894044673/versions/1127762460673
+
+
+FIX 1 - EXACT CHANGES (extensions/cartncodform-embed/blocks/push-notifications.liquid)
+=========================================================================
+1. ccfShowPhoneField():
+     function ccfShowPhoneField() {
+       return false;
+     }
+
+2. ccfBuildDiscountFields() -- the shared field-builder (used by the
+   SPLIT layout): the `if (ccfShowPhoneField()) { ... }` block that
+   created the #ccf-phone-input <input type="tel"> was deleted
+   entirely. The email input block is unchanged.
+
+3. The allow-button click handler (showSoftPrompt()):
+   - `var phoneEl = document.getElementById('ccf-phone-input');` and
+     `var phone = phoneEl && phoneEl.value ? phoneEl.value.trim() :
+     '';` removed.
+   - Branch A (Notification.permission === 'granted', discount-capture-
+     only path): `capAction` detection simplified from a 4-line
+     email/phone/both cascade to `var capAction = 'push'; if (email)
+     capAction = 'email';`. The `phone: phone,` key was also removed
+     from the JSON.stringify() body sent to /generate-discount in this
+     branch (see DEVIATION note 1 below -- this was a necessary
+     consequence of removing the `phone` variable, not separately
+     named by the task).
+   - Branch B (new-subscriber flow, after Notification.requestPermission
+     succeeds): same simplification applied to `action` detection, and
+     the same `phone: phone,` removal from its own JSON.stringify()
+     body.
+
+4. Not explicitly named by the task, but fixed for completeness (see
+   DEVIATION note 2 below): a SECOND, separate phone-input-building
+   block existed inside showSoftPrompt()'s "card" layout branch (its
+   own comment: "Card builds its own inline email/phone inputs...
+   instead of the shared ccfBuildDiscountFields()") -- this
+   #ccf-phone-input <input type="tel"> block was also deleted.
+   injectProductNudge() (lines 1369+ after all these edits) was
+   confirmed completely untouched -- it has its own separate
+   #ccf-nudge-phone field, own action-detection cascade, and own
+   fetch body, all outside the scope of every edit above.
+
+
+DEVIATIONS - both necessary, verified by reading the actual code before
+and after each change, not guessed
+=========================================================================
+1. `phone: phone,` removed from BOTH generate-discount request bodies.
+   The task's literal instructions named removing the `phoneEl`/`phone`
+   variable declarations and simplifying the action-detection cascades,
+   but never mentioned the two `body: JSON.stringify({ action: ...,
+   email: email, phone: phone, ... })` calls that also reference
+   `phone`. Once the `phone` variable declaration was removed (as
+   explicitly instructed), these two references would throw
+   `ReferenceError: phone is not defined` the instant a customer clicks
+   Allow -- a guaranteed runtime crash on the app's own core discount-
+   capture flow, not a cosmetic gap. Removed `phone: phone,` from both
+   JSON bodies (leaving `action`, `email`, `sessionId`, `cartToken`
+   unchanged). Per "DO NOT touch backend discount logic": the backend's
+   generateDiscount() (backend/routes/discounts.js, unmodified by this
+   task) already reads `body.phone` defensively (`const phone =
+   body.phone ? String(body.phone).trim() : '';`), so a request that
+   simply omits the `phone` key entirely is already handled gracefully
+   server-side -- no backend change was needed or made.
+
+2. The "card" layout's own duplicate phone-input block (item 4 above)
+   was removed even though the task's Fix 1 instructions only
+   explicitly named ccfBuildDiscountFields(). Read the file in full
+   while implementing this fix (not just the two spots the task named)
+   and found this second, functionally-identical #ccf-phone-input
+   block, gated behind the same ccfShowPhoneField() (now hard-false)
+   used for the SPLIT/banner layouts' shared field-builder. Two
+   reasons this was fixed rather than left alone: (a) it becomes dead
+   code the moment ccfShowPhoneField() always returns false, so leaving
+   it in place has zero functional benefit and only adds confusion for
+   a future reader wondering why an unreachable phone input still
+   exists; (b) the task's own stated goal is "Remove phone number field
+   from popup completely" -- leaving one of two near-identical
+   phone-input blocks in place, purely because it happened to live in a
+   different popup layout branch than the one explicitly named, would
+   not meet that stated goal. Confirmed via `function injectProductNudge`
+   / `function showSoftPrompt` line positions that this block sits
+   inside showSoftPrompt() (not injectProductNudge()), so it is not the
+   "separate phone field handling" the task explicitly excluded.
+
+3. Fix 3 hides BOTH phoneDiscount AND bothDiscount toggle cards from
+   Discounts.jsx, not just the literal "phone discount toggle card."
+   Read Discounts.jsx in full: DISCOUNT_ITEMS has exactly 4 entries --
+   pushDiscount, emailDiscount, phoneDiscount ("📱 Phone number"), and
+   bothDiscount ("⭐ Email + Phone... Customer provides both email and
+   phone"). With the popup's phone input now removed completely (Fix
+   1), leaving "Email + Phone" toggleable and enabled-by-default-
+   visible in the merchant admin UI would be actively misleading: a
+   merchant could enable it expecting phone capture + a "both" discount
+   tier, and the popup would silently never collect a phone number at
+   all (the discount config itself would still technically function on
+   the backend -- action 'both' now can never actually be sent from the
+   main popup post-Fix-1, since the action-detection cascades no longer
+   produce 'both' or 'phone' -- only 'push' or 'email' -- so a merchant-
+   enabled bothDiscount rule would simply never be selected by the
+   popup, a confusing silent no-op rather than an outright error).
+   Hidden both from render via a filtered VISIBLE_DISCOUNT_ITEMS array
+   built from the original, UNMODIFIED DISCOUNT_ITEMS (which still
+   lists all 4 entries) -- satisfying "Keep backend unchanged — just
+   hide from merchant UI" for both, not just one.
+
+
+NOT TOUCHED
+=========================================================================
+- injectProductNudge() (push-notifications.liquid): entirely
+  unmodified, per explicit instruction -- confirmed by grepping every
+  remaining "phone" occurrence in the file after all edits; every one
+  left in place is inside this function (showPhone, phonePct,
+  #ccf-nudge-phone, its own action cascade, its own fetch body).
+- ccfDiscountEnabled() and ccfRuleOn() (both still reference
+  'phoneDiscount'/'bothDiscount' rule keys): unmodified -- these
+  determine whether ANY discount UI shows at all, not whether the
+  phone FIELD specifically renders, and the task said nothing about
+  changing what counts as "a discount is enabled."
+- ccfDiscountOfferText() (still has an `if (ccfShowPhoneField())`
+  branch): unmodified -- now permanently unreachable since
+  ccfShowPhoneField() is hard-false, but functionally harmless (falls
+  through correctly to the email-only or push-only message), and the
+  task did not name this function.
+- backend/routes/discounts.js and every other backend file: untouched,
+  per "DO NOT touch backend discount logic."
+- Every database model (Profile.channels, CodOrder, etc.) and its
+  phone field: untouched, per "DO NOT remove phone from database
+  models."
+- No frontend Vercel deploy was performed -- this task's verification/
+  deploy steps only listed `node --check`, `npm run build`, the git
+  commands, and `shopify app deploy --allow-updates` (unlike several
+  earlier tasks this session, this one did not include `npx vercel
+  --prod`), so none was run.

@@ -1,0 +1,212 @@
+=== SENDNOW FIXES AUDIT ===
+Generated: 2026-09-18
+
+FIX 1 - Loading state:
+  sendingNow state added: yes
+  Spinner shown while sending: yes
+  Button disabled while sending: yes
+  Success toast shown: yes
+  sendingNow reset on modal close: yes
+FIX 2 - Cloudinary:
+  uploadToCloudinary function added: yes
+  Base64 uploaded to Cloudinary: yes
+  Real URL passed to FCM: yes
+  Graceful fallback if no Cloudinary config: yes
+node --check push.js: pass
+npm test: 151/151 passing
+frontend build: pass
+git push: done (4321604..338a5fd)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full (1838
+lines, in two parts) and backend/routes/push.js in full (594 lines)
+before making any change, as instructed.
+
+
+====================================================================
+FIX 1 — frontend/app/admin/dashboard/DashboardScreen.jsx
+====================================================================
+Added `sendingNow`/`setSendingNow` and `successMsg`/`setSuccessMsg`
+state, grouped with the other Phase 1 editor-modal state (directly
+after `showImageInfo`).
+
+Added the CSS keyframe injection block ("at top of component") right
+after `const router = useRouter();`, as a plain guarded `if` statement
+(idempotent — checks `!document.getElementById('dashboard-anim')`
+before injecting) matching the same pattern already used in
+frontend/app/admin/components/Shimmer.jsx from an earlier task.
+Defines two keyframes: `spin` (the Send Now spinner) and `fadeIn`
+(the toast's entrance).
+
+Added the success toast JSX exactly as given, placed directly after
+SECTION 1's sticky top bar closes and before the two-column content
+area begins — i.e. "after the sticky bar," per the task's own
+placement instruction. `position: fixed` means its exact DOM position
+doesn't affect layout, but it was placed there literally as asked.
+
+Replaced the Send Now button's onClick handler and style/content with
+the given code, verbatim. This is a real, disclosed behavior change
+worth flagging: the OLD handler additionally called
+`setShowImageInfo(false)`, `setEditorMobileImageUrl('')`,
+`setEditorDesktopImageUrl('')`, and showed a blocking `alert(...)` on
+success. The task's given replacement code does none of those three
+resets and replaces the alert with the toast + auto-clearing
+`setSuccessMsg`. Implemented literally as given rather than
+re-inserting the three dropped reset calls, since the task explicitly
+provided this exact literal onClick body as the intended replacement.
+No visible regression results: the only way the editor modal can be
+reopened is via the festival-list click handler (Notification
+Suggestions sidebar), which already unconditionally resets
+editorMobileImageUrl/editorDesktopImageUrl itself before showing the
+editor again — so those two values can never leak stale state into a
+subsequent session even without the Send Now handler resetting them
+itself.
+
+Added `setSendingNow(false)` to the 4 other `setShowEditor(false)`
+call sites (confirmed via a post-edit grep across all 5 sites):
+  1. Modal backdrop click-to-close
+  2. Modal's own X close button
+  3. Send Now's onClick (already handled directly by the given code,
+     in both the success and catch branches — no separate edit needed)
+  4. Approve button's success path
+  5. Add to Queue button's success path
+This matches the task's "Also reset sendingNow in all
+setShowEditor(false) calls" instruction — sendingNow is never actually
+set true by Approve/Add to Queue's own flow, so this is a defensive/
+consistency reset on those two paths rather than one that fixes an
+observed bug, exactly as the task's literal wording asked for.
+
+
+====================================================================
+FIX 2 — backend/routes/push.js
+====================================================================
+Added `uploadToCloudinary(base64Data)` as a module-level async
+function, placed directly after `const router = express.Router();`
+(matching "At top of file add"), exactly as given: reads
+`CLOUDINARY_CLOUD_NAME`/`CLOUDINARY_UPLOAD_PRESET` from environment
+variables, returns `null` immediately if either is unset, otherwise
+POSTs the base64 data + upload preset to Cloudinary's unsigned
+`/image/upload` endpoint and returns `data.secure_url || null`. Wrapped
+in try/catch exactly as given — any error (network, bad response
+JSON, etc.) is caught, logged via `console.error('[push] cloudinary
+upload error:', ...)`, and resolves to `null` rather than throwing, so
+a Cloudinary outage or misconfiguration can never crash or reject the
+POST /send-store request itself.
+
+Confirmed `fetch()` is available as a global in this backend without
+any import — checked `node --version` (v24.16.0) and
+backend/package.json's `engines.node` field (">=20"); Node 18+ ships a
+stable global `fetch`, so no `node-fetch`/`undici` import was needed
+or added.
+
+Updated the POST /send-store handler's image-resolution block (added
+in the immediately preceding task, audits/base64-strip-audit.txt) to
+try the Cloudinary upload BEFORE falling back to stripping, exactly as
+given:
+
+  const rawImage = mobileImageUrl || desktopImageUrl || '';
+  let imageUrl = '';
+  if (rawImage.startsWith('data:')) {
+    const cloudUrl = await uploadToCloudinary(rawImage);
+    imageUrl = cloudUrl || '';
+    if (cloudUrl) {
+      console.log('[push] image uploaded to Cloudinary:',
+        cloudUrl.substring(0, 50));
+    }
+  } else {
+    imageUrl = rawImage;
+  }
+
+The pre-existing `console.log('[push] send-store imageUrl:', ...)`
+line from the prior task was kept immediately after this block,
+unchanged — it still logs whatever `imageUrl` ends up being (a
+Cloudinary URL, an already-real URL passed straight through, or empty
+string if upload failed/wasn't configured).
+
+Net behavior:
+  - No Cloudinary env vars configured -> uploadToCloudinary returns
+    null immediately (no network call attempted) -> imageUrl = '' ->
+    same graceful no-image fallback as the prior task, nothing breaks.
+  - Cloudinary configured + upload succeeds -> imageUrl = the returned
+    secure_url (a real https:// URL) -> passed to
+    sendPushToCustomers() -> FCM receives a real, fetchable image URL.
+  - Cloudinary configured but the upload call itself fails (network
+    error, bad preset, etc.) -> caught inside uploadToCloudinary,
+    returns null -> imageUrl = '' -> same graceful fallback, the push
+    still sends (just without an image) rather than failing outright.
+  - rawImage is already a real URL (not base64) -> the `else` branch
+    passes it straight through unchanged, exactly as before.
+
+
+====================================================================
+CLOUDINARY SETUP — NOT PERFORMED (outside this task's scope)
+====================================================================
+The task's own "CLOUDINARY SETUP (manual steps for you)" section is
+explicitly addressed to the user (sign up, create an unsigned upload
+preset, copy the cloud name + preset name, add them as Render
+environment variables) — this was not and could not be done as part
+of this code change; it requires an external account and access to
+the Render dashboard's environment variable settings, neither of
+which are available from this session. Until
+CLOUDINARY_CLOUD_NAME/CLOUDINARY_UPLOAD_PRESET are actually set on
+Render, uploadToCloudinary() will keep returning null immediately (by
+design) and Send Now will continue sending with no image — exactly
+the same behavior as before this task, just with the upload attempt
+wired up and ready the moment those two env vars are added.
+
+
+====================================================================
+DO NOT CHANGE COMPLIANCE
+====================================================================
+No other route or handler in backend/routes/push.js was touched. In
+DashboardScreen.jsx, no other section/state/handler outside what's
+described above was modified — the upload boxes, Title/Message/
+Schedule Date fields, Approve/Add to Queue request bodies, and the
+Live Preview panel are all unchanged from the version read at the
+start of this task.
+
+
+====================================================================
+DO-NOT-TOUCH-OTHER-FILES COMPLIANCE
+====================================================================
+Only the 2 files this task's own git-add list names were staged and
+committed: frontend/app/admin/dashboard/DashboardScreen.jsx and
+backend/routes/push.js. `git status` after staging confirmed exactly
+these 2 paths; the pre-existing unrelated dirty files
+(backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- node --check backend/routes/push.js -- pass
+- cd backend && npm test -- 19 suites, 151/151 passing (one
+  pre-existing, unrelated console.warn in brain.test.js from a
+  deliberately-unavailable test DB lookup -- expected test output, not
+  a failure; present before this task too).
+- cd frontend && npm run build -- compiled successfully, all 15 static
+  routes + 1 dynamic route generated, no errors (/admin/dashboard:
+  10.6kB -> 10.9kB First Load JS).
+- git push origin main -- succeeded (4321604..338a5fd), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+2 files modified (frontend/app/admin/dashboard/DashboardScreen.jsx,
+backend/routes/push.js). No other file was touched. Manual visual
+verification in a live browser (confirming the spinner/disabled state
+during a real send, the toast's fadeIn animation, and an actual
+Cloudinary upload round-trip) was not performed as part of this task —
+this environment has no running dev server / authenticated Shopify
+session to click through, and Cloudinary itself is not yet configured
+on Render (see the "CLOUDINARY SETUP" section above); verification
+here is limited to a clean build/test run and the code review
+documented above.

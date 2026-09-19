@@ -1,0 +1,269 @@
+EMAIL AUTOMATION AUDIT — read-only file dump
+=============================================
+Generated: 2026-09-12
+No modifications made.
+
+
+════════════════════════════════════════════════════════════════════
+1. backend/server.js — processScheduledJobs() email-sending block
+════════════════════════════════════════════════════════════════════
+
+--- EMAIL_SIGNAL_TYPES (module scope, lines 193-200) ---
+193	// Signal types that also get a marketing email after a successful push
+194	// (in addition to whatever single channel brain.js already picked for the
+195	// job itself — see the email-send block inside processScheduledJobs()).
+196	const EMAIL_SIGNAL_TYPES = [
+197	  'cart_abandon', 'checkout_abandon', 'high_intent',
+198	  'lapsing', 'winback', 'post_purchase_d3',
+199	  'back_in_stock', 'price_drop',
+200	];
+
+--- The full email-sending block (lines 395-463), inside processScheduledJobs(),
+    inside the `if (channel === 'push')` branch's success `else` — runs right
+    after the existing push-hygiene calls (checkUnopenedThreshold /
+    updateDeliveredRate) ---
+
+395	            // Bonus email — after a successful push, also email profiles
+396	            // (brain-scheduled jobs only; profileId is required to look up
+397	            // the profile at all) whose signal type warrants a marketing
+398	            // email, with a 24h dedup guard against emailing the same
+399	            // profile twice in one day. Reuses jobStore/voice already
+400	            // loaded above rather than re-fetching Store.
+401	            if (job.profileId && EMAIL_SIGNAL_TYPES.includes(job.signalType)) {
+402	              try {
+403	                const profile = await Profile.findById(job.profileId)
+404	                  .select('identifiers channels messages');
+405
+406	                const emailAddr = profile?.channels?.email?.address ||
+407	                  profile?.identifiers?.emails?.[0];
+408
+409	                if (emailAddr) {
+410	                  const recentEmail = profile?.messages?.find((m) =>
+411	                    m.channel === 'email' &&
+412	                    m.sentAt && m.sentAt > new Date(Date.now() - 24 * 60 * 60 * 1000)
+413	                  );
+414
+415	                  if (!recentEmail) {
+416	                    const { subject, body } = await generateEmailCopy(
+417	                      job.shopDomain,
+418	                      { type: job.signalType, strength: job.strength || 0.5 },
+419	                      voice,
+420	                      {}
+421	                    );
+422
+423	                    await sendMarketingEmail(
+424	                      emailAddr,
+425	                      subject,
+426	                      body.replace(/\n/g, '<br>'),
+427	                      job.shopDomain
+428	                    );
+429
+430	                    // Field names match the Profile.messages subdocument
+431	                    // schema (`type`/`outcome`) — Mongoose strict mode
+432	                    // silently drops any unrecognized key, so pushing
+433	                    // signalType/status/payload here (as a naive first
+434	                    // draft did) would erase job.signalType from this log
+435	                    // entry and defeat brain.js's per-signal 6h cooldown
+436	                    // check, which reads m.type. $slice caps it at 20,
+437	                    // matching recordProfileMessage() above.
+438	                    await Profile.updateOne(
+439	                      { _id: job.profileId },
+440	                      {
+441	                        $push: {
+442	                          messages: {
+443	                            $each: [{
+444	                              channel: 'email',
+445	                              type: job.signalType,
+446	                              sentAt: new Date(),
+447	                              outcome: 'sent',
+448	                              jobId: job._id,
+449	                            }],
+450	                            $slice: -20,
+451	                          },
+452	                        },
+453	                      }
+454	                    );
+455
+456	                    console.log('[poller] email sent for job', job._id, 'signal:', job.signalType);
+457	                  }
+458	                }
+459	              } catch (emailErr) {
+460	                // Email errors never block push delivery.
+461	                console.error('[poller] email send error:', emailErr.message);
+462	              }
+463	            }
+
+--- 24h dedup guard logic (extracted, lines 409-415) ---
+    const recentEmail = profile?.messages?.find((m) =>
+      m.channel === 'email' &&
+      m.sentAt && m.sentAt > new Date(Date.now() - 24 * 60 * 60 * 1000)
+    );
+    if (!recentEmail) { ... }
+  Reads the profile's own `messages` subdocument array (capped at the last
+  20 entries by the $slice below) and looks for ANY entry with
+  channel==='email' and sentAt within the last 24h. If found, the bonus
+  email is skipped entirely for this job.
+
+--- try/catch around the email step ---
+  A single try/catch wraps the ENTIRE block (lines 402-462): the Profile
+  lookup, the dedup check, generateEmailCopy(), sendMarketingEmail(), and
+  the Profile.updateOne() message-log write are all inside one try, with
+  one catch (line 459-461) that only logs
+  '[poller] email send error:' and swallows the error — it does not set
+  the ScheduledJob's status to 'failed' or touch the job document at all.
+  This means a failed bonus email is invisible in ScheduledJob (see
+  section 4 below) — it only ever surfaces via this console.error line
+  and, on success, via the Profile.messages entry pushed at lines 438-454.
+
+--- Adjacent, pre-existing, SEPARATE email path (lines 465-509+) ---
+  Note there is a second, older `else if (channel === 'email')` branch
+  right after this block — this is brain.js's ORIGINAL single-channel
+  pick (see section 3): when brain.js selects 'email' as the job's own
+  channel (not the bonus-email add-on above), the poller sends via
+  sendAbandonedCartEmail() (utils/email.js, a different function from
+  sendMarketingEmail), looked up via AbandonedCustomer by cartToken, and
+  DOES update ScheduledJob.status on success/failure. This is a fully
+  separate code path from the bonus-email block in section 1 above.
+
+
+════════════════════════════════════════════════════════════════════
+2. backend/utils/email.js — sendMarketingEmail() full function (lines 167-213)
+════════════════════════════════════════════════════════════════════
+167	async function sendMarketingEmail(to, subject, htmlBody, shopDomain) {
+168	  if (!process.env.RESEND_API_KEY) {
+169	    console.warn('[email] RESEND_API_KEY not set — skipping');
+170	    return { skipped: true };
+171	  }
+172	  if (!to || !to.includes('@')) {
+173	    console.warn('[email] Invalid email address — skipping');
+174	    return { skipped: true };
+175	  }
+176
+177	  // Reuse the shared client above (already guarded against a missing key)
+178	  // rather than constructing a second Resend SDK instance per call.
+179	  const { data, error } = await resend.emails.send({
+180	    from: 'CartnCodForm <onboarding@resend.dev>',
+181	    to,
+182	    subject,
+183	    html: `
+184	      <div style="font-family:-apple-system,BlinkMacSystemFont,
+185	        sans-serif;max-width:600px;margin:0 auto;
+186	        padding:32px 24px;background:#f9fafb">
+187	        <div style="background:#fff;border-radius:16px;
+188	          border:1px solid #e5e7eb;padding:32px">
+189	          <div style="font-size:16px;color:#111827;
+190	            line-height:1.6">
+191	            ${htmlBody}
+192	          </div>
+193	          <hr style="margin:24px 0;border:none;
+194	            border-top:1px solid #f3f4f6">
+195	          <p style="font-size:12px;color:#9ca3af;margin:0">
+196	            You received this because you subscribed to
+197	            notifications from ${shopDomain || 'this store'}.
+198	            <br>To unsubscribe, reply with "unsubscribe".
+199	          </p>
+200	        </div>
+201	      </div>
+202	    `,
+203	  });
+204
+205	  if (error) {
+206	    console.error('[email] Resend error:', error.message);
+207	    throw new Error(error.message);
+208	  }
+209
+210	  // Never log the recipient address (CLAUDE.md: no PII in console.log).
+211	  console.log('[email] Marketing email sent for shop', shopDomain);
+212	  return { success: true, id: data?.id };
+213	}
+  Note: throws on a Resend-reported error (does not return
+  {success:false}) — this is why the caller in server.js needs its own
+  try/catch (section 1) to avoid an uncaught rejection.
+
+
+════════════════════════════════════════════════════════════════════
+3. backend/services/brain.js — channel value written to ScheduledJob
+════════════════════════════════════════════════════════════════════
+selectChannel() (lines 76-93) returns the plain string 'push' or 'email'
+(never anything else, or null if neither channel is available for the
+profile):
+ 76	function selectChannel(signalType, config, profile) {
+ 77	  const ch = profile.channels || {};
+ 78	  const avail = {
+ 79	    push: !!(ch.push && ch.push.subscribed === true),
+ 80	    email: !!(ch.email && ch.email.address),
+ 81	  };
+ 82
+ 83	  let preferred;
+ 84	  if (config && (config.channelOverride === 'push' || config.channelOverride === 'email')) {
+ 85	    preferred = config.channelOverride;
+ 86	  } else {
+ 87	    preferred = EMAIL_FIRST.has(signalType) ? 'email' : 'push';
+ 88	  }
+ 89	  const other = preferred === 'push' ? 'email' : 'push';
+ 90
+ 91	  if (avail[preferred]) return preferred;
+ 92	  if (avail[other]) return other;
+ 93	  return null;
+
+That return value flows straight into the ScheduledJob.create() call as
+the `channel` field, unmodified:
+256
+257	  try {
+258	    await ScheduledJob.create({
+259	      shopDomain: shop,
+260	      profileId,
+261	      signalType: winner.type,
+262	      channel,
+263	      reason,
+264	      ...
+
+So: ScheduledJob.channel is exactly the string 'push' or 'email' that
+selectChannel() returned. This is brain's ONE originally-picked channel
+for the job — it is NOT touched by the "bonus email" logic in section 1
+above. A job whose channel is 'push' and that also triggers a
+successful bonus email still has channel:'push' on its ScheduledJob
+document; the bonus send is recorded only in Profile.messages (channel:
+'email' entries pushed by the block in section 1), never on the
+ScheduledJob row itself. This matters directly for interpreting the
+counts in section 4.
+
+
+════════════════════════════════════════════════════════════════════
+4. MongoDB — ScheduledJob counts by channel (status: sent / failed)
+════════════════════════════════════════════════════════════════════
+Query run:
+  db.ScheduledJob.countDocuments({status:'sent', channel:'email'})
+  db.ScheduledJob.countDocuments({status:'sent', channel:'push'})
+  db.ScheduledJob.countDocuments({status:'failed', channel:'email'})
+  db.ScheduledJob.countDocuments({status:'failed', channel:'push'})
+
+Result:
+  email sent:   0
+  push sent:    12
+  email failed: 0
+  push failed:  113
+
+NOTE (read-only observation, not something acted on here): the prior
+session audit (audits/session-sept12-audit.txt) recorded overall totals
+of Sent: 20 and Failed: 114 across ALL channels. This query's push+email
+breakdown only accounts for 12 sent (of 20) and 113 failed (of 114) — 8
+'sent' and 1 'failed' document are NOT channel:'push' or channel:'email'.
+Given ScheduledJob's schema enum for `channel` is only ['push','email']
+(default 'push'), and per section 3 selectChannel() only ever returns
+'push', 'email', or null (which would make the job never get created at
+all — selectChannel returning null causes runBrainForProfile to `return
+null` before ScheduledJob.create() is ever called), the most likely
+explanation is that these 9 unaccounted documents are older
+rows created before Phase C's brain-based channel field existed, or were
+created through a different path than runBrainForProfile() (e.g. the
+legacy AutomationRule-based scheduler once referenced in ScheduledJob's
+own `ruleId` doc-comment) with `channel` left at some other value not
+matching either literal string queried. Not investigated further per the
+"audit only" scope of this task.
+
+Also worth noting: email sent = 0 confirms that, as of this snapshot, no
+ScheduledJob has ever completed with brain having picked 'email' as its
+own primary channel (the section-1 "bonus email" path is invisible to
+this query regardless, per the section 3 note — it would need a query
+against Profile.messages for channel:'email' entries to be counted).

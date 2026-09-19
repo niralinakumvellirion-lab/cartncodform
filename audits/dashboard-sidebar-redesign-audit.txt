@@ -1,0 +1,108 @@
+SELF-AUDIT — dashboard-sidebar-redesign
+
+File: frontend/app/admin/dashboard/DashboardScreen.jsx
+
+CHANGE 1: Quick Stats card removed
+------------------------------------
+Confirmed the entire "Quick stats card" block (previously the JSX
+comment {/* Quick stats card */} through its closing </div>, immediately
+after the Notification Suggestions card's closing </div>) is deleted.
+Checked for variables/helpers used ONLY by that block: it had none of its
+own — its `{ label, value }` array was an inline literal inside the JSX,
+not a hoisted const, and it read `notifStats?.pushSubscribers`,
+`notifStats?.emailsCaptured`, `notifStats?.popupsShown` — all of which
+`notifStats` fields are still read elsewhere (kpiRow1/kpiRow2, built at
+what is now lines ~477-486, use pushSent/emailsSent/pushSubscribers and
+popupsShown/emailsCaptured respectively). So `notifStats` state itself is
+still very much in use; nothing was orphaned by this removal. The top KPI
+row (the `[...kpiRow1, ...kpiRow2].map(...)` block) was not touched.
+
+CHANGE 2: timezone fix in getUpcomingFestivals
+-------------------------------------------------
+Confirmed `const fDate = new Date(f.date);` (which parsed 'YYYY-MM-DD' as
+UTC midnight) was replaced with:
+  const parts = f.date.split('-');
+  const fDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+which constructs the Date from local year/month/day components — this
+constructor always produces LOCAL midnight, matching how `today` is
+already normalized (`today.setHours(0,0,0,0)` operates in local time).
+Everything downstream (diffMs, diffDays, filter, sort, slice) is
+unchanged — only the date-parsing line differs. FESTIVAL_CALENDAR itself
+(the data array) was not touched.
+
+Also added a new top-level helper, `formatRelativeDate(diffDays)`, right
+after getUpcomingFestivals, used by the redesigned card to render
+"Today" / "Tomorrow" / "In N days" (diffDays <= 13) / "In N weeks"
+(diffDays >= 14, rounded) — needed for the "In 3 weeks" style label the
+redesign spec asked for, which the old row markup never produced (it only
+ever showed raw day counts).
+
+CHANGE 3: Notification Suggestions card redesign
+-----------------------------------------------------
+Confirmed present in the new markup:
+- HEADER: title + "N upcoming festival(s)" subtitle (singular/plural now
+  handled, previously always said "festivals" even for 1), a count badge,
+  and a chevron SVG that rotates 90deg via inline `transform` keyed off
+  `suggestionsOpen` with a `transition: 'transform 0.2s'`. The whole header
+  div is the onClick target (unchanged from before) and now also has an
+  onMouseEnter/onMouseLeave hover background, matching the direct-DOM-style
+  hover pattern already used elsewhere in this file. Padding is 16px
+  (previously 14px 16px).
+- EACH ROW: 36x36 circular emoji badge (#f3f4f6 fill), festival name at
+  14px/weight 600 with ellipsis overflow handling, a relative-date line
+  below it via formatRelativeDate(), and a compact "Create" button
+  (8px radius, ~11.5px text, padding '5px 12px') on the right instead of
+  the old chevron-only row. Row padding is 12px vertical / 14px
+  horizontal. Border: `borderBottom: isLast ? 'none' : '1px solid #f9fafb'`
+  so the last row has no trailing separator. The whole row's onClick calls
+  the new shared `openFestivalEditor(f)` helper (added right after
+  `upcomingFestivals` is derived, factored out of what was previously
+  inline in the row's onClick); the Create button's onClick calls the same
+  helper and calls `e.stopPropagation()` first so clicking Create doesn't
+  also fire the row's own onClick.
+- HOVER: row hover sets background to #f9fafb (as before) and additionally
+  reaches into the row via `e.currentTarget.querySelector('[data-create-btn]')`
+  to flip the Create button from its resting DS.primaryLight/DS.primary
+  colors to solid DS.primary background with white text — done via direct
+  DOM style mutation (same pattern the file already used for row hover
+  backgrounds), not new React state, so no extra re-renders.
+- URGENCY CUE: `const urgent = f.diffDays <= 7;` — when true, the
+  relative-date text color switches to DS.warning ('#d97706') and a 5x5px
+  circular dot in the same color is prefixed before the text; otherwise
+  the label stays the original muted '#9ca3af'. No background color is
+  applied to the row itself in either case — only the text/dot are tinted,
+  per the "keep it subtle" requirement.
+- EMPTY STATE: when `suggestionsOpen` is true and `upcomingFestivals.length
+  === 0`, renders a centered block (calendar emoji at reduced opacity,
+  "No upcoming festivals" at 13px/weight 600, and the 12px muted
+  "Check back closer to the next festival season." line) instead of the
+  list container.
+- MAX-HEIGHT CAP: the list wrapper (non-empty case) uses
+  `maxHeight: 320, overflowY: 'auto', overflowX: 'hidden'` — a fixed
+  320px cap, replacing the old `calc(100vh - 300px)` viewport-relative
+  cap, per the task's explicit "max-height 320px" instruction.
+- Card stays collapsed by default (suggestionsOpen state/useState is
+  unchanged — still initialized false elsewhere in the component; this
+  task didn't touch that declaration).
+
+CONFIRMED UNCHANGED
+----------------------
+- FESTIVAL_CALENDAR (the data array): not touched — same 13 entries, same
+  dates/emoji/suggestion/message fields.
+- The festival notification editor modal (the `{showEditor &&
+  selectedFestival && (...)}` block and everything inside it): not
+  touched — openFestivalEditor() sets the exact same state fields
+  (selectedFestival, editorTitle, editorBody, editorMobileImageUrl,
+  editorDesktopImageUrl, editorDate, editorAction, showEditor) the old
+  inline handler did, in the same order, with the same values.
+- Send logic (the Approve/Add-to-Queue POST calls to
+  /api/queue/{shop}/festival, the Send Now flow, etc.): not touched at
+  all — this task only edited the sidebar card and getUpcomingFestivals.
+
+BUILD / DEPLOY
+----------------
+`cd frontend && npx next build`: compiled successfully, all 17 routes
+generated, no type/lint errors — run before deploying as a syntax/build
+sanity check beyond what the task explicitly asked for.
+`cd frontend && npx vercel --prod`: build succeeded again on Vercel's
+infrastructure, deployed and aliased to https://app.shopireachboost.com.

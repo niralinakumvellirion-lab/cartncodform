@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import { ShimmerRow, ShimmerCard } from '../components/Shimmer';
+import { ImageUploadPair } from '../components/ImageUploadPair';
 
 const DS = {
   page: {
@@ -456,9 +457,13 @@ export default function DashboardScreen({ shop }) {
   const [editorDesktopImageUrl, setEditorDesktopImageUrl] = useState('');
   const [editorAction, setEditorAction] = useState(null);
   const [editorDate, setEditorDate] = useState('');
-  const [showImageInfo, setShowImageInfo] = useState(false);
   const [sendingNow, setSendingNow] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
+  // FestivalQueue items already queued for this shop — used to hide
+  // already-queued festivals from the Suggestions list. Holds raw items
+  // (each needs at least .festival and .status); a Set of the relevant
+  // names is derived from this below, near upcomingFestivals.
+  const [queuedFestivals, setQueuedFestivals] = useState([]);
 
   // Fetch the shared, image-enriched festival calendar once on mount.
   // Falls back to the hardcoded (no-image) copy if the request fails, so
@@ -479,6 +484,25 @@ export default function DashboardScreen({ shop }) {
       cancelled = true;
     };
   }, []);
+
+  // Fetch this shop's existing FestivalQueue items once on mount, so the
+  // Suggestions sidebar can exclude festivals that are already queued.
+  useEffect(() => {
+    if (!shop) return;
+    let cancelled = false;
+    apiGet(`/api/queue/${encodeURIComponent(shop)}/festival`)
+      .then((data) => {
+        if (cancelled) return;
+        setQueuedFestivals(data.items || []);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setQueuedFestivals([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [shop]);
 
   // --- Today.jsx: activity + notifStats fetch, keyed on date filter ---
   useEffect(() => {
@@ -681,9 +705,23 @@ export default function DashboardScreen({ shop }) {
     revisit: '#3b82f6',
   };
 
+  // Festivals already queued (draft or approved — NOT sent/cancelled, so
+  // a sent festival becomes suggestible again next year) should not be
+  // re-suggested. Filter the source calendar before slicing to the top
+  // 10, so already-queued festivals get backfilled by later ones rather
+  // than just shrinking the list below 10.
+  const queuedFestivalNames = new Set(
+    queuedFestivals
+      .filter((item) => item.status === 'draft' || item.status === 'approved')
+      .map((item) => item.festival)
+  );
+  const availableFestivalCalendar = festivalCalendar.filter(
+    (f) => !queuedFestivalNames.has(f.name)
+  );
+
   // Phase 1 sidebar: all festivals in the next 60 days (getUpcomingFestivals
   // already filters to <=60 days internally — see its definition above).
-  const upcomingFestivals = getUpcomingFestivals(festivalCalendar, 10);
+  const upcomingFestivals = getUpcomingFestivals(availableFestivalCalendar, 10);
 
   // Shared by the suggestion row's click and its Create button — opens the
   // festival notification editor pre-filled for that festival.
@@ -1537,7 +1575,6 @@ export default function DashboardScreen({ shop }) {
         }}
           onClick={e => { if (e.target === e.currentTarget) {
             setShowEditor(false);
-            setShowImageInfo(false);
             setEditorMobileImageUrl('');
             setEditorDesktopImageUrl('');
             setSendingNow(false);
@@ -1567,7 +1604,6 @@ export default function DashboardScreen({ shop }) {
               </div>
               <button onClick={() => {
                   setShowEditor(false);
-                  setShowImageInfo(false);
                   setEditorMobileImageUrl('');
                   setEditorDesktopImageUrl('');
                   setSendingNow(false);
@@ -1638,182 +1674,16 @@ export default function DashboardScreen({ shop }) {
                   </div>
                 </div>
 
-                {/* Mobile Image + Desktop Image — separate uploads, shown
-                    side by side. See audits/horizontal-upload-audit.txt
-                    (was audits/separate-images-audit.txt, stacked). */}
-                <div style={{ marginBottom: 16 }}>
-                  {/* Label row with info button */}
-                  <div style={{ display: 'flex', alignItems: 'center',
-                                gap: 6, marginBottom: 8 }}>
-                    <label style={{ fontSize: 12, fontWeight: 600,
-                                    color: '#374151' }}>
-                      Notification Images
-                    </label>
-                    <button
-                      onClick={() => setShowImageInfo(s => !s)}
-                      style={{
-                        width: 16, height: 16, borderRadius: '50%',
-                        border: '1.5px solid #9ca3af', background: 'none',
-                        color: '#9ca3af', fontSize: 10, fontWeight: 700,
-                        cursor: 'pointer', display: 'flex', alignItems: 'center',
-                        justifyContent: 'center', lineHeight: 1, padding: 0,
-                        flexShrink: 0,
-                      }}
-                      title="Image size guidance"
-                    >
-                      i
-                    </button>
-                  </div>
-
-                  {/* Info tooltip/box */}
-                  {showImageInfo && (
-                    <div style={{
-                      background: '#f0f9ff', border: '1px solid #bae6fd',
-                      borderRadius: 8, padding: '10px 12px', marginBottom: 10,
-                      fontSize: 12, color: '#0369a1', lineHeight: 1.6,
-                    }}>
-                      <div style={{ fontWeight: 700, marginBottom: 4 }}>
-                        📐 Recommended Image Size
-                      </div>
-                      <div>• <strong>360 × 180px</strong> — best for all platforms</div>
-                      <div>• Ratio: <strong>2:1</strong> (wide landscape)</div>
-                      <div>• Format: <strong>JPG or PNG</strong></div>
-                      <div>• Max size: <strong>under 1MB</strong></div>
-                      <div style={{ marginTop: 6, color: '#0284c7', fontSize: 11 }}>
-                        Tip: Avoid text in the image — it gets cropped on mobile screens.
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Two upload boxes side by side */}
-                  <div style={{ display: 'grid',
-                                gridTemplateColumns: '1fr 1fr',
-                                gap: 10 }}>
-
-                    {/* Mobile upload box */}
-                    <div>
-                      <div style={{ fontSize: 11, fontWeight: 600,
-                                    color: '#6b7280', marginBottom: 4,
-                                    textAlign: 'center' }}>
-                        📱 Mobile
-                      </div>
-                      <label style={{
-                        display: 'flex', flexDirection: 'column',
-                        alignItems: 'center', justifyContent: 'center',
-                        gap: 4, padding: '12px 8px',
-                        borderRadius: 8, border: '2px dashed #d1d5db',
-                        background: editorMobileImageUrl ? '#f0fdf4' : '#f9fafb',
-                        cursor: 'pointer', fontSize: 11, color: '#6b7280',
-                        fontWeight: 500, minHeight: 80,
-                        boxSizing: 'border-box', width: '100%',
-                        position: 'relative', overflow: 'hidden',
-                      }}>
-                        {editorMobileImageUrl ? (
-                          <>
-                            <img src={editorMobileImageUrl} alt="mobile"
-                              style={{ width: '100%', height: 60,
-                                       objectFit: 'cover', borderRadius: 6 }} />
-                            <span style={{ fontSize: 10, color: '#16a34a',
-                                           fontWeight: 600 }}>✓ Uploaded</span>
-                          </>
-                        ) : (
-                          <>
-                            <svg width="20" height="20" viewBox="0 0 24 24"
-                              fill="none" stroke="#9ca3af" strokeWidth="2"
-                              strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                              <polyline points="17 8 12 3 7 8"/>
-                              <line x1="12" y1="3" x2="12" y2="15"/>
-                            </svg>
-                            <span>Upload</span>
-                          </>
-                        )}
-                        <input type="file" accept="image/*"
-                               style={{ display: 'none' }}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            const reader = new FileReader();
-                            reader.onload = (ev) =>
-                              setEditorMobileImageUrl(ev.target.result);
-                            reader.readAsDataURL(file);
-                          }}
-                        />
-                      </label>
-                      {editorMobileImageUrl && (
-                        <button onClick={() => setEditorMobileImageUrl('')}
-                          style={{ width: '100%', marginTop: 4, fontSize: 10,
-                                   color: '#dc2626', background: 'none',
-                                   border: 'none', cursor: 'pointer', padding: 0,
-                                   textAlign: 'center' }}>
-                          Remove
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Desktop upload box */}
-                    <div>
-                      <div style={{ fontSize: 11, fontWeight: 600,
-                                    color: '#6b7280', marginBottom: 4,
-                                    textAlign: 'center' }}>
-                        🖥️ Desktop
-                      </div>
-                      <label style={{
-                        display: 'flex', flexDirection: 'column',
-                        alignItems: 'center', justifyContent: 'center',
-                        gap: 4, padding: '12px 8px',
-                        borderRadius: 8, border: '2px dashed #d1d5db',
-                        background: editorDesktopImageUrl ? '#f0fdf4' : '#f9fafb',
-                        cursor: 'pointer', fontSize: 11, color: '#6b7280',
-                        fontWeight: 500, minHeight: 80,
-                        boxSizing: 'border-box', width: '100%',
-                        position: 'relative', overflow: 'hidden',
-                      }}>
-                        {editorDesktopImageUrl ? (
-                          <>
-                            <img src={editorDesktopImageUrl} alt="desktop"
-                              style={{ width: '100%', height: 60,
-                                       objectFit: 'cover', borderRadius: 6 }} />
-                            <span style={{ fontSize: 10, color: '#16a34a',
-                                           fontWeight: 600 }}>✓ Uploaded</span>
-                          </>
-                        ) : (
-                          <>
-                            <svg width="20" height="20" viewBox="0 0 24 24"
-                              fill="none" stroke="#9ca3af" strokeWidth="2"
-                              strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                              <polyline points="17 8 12 3 7 8"/>
-                              <line x1="12" y1="3" x2="12" y2="15"/>
-                            </svg>
-                            <span>Upload</span>
-                          </>
-                        )}
-                        <input type="file" accept="image/*"
-                               style={{ display: 'none' }}
-                          onChange={(e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            const reader = new FileReader();
-                            reader.onload = (ev) =>
-                              setEditorDesktopImageUrl(ev.target.result);
-                            reader.readAsDataURL(file);
-                          }}
-                        />
-                      </label>
-                      {editorDesktopImageUrl && (
-                        <button onClick={() => setEditorDesktopImageUrl('')}
-                          style={{ width: '100%', marginTop: 4, fontSize: 10,
-                                   color: '#dc2626', background: 'none',
-                                   border: 'none', cursor: 'pointer', padding: 0,
-                                   textAlign: 'center' }}>
-                          Remove
-                        </button>
-                      )}
-                    </div>
-
-                  </div>
-                </div>
+                {/* Mobile Image + Desktop Image — shared widget, see
+                    frontend/app/admin/components/ImageUploadPair.jsx.
+                    See audits/horizontal-upload-audit.txt (was
+                    audits/separate-images-audit.txt, stacked). */}
+                <ImageUploadPair
+                  mobileImageUrl={editorMobileImageUrl}
+                  desktopImageUrl={editorDesktopImageUrl}
+                  onMobileChange={setEditorMobileImageUrl}
+                  onDesktopChange={setEditorDesktopImageUrl}
+                />
 
                 {/* Title */}
                 <div style={{ marginBottom: 16 }}>
@@ -1883,7 +1753,6 @@ export default function DashboardScreen({ shop }) {
                         });
                         setShowEditor(false);
                         setSendingNow(false);
-                        setShowImageInfo(false);
                         // Show success toast
                         setSuccessMsg('Notification sent successfully! 🎉');
                         setTimeout(() => setSuccessMsg(''), 3000);
@@ -1931,12 +1800,19 @@ export default function DashboardScreen({ shop }) {
                             status: 'approved',
                           }
                         );
+                        setQueuedFestivals(prev => [
+                          ...prev,
+                          { festival: selectedFestival.name, status: 'approved' },
+                        ]);
                         setShowEditor(false);
-                        setShowImageInfo(false);
                         setEditorMobileImageUrl('');
                         setEditorDesktopImageUrl('');
                         setSendingNow(false);
-                        alert('Added to queue as approved!');
+                        setSuccessMsg('Added to queue as approved!');
+                        setTimeout(() => {
+                          setSuccessMsg('');
+                          navigate('/admin/queue');
+                        }, 1200);
                       } catch(e) {
                         alert('Failed to approve');
                       }
@@ -1964,11 +1840,19 @@ export default function DashboardScreen({ shop }) {
                             status: 'draft',
                           }
                         );
+                        setQueuedFestivals(prev => [
+                          ...prev,
+                          { festival: selectedFestival.name, status: 'draft' },
+                        ]);
                         setShowEditor(false);
-                        setShowImageInfo(false);
                         setEditorMobileImageUrl('');
                         setEditorDesktopImageUrl('');
                         setSendingNow(false);
+                        setSuccessMsg('Added to queue');
+                        setTimeout(() => {
+                          setSuccessMsg('');
+                          navigate('/admin/queue');
+                        }, 1200);
                       } catch(e) {
                         alert('Failed to save');
                       }

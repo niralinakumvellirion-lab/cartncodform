@@ -1,0 +1,89 @@
+=== QUEUE STATS COMPACT AUDIT ===
+Generated: 2026-09-17
+
+Large cards replaced with compact bar: yes
+Pending stat shown: yes
+Sent stat shown: yes
+frontend build: pass
+git push: done (1ef622d..b73dd28)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/queue/QueueScreen.jsx in full (476 lines)
+before making any edit, as instructed.
+
+
+====================================================================
+VARIABLE-NAME MISMATCH FOUND AND CORRECTED
+====================================================================
+The task's given code referenced `stats.pending` / `stats.sent`, but
+no `stats` object exists anywhere in this file. Re-reading the file
+confirmed the actual state holding these two counts is:
+  const [statusCounts, setStatusCounts] = useState({});
+populated by the "Stats row" useEffect (lines 114-138), which fetches
+GET /api/queue/:shop?status=pending / ?status=sent (one call per
+entry in STATS_STATUSES = ['pending', 'sent']) and stores each
+result's `.total` into `statusCounts[status]`.
+
+Used `statusCounts.pending` and `statusCounts.sent` in place of the
+task's assumed `stats.pending`/`stats.sent` so the compact bar
+actually reads real data instead of throwing (a bare `stats` object
+does not exist, so `stats.pending` would have been a ReferenceError
+at render time, not just a wrong value).
+
+
+====================================================================
+WHAT WAS CHANGED
+====================================================================
+Replaced the "3. STATS ROW" block (previously a 2-column CSS grid of
+large bordered cards, 16px padding, 24px numbers, one per
+STATS_STATUSES entry, gated on statsLoading) with the compact
+horizontal bar given in the task: a flex row, 24px gap, 12px 0
+padding, bottom border, each stat rendered as an inline
+number+label pair (20px/800 number, 12px gray label), using the
+exact colors specified (#f59e0b for Pending, #16a34a for Sent).
+
+The given snippet does not gate on the existing `statsLoading` state
+(unlike the previous large-card version, which showed '...' while
+loading). Since `statusCounts` starts as `{}`, `statusCounts.pending`
+/`statusCounts.sent` are `undefined` until the fetch resolves, so the
+`value ?? '—'` fallback in the given code already shows '—' during
+the loading window — functionally equivalent to the old loading
+indicator, just a different placeholder glyph. Did not add an
+explicit statsLoading check since the given code didn't call for one
+and the existing behavior is already reproduced via the nullish
+fallback; `statsLoading` state itself is untouched (still declared,
+set, and updated by the existing effect) even though nothing in this
+new block reads it directly.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+Confirmed via `git diff`: only the STATS ROW block's JSX changed (27
+insertions, 25 deletions, all inside that one block). No useState,
+useEffect, apiGet/apiSend call, filter-tab (STATUS_FILTERS) code, or
+any other part of the file was touched. `git status` after staging
+showed only frontend/app/admin/queue/QueueScreen.jsx changed; the
+pre-existing unrelated dirty files (backend/__tests__/brain.test.js,
+frontend/lib/api.js) were left alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 17
+  routes generated, no errors.
+- git push origin main -- succeeded (1ef622d..b73dd28), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Only frontend/app/admin/queue/QueueScreen.jsx was modified. No other
+file was changed.

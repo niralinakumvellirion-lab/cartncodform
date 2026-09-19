@@ -1,0 +1,189 @@
+PRODUCT IMAGE / JOURNEY AUDIT - read-only, no changes
+=======================================================
+Generated: 2026-09-15
+
+Files read: backend/routes/events.js (in full, 552 lines),
+backend/models/ProductImageCache.js (in full, 17 lines).
+
+
+====================================================================
+1. getJourneyData() - how topProducts is built, full loop
+====================================================================
+
+Location: backend/routes/events.js, function getJourneyData()
+(lines 431-527). topProducts is built inside the per-profile
+Promise.all mapper (lines 468-523), specifically lines 497-522:
+
+497	      // Extract product interests from events.
+498	      const productViews = {};
+499	      events.forEach((e) => {
+500	        if (e.type === 'product_view' && e.meta?.productId) {
+501	          const productId = e.meta.productId;
+502	          if (!productViews[productId]) {
+503	            productViews[productId] = {
+504	              productId,
+505	              title: e.meta.productTitle || productId,
+506	              count: 0,
+507	              lastSeen: e.ts,
+508	            };
+509	          }
+510	          productViews[productId].count++;
+511	        }
+512	      });
+513
+514	      return {
+515	        profile,
+516	        topSignal: entry.signal,
+517	        signals: entry.signals,
+518	        recentEvents: events,
+519	        topProducts: Object.values(productViews)
+520	          .sort((a, b) => b.count - a.count)
+521	          .slice(0, 3),
+522	      };
+
+This is a plain in-memory JS loop, NOT a Mongo aggregation pipeline
+($group etc.) - unlike the separate product-analytics route further
+up the same file (lines 308-419), which does use a real
+StorefrontEvent.aggregate() pipeline. getJourneyData()'s topProducts
+is derived from `events`, the SAME array already fetched a few lines
+above (lines 479-486) for the Recent Activity timeline:
+
+479	      const events = await StorefrontEvent.find({
+480	        shopDomain: shop,
+481	        sessionId: { $in: [...sessionIds, ...cartTokens] },
+482	        type: { $in: ['page_view', 'push_prompt_shown', 'push_prompt_accepted', 'product_view'] },
+483	      })
+484	        .sort({ ts: -1 })
+485	        .limit(20)
+486	        .select('type path pageType meta ts');
+
+So topProducts only ever considers the same 20 most-recent
+qualifying events already loaded for the timeline (type one of
+page_view / push_prompt_shown / push_prompt_accepted / product_view,
+for this profile's sessionIds+cartTokens) - it does NOT run its own
+separate query. Within those (up to) 20 events, it filters to only
+type === 'product_view' rows that have e.meta.productId, tallies a
+per-productId count + lastSeen (updated to the LATEST event's ts
+seen, since events was reversed into chronological/ascending order
+first at line 495 - see the comment there - so lastSeen ends up
+being whichever product_view is later in that ascending array, i.e.
+still effectively "most recent" for that product within the 20-event
+window), then takes the top 3 productIds by view count.
+
+Caveat worth noting: since the source event window is capped at 20
+events total (not 20 product_view events specifically - it's 20
+events of ANY of the 4 listed types combined), a very
+activity-heavy customer could have their product_view events pushed
+out of that 20-event window by other event types, meaning
+topProducts reflects "products viewed within the last ~20 tracked
+timeline events" rather than "top 3 products this customer has ever
+viewed."
+
+
+====================================================================
+2. Fields each topProducts entry currently has
+====================================================================
+
+Each entry in the topProducts array (one per distinct productId,
+built at lines 502-509, then sorted/sliced at lines 519-521) has
+exactly 4 fields:
+
+  productId  - string, from e.meta.productId
+  title      - string, from e.meta.productTitle, falling back to
+               the raw productId itself if productTitle is missing/
+               falsy (line 505: `e.meta.productTitle || productId`)
+  count      - number, incremented once per matching product_view
+               event for that productId within the 20-event window
+  lastSeen   - Date (or whatever e.ts is, typically a Date from the
+               StorefrontEvent schema) - set ONCE, the first time
+               this productId is encountered while iterating the
+               (already-reversed-to-ascending) events array; NOT
+               updated on subsequent increments of the same
+               productId (there is no `productViews[productId].lastSeen
+               = e.ts` anywhere after the initial object literal at
+               lines 503-508) - so despite the variable name
+               suggesting "most recently seen," it is actually
+               fixed to whichever timestamp this productId FIRST
+               appeared at when scanning oldest-to-newest, i.e. the
+               EARLIEST product_view of that product within the
+               window, not the latest.
+
+No other fields (no productImage/imageUrl, no price, no productUrl,
+no handle/slug) are present anywhere on a topProducts entry - this
+loop only ever reads e.meta.productId, e.meta.productTitle, and e.ts
+from each event; nothing else off e.meta is consulted for
+topProducts (contrast with the separate product-analytics
+aggregation pipeline earlier in the file, which also reads
+meta.productPrice and meta.dwellSeconds, but that pipeline feeds a
+totally different response shape/endpoint, not getJourneyData()).
+
+
+====================================================================
+3. Where ProductImageCache is imported (if at all)
+====================================================================
+
+ProductImageCache is NOT imported anywhere in backend/routes/
+events.js. A full-file read confirms:
+  - No `require('../models/ProductImageCache')` line exists.
+  - No reference to the string "ProductImageCache" or "imageUrl"
+    anywhere in this file.
+  - getJourneyData()'s topProducts entries (see section 2 above)
+    carry no image-related field at all - a consumer of this
+    endpoint (e.g. the Journey.jsx admin screen) has no image URL
+    available from this data without a separate lookup of its own.
+
+This file only requires these models (all inline, function-scoped,
+not at module top level except StorefrontEvent): StorefrontEvent
+(top-level import, line 3), AttributedEvent (line 73, inside the
+POST /api/events attribution block), Profile (lines 74, 120, 191,
+433, inside various handlers), CustomerPushSubscription (line 284,
+inside the /resolve/:cartToken route), Signal (line 432, inside
+getJourneyData()). ProductImageCache is absent from this list
+entirely.
+
+
+====================================================================
+4. backend/models/ProductImageCache.js - full schema
+====================================================================
+
+ 1  const mongoose = require('mongoose');
+ 2
+ 3  const productImageCacheSchema = new mongoose.Schema({
+ 4    shopDomain: { type: String, required: true, lowercase: true },
+ 5    productId: { type: String, required: true },
+ 6    imageUrl: { type: String },
+ 7    cachedAt: { type: Date, default: Date.now },
+ 8  });
+ 9
+10  // Compound unique index -- one cache entry per shop+product.
+11  productImageCacheSchema.index({ shopDomain: 1, productId: 1 },
+12    { unique: true });
+13
+14  // Auto-expire cache entries after 24 hours.
+15  productImageCacheSchema.index({ cachedAt: 1 },
+16    { expireAfterSeconds: 24 * 60 * 60 });
+17
+18  module.exports = mongoose.model('ProductImageCache',
+19    productImageCacheSchema);
+
+Fields: shopDomain (String, required, lowercased), productId
+(String, required), imageUrl (String, optional), cachedAt (Date,
+defaults to Date.now at document creation).
+
+Two indexes:
+  - Compound unique index on {shopDomain, productId} - enforces at
+    most one cached image row per shop+product pair (an upsert
+    target, not queried by events.js).
+  - TTL index on cachedAt with expireAfterSeconds = 86400 (24
+    hours) - MongoDB auto-deletes a cache row 24 hours after its
+    cachedAt value, so this collection self-expires and requires no
+    manual cleanup job.
+
+No other fields, no other indexes, no schema methods/statics/
+virtuals defined on this model.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified as part of this task.

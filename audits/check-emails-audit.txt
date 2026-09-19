@@ -1,0 +1,4 @@
+=== CHECK-EMAILS SCRIPT AUDIT ===
+File created: yes
+Path: D:\cartncodform\backend\check-emails.js
+node --check check-emails.js: pass

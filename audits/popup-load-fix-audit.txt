@@ -1,0 +1,127 @@
+=== POPUP LOAD FIX AUDIT ===
+Image size cap removed: yes (the 4-line `if (file.size > 2 * 1024 * 1024)
+  {...}` block, previously at lines 799-802, deleted with no
+  replacement)
+Popup data load: was it separate fetch? no
+  If yes — now parallel with settings fetch: n/a (see FINDING below —
+  no change was needed or made to the data-loading effect)
+frontend build: pass (npm run build — compiled successfully, all 13
+  static pages generated, no errors)
+git push: done (commit 2324d0a, f0d3298..2324d0a main -> main)
+vercel deploy: done (production, readyState: READY,
+  deployment id dpl_4Af56wQpW7CpLczFkPAnk7saEYdo,
+  https://cartncodform-aljlnptrv-niralinakumvellirion-8853s-projects.vercel.app,
+  aliased to https://cartncodform-beryl.vercel.app)
+
+
+CHANGE 1 — image size cap removed (EXACT DIFF)
+=========================================================================
+                       onChange={(e) => {
+                         const file = e.target.files?.[0];
+                         if (!file) return;
+-                        if (file.size > 2 * 1024 * 1024) {
+-                          alert('Image too large — please use an image under 2MB.');
+-                          return;
+-                        }
+                         const reader = new FileReader();
+                         reader.onload = (ev) => {
+                           // Resize/compress via canvas before storing as base64 —
+
+Canvas compression (800px max dimension, JPEG quality 0.7,
+lines further down in the same handler) was left completely untouched,
+per the task's explicit "DO NOT touch compression logic" instruction —
+confirmed via git diff, only the 4 deleted lines appear in the change.
+
+
+CHANGE 2 — popup config load flow (READ CAREFULLY, NO CHANGE MADE)
+=========================================================================
+The task's premise was that popup config might be fetched separately
+from voice/caps settings (e.g. on tab-open, or in a second sequential
+request), and asked to move it into one parallel Promise.all if so.
+
+Read Settings.jsx's actual data-loading flow (the single useEffect that
+depends on `shop`, lines 79-118) before making any change. It already
+does exactly what CHANGE 2 asks for:
+
+  useEffect(() => {
+    if (!shop) return;
+    let cancelled = false;
+    Promise.allSettled([
+      apiGet(`/api/profiles/${encodeURIComponent(shop)}/settings`),
+      apiGet(`/api/profiles/${encodeURIComponent(shop)}/signal-configs`),
+      apiGet(`/api/profiles/${encodeURIComponent(shop)}/popup`),
+      apiGet(`/api/profiles/${encodeURIComponent(shop)}/push-stats`),
+      apiGet(`/api/profiles/${encodeURIComponent(shop)}/profiles?limit=1`),
+      apiGet(`/api/discounts/${encodeURIComponent(shop)}/config`),
+    ]).then(([s, c, pop, ps, prof, disc]) => {
+      if (cancelled) return;
+      ...
+      if (s.status === 'fulfilled') { setVoice(...); setCaps(...); ... }
+      ...
+      if (pop.status === 'fulfilled') {
+        setPopup(pop.value?.popup || {});
+        setMobilePopup(pop.value?.mobilePopup || {});
+      }
+      ...
+    });
+    return () => { cancelled = true; };
+  }, [shop]);
+
+Findings:
+- There is exactly ONE data-loading effect in this file, gated only on
+  `shop` becoming available -- it runs once on mount (and again if
+  `shop` itself changes), not when a "popup tab" is opened.
+- `/api/profiles/:shop/popup` (line 85 in the array) is already inside
+  the SAME `Promise.allSettled([...])` array as
+  `/api/profiles/:shop/settings` (line 83) and 4 other endpoints
+  (signal-configs, push-stats, profiles, discounts config) -- all 6
+  requests fire together, in parallel, in a single effect run. There is
+  no separate/later/sequential fetch for popup config anywhere else in
+  the file (grepped for every `apiGet(` and every `useEffect(` call in
+  the file -- only 2 useEffects exist total: one for the
+  isMobileView resize listener (lines 72-77), and this one).
+- `showPopupCustomizer` (the state that toggles which panel is
+  rendered -- the popup customizer vs. the voice/frequency cards) is a
+  purely client-side render switch (`setShowPopupCustomizer(true)` on
+  a button click, lines 638/667) -- it does not trigger any fetch.
+  popup/mobilePopup state is already populated from the initial mount
+  load by the time a merchant could click into the customizer panel,
+  regardless of whether they do so immediately or after some delay.
+- Promise.allSettled (rather than Promise.all) is actually a slightly
+  stronger guarantee here than what the task asked for: it means a
+  slow/failing request on ANY one of the 6 endpoints (e.g. discounts
+  config) does not prevent the other 5 -- including popup -- from
+  still resolving and updating state as soon as THEY finish, since
+  each result is inspected individually via `.status === 'fulfilled'`
+  after the whole batch settles. (Note: because it's `.then()` on the
+  whole array rather than handling each promise's own `.then()`
+  independently, all 6 results are still applied together only once
+  every one of them has either resolved or rejected -- so a single
+  very slow request among the 6 still delays when ALL of the resulting
+  state updates apply, popup included. This is a possible future
+  optimization -- attaching state updates to each individual apiGet's
+  own `.then()` instead of waiting on the whole batch -- but it was not
+  in scope here: the task only asked whether popup was fetched
+  SEPARATELY from settings, which it is not, and whether it could be
+  loaded in ONE parallel Promise.all, which it already is.)
+
+Conclusion: no code change was needed or made for CHANGE 2. The
+described problem (a separate/delayed popup config fetch) does not
+exist in the current file -- it was very likely already fixed by an
+earlier task this session (the "settings-save-fix" work, which
+introduced the parallel PATCH via Promise.all for SAVING; the GET-side
+Promise.allSettled shown above for LOADING predates this task and
+already included /popup alongside /settings). Settings.jsx was left
+otherwise unmodified aside from CHANGE 1.
+
+
+NOT TOUCHED
+=========================================================================
+- The data-loading useEffect (lines 79-118): confirmed unchanged via
+  git diff -- the only diff in the whole file is the 4 deleted lines
+  from CHANGE 1.
+- Canvas compression logic, markImageChanged() wiring, the
+  popup-image-skip PATCH logic, and every other function in the file:
+  untouched.
+- No file other than
+  frontend/app/admin/screens/Settings.jsx was staged or committed.

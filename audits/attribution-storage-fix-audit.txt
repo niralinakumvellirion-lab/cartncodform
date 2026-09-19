@@ -1,0 +1,79 @@
+=== ATTRIBUTION STORAGE FIX ===
+sessionStorage -> localStorage replacements: 6 total
+  1. setItem('ccf_attribution_job', jobFromUrl)   -- line 46
+  2. setItem('ccf_attribution_ts', ...)            -- line 47
+  3. getItem('ccf_attribution_job')                -- line 51
+  4. getItem('ccf_attribution_ts')                 -- line 52
+  5. removeItem('ccf_attribution_job')             -- line 58
+  6. removeItem('ccf_attribution_ts')               -- line 59
+node --check: pass
+git push: done (commit bc59cc1, ff9a862..bc59cc1 main -> main)
+shopify deploy: cartncodform-104 [1]
+  https://dev.shopify.com/dashboard/232824361/apps/415894044673/versions/1127622967297
+
+
+EXACT DIFF
+=========================================================================
+       var jobFromUrl = params.get('ccf_job');
+       if (jobFromUrl) {
+         // Store in sessionStorage for subsequent pages
+-        sessionStorage.setItem('ccf_attribution_job', jobFromUrl);
+-        sessionStorage.setItem('ccf_attribution_ts', Date.now().toString());
++        localStorage.setItem('ccf_attribution_job', jobFromUrl);
++        localStorage.setItem('ccf_attribution_ts', Date.now().toString());
+         return jobFromUrl;
+       }
+       // Check sessionStorage (subsequent pages in same session)
+-      var storedJob = sessionStorage.getItem('ccf_attribution_job');
+-      var storedTs = sessionStorage.getItem('ccf_attribution_ts');
++      var storedJob = localStorage.getItem('ccf_attribution_job');
++      var storedTs = localStorage.getItem('ccf_attribution_ts');
+       if (storedJob && storedTs) {
+         // 7-day attribution window
+         var age = Date.now() - parseInt(storedTs, 10);
+         if (age < 7 * 24 * 60 * 60 * 1000) return storedJob;
+         // Expired - clear it
+-        sessionStorage.removeItem('ccf_attribution_job');
+-        sessionStorage.removeItem('ccf_attribution_ts');
++        localStorage.removeItem('ccf_attribution_job');
++        localStorage.removeItem('ccf_attribution_ts');
+       }
+
+
+NOTE - the two inline comments still say "sessionStorage" verbatim
+=========================================================================
+  // Store in sessionStorage for subsequent pages
+  ...
+  // Check sessionStorage (subsequent pages in same session)
+Left unchanged, per the task's explicit "DO NOT change anything else
+in the function" -- the task's replacement list named only the 6 API
+calls above, not the comment text. These 2 comment lines are now
+factually stale (the code reads/writes localStorage, not
+sessionStorage), but fixing that wording is a change beyond what was
+asked, so it wasn't touched here. Worth a follow-up if a future task
+revisits this function.
+
+This also resolves the limitation flagged in the previous task's
+self-audit (audits/phase1-attribution-audit.txt, "NOTE - sessionStorage
+vs. the '7-day' window"): the stored job id and timestamp now genuinely
+persist across tab/browser closures (localStorage has no
+browser-session lifetime, unlike sessionStorage), so the 7-day
+age-based expiry check is now the actual, real constraint on the
+attribution window rather than being pre-empted by the tab closing
+first.
+
+
+NOT TOUCHED
+=========================================================================
+- Every other sessionStorage key in this file (ccf_prompt_shown /
+  PROMPT_SHOWN_KEY, ccf_denied_session, ccf_disc_redirected,
+  ccf_click_recorded_<jobId> inside handlePushClickAttribution()):
+  untouched -- these are deliberately session-scoped (once-per-tab-
+  session prompt/dismissal state) and are unrelated to the two keys
+  this task named.
+- getAttributionJob()'s control flow, the 7-day expiry math, the
+  try/catch, and everything else in the function: unchanged --
+  confirmed via git diff, only the 6 lines shown above differ.
+- No file other than
+  extensions/cartncodform-embed/blocks/push-notifications.liquid was
+  staged or committed.

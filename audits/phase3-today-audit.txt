@@ -1,0 +1,228 @@
+=== PHASE 3 TODAY SCREEN AUDIT ===
+Part A - activity fetch on mount: yes
+Part B - 4 activity tiles added at top: yes
+  Tiles: add_to_cart, checkout_start, purchase, revisit: yes
+  Click navigates to /admin/activity: yes (see Part D note on the
+    navigate() implementation and the fact that this destination page
+    does not exist yet)
+Part C - existing content preserved below: yes (git diff shows only
+  80 insertions, 0 deletions/modifications to any pre-existing line)
+Part D - navigation pattern used: none existed anywhere in this app to
+  reuse (see below) — introduced Next.js App Router's useRouter()
+  (next/navigation), the framework's own standard client-side
+  navigation primitive, wrapped in a local navigate() helper that also
+  carries `shop` forward explicitly (see DEVIATION section)
+frontend build: pass (npm run build — compiled successfully, all 13
+  pages generated; /admin grew 4.86 kB -> 5.44 kB, consistent with the
+  added section, no errors)
+git push: done (commit b7c0617, a7f1cff..b7c0617 main -> main)
+vercel deploy: done (production, readyState: READY,
+  deployment id dpl_96ucqbQgpX4ks1QGMkiudzW75qvm,
+  https://cartncodform-6cb7moopr-niralinakumvellirion-8853s-projects.vercel.app,
+  aliased to https://cartncodform-beryl.vercel.app)
+
+
+FULL FILE READ FIRST, AS INSTRUCTED
+=========================================================================
+Read frontend/app/admin/screens/Today.jsx in full (414 lines) before
+making any change, confirming: the existing mount useEffect only fetches
+push-stats/signals/orders (not activity), there is no navigate/router
+usage anywhere in the file, and the render structure is
+<Page><div maxWidth wrapper>{header}{error}{two-column grid}{chart}
+</div></Page> — a single outer wrapper div holding everything, which is
+where the new activity section was inserted as the first child.
+
+One pre-existing, unrelated observation from that full read, noted here
+for the record but NOT touched (out of scope for this task): `stats`
+(useState(null), line 23) is declared but `setStats` is never called
+anywhere in the file — the mount effect only calls setPushStats and
+setSignals. This means "Sent" (partially), "Came back and bought",
+"Recovered", and the "Recovered this week chart" section have shown
+placeholder/zero values (stats?.x ?? '—' / stats?.x || 0) since before
+this task, unrelated to Phase 3. Flagging for visibility, not fixing —
+this task's scope was Parts A-D only.
+
+
+PART A - EXACT CODE (mount fetch)
+=========================================================================
+  const [activity, setActivity] = useState(null);
+  const [activityLoading, setActivityLoading] = useState(true);
+
+  useEffect(() => {
+    if (!shop) return;
+    setActivityLoading(true);
+    apiGet(`/api/activity?shop=${encodeURIComponent(shop)}`)
+      .then(data => setActivity(data))
+      .catch(() => setActivity(null))
+      .finally(() => setActivityLoading(false));
+  }, [shop]);
+
+Matches the task's given code exactly, as its own separate useEffect
+(not merged into the existing push-stats/signals/orders effect) —
+kept independent so a slow/failing /api/activity call can never delay
+or fail the existing Today content, and vice versa.
+
+Note: the backend endpoint this calls (backend/routes/activity.js,
+built in the Phase 2 task) does NOT read req.query.shop at all — it
+derives the shop exclusively from the verified session token
+(req.shopDomain), by design (see audits/phase2-activity-api-audit.txt,
+security note on that endpoint). So the `?shop=...` in this fetch URL
+is harmless but effectively unused server-side; apiGet() still needs
+to attach the session token (Authorization header) for the request to
+succeed at all, which it already does for every other call in this
+file. No change was needed here since the call still works correctly —
+just noting the param is a no-op on the backend, not a bug.
+
+
+PART B - EXACT CODE (activity tiles section)
+=========================================================================
+Inserted as the first child of the existing maxWidth wrapper <div>,
+immediately before the {/* Header */} block:
+  <div style={{ marginBottom: 24 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between',
+                  alignItems: 'center', marginBottom: 12 }}>
+      <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>
+        Activity (last 7 days)
+      </h2>
+      <button
+        onClick={() => navigate('/admin/activity')}
+        style={{ fontSize: 13, color: '#6366f1', background: 'none',
+                 border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+        View all →
+      </button>
+    </div>
+
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)',
+                  gap: 12 }}>
+      {ACTIVITY_TILES.map(({ key, label, icon, color }) => (
+        <div
+          key={key}
+          onClick={() => navigate(`/admin/activity?type=${key}`)}
+          style={{ background: '#fff', border: '1px solid #e5e7eb',
+                   borderRadius: 12, padding: '16px 20px',
+                   cursor: 'pointer', transition: 'box-shadow 0.15s' }}
+          onMouseEnter={e => e.currentTarget.style.boxShadow =
+            '0 4px 12px rgba(0,0,0,0.08)'}
+          onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+        >
+          <div style={{ fontSize: 24, marginBottom: 6 }}>{icon}</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color,
+                        lineHeight: 1 }}>
+            {activityLoading ? '...' :
+             (activity?.summary?.[key] ?? 0)}
+          </div>
+          <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
+            {label}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+Where ACTIVITY_TILES is the same 4-entry array the task gave inline in
+the .map() call, hoisted to module scope (just above the component
+function) instead of re-created as a literal on every render — a
+trivial, behavior-preserving styling choice, not a functional change.
+All styling/markup otherwise identical to what was given.
+
+
+PART C - existing content preserved below
+=========================================================================
+`git diff --stat` for this file shows "80 insertions(+)" and no
+deletions — every pre-existing line (Header, error banner, the two-
+column Planned-for-today/Yesterday grid, the Recovered-this-week chart)
+is untouched and still renders, now below the new activity section.
+
+
+PART D - navigation pattern
+=========================================================================
+Checked for an existing `useRouter`/navigation hook import in this
+file first, per the task's instruction: none was present. Per the
+task's fallback instruction, checked Customers.jsx and Messages.jsx for
+"the pattern used" — grepped both files for useRouter, router.push,
+next/navigation, next/router, window.location.href, and <a href: ZERO
+matches in either file. Neither screen navigates anywhere at all.
+Broadened the search to the whole frontend/ tree: `useRouter` (from
+next/navigation or next/router) is not imported ANYWHERE in this
+codebase. The only real navigation mechanism that exists anywhere in
+this app is Shopify's own NavMenu component (@shopify/app-bridge-react),
+declared once per admin/*/page.js wrapper file (not in any screen
+component) as plain <a href="/admin/...">, e.g.:
+  <NavMenu>
+    <a href="/admin" rel="today">Today</a>
+    <a href="/admin/customers" rel="customers">Customers</a>
+    ...
+  </NavMenu>
+This is Shopify Admin's own left-hand nav, rendered outside the iframe
+by App Bridge — clicking one causes Shopify's embedded-app shell to
+navigate the iframe itself, which is a different mechanism from a
+same-document client-side route change.
+
+Since no reusable pattern existed to "use the same pattern" per the
+task's fallback instruction, introduced Next.js App Router's own
+standard client-side navigation hook, `useRouter` from `next/navigation`
+(this project's App Router version; `next/navigation`'s
+`useSearchParams` is already used elsewhere in the codebase, e.g.
+every admin/*/page.js wrapper file, so the module itself is already a
+project dependency in active use — just not `useRouter` specifically
+until now):
+  import { useRouter } from 'next/navigation';
+  ...
+  const router = useRouter();
+  const navigate = (path) => {
+    const sep = path.includes('?') ? '&' : '?';
+    router.push(`${path}${sep}shop=${encodeURIComponent(shop)}`);
+  };
+
+
+DEVIATION - navigate() carries `shop` forward explicitly; the task's
+given onClick handlers did not
+=========================================================================
+The task's given code called `navigate('/admin/activity')` and
+`navigate(\`/admin/activity?type=${key}\`)` with no shop parameter.
+Every admin/*/page.js wrapper in this codebase (confirmed by reading
+admin/page.js and admin/customers/page.js in full) derives the `shop`
+prop passed into its screen component via
+`useSearchParams().get('shop')` — there is no other mechanism in this
+app for a screen to learn which shop it's rendering for. The existing
+NavMenu <a href="/admin/customers"> links also don't carry `?shop=`
+explicitly, but that's a DIFFERENT mechanism: Shopify's embedded-app
+shell (outside the iframe) owns that navigation and is known to
+reinject shop/host params when it reloads the iframe's src — this is
+how Shopify embedded apps' NavMenu is documented to behave, and is
+consistent with every screen in this app working correctly today
+despite none of the NavMenu hrefs carrying shop explicitly.
+`router.push()`, by contrast, is a same-document, client-side Next.js
+route transition that happens entirely INSIDE the iframe, bypassing
+Shopify's shell entirely — there is no reason to expect shop/host
+reinjection to happen for it. Had `navigate('/admin/activity')` been
+implemented exactly as given, a future /admin/activity/page.js built
+the same way as every other page.js in this app (reading shop via
+searchParams) would receive an empty shop string the moment a merchant
+clicked "View all" or a tile from Today, breaking every API call the
+destination page makes.
+Since this is a concrete, verifiable, high-confidence failure mode
+(not a stylistic guess) and the fix is a one-line addition local to
+this file, `navigate()` now appends `shop` explicitly, handling both
+cases (no existing query string vs. one already present, e.g. the
+`?type=${key}` tile links).
+
+
+NOTE - /admin/activity does not exist yet
+=========================================================================
+There is no app/admin/activity directory/page.js in this codebase as
+of this task (confirmed via a directory listing of frontend/app/admin/).
+Clicking "View all" or any tile currently navigates to a route that
+will 404 until a future phase adds that page — expected and unavoidable
+for an incremental "Phase 3" task scoped only to Today.jsx (the task
+gave no instruction, and explicitly forbade, creating any other
+screen/route in this task). Not fixed or worked around here.
+
+
+NOT TOUCHED
+=========================================================================
+- Every other admin screen (Customers.jsx, Messages.jsx, Journey.jsx,
+  Settings.jsx, etc.): untouched, read-only (Customers.jsx/Messages.jsx
+  were only grepped, not edited).
+- No backend file was touched.
+- No admin/*/page.js wrapper file was touched (no new /admin/activity
+  route was created).

@@ -1,0 +1,261 @@
+=== CUSTOMERS JOURNEY MERGE AUDIT ===
+Generated: 2026-09-17
+
+Journey right panel added to Customers: yes
+2-panel layout on customer click: yes
+NotificationComposer copied: yes
+EmailComposer copied: yes
+loadCustomerJourney function added: yes
+Send push/email functions added: yes (sendJourneyPush/sendJourneyEmail
+  present, but NOT wired to anything — see deviation notes)
+Close button on right panel: yes
+Journey removed from NavMenu: yes (13 files — the 12 pre-existing
+  page.js files plus journey/page.js's own nav, so no page.js in the
+  repo still links to /admin/journey)
+Journey.jsx file kept: yes (frontend/app/admin/screens/Journey.jsx
+  and frontend/app/admin/journey/ untouched, per Part C)
+frontend build: pass
+git push: done (9fe917d..9702a90)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/screens/Customers.jsx (757 lines) and
+frontend/app/admin/screens/Journey.jsx (1318 lines) in full — both
+had already been fully read moments earlier in this same session for
+the immediately preceding read-only audit
+(audits/customers-journey-merge-audit.txt), and neither had been
+touched since, so that content was current. Located and read all 13
+page.js files under frontend/app/admin/ via Glob + read/grep before
+editing any of them. Also read backend/routes/events.js's
+getJourneyData()/journey route in full (previously partially known
+from the prior audit, re-read here specifically to evaluate the
+`?profileId=` query param the task's given loadCustomerJourney()
+snippet depends on).
+
+
+====================================================================
+CRITICAL FINDING — the given loadCustomerJourney() would have shown
+the WRONG customer's data, and backend/routes/events.js needed a
+real fix to make it correct
+====================================================================
+The task's Step 2 gave this exact function:
+  apiGet(`/api/events/${encodeURIComponent(shop)}/journey?profileId=${profileId}`)
+
+Before this task, GET /api/events/:shopDomain/journey (backend/
+routes/events.js) only ever read `limit` and `page` from the query
+string — any other param, including `profileId`, was silently
+ignored by both Express and the handler. Calling it with
+`?profileId=X` would therefore have returned the SAME top-N
+signal-having customers as a plain unfiltered call, and
+`data.customers[0]` would be whichever of those happens to have the
+single strongest signal / most recent activity — NOT the customer
+whose row was actually clicked. Clicking on Customer A could show
+Customer B's journey timeline and, more seriously, let the merchant
+send a "targeted" push/email to Customer A while believing they were
+messaging Customer B (or vice versa) — a real data-integrity and
+trust problem, not a cosmetic one.
+
+A second, independent problem: getJourneyData()'s underlying list is
+built by iterating `Signal.find({shopDomain})` and grouping by
+profile — a profile with ZERO active signals (e.g. a straightforward
+repeat buyer with no current abandonment/lapsing signal) NEVER
+appears in that list at any `limit`, so no client-side "search the
+returned list for a matching profile._id" workaround could have
+fixed this for such customers either — many rows in the Customers
+screen's own list (which shows ALL profiles, signal or not) would
+have been permanently unable to open a journey panel at all.
+
+FIX (backend/routes/events.js): extracted the existing per-profile
+computation (recent events + top products + image enrichment) out of
+the inline map callback into a shared `buildJourneyEntry(shop,
+profile, entrySignals)` helper, unchanged in behavior. Added a new
+profileId-scoped branch to getJourneyData(): when a `profileId` is
+given, it looks up that one Profile document directly (scoped to
+`shopDomain`, so a client-supplied id can't cross shops — same IDOR
+pattern as every other :shopDomain route in this codebase) and that
+profile's own Signal documents (which may be an EMPTY array — the new
+path tolerates zero signals fine, matching how the frontend already
+renders a missing topSignal gracefully everywhere, e.g.
+`SIGNAL_LABELS[customer?.topSignal?.type] || '—'`), builds one entry
+via the shared helper, and returns `{ customers: [entry], total: 1 }`
+(or `{ customers: [], total: 0 }` if the profile doesn't exist / isn't
+this shop's). The route handler now reads `req.query.profileId` and
+passes it through. Existing callers that never pass `profileId`
+(Journey.jsx's own `?limit=50` call) are completely unaffected — this
+is a purely additive, backward-compatible change.
+
+Because of this fix, the task's given loadCustomerJourney() snippet
+was copied into Customers.jsx ESSENTIALLY VERBATIM (only the
+surrounding comment was added) — it now actually does what it was
+written to do, rather than needing a different/hacked client-side
+approach.
+
+This deviates from the task's own git-add list, which only named
+frontend files. backend/routes/events.js was staged and committed
+alongside them anyway, since without it the entire feature would
+silently misbehave (see above) — flagged here rather than silently
+expanding scope. Ran `cd backend && npm test` after this change (not
+explicitly requested by this task's own Verification section, but
+standard practice per CLAUDE.md for any backend change): 19 suites,
+151/151 passing.
+
+
+====================================================================
+OTHER BUGS/GAPS FOUND IN THE GIVEN SNIPPETS AND HOW THEY WERE HANDLED
+====================================================================
+
+1. Selected-row highlight compared the wrong shape. Step 3 gave:
+     background: selectedCustomer?._id === customer._id ? '#f5f3ff' : 'transparent'
+   But a Journey "customer" entry (exactly what loadCustomerJourney()
+   now correctly stores into selectedCustomer) has the profile nested
+   at `.profile`, not at the top level — confirmed directly from
+   Journey.jsx's own rendering code (`selectedCustomer.profile?.
+   channels`, `isSelected = selectedCustomer?.profile?._id ===
+   profile?._id`, etc.) and from getJourneyData()'s return shape
+   (`{ profile, topSignal, signals, recentEvents, topProducts }`).
+   `selectedCustomer._id` is always undefined, so the literal given
+   comparison would NEVER highlight anything. Used
+   `selectedCustomer?.profile?._id === p._id` instead.
+
+2. The imperative hover handlers already on each row
+   (onMouseEnter/onMouseLeave, pre-existing in Customers.jsx, not
+   part of this task) directly set `e.currentTarget.style.background`
+   on every hover in/out. Adding the new static `background:` prop
+   without also fixing onMouseLeave would make a SELECTED row's
+   highlight vanish the instant the mouse left it (mouseleave
+   unconditionally reset background to '#fff'/'transparent').
+   Adjusted both onMouseEnter (skip the hover color while the row is
+   selected, so the highlight isn't overridden while hovering it) and
+   onMouseLeave (restore '#f5f3ff' instead of the plain default when
+   the row is the selected one) so the highlight persists correctly.
+
+3. Step 3's onClick used `customer.profileId || customer._id`. Every
+   row in this screen's own `profiles` array (from GET /api/profiles/
+   :shop/profiles) is a Profile document — it has `._id`, never a
+   `.profileId` field. Kept the literal expression (`p.profileId ||
+   p._id`, `p` being this file's existing per-row variable name, not
+   `customer`) since the `||` fallback makes it resolve correctly
+   anyway (`p.profileId` is always undefined -> falls through to
+   `p._id`); harmless, but noting it doesn't do anything the simpler
+   `p._id` alone wouldn't.
+
+4. Step 5's copy list (9 items) omits the `SUGGESTIONS` constant — a
+   separate small auto-fill map (cart_abandon/high_intent/
+   price_hesitation/lapsing/winback -> title()/body() functions) that
+   NotificationComposer's own useEffect reads directly
+   (`SUGGESTIONS[signal]`). Without it, NotificationComposer would
+   throw a ReferenceError the first time a push-capable customer was
+   selected. Copied it over anyway (noted inline in the file) since
+   omitting it isn't a viable interpretation of "copy NotificationComposer
+   ... full".
+
+5. Step 5's given right-panel description ("Send notification
+   sections") doesn't reproduce the Push/Email TAB SWITCHER from
+   Journey.jsx's own right panel, and an early draft of this change
+   briefly simplified it to "show whichever one is available,
+   preferring push" — that would have silently hidden the Email
+   option for any customer who has BOTH push and email, a real
+   regression versus Journey.jsx's existing behavior (which lets the
+   merchant switch channels for such a customer). Caught this before
+   finishing and copied the full tab switcher + its companion
+   auto-switch effect (notifTab state, the effect that defaults
+   notifTab to whichever channel is actually available whenever
+   selectedCustomer changes) from Journey.jsx as well, so the merged
+   panel's behavior matches Journey.jsx's original exactly.
+
+6. Retired `selectedProfileId` state, the `if (selectedProfileId)
+   return <ProfileScreen .../>` early-return, and the `ProfileScreen`
+   import. Reasoning: Step 3 explicitly gives the new onClick to put
+   on each row (`loadCustomerJourney(...)`) with no mention of keeping
+   the old one, and a DOM element can only have one onClick handler —
+   so the old "click a row -> full-screen ProfileScreen" navigation is
+   no longer reachable from anywhere once the new onClick replaces it.
+   Rather than leave `selectedProfileId` as dead, always-null state
+   and an unreachable branch (which would also leave `ProfileScreen`
+   imported but unused), it was removed. This is a real, user-facing
+   behavior change worth flagging explicitly: there is now no way to
+   open the old full-screen customer profile view from this screen —
+   only the new Journey side panel. If that full view is still needed
+   for some other reason, it would need to be reintroduced via an
+   explicit "View full profile" affordance, which nothing in this task
+   asked for.
+
+7. `journeyLoading` state (Step 1) was never wired to any UI by the
+   task's own given snippets — it's set/cleared by loadCustomerJourney
+   but nothing in Steps 3-5's given code reads it. Added one small,
+   low-risk usage beyond the literal snippets: the grid now also
+   splits into 2 columns while `journeyLoading` is true (not just
+   `selectedCustomer`), and the right panel shows a plain "Loading
+   journey…" placeholder card during that window, before
+   selectedCustomer is set. This directly serves what the state
+   variable was evidently added for, without adding any new
+   fetch/logic.
+
+8. Step 6's sendJourneyPush/sendJourneyEmail wrapper functions were
+   added exactly as given, but Step 5 also says to copy
+   NotificationComposer/EmailComposer "full" — and those components
+   already call `apiSend('/api/push/send-journey', ...)` /
+   `apiSend('/api/push/send-journey-email', ...)` directly inside
+   their own `send()` functions, unchanged from Journey.jsx. Copying
+   both literally means the two new wrapper functions in Step 6 end up
+   unused/dead code — kept them anyway since the task explicitly asked
+   for them to be added, rather than silently dropping an explicit
+   instruction; did not rewire the composers to use them, since that
+   would have meant NOT copying the composers "full" as separately
+   instructed. Flagging the resulting redundancy rather than resolving
+   it unilaterally in either direction.
+
+
+====================================================================
+PART B — NavMenu updates
+====================================================================
+Removed the single `<a href="/admin/journey" rel="journey">Journey</a>`
+line from all 13 page.js files under frontend/app/admin/ (the 12
+files that had it in their shared NavMenu list, plus
+journey/page.js's own copy of that same list — Part C says to unlink
+from nav "as done in Part B", so journey/page.js's own nav was
+brought in line with every other file's post-change list too).
+Verified via grep afterward: zero `rel="journey"` occurrences remain
+anywhere under frontend/app/admin/. The "Customers" nav item itself
+was not touched in any file.
+
+
+====================================================================
+PART C — Journey.jsx kept
+====================================================================
+frontend/app/admin/screens/Journey.jsx and the
+frontend/app/admin/journey/ directory (including journey/page.js,
+which still renders <JourneyScreen>) were not deleted — only their
+own NavMenu entry was removed, same as every other file. /admin/journey
+remains a live, reachable route if visited directly by URL; nothing
+links to it anymore from any nav menu.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- node --check backend/routes/events.js -- pass
+- cd backend && npm test -- 19 suites, 151/151 passing
+- cd frontend && npm run build -- compiled successfully, all 17
+  routes generated (customers route grew 10.1kB -> 11.2kB from the
+  merged panel/composers; journey route unchanged at 9.54kB, still
+  present per Part C), no errors
+- git status after staging showed exactly the 15 intended files
+  (Customers.jsx, 13 page.js files, events.js) plus nothing else;
+  pre-existing unrelated dirty files (backend/__tests__/brain.test.js,
+  frontend/lib/api.js) were left alone, per standing practice
+- git push origin main -- succeeded (9fe917d..9702a90), no hang
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Files modified: frontend/app/admin/screens/Customers.jsx, all 13
+frontend/app/admin/**/page.js files, and backend/routes/events.js
+(necessary fix, see Critical Finding above). Journey.jsx and every
+other file were left untouched.

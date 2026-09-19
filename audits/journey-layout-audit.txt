@@ -1,0 +1,323 @@
+JOURNEY LAYOUT AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-14
+
+File read: frontend/app/admin/screens/Journey.jsx, in full (958 lines).
+
+
+====================================================================
+1. The top header section - what's currently there, any existing
+   buttons
+====================================================================
+Lines 584-592, inside JourneyScreen's return, the very first thing
+rendered:
+
+584	      {/* Header */}
+585	      <div style={{ marginBottom: '20px' }}>
+586	        <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#111827', margin: '0 0 6px' }}>
+587	          Customer Journey
+588	        </h1>
+589	        <p style={{ fontSize: '13px', color: '#9ca3af', margin: 0 }}>
+590	          Customers with active signals — review their journey and send targeted notifications.
+591	        </p>
+592	      </div>
+
+Just a title + one-line subtitle -- no buttons, no actions, no icons
+inside this header block itself.
+
+The nearest thing to "existing buttons" near the top is a SEPARATE
+section immediately below the header (lines 604-634, "Filter tabs"):
+5 pill buttons -- All signals / Cart abandon / High intent / Price
+hesitation / Going quiet -- that filter the customer list client-side
+by signal type (`filter` state, lines 609-633). These are not part of
+the header block itself, but are the first interactive controls on
+the screen.
+
+No other buttons exist above the customer list (no refresh button, no
+export, no "new customer" action, nothing else).
+
+
+====================================================================
+2. The right panel layout - full JSX structure/hierarchy
+====================================================================
+The right panel only renders when a customer row is selected
+(`{selectedCustomer && (...)}`, line 768), as the second column of a
+2-column CSS grid (`gridTemplateColumns: selectedCustomer ? '1fr 400px'
+: '1fr'`, line 639) -- so with nothing selected, the grid is a single
+column and the right panel doesn't exist in the DOM at all.
+
+Full hierarchy (line numbers as of this read):
+
+  {selectedCustomer && (                                    [768]
+    <div ...sticky wrapper, flex column, gap 12px...>        [769]
+
+      {/* Journey timeline */}                                [771]
+      <div ...card...>                                        [772]
+        <div>Customer journey</div>  (section heading)         [773-775]
+
+        {/* Top products */} (conditional on topProducts.length) [778]
+          <div>Most interested in</div>  (label)                [780-785]
+          {topProducts.map(...)} -> title + view count rows     [786-796]
+
+        {/* Recent events */}                                  [800]
+          <div>Recent activity</div>  (label)                  [801-806]
+          (() => { filter + map recentEvents -> dot+label+     [808-850]
+                    sub-line+time rows, or "No journey data
+                    yet" empty state })()
+      </div>  (end Journey timeline card)                      [852]
+
+      {/* Send notification panel */}                          [854]
+      (() => {                                                 [855]
+        hasPush / hasEmail computed                             [856-860]
+        if (!hasPush && !hasEmail)
+          return <div>No push subscription or email on          [862-873]
+                       file...</div>  (fallback card, no
+                       composer rendered at all)
+        return (
+          <div ...card...>                                     [876]
+            <div>Send notification</div>  (heading)             [877-879]
+            {/* Push / Email tab switcher */}                   [881]
+              2 buttons: Push / Email, each disabled when        [886-912]
+              that channel isn't available for this customer
+            {notifTab === 'push' && hasPush &&
+              <NotificationComposer .../>}                      [915-925]
+            {notifTab === 'email' && hasEmail &&
+              <EmailComposer .../>}                              [927-937]
+            {sendResult && <div>{sendResult}</div>}               [939-947]
+              (green "Sent successfully!" or red "Error: ..."
+               banner, auto-clears after 3s via setTimeout in
+               the parent's onSent/onError callbacks)
+          </div>
+        );
+      })()                                                       [950]
+
+    </div>  (end sticky wrapper)                                 [952]
+  )}                                                              [953]
+
+NOTE -- there is NO separate "Customer info section" anywhere in the
+right panel (the task's question 2 assumed one exists as its own
+block; it does not). The customer's identifying info (email/phone/
+"Anonymous <id>") is shown ONLY in the LEFT customer-list row (line
+677-680, `identifier`) -- it is never repeated inside the right panel
+itself. The right panel goes straight from the sticky wrapper into the
+"Customer journey" card (top products + recent activity) and then the
+"Send notification" panel -- exactly 2 top-level cards, not the 4
+sections (Customer info / Journey timeline / Push notification /
+Email section) the question enumerated. The "Push notification" and
+"Email section" the question asks about are not two separate
+standing sections either -- they are the SAME "Send notification"
+card, with NotificationComposer/EmailComposer swapped in based on the
+notifTab toggle (only one of the two ever renders at a time, never
+both simultaneously).
+
+
+====================================================================
+3. NotificationComposer - how suggestions are currently implemented
+   for push
+====================================================================
+TWO separate, independent suggestion mechanisms exist for push,
+serving different purposes:
+
+a) SUGGESTIONS (module scope, lines 78-99) -- AUTO-FILL only, keyed by
+   the customer's topSignal.type, each entry a pair of functions taking
+   the customer's top product name:
+     const SUGGESTIONS = {
+       cart_abandon: {
+         title: (product) => (product ? `Your ${product} is waiting` : 'Your cart is waiting'),
+         body: () => 'Complete your order before it sells out.',
+       },
+       high_intent: { ... },
+       price_hesitation: { ... },
+       lapsing: { ... },
+       winback: { ... },
+     };
+   Only 5 of the 12 known signal types have an entry here (cart_abandon,
+   high_intent, price_hesitation, lapsing, winback) -- any other signal
+   type (checkout_abandon, browse_abandon, price_drop, back_in_stock,
+   post_purchase_d3, email_capture, cod_to_prepaid) falls back to a
+   generic default (`{ title: () => 'Hello from the store', body: () =>
+   'We have something special for you.' }`, lines 230-233).
+   This runs in a useEffect keyed on `[customer]` (lines 223-236) --
+   every time a different customer is selected, `title`/`body` state
+   is silently overwritten to that customer's suggested copy (whatever
+   the merchant may have been mid-typing for a PREVIOUSLY selected
+   customer is discarded).
+
+b) NOTIFICATION_SUGGESTIONS (module scope, lines 101-212) -- a
+   BROWSABLE library the merchant can open and pick from manually, NOT
+   tied to the selected customer's signal at all. Shape: an array of 5
+   categories, each with a color/textColor/icon and 2-3 suggestion
+   objects (label/title/body):
+     const NOTIFICATION_SUGGESTIONS = [
+       { category: 'Cart & Purchase', color: '#fee2e2', textColor: '#dc2626',
+         icon: '🛒', suggestions: [ {label, title, body}, ... ] },
+       { category: 'Offers & Discounts', ... },
+       { category: 'Product Updates', ... },
+       { category: 'Re-engagement', ... },
+       { category: 'Post Purchase', ... },
+     ];
+   12 total suggestions across the 5 categories (2+3+3+3+3 — see raw
+   data above). Rendered via a collapsible "Notification ideas" toggle
+   row (lines 263-295, a clickable div with a chevron that flips 180deg
+   when open) -> when open, shows category tabs (lines 307-331, one
+   button per category, active tab styled with that category's own
+   color/textColor) -> below the tabs, the ACTIVE category's
+   suggestion cards only (lines 335-383, `NOTIFICATION_SUGGESTIONS
+   [activeCategory].suggestions.map(...)`). Clicking a suggestion card
+   sets `title`/`body` directly to that suggestion's literal strings
+   (lines 338-342, no product-name interpolation -- these are static,
+   unlike (a)'s functions) and closes the panel
+   (`setShowSuggestions(false)`).
+   `activeCategory` (useState, default 0 = 'Cart & Purchase') persists
+   across which category tab was last viewed, independent of which
+   customer is selected.
+
+Below both suggestion mechanisms: a plain title `<input>` and body
+`<textarea>` (lines 388-409, both directly editable, always reflecting
+whichever of (a)/(b)/manual-typing happened last), a small signal/
+strength readout line (lines 410-413), and the Send button (lines
+414-427, disabled while sending or while either field is empty).
+
+
+====================================================================
+4. EmailComposer - full current implementation; does it have
+   suggestions; what fields does it have
+====================================================================
+Full function, lines 432-531:
+
+432	function EmailComposer({ customer, shop, onSent, onError }) {
+433	  const [subject, setSubject] = useState('');
+434	  const [body, setBody] = useState('');
+435	  const [sending, setSending] = useState(false);
+436
+437	  useEffect(() => {
+438	    const signal = customer?.topSignal?.type;
+439	    const rawProduct = customer?.topProducts?.[0]?.title || '';
+440	    const product = /^\d+$/.test(rawProduct) ? '' : rawProduct;
+441	    const suggestions = {
+442	      cart_abandon: {
+443	        subject: 'You left something behind',
+444	        body: `Hi there,\n\nWe noticed you added ${product || 'some items'} to your cart but didn't complete your purchase.\n\nYour cart is saved and waiting for you. Come back and complete your order before it sells out!\n\nShop now and get free shipping on orders above ₹999.\n\nWarm regards,\nThe Team`,
+445	      },
+446	      high_intent: {
+447	        subject: `Still thinking about ${product || 'your saved item'}?`,
+448	        body: `Hi there,\n\nWe noticed you've been checking out ${product || 'one of our products'} multiple times.\n\nWe think you're going to love it! Here's what makes it special...\n\nDon't wait too long — stock is limited.\n\nWarm regards,\nThe Team`,
+449	      },
+450	      lapsing: {
+451	        subject: "We miss you! Here's something special",
+452	        body: `Hi there,\n\nIt's been a while since your last visit and we miss you!\n\nWe've added exciting new products to our collection that we think you'll love.\n\nCome back and explore — we'd love to see you again.\n\nWarm regards,\nThe Team`,
+452	      },
+453	    };
+454	    const s = suggestions[signal] || {
+455	      subject: 'A message from our store',
+456	      body: 'Hi there,\n\nThank you for being a valued customer. We have something special for you.\n\nWarm regards,\nThe Team',
+457	    };
+458	    setSubject(s.subject);
+459	    setBody(s.body);
+460	  }, [customer]);
+461
+462	  async function send() {
+463	    if (!subject || !body || sending) return;
+464	    setSending(true);
+465	    try {
+466	      await apiSend('/api/push/send-journey-email', 'POST', {
+467	        profileId: customer.profile._id,
+468	        subject,
+469	        body,
+470	      });
+471	      onSent();
+472	    } catch (e) {
+473	      onError(e.message);
+474	    } finally {
+475	      setSending(false);
+476	    }
+477	  }
+478
+479	  const email = customer?.profile?.channels?.email?.address ||
+480	    customer?.profile?.identifiers?.emails?.[0];
+481
+482	  return (
+483	    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+484	      <div>Sending to: <strong>{email}</strong></div>
+485	      <input value={subject} onChange={...} placeholder="Email subject" .../>
+486	      <textarea value={body} onChange={...} placeholder="Email message"
+487	                rows={6} .../>
+488	      <div>Sent from: onboarding@resend.dev</div>
+489	      <button onClick={send} disabled={sending || !subject || !body}>
+490	        {sending ? '⏳ Sending...' : '✉️ Send email'}
+491	      </button>
+492	    </div>
+493	  );
+494	}
+
+(line numbers in this reproduction shifted slightly from the literal
+source due to the collapsed JSX in the return block above -- the
+literal source line numbers for send()/email/return are 465-531, cited
+correctly earlier in this document; the collapsed excerpt here is for
+readability only)
+
+Does it have suggestions: only the SAME kind of auto-fill (a) that
+NotificationComposer has -- a plain object literal keyed by signal
+type (cart_abandon / high_intent / lapsing only -- just 3 of the 5
+NotificationComposer's SUGGESTIONS covers, and 3 of 12 known signal
+types total), applied once via useEffect on `[customer]`, with no user
+override besides directly editing the subject/body fields afterward.
+It does NOT have anything equivalent to NotificationComposer's
+NOTIFICATION_SUGGESTIONS -- no browsable/expandable suggestion
+library, no categories, no "click to use" cards, no toggle UI at all.
+This is the most significant structural asymmetry between the two
+composers.
+
+Fields: exactly 4 pieces of UI, all inside a flex column with 8px gap:
+  1. A read-only "Sending to: <email>" line (email resolved via
+     `customer?.profile?.channels?.email?.address ||
+     customer?.profile?.identifiers?.emails?.[0]` -- same 2-field
+     fallback pattern used elsewhere in this file).
+  2. `subject` -- a plain text <input>.
+  3. `body` -- a <textarea rows={6}>.
+  4. A static, non-editable "Sent from: onboarding@resend.dev" line
+     (a hardcoded sender address, not derived from any config/state).
+  Plus the Send button (disabled while sending or while subject/body
+  is empty) and, in the parent's render, a shared success/error banner
+  (`sendResult`) below whichever composer is active.
+
+
+====================================================================
+5. How product data is currently available - does selectedCustomer
+   have product info; topProducts structure
+====================================================================
+Yes -- `selectedCustomer.topProducts` (and, before selection,
+`c.topProducts` for each row in the customer list) is an array
+produced by the backend's getJourneyData() (backend/routes/events.js),
+built from that customer's recent product_view events:
+  topProducts: Object.values(productViews)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3)
+Each entry's shape (per that same backend aggregation):
+  { productId, title, count, lastSeen }
+-- though only `title` and `count` are actually read anywhere in
+Journey.jsx (`productId` is read too, in one spot -- see below;
+`lastSeen` is never read in this file at all). Capped to the top 3
+products by view count.
+
+Where it's consumed in Journey.jsx:
+  - Left customer list, "Top product" column (line 683-684):
+    `c.topProducts?.[0]?.title` -- just the single top product's
+    title, with a numeric-ID fallback check (`/^\d+$/.test(...)`
+    displays '—' instead of a raw numeric product ID).
+  - Right panel, "Most interested in" section (lines 778-798): ALL of
+    `selectedCustomer.topProducts` (up to 3), each rendered as
+    `{p.title}` + `{p.count} view(s)`.
+  - NotificationComposer's auto-fill (line 225): `rawProduct =
+    customer?.topProducts?.[0]?.title || ''`, with the same numeric-ID
+    guard, fed into the SUGGESTIONS title()/body() functions as
+    `product`.
+  - NotificationComposer's send() (lines 246-248): uses
+    `customer.topProducts[0].productId` (the only place `productId`
+    is read in this file) to build the notification's click-through
+    URL: `https://${shop}/products/${customer.topProducts[0].productId}`,
+    falling back to the bare shop URL when there's no top product.
+  - EmailComposer's auto-fill (line 439): same
+    `customer?.topProducts?.[0]?.title` pattern as
+    NotificationComposer, independently duplicated (not shared via a
+    common helper).

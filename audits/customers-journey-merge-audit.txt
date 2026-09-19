@@ -1,0 +1,212 @@
+=== CUSTOMERS + JOURNEY MERGE AUDIT ===
+Generated: 2026-09-17
+Scope: AUDIT ONLY, read-only. No files were modified while producing this.
+
+Files read in full:
+  frontend/app/admin/screens/Customers.jsx (757 lines)
+  frontend/app/admin/screens/Journey.jsx    (1318 lines)
+
+
+====================================================================
+1. CUSTOMERS.JSX
+====================================================================
+
+--- How the customer list is fetched ---
+loadData() (useCallback, lines 212-256), debounced 300ms via a
+useEffect (lines 258-266, setTimeout on every [loadData] change, i.e.
+every time shop/filter/search changes). Fetches, in parallel via
+Promise.all:
+  GET /api/profiles/:shop/profiles?limit=50[&filter=...][&search=...]
+  GET /api/profiles/:shop/signals?limit=200
+Results:
+  profiles -> setProfiles(profRes.profiles), setTotal(profRes.total)
+  signals  -> reduced client-side into two maps:
+    signalMap[profileId]      = { type, strength } of the STRONGEST
+                                 signal for that profile
+    signalCountMap[profileId] = total signal count for that profile
+There is no separate call for "top interest" — that comes from each
+profile object's own `interests` field (p.interests, an object of
+interest-name -> weight), sorted client-side per row.
+
+--- How it's rendered ---
+A single scrollable table/card (desktop: CSS-grid table with
+GRID_COLS = '2fr 1fr 2fr 1fr 1.5fr 1fr'; mobile: stacked 3-line
+cards), filtered via FILTER_TABS (everyone / has_cart / bought_once /
+repeat_buyer / going_quiet -> sent as the `filter` query param) and a
+debounced text search box (name/email, sent as `search`). Loading
+state shows 5 skeleton rows; empty state shows "No customers match
+this view."
+
+--- What each customer row shows ---
+Desktop columns (6):
+  1. Customer    - display name (first email, else first phone, else
+                    "Anonymous shopper · #<last5ofId>") + "seen <relative
+                    time>" from p.lastSeenAt if present
+  2. Stage       - a badge: "Repeat buyer" (orders.count>=2, blue),
+                    "Bought once" (orders.count===1, green), "Has a
+                    cart" (has a cartToken and 0 orders, yellow), else
+                    falls back to STAGE_CONFIG[p.stage] label
+                    (customer/identified/anonymous/lapsed)
+  3. Most interested in - the profile's top `interests` entry (by
+                    weight) as plain text, plus the label for that
+                    profile's strongest signal (from signalMap,
+                    SIGNAL_LABELS lookup) underneath in indigo; "—" if
+                    no signal
+  4. Reach       - three icons (🔔 push, ✉️ email, 📱 phone), each
+                    dimmed to 20% opacity when that channel is absent
+  5. Last messaged - relative time of p.messages[last].sentAt, or
+                    "Never"
+  6. Spent       - p.orders.ltv formatted as ₹X,XX,XXX (en-IN), or "—"
+                    if 0/absent
+Mobile cards show the same information condensed into 3 rows (name +
+stage badge; last-seen + "<n> signals" count from signalCountMap;
+channel icons + LTV).
+
+--- What happens when a customer row is clicked ---
+onClick sets selectedProfileId to that profile's _id (line 475/605).
+When selectedProfileId is truthy, the ENTIRE Customers component
+short-circuits (line 268-276) and renders, in place of the list:
+  <ProfileScreen shop={shop} profileId={selectedProfileId}
+                 onBack={() => setSelectedProfileId(null)} />
+i.e. a FULL-SCREEN REPLACEMENT (imported from './Profile', a separate
+screen file not included in this audit's scope), not a side panel —
+the list, search box, and filter tabs all disappear while a profile
+is open; clicking "Back" inside ProfileScreen (via the onBack prop)
+is what restores the list view.
+
+
+====================================================================
+2. JOURNEY.JSX
+====================================================================
+
+--- How selectedCustomer is set ---
+const [selectedCustomer, setSelectedCustomer] = useState(null);
+Set in two places, both from the customer list rows:
+  1. Clicking anywhere on a row (line 1028):
+     onClick={() => setSelectedCustomer(isSelected ? null : c)}
+     - TOGGLES: clicking the already-selected row deselects it.
+  2. Clicking the "Notify" button inside a row, only shown when
+     hasPush is true (line 1085-1088):
+     onClick={(e) => { e.stopPropagation(); setSelectedCustomer(c); }}
+     - Always selects (does not toggle), and stops the row's own
+       onClick from also firing.
+`c` is one entry of `filteredCustomers` (derived from the `customers`
+state array, itself set by load() below — each entry already contains
+.profile, .signals, .topSignal, .topProducts, .recentEvents combined
+server-side).
+A separate useEffect (lines 861-870) auto-switches `notifTab` (see
+below) to whichever channel (push/email) is actually available
+whenever selectedCustomer changes, so selecting an email-only customer
+while notifTab was still 'push' doesn't render an empty panel.
+
+--- What the right panel shows ---
+Only rendered when selectedCustomer is truthy (line 1108), as a
+sticky side panel (grid-template-columns becomes '1fr 400px' when a
+customer is selected, vs '1fr' otherwise — the LIST STAYS VISIBLE
+alongside the panel, unlike Customers.jsx's full replacement). Two
+stacked cards inside it:
+
+  A. "Customer journey" card (lines 1120-1208):
+     - "Most interested in": selectedCustomer.topProducts, each row
+       showing a ProductThumbnail (real image if cached, else a
+       placeholder icon), title, and view count
+     - "Recent activity": selectedCustomer.recentEvents, filtered to
+       only types with an EVENT_LABELS entry (page_view,
+       push_prompt_shown, push_prompt_accepted, product_view), each
+       row: a colored dot (EVENT_DOT_COLORS), the friendly label
+       (EVENT_LABELS, or getFriendlyPath()-derived detail for
+       product_view/page_view), and a formatted time (en-IN,
+       hour:minute)
+
+  B. "Send notification" card (lines 1210-1310):
+     - If neither push nor email is available for the customer: a
+       plain "No push subscription or email on file" message instead
+       of any composer.
+     - Otherwise: a Push/Email tab switcher (notifTab state,
+       'push'|'email'; a tab is disabled/greyed if that channel isn't
+       available for this customer) and, below it, ONE of:
+         <NotificationComposer> (push) — auto-fills title/body from
+           SUGGESTIONS[topSignal.type], has a "Notification ideas"
+           suggestion browser (NOTIFICATION_SUGGESTIONS, 5 categories,
+           each with 2-3 canned title/body pairs, optionally showing a
+           product thumbnail), free-text title+body fields, and a
+           Send button.
+         <EmailComposer> (email) — same pattern for email
+           (subject/body), its own inline auto-fill suggestion map and
+           EMAIL_SUGGESTIONS category browser (4 categories).
+       A shared sendResult message (green on success, red on
+       "Error: ...") shows under whichever composer is active.
+
+--- API calls Journey.jsx makes ---
+  GET  /api/events/:shop/journey?limit=50          (load(), on mount
+                                                      and via the
+                                                      header Refresh
+                                                      button; returns
+                                                      { customers,
+                                                      total }, each
+                                                      customer entry
+                                                      pre-joined with
+                                                      profile/signals/
+                                                      topProducts/
+                                                      recentEvents)
+  POST /api/push/send-journey                       (NotificationComposer
+                                                      .send(): body
+                                                      { profileId,
+                                                      title, body, url })
+  POST /api/push/send-journey-email                 (EmailComposer
+                                                      .send(): body
+                                                      { profileId,
+                                                      subject, body })
+No other apiGet/apiSend calls exist anywhere in this file.
+
+--- File size ---
+1318 lines total (frontend/app/admin/screens/Journey.jsx).
+
+
+====================================================================
+3. SHARED API CALLS BETWEEN BOTH SCREENS
+====================================================================
+
+NONE. Zero identical endpoint strings are called by both files:
+
+  Customers.jsx calls:
+    GET /api/profiles/:shop/profiles?...
+    GET /api/profiles/:shop/signals?limit=200
+
+  Journey.jsx calls:
+    GET  /api/events/:shop/journey?limit=50
+    POST /api/push/send-journey
+    POST /api/push/send-journey-email
+
+Customers.jsx builds its "most interested in" / signal view by
+fetching profiles and signals SEPARATELY and joining them client-side
+(signalMap/signalCountMap). Journey.jsx instead calls one combined
+backend endpoint (/api/events/:shop/journey) that already returns
+each customer bundled with .profile, .signals, .topSignal,
+.topProducts, and .recentEvents pre-joined server-side — a different,
+richer endpoint built for a different purpose (individual customer
+journey detail, not a filterable/searchable list). There is real DATA
+overlap (both ultimately show profile identity + top signal/interest
+per customer) but no shared API CALL — a merge would need to either
+pick one of these two backend endpoints as the single source of truth
+or keep both fetches running side by side.
+
+Additional non-API overlap worth noting for a merge: both files
+independently define an IDENTICAL DS design-token object, an
+IDENTICAL PageHeader() component, and a near-identical SIGNAL_LABELS
+map (Customers.jsx's SIGNAL_LABELS uses "Reached checkout" /
+"Price dropped"; Journey.jsx's uses "Checkout left behind" /
+"Price dropped" for the same two keys — one small wording
+difference between the two copies). This matches the same
+no-shared-layout, per-file-duplicated-DS pattern already documented
+for every other screen in this codebase (see e.g.
+audits/dashboard-merge-audit.txt for the same pattern in Today.jsx /
+Insights.jsx).
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified. This was a read-only audit of
+frontend/app/admin/screens/Customers.jsx and
+frontend/app/admin/screens/Journey.jsx.

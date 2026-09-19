@@ -1,0 +1,109 @@
+=== CUSTOMERS COLUMNS FIX AUDIT ===
+Generated: 2026-09-17
+
+gridTemplateColumns updated: yes ('2fr 120px 140px 90px 120px 80px')
+Header and rows use same grid: yes (both reference the single
+  GRID_COLS constant, so this was automatically satisfied by editing
+  it in one place)
+REACH cell flex aligned: yes
+Outer container overflowX auto: yes
+frontend build: pass
+git push: done (da85ee7..4a4f7fb)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/screens/Customers.jsx in full (1815 lines,
+across two Read calls due to file size) before making any edit, as
+instructed.
+
+
+====================================================================
+WHAT WAS CHANGED
+====================================================================
+1. GRID_COLS constant (single source used by both the header row and
+   every desktop customer row): '2fr 1fr 2fr minmax(80px, 1fr) 1.5fr
+   1fr' -> '2fr 120px 140px 90px 120px 80px', exactly as specified
+   (CUSTOMER 2fr | STAGE 120px | MOST INTERESTED IN 140px | REACH
+   90px | LAST MESSAGED 120px | SPENT 80px).
+
+2. STAGE cell (desktop row): added whiteSpace: 'nowrap' to the
+   wrapping div (StageBadge's own text already had its own
+   whiteSpace: 'nowrap' from an earlier task, but the task explicitly
+   asked for it on the cell itself too — added, harmless duplication).
+
+3. REACH cell (desktop row): added gap: 8 to the wrapping div, as
+   specified. Note the cell only ever contains a single child
+   (<ReachIcons customer={p} />, which already has its own internal
+   gap: 6 between its 3 icons) — the outer gap: 8 has no visible
+   effect with only one child, but was added exactly as instructed
+   for literal compliance and in case of future multi-child changes.
+
+4. LAST MESSAGED cell (desktop row): fontSize 12 / color #6b7280
+   already matched; added whiteSpace: 'nowrap' (was missing).
+
+5. SPENT cell (desktop row): fontSize 13 / fontWeight 600 already
+   matched; added textAlign: 'right' as specified. NOTE: this cell's
+   wrapper has `display: 'flex'` (pre-existing, for vertical
+   centering) — `textAlign` has no effect on how a flex child is
+   positioned along the main axis; only `justifyContent` does. Adding
+   textAlign: 'right' alone would have been visually inert (the
+   amount/'—' would stay left-aligned despite the style being
+   present). Added `justifyContent: 'flex-end'` alongside it so the
+   requested right-alignment actually renders, consistent with this
+   session's standing practice of completing under-specified CSS
+   combinations rather than shipping a property that has no visual
+   effect.
+
+6. Outer list container (the `...DS.card, padding: 0, overflow:
+   'hidden'` div wrapping the header + rows): added overflowX: 'auto'
+   and minWidth: 600, exactly as specified. `overflow: 'hidden'` (the
+   shorthand, setting both axes to hidden) and `overflowX: 'auto'`
+   both being present in the same style object is intentional, not a
+   conflict — React/CSS resolves this to overflow-y: hidden (from the
+   shorthand) with overflow-x: auto overriding just the x-axis, which
+   is exactly the "scroll horizontally, never vertically within this
+   card" behavior the fix is going for.
+
+
+====================================================================
+SCOPE NOTE — mobile row layout untouched
+====================================================================
+GRID_COLS (and every other change above) is only referenced by the
+desktop header row and the desktop (non-mobile) customer row. The
+separate mobile row layout (isMobileView === true branch, a 3-line
+stacked card with no gridTemplateColumns at all) was not touched —
+the task's own framing ("Find the desktop customer row grid layout")
+scoped this to desktop only, and the mobile layout has no grid to
+misalign in the first place.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+`git diff` shows exactly 8 insertions / 4 deletions across 6 small,
+disjoint edits (GRID_COLS, the outer container's style, and 4 cell
+styles). No state, effect, API call, filter/search logic, or right
+panel code was touched. `git status` after staging showed only
+frontend/app/admin/screens/Customers.jsx changed; the pre-existing
+unrelated dirty files (backend/__tests__/brain.test.js,
+frontend/lib/api.js) were left alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 17
+  routes generated, no errors.
+- git push origin main -- succeeded (da85ee7..4a4f7fb), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Only frontend/app/admin/screens/Customers.jsx was modified. No other
+file was changed.

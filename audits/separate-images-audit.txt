@@ -1,0 +1,241 @@
+=== SEPARATE IMAGES AUDIT ===
+Generated: 2026-09-17
+
+editorMobileImageUrl state: yes
+editorDesktopImageUrl state: yes
+Mobile upload button: yes
+Desktop upload button: yes
+Remove button for each: yes
+Mobile preview uses mobile image: yes
+Desktop preview uses desktop image: yes
+FestivalQueue model updated: yes
+API calls updated with both images: yes
+frontend build: pass
+git push: done (a8e8bd6..749c3fb)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full
+(1620 lines) and backend/models/FestivalQueue.js in full (20 lines)
+before making any change, as instructed. Also grepped
+backend/routes/queue.js and backend/routes/push.js (not edited — see
+Critical Finding below) to check whether the backend already reads
+the new field names the frontend would start sending.
+
+
+====================================================================
+CHANGE 1 — two separate image states
+====================================================================
+Replaced the single `editorImageUrl`/`setEditorImageUrl` state with
+`editorMobileImageUrl`/`setEditorMobileImageUrl` and
+`editorDesktopImageUrl`/`setEditorDesktopImageUrl`, exactly as given.
+
+Every prior use of `editorImageUrl` was found and updated (confirmed
+via a final grep for "editorImageUrl" after all edits — zero matches
+remain):
+- Upload button onChange -> split into two separate `<input
+  type="file">` handlers, one per new state (Change 2).
+- Mobile preview `<img>` -> `editorMobileImageUrl`.
+- Desktop preview `<img>` -> `editorDesktopImageUrl`.
+- Send Now / Approve / Add to Queue API call bodies -> both
+  `mobileImageUrl`/`desktopImageUrl` fields (Change 5).
+- All 5 `setShowEditor(false)` close sites (backdrop click, ✕ button,
+  and the 3 action buttons' success paths) -> now also reset both
+  `setEditorMobileImageUrl('')`/`setEditorDesktopImageUrl('')`, per
+  "In setShowEditor(false) resets -> reset both states." This is new
+  behavior — the OLD single `editorImageUrl` state was never reset at
+  any of these 5 close sites before this task (it was only ever reset
+  when a NEW festival was clicked to open the editor, not when the
+  editor closed) — implemented as explicitly instructed here.
+- Festival list click handler (opens the editor for a newly selected
+  festival) -> `setEditorImageUrl('')` replaced with both resets.
+
+
+====================================================================
+CHANGE 2 — two upload sections
+====================================================================
+Replaced the single "Notification Image" upload section with the
+given "📱 Mobile Image" and "🖥️ Desktop Image" sections, each with its
+own dashed-border upload button, its own hidden file input + FileReader
+-> readAsDataURL -> setState, and its own conditional "Remove
+[mobile|desktop] image" text button — all implemented verbatim.
+
+The existing info ("i") button and its info-box (recommended size/
+ratio/format/tip) were kept, placed in the Mobile Image section's
+label row exactly where the given code's own comment says to
+("{/* keep existing info button here */}") — the info box itself
+(unchanged content) renders directly below that label row, in the
+same relative position it held before this task, toggled by the same
+pre-existing `showImageInfo` state (untouched).
+
+
+====================================================================
+CHANGE 3 — previews use their own image state
+====================================================================
+Mobile preview: swapped to `editorMobileImageUrl`, and — since the
+original code rendered NOTHING when no image was set (no placeholder
+at all) — added the given 🔔 placeholder tile for the empty case,
+implemented as `editorMobileImageUrl ? <img/> : <div>🔔</div>` (an
+if/else, matching the exact pattern the Desktop preview already used
+for its own placeholder, for visual/structural consistency between
+the two previews — the task's two separate bullet points, "src=
+{editorMobileImageUrl}" and "show placeholder bell if no mobile
+image," describe exactly this combined behavior).
+
+Desktop preview: swapped `editorImageUrl` -> `editorDesktopImageUrl`;
+the pre-existing 🔔-placeholder-when-empty branch was left completely
+unchanged, per "Keep existing 🔔 placeholder when no desktop image."
+
+
+====================================================================
+CHANGE 5 — API call bodies
+====================================================================
+All three action buttons now send both `mobileImageUrl:
+editorMobileImageUrl` and `desktopImageUrl: editorDesktopImageUrl` in
+place of the old single `imageUrl: editorImageUrl` field, exactly as
+given.
+
+DEVIATION FROM THE GIVEN SPEC — `shop` was NOT added to the Approve /
+Add to Queue request bodies. The task's own template for those two
+buttons includes a `shop` field ("body: { shop, title: editorTitle,
+... }"), but the ACTUAL pre-existing code for both of those two calls
+(POST /api/queue/:shop/festival) has never included `shop` in the
+body — shop travels via the URL path segment only
+(`` `/api/queue/${encodeURIComponent(shop)}/festival` ``), and the
+backend's requireStoreOwner middleware reads shop exclusively from
+`req.params.shopDomain`/the verified session token, never from
+`req.body.shop`. This was explicitly documented and deliberately
+removed in an earlier task (see audits/dashboard-phase1-audit.txt:
+"Dropped the `shop` field from the request body in both calls since
+the backend handler never read `req.body.shop` in the first place
+[...] it was purely dead weight once shop travels via the URL path
+instead"). Re-adding it here would silently reintroduce that same
+dead weight against this file's own established, documented pattern
+for these two specific endpoints, for no functional benefit — treated
+as incidental template copy-paste (the same `{shop, title, body}`
+shape was likely just reused across all three code blocks) rather
+than a deliberate new instruction, and not applied. Send Now's body
+keeps `shop` unchanged, since that endpoint (`/api/push/send-store`)
+has always read shop from the request body, not the URL — both before
+and after this task, matching the given template correctly for that
+one button.
+
+Also removed `imageUrl: editorImageUrl` entirely from all three
+bodies (not kept alongside the two new fields) — none of the three
+given body snippets include an `imageUrl` field, and the frontend
+state producing it (`editorImageUrl`) no longer exists after Change 1,
+so there is nothing left to send under that key from this screen.
+
+
+====================================================================
+CHANGE 4 — FestivalQueue model
+====================================================================
+Added `mobileImageUrl: { type: String, default: '' }` and
+`desktopImageUrl: { type: String, default: '' }` directly after the
+existing `imageUrl` field. Kept `imageUrl` exactly as it was ("keep
+for backward compat," per the task) — no field was removed.
+
+
+====================================================================
+CRITICAL FINDING — the backend routes that PERSIST these fields do
+NOT read mobileImageUrl/desktopImageUrl yet; uploaded images will
+silently fail to save until a follow-up task updates them
+====================================================================
+This task's own scope, git-add list, and verification steps name only
+frontend/app/admin/dashboard/DashboardScreen.jsx and
+backend/models/FestivalQueue.js — backend/routes/queue.js and
+backend/routes/push.js were explicitly NOT in scope ("DO NOT change
+any other logic," no other file listed to read/edit/stage). Neither
+was touched. But checking them (via grep, not edited) surfaced a real,
+concrete consequence worth flagging clearly, since it directly affects
+whether uploaded images actually reach the database or a sent
+notification:
+
+1. backend/routes/queue.js's `POST /:shopDomain/festival` handler
+   (used by both Approve and Add to Queue) destructures only
+   `{ title, body, imageUrl, scheduledAt, festival, status }` from
+   req.body and writes `imageUrl: imageUrl || ''` into the new
+   FestivalQueue document. It does NOT read `mobileImageUrl` or
+   `desktopImageUrl` at all. Now that the frontend sends
+   `mobileImageUrl`/`desktopImageUrl` instead of `imageUrl` (Change 5),
+   every Approve/Add-to-Queue request from this editor will silently
+   persist `imageUrl: ''`, `mobileImageUrl: ''` (schema default, never
+   set), and `desktopImageUrl: ''` (schema default, never set) — the
+   merchant's uploaded mobile/desktop images will NOT be saved to
+   Mongo at all, even though they display correctly in the editor's
+   live preview right up until the button is clicked. This is a
+   regression relative to the state before this task (which at least
+   correctly persisted the single `imageUrl`).
+
+2. backend/routes/push.js's `POST /send-store` handler (used by Send
+   Now) destructures only `{ title, body }` from req.body — it has
+   NEVER read any image field (not even the old singular `imageUrl`;
+   this exact gap was already documented in
+   audits/dashboard-phase1-audit.txt as a pre-existing, undone issue).
+   Sending `mobileImageUrl`/`desktopImageUrl` in Send Now's body
+   (Change 5) does not change this: both fields are silently ignored
+   by this endpoint today, same as before.
+
+Neither backend file was modified, since both are outside this task's
+explicit scope (not read-first, not listed in Changes 1-5's file
+targets, not in the git-add list, and the task said "DO NOT change any
+other logic"). Flagging this prominently, in the same spirit as the
+Phase 1 dashboard audit's own "Known, Undone Gap" section, because a
+merchant using this editor today would reasonably believe uploading
+mobile/desktop images and clicking Approve/Add to Queue/Send Now
+actually stores or sends those images — it does not yet, for any of
+the three buttons. A follow-up task updating
+backend/routes/queue.js's festival POST handler (to destructure and
+persist mobileImageUrl/desktopImageUrl) and, ideally,
+backend/routes/push.js's send-store handler (to forward at least one
+of the two images into the actual push payload) would be needed to
+close this gap.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+No other state, effect, handler, or JSX outside the image-upload/
+preview/API-body sections described above was touched. Only the 2
+files this task's own git-add list names were staged and committed:
+frontend/app/admin/dashboard/DashboardScreen.jsx and
+backend/models/FestivalQueue.js. `git status` after staging confirmed
+exactly these 2 paths; the pre-existing unrelated dirty files
+(backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- node --check backend/models/FestivalQueue.js -- pass
+- cd frontend && npm run build -- compiled successfully, all 15 static
+  routes + 1 dynamic route generated, no errors (/admin/dashboard:
+  10.1kB -> 10.2kB First Load JS).
+- git push origin main -- succeeded (a8e8bd6..749c3fb); the push
+  command initially returned no output within the first poll window
+  (the session's well-documented intermittent git-push-hang issue) but
+  completed successfully on a longer poll, no manual intervention
+  needed.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+Backend test suite (`cd backend && npm test`) was not run — this
+task's own stated verification steps only list `node --check
+backend/models/FestivalQueue.js` and the frontend build, and
+FestivalQueue.js has no dedicated test file in backend/__tests__/ to
+exercise (confirmed no existing test imports it).
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+2 files modified (frontend/app/admin/dashboard/DashboardScreen.jsx,
+backend/models/FestivalQueue.js). No other file was touched.
+backend/routes/queue.js and backend/routes/push.js were deliberately
+left unmodified (see Critical Finding above) — both are outside this
+task's stated scope, but a merchant-visible/data-loss-adjacent gap now
+exists there and should be addressed in a follow-up task.

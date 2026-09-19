@@ -1,0 +1,395 @@
+POPUP DEBUG AUDIT — read-only file dump
+==========================================
+Generated: 2026-09-12
+No modifications made.
+
+
+════════════════════════════════════════════════════════════════════
+1. start() — full entry point logic
+════════════════════════════════════════════════════════════════════
+
+--- Supporting module-scope state (lines 2296, 1545) ---
+2296  var ccfStarted = false;
+1545  var ccfExitIntentBound = false;
+
+--- start() (full, lines 2297-2328) ---
+2297	  function start() {
+2298	    if (ccfStarted) return;
+2299	    ccfStarted = true;
+2300	    trackCart();
+2301	    checkAndInit();
+2302	    initTracking();
+2303
+2304	    // discount-feature: if a CCF discount was minted earlier this session,
+2305	    // badge every product price on this page (collection / home / search / PDP).
+2306	    checkActiveDiscount();
+2307
+2308	    // popup-customizer + discount-feature: load appearance + discount config
+2309	    // first, then wire the intent triggers (which is where the dwell timer
+2310	    // starts) and the product-page nudge — both read popupConfig/
+2311	    // discountConfig, so both wait on this same Promise.all rather than a
+2312	    // bare setTimeout racing the config fetch (which can lose on a cold
+2313	    // backend and silently never show the nudge).
+2314	    Promise.all([fetchPopupConfig(), fetchDiscountConfig()]).then(function () {
+2315	      initIntentTriggers();
+2316
+2317	      // Inject product page discount nudge.
+2318	      setTimeout(function() {
+2319	        if (Notification.permission === 'granted') return;
+2320	        // already subscribed — no nudge needed
+2321	        injectProductNudge();
+2322	      }, 1000);
+2323	    });
+2324
+2325	    if (Notification.permission === 'granted') {
+2326	      setupForegroundMessages();
+2327	    }
+2328	  }
+
+--- Invocation wiring (lines 2330-2338) ---
+2330	  if (document.readyState === 'loading') {
+2331	    document.addEventListener('DOMContentLoaded', start);
+2332	  } else {
+2333	    start();
+2334	  }
+2336	  window.addEventListener('load', function() {
+2337	    if (!ccfStarted) start();
+2338	  });
+
+--- What must be true for showSoftPrompt() to actually get called ---
+start() itself never calls showSoftPrompt() directly. It only calls
+initIntentTriggers() (after the config Promise.all resolves) and
+checkAndInit() (which can independently trigger showSoftPrompt() via a
+different path — see below). All roads to showSoftPrompt() run through
+one of these:
+
+  (a) initIntentTriggers() — see full function below. Requires, in
+      order:
+        1. canPrompt() returns true (see section 3/canPrompt below).
+        2. getPageType() !== 'product' — OR, if it IS 'product', the
+           function has already returned early at that same check,
+           so nothing past it runs for product pages via THIS path
+           (the return-visit/dwell triggers further down are therefore
+           dead code as of the current file — see the code comment at
+           lines 1574-1578 explaining exactly this).
+        3. Then EITHER:
+           - no PAGE_LOAD_TOKEN_KEY in localStorage AND canPrompt()
+             still true -> showSoftPrompt('page_load', null) fires
+             after a DWELL_MS (1500ms) setTimeout, OR
+           - (if hasToken) falls through toward the return-visit/dwell/
+             exit-intent triggers, but as noted these are unreachable
+             for pageType !== 'product' since pid stays null and the
+             'product' branches are skipped; exit-intent (desktop,
+             width>768) IS still reachable here regardless of page type.
+        4. Trigger 3 (ADD_TO_CART) is wired elsewhere entirely (the
+           window.fetch monkey-patch in initTracking(), and trackCart()),
+           calling showSoftPrompt('add_to_cart', ...) directly — not
+           through initIntentTriggers()'s own body.
+
+  (b) checkAndInit() (called from start(), NOT shown in full here since
+      not asked for verbatim — but its relevant call site is documented
+      in saveToken(), which checkAndInit()'s 'granted' branch invokes):
+      saveToken()'s success handler independently calls
+        showSoftPrompt('page_load', null)
+      after a 1500ms setTimeout, gated on:
+        ccfDiscountEnabled() && canPromptForDiscount() && getPageType() !== 'product'
+      — this is the "discount-capture" path for an ALREADY-subscribed
+      customer (Notification.permission === 'granted'), using
+      canPromptForDiscount() instead of canPrompt() (canPrompt() would
+      always reject an already-granted customer, since it requires
+      Notification.permission === 'default').
+
+  (c) The product-page nudge (injectProductNudge(), guarded separately
+      in start() by `if (Notification.permission === 'granted') return;`
+      before it's even called) does NOT call showSoftPrompt() at all —
+      it builds its own separate DOM element (#ccf-product-nudge), so
+      it is not a path to showSoftPrompt().
+
+Net summary of gating conditions across all paths: browser must support
+Notification; permission must be 'default' (canPrompt() path) or
+'granted' (canPromptForDiscount() discount-capture path, only if
+discounts are enabled); the once-per-session PROMPT_SHOWN_KEY must not
+already be set; SUBSCRIBED_KEY (localStorage) must not be '1' for the
+canPrompt() path; ccf_denied_session (sessionStorage) must not be set;
+ccf_disc_redirected must not be '1' for canPromptForDiscount(); and, for
+the page_load trigger specifically, the page must not be a product page
+and (for the canPrompt() path) DWELL_MS (1500ms) must elapse first.
+
+
+════════════════════════════════════════════════════════════════════
+canPrompt() — full (lines 60-67)
+════════════════════════════════════════════════════════════════════
+60	  function canPrompt() {
+61	    if (!('Notification' in window)) return false;
+62	    if (Notification.permission !== 'default') return false; // already granted or denied
+63	    if (promptAlreadyShown()) return false;
+64	    if (localStorage.getItem(SUBSCRIBED_KEY) === '1') return false;
+65	    try { if (sessionStorage.getItem('ccf_denied_session')) return false; } catch (e) {}
+66	    return true;
+67	  }
+
+(Supporting: promptAlreadyShown()/markPromptShown(), lines 53-58, and
+SUBSCRIBED_KEY = 'ccf_subscribed_' + SHOP_DOMAIN, line 30 — see section 3.)
+
+
+════════════════════════════════════════════════════════════════════
+markPromptShown() — full (lines 56-58)
+════════════════════════════════════════════════════════════════════
+56	  function markPromptShown() {
+57	    try { sessionStorage.setItem(PROMPT_SHOWN_KEY, 'true'); } catch (e) {}
+58	  }
+
+(PROMPT_SHOWN_KEY = 'ccf_prompt_shown', line 41 — sessionStorage, stores
+the STRING 'true', not '1'. Called once, inside showSoftPrompt() itself,
+right after its own entry guard passes — not inside canPrompt().)
+
+
+════════════════════════════════════════════════════════════════════
+initIntentTriggers() — full (lines 1546-1637)
+════════════════════════════════════════════════════════════════════
+1546	  function initIntentTriggers() {
+1547	    if (!canPrompt()) return;
+1548
+1549	    // Do not show the popup on product pages — home/collection/etc only.
+1550	    // Computed here (not the `var pageType = getPageType()` further down)
+1551	    // so this actually gates the PAGE_LOAD trigger below too, not just the
+1552	    // return-visit/dwell triggers that come after it.
+1553	    var pageType = getPageType();
+1554	    if (pageType === 'product') return;
+1555
+1556	    // PAGE_LOAD trigger — fires on ANY [remaining, non-product] page after
+1557	    // DWELL_MS (1.5s) if the customer has no existing push subscription.
+1558	    // When it's in play we don't wire the other (page-restricted) intent
+1559	    // triggers.
+1560	    var hasToken = false;
+1561	    try {
+1562	      hasToken = !!localStorage.getItem(PAGE_LOAD_TOKEN_KEY);
+1563	    } catch (e) {}
+1564
+1565	    if (!hasToken && canPrompt()) {
+1566	      setTimeout(function () {
+1567	        if (canPrompt()) {
+1568	          showSoftPrompt('page_load', null);
+1569	        }
+1570	      }, DWELL_MS);
+1571	      return; // Don't set up other triggers if we show on load
+1572	    }
+1573
+1574	    // pageType is already computed above (and is guaranteed not 'product'
+1575	    // here, since we returned early if it was) — meta/pid below is now
+1576	    // effectively always null; the return-visit and dwell triggers that
+1577	    // reference it are unreachable dead code as a direct consequence of
+1578	    // this change, kept as-is in case product pages are ever re-enabled.
+1579	    var meta = pageType === 'product' ? getProductMeta() : null;
+1580	    var pid = meta && meta.productId ? String(meta.productId) : null;
+1581
+1582	    // Trigger 2 — RETURN VISIT: this productId seen in a previous session.
+1583	    if (pageType === 'product' && pid) {
+1584	      var viewed = [];
+1585	      try { viewed = JSON.parse(localStorage.getItem(VIEWED_KEY) || '[]'); } catch (e) { viewed = []; }
+1586	      if (!Array.isArray(viewed)) viewed = [];
+1587	      if (viewed.indexOf(pid) !== -1) {
+1588	        showSoftPrompt('return_visit', pid);
+1589	      } else {
+1590	        viewed.push(pid);
+1591	        if (viewed.length > 200) viewed = viewed.slice(-200);
+1592	        try { localStorage.setItem(VIEWED_KEY, JSON.stringify(viewed)); } catch (e) {}
+1593	      }
+1594	    }
+1595
+1596	    // Trigger 1 — DWELL: continuous dwell on a product page (pauses when hidden).
+1597	    if (pageType === 'product') {
+1598	      var dwellRemaining = DWELL_MS;
+1599	      var dwellStartedAt = 0;
+1600	      var dwellTimer = null;
+1601	      function startDwell() {
+1602	        if (dwellTimer || dwellRemaining <= 0) return;
+1603	        dwellStartedAt = Date.now();
+1604	        dwellTimer = setTimeout(function () {
+1605	          dwellTimer = null;
+1606	          dwellRemaining = 0;
+1607	          showSoftPrompt('dwell', pid);
+1608	        }, dwellRemaining);
+1609	      }
+1610	      function pauseDwell() {
+1611	        if (!dwellTimer) return;
+1612	        clearTimeout(dwellTimer);
+1613	        dwellTimer = null;
+1614	        dwellRemaining -= (Date.now() - dwellStartedAt);
+1615	        if (dwellRemaining < 0) dwellRemaining = 0;
+1616	      }
+1617	      document.addEventListener('visibilitychange', function () {
+1618	        if (document.visibilityState === 'hidden') pauseDwell();
+1619	        else startDwell();
+1620	      });
+1621	      if (document.visibilityState === 'visible') startDwell();
+1622	    }
+1623
+1624	    // Trigger 4 — EXIT INTENT: desktop only, mouse toward the browser chrome.
+1625	    if (window.innerWidth > 768 && !ccfExitIntentBound) {
+1626	      ccfExitIntentBound = true;
+1627	      var onExitMove = function (e) {
+1628	        if (e.clientY < 20) {
+1629	          document.removeEventListener('mousemove', onExitMove);
+1630	          showSoftPrompt('exit_intent', null);
+1631	        }
+1632	      };
+1633	      document.addEventListener('mousemove', onExitMove);
+1634	    }
+1635	    // Trigger 3 — ADD TO CART: fired from the cart-add hooks (see trackCart /
+1636	    // the /cart/add.js fetch interceptor), which call showSoftPrompt('add_to_cart').
+1637	  }
+
+(NOTE, read-only observation: as the code's own comment at 1574-1578
+acknowledges, since this function already returns at line 1554 whenever
+pageType === 'product', the `pageType === 'product'` checks at lines
+1583 and 1597 can never be true when reached — Triggers 1 (dwell) and 2
+(return-visit) are dead code in the current file. Only Trigger 4
+(exit-intent, desktop-only) and the PAGE_LOAD trigger above it are live
+from this function; Trigger 3 (add-to-cart) lives entirely outside it.)
+
+
+════════════════════════════════════════════════════════════════════
+sessionStorage keys checked before showing the popup
+════════════════════════════════════════════════════════════════════
+  - ccf_prompt_shown (PROMPT_SHOWN_KEY) — checked by promptAlreadyShown()
+    (line 54), used inside both canPrompt() (line 63) and
+    canPromptForDiscount() (line 81). Stores the STRING 'true' (set by
+    markPromptShown(), line 57) — NOT '1'.
+  - ccf_denied_session — checked directly inline in three places:
+    canPrompt() (line 65), initIntentTriggers() doesn't check it
+    directly (relies on canPrompt()), showSoftPrompt()'s deny/close
+    handlers SET it (lines 1246, 1304, 1310), and checkAndInit() (line
+    1862, `if (sessionStorage.getItem('ccf_denied_session')) return;`)
+    also reads it directly to bail out early on repeat page loads within
+    the same tab session.
+  - ccf_disc_redirected — checked by canPromptForDiscount() (line 79,
+    exact-match '1') and again directly inside injectProductNudge()
+    (line 1359, `discAlreadyClaimed = sessionStorage.getItem(...) === '1'`)
+    — SET to '1' at line 1528, inside injectProductNudge()'s own
+    discount-success handler, immediately before its redirect (mirrors
+    the pattern renderDiscountCode() uses for the main popup's
+    ccf_active_discount/ccf_active_pct stash).
+  - ccf_active_discount / ccf_active_pct — read by checkActiveDiscount()
+    (lines 526-527) to badge prices; not a gate on showing the popup
+    itself, but stashed by renderDiscountCode() right before its redirect
+    and by injectProductNudge()'s own success handler.
+
+
+════════════════════════════════════════════════════════════════════
+2. checkActiveDiscount() — full (lines 523-556)
+════════════════════════════════════════════════════════════════════
+523	  function checkActiveDiscount() {
+524	    var activeCode, activePct;
+525	    try {
+526	      activeCode = sessionStorage.getItem('ccf_active_discount');
+527	      activePct = sessionStorage.getItem('ccf_active_pct');
+528	    } catch (e) { return; }
+529	    if (!activeCode || !activePct) return;
+530
+531	    var priceEls = document.querySelectorAll(
+532	      '.price, .product-item__price, .price__regular, ' +
+533	      '[class*="price"], .money'
+534	    );
+535
+536	    for (var i = 0; i < priceEls.length; i++) {
+537	      var el = priceEls[i];
+538	      if (el.dataset.ccfBadged || !el.parentNode) continue;
+539	      el.dataset.ccfBadged = '1';
+540
+541	      var badge = document.createElement('span');
+542	      badge.style.cssText = [
+543	        'display:inline-block',
+544	        'background:#16a34a',
+545	        'color:#fff',
+546	        'font-size:11px',
+547	        'font-weight:700',
+548	        'padding:2px 6px',
+549	        'border-radius:4px',
+550	        'margin-left:6px',
+551	        'vertical-align:middle'
+552	      ].join(';');
+553	      badge.textContent = activePct + '% OFF';
+554	      el.parentNode.insertBefore(badge, el.nextSibling);
+555	    }
+556	  }
+
+
+════════════════════════════════════════════════════════════════════
+3. Guards checking each named condition — consolidated
+════════════════════════════════════════════════════════════════════
+
+--- ccf_prompt_shown (sessionStorage) ---
+  Set:   markPromptShown(), line 57 — sessionStorage.setItem(PROMPT_SHOWN_KEY, 'true')
+  Read:  promptAlreadyShown(), line 54 — === 'true' (exact string match)
+  Used by: canPrompt() line 63, canPromptForDiscount() line 81
+
+--- ccf_denied_session (sessionStorage) ---
+  Set:   showSoftPrompt()'s deny button handler (line 1304-ish region —
+         "sessionStorage.setItem('ccf_denied_session', '1')"), its
+         closeBtn handler (same pattern), and the "permission denied"
+         branch of the Notification.requestPermission() flow inside the
+         Allow handler (line ~1246).
+  Read:  canPrompt() line 65 (truthy check, not exact '1' match — any
+         non-empty string blocks it) and checkAndInit() line 1862 (same
+         truthy check, used as an early bail-out for the whole function).
+
+--- ccf_disc_redirected (sessionStorage) ---
+  Set:   injectProductNudge()'s discount-success handler, line 1528 —
+         sessionStorage.setItem('ccf_disc_redirected', '1')
+  Read:  canPromptForDiscount() line 79 (=== '1') and
+         injectProductNudge() line 1359 (=== '1', its own
+         discAlreadyClaimed guard, checked BEFORE building the nudge UI)
+
+--- Notification.permission state ---
+  'default'  required by canPrompt() (line 62, `!== 'default'` rejects)
+             — i.e. canPrompt() ONLY allows the native, never-yet-asked
+             state.
+  'granted'  required (implicitly, via the discount-capture branch) for
+             canPromptForDiscount() to be reached at all in practice —
+             canPromptForDiscount() itself only explicitly rejects
+             'denied' (line 77); it does not check for 'default' or
+             'granted', but its only real caller (saveToken()'s success
+             handler) only exists on an already-subscribed customer's
+             flow. Also independently checked:
+               - start(), line 2319: `if (Notification.permission ===
+                 'granted') return;` — before calling injectProductNudge()
+               - start(), line 2325: `if (Notification.permission ===
+                 'granted') { setupForegroundMessages(); }`
+               - showSoftPrompt(), line 565 (isDiscountCapture check):
+                 `('Notification' in window) && Notification.permission
+                 === 'granted'`
+               - showSoftPrompt()'s Allow handler, line ~1210:
+                 `if (Notification.permission === 'granted') { ... }`
+                 branches to the discount-capture POST flow, skipping
+                 requestPermission() entirely.
+  'denied'   explicitly rejected by canPromptForDiscount() (line 77) and
+             implicitly by canPrompt() (excluded since it only allows
+             'default').
+
+--- localStorage ccf_subscribed_<shop> (SUBSCRIBED_KEY) ---
+  Declared: line 30, `SUBSCRIBED_KEY = 'ccf_subscribed_' + SHOP_DOMAIN`
+  Set:      saveToken()'s success handler — '1' on a successful
+            subscribe-customer response.
+  Removed:  saveToken()'s failure handler (backend rejected the token —
+            clears the latch so the next visit retries), and again on a
+            'no token' outcome elsewhere in checkAndInit()'s chain.
+  Read:     canPrompt() line 64 — `=== '1'` exact match blocks prompting
+            once a subscription is confirmed saved.
+
+
+════════════════════════════════════════════════════════════════════
+4. DWELL_MS
+════════════════════════════════════════════════════════════════════
+Line 43: `var DWELL_MS = 1500; // all intent triggers fire within 1-2s`
+
+Used at:
+  - initIntentTriggers() line 1570 — the PAGE_LOAD trigger's setTimeout
+    delay (1500ms) before calling showSoftPrompt('page_load', null).
+  - initIntentTriggers() line 1598 — seeds `dwellRemaining` for Trigger 1
+    (continuous product-page dwell), though as noted in section 1 this
+    branch is currently unreachable (pageType === 'product' always
+    returns early before this point in the function).
+  - start()'s product-nudge setTimeout (line 2318) uses a SEPARATE
+    literal `1000` (1 second), not DWELL_MS — a different, independent
+    delay for injectProductNudge(), not derived from DWELL_MS.

@@ -1,0 +1,91 @@
+=== ACTIVITY ICON FIX AUDIT ===
+CartIcon SVG added: yes
+CreditCardIcon SVG added: yes
+CheckCircleIcon SVG added: yes
+RepeatIcon SVG added: yes
+Colored numbers removed: yes (tile count now fixed #111827, no longer
+  the per-type amber/purple/green/blue)
+frontend build: pass (npm run build — compiled successfully, 14 static
+  pages, /admin/activity grew 3.6 kB -> 3.94 kB, no errors)
+git push: done (commit ba70fb1, c20d062..ba70fb1 main -> main)
+vercel deploy: done (production, readyState: READY,
+  deployment id dpl_raQUXY7BvmCGHfUsy4s4kYpn1mWM,
+  https://cartncodform-pojyew7dw-niralinakumvellirion-8853s-projects.vercel.app,
+  aliased to https://cartncodform-beryl.vercel.app)
+
+
+FILE READ FIRST, AS INSTRUCTED
+=========================================================================
+Read frontend/app/admin/activity/ActivityScreen.jsx in full (434 lines)
+before making any change. Confirmed the 4 summary tiles were driven by
+ACTIVITY_TYPES (emoji `icon` + `color` per entry, used for both the big
+count number's color AND the emoji glyph) and were a SEPARATE concern
+from BADGE_CONFIG (the table/card row badges, e.g. "Checkout started"),
+which also uses emoji+color but was NOT named by this task — left
+untouched, per its own scope ("Find the 4 summary tiles").
+
+
+EXACT CHANGES
+=========================================================================
+1. Added the 4 given icon components verbatim (CartIcon, CreditCardIcon,
+   CheckCircleIcon, RepeatIcon), placed at the top of the file, right
+   after the imports and before FILTER_TABS — "before the main
+   component function" as instructed.
+
+2. ACTIVITY_TYPES: `icon: '🛒'` etc. replaced with `Icon: CartIcon` etc.
+   (component references, not element instances — rendered as `<Icon
+   />` in the JSX below). `color` was KEPT on each entry, since it is
+   still used for a different purpose the task didn't ask to remove:
+   the active/selected tile's border highlight
+   (`border: active ? \`2px solid ${color}\` : '1px solid #e5e7eb'`).
+   The task's instruction was specifically "Remove any color values
+   from the tile number/count" — the border highlight is a separate
+   visual element, not the count, so it was left as-is.
+
+3. Tile JSX: `<div style={{ fontSize: '24px', marginBottom: '6px'
+   }}>{icon}</div>` (an emoji glyph in a sized div) replaced with
+   `<div style={{ marginBottom: '6px' }}><Icon /></div>` (the SVG
+   component itself, which already sets its own width="20"
+   height="20" per the given markup — no wrapping font-size needed).
+   The count div's `color` prop changed from the per-type variable to
+   the literal `'#111827'`.
+
+4. Tile click behavior (`onClick={() => setActiveType(active ? null :
+   key)}`, toggling the on-page table filter) was left completely
+   unchanged, per "Keep tile click navigation unchanged."
+
+
+NOTE — structural difference from Today.jsx's own icon components,
+not fixed (implemented literally as given)
+=========================================================================
+The task's given icon code hardcodes `stroke="#6366f1"` directly on
+each `<svg>` and defines each icon as a zero-argument component
+(`const CartIcon = () => (<svg ...>)`, no props accepted). Today.jsx's
+OWN icon components (built in the immediately preceding "Today screen
+redesign" task) instead use `stroke="currentColor"` and spread
+`{...props}`, so a single reusable component can take a `style={{
+color, marginBottom }}` prop at each call site. Both approaches render
+IDENTICALLY here (a 20x20 indigo-stroke icon) since every call site in
+both files applies the same #6366f1 color either way — the difference
+is structural reusability, not visual output. Implemented the version
+the task explicitly gave, verbatim, rather than converting to match
+Today.jsx's props-based pattern (which would have been an unprompted
+refactor of code the task itself supplied exactly as-is, not something
+the task described as broken or asked to change). Flagging this here
+for transparency should a future task want to unify the two files'
+icon implementations.
+
+
+NOT TOUCHED
+=========================================================================
+- BADGE_CONFIG and every table/card row's badge rendering (still
+  emoji+color, unchanged) — not named by this task.
+- frontend/app/admin/screens/Today.jsx: confirmed untouched (git status
+  showed no pending changes to it before or after this task).
+- Every other section of ActivityScreen.jsx (date filter bar, table/
+  card list, fetch logic): unchanged, confirmed via git diff (only the
+  4 new icon components + the ACTIVITY_TYPES entries + the tile JSX's
+  icon/count rendering differ).
+- No file other than
+  frontend/app/admin/activity/ActivityScreen.jsx was staged or
+  committed.

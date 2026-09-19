@@ -1,0 +1,68 @@
+=== JOURNEY FRIENDLY PATHS AUDIT ===
+getFriendlyPath() function added: yes
+page_view path now uses getFriendlyPath(): yes
+product_view fallback to getFriendlyPath(): yes
+frontend build: pass (npm run build — compiled successfully, 14
+  static pages, /admin/journey grew 7.46 kB -> 7.72 kB, no errors)
+git push: done (commit e4d6c1d, 8b7a78e..e4d6c1d main -> main)
+vercel deploy: done (production, readyState: READY,
+  deployment id dpl_AcJF5XWzb9CKrj19xutyRuj3vKw2,
+  https://cartncodform-6h8t7hfxq-niralinakumvellirion-8853s-projects.vercel.app,
+  aliased to https://cartncodform-beryl.vercel.app)
+
+
+FILE READ FIRST, AS INSTRUCTED
+=========================================================================
+Read the full "Recent events" render section (the IIFE built by the
+previous journey-filter task, lines 759-810ish) before making any
+change, confirming: EVENT_LABELS/EVENT_DOT_COLORS are the two relevant
+module-scope constants already present, e.path was displayed raw only
+for page_view, and product_view showed e.meta.productTitle with NO
+fallback at all when it was missing (the sub-line simply didn't render).
+
+
+EXACT CHANGES
+=========================================================================
+1. getFriendlyPath() added verbatim as given, placed at module scope
+   immediately after EVENT_DOT_COLORS (matching this file's existing
+   convention of grouping small lookup/helper constants together near
+   the top, before the larger SUGGESTIONS/NOTIFICATION_SUGGESTIONS
+   objects).
+
+2. page_view sub-line:
+     {e.type === 'page_view' && e.path && (
+       <div style={{ color: '#6b7280', fontSize: '11px' }}>
+         {getFriendlyPath(e.path)}
+       </div>
+     )}
+   -- the raw `{e.path}` display replaced with
+   `{getFriendlyPath(e.path)}`; the surrounding `e.path` presence
+   check (guarding whether the sub-line renders at all) is unchanged.
+
+3. product_view sub-line:
+     {e.type === 'product_view' && (e.meta?.productTitle || e.path) && (
+       <div style={{ color: '#6b7280', fontSize: '11px' }}>
+         {e.meta?.productTitle || getFriendlyPath(e.path)}
+       </div>
+     )}
+   -- per the task's spec ("if e.meta?.productTitle exists, show it
+   as-is... If productTitle is missing but e.path exists, use
+   getFriendlyPath(e.path)"): the outer condition was widened from
+   `e.meta?.productTitle` alone to `(e.meta?.productTitle || e.path)`
+   so the sub-line now also renders in the fallback case (previously
+   it wouldn't render at all when productTitle was missing, even if
+   e.path existed), and the inner content picks productTitle first,
+   falling back to the friendly path only when productTitle is absent.
+
+
+NOT TOUCHED
+=========================================================================
+- EVENT_LABELS, EVENT_DOT_COLORS, the filteredEvents computation, the
+  dot/time rendering, the empty state, and every other section of
+  Journey.jsx (the customer list, filter tabs, NotificationComposer,
+  EmailComposer, the send-notification panel): unchanged, confirmed
+  via git diff — only the new getFriendlyPath() function and the two
+  sub-line blocks differ.
+- No backend file was touched.
+- No file other than frontend/app/admin/screens/Journey.jsx was staged
+  or committed.

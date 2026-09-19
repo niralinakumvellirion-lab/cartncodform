@@ -1,0 +1,217 @@
+=== UI REDESIGN AUDIT ===
+Generated: 2026-09-16
+
+Screens updated (all 11):
+  1. Today.jsx
+  2. Customers.jsx
+  3. Messages.jsx
+  4. Insights.jsx
+  5. WhatToActOn.jsx
+  6. CodOrders.jsx
+  7. Settings.jsx
+  8. Onboarding.jsx
+  9. Journey.jsx
+  10. Profile.jsx
+  11. Discounts.jsx
+
+DS object added to each: yes
+PageHeader added to each: yes (defined in every file per the task's
+  blanket instruction; NOT rendered in Onboarding.jsx's JSX — see
+  deviation notes below — and Profile.jsx keeps Polaris <Page> as its
+  actual header, per instruction #11, so PageHeader sits unused there
+  too, defined but not called, satisfying "add to each file" literally)
+
+Any logic/functionality changed: NO
+  Every onClick handler, useState/useEffect/useCallback hook, data
+  fetch, conditional render, and .map() was left untouched. Only
+  style objects/JSX wrapper markup for containers, headers, cards,
+  and (where explicitly listed per screen) buttons were changed.
+
+frontend build: pass (all 16 routes compiled, no errors)
+git push: done — but NOT a plain `git push origin main` (see
+  "IMPORTANT — push had to be handled differently" below)
+vercel deploy: done (readyState READY)
+
+
+====================================================================
+IMPORTANT — push had to be handled differently than instructed
+====================================================================
+
+The task's own steps said `git add -A` / commit / `git push origin
+main` / `vercel --prod`. At the time this task started, local `main`
+already had ONE prior commit (9f05120, "feat: migrate to
+shopireachboost.com domain") that the user had explicitly told me
+NOT to push yet, pending confirmation that api.shopireachboost.com /
+app.shopireachboost.com / Resend verification are actually live —
+see audits/domain-migration-audit.txt. That commit was sitting local-
+only, on top of what origin/main had.
+
+Running a plain `git push origin main` for this task would have
+pushed BOTH commits — silently shipping the domain migration the
+user had asked me to hold back, as a side effect of pushing the
+redesign. I stopped and asked the user how to handle this rather
+than pushing blindly; they chose: push the redesign only, keep the
+domain-migration commit local or the moment.
+
+What was actually done:
+  1. Committed the redesign locally as instructed (commit adc2b50,
+     on top of 9f05120 — local main's history is exactly as the
+     task's own steps would have produced).
+  2. Created a temporary branch from origin/main (NOT from local
+     main), cherry-picked ONLY the redesign commit's changes onto it
+     (commit a7b10d0 — same file diff as adc2b50, different parent/
+     hash since its parent is origin/main's tip, 3b3679c, not
+     9f05120).
+  3. Pushed that temporary branch to origin/main
+     (`git push origin temp-redesign-push:main`) — origin/main now
+     has the redesign but NOT the domain migration.
+  4. Switched back to local `main` (still exactly 3b3679c -> 9f05120
+     -> adc2b50, untouched) and deleted the temporary branch.
+  5. For the Vercel deploy specifically: `vercel --prod` uploads
+     whatever is on local disk, not whatever is on GitHub — and
+     local main's working tree has the domain-migration file
+     contents checked out. Deploying straight from that would have
+     shipped the domain-migration's frontend-side changes
+     (firebase-messaging-sw.js's app.shopireachboost.com references)
+     to production even though the backend/CORS/OAuth side was
+     deliberately NOT pushed — a broken half-migrated state. So
+     before deploying, the 7 domain-touched files were temporarily
+     restored to their a7b10d0 (pre-migration) content on disk,
+     `vercel --prod` was run from that state, and then all 7 files
+     were restored back to local main's HEAD (adc2b50) immediately
+     after — confirmed via `git status` that the working tree
+     matches local main's committed state again, nothing lost.
+
+Net result: origin/main and the live Vercel deployment now both
+reflect ONLY the UI redesign, on top of the last previously-pushed
+commit (3b3679c) — the domain-migration commit was NOT shipped.
+Local `main` still has both commits, unpushed for 9f05120, ready to
+push whenever the user confirms the domain is fully live.
+
+CONSEQUENCE TO BE AWARE OF: local `main` and `origin/main` have now
+DIVERGED (different commit history for the same net changes) — local
+main is 3b3679c -> 9f05120 -> adc2b50; origin/main is
+3b3679c -> a7b10d0 (a7b10d0 has the same file changes as adc2b50 but
+a different parent/hash, since it doesn't include 9f05120). A future
+plain `git push origin main` from local main will be REJECTED
+(non-fast-forward) until this is reconciled. When the domain is
+confirmed ready, the recommended fix is: `git rebase origin/main`
+(or `git pull --rebase`) on local main, which should cleanly drop
+adc2b50 as a duplicate of a7b10d0 (identical patch) and leave only
+9f05120 needing to be pushed — then push normally. Flagging this now
+so it doesn't surprise anyone later.
+
+
+====================================================================
+ANOTHER IMPORTANT FINDING — surfaced during the Vercel deploy
+====================================================================
+
+Running `vercel --prod` and then `vercel alias ls` revealed that
+**app.shopireachboost.com is already aliased to this Vercel project**,
+and has been for approximately 18 HOURS — i.e., since before today's
+session even started, independent of anything done in this or the
+prior domain-migration task. Both app.shopireachboost.com and the
+original cartncodform-beryl.vercel.app now point at the same latest
+production deployment (standard Vercel behavior — all production
+domains for a project alias to the same build).
+
+This does not change anything about what was actually pushed/
+deployed for THIS task (still redesign-only, as above), but it is
+directly relevant to the domain-readiness question from the prior
+task: the Vercel/DNS side of app.shopireachboost.com appears to
+already be configured, even though the user's answer there was
+"not yet". This may mean only the BACKEND side (Render custom domain
+for api.shopireachboost.com) and Resend domain verification are
+still pending, not the frontend/Vercel side — but this was not
+independently confirmed (no Render or Resend access from here), so
+treat this as an observation to double-check, not a conclusion that
+the full migration is now safe to push.
+
+
+====================================================================
+DEVIATIONS FROM THE LITERAL PER-SCREEN INSTRUCTIONS (documented)
+====================================================================
+
+1. Today.jsx — STAT_CARD_STYLE and the outer container's padding:
+   the task said "Replace STAT_CARD_STYLE with DS.card" and "Replace
+   outer container style with DS.page" literally. Implemented as
+   `{ ...DS.card, padding: 16, marginBottom: 0, display: 'flex',
+   flexDirection: 'column', gap: 4 }` instead of bare DS.card, since
+   the stat tiles need the flex/column/gap layout to stack their
+   icon/number/label — swapping in bare DS.card (no display/
+   flexDirection) would have broken that layout, which the task's
+   own rules said to avoid ("DO NOT change Today.jsx's activity
+   tiles or stat cards content"). The outer container now uses
+   DS.page as literally instructed, which drops the previous
+   isMobileView-conditional horizontal padding reduction — accepted
+   as a minor, intentional visual-only regression matching the
+   task's literal instruction; the isMobileView-driven grid-column
+   counts elsewhere (5-col/2-col, 4-col/2-col) were left untouched
+   since those are structural/responsive, not just container
+   padding. Also merged the OLD separate header+Refresh-button block
+   into the new PageHeader's action slot and DELETED the old
+   duplicate header markup (title/date/refresh button) that would
+   otherwise have rendered twice.
+2. Today.jsx subtitle — task's example showed
+   `subtitle={`${dayName}, ${dateStr}`}`; the screen's own existing
+   date formatting (`toLocaleDateString('en-IN', {weekday:'long',
+   day:'numeric', month:'long'})`) already produces a single
+   "Weekday, D Month" string in one call, so a `todaySubtitle`
+   constant using that exact same formatting was passed directly
+   as `subtitle`, rather than inventing a separate dayName/dateStr
+   split that would just reproduce the same string.
+3. Settings.jsx — task said "Replace const card with DS.card"; kept
+   `const card = { ...DS.card, padding: isMobileView ? '16px' :
+   DS.card.padding }` instead of a bare reassignment, preserving the
+   existing mobile-responsive padding behavior rather than losing it
+   (task's own rule: "if a screen has a unique layout that works
+   well, preserve it and only apply the DS tokens").
+4. Onboarding.jsx — PageHeader is defined (per the blanket
+   instruction) but NOT used in the JSX — this screen's own bullet
+   list (#10) only asked to restyle the existing title/card/buttons
+   in place and explicitly said "Keep the full-viewport centered
+   layout," which doesn't match PageHeader's flex title+subtitle+
+   action+underline shape. Applied DS.pageTitle merged with
+   `fontSize: 26` (as literally specified) directly to the existing
+   h1 instead.
+5. Profile.jsx — task instruction #11 said "wrap any custom content
+   cards with DS.card style," but this file has ZERO custom (non-
+   Polaris) cards — it is built entirely from Polaris <Page>/<Card>/
+   <Layout> components (confirmed by a full read before editing).
+   There was nothing to wrap. DS/PageHeader were still added per the
+   blanket instruction, but neither is referenced anywhere in this
+   file's actual render output — the Polaris <Page>/<Card> stack was
+   left completely untouched, per instruction #11's own "keep that."
+6. CodOrders.jsx and Customers.jsx subtitles — both screens
+   previously showed dynamic, data-driven subtitle text (pending-
+   order count, total-customer count). The task gave fixed literal
+   subtitle strings for both ("Cash on delivery order management",
+   "All push notification subscribers"). Followed the task's literal
+   text for both, for consistency with how every other screen's
+   subtitle was handled (all given literal strings, none preserving
+   prior dynamic copy) — an initial attempt to preserve CodOrders'
+   dynamic pending-count text was reverted mid-task for this
+   consistency reason.
+7. All screens — error banners (red, `#fef2f2`/`#fecaca`) were
+   restyled using DS.dangerLight/DS.danger rather than forced into
+   DS.card's neutral white look, since DS.card has no color-coded
+   variant for error/warning states and forcing an error message
+   into a plain white card would lose its visual urgency. This
+   matches the task's own instruction to "apply the DS tokens to
+   colors" — DS.danger/DS.dangerLight are exactly the tokens meant
+   for this.
+8. Several screens (Discounts.jsx, Onboarding.jsx, Settings.jsx)
+   had primary action buttons (Save, Customize popup, etc.)
+   restyled onto DS.btnPrimary/DS.btnSecondary even where a given
+   screen's bullet list didn't explicitly mention buttons — covered
+   by the task's own top-level rule "Only change visual styles
+   (colors, spacing, borders, shadows, typography)," which buttons
+   fall under, and by the DS object itself defining btnPrimary/
+   btnSecondary as tokens clearly meant to be used somewhere. Left
+   secondary/inline buttons (Cancel/Confirm in CodOrders, filter
+   tabs, toggle switches) untouched across all screens to limit
+   scope, since none of those were named in any per-screen bullet
+   list.
+
+No backend files, no data-fetching hooks, no event handlers, and no
+non-screens/ frontend files were touched by this task.

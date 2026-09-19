@@ -1,0 +1,137 @@
+=== DUAL PREVIEW AUDIT ===
+Generated: 2026-09-17
+
+Image preview below upload removed: yes
+Mobile preview added: yes
+  Shows image: yes
+  Shows title: yes
+  Shows body (2 lines): yes
+Desktop preview added: yes
+  Image on left side: yes
+  Text on right side: yes
+  Shows title + body: yes
+frontend build: pass
+git push: done (9a3fa56..a8e8bd6)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full
+(1607 lines) before making any change, as instructed.
+
+
+====================================================================
+FIX 1 — image preview below the upload button removed
+====================================================================
+Deleted the entire `{editorImageUrl && (<div style={{marginTop:10,
+position:'relative'}}>...</div>)}` block that previously sat directly
+below the upload `<label>` — the `<img id="editor-img-preview">`, the
+dimensions overlay (`<span id="img-dimensions">`, populated by the
+image's own `onLoad` handler), and the round ✕ remove button all went
+with it, exactly as instructed ("Remove this entire block").
+
+Kept the upload `<label>` (with its dashed border, upload icon, and
+hidden `<input type="file">`) completely untouched, including its
+existing conditional text `{editorImageUrl ? 'Change Image' : 'Upload
+Image'}` — this is the "Remove/Change image text on the upload button
+label" the task said to keep; it was already there before this task
+and required no edit.
+
+NOTE — a real, disclosed side effect of literal FIX 1: the explicit
+round "✕" remove button is now gone along with the rest of the deleted
+block, so there is no longer a direct one-click way to clear
+editorImageUrl once an image is uploaded (short of re-uploading a
+different file, which overwrites it via the same onChange handler).
+This is the literal, intended result of "Remove this entire block" —
+the button lived inside the block that was explicitly named for
+removal — and was not worked around, since the task didn't ask for a
+replacement remove affordance elsewhere.
+
+
+====================================================================
+FIX 2 — dual mobile + desktop preview
+====================================================================
+Replaced the entire "Right: Live Preview" panel (previously: one
+260px-wide column with a single dark phone mockup) with the given
+280px-wide panel containing two stacked previews — implemented
+verbatim:
+
+- Mobile preview: dark rounded phone-frame mockup (unchanged visual
+  language from before, now narrower/shorter — maxWidth 200 vs the old
+  220, image height 70 vs the old auto/maxHeight-100), with the
+  notification image (conditionally, `editorImageUrl &&`), the
+  ShopiReachBoost AI brand row, the title (single line, ellipsis-
+  truncated), and the body clamped to 2 lines via the given
+  `-webkit-line-clamp: 2` treatment.
+- Desktop preview: a new toast-style mockup (grey device-frame,
+  white card, `display:flex`) with the image as a fixed 60×60 tile on
+  the LEFT (falling back to a 🔔 placeholder tile when no image is
+  set, exactly as given — this is the one preview that shows a visible
+  placeholder even with no image, matching real desktop notification
+  UIs that always reserve an icon slot) and the brand row / title /
+  2-line-clamped body on the RIGHT, plus a "Chrome · now" timestamp
+  line below the card.
+- The "Preview updates as you type" helper text was kept, moved to sit
+  below both previews (per the given layout).
+
+Both previews read the same, already-existing `editorImageUrl`,
+`editorTitle`, and `editorBody` state — no new state was introduced,
+and neither preview writes to any state (purely derived render output,
+consistent with how the original single preview worked).
+
+
+====================================================================
+UPLOAD / SEND / APPROVE / QUEUE LOGIC — untouched, verified
+====================================================================
+The upload `<input type="file">`'s onChange (FileReader ->
+readAsDataURL -> setEditorImageUrl) was not touched. Re-read the three
+action button handlers after editing (Send Now -> POST
+/api/push/send-store; Approve / Add to Queue -> POST
+/api/queue/:shop/festival with status 'approved'/'draft') and confirmed
+they are byte-for-byte unchanged from before this task — only the
+editor's image-preview block and the right-hand preview panel were
+modified, per the task's explicit scope ("DO NOT change any upload
+logic, send/approve/queue logic").
+
+
+====================================================================
+DO-NOT-TOUCH-OTHER-FILES COMPLIANCE
+====================================================================
+Only frontend/app/admin/dashboard/DashboardScreen.jsx was staged and
+committed, per the task's own git-add line. `git status` after staging
+confirmed exactly this one path; the pre-existing unrelated dirty
+files (backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 15 static
+  routes + 1 dynamic route generated, no errors (/admin/dashboard:
+  10kB -> 10.1kB First Load JS — net change is small since a
+  same-sized block was removed from the editor and a larger dual-
+  preview block was added on the preview side).
+- git push origin main -- succeeded (9a3fa56..a8e8bd6), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+No backend changes were needed or made — this task is frontend-only,
+touching a single file. This app has no automated frontend test suite,
+so verification here is build-only, per the task's own stated
+verification step.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+1 file modified (frontend/app/admin/dashboard/DashboardScreen.jsx). No
+other file was touched. Manual visual verification in a live browser
+(uploading an image, confirming both mobile and desktop previews
+render correctly, confirming the old preview-with-dimensions block no
+longer appears below the upload button) was not performed as part of
+this task — this environment has no running dev server / authenticated
+Shopify session to click through; verification here is limited to a
+clean production build and the code review documented above.

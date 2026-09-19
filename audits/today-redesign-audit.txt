@@ -1,0 +1,206 @@
+=== TODAY REDESIGN AUDIT ===
+Date filter bar: yes (Today | Yesterday | Last 7 days | Last 30 days,
+  default '7d')
+Row 1 notification stats (5 cards): yes
+  Push sent, emails sent, popups, emails captured,
+  push subscribers: all yes
+Row 2 activity stats (4 cards, clickable): yes
+SVG icons (no emoji): yes (9 inline icon components, exact paths as
+  given: Bell, Envelope, Cursor, UserPlus, Users, Cart, CreditCard,
+  CheckCircle, Repeat)
+Backend today-stats endpoint: yes
+Mobile responsive: yes (see DEVIATION note on the breakpoint used)
+Old emoji tiles removed: yes (ACTIVITY_TILES array and its JSX block
+  deleted entirely; grepped the file afterward for "activityLoading"
+  and "ACTIVITY_TILES" -- zero matches remain)
+node --check profiles.js: pass
+npm test: 151/151 passing (19/19 suites)
+frontend build: pass (npm run build -- compiled successfully, 14
+  static pages, /admin grew 5.45 kB -> 6.46 kB, no errors)
+git push: done (commit c20d062, 3af4271..c20d062 main -> main)
+vercel deploy: done (production, readyState: READY,
+  deployment id dpl_91yeF6sfdhQDvY5AJwsfgfqLkeT4,
+  https://cartncodform-99nebe9my-niralinakumvellirion-8853s-projects.vercel.app,
+  aliased to https://cartncodform-beryl.vercel.app)
+
+
+FULL FILE READ FIRST, AS INSTRUCTED
+=========================================================================
+Read frontend/app/admin/screens/Today.jsx in full (its current,
+post-Phase-3 state -- 494 lines) before making any change, confirming
+the exact Phase 3 block to replace (the "Activity (last 7 days)" 2x2
+emoji-tile section, lines 280-321) and that the existing isMobileView
+state/resize-listener, the `navigate()` helper (added in Phase 3, still
+carries `shop` forward), and the Planned-for-today/Yesterday/chart
+sections were all still present and correctly positioned below it.
+
+
+PART A — backend/routes/profiles.js: GET /:shopDomain/today-stats
+=========================================================================
+Added directly after the existing push-stats handler (a natural,
+topically-related location), following this file's own established
+per-route conventions throughout.
+
+Two fixes were required before the given code would even run, both
+caught by reading the actual middleware/model setup in this exact
+file (not guessed):
+
+1. `requireOwner` does not exist. The task's given handler signature
+   was `router.get('/:shopDomain/today-stats', requireOwner, async
+   (req, res) => {...})`. backend/middleware/requireOwner.js (the
+   FILE) exports `{ requireAuth, requireStoreOwner, requirePaidPlan }`
+   -- there is no export named `requireOwner`, and no such identifier
+   is imported anywhere in profiles.js either (the given snippet
+   never showed an import line for it). Using an undefined
+   `requireOwner` as an Express route handler argument would throw a
+   TypeError at route-registration time (`Route.get() requires a
+   callback function but got a [object Undefined]`), crashing the
+   whole backend the moment this file is required. Fixed to
+   `requireAuth, requireStoreOwner` -- the actual middleware pair
+   already imported at the top of this file (line 11) and used by
+   every other GET handler in it.
+
+2. `mongoose.model('X')` calls were unnecessary and `mongoose` itself
+   is not imported in this file at all (grepped for "require('mongoose')"
+   and "mongoose." across profiles.js: zero matches). The given code
+   called `mongoose.model('ScheduledJob')`, `mongoose.model('Profile')`,
+   `mongoose.model('StorefrontEvent')` inline inside the handler.
+   Rather than adding a new `require('mongoose')` import, used the
+   models this file ALREADY imports directly by name at its top
+   (Profile, StorefrontEvent, ScheduledJob -- lines 4, 7, 9) -- simpler,
+   avoids a new dependency, and matches how every other handler in this
+   file accesses these exact models.
+
+Also matched this file's own defensive convention of
+`req.params.shopDomain.trim().toLowerCase()` (the given code used
+`req.params.shopDomain` bare, unlike every other handler in this
+file).
+
+One additional accuracy fix, beyond the literal given query: the
+"push sent in range" count used `updatedAt` in the given code
+(`ScheduledJob.countDocuments({..., status: 'sent', updatedAt: {$gte,
+$lte}})`). Read backend/models/ScheduledJob.js in full to confirm: it
+has BOTH `{ timestamps: true }` (auto-managed updatedAt, touched on
+ANY later write to the document) AND a dedicated `sentAt` field that
+is explicitly set to `new Date()` at the exact moment a job is
+claimed/sent (server.js's processScheduledJobs(), the very first
+findOneAndUpdate: `{ status: 'sent', sentAt: new Date() }`). Using
+updatedAt would misattribute a job's "sent" date whenever it received
+ANY later write after being sent (e.g. an outcome/clickedAt update
+from a subsequent click) -- a job actually sent yesterday but clicked
+today would incorrectly count as sent "today" under a Today-filter
+query, and (less obviously) a job sent long ago could also
+re-qualify for a recent date range if something unrelated touched it
+recently. Used `sentAt` instead, which is set once, exactly when the
+job is actually sent, and never touched again by later updates --
+the semantically correct field for this specific stat.
+
+Everything else in the endpoint (the from/to default computation, the
+aggregate shape for emails-sent via Profile.messages, the
+popups-shown/emails-captured/push-subscribers queries, the response
+shape) matches the task's given code exactly.
+
+
+PART B/C/D — frontend/app/admin/screens/Today.jsx
+=========================================================================
+- 9 inline SVG icon components added (Bell/Envelope/Cursor/UserPlus/
+  Users/Cart/CreditCard/CheckCircle/Repeat), each using the exact
+  paths given, each spreading `...props` so a shared
+  `{ color: '#6366f1', marginBottom: 8 }` style can be applied
+  uniformly at every call site.
+- DATE_FILTERS (4 entries, no "Custom" -- the task's date-filter bar
+  for Today only lists Today/Yesterday/Last 7 days/Last 30 days,
+  unlike the 5-tab bar with Custom built for the separate Activity
+  screen in Phase 4), NOTIF_STATS (5 entries), ACTIVITY_STATS (4
+  entries), STAT_LABEL_STYLE, STAT_CARD_STYLE, and getDateRange()
+  (module scope, implemented verbatim as given) were added near the
+  top of the file.
+- State: dateFilter ('7d' default), activity, notifStats, notifLoading
+  replace the old activity/activityLoading pair -- both stat rows now
+  share one loading flag (notifLoading) since both are fetched
+  together in the same effect.
+- The combined fetch effect (keyed on [shop, dateFilter]) replaced the
+  old activity-only effect, implementing the task's given
+  Promise.all([...]).then(...).finally(...) shape with 3 small,
+  consistency-driven additions (not scope changes -- see DEVIATION
+  section below): a .catch() clause, encodeURIComponent() on from/to,
+  and a `cancelled` guard.
+- SECTION 1 (date filter bar), SECTION 2 (Row 1, 5-column notification
+  grid), and SECTION 3 (Row 2, 4-column clickable activity grid, with
+  the "View all ->" link kept next to the "Attributed Activity" label)
+  replace the old Phase 3 block entirely, in the same position (first
+  content in the wrapper div, before the existing Header/Planned-for-
+  today/Yesterday/chart sections, all of which are unchanged below it).
+- Card hover effect (box-shadow 0 2px 8px rgba(0,0,0,0.08)) applied
+  only to Row 2's clickable cards, per the task's spec (Row 1 cards are
+  not clickable and have no hover effect specified).
+
+
+DEVIATIONS
+=========================================================================
+1. Added .catch(), encodeURIComponent(), and a `cancelled` guard to
+   the new combined fetch effect -- none of the 3 were in the task's
+   given snippet. Justification, matching established practice from
+   earlier tasks in this session (Phase 4's ActivityScreen fetch had
+   the same 2 gaps, fixed the same way):
+     - .catch(): without one, a rejected promise (network error, 401,
+       etc.) would leave both activity and notifStats stuck at
+       whatever they were before (null on first load), the .finally()
+       would still clear the loading flag, and the rejection would
+       surface as an unhandled-promise-rejection console warning.
+       Every other data-fetching effect in this exact file (and in
+       ActivityScreen.jsx) has a .catch() that resets to null instead.
+     - encodeURIComponent(from/to): matches how `shop` was already
+       encoded in the same given line, and how every other dynamic
+       query value in this codebase is encoded (not strictly required
+       for these particular ISO date strings, but consistent rather
+       than the one unencoded interpolation in the file).
+     - `cancelled` guard: the effect this one REPLACES already had
+       this exact pattern (a local `cancelled` flag checked before
+       every setState inside .then()), and BOTH of this file's other
+       two effects (isMobileView listener excepted) use the same
+       pattern for the same reason -- avoiding a fast dateFilter
+       change followed by a slower, now-stale request resolving later
+       and clobbering newer state. Since dateFilter now changes on
+       every filter-button click (a much more frequent trigger than
+       the old mount-only `[shop]` dependency), this race became more
+       likely, not less, with this redesign -- so the guard was kept.
+
+2. Mobile breakpoint: task says "On mobile (window.innerWidth <= 600):
+   ... Use isMobileView state already present in Today.jsx" -- but
+   isMobileView's actual threshold (defined earlier in this same file,
+   unchanged by this task) is `window.innerWidth <= 768`, not 600.
+   These two instructions conflict with each other. Followed the more
+   specific, explicit one ("use isMobileView already present" -- i.e.
+   reuse, don't add a new state/listener) rather than introduce a
+   second, separate 600px-threshold resize listener alongside the
+   existing 768px one, which would have meant two different
+   "is this mobile" answers active in the same component depending on
+   viewport width between 600-768px. Both stat-row grids switch from
+   5/4 columns to 2 columns at 768px (isMobileView's real threshold),
+   not 600px.
+
+3. Row 1 and Row 2 icon/number colors are uniform (#6366f1 icons,
+   #111827 numbers) across all 9 cards, rather than reusing the
+   per-type accent colors (amber/purple/green/blue) from Phase 3/4's
+   ACTIVITY_TILES/ACTIVITY_TYPES. The task's styling spec for Row 2
+   says only "Card style: same as above but cursor pointer" --
+   "above" being Row 1's style block, which specifies a single icon
+   color (#6366f1) and number color (#111827) with no per-type
+   variation mentioned anywhere in this task. Implemented literally as
+   given (uniform monochrome-icon styling across both rows) rather
+   than reintroducing the older per-type color scheme this task's own
+   spec doesn't reference.
+
+
+NOT TOUCHED
+=========================================================================
+- Planned-for-today, Yesterday, and "Recovered this week" chart
+  sections: unchanged, confirmed still rendering below the new stat
+  rows (git diff shows no changes below the replaced block other than
+  the pre-existing, already-noted stats-never-set issue from Phase 3's
+  audit, which remains out of scope here too).
+- No other file besides frontend/app/admin/screens/Today.jsx and
+  backend/routes/profiles.js was staged or committed.
+- GET /:shopDomain/push-stats and every other existing route in
+  profiles.js: unchanged.

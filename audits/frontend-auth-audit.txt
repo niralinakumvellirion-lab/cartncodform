@@ -1,0 +1,271 @@
+FRONTEND AUTH AUDIT - read-only, no changes
+==============================================
+Generated: 2026-09-15
+
+Files read: frontend/lib/api.js (in full, 140 lines).
+frontend/app/admin/layout.js does NOT initialize App Bridge — it is
+a bare passthrough (confirmed by reading it, 4 lines: `export
+default function AdminLayout({ children }) { return children; }`).
+App Bridge/AppProvider setup lives in each page.js wrapper instead
+(this project's established pattern, per CLAUDE.md: "no shared
+layout -- layout.js is a bare passthrough"), duplicated identically
+across every frontend/app/admin/*/page.js file. Read
+frontend/app/admin/page.js as the representative example (all
+others follow the same pattern). Also re-read frontend/app/layout.js
+(the ROOT layout, already read in full earlier this session) since
+that is where App Bridge is actually configured — see section 3.
+
+
+====================================================================
+1 & 2. frontend/lib/api.js - full apiGet() and apiSend(), and how
+       the session token is obtained + sent
+====================================================================
+
+--- getAuthToken() (lines 25-38) - how the token is obtained ---
+
+// Auth is a Shopify App Bridge session token. App Bridge is loaded
+// synchronously by a plain <script> in the root layout <head>, so by the time
+// any api call runs window.shopify is normally already there; the short poll
+// below just covers the first render. window.shopify.idToken() returns a
+// fresh, short-lived JWT and caches/refreshes internally — no caching here.
+async function getAuthToken() {
+  if (typeof window === 'undefined') {
+    throw new Error('Not running in browser');
+  }
+  let waited = 0;
+  while (!window.shopify) {
+    if (waited >= 10000) {
+      throw new Error('App Bridge did not initialize');
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+    waited += 100;
+  }
+  return await window.shopify.idToken();
+}
+
+The token is NOT obtained via any App Bridge React hook/component
+(no useAppBridge, no App Bridge `createApp()` instance held in
+React state/context anywhere in this file) — it is read directly
+off the global `window.shopify` object, which the App Bridge script
+(see section 3) attaches to `window` once it initializes.
+`window.shopify.idToken()` is called fresh on every request (no
+token caching inside this file at all — the comment explicitly notes
+App Bridge itself "caches/refreshes internally"). If `window.shopify`
+hasn't appeared yet (e.g. very first render before the synchronous
+<script> tag in the root <head> has finished executing), this polls
+every 100ms up to a 10-second ceiling before throwing "App Bridge
+did not initialize".
+
+--- apiGet() (lines 40-81) - full function ---
+
+export async function apiGet(path) {
+  const url = `${BACKEND_URL}${path}`;
+  const token = await getAuthToken();
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+  let res;
+  try {
+    res = await fetch(url, { cache: 'no-store', headers });
+  } catch (err) {
+    throw new Error(describeNetworkError(err, 'GET', url));
+  }
+
+  // App Bridge session tokens live ~1 minute. On a 401, wait briefly (App
+  // Bridge needs a moment to mint a new one) then retry ONCE with a fresh token.
+  if (res.status === 401) {
+    await new Promise((r) => setTimeout(r, 500));
+    const freshToken = await getAuthToken();
+    let retryRes;
+    try {
+      retryRes = await fetch(url, {
+        cache: 'no-store',
+        headers: {
+          Authorization: `Bearer ${freshToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+    } catch (err) {
+      throw new Error(describeNetworkError(err, 'GET', url));
+    }
+    if (!retryRes.ok) {
+      const err = await retryRes.json().catch(() => ({}));
+      throw new Error(err.error || `${path} failed (${retryRes.status})`);
+    }
+    return retryRes.json();
+  }
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`GET ${path} failed (${res.status}): ${body}`);
+  }
+  return res.json();
+}
+
+--- apiSend() (lines 100-139) - full function ---
+
+export async function apiSend(path, method, body) {
+  const url = `${BACKEND_URL}${path}`;
+  const token = await getAuthToken();
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+
+  const res = await fetchWithTimeout(url, {
+    method,
+    headers,
+    body: JSON.stringify(body),
+  }, method);
+
+  // App Bridge session tokens live ~1 minute. On a 401, wait briefly then
+  // retry ONCE with a fresh token.
+  if (res.status === 401) {
+    await new Promise((r) => setTimeout(r, 500));
+    const freshToken = await getAuthToken();
+    const retryRes = await fetchWithTimeout(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${freshToken}`,
+      },
+      body: JSON.stringify(body),
+    }, method);
+    if (!retryRes.ok) {
+      const err = await retryRes.json().catch(() => ({}));
+      throw new Error(err.error || `${method} ${path} failed (${retryRes.status})`);
+    }
+    return retryRes.json().catch(() => ({}));
+  }
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || `${method} ${path} failed (${res.status})`);
+  }
+  return data;
+}
+
+(apiSend() depends on fetchWithTimeout(), lines 87-98 — a thin
+AbortController wrapper adding a 30-second client-side timeout;
+included here only as context, not itself asked about.)
+
+--- How the token is SENT to the backend ---
+
+Identically in both functions: as a standard Bearer token in the
+`Authorization` HTTP header — `Authorization: Bearer <idToken>` —
+never as a query param, cookie, or request body field. Both
+functions build this header conditionally (`token ? {Authorization:
+...} : {}`), though in practice getAuthToken() always either returns
+a token or throws, so the header is effectively always present on
+any successful call.
+
+Both functions share the exact same 401-retry policy: on first
+receiving HTTP 401 from the backend, wait 500ms (giving App Bridge
+time to mint a fresh idToken, since these tokens are short-lived,
+per the comment "~1 minute"), call getAuthToken() again for a new
+token, and retry the SAME request exactly once with the new token in
+the Authorization header. A second 401 (or any other non-ok status)
+on the retry is a hard failure — no further retries.
+
+
+====================================================================
+3. Any reference to SHOPIFY_API_KEY in frontend/lib/api.js
+====================================================================
+
+NONE. Searched the full file (already fully quoted above) — there is
+no reference anywhere to SHOPIFY_API_KEY, NEXT_PUBLIC_SHOPIFY_CLIENT_ID,
+or any API-key-shaped constant. This file only deals with
+BACKEND_URL (frontend/lib/api.js line 2-3,
+`process.env.NEXT_PUBLIC_BACKEND_URL`) and the session token obtained
+from `window.shopify.idToken()` — it has no awareness of the
+Shopify app's client_id/API key at all. That value lives entirely in
+the App Bridge initialization code (section 4 below), not in this
+file.
+
+
+====================================================================
+4. App Bridge / AppProvider configuration - what apiKey is passed
+====================================================================
+
+There is no frontend/app/admin/layout.jsx — frontend/app/admin/
+layout.js exists but is a bare passthrough (shown above), so it does
+NOT configure App Bridge. Two DIFFERENT things are involved across
+two different files, and neither of them is where you'd expect from
+the name "AppProvider":
+
+--- (a) frontend/app/admin/page.js (and identically in every other
+    frontend/app/admin/*/page.js wrapper, per this project's
+    duplicated-nav-block convention) - AppProvider usage ---
+
+    import { AppProvider } from '@shopify/polaris';
+    import { NavMenu } from '@shopify/app-bridge-react';
+    ...
+    return (
+      <AppProvider i18n={{}}>
+        {!showOnboarding && (
+          <NavMenu>
+            <a href="/admin" rel="today">Today</a>
+            ...
+          </NavMenu>
+        )}
+        ...
+      </AppProvider>
+    );
+
+IMPORTANT: `AppProvider` here is imported from `@shopify/polaris`,
+NOT from `@shopify/app-bridge-react` — it is Polaris's own i18n/
+theming context provider (takes only an `i18n` prop, here an empty
+object `{}}`), NOT an App Bridge initialization component. It does
+NOT accept or pass any apiKey prop anywhere in this codebase.
+`NavMenu` (from `@shopify/app-bridge-react`) registers the embedded
+app's navigation links with whatever App Bridge instance is already
+running globally — it also takes no apiKey prop. Neither of these
+two components is what actually creates/configures App Bridge or
+supplies the Shopify API key.
+
+--- (b) frontend/app/layout.js (the ROOT layout, not the admin one)
+    - this is where App Bridge is ACTUALLY configured ---
+
+    <head>
+      {/* App Bridge reads this meta on load — it must be in the real <head>,
+          not rendered from a client component inside <Suspense> (Next.js
+          App Router does not reliably hoist those). layout.js is a Server
+          Component, so the public env var is inlined at build time. */}
+      <meta
+        name="shopify-api-key"
+        content={process.env.NEXT_PUBLIC_SHOPIFY_CLIENT_ID || ''}
+      />
+      {/* App Bridge must load synchronously (no async/defer) — a plain
+          <script> in the root layout <head> is the only reliable way in
+          the Next.js App Router. Do NOT switch this to next/script. */}
+      <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
+    </head>
+
+This is the NEW/modern Shopify App Bridge (the CDN-hosted
+`app-bridge.js`, loaded as a plain synchronous `<script>` tag, NOT
+the older `@shopify/app-bridge` `createApp({apiKey, host, ...})`
+JS-config pattern). This newer App Bridge script SELF-initializes by
+reading a `<meta name="shopify-api-key" content="...">` tag already
+present in the document `<head>` at load time — there is no
+JavaScript `createApp()` call anywhere in this codebase (confirmed:
+no such call appears in api.js, page.js, or layout.js). Once it
+self-initializes, it attaches the resulting instance to
+`window.shopify`, which is exactly the global frontend/lib/api.js's
+getAuthToken() polls for and calls `.idToken()` on.
+
+apiKey value: `process.env.NEXT_PUBLIC_SHOPIFY_CLIENT_ID` (falling
+back to an empty string if unset). This is a Next.js public env var,
+inlined into the built HTML at build time (per the code's own
+comment: "layout.js is a Server Component, so the public env var is
+inlined at build time"). Note the naming: the env var is called
+NEXT_PUBLIC_SHOPIFY_CLIENT_ID here, distinct from the backend's own
+SHOPIFY_API_KEY env var (backend/utils/shopify.js) — both are
+expected to hold the SAME underlying Shopify app client_id value,
+just under different variable names on each side (frontend vs.
+backend), since a Shopify app's client_id and "API key" are the same
+identifier in Shopify's terminology.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+No files were modified as part of this task.

@@ -1,0 +1,90 @@
+SELF-AUDIT — savetoken-fix
+
+File: extensions/cartncodform-embed/blocks/push-notifications.liquid
+Function: saveToken(token), lines 1809-1883 (post-edit)
+
+OLD STRUCTURE
+-------------
+  function saveToken(token) {
+    ... setup vars ...
+
+    fetch('/cart.js')                              // <- not returned
+      .then(r => r.json())
+      .then(cart => fetch(BACKEND_URL + '/api/push/subscribe-customer', {...}))
+      .then(r => r.json())
+      .then(data => {
+        ... handle data.success / discount-capture logic ...
+        return data;
+      })
+      .catch(err => {
+        console.error('[CCF] saveToken error:', err.message);   // logged, then swallowed
+      });
+
+    // Return a resolved promise so the caller chain doesn't break.
+    return Promise.resolve({ success: true });      // <- fires IMMEDIATELY, synchronously,
+                                                      //    before the fetch chain above has
+                                                      //    even sent its first request.
+  }
+
+Effect of the bug: every caller of saveToken() — the initial-subscribe flow
+(registerSW -> getToken -> saveToken -> setupForegroundMessages -> UI shows
+"Subscribed!") and the returning-customer token-rotation check in
+checkAndInit() — saw saveToken() resolve instantly, regardless of whether
+/cart.js or the subscribe-customer POST ever succeeded. A failed POST only
+produced a swallowed console.error; the UI still reported success and the
+outer .catch handlers (which reset the Allow button / retry with a fallback
+token) never ran, because there was nothing left to reject.
+
+NEW STRUCTURE
+-------------
+  function saveToken(token) {
+    ... setup vars (unchanged) ...
+
+    return fetch('/cart.js')                        // <- function now returns the chain
+      .then(r => r.json())
+      .then(cart => fetch(BACKEND_URL + '/api/push/subscribe-customer', {...}))
+      .then(r => r.json())
+      .then(data => {
+        ... same data.success / discount-capture logic as before, unchanged ...
+        console.log('[ccf] subscribe POST success');
+        return { success: true };                   // <- only reached after the POST's
+                                                      //    response has been parsed
+      })
+      .catch(err => {
+        console.error('[ccf] subscribe POST failed', err);
+        throw err;                                   // <- re-thrown, not swallowed
+      });
+  }
+
+CONFIRMATIONS
+-------------
+1. Promise.resolve/the `{ success: true }` resolution is now INSIDE the
+   final `.then(function(data) {...})` callback (line 1877), reached only
+   after fetch('/cart.js') resolved, the subscribe-customer POST resolved,
+   and its JSON body was parsed. There is no code path left that resolves
+   the function's returned promise before the network chain completes.
+
+2. Errors are no longer silently swallowed: the terminal `.catch` (lines
+   1879-1882) logs via `console.error('[ccf] subscribe POST failed', err)`
+   AND re-throws (`throw err;`), so the rejection propagates to every
+   caller's own `.catch`:
+     - line ~1304-1307 (initial subscribe flow): logs
+       '[CCF] subscribe after prompt failed' and calls resetButton(), so the
+       UI no longer falsely shows "Subscribed!" on a failed save.
+     - line ~1918-1925 (checkAndInit token-rotation check): logs
+       '[CCF] Token verify failed' and retries with the last known-good
+       stored token via saveToken(fallback).
+   Both call sites already had their own terminal .catch before this
+   change, confirmed by reading their surrounding code, so re-throwing
+   here does not introduce any unhandled-rejection path.
+
+3. All pre-existing logic inside the success branch (localStorage writes,
+   PAGE_LOAD_TOKEN_KEY latch, discount-capture showSoftPrompt scheduling)
+   is unchanged — only the return value/timing and error handling changed.
+
+DEPLOY
+------
+`shopify app deploy --allow-updates` run after the change — released as
+shopireachboost-ai-110. Theme-check reported the same pre-existing
+ParserBlockingScript/RemoteAsset warnings on the Firebase CDN <script> tags
+(lines 3-4), unrelated to this change; deploy succeeded.

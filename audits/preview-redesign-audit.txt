@@ -1,0 +1,127 @@
+=== PREVIEW REDESIGN AUDIT ===
+Generated: 2026-09-18
+
+Mobile phone frame compact (180px wide): yes
+Mobile status bar: yes
+Mobile notification card fits inside phone: yes
+Mobile banner image below text: yes
+Desktop mac background: yes
+Desktop dark notification toast: yes
+Desktop mac dots (red/yellow/green): yes
+Both fit without cutting off: yes
+frontend build: pass
+git push: done (9fb2faa..41cdf94, after one hung/stopped attempt — see note below)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full (1811
+lines, in three parts) before making any change, as instructed.
+Located the entire "Right: Live Preview" panel — the 280px-wide,
+`#f1f5f9`-background phone-frame + Mac-notification section built up
+across the previous several tasks (audits/preview-fix-audit.txt,
+audits/banner-image-audit.txt) — spanning from its own opening comment
+through its closing `</div>`, immediately before the modal body's own
+closing tags.
+
+
+====================================================================
+IMPLEMENTATION
+====================================================================
+Replaced the entire Live Preview panel wholesale with the given
+compact version, verbatim:
+
+- Outer panel: narrowed from 280px to 260px, lighter `#f8fafc`
+  background, smaller/tighter padding (`14px 12px` vs `16px 12px`),
+  gap reduced from 20 to 16, and `flexShrink: 0` added explicitly (so
+  the panel can no longer be squeezed narrower than 260px by its flex
+  siblings, which was likely contributing to the "cutting off"
+  symptom the task describes).
+- Mobile phone frame: narrowed from 200px to 180px, simpler/flatter
+  `#111` bezel (vs the previous `#1c1c1e` + more padding), smaller
+  border-radius (24 vs 32), tighter status bar with an added
+  battery/signal glyph string, a more compact notification card (10px
+  radius vs 14px, smaller fonts: 10/8px vs 12/10-11px, a 32×32
+  thumbnail vs the previous 40×40), the banner image kept but shrunk
+  to 55px tall (vs 80px) and now rendered directly as a plain `<img>`
+  (no extra wrapper div, matching the given code exactly — the wrapper
+  div and its own `height:80` from the prior task's banner
+  implementation were dropped since the given code renders the image
+  element directly), and a shorter home-indicator bar (14px tall vs
+  20px, 40×3 bar vs 60×4).
+- Desktop preview: replaced the flat `rgba(50,50,50,0.85)` card
+  sitting directly on the panel background with a proper "Mac desktop"
+  gradient backdrop (`linear-gradient(135deg, #1e3a5f, #0f2027)`)
+  containing the dark translucent notification toast (36×36 thumbnail
+  vs the previous 44×44) plus a new macOS-style traffic-light dot row
+  (red/yellow/green, 6px circles) beneath the toast, right-aligned —
+  none of this traffic-light element existed before this task.
+- Footer text kept as "Updates as you type", now 9px (was 10px).
+
+All four dynamic bindings — `editorTitle`, `editorBody`,
+`editorMobileImageUrl`, `editorDesktopImageUrl` — are read exactly as
+before; no new state was introduced and this task did not touch the
+Title input, Message textarea, or either upload box's `<input
+type="file">` handler above this panel, so both previews still update
+live as the merchant types or uploads.
+
+
+====================================================================
+DO NOT CHANGE COMPLIANCE
+====================================================================
+Only the "Right: Live Preview" panel was replaced. Re-read the
+surrounding modal body after editing to confirm the two upload boxes,
+the Title/Message/Schedule Date fields, and all three action buttons
+(Send Now / Approve / Add to Queue) with their existing
+`mobileImageUrl`/`desktopImageUrl` request bodies are byte-for-byte
+unchanged from the version read at the start of this task.
+
+
+====================================================================
+DO-NOT-TOUCH-OTHER-FILES COMPLIANCE
+====================================================================
+Only frontend/app/admin/dashboard/DashboardScreen.jsx was staged and
+committed, per the task's own git-add line. `git status` after staging
+confirmed exactly this one path; the pre-existing unrelated dirty
+files (backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 15 static
+  routes + 1 dynamic route generated, no errors (/admin/dashboard:
+  10.5kB -> 10.6kB First Load JS).
+- git push origin main -- the first attempt (backgrounded) produced no
+  output at all for several minutes — this session's well-documented
+  intermittent git-push hang — and was stopped via TaskStop after
+  confirming the commit (41cdf94) was safely made locally and the
+  branch was simply "ahead of origin by 1 commit" (no data at risk). A
+  second, foreground attempt with a longer timeout succeeded
+  immediately: 9fb2faa..41cdf94, no manual intervention from the user
+  needed.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+No backend changes were needed or made — this task is frontend-only,
+touching a single file, a full replacement of one self-contained
+preview panel. This app has no automated frontend test suite, so
+verification here is build-only, per the task's own stated
+verification step.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+1 file modified (frontend/app/admin/dashboard/DashboardScreen.jsx). No
+other file was touched. Manual visual verification in a live browser
+(confirming the 260px panel and 180px phone frame no longer get
+clipped by the modal's own 760px maxWidth / overflow:hidden boundaries,
+and that the Mac traffic-light dots render correctly) was not
+performed as part of this task — this environment has no running dev
+server / authenticated Shopify session to click through; verification
+here is limited to a clean production build and the code review
+documented above.

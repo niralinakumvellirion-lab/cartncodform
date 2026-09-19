@@ -1,0 +1,106 @@
+SELF-AUDIT — sw-scope-revert
+
+CONTEXT
+-------
+Prior turns moved the storefront SW's scope from '/apps/cartncodform/' to
+'/', and later made registerSW()'s activation wait on
+navigator.serviceWorker.ready. The user reported the real-world mobile
+failure this caused (captured via the DEBUG_ERROR_REPORT mechanism added
+in a previous turn, visible in Render logs):
+  "Failed to register a ServiceWorker for scope ('.../') with script
+  ('.../apps/cartncodform/sw.js'): The path of the provided scope ('/')
+  is not under the max scope allowed ('/apps/cartncodform/'). ... use the
+  Service-Worker-Allowed HTTP header to allow the scope."
+Root cause: Shopify's App Proxy strips the Service-Worker-Allowed header
+before it reaches the browser, so scope '/' on a script served under
+/apps/cartncodform/ is never actually achievable on the storefront, no
+matter what the backend sends. Confirmed with the user before proceeding
+(flagged the scope revert would otherwise break navigator.serviceWorker
+.ready, since .ready only resolves for the page currently being
+controlled, and a scope of /apps/cartncodform/ never controls normal
+storefront pages) — user asked for both the scope revert AND a
+scope-independent activation replacement together, which is what was
+implemented.
+
+CHANGE 1-3: scope reverted to '/apps/cartncodform/' in all 3 places
+------------------------------------------------------------------------
+File: extensions/cartncodform-embed/blocks/push-notifications.liquid,
+function registerSW().
+1. Stale-cleanup `swScope` var (inside the first
+   navigator.serviceWorker.getRegistrations().then(...) block): confirmed
+   now reads `var swScope = window.location.origin + '/apps/cartncodform/';`.
+2. "Already active" loop comparison: confirmed now reads
+   `reg.scope === window.location.origin + '/apps/cartncodform/'`.
+3. The navigator.serviceWorker.register(swUrl, {...}) call: confirmed
+   `scope: '/apps/cartncodform/'`. The adjacent
+   console.log('[ccf:lifecycle] registering SW at: ...') line, which
+   previously hardcoded the text "scope: /", was also updated to say
+   "scope: /apps/cartncodform/" so the debug log stays accurate — this
+   wasn't separately requested but follows directly from change 3 and
+   changes no behavior, only log text.
+
+CHANGE 4: old-scope unregister block removed, chain intact
+----------------------------------------------------------------
+Confirmed the block that unregistered any registration whose scope
+contained '/apps/cartncodform/' (previously sitting between the
+stale-cleanup .then() and the "check if correct SW already active" .then())
+is fully deleted. Confirmed by reading the current function: the first
+navigator.serviceWorker.getRegistrations().then(function(regs) {...return
+Promise.all(unregisterPromises);}) block now chains directly into
+.then(function() { // Check if correct SW already active ... }) — no
+orphaned .then(), no dangling closing braces/parens; the whole function
+body reads as one continuous, correctly nested Promise chain ending in the
+two .catch() handlers ('[CCF] SW registration failed' and '[CCF] SW setup
+error') that were already there.
+
+CHANGE 5: navigator.serviceWorker.ready replaced with registration-based activation
+----------------------------------------------------------------------------------------
+Confirmed navigator.serviceWorker.ready no longer appears anywhere in
+registerSW() (grepped the function body — zero matches). The
+register(...).then(function(reg) {...}) callback now:
+  - resolves immediately if reg.active is already set;
+  - resolves immediately if neither reg.installing nor reg.waiting exists
+    (reg.active must then be the only state, but this also covers any
+    unexpected in-between state by resolving with the reg as-is, per the
+    user's "FCM can work with the reg as-is" comment);
+  - still sends SKIP_WAITING to reg.waiting if present (unchanged from
+    prior turns);
+  - resolves immediately if the installing/waiting worker's .state is
+    already 'activated';
+  - otherwise attaches a 'statechange' listener directly on that worker
+    object (reg.installing || reg.waiting), resolving as soon as its state
+    becomes 'activated' or 'redundant', with a 10s fallback timeout that
+    also RESOLVES (not rejects) — matching the user's explicit
+    "resolve, not reject — FCM often works anyway" requirement, a
+    deliberate change from the prior 15s reject-on-timeout behavior.
+  - A `done` flag guards against the timeout and the statechange listener
+    both firing (double-resolve is harmless on a Promise, but the flag
+    keeps the timeout from doing redundant work after the listener already
+    settled it, and vice versa).
+This activation logic depends only on the registration/worker objects
+returned directly by register(), never on which page currently has a
+controller — so it works regardless of whether the SW's scope covers the
+page the customer is actually on.
+
+TESTS / DEPLOY
+---------------
+`cd backend && npm test`: 19 test suites, 151 tests, all passing (no
+backend files were touched by this change; run as a sanity check per
+CLAUDE.md).
+`shopify app deploy --allow-updates`: released as shopireachboost-ai-120.
+Theme-check reported the same pre-existing ParserBlockingScript/RemoteAsset
+warnings on the Firebase CDN <script> tags (lines 3-4), unrelated to this
+change; deploy succeeded.
+
+NOT CHANGED (left for a possible follow-up, not touched this turn)
+----------------------------------------------------------------------
+backend/routes/proxy.js's /sw.js handler and backend/server.js's static
+SW route both still send `Service-Worker-Allowed: '/'`. Since the App Proxy
+strips this header anyway (per the diagnosed root cause), its value is now
+moot for the storefront path in practice, and a scope of
+'/apps/cartncodform/' doesn't require this header at all (a script served
+at that exact path can register at that scope or narrower without any
+Service-Worker-Allowed header). Left both as '/' rather than reverting them
+too, since this task only asked for the liquid-file changes; flagging here
+in case that header value is worth revisiting later for clarity, though it
+has no observed effect on the current fix.

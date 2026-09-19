@@ -1,0 +1,142 @@
+=== SETTINGS SAVE FIX AUDIT ===
+
+Fix 1a — Promise.all parallel save: yes
+  saveSettings() (frontend/app/admin/screens/Settings.jsx) now runs both
+  PATCH calls (settings, popup) inside a single `await Promise.all([...])`
+  instead of two sequential awaits. The `[settings] saving popup
+  device...` console.log was moved to run once, before the try block
+  (previously it sat between the two sequential calls, which no longer
+  makes sense once they run concurrently).
+
+  Real behavior change worth flagging (not a deviation, just noting the
+  consequence): under the OLD sequential code, if the settings PATCH
+  threw, the popup PATCH was never even attempted. With Promise.all,
+  both requests are always fired concurrently — a failure in one no
+  longer prevents the other from being attempted. This is a genuine
+  improvement, not something asked for separately, but a direct and
+  correct consequence of the requested change.
+
+Fix 1b — 30s timeout in api.js: yes
+  apiSend() (frontend/lib/api.js) — see DEVIATION note below for how
+  this was adapted to the function's real (two-fetch-call) shape.
+
+Fix 2a — 500KB size warning: yes
+  Added immediately after the existing `if (!file) return;` guard, in
+  the "Upload image" <input type="file"> onChange handler, using the
+  exact literal condition and message given.
+
+Fix 2b — canvas compression added: yes
+  Max dimension: 800px
+  JPEG quality: 0.7
+  Integrated inside the existing reader.onload callback: the raw
+  FileReader result is now loaded into an Image, drawn to a canvas at
+  the aspect-ratio-preserving resized dimensions, and the resulting
+  canvas.toDataURL('image/jpeg', 0.7) string is what actually gets
+  passed to setActivePopup(...) — not the original uncompressed
+  base64. Confirmed drag-to-focus (imagePosition) and both the
+  desktop/mobile preview renderers are unaffected: all three read
+  activePopup.imageUrl and activePopup.imagePosition independently of
+  how imageUrl was produced, and a JPEG data: URI is a valid <img src>
+  / CSS background-image value exactly like the PNG/original format
+  was.
+
+frontend build: pass (cd frontend && npm run build -> compiled
+  successfully, all 13 routes generated, no type/lint errors)
+
+
+DEVIATION FROM THE LITERAL TASK SNIPPET (verified, not guessed)
+=========================================================================
+The task's given apiSend() timeout snippet assumed a single `fetch(url,
+options)` call with one `return res;` — but the ACTUAL apiSend()
+function (re-read in full before editing) makes TWO separate fetch()
+calls: the initial request, and a one-time retry after a 401 (App
+Bridge session tokens live ~1 minute; the retry waits 500ms then uses
+a freshly-minted token). Applying the given snippet verbatim to only
+the first fetch would have left the 401-retry fetch with no timeout at
+all — exactly the same "Saving..." forever failure mode the task is
+trying to fix, just moved to a less-common path.
+
+Extracted a small shared helper, `fetchWithTimeout(url, options,
+method)`, applying the AbortController + 30s timer + AbortError
+handling to BOTH fetch call sites (the initial attempt and the 401
+retry) instead of duplicating the try/catch/finally block twice
+inline. Same behavior as the given snippet at each individual fetch
+site (30s abort, "Request timed out" on AbortError, existing
+describeNetworkError() message otherwise) — just factored once instead
+of copy-pasted, since apiSend() needs it in two places.
+
+apiGet() was NOT touched — the task named apiSend() specifically, and
+"DO NOT touch any other files" plus "Find apiSend() function" together
+scope this to apiSend() only. apiGet() still has no timeout; flagging
+this as an intentional scope boundary, not an oversight, in case a
+future task wants the same fix applied there.
+
+
+EXACT CODE — frontend/lib/api.js (new helper + apiSend(), full)
+=========================================================================
+// 30s client-side cutoff so a hung backend request doesn't leave the UI
+// showing "Saving..." indefinitely — fetch() has no built-in timeout.
+const REQUEST_TIMEOUT_MS = 30000;
+
+async function fetchWithTimeout(url, options, method) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('Request timed out');
+    throw new Error(describeNetworkError(err, method, url));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function apiSend(path, method, body) {
+  const url = `${BACKEND_URL}${path}`;
+  const token = await getAuthToken();
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+
+  const res = await fetchWithTimeout(url, {
+    method,
+    headers,
+    body: JSON.stringify(body),
+  }, method);
+
+  if (res.status === 401) {
+    await new Promise((r) => setTimeout(r, 500));
+    const freshToken = await getAuthToken();
+    const retryRes = await fetchWithTimeout(url, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${freshToken}`,
+      },
+      body: JSON.stringify(body),
+    }, method);
+    if (!retryRes.ok) {
+      const err = await retryRes.json().catch(() => ({}));
+      throw new Error(err.error || `${method} ${path} failed (${retryRes.status})`);
+    }
+    return retryRes.json().catch(() => ({}));
+  }
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || `${method} ${path} failed (${res.status})`);
+  }
+  return data;
+}
+
+
+NOT TOUCHED (confirmed)
+=========================================================================
+- frontend/lib/api.js's apiGet() and describeNetworkError() — unchanged.
+- Every other Settings.jsx field/handler (voice, caps, quietHours,
+  layout/headline/subtext/colors/etc., the "paste URL" input, the
+  drag-to-focus mousedown/touchstart handlers, both preview renderers) —
+  unchanged; only the file-input onChange handler was edited.
+- No file other than frontend/app/admin/screens/Settings.jsx and
+  frontend/lib/api.js was modified.

@@ -1,0 +1,89 @@
+=== DELAY SECONDS AUDIT ===
+Generated: 2026-09-17
+
+Seconds option added to select: yes
+Conversion logic updated: yes
+  seconds → minutes: yes (mins = a / 60)
+  minutes → minutes: yes (mins = a, unchanged)
+  hours → minutes: yes (mins = a * 60, unchanged)
+Initial display logic updated: yes
+frontend build: pass
+git push: done (acd5bf4..743467e)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/automation/AutomationScreen.jsx in full (463
+lines) before making any edit, as instructed. Located the DelayInput
+component (previously lines 88-134).
+
+
+====================================================================
+WHAT WAS CHANGED
+====================================================================
+Applied the task's given code verbatim, replacing:
+  - the isHours/amount/unit initial-state block with the
+    isHours/isSeconds/amount/unit block given (amount seeded from
+    Math.round(value * 60) when the stored value is a sub-1 decimal,
+    e.g. 0.5 -> 30; unit seeded to 'seconds' in that case),
+  - the update() function's single-branch hours check with the given
+    three-branch seconds/hours/minutes version,
+  - the <select> options, adding <option value="seconds">sec</option>
+    as the first option, ahead of the existing minutes/hours options.
+
+No other part of DelayInput (the number <input>, its min="1"/max="999"
+bounds, styling, or the outer wrapping <div>) was touched, and no
+other function or section in the file was touched.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+Confirmed via `git diff`: the only change is inside DelayInput (12
+insertions, 3 deletions) -- the initial-state block, update(), and
+the one new <option>. DELAY_ROWS, every caller of DelayInput
+(unchanged: `value={config[key] || 60}` /
+`onChange={(mins) => setConfig(c => ({ ...c, [key]: mins }))}`),
+saveConfig, all state declarations, all useEffects, and every other
+section of the screen (header/toggle, signal delays row layout,
+real-time triggers, signal controls, save bar) are untouched.
+
+One consequence worth noting, not a deviation but a natural result
+of the given conversion math: choosing "sec" for a value like 45
+stores 45/60 = 0.75 as the delay (a fractional-minute value), which
+`saveConfig()` sends to the backend exactly as-is in the PATCH body
+(e.g. `cartAbandonDelay: 0.75`) -- consistent with "DO NOT change any
+other logic," since saveConfig was not touched and already forwards
+whatever numeric value the field holds.
+
+`git status` after staging showed only
+frontend/app/admin/automation/AutomationScreen.jsx changed; the
+pre-existing unrelated dirty files (backend/__tests__/brain.test.js,
+frontend/lib/api.js) were left alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 17
+  routes generated, no errors.
+- git push origin main -- hit the session's known intermittent
+  push-hang on the first attempt (no output after ~150s across two
+  polls); stopped the task and asked the user to push manually, which
+  landed the PRIOR commit (acd5bf4, the Automation UI redesign from
+  the previous task) on origin. This task's own push then succeeded
+  on the first try: acd5bf4..743467e.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com. This deploy carries BOTH this
+  task's seconds-option change and the previous task's Automation UI
+  redesign (toggle-in-header / daily-time-removed / compact delays),
+  since that commit had not yet been deployed when this task began.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Only frontend/app/admin/automation/AutomationScreen.jsx was modified.
+No other file was changed.

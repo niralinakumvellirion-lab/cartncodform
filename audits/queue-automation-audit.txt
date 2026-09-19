@@ -1,0 +1,222 @@
+QUEUE AUTOMATION AUDIT - read-only, no changes
+=============================================
+Generated: 2026-09-15
+
+Files read: frontend/app/admin/queue/QueueScreen.jsx (in full, 477
+lines), backend/routes/queue.js (in full, 111 lines),
+frontend/app/admin/automation/AutomationScreen.jsx (in full, 415
+lines), backend/models/AutomationConfig.js (in full, 48 lines).
+
+
+====================================================================
+1. frontend/app/admin/queue/QueueScreen.jsx
+====================================================================
+
+--- Current sort order used when fetching jobs ---
+QueueScreen.jsx itself does NOT specify or control any sort order at
+all -- there is no `sort` query param anywhere in this file, and no
+client-side `.sort()` call on the `jobs` array either (it renders
+`jobs.map(...)` directly, in whatever order the API response returns).
+The sort order is entirely determined server-side, by
+backend/routes/queue.js's GET handler (see section 2 below:
+`.sort({ createdAt: -1 })`, i.e. newest-created job first).
+
+--- Fetch URL/params sent to backend ---
+Two different fetch call sites in this file, both hitting the same
+GET /api/queue/:shopDomain endpoint with different params:
+
+  1. The paginated job list (lines 89-111, the main FETCH LOGIC
+     effect, keyed on [shop, statusFilter, page, refreshKey]):
+       apiGet(`/api/queue/${encodeURIComponent(shop)}?status=${encodeURIComponent(statusFilter)}&page=${page}`)
+     Two query params: `status` (one of 'all'/'pending'/'sent'/
+     'failed'/'cancelled', from the STATUS_FILTERS tabs) and `page`
+     (a 0-based integer, from the Previous/Next pagination buttons).
+     No `limit` param is ever sent -- the backend hardcodes limit=20
+     itself (confirmed in section 2), so there's no way for this
+     screen to request a different page size.
+
+  2. The stats row (lines 115-139, a separate effect keyed on [shop,
+     refreshKey] only -- independent of statusFilter/page):
+       apiGet(`/api/queue/${encodeURIComponent(shop)}?status=${s}&page=0`)
+     Called 4 times in parallel (once per s in STATS_STATUSES =
+     ['pending','sent','failed','cancelled']), always with `page=0`,
+     reading only each response's `.total` field and discarding the
+     job rows each call also returns (see the file's own comment at
+     lines 14-21 explaining why -- the backend has no aggregate
+     per-status-counts endpoint, so this is 4 separate calls to the
+     same list endpoint instead of one call to a dedicated stats
+     endpoint).
+
+Both call sites use `apiGet` (frontend/lib/api.js) and always
+URL-encode `shop`; neither ever sends a `sort` param, since the
+backend doesn't read one anyway (see section 2).
+
+
+====================================================================
+2. backend/routes/queue.js - the GET handler sort query, exactly
+====================================================================
+Lines 20-27, inside GET /:shopDomain:
+
+20	    const [jobs, total] = await Promise.all([
+21	      ScheduledJob.find(query)
+22	        .sort({ createdAt: -1 })
+23	        .skip(page * limit)
+24	        .limit(limit)
+25	        .lean(),
+26	      ScheduledJob.countDocuments(query),
+27	    ]);
+
+Exactly one sort key: `createdAt: -1` -- descending by the document's
+own creation timestamp (ScheduledJob has `{ timestamps: true }` in its
+schema, so `createdAt` is Mongoose-managed, set once when the job row
+is inserted and never changed again). This means the list is ordered
+by "when this job was SCHEDULED/CREATED", not by `runAt` (when it's
+due/was due to run), not by `status`, and not by `updatedAt` (which
+WOULD move whenever a job's status changes, e.g. via the send-now/
+cancel actions in this same file) -- a job created earlier always
+sorts above one created later, regardless of which one is due sooner
+or which one was most recently acted on.
+`limit` is hardcoded to 20 (line 15, `const limit = 20;`) -- not
+configurable via any query param; `page` (from `req.query.page`,
+defaulting to '0') drives `.skip(page * limit)`.
+This is the ONLY sort/pagination logic in the file -- the two POST
+action routes (send-now, cancel) don't sort anything, they each do a
+single `ScheduledJob.findOne({_id, shopDomain, status:'pending'})`
+lookup.
+
+
+====================================================================
+3. frontend/app/admin/automation/AutomationScreen.jsx
+====================================================================
+
+--- Full SECTION 3 (signal delays) JSX, exact, lines 261-307 ---
+261	      {/* SECTION 3 — Signal delays */}
+262	      <div style={cardStyle}>
+263	        <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
+264	          Send delay after trigger
+265	        </div>
+266	        <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '14px' }}>
+267	          How long to wait after a customer action before sending a notification
+268	        </div>
+269	        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+270	          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+271	            <span style={{ fontSize: '13px', color: '#374151' }}>Cart abandoned</span>
+272	            <select
+273	              value={config.cartAbandonDelay}
+274	              onChange={(e) => setConfig((c) => ({ ...c, cartAbandonDelay: Number(e.target.value) }))}
+275	              style={selectStyle}
+276	            >
+277	              {CART_CHECKOUT_DELAY_OPTIONS.map((o) => (
+278	                <option key={o.value} value={o.value}>{o.label}</option>
+279	              ))}
+280	            </select>
+281	          </div>
+282	          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+283	            <span style={{ fontSize: '13px', color: '#374151' }}>Checkout abandoned</span>
+284	            <select
+285	              value={config.checkoutAbandonDelay}
+286	              onChange={(e) => setConfig((c) => ({ ...c, checkoutAbandonDelay: Number(e.target.value) }))}
+287	              style={selectStyle}
+288	            >
+289	              {CART_CHECKOUT_DELAY_OPTIONS.map((o) => (
+290	                <option key={o.value} value={o.value}>{o.label}</option>
+291	              ))}
+292	            </select>
+293	          </div>
+294	          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+295	            <span style={{ fontSize: '13px', color: '#374151' }}>Browse abandoned</span>
+296	            <select
+297	              value={config.browseAbandonDelay}
+298	              onChange={(e) => setConfig((c) => ({ ...c, browseAbandonDelay: Number(e.target.value) }))}
+299	              style={selectStyle}
+300	            >
+301	              {BROWSE_DELAY_OPTIONS.map((o) => (
+302	                <option key={o.value} value={o.value}>{o.label}</option>
+303	              ))}
+304	            </select>
+305	          </div>
+306	        </div>
+307	      </div>
+
+Exactly 3 delay rows in this section's UI -- Cart abandoned
+(cartAbandonDelay), Checkout abandoned (checkoutAbandonDelay), Browse
+abandoned (browseAbandonDelay). No UI control exists anywhere in this
+file for `lapsingDelay` or `winbackDelay`, even though both are real
+AutomationConfig fields (see section 4) -- they're carried through
+saveConfig()'s PATCH body unmodified (whatever value they currently
+hold in `config` state, itself only ever set from the GET response or
+DEFAULT_CONFIG) but the merchant has no way to change them from this
+screen.
+
+--- Delay options currently hardcoded (lines 47-60) ---
+  const CART_CHECKOUT_DELAY_OPTIONS = [
+    { label: '30 min', value: 30 },
+    { label: '1 hour', value: 60 },
+    { label: '2 hours', value: 120 },
+    { label: '6 hours', value: 360 },
+    { label: 'Next brain run', value: 0 },
+  ];
+  const BROWSE_DELAY_OPTIONS = [
+    { label: '15 min', value: 15 },
+    { label: '30 min', value: 30 },
+    { label: '1 hour', value: 60 },
+    { label: 'Next brain run', value: 0 },
+  ];
+Used by Cart abandoned + Checkout abandoned (both share
+CART_CHECKOUT_DELAY_OPTIONS, 5 options: 30/60/120/360/0 minutes) and
+Browse abandoned (its own BROWSE_DELAY_OPTIONS, 4 options: 15/30/60/0
+minutes) respectively -- matching the row-to-options mapping shown in
+the JSX above.
+
+--- How values are saved to state ---
+Each `<select>`'s onChange handler updates `config` via the same
+pattern, in-place, immediately on selection (not deferred to Save):
+  onChange={(e) => setConfig((c) => ({ ...c, cartAbandonDelay: Number(e.target.value) }))}
+(and the equivalent for checkoutAbandonDelay/browseAbandonDelay) --
+`e.target.value` (a string, since HTML <select> option values are
+always strings) is coerced to a Number before being written into
+`config` state, so `config.cartAbandonDelay` etc. always holds a
+genuine number matching one of the option `value`s (30/60/120/360/0 or
+15/30/60/0), never a string. This ONLY updates local React state --
+nothing is sent to the backend until the merchant clicks "Save
+automation settings" (SECTION 6, saveConfig(), lines 161-187), which
+PATCHes the whole config object (including cartAbandonDelay/
+checkoutAbandonDelay/browseAbandonDelay, plus the untouched
+lapsingDelay/winbackDelay carried through as-is) to PATCH
+/api/automation/:shop in one request.
+
+
+====================================================================
+4. backend/models/AutomationConfig.js - all delay fields currently
+   defined
+====================================================================
+Lines 14-20:
+
+14	  // Signal delays (how long after event before sending)
+15	  // in minutes
+16	  cartAbandonDelay: { type: Number, default: 60 },
+17	  checkoutAbandonDelay: { type: Number, default: 60 },
+18	  browseAbandonDelay: { type: Number, default: 30 },
+19	  lapsingDelay: { type: Number, default: 0 },    // 0 = send at brain run time
+20	  winbackDelay: { type: Number, default: 0 },
+
+Exactly 5 delay fields, all plain Numbers, all in minutes:
+  - cartAbandonDelay (default 60)
+  - checkoutAbandonDelay (default 60)
+  - browseAbandonDelay (default 30)
+  - lapsingDelay (default 0 -- per its own inline comment, "0 = send
+    at brain run time", i.e. no independent delay of its own, distinct
+    from the other 4 fields where 0 is just a selectable option
+    meaning the same thing via the frontend's own "Next brain run"
+    label)
+  - winbackDelay (default 0)
+No other delay-shaped field exists on this schema -- `brainRunHour`/
+`brainRunMinute` (lines 11-12) are a separate concept (the nightly
+brain run's own daily clock time, not a per-signal delay).
+Cross-referencing section 3: only 3 of these 5 fields
+(cartAbandonDelay, checkoutAbandonDelay, browseAbandonDelay) have a
+corresponding UI control in AutomationScreen.jsx's SECTION 3 --
+lapsingDelay and winbackDelay are defined on the schema, defaulted,
+and round-tripped through the GET/PATCH cycle, but have no dropdown or
+any other control anywhere in the frontend to let a merchant actually
+change them.

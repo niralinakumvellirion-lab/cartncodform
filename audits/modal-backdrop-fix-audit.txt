@@ -1,0 +1,153 @@
+=== MODAL BACKDROP FIX AUDIT ===
+Generated: 2026-09-18
+
+setShowEditor(false) in Send Now: yes
+All close paths reset sendingNow: yes
+All close paths reset showImageInfo: yes
+Any other stuck overlay found: no
+frontend build: pass
+git push: done (338a5fd..413ae46)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full (1892
+lines, in two parts) before making any change, as instructed.
+
+
+====================================================================
+FINDING — setShowEditor(false) was ALREADY present in Send Now
+====================================================================
+The task frames this as "make sure setShowEditor(false) is called ...
+— add it explicitly," implying it might be missing. Checked the
+actual Send Now onClick handler as it exists in the file (added two
+tasks ago, audits/sendnow-fixes-audit.txt): it already calls
+`setShowEditor(false);` immediately after the `await apiSend(...)`
+resolves successfully — byte-for-byte in the same position the task's
+own given "fixed" code shows. No change was needed there; confirmed
+by direct comparison rather than assumed.
+
+
+====================================================================
+FINDING — no second/stuck overlay exists anywhere in the file
+====================================================================
+Searched the full file for every `position: 'fixed'` declaration
+(confirmed via grep, cross-checked against the full read): exactly
+two exist —
+  1. The success toast (`top: 20, right: 20, zIndex: 9999, background:
+     '#16a34a'`, a small solid-green corner toast, NOT a full-screen
+     backdrop) — gated by `{successMsg && (...)}`, a separate boolean
+     state, unrelated to showEditor, and self-clears via
+     `setTimeout(() => setSuccessMsg(''), 3000)`.
+  2. The editor modal's own backdrop (`inset: 0, background:
+     'rgba(0,0,0,0.5)', zIndex: 1000`) — gated by `showEditor &&
+     selectedFestival`.
+No other `position: fixed` element, portal, or duplicate overlay div
+exists anywhere in this 1892-line file. Since `showEditor` correctly
+flips to `false` in every close path (including Send Now's own
+success handler, confirmed above), and the backdrop's entire subtree
+is conditionally rendered on `showEditor && selectedFestival`, React
+unmounts the backdrop the moment `showEditor` becomes false — there is
+no code path in this file that would leave a backdrop rendered while
+`showEditor` is false.
+
+NOTE: `selectedFestival` itself is never reset to `null` anywhere
+(only ever set, when a festival is clicked to open the editor) — but
+since the render condition is `showEditor && selectedFestival` and
+`showEditor` alone already correctly gates to `false` on close, this
+stale-but-truthy `selectedFestival` has no visible effect on backdrop
+persistence. Not changed, since the task's explicit reset checklist
+(setShowEditor/setSendingNow/setShowImageInfo) doesn't name it, and
+there's no evidence it needs to be reset for this bug.
+
+
+====================================================================
+THE ONE ACTUAL GAP FOUND AND FIXED
+====================================================================
+Re-checked all 5 `setShowEditor(false)` call sites against this
+task's explicit checklist ("Make sure EVERY close path resets:
+setShowEditor(false); setSendingNow(false); setShowImageInfo(false);"):
+
+  1. Backdrop click-to-close    -> all 3 present (+ image resets)
+  2. Modal's X close button      -> all 3 present (+ image resets)
+  3. Send Now success            -> showEditor + sendingNow present,
+                                     showImageInfo MISSING
+  4. Approve success             -> all 3 present (+ image resets)
+  5. Add to Queue success        -> all 3 present (+ image resets)
+
+Site 3 (Send Now) was the one gap: its handler (added two tasks ago)
+deliberately omitted `setShowImageInfo(false)` and the two image-URL
+resets, per that task's own literal given code and documented
+reasoning (audits/sendnow-fixes-audit.txt — the image resets were
+judged unnecessary there since the festival-list click handler already
+unconditionally clears both image URLs before the editor can reopen).
+This task's own explicit instruction ("Make sure EVERY close path
+resets... setShowImageInfo(false)") directly asks to close that one
+gap, so `setShowImageInfo(false);` was added to the Send Now success
+block — now all 5 sites reset all 3 states uniformly. The two image-
+URL resets were left as-is (still absent only from Send Now), since
+this task's own checklist names exactly 3 setters, not 5, and doesn't
+ask to revisit that separate, already-documented decision.
+
+This change does not, by itself, address a `showEditor`-driven
+backdrop-persistence bug — `showImageInfo` only controls the small
+"i" info tooltip inside the modal body, not the backdrop's own
+visibility — but it directly satisfies this task's explicit, literal
+checklist item, and it is a genuine, real gap (an inconsistency
+between Send Now and every other close path) worth fixing regardless.
+
+
+====================================================================
+HONEST ASSESSMENT — no reproducible "backdrop stays visible" bug
+found
+====================================================================
+Based on a full read of the file, `setShowEditor(false)` already
+correctly runs in every code path that closes the modal, the
+backdrop's render condition (`showEditor && selectedFestival`)
+correctly reacts to that state, and no duplicate/stray overlay exists
+anywhere else in the file. No code path was found that would leave the
+backdrop rendered while `showEditor` is false. If this symptom is
+still observed in the live app, the cause is likely outside this
+file's scope (e.g., a stale/cached bundle before this session's recent
+deploys, or a different render path this task didn't point to) rather
+than a bug in the logic described here — flagging this rather than
+inventing an unverified fix.
+
+
+====================================================================
+DO NOT CHANGE COMPLIANCE
+====================================================================
+Only one line was added (`setShowImageInfo(false);` inside the Send
+Now success block). No other state, handler, or JSX was modified.
+
+
+====================================================================
+DO-NOT-TOUCH-OTHER-FILES COMPLIANCE
+====================================================================
+Only frontend/app/admin/dashboard/DashboardScreen.jsx was staged and
+committed, per the task's own git-add line. `git status` after staging
+confirmed exactly this one path; the pre-existing unrelated dirty
+files (backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 15 static
+  routes + 1 dynamic route generated, no errors (/admin/dashboard:
+  10.9kB First Load JS, unchanged from the prior task at this
+  granularity — a single added statement doesn't move the rounded kB
+  figure).
+- git push origin main -- succeeded (338a5fd..413ae46), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+1 file modified (frontend/app/admin/dashboard/DashboardScreen.jsx), 1
+line added. No other file was touched.

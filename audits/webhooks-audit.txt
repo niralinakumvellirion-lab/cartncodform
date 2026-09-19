@@ -1,0 +1,86 @@
+=== WEBHOOKS AUDIT ===
+Generated: 2026-09-12
+Script created: backend/check-webhooks.js (content matches what was
+  specified verbatim). Executed once via `node check-webhooks.js`,
+  making a live GET call to Shopify's Admin API
+  (https://cartncod-form.myshopify.com/admin/api/2025-01/webhooks.json)
+  using the store's stored offline access token. No other files
+  modified. No PII in this output (only a truncated token prefix,
+  webhook topics, and callback URLs).
+
+Using token: shpat_cb48...
+
+=== REGISTERED WEBHOOKS ===
+NO WEBHOOKS REGISTERED
+Raw response: {"errors":"[API] Non-expiring access tokens are no longer accepted for the Admin API. Start using expiring offline tokens: https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens/offline-access-tokens#expiring-vs-non-expiring-offline-tokens"}
+
+
+FINDING (read-only, not acted on here) -- this is the likely root cause
+of every downstream symptom traced across the last several audits
+================================================================================
+Shopify's Admin API is flatly REJECTING the store's stored
+`accessToken` (the classic OAuth offline token) for ALL Admin API
+calls, with a hard error: "Non-expiring access tokens are no longer
+accepted for the Admin API." This is not a webhooks-specific rejection
+-- it means this exact token cannot be used for ANY Admin API request
+(REST or GraphQL) against this store, full stop.
+
+Why this matters for everything investigated in the last several tasks:
+
+1. backend/utils/shopify.js's registerAllWebhooks() -- the function
+   that registers carts/create, carts/update, checkouts/create,
+   checkouts/update, and orders/create (see
+   audits/abandoned-customer-source-audit.txt section 4) -- is called
+   from backend/routes/auth.js at OAuth-callback time using this SAME
+   store.accessToken (the classic offline token), via the identical
+   REST endpoint this check script just called
+   (POST .../admin/api/{version}/webhooks.json). If this token is
+   rejected for a GET on that endpoint, it would almost certainly also
+   be rejected for the POST calls registerWebhook() makes for each of
+   those 7 topics -- meaning those webhook registrations likely FAILED
+   silently every time this store connected/reconnected. Per
+   registerWebhook()'s own error handling (utils/shopify.js, "best-
+   effort, non-blocking failures are logged"), a failure there is only
+   ever written to a console.error line and never retried, stored, or
+   surfaced anywhere else -- so there would be no visible sign of this
+   inside the app itself.
+
+2. This directly explains the previous audit's finding that
+   AbandonedCustomer has only 36 total documents (several of them
+   local dev seed fixtures) and that ZERO of the 32 real cartTokens on
+   the two email-carrying profiles matched any AbandonedCustomer row:
+   if carts/create and carts/update were never successfully registered
+   with Shopify for this shop, Shopify would never have sent those
+   webhooks in the first place, so webhooks.js's handleWebhook() -- the
+   ONLY live code path that creates real (non-seed) AbandonedCustomer
+   rows -- would rarely or never have run. Confirmed here as NOT a
+   theoretical possibility but the STATED reason: "NO WEBHOOKS
+   REGISTERED" for this shop, right now, full stop.
+
+3. This is consistent with, and now explains, a much earlier finding in
+   this same investigation thread (audits/DISCOUNT_AUDIT.txt /
+   FIX_DISCOUNT_CREATE_AUDIT.txt lineage): the reason
+   backend/routes/discounts.js's generateDiscount() was changed to
+   prefer store.onlineAccessToken (obtained via OAuth Token Exchange)
+   over store.accessToken, with a fallback -- the offline token has
+   apparently been unusable for live Admin API calls on this store for
+   some time, and the online-token path was built specifically to route
+   around it for discount creation. That workaround was never applied
+   to registerAllWebhooks()/routes/auth.js's webhook registration call,
+   which still uses the plain offline accessToken exclusively -- so
+   discount generation was fixed, but webhook registration was not,
+   and this task is the first point in this investigation where that
+   asymmetry has been directly confirmed against a live Shopify
+   response.
+
+NOT ACTED ON HERE (audit only, per task scope): no code was changed.
+Fixing this would need either (a) re-authenticating this store so
+Shopify issues a valid (expiring) offline token and reruns
+registerAllWebhooks() with it, or (b) switching
+registerAllWebhooks()/registerWebhook() to use the same online-token-
+via-Token-Exchange mechanism generateDiscount() already uses, or (c)
+migrating webhook registration to the declarative shopify.app.toml
+[[webhooks.subscriptions]] mechanism (which does not depend on a
+runtime Admin API call or its token at all) for these 5 topics, the
+same way the 3 GDPR compliance topics are already declared there. None
+of these were implemented in this task.

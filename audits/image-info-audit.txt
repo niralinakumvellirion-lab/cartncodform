@@ -1,0 +1,124 @@
+=== IMAGE INFO AUDIT ===
+Generated: 2026-09-17
+
+Info button added next to label: yes
+Info box shows on click: yes
+Info box hides on second click: yes
+Info box resets when modal closes: yes
+frontend build: pass
+git push: done (cc99e47..9a3fa56)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full
+(1562 lines) before making any change, as instructed.
+
+
+====================================================================
+IMPLEMENTATION
+====================================================================
+Added `const [showImageInfo, setShowImageInfo] = useState(false);`
+grouped with the other Phase 1 editor-modal state variables
+(suggestionsOpen/selectedFestival/showEditor/editorTitle/editorBody/
+editorImageUrl/editorAction/editorDate), directly after editorDate —
+per the task's "Place showImageInfo state with the other editor state
+variables."
+
+Replaced the plain "Notification Image" `<label>` with the given
+flex row (label + circular "i" info-toggle button) and the given info
+box (recommended size/ratio/format/max-size + a mobile-cropping tip),
+implemented verbatim — no wording, styling, or structural changes from
+the given code.
+
+Toggle behavior: `onClick={() => setShowImageInfo(s => !s)}` — a
+single boolean flip, so clicking once opens the box (`false -> true`)
+and clicking the same button again closes it (`true -> false`),
+satisfying both "shows on click" and "hides on second click" with one
+handler, exactly as given.
+
+
+====================================================================
+"Reset wherever setShowEditor(false) is called" — all 5 call sites
+====================================================================
+Grepped for every `setShowEditor(false)` occurrence in the file after
+editing and confirmed all 5 now also call `setShowImageInfo(false)`
+immediately alongside it:
+
+1. Modal backdrop click-to-close (clicking the dark overlay outside
+   the modal card) — was a single-statement arrow body
+   (`if (e.target === e.currentTarget) setShowEditor(false);`), turned
+   into a block body so both setters run:
+   `if (e.target === e.currentTarget) { setShowEditor(false);
+   setShowImageInfo(false); }`.
+2. The modal's ✕ close button.
+3. The "Send Now" button's success path (after
+   POST /api/push/send-store resolves, before its `alert(...)`).
+4. The "Approve" button's success path (after
+   POST /api/queue/:shop/festival with status:'approved' resolves,
+   before its `alert(...)`).
+5. The "Add to Queue" button's success path (after
+   POST /api/queue/:shop/festival with status:'draft' resolves — this
+   one has no follow-up alert, matching its pre-existing behavior).
+
+Only these 5 sites were touched, per the task's literal "wherever
+setShowEditor(false) is called" — the corresponding `setShowEditor
+(true)` call site (when a festival is clicked to open the editor) was
+NOT touched, since the task scoped the reset to close events only.
+This still leaves no stale-open-box scenario: every path that closes
+the modal already runs through one of these 5 sites, so by the time
+the editor is next opened, showImageInfo has already been reset to
+false via whichever close path was last taken.
+
+
+====================================================================
+DO NOT CHANGE COMPLIANCE
+====================================================================
+No other state, effect, or handler was touched. The three action
+buttons' own request bodies (title/body/imageUrl/scheduledAt/
+festival/status) and API call shapes are byte-for-byte unchanged —
+only a `setShowImageInfo(false);` line was inserted alongside each
+pre-existing `setShowEditor(false);` call, and the try/catch
+structure around each apiSend call is otherwise identical to before
+this task.
+
+
+====================================================================
+DO-NOT-TOUCH-OTHER-FILES COMPLIANCE
+====================================================================
+Only frontend/app/admin/dashboard/DashboardScreen.jsx was staged and
+committed, per the task's own git-add line. `git status` after staging
+confirmed exactly this one path; the pre-existing unrelated dirty
+files (backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- cd frontend && npm run build -- compiled successfully, all 15 static
+  routes + 1 dynamic route generated, no errors (/admin/dashboard:
+  9.68kB -> 10kB First Load JS, consistent with the added info-button/
+  info-box JSX).
+- git push origin main -- succeeded (cc99e47..9a3fa56), no hang.
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com.
+
+No backend changes were needed or made — this task is frontend-only,
+touching a single file. This app has no automated frontend test suite,
+so verification here is build-only, per the task's own stated
+verification step.
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+1 file modified (frontend/app/admin/dashboard/DashboardScreen.jsx). No
+other file was touched. Manual visual verification in a live browser
+(clicking the info button, confirming the box toggles, confirming it
+resets after closing/reopening the modal) was not performed as part of
+this task — this environment has no running dev server / authenticated
+Shopify session to click through; verification here is limited to a
+clean production build and the code review documented above.

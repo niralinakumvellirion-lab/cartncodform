@@ -1,0 +1,78 @@
+=== POPUP TIMEOUT FIX AUDIT ===
+fetchWithTimeout() helper added: yes (line 1318)
+fetchPopupConfig() updated: yes (line 1331, was `return fetch(url)` now
+  `return fetchWithTimeout(url, 3000)`)
+fetchDiscountConfig() updated: yes (line 1349, same change)
+node --check: pass
+git push: done (commit c61a479, 9adc41e..c61a479 main -> main)
+shopify deploy: done (cartncodform-102 [1],
+  https://dev.shopify.com/dashboard/232824361/apps/415894044673/versions/1126082379777)
+
+
+EXACT CODE ADDED (extensions/cartncodform-embed/blocks/push-notifications.liquid)
+=========================================================================
+  // Races a fetch against a plain timer so a cold-starting backend can't
+  // block the popup/discount config load (and, in turn, initIntentTriggers())
+  // for as long as the browser's own fetch would otherwise wait.
+  function fetchWithTimeout(url, ms) {
+    var timeout = new Promise(function(resolve) {
+      setTimeout(resolve, ms || 3000, null);
+    });
+    return Promise.race([fetch(url), timeout]);
+  }
+
+Inserted immediately before fetchPopupConfig() (previously at line
+1318, now pushed down to line 1328 by this insertion).
+
+fetchPopupConfig() -- only its first line changed:
+  function fetchPopupConfig() {
+    var url = window.location.origin + '/apps/cartncodform/popup-config';
+    return fetchWithTimeout(url, 3000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      ... (unchanged below)
+
+fetchDiscountConfig() -- only its first line changed:
+  function fetchDiscountConfig() {
+    var url = window.location.origin + '/apps/cartncodform/discount-config?shop=' +
+      encodeURIComponent(SHOP_DOMAIN);
+    return fetchWithTimeout(url, 3000)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      ... (unchanged below)
+
+
+BEHAVIOR NOTE (observed, not a deviation -- matches what the task
+already called out as safe)
+=========================================================================
+When the 3s timer wins the race, fetchWithTimeout() resolves with
+`null` (not a Response object). The very next line in both functions,
+`r.ok ? r.json() : null`, then evaluates `null.ok` -- this throws a
+TypeError, which is caught by each function's existing
+`.catch(function () { /* keep defaults */ })` at the end of the chain.
+So a timeout still results in "keep defaults" exactly as the task
+intended, just via the catch block rather than the `r.ok` false
+branch. Functionally equivalent to the task's stated expectation
+("resolve with null (use defaults) and let initIntentTriggers() run
+immediately") -- initIntentTriggers() is gated on Promise.all()
+settling (not on any particular resolved value), and both promises
+here always resolve (never reject) by design, so this still unblocks
+initIntentTriggers() within the 3s cap regardless of which path
+(r.ok-false vs. thrown-and-caught) is taken.
+
+A genuinely slow-but-eventually-successful fetch (e.g. one that
+returns after 3.5s) is NOT aborted by this change -- Promise.race()
+does not cancel the losing fetch, it just ignores its result once the
+timer promise has already resolved the race. The abandoned fetch
+still completes in the background (its response is simply never used
+by fetchPopupConfig()/fetchDiscountConfig() once they've already
+resolved via the timeout path) -- no AbortController was introduced,
+matching the task's exact given helper code, which does not use one.
+
+
+NOT TOUCHED
+=========================================================================
+- No other function in this file was changed -- confirmed via git diff
+  (only the 3 hunks: the new helper, and one line each inside
+  fetchPopupConfig()/fetchDiscountConfig()).
+- No file other than
+  extensions/cartncodform-embed/blocks/push-notifications.liquid was
+  staged or committed.

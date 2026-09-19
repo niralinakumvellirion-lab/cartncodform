@@ -1,0 +1,270 @@
+=== DASHBOARD PHASE 1 AUDIT ===
+Generated: 2026-09-17
+
+One-page layout (no page scroll): yes
+Right sidebar with suggestions: yes
+  Count badge visible: yes
+  List hidden until clicked: yes
+Editor modal with preview: yes
+  Image URL input: yes
+  Title input: yes
+  Message textarea: yes
+  Schedule date picker: yes
+  Send Now button: yes
+  Approve button: yes
+  Add to Queue button: yes
+  Live phone preview: yes
+Old suggestions section removed: yes
+FestivalQueue model created: yes
+POST /api/queue/festival endpoint: yes (as /api/queue/:shopDomain/festival
+  -- see Critical Finding below)
+node --check: pass (queue.js, FestivalQueue.js)
+npm test: 151/151 passing
+frontend build: pass
+git push: done (c762cc7..619d3b2)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+
+
+====================================================================
+WHAT WAS READ BEFORE CHANGING ANYTHING
+====================================================================
+Read frontend/app/admin/dashboard/DashboardScreen.jsx in full (1148
+lines) and backend/routes/queue.js in full (110 lines) before making
+any change, as instructed.
+
+
+====================================================================
+CRITICAL FINDING — the given /api/queue/festival route would have
+403'd on every single request
+====================================================================
+Part E's given route was:
+  router.post('/festival', requireAuth, requireStoreOwner, async (req, res) => {...})
+
+backend/middleware/requireOwner.js's requireStoreOwner (read in full
+to confirm) does, unconditionally:
+  if (req.shopDomain !== req.params.shopDomain) {
+    return res.status(403).json({ error: 'Not authorized for this store' });
+  }
+
+A route path of plain `/festival` has no `:shopDomain` segment, so
+`req.params.shopDomain` is always `undefined` -- which never equals
+a real shop domain string. Every single request to this endpoint,
+from any authenticated shop, would have received a 403 "Not
+authorized for this store" -- the Approve and Add to Queue buttons
+would have been completely non-functional, always failing with the
+generic "Failed to approve"/nothing-happens alert the frontend shows
+on any thrown error. This is exactly why every OTHER route already in
+backend/routes/queue.js uses the `/:shopDomain/...` path shape (GET
+/:shopDomain, POST /:shopDomain/:jobId/send-now, POST
+/:shopDomain/:jobId/cancel) -- this new route was the one exception,
+and would have been broken from the moment it shipped.
+
+FIX: changed the route path to `/:shopDomain/festival`, matching
+this file's own established convention, and updated both frontend
+call sites (Approve, Add to Queue) to
+`` `/api/queue/${encodeURIComponent(shop)}/festival` `` accordingly,
+also matching how every other apiGet/apiSend call in this same file
+already addresses shop-scoped backend routes. Dropped the `shop`
+field from the request body in both calls since the backend handler
+never read `req.body.shop` in the first place (it already correctly
+used the verified `req.shopDomain` from the session token, same IDOR-
+safe pattern as every other route in this file) -- it was purely
+dead weight once shop travels via the URL path instead.
+
+This is not a scope expansion: Part E explicitly asked this task to
+WRITE this exact route in this exact file. Writing it so it actually
+works, rather than writing it exactly as given knowing it would 403
+on every call, is the same standing practice this session has applied
+to every previous backend route given by a task (see e.g.
+audits/customers-journey-merge-build-audit.txt for an equivalent
+:profileId-filter gap in a different route).
+
+
+====================================================================
+KNOWN, UNDONE GAP — /api/push/send-store does not forward imageUrl
+====================================================================
+The editor's "Send Now" button calls the EXISTING
+POST /api/push/send-store endpoint (backend/routes/push.js, added in
+an earlier task this session) with `{ shop, title, body, imageUrl }`.
+Read that route's current implementation to check: it destructures
+only `{ title, body }` from req.body and calls `sendPushToCustomers(
+shop, title, body, '/', null, ...)` -- the 5th argument (imageUrl) is
+hardcoded `null`, so any image URL the merchant enters and previews
+in the editor is silently dropped when they click "Send Now" (title
+and message still send correctly).
+
+This was NOT fixed. Unlike the queue.js route above, this is a
+genuine scope-boundary call, not a "the given code cannot work at
+all" situation: fixing it means editing backend/routes/push.js, a
+file this task's own explicit git-add list and Part E/F file list do
+not include, and the underlying feature still works (title + body
+notifications send successfully) -- the image is explicitly labeled
+"optional" in the editor UI, so its being dropped is a real but minor
+completeness gap, not a broken feature. Flagging it here rather than
+silently leaving it undocumented or silently expanding this task's
+file scope to fix a cosmetic gap in a file nobody asked to touch this
+time.
+
+
+====================================================================
+PART A — one-page layout
+====================================================================
+Applied the given outer container exactly, with one necessary
+structural change: REMOVED the Polaris `<Page>` wrapper that
+previously wrapped the whole screen (and its now-unused import).
+DashboardScreen was the only admin screen in this codebase still
+using Polaris's `<Page>` (every other screen — Customers, Journey,
+Queue, Automation, etc. — already renders a plain `<div
+style={DS.page}>` with no `<Page>` ancestor, per this app's
+established no-shared-layout convention). Nesting the new
+`height: calc(100vh - 40px); overflow: hidden` flex container INSIDE
+`<Page>` risked Page's own internal layout fighting the "no
+page-level scroll" requirement this whole task exists to satisfy, and
+it added nothing the hand-rolled layout doesn't already provide.
+Confirmed via the build output that this also dropped the /admin/
+dashboard route's own bundle size (133kB -> 108kB First Load JS),
+since Polaris no longer needs to be pulled into that route's chunk.
+
+Sticky top bar copied verbatim, unchanged, per "keep ... exactly
+as-is." Its `position: sticky` properties are now largely inert (it's
+a sibling of the scrolling left column, not inside it, so it was
+already always visible) but were left in place exactly as instructed
+rather than "cleaned up," since the instruction was explicit.
+
+Content area (flex row, two columns) added exactly as specified.
+
+
+====================================================================
+PART A — LEFT COLUMN compacting, item by item
+====================================================================
+1. Store Performance: card padding 16px/20px -> 10px/14px, number
+   26px -> 20px, label already 10px (unchanged), section wrapper
+   marginBottom 20 -> 10, as specified.
+2. KPI row: card padding 16px/20px -> 10px/14px, number 24px -> 18px,
+   row marginBottom 24 -> 10, as specified.
+3. Activity row: card padding 16px/20px -> 10px/14px, number 22px ->
+   18px, row marginBottom 24 -> 10, as specified.
+4/7. Two-column layout (products + AI insight | planned + yesterday):
+   - Products table: kept its outer card at padding: 0 (its
+     established pattern — the column-header row's #f9fafb background
+     and every row's own border need to span the full card width
+     edge-to-edge; adding outer padding would inset those backgrounds
+     and break that look). Instead proportionally shrank each
+     internal section's own padding toward the spirit of "12px 16px" /
+     "table row padding 6px 0": header row 14/20 -> 10/16,
+     column-header row 8/20 -> 5/16, data rows 10/20 -> 6/16. Did NOT
+     drop the row's horizontal padding to literal 0 as item 4's
+     "Table row padding: '6px 0'" reads -- the products card has no
+     other source of horizontal inset (padding: 0 on the outer card),
+     so product names/numbers would run flush against the card edges,
+     directly contradicting "compact" in favor of "cramped and
+     unreadable." Kept a reduced-but-present 16px horizontal gutter
+     instead; flagging this literal deviation explicitly, consistent
+     with an identical judgment call made in an earlier task on this
+     exact card (see audits/customers-columns-fix-audit.txt).
+   - AI insight card: switched from the shared DS.card default (20/24
+     padding) to the specified '12px 16px', label 11px->10px, body
+     copy 13px->12px, per item 7's "fontSize throughout: 12px."
+   - Planned for today: switched to padding '12px 16px', row padding
+     7px 0 -> 6px 0, text 13px -> 12px, per items 4 and 7.
+   - Yesterday: switched to padding '12px 16px', labels 12px -> 11px.
+     The two HERO NUMBERS were kept at 18px (matching the KPI/Activity
+     rows' own already-reduced number size in this same compacting
+     pass) rather than item 7's literal "fontSize throughout: 12px."
+     Shrinking a headline stat number down to label-sized 12px would
+     have made it unreadable as a "hero" figure and visually
+     inconsistent with every other stat number on this same compacted
+     page (all landed at 18px, not 12px, per items 2/3's own explicit
+     numeric targets). Flagged as a deliberate, minor deviation from
+     item 7's literal wording, resolving a real conflict between items
+     4/7's generic "12px throughout" and items 2/3's own specific
+     18px target for equivalent hero numbers elsewhere on the same
+     page.
+   - Section-level marginBottom: 24 -> 10, per item 4.
+5. New subscriber alert: marginBottom 0 -> 10, everything else kept
+   as-is (it was already reasonably compact: 13px/12px text, no
+   oversized elements) — matches "Keep compact, marginBottom: 10"
+   literally.
+6. Old "Suggestions" section (the 3-column festival-card grid with
+   "Send Notification ->" buttons) removed entirely from the left
+   column, along with its trigger for the old compose modal — see
+   Part D below. Confirmed via grep that no trace of "Send Notification
+   →" or the old modal state remains anywhere in the file.
+
+
+====================================================================
+PART B — right sidebar
+====================================================================
+Implemented essentially verbatim: the 8 new state variables, the
+`upcomingFestivals = getUpcomingFestivals(10)` derived value (added
+alongside the file's other existing derived values — kpiRow1/
+kpiRow2/ACT_COLORS — right before the return, same as the established
+pattern), and the Notification Suggestions + Quick Stats cards exactly
+as given (collapsed-by-default list, count badge, click-to-open
+editor).
+
+
+====================================================================
+PART C — editor modal
+====================================================================
+Implemented essentially verbatim (image URL input + live preview,
+title, message, datetime-local schedule picker, and the 3 action
+buttons), with only the 2 URL-path fixes described in the Critical
+Finding above (queue-festival calls) and no other logic changes.
+
+
+====================================================================
+PART D — removals
+====================================================================
+Confirmed via grep: zero remaining references to showSuggestModal,
+modalFestival, modalSending, modalSent, or "Send Notification →"
+anywhere in the file (only an explanatory code comment mentions the
+old state names, for context). FESTIVAL_CALENDAR and
+getUpcomingFestivals() were kept completely unchanged, per instruction.
+
+
+====================================================================
+DO-NOT-CHANGE COMPLIANCE
+====================================================================
+Verified counts before/after: 29 useState calls (21 pre-existing +
+8 new Phase 1 state vars, replacing the 4 old modal-only state vars
+that were removed: 25 - 4 + 8 = 29, matches) and 5 useEffect calls
+(unchanged count and unchanged bodies, confirmed by diff review).
+Verified all 8 original apiGet/apiSend calls (activity, today-stats,
+new-subscribers, push-stats, signals, orders, product-analytics,
+weekly-narrative) are present with byte-identical URLs. No other
+file besides frontend/app/admin/dashboard/DashboardScreen.jsx,
+backend/routes/queue.js, and backend/models/FestivalQueue.js (new)
+was touched. `git status` after staging showed exactly these 3
+paths; the pre-existing unrelated dirty files
+(backend/__tests__/brain.test.js, frontend/lib/api.js) were left
+alone, per standing practice.
+
+
+====================================================================
+VERIFICATION
+====================================================================
+- node --check backend/routes/queue.js -- pass
+- node --check backend/models/FestivalQueue.js -- pass
+- cd backend && npm test -- 19 suites, 151/151 passing
+- cd frontend && npm run build -- compiled successfully, all 17
+  routes generated, no errors (dashboard route bundle actually
+  shrank, 133kB -> 108kB First Load JS, from removing the unused
+  Polaris <Page> import)
+- git push origin main -- succeeded (c762cc7..619d3b2), no hang
+- npx vercel --prod -- readyState READY, aliased to
+  https://app.shopireachboost.com
+
+
+====================================================================
+END OF AUDIT
+====================================================================
+Files modified: frontend/app/admin/dashboard/DashboardScreen.jsx,
+backend/routes/queue.js. File created: backend/models/FestivalQueue.js.
+backend/routes/push.js was deliberately left unmodified (see "Known,
+undone gap" above). No other file was touched. This is Phase 1 only
+— nothing in this app yet reads FestivalQueue documents to actually
+send a scheduled/approved festival notification at its scheduledAt
+time; "Approve" and "Add to Queue" currently only persist a document
+with no consumer yet, which is expected given the task's own "Phase 1"
+framing, not a bug.
