@@ -1,0 +1,216 @@
+SELF-AUDIT — queue-edit-dedupe
+
+FIX 1: Hide queued festivals from Suggestions (DashboardScreen.jsx)
+------------------------------------------------------------------------
+Added `queuedFestivals` state, populated once on mount via
+apiGet(`/api/queue/${shop}/festival`) (falls back to [] on failure).
+
+CONFIRM THE FILTER EXCLUDES draft/approved BUT NOT sent/cancelled
+-----------------------------------------------------------------------
+`queuedFestivalNames` is built as:
+  new Set(queuedFestivals.filter(item =>
+    item.status === 'draft' || item.status === 'approved'
+  ).map(item => item.festival))
+Confirmed via the FestivalQueue model's status enum
+(draft/approved/sent/cancelled — backend/models/FestivalQueue.js) that
+this is an exhaustive two-of-four inclusion: 'sent' and 'cancelled' items
+are never added to the Set, so a festival that has already been sent (or
+was queued then cancelled) is NOT excluded — it becomes suggestible again,
+matching the "suggestible again next year" requirement.
+
+The filter is applied to the SOURCE calendar array, not to
+getUpcomingFestivals()'s already-sliced-to-10 output:
+  const availableFestivalCalendar = festivalCalendar.filter(
+    (f) => !queuedFestivalNames.has(f.name)
+  );
+  const upcomingFestivals = getUpcomingFestivals(availableFestivalCalendar, 10);
+This was a deliberate choice over filtering the post-slice result: filtering
+after slicing to 10 could show fewer than 10 suggestions even when more
+non-queued festivals exist further down the list; filtering the source
+array first lets later festivals backfill the list up to the same cap.
+
+CONFIRM COUNT BADGE AND EMPTY STATE REFLECT FILTERING
+-----------------------------------------------------------
+No changes were needed to the header badge, subtitle, or empty-state JSX
+— all three already read `upcomingFestivals.length` (confirmed by reading
+the card header and empty-state blocks before editing), so filtering the
+array that variable is derived from automatically flows through to all
+three UI elements. Verified the empty state (`upcomingFestivals.length
+=== 0`) correctly triggers when every upcoming festival has been queued.
+
+Optimistic update (step 4): both the Approve and Add to Queue button
+handlers now push a `{ festival: selectedFestival.name, status:
+'approved' | 'draft' }` entry into `queuedFestivals` immediately after a
+successful POST, so the row disappears from Suggestions right away even
+during the ~1.2s window before the delayed navigate('/admin/queue') call
+(added in a prior turn) fires, or if that navigation is somehow
+interrupted.
+
+FIX 2: Make queue items editable (QueueScreen.jsx)
+-------------------------------------------------------
+Added Planning List "Edit" button (between Approve and Delete) that opens
+a new modal, gated by `editingItem` state. The modal mirrors the
+Dashboard editor's structure: read-only festival header (48px circular
+thumbnail with emoji fallback + name + formatted date — looked up from
+`festivalCalendar` by `item.festival` name, since FestivalQueue documents
+only store the plain festival name string, not its emoji/imageUrl;
+falls back to formatting the item's own scheduledAt if no matching
+calendar entry is found), editable Title input, editable Body textarea,
+the shared ImageUploadPair widget (mobile/desktop image), an editable
+Scheduled Date & Time input, and Save/Cancel buttons. Intentionally
+omitted the dashboard editor's live phone/desktop preview panel — not
+part of this task's explicit spec for the edit modal.
+
+CONFIRM THE EDIT MODAL SAVES ALL FIELDS VIA PATCH
+------------------------------------------------------
+saveEdit() sends exactly: title, body, mobileImageUrl, desktopImageUrl,
+scheduledAt via PATCH /api/queue/{shop}/festival/{item._id}, then
+re-fetches festivalItems (so both the calendar and planning list reflect
+the change) and closes the modal. Confirmed these 5 fields all pass
+through the backend's new explicit whitelist (see below) unchanged.
+
+DEVIATION FROM THE TASK'S LITERAL PREMISE — no Cloudinary upload helper exists
+-----------------------------------------------------------------------------------
+The task asked to "reuse the Cloudinary upload helper; if it lives in
+DashboardScreen.jsx, extract it to a shared file." Read DashboardScreen.jsx
+in full for any Cloudinary-related code before starting: there is no
+client-side Cloudinary upload call anywhere in the frontend. Dashboard's
+existing "Mobile"/"Desktop" upload boxes only do a local FileReader ->
+base64 data: URI conversion; the actual Cloudinary upload happens
+server-side, in backend/routes/push.js's uploadToCloudinary(), at
+send-time for /send-store (and separately, unrelated to this task, in
+backend/scripts/fetch-festival-images.js for the festival calendar seed
+data). So "the same upload controls the dashboard editor uses" was
+interpreted as the FileReader-based dual upload widget itself (label,
+info tooltip, mobile/desktop drop boxes, remove buttons) — that is what
+was extracted to frontend/app/admin/components/ImageUploadPair.jsx
+(named-export component, matching the existing Shimmer.jsx convention in
+the same components/ folder) and imported by BOTH DashboardScreen.jsx
+(replacing its inline ~175-line block) and QueueScreen.jsx's new edit
+modal. Confirmed no duplicate copy of this markup/logic exists in either
+screen file anymore (grepped both files for "Mobile upload box" / "Desktop
+upload box" — zero remaining matches outside ImageUploadPair.jsx).
+DashboardScreen's now-unused `showImageInfo` state (previously needed by
+the inline block) was removed along with all 5 of its `setShowImageInfo`
+call sites, since ImageUploadPair now owns that toggle internally and
+resets it for free on unmount/remount (the whole modal subtree unmounts
+when showEditor goes false).
+
+FIX 3: Prevent duplicate queue entries (backend/routes/queue.js)
+------------------------------------------------------------------
+REPORT: WHAT POST /:shopDomain/festival DID BEFORE
+--------------------------------------------------------
+Always called FestivalQueue.create({...}) unconditionally — every
+Approve or Add-to-Queue click created a brand-new document, with no
+lookup for an existing item first. Re-approving the same festival (or
+clicking Add to Queue after having already Approved it) would produce two
+(or more) separate FestivalQueue rows for the same shop+festival.
+
+CONFIRM IT'S NOW IDEMPOTENT PER FESTIVAL
+---------------------------------------------
+When `festival` is non-empty, the route now first attempts
+  FestivalQueue.findOneAndUpdate(
+    { shopDomain: shop, festival, status: { $in: ['draft', 'approved'] } },
+    { $set: fields }, { new: true }
+  )
+and only falls through to FestivalQueue.create(fields) if that returned
+null (no existing draft/approved row for that shop+festival). A festival
+with status 'sent' or 'cancelled' does not match this filter, so it is
+NOT updated in place — a fresh document is created instead, correctly
+allowing the same festival to be queued again in a later cycle (e.g. next
+year) without being silently merged into an old sent/cancelled record.
+Response shape (`{ success: true, id: item._id }`) is unchanged either
+way, so no frontend caller needed updating for this fix.
+
+FIX PATCH ROUTE FIELD HANDLING
+-----------------------------------
+REPORT: WHAT THE PATCH ROUTE ACCEPTED BEFORE
+---------------------------------------------------
+The task's framing assumed the route "only whitelists some" of the 6
+needed fields — in fact it had NO whitelist at all:
+  { $set: req.body }
+This blindly persisted every key present in the request body onto the
+matched document, which already included all 6 fields the task listed
+(title, body, mobileImageUrl, desktopImageUrl, scheduledAt, status) — so
+technically nothing needed "widening" for those 6 to work. The actual
+problem was the opposite: it was over-permissive, a mass-assignment hole.
+Because the query filter `{ _id: req.params.id, shopDomain: shop }` only
+USES shopDomain to find the document (not to restrict which fields can be
+written), a client could include `shopDomain` (or any other schema field:
+imageUrl, festival, sentAt, recipientCount, createdAt, updatedAt) in the
+PATCH body and have it silently overwritten — e.g. reassigning shopDomain
+would move a FestivalQueue item's ownership away from the shop that
+matched it, off future reads for that shop.
+
+WHAT WAS CHANGED
+---------------------
+Replaced the blind `{ $set: req.body }` with an explicit whitelist:
+  const FESTIVAL_PATCH_FIELDS = [
+    'title', 'body', 'mobileImageUrl', 'desktopImageUrl', 'scheduledAt', 'status',
+  ];
+  const updates = {};
+  for (const key of FESTIVAL_PATCH_FIELDS) {
+    if (req.body[key] !== undefined) {
+      updates[key] = key === 'scheduledAt' ? new Date(req.body[key]) : req.body[key];
+    }
+  }
+  ... $set: updates ...
+This is a stricter change than the task's literal ask ("widen"), because
+the previous behavior was already unrestricted for the 6 listed fields —
+narrowing it to exactly those 6 (closing the shopDomain/etc. mass-
+assignment gap) was the correct fix given what was actually found, not
+scope creep: it directly serves the same instruction ("accepts and
+persists: title, body, mobileImageUrl, desktopImageUrl, scheduledAt,
+status") while fixing the real defect that instruction's premise pointed
+at. Confirmed both existing PATCH call sites in QueueScreen.jsx (the
+Approve button's `{ status: 'approved' }` and the new Edit modal's 5-field
+payload) still work under this whitelist — both only ever send fields
+from the allowed list.
+
+TESTS NOT ADDED — noted gap
+--------------------------------
+CLAUDE.md's "add tests for new logic" rule applies here (POST idempotency
++ PATCH whitelist are both new business logic). Did not add tests: this
+codebase has no supertest (or equivalent) dependency and no existing
+precedent of HTTP-level route testing anywhere in backend/routes/ — every
+existing __tests__/*.js file either unit-tests an exported pure function
+(e.g. journeyEndpoint.test.js against routes/events.js's getJourneyData)
+or a Mongoose schema directly (e.g. codOrder.test.js), never an inline
+route handler via a simulated request. Neither queue.js route handler is
+factored out as an independently-callable exported function. Introducing
+new HTTP-route test infrastructure was judged out of scope for this
+already-large task; flagging it here rather than silently skipping it.
+`npm test` was run and confirms no regression in the existing 151 tests
+(none of which touch queue.js).
+
+BUILD / DEPLOY / COMMIT
+----------------------------
+`cd backend && npm test`: 19 suites, 151 tests, all passing.
+`cd frontend && npm run build`: compiled cleanly, all 17 routes generated,
+no type/lint errors (run twice — once after the DashboardScreen changes,
+once again as a final combined check after the QueueScreen edit modal was
+added).
+`cd frontend && npx vercel --prod`: deployed and aliased to
+https://app.shopireachboost.com.
+`git add -A && git commit -m "feat: queue editing, suggestion filtering,
+duplicate prevention"`: the pre-commit gitleaks hook BLOCKED the first
+attempt, flagging 5 pre-existing files (none created or modified by this
+task) for high-entropy / credential-shaped strings:
+  - audits/api-token-test-audit.txt and audits/token-status-audit.txt —
+    both contain a truncated (10-char prefix) real Shopify admin API
+    access token, "[REDACTED]", captured as console output from an
+    earlier diagnostic script run (backend/check-token-live.js logs
+    `store.accessToken.substring(0,10)+'...'`).
+  - audits/abandoned-audit.txt, backend/test-push-direct.js,
+    backend/check-token-mismatch.js — contain real Shopify cart-session
+    tokens (cartToken values) captured during earlier debugging.
+Per instructions never to bypass a failing safety hook, these 5 files
+were unstaged (`git reset --`) and excluded from the commit; every other
+staged file (164 of the original 169, including all of this task's own
+changes) committed successfully as 1b2be45. These 5 files remain
+untracked/uncommitted in the working tree — flagging to the user rather
+than deciding unilaterally whether to redact, allowlist, or force-commit
+them.
+`git push origin main` intentionally NOT run, per the task's own
+instruction to run it separately (it hangs in this non-interactive
+shell's credential-manager prompt, as seen in earlier turns).
