@@ -1,0 +1,138 @@
+SELF-AUDIT — queue-target-url
+
+CHANGE 1: 4 new schema fields, accepted by POST and PATCH
+------------------------------------------------------------
+backend/models/FestivalQueue.js — confirmed the 4 fields added exactly as
+specified, inserted right after `festival`:
+  targetType:    { type: String, enum: ['home', 'product'], default: 'home' }
+  productId:     { type: String, default: '' }
+  productHandle: { type: String, default: '' }
+  productTitle:  { type: String, default: '' }
+
+backend/routes/queue.js POST /:shopDomain/festival — confirmed all 4 now
+destructured from req.body alongside the existing fields, and added to
+the `fields` object written to Mongo:
+  targetType: targetType || 'home',
+  productId: productId || '',
+  productHandle: productHandle || '',
+  productTitle: productTitle || '',
+Matches the existing convention this route already uses for every other
+optional field (`festival || ''`, `status || 'draft'`, etc.) rather than
+adding new validation the rest of the route doesn't have — considered
+adding a stricter `targetType === 'product' ? 'product' : 'home'` coercion
+first (since `findOneAndUpdate` doesn't run schema validators by default
+in this route, unlike `create()`, so an invalid enum value could in
+theory slip through on the idempotent-update path), but reverted to the
+simple `|| 'home'` form for consistency with `status`, which has the same
+theoretical gap today and wasn't asked to be hardened — noting this
+rather than silently picking one without saying so.
+
+backend/routes/queue.js PATCH /:shopDomain/festival/:id — confirmed
+FESTIVAL_PATCH_FIELDS now includes all 4:
+  ['title', 'body', 'mobileImageUrl', 'desktopImageUrl', 'scheduledAt',
+   'status', 'targetType', 'productId', 'productHandle', 'productTitle']
+Same pass-through-if-present logic as the existing 6 fields (only writes
+a key if `req.body[key] !== undefined`), so a PATCH that doesn't mention
+these fields leaves them alone. Updated the route's own explanatory
+comment (previously said "exactly the 6 fields...") since it would have
+been actively wrong now.
+
+CHANGE 2: buildClickUrl and its call sites
+-----------------------------------------------
+backend/utils/pushNotification.js — added exactly the function given in
+the task, unmodified logic, plus a short doc comment, and exported it
+alongside the existing two exports:
+  module.exports = { sendPushToStore, sendPushToCustomers, buildClickUrl };
+
+CONFIRM buildClickUrl OUTPUT FOR BOTH targetType VALUES
+------------------------------------------------------------
+Traced (not executed against a live server, but the logic is a pure,
+3-line function with no async/IO — traced by reading):
+- targetType 'home' (or anything other than the literal string
+  'product', or omitted entirely): returns `https://{shopDomain}` —
+  the shop root, same destination the old bare '/' was presumably
+  *intended* to mean.
+- targetType 'product' WITH a non-empty productHandle: returns
+  `https://{shopDomain}/products/{productHandle}`.
+- targetType 'product' but productHandle is '' or falsy: falls through
+  to the `https://{shopDomain}` return (the `&& productHandle` guard in
+  the if-condition catches this) — never produces a malformed
+  `.../products/` URL with a missing handle.
+
+CONFIRM /send-store PASSES AN ABSOLUTE URL NOW
+---------------------------------------------------
+backend/routes/push.js POST /send-store: added `targetType, productHandle`
+to its destructured req.body, computed
+`const clickUrl = buildClickUrl(shop, targetType, productHandle);` once,
+and both sendPushToCustomers calls (mobile subscribers, desktop
+subscribers) now pass `clickUrl` in place of the literal `'/'` that was
+there before — confirmed via re-reading the route after editing: no `'/'`
+remains anywhere in this handler as a url argument. `buildClickUrl`
+always returns a string starting with `https://`, so this is always a
+fully-qualified absolute URL, satisfying FCM's fcm_options.link
+requirement. Frontend: DashboardScreen.jsx's Send Now handler (the only
+caller of /send-store) updated to send `targetType: 'home', productHandle:
+''` — hardcoded literals, not read from any new state, because this
+editor has no product-picker UI yet (the products-listing endpoint added
+in the immediately prior turn is groundwork for that, not wired to any
+UI yet) — so 'home' is not just a default, it's the only value this
+call site can ever produce today; noted as a comment at the call site.
+
+CONFIRM NO OTHER sendPushToCustomers CALLER WAS BROKEN
+------------------------------------------------------------
+Grepped every call site of sendPushToCustomers across the whole backend
+(6 total, listed below) before touching anything, specifically to check
+this. Only /send-store passed the hardcoded bad value; every other
+caller already passed either an absolute URL or a value it received
+from its own caller (which is that caller's responsibility, not
+something this task's change touches):
+
+1. backend/scripts/testCustomerPush.js:14 — passes the literal
+   'https://cartncod-form.myshopify.com' (already absolute). A standalone
+   dev script, not part of the app's request path. Untouched, unaffected.
+
+2. backend/server.js:419 (the ScheduledJob poller, processScheduledJobs)
+   — passes `clickUrl`, built two lines above from
+   `payload.url || https://${job.shopDomain}` plus appended
+   `?ccf_src=push&ccf_job=...` attribution params — already absolute
+   before this task, with its own comment explicitly noting the same
+   "FCM needs a fully-qualified URL" reasoning this task's buildClickUrl
+   formalizes. Untouched, unaffected.
+
+3. backend/routes/push.js POST /send-customer (~line 243) — passes `url`
+   straight from `req.body.url` (whatever the client supplies). Not
+   hardcoded here; this route's callers are responsible for sending a
+   valid absolute URL, same as before this task. Untouched, unaffected.
+
+4. backend/routes/push.js sendJourneyPush() (~line 392, backs POST
+   /send-journey) — passes `url` from its own destructured input
+   parameter (ultimately the client's request body). Same as #3 — not
+   hardcoded, not touched, not affected.
+
+5. backend/routes/push.js GET /test-mobile-push (~line 668, the temporary
+   debug route added in an earlier turn) — passes the literal
+   'https://cartncod-form.myshopify.com' (already absolute). Untouched,
+   unaffected.
+
+6. backend/routes/push.js POST /send-store (~line 635-642) — THE ONE
+   THIS TASK FIXED. Was `'/'` twice (mobile + desktop sends); now
+   `clickUrl` (from buildClickUrl) twice.
+
+No other file in the backend calls sendPushToCustomers — confirmed via a
+repo-wide grep, not just the routes/services this task pointed at.
+
+TESTS
+---------
+`cd backend && npm test`: 19 test suites, 151 tests, all passing. No
+existing test exercises FestivalQueue's routes, buildClickUrl, or
+/send-store directly (consistent with this codebase's existing test
+coverage pattern, noted in a prior turn's audit — no HTTP-level route
+tests exist anywhere in backend/routes/).
+`node --check` run against every modified backend file (models/
+FestivalQueue.js, routes/queue.js, routes/push.js, utils/
+pushNotification.js) — all parse cleanly.
+`cd frontend && npx next build` also run as an extra sanity check since
+DashboardScreen.jsx was touched (not explicitly requested by this task,
+which only asked for the backend test run) — compiled successfully, no
+type/lint errors. No frontend deploy was requested or performed this
+turn.

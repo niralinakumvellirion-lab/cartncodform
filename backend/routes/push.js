@@ -1,7 +1,7 @@
 const express = require('express');
 const PushSubscription = require('../models/PushSubscription');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
-const { sendPushToStore, sendPushToCustomers } = require('../utils/pushNotification');
+const { sendPushToStore, sendPushToCustomers, buildClickUrl } = require('../utils/pushNotification');
 const { sendAbandonedCartEmail } = require('../utils/email');
 const { fetchProductImage } = require('./webhooks');
 const { requireAuth } = require('../middleware/requireOwner');
@@ -600,12 +600,19 @@ router.post('/send-journey-email', requireAuth, async (req, res) => {
  */
 router.post('/send-store', requireAuth, async (req, res) => {
   try {
-    const { title, body, mobileImageUrl, desktopImageUrl } = req.body;
+    const { title, body, mobileImageUrl, desktopImageUrl, targetType, productHandle } = req.body;
     const shop = req.shopDomain;
 
     if (!title || !body) {
       return res.status(400).json({ error: 'title and body required' });
     }
+
+    // Absolute click-through URL — FCM's fcm_options.link (and this
+    // function's own data.url) both require a fully-qualified URL, not
+    // the bare '/' this route used to pass. targetType/productHandle are
+    // optional; buildClickUrl() falls back to the shop root when either
+    // is missing or targetType isn't 'product'.
+    const clickUrl = buildClickUrl(shop, targetType, productHandle);
 
     // FCM only accepts a real, fetchable image URL — a base64 data: URI
     // (what the Dashboard editor's file upload produces, see
@@ -633,12 +640,12 @@ router.post('/send-store', requireAuth, async (req, res) => {
 
     // Send to mobile subscribers with the mobile image.
     const mobileResult = await sendPushToCustomers(
-      shop, title, body, '/', mobileImage, true, null, false, false
+      shop, title, body, clickUrl, mobileImage, true, null, false, false
     );
 
     // Send to desktop subscribers with the desktop image.
     const desktopResult = await sendPushToCustomers(
-      shop, title, body, '/', desktopImage, false, null, false, true
+      shop, title, body, clickUrl, desktopImage, false, null, false, true
     );
 
     if (!mobileResult.success && !desktopResult.success) {

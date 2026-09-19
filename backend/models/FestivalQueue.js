@@ -9,6 +9,10 @@ const festivalQueueSchema = new mongoose.Schema({
   desktopImageUrl: { type: String, default: '' },
   scheduledAt: { type: Date, required: true },
   festival: { type: String, default: '' },
+  targetType: { type: String, enum: ['home', 'product'], default: 'home' },
+  productId: { type: String, default: '' },
+  productHandle: { type: String, default: '' },
+  productTitle: { type: String, default: '' },
   status: {
     type: String,
     enum: ['draft', 'approved', 'sent', 'cancelled'],

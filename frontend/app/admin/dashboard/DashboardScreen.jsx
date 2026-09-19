@@ -1750,6 +1750,12 @@ export default function DashboardScreen({ shop }) {
                           body: editorBody,
                           mobileImageUrl: editorMobileImageUrl,
                           desktopImageUrl: editorDesktopImageUrl,
+                          // No product-picker UI exists yet (see
+                          // audits/products-endpoint-audit.txt for the
+                          // backend groundwork) — this editor can only
+                          // ever target the shop's home page today.
+                          targetType: 'home',
+                          productHandle: '',
                         });
                         setShowEditor(false);
                         setSendingNow(false);

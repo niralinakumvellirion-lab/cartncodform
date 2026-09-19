@@ -130,7 +130,8 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
   try {
     const shop = req.shopDomain;
     const { title, body, imageUrl, scheduledAt, festival,
-            status, mobileImageUrl, desktopImageUrl } = req.body;
+            status, mobileImageUrl, desktopImageUrl,
+            targetType, productId, productHandle, productTitle } = req.body;
 
     if (!title || !scheduledAt) {
       return res.status(400).json({
@@ -148,6 +149,10 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
       desktopImageUrl: desktopImageUrl || '',
       scheduledAt: new Date(scheduledAt),
       festival: festival || '',
+      targetType: targetType || 'home',
+      productId: productId || '',
+      productHandle: productHandle || '',
+      productTitle: productTitle || '',
       status: status || 'draft',
     };
 
@@ -209,11 +214,14 @@ router.get('/:shopDomain/festival', requireAuth, requireStoreOwner,
 // only uses shopDomain to find the doc, a body containing a different
 // shopDomain would still match-then-reassign it, silently moving the
 // item off this shop). Replaced with an explicit whitelist covering
-// exactly the 6 fields the Edit modal and Approve button need
-// (title, body, mobileImageUrl, desktopImageUrl, scheduledAt, status);
+// exactly the fields the Edit modal and Approve button need
+// (title, body, mobileImageUrl, desktopImageUrl, scheduledAt, status,
+// plus targetType/productId/productHandle/productTitle for the
+// click-URL target — see buildClickUrl in utils/pushNotification.js);
 // everything else in the body is now ignored.
 const FESTIVAL_PATCH_FIELDS = [
   'title', 'body', 'mobileImageUrl', 'desktopImageUrl', 'scheduledAt', 'status',
+  'targetType', 'productId', 'productHandle', 'productTitle',
 ];
 router.patch('/:shopDomain/festival/:id', requireAuth,
   requireStoreOwner, async (req, res) => {

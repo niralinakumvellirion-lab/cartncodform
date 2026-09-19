@@ -37,6 +37,22 @@ if (!getApps().length) {
   firebaseReady = true;
 }
 
+/**
+ * Build an absolute click-through URL for a push notification. FCM's
+ * webpush fcm_options.link (and the data.url this app also sends) both
+ * require a fully-qualified URL — a bare relative path like '/' is not
+ * valid there. Callers with nothing more specific (no target picked)
+ * should pass targetType 'home' (or omit targetType/productHandle
+ * entirely) to get the shop's root URL.
+ */
+function buildClickUrl(shopDomain, targetType, productHandle) {
+  const base = `https://${shopDomain}`;
+  if (targetType === 'product' && productHandle) {
+    return `${base}/products/${productHandle}`;
+  }
+  return base;
+}
+
 async function sendPushToStore(shopDomain, title, body) {
   const PushSubscription = require('../models/PushSubscription');
   try {
@@ -274,4 +290,4 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
   }
 }
 
-module.exports = { sendPushToStore, sendPushToCustomers };
+module.exports = { sendPushToStore, sendPushToCustomers, buildClickUrl };
