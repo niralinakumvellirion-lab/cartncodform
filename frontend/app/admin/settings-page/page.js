@@ -17,7 +17,6 @@ function SettingsContent() {
         <a href="/admin/queue" rel="queue">Queue</a>
         <a href="/admin/automation" rel="automation">Automation</a>
         <a href="/admin/customers" rel="customers">Customers</a>
-        <a href="/admin/signals" rel="signals">What to act on</a>
         <a href="/admin/messages" rel="messages">Messages</a>
         <a href="/admin/cod" rel="cod">Cash on delivery</a>
         <a href="/admin/discounts" rel="discounts">Discounts</a>
