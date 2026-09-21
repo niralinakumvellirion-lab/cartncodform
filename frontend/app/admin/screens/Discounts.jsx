@@ -193,14 +193,6 @@ export default function Discounts({ shop }) {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-  const [isNarrow, setIsNarrow] = useState(false);
-
-  useEffect(() => {
-    const check = () => setIsNarrow(window.innerWidth < 600);
-    check();
-    window.addEventListener('resize', check);
-    return () => window.removeEventListener('resize', check);
-  }, []);
 
   useEffect(() => {
     if (!shop) return;
