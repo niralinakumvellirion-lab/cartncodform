@@ -103,23 +103,63 @@ function PageHeader({ title, subtitle, action }) {
   );
 }
 
+// Phone / "Email + Phone" discounts are retired: the popup only collects an
+// email (see ccfShowPhoneField() in push-notifications.liquid) and the server
+// always saves those two rules as disabled, so they are not shown or sent.
 const DISCOUNT_ITEMS = [
-  { key: 'pushDiscount', label: '🔔 Push notification', desc: 'Customer allows push notifications' },
-  { key: 'emailDiscount', label: '✉️ Email address', desc: 'Customer provides their email' },
-  { key: 'phoneDiscount', label: '📱 Phone number', desc: 'Customer provides their phone number' },
-  { key: 'bothDiscount', label: '⭐ Email + Phone', desc: 'Customer provides both email and phone' },
+  {
+    key: 'pushDiscount',
+    label: '🔔 Push notification',
+    desc: 'Customer allows push notifications',
+    defaults: { percentage: 10, maxUses: 100, expiryDays: 7 },
+    autoText: (pct) => `You get ${pct}% off as a subscriber`,
+  },
+  {
+    key: 'emailDiscount',
+    label: '✉️ Email address',
+    desc: 'Customer provides their email',
+    defaults: { percentage: 15, maxUses: 100, expiryDays: 7 },
+    autoText: (pct) => `Add your email to get ${pct}% off`,
+  },
 ];
 
-// remove-phone: the popup no longer has a phone input field (see
-// ccfShowPhoneField() in push-notifications.liquid) — hiding phoneDiscount
-// AND bothDiscount from the merchant UI too, since "Email + Phone" is now
-// misleading (the popup can only ever collect email). Both stay in
-// DISCOUNT_ITEMS/config/backend untouched — this only affects what
-// renders below.
-const HIDDEN_DISCOUNT_KEYS = ['phoneDiscount', 'bothDiscount'];
-const VISIBLE_DISCOUNT_ITEMS = DISCOUNT_ITEMS.filter(
-  (item) => !HIDDEN_DISCOUNT_KEYS.includes(item.key)
-);
+const OFFER_TEXT_MAX = 120;
+const HEADLINE_MAX = 200;
+
+function clampPct(v, fallback) {
+  const n = Number(v);
+  if (v === '' || v === null || v === undefined || !Number.isFinite(n)) return fallback;
+  return Math.min(100, Math.max(1, Math.round(n)));
+}
+
+// Only what PATCH /api/discounts/:shop/config accepts.
+function buildPayload(config) {
+  const out = { offerHeadline: config.offerHeadline || '' };
+  for (const item of DISCOUNT_ITEMS) {
+    const d = config[item.key] || {};
+    out[item.key] = {
+      enabled: !!d.enabled,
+      percentage: clampPct(d.percentage ?? item.defaults.percentage, item.defaults.percentage),
+      maxUses: d.maxUses || item.defaults.maxUses,
+      expiryDays: d.expiryDays || item.defaults.expiryDays,
+      prefix: d.prefix || '',
+      offerText: (d.offerText || '').slice(0, OFFER_TEXT_MAX),
+    };
+  }
+  return out;
+}
+
+const inputStyle = {
+  width: '100%',
+  padding: '8px 10px',
+  fontSize: '13px',
+  border: '1px solid #e5e7eb',
+  borderRadius: '8px',
+  outline: 'none',
+  boxSizing: 'border-box',
+};
+
+const labelStyle = { fontSize: '12px', color: '#6b7280', marginBottom: '6px' };
 
 export default function Discounts({ shop }) {
   const [config, setConfig] = useState({});
@@ -127,6 +167,14 @@ export default function Discounts({ shop }) {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
+  const [isNarrow, setIsNarrow] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsNarrow(window.innerWidth < 600);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   useEffect(() => {
     if (!shop) return;
@@ -154,6 +202,10 @@ export default function Discounts({ shop }) {
     };
   }, [shop]);
 
+  function updateRule(key, patch) {
+    setConfig((c) => ({ ...c, [key]: { ...(c[key] || {}), ...patch } }));
+  }
+
   async function saveConfig() {
     setSaving(true);
     setError('');
@@ -162,7 +214,7 @@ export default function Discounts({ shop }) {
       const res = await apiSend(
         `/api/discounts/${encodeURIComponent(shop)}/config`,
         'PATCH',
-        config
+        buildPayload(config)
       );
       if (res?.config) setConfig(res.config);
       setSuccess(true);
@@ -172,6 +224,8 @@ export default function Discounts({ shop }) {
       setSaving(false);
     }
   }
+
+  const headline = config.offerHeadline || '';
 
   return (
     <div style={DS.page}>
@@ -184,49 +238,38 @@ export default function Discounts({ shop }) {
         <div style={{ fontSize: '13px', color: '#9ca3af' }}>Loading…</div>
       ) : (
         <>
-          {/* Offer headline */}
+          {/* Popup headline */}
           <div style={DS.card}>
-            <div
-              style={{
-                fontSize: '14px',
-                fontWeight: '600',
-                color: '#111827',
-                marginBottom: '12px',
-              }}
-            >
-              Popup offer text
+            <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>
+              Popup headline
             </div>
             <input
-              value={config.offerHeadline || ''}
+              value={headline}
+              maxLength={HEADLINE_MAX}
               onChange={(e) => setConfig((c) => ({ ...c, offerHeadline: e.target.value }))}
               placeholder="Get a discount on your first order!"
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                fontSize: '13px',
-                border: '1px solid #e5e7eb',
-                borderRadius: '8px',
-                outline: 'none',
-                boxSizing: 'border-box',
-              }}
+              style={{ ...inputStyle, padding: '10px 12px' }}
             />
+            <div style={{ fontSize: '11px', color: '#9ca3af', textAlign: 'right', marginTop: '4px' }}>
+              {headline.length} / {HEADLINE_MAX}
+            </div>
           </div>
 
-          {/* Discount cards (phone-related ones hidden — see
-              VISIBLE_DISCOUNT_ITEMS) */}
-          {VISIBLE_DISCOUNT_ITEMS.map((item) => {
+          {DISCOUNT_ITEMS.map((item) => {
             const d = config[item.key] || {};
+            const pctValue = d.percentage ?? item.defaults.percentage;
+            const effectivePct = clampPct(pctValue, item.defaults.percentage);
+            const offerText = d.offerText || '';
+
             return (
-              <div
-                key={item.key}
-                style={DS.card}
-              >
+              <div key={item.key} style={DS.card}>
                 {/* Header row */}
                 <div
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
+                    gap: '12px',
                     marginBottom: d.enabled ? '16px' : 0,
                   }}
                 >
@@ -238,12 +281,7 @@ export default function Discounts({ shop }) {
                   </div>
                   {/* Toggle */}
                   <div
-                    onClick={() =>
-                      setConfig((c) => ({
-                        ...c,
-                        [item.key]: { ...(c[item.key] || {}), enabled: !d.enabled },
-                      }))
-                    }
+                    onClick={() => updateRule(item.key, { enabled: !d.enabled })}
                     style={{
                       width: '44px',
                       height: '24px',
@@ -273,145 +311,112 @@ export default function Discounts({ shop }) {
 
                 {/* Settings (shown when enabled) */}
                 {d.enabled && (
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(2, 1fr)',
-                      gap: '12px',
-                    }}
-                  >
-                    {/* Percentage */}
-                    <div>
-                      <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '6px' }}>
-                        Discount %
+                  <>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: isNarrow ? '1fr' : 'repeat(2, 1fr)',
+                        gap: '16px 12px',
+                      }}
+                    >
+                      {/* Percentage */}
+                      <div>
+                        <div style={labelStyle}>Discount %</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <input
+                            type="number"
+                            min="1"
+                            max="100"
+                            step="1"
+                            value={pctValue}
+                            onChange={(e) =>
+                              updateRule(item.key, {
+                                percentage: e.target.value === '' ? '' : Number(e.target.value),
+                              })
+                            }
+                            onBlur={() =>
+                              updateRule(item.key, {
+                                percentage: clampPct(pctValue, item.defaults.percentage),
+                              })
+                            }
+                            style={inputStyle}
+                          />
+                          <span style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>%</span>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+
+                      {/* Max uses */}
+                      <div>
+                        <div style={labelStyle}>Max uses</div>
                         <input
-                          type="range"
-                          min="5"
-                          max="50"
-                          value={d.percentage || 10}
-                          onChange={(e) =>
-                            setConfig((c) => ({
-                              ...c,
-                              [item.key]: {
-                                ...(c[item.key] || {}),
-                                percentage: Number(e.target.value),
-                              },
-                            }))
-                          }
-                          style={{ flex: 1 }}
+                          type="number"
+                          min="1"
+                          max="10000"
+                          value={d.maxUses || item.defaults.maxUses}
+                          onChange={(e) => updateRule(item.key, { maxUses: Number(e.target.value) })}
+                          style={inputStyle}
                         />
-                        <span
-                          style={{
-                            fontSize: '16px',
-                            fontWeight: '700',
-                            color: '#111827',
-                            minWidth: '40px',
-                          }}
-                        >
-                          {d.percentage || 10}%
-                        </span>
+                      </div>
+
+                      {/* Expiry days */}
+                      <div>
+                        <div style={labelStyle}>Expires after (days)</div>
+                        <input
+                          type="number"
+                          min="1"
+                          max="365"
+                          value={d.expiryDays || item.defaults.expiryDays}
+                          onChange={(e) => updateRule(item.key, { expiryDays: Number(e.target.value) })}
+                          style={inputStyle}
+                        />
+                      </div>
+
+                      {/* Code prefix */}
+                      <div>
+                        <div style={labelStyle}>Code prefix</div>
+                        <input
+                          type="text"
+                          maxLength="10"
+                          value={d.prefix || ''}
+                          onChange={(e) => updateRule(item.key, { prefix: e.target.value.toUpperCase() })}
+                          style={{ ...inputStyle, fontFamily: 'monospace' }}
+                        />
                       </div>
                     </div>
 
-                    {/* Max uses */}
-                    <div>
-                      <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '6px' }}>
-                        Max uses
-                      </div>
-                      <input
-                        type="number"
-                        min="1"
-                        max="10000"
-                        value={d.maxUses || 100}
-                        onChange={(e) =>
-                          setConfig((c) => ({
-                            ...c,
-                            [item.key]: { ...(c[item.key] || {}), maxUses: Number(e.target.value) },
-                          }))
-                        }
-                        style={{
-                          width: '100%',
-                          padding: '8px 10px',
-                          fontSize: '13px',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
-                          outline: 'none',
-                          boxSizing: 'border-box',
-                        }}
+                    {/* Offer text — full width below the grid */}
+                    <div style={{ marginTop: '16px' }}>
+                      <div style={labelStyle}>Offer text shown in the popup</div>
+                      <textarea
+                        value={offerText}
+                        maxLength={OFFER_TEXT_MAX}
+                        rows={2}
+                        onChange={(e) => updateRule(item.key, { offerText: e.target.value })}
+                        placeholder={item.autoText(effectivePct)}
+                        style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
                       />
-                    </div>
-
-                    {/* Expiry days */}
-                    <div>
-                      <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '6px' }}>
-                        Expires after (days)
-                      </div>
-                      <input
-                        type="number"
-                        min="1"
-                        max="365"
-                        value={d.expiryDays || 7}
-                        onChange={(e) =>
-                          setConfig((c) => ({
-                            ...c,
-                            [item.key]: {
-                              ...(c[item.key] || {}),
-                              expiryDays: Number(e.target.value),
-                            },
-                          }))
-                        }
+                      <div
                         style={{
-                          width: '100%',
-                          padding: '8px 10px',
-                          fontSize: '13px',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
-                          outline: 'none',
-                          boxSizing: 'border-box',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: '8px',
+                          fontSize: '11px',
+                          color: '#9ca3af',
+                          marginTop: '4px',
                         }}
-                      />
-                    </div>
-
-                    {/* Code prefix */}
-                    <div>
-                      <div style={{ fontSize: '12px', color: '#6b7280', marginBottom: '6px' }}>
-                        Code prefix
+                      >
+                        <span>Leave blank to use the automatic text.</span>
+                        <span style={{ flexShrink: 0 }}>{offerText.length} / {OFFER_TEXT_MAX}</span>
                       </div>
-                      <input
-                        type="text"
-                        maxLength="10"
-                        value={d.prefix || ''}
-                        onChange={(e) =>
-                          setConfig((c) => ({
-                            ...c,
-                            [item.key]: {
-                              ...(c[item.key] || {}),
-                              prefix: e.target.value.toUpperCase(),
-                            },
-                          }))
-                        }
-                        style={{
-                          width: '100%',
-                          padding: '8px 10px',
-                          fontSize: '13px',
-                          border: '1px solid #e5e7eb',
-                          borderRadius: '8px',
-                          outline: 'none',
-                          boxSizing: 'border-box',
-                          fontFamily: 'monospace',
-                        }}
-                      />
                     </div>
-                  </div>
+                  </>
                 )}
               </div>
             );
           })}
 
           {/* Save button */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
             <button
               onClick={saveConfig}
               disabled={saving}

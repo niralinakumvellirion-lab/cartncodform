@@ -1,0 +1,91 @@
+=== DISCOUNTS REDESIGN AUDIT ===
+Generated: 2026-09-21
+
+Slider replaced with number input, ||10 bug fixed: yes
+offerText in schema, PATCH and proxy response: yes
+phone/both forced disabled on save AND in proxy response: yes
+Storefront uses offerText with auto-text fallback, escaped: yes
+Save payload trimmed to accepted fields: yes
+Dead phone code removed from liquid: yes (list below)
+Responsive under 600px: yes (single column)
+backend npm test: 21 suites, 173/173 pass (new discountConfigRoutes.test.js)
+frontend build: pass; vercel deploy: READY, aliased to app.shopireachboost.com
+shopify app deploy --allow-updates: released shopireachboost-ai-121
+git push: NOT done (left for the user)
+Not verified in a browser or on a live storefront.
+
+IMPORTANT ORDER NOTE: the backend changes are only committed, not deployed
+(Render deploys on push). Until the push, the live backend ignores offerText
+on save and does not return it from /discount-config, and stale phone/both
+values still leak. The deployed admin and storefront extension already
+contain the new code and degrade gracefully (blank offer text -> auto text).
+
+
+NUMBER INPUT (Discounts.jsx)
+The range slider (5-50) is now <input type="number" min=1 max=100 step=1>
+with a "%" beside it. The value is d.percentage ?? default (10 push / 15
+email), so 0 or any stored number displays as-is and the default is used
+only for undefined/null. While typing, an empty box stays empty; on blur the
+value is clamped to 1-100 (rounded) or reset to the default if empty/NaN.
+buildPayload also clamps on save.
+
+BACKEND
+- models/DiscountConfig.js: offerText {String, default ''} on all four rule
+  sub-docs (schema fields kept, old documents stay valid).
+- routes/discounts.js: defaultConfig() includes offerText ''. sanitizeRule
+  trims offerText and caps it at 120 (non-string -> ''). PATCH only replaces
+  pushDiscount and emailDiscount; phoneDiscount.enabled and
+  bothDiscount.enabled are always $set to false (dotted paths, so their other
+  stored fields are untouched, and a body value can never enable them).
+  Removed the now-unused ACTION_KEYS constant.
+- routes/proxy.js GET /discount-config: push/email return {enabled,
+  percentage, offerText (trimmed, <=120)}; phone/both always return
+  {enabled:false, percentage}.
+- Not changed (not asked): generateDiscount / POST /generate-discount can
+  still issue a phone/both code if an old DB row is enabled and a client
+  sends that action. The updated storefront never sends those actions.
+
+ADMIN LAYOUT / PAYLOAD
+- Save now sends only {offerHeadline, pushDiscount, emailDiscount}, each rule
+  {enabled, percentage, maxUses, expiryDays, prefix, offerText}. No _id, __v,
+  shopDomain, updatedAt, phone or both.
+- "Popup offer text" renamed "Popup headline", maxLength 200, "n / 200"
+  counter.
+- Each enabled card: 2-column grid (Discount % / Max uses, Expires after /
+  Code prefix); under 600px (window.innerWidth listener) it is one column.
+  Offer text textarea is full width below the grid, label "Offer text shown
+  in the popup", maxLength 120, "n / 120" counter, helper "Leave blank to use
+  the automatic text.", placeholder = the storefront's automatic line for the
+  current % ("You get N% off as a subscriber" / "Add your email to get N%
+  off"), updating live as the % changes.
+- Phone and Email+Phone cards remain hidden/removed from the list.
+
+STOREFRONT (push-notifications.liquid)
+- New ccfOfferText(key) (trimmed, <=120) and ccfEscapeHtml().
+- ccfDiscountOfferText(): email path returns emailDiscount.offerText or the
+  auto text; push path returns pushDiscount.offerText or the auto text. It
+  returns raw text; the card's offerBox innerHTML now wraps it in
+  ccfEscapeHtml().
+- Product nudge subtitle: uses offerText of emailDiscount (if the email field
+  shows) else pushDiscount, escaped; else the old "Enter your details..." /
+  "Subscribe to notifications..." line. The nudge title still says
+  "Unlock N% off this order".
+- The split layout headline/email placeholder and the email/push flows are
+  otherwise unchanged. ccfShowPhoneField() still returns false.
+
+DEAD PHONE CODE REMOVED
+- ccfDiscountOfferText: the "email + phone" and "phone" branches, and the
+  phonePct / bothPct variables.
+- injectProductNudge: phonePct and bothPct vars, showPhone, the
+  showEmail&&showPhone ('both') and showPhone ('phone') bestPct branches, the
+  <input id="ccf-nudge-phone"> markup, the phone element lookup and phoneVal,
+  the 'both' and 'phone' action values (action is now 'email' or 'push'), and
+  the phone field in the generate-discount request body.
+Left alone: ccfShowPhoneField() itself, the phone/both keys read by
+ccfRuleOn/ccfDiscountEnabled/ccfFieldPct (the proxy now forces those off),
+and the unused bestAction variable that was already there.
+
+TESTS
+__tests__/discountConfigRoutes.test.js (new): PATCH trims/caps offerText,
+non-string -> '', phone/both forced disabled with or without body values;
+proxy returns offerText and forces phone/both enabled:false.

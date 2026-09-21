@@ -30,6 +30,7 @@ const discountConfigSchema = new mongoose.Schema({
     maxUses: { type: Number, default: 100 },
     expiryDays: { type: Number, default: 7 },
     prefix: { type: String, default: 'PUSH' },
+    offerText: { type: String, default: '' },
   },
   emailDiscount: {
     enabled: { type: Boolean, default: false },
@@ -37,6 +38,7 @@ const discountConfigSchema = new mongoose.Schema({
     maxUses: { type: Number, default: 100 },
     expiryDays: { type: Number, default: 7 },
     prefix: { type: String, default: 'EMAIL' },
+    offerText: { type: String, default: '' },
   },
   phoneDiscount: {
     enabled: { type: Boolean, default: false },
@@ -44,6 +46,7 @@ const discountConfigSchema = new mongoose.Schema({
     maxUses: { type: Number, default: 100 },
     expiryDays: { type: Number, default: 7 },
     prefix: { type: String, default: 'PHONE' },
+    offerText: { type: String, default: '' },
   },
   bothDiscount: {
     enabled: { type: Boolean, default: false },
@@ -51,6 +54,7 @@ const discountConfigSchema = new mongoose.Schema({
     maxUses: { type: Number, default: 100 },
     expiryDays: { type: Number, default: 7 },
     prefix: { type: String, default: 'VIP' },
+    offerText: { type: String, default: '' },
   },
 
   // Popup text customization — shown above the email/phone fields.

@@ -9,7 +9,6 @@ const { verifyProxySignature, API_VERSION } = require('../utils/shopify');
 // The four storefront actions that can earn a discount code, and the
 // DiscountConfig sub-doc key each maps to.
 const ACTIONS = ['push', 'email', 'phone', 'both'];
-const ACTION_KEYS = ['pushDiscount', 'emailDiscount', 'phoneDiscount', 'bothDiscount'];
 const DEFAULT_PREFIX = {
   pushDiscount: 'PUSH',
   emailDiscount: 'EMAIL',
@@ -23,13 +22,19 @@ const DEFAULT_PREFIX = {
 function defaultConfig(shop) {
   return {
     shopDomain: shop,
-    pushDiscount: { enabled: false, percentage: 10, maxUses: 100, expiryDays: 7, prefix: 'PUSH' },
-    emailDiscount: { enabled: false, percentage: 15, maxUses: 100, expiryDays: 7, prefix: 'EMAIL' },
-    phoneDiscount: { enabled: false, percentage: 15, maxUses: 100, expiryDays: 7, prefix: 'PHONE' },
-    bothDiscount: { enabled: false, percentage: 20, maxUses: 100, expiryDays: 7, prefix: 'VIP' },
+    pushDiscount: { enabled: false, percentage: 10, maxUses: 100, expiryDays: 7, prefix: 'PUSH', offerText: '' },
+    emailDiscount: { enabled: false, percentage: 15, maxUses: 100, expiryDays: 7, prefix: 'EMAIL', offerText: '' },
+    phoneDiscount: { enabled: false, percentage: 15, maxUses: 100, expiryDays: 7, prefix: 'PHONE', offerText: '' },
+    bothDiscount: { enabled: false, percentage: 20, maxUses: 100, expiryDays: 7, prefix: 'VIP', offerText: '' },
     offerHeadline: 'Get a discount on your first order!',
   };
 }
+
+// Only these two actions are still offered by the storefront popup; phone /
+// both are kept in the schema for old documents but are always saved disabled.
+const EDITABLE_KEYS = ['pushDiscount', 'emailDiscount'];
+const DISABLED_KEYS = ['phoneDiscount', 'bothDiscount'];
+const OFFER_TEXT_MAX = 120;
 
 // Clamp / coerce one incoming rule sub-doc before it is written.
 function sanitizeRule(input, fallbackPrefix) {
@@ -47,6 +52,9 @@ function sanitizeRule(input, fallbackPrefix) {
     maxUses: Number.isFinite(uses) ? Math.min(100000, Math.max(1, Math.round(uses))) : 100,
     expiryDays: Number.isFinite(days) ? Math.min(365, Math.max(1, Math.round(days))) : 7,
     prefix: prefix || fallbackPrefix,
+    offerText: typeof r.offerText === 'string'
+      ? r.offerText.trim().slice(0, OFFER_TEXT_MAX)
+      : '',
   };
 }
 
@@ -266,8 +274,9 @@ router.get('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, re
 
 /**
  * PATCH /api/discounts/:shopDomain/config
- * Admin only. Upserts the DiscountConfig with any of the four rule sub-docs
- * (replaced wholesale, clamped) and offerHeadline.
+ * Admin only. Upserts the DiscountConfig with pushDiscount / emailDiscount
+ * (replaced wholesale, clamped, incl. offerText) and offerHeadline; phoneDiscount
+ * and bothDiscount are always saved with enabled:false.
  * -> { updated: true, config }
  */
 router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, res) => {
@@ -275,10 +284,15 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
     const shop = req.params.shopDomain.trim().toLowerCase();
     const set = { updatedAt: new Date() };
 
-    for (const key of ACTION_KEYS) {
+    for (const key of EDITABLE_KEYS) {
       if (req.body[key] && typeof req.body[key] === 'object') {
         set[key] = sanitizeRule(req.body[key], DEFAULT_PREFIX[key]);
       }
+    }
+    // phone / both can no longer be turned on: force them off on every save,
+    // leaving their other stored fields untouched.
+    for (const key of DISABLED_KEYS) {
+      set[`${key}.enabled`] = false;
     }
     if (typeof req.body.offerHeadline === 'string') {
       set.offerHeadline = req.body.offerHeadline.slice(0, 200);

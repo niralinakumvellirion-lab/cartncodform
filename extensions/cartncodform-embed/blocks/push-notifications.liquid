@@ -162,6 +162,21 @@
   function ccfFieldPct(singleKey) {
     return Math.max(ccfPct(singleKey), ccfPct('bothDiscount')) || 0;
   }
+  // Merchant-written offer text for one rule ('' when unset). Raw text —
+  // callers must escape it (ccfEscapeHtml) before putting it in innerHTML.
+  function ccfOfferText(key) {
+    var r = discountConfig && discountConfig[key];
+    var t = r && typeof r.offerText === 'string' ? r.offerText.trim() : '';
+    return t.slice(0, 120);
+  }
+  function ccfEscapeHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
 
   // popup-redesign-2: shared style builders so the main popup, the
   // discount-capture popup, and the split layout all match the same
@@ -183,15 +198,15 @@
       'font-family:inherit;letter-spacing:0.3px;';
   }
   // The percentage-aware line used in the main popup's discount-offer box.
+  // Returns RAW text (merchant offerText when set, else the automatic line);
+  // escape before inserting into innerHTML.
   function ccfDiscountOfferText() {
     var emailPct = (discountConfig.emailDiscount && discountConfig.emailDiscount.percentage) || 0;
-    var phonePct = (discountConfig.phoneDiscount && discountConfig.phoneDiscount.percentage) || 0;
-    var bothPct = (discountConfig.bothDiscount && discountConfig.bothDiscount.percentage) || 0;
     var pushPct = (discountConfig.pushDiscount && discountConfig.pushDiscount.percentage) || 0;
-    if (ccfShowEmailField() && ccfShowPhoneField()) return 'Add email + phone to get ' + bothPct + '% off';
-    if (ccfShowEmailField()) return 'Add your email to get ' + emailPct + '% off';
-    if (ccfShowPhoneField()) return 'Add your phone to get ' + phonePct + '% off';
-    return 'You get ' + pushPct + '% off as a subscriber';
+    if (ccfShowEmailField()) {
+      return ccfOfferText('emailDiscount') || 'Add your email to get ' + emailPct + '% off';
+    }
+    return ccfOfferText('pushDiscount') || 'You get ' + pushPct + '% off as a subscriber';
   }
   // Injects the popup's animation/hover/focus CSS once per page.
   // #ccf-push-prompt (main popup, any layout) gets the bottom-anchored
@@ -919,7 +934,7 @@
         offerBox.innerHTML =
           '<span style="font-size:16px">🏷️</span>' +
           '<span style="font-size:13px;color:#16a34a;font-weight:600">' +
-          ccfDiscountOfferText() + '</span>';
+          ccfEscapeHtml(ccfDiscountOfferText()) + '</span>';
         cardContent.appendChild(offerBox);
       }
 
@@ -1428,26 +1443,17 @@
 
     var emailPct = (discountConfig.emailDiscount &&
       discountConfig.emailDiscount.percentage) || 15;
-    var phonePct = (discountConfig.phoneDiscount &&
-      discountConfig.phoneDiscount.percentage) || 15;
-    var bothPct = (discountConfig.bothDiscount &&
-      discountConfig.bothDiscount.percentage) || 20;
     var pushPct = (discountConfig.pushDiscount &&
       discountConfig.pushDiscount.percentage) || 10;
 
     var accent = popupConfig.accentColor || '#4f46e5';
     var showEmail = ccfShowEmailField();
-    var showPhone = ccfShowPhoneField();
 
     // Determine best discount to show.
     var bestPct = pushPct;
     var bestAction = 'push';
-    if (showEmail && showPhone) {
-      bestPct = bothPct; bestAction = 'both';
-    } else if (showEmail) {
+    if (showEmail) {
       bestPct = emailPct; bestAction = 'email';
-    } else if (showPhone) {
-      bestPct = phonePct; bestAction = 'phone';
     }
 
     // Find Buy It Now button.
@@ -1479,25 +1485,18 @@
       '<div style="font-size:14px;font-weight:700;color:#111827">' +
       'Unlock ' + bestPct + '% off this order</div>' +
       '<div style="font-size:12px;color:#6b7280">' +
-      (showEmail || showPhone
-        ? 'Enter your details below to claim'
-        : 'Subscribe to notifications to claim') +
+      ccfEscapeHtml(
+        ccfOfferText(showEmail ? 'emailDiscount' : 'pushDiscount') ||
+        (showEmail
+          ? 'Enter your details below to claim'
+          : 'Subscribe to notifications to claim')
+      ) +
       '</div></div></div>';
 
     if (showEmail) {
       formHTML +=
         '<input type="email" id="ccf-nudge-email" ' +
         'placeholder="Your email address" ' +
-        'style="width:100%;padding:10px 14px;font-size:13px;' +
-        'border:1.5px solid #e5e7eb;border-radius:10px;' +
-        'box-sizing:border-box;margin-bottom:8px;' +
-        'background:#fff;font-family:inherit"/>';
-    }
-
-    if (showPhone) {
-      formHTML +=
-        '<input type="tel" id="ccf-nudge-phone" ' +
-        'placeholder="Your phone number" ' +
         'style="width:100%;padding:10px 14px;font-size:13px;' +
         'border:1.5px solid #e5e7eb;border-radius:10px;' +
         'box-sizing:border-box;margin-bottom:8px;' +
@@ -1534,15 +1533,10 @@
 
     nudgeBtn.addEventListener('click', function() {
       var email = document.getElementById('ccf-nudge-email');
-      var phone = document.getElementById('ccf-nudge-phone');
       var emailVal = email ? email.value.trim() : '';
-      var phoneVal = phone ? phone.value.trim() : '';
 
       // Determine action based on what was entered.
-      var action = 'push';
-      if (emailVal && phoneVal) action = 'both';
-      else if (emailVal) action = 'email';
-      else if (phoneVal) action = 'phone';
+      var action = emailVal ? 'email' : 'push';
 
       nudgeBtn.textContent = '⏳ Getting your discount...';
       nudgeBtn.disabled = true;
@@ -1554,7 +1548,6 @@
         body: JSON.stringify({
           action: action,
           email: emailVal || null,
-          phone: phoneVal || null,
           sessionId: getSessionId()
         })
       })

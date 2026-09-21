@@ -113,7 +113,10 @@ router.get('/discount-config', async (req, res) => {
     const slim = (r) => ({
       enabled: !!(r && r.enabled),
       percentage: (r && r.percentage) || 0,
+      offerText: String((r && r.offerText) || '').trim().slice(0, 120),
     });
+    // phone / both are retired: never let a stale DB value switch them on.
+    const off = (r) => ({ enabled: false, percentage: (r && r.percentage) || 0 });
 
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -121,8 +124,8 @@ router.get('/discount-config', async (req, res) => {
     return res.json({
       pushDiscount: slim(doc.pushDiscount),
       emailDiscount: slim(doc.emailDiscount),
-      phoneDiscount: slim(doc.phoneDiscount),
-      bothDiscount: slim(doc.bothDiscount),
+      phoneDiscount: off(doc.phoneDiscount),
+      bothDiscount: off(doc.bothDiscount),
       offerHeadline: doc.offerHeadline || 'Get a discount on your first order!',
     });
   } catch (err) {
