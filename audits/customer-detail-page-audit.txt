@@ -1,0 +1,91 @@
+=== CUSTOMER DETAIL PAGE AUDIT ===
+Generated: 2026-09-21
+
+Row click navigates with ?shop= preserved: yes
+Side panel + all its state removed from Customers.jsx: yes
+Code moved, not duplicated: yes
+Loading / error (with retry) / not-found states: yes
+send-journey / send-journey-email payloads unchanged: yes
+Responsive layout at 900px: yes
+frontend build: pass (/admin/customers 5.92 kB, new /admin/customers/[id] 10 kB)
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+git push: NOT done (left for the user)
+Not verified in a browser: layout and the click-through were not exercised
+in the live embedded admin.
+
+
+ROW CLICK
+Customers.jsx now has useRouter and the same navigate() helper as
+DashboardScreen.jsx (appends ?shop=<encoded shop>, '&' if the path already
+has a query). Both the desktop and mobile row onClick call
+navigate(`/admin/customers/${encodeURIComponent(p._id)}`).
+The route wrapper reads shop from useSearchParams and id from useParams.
+
+
+PANEL REMOVED FROM Customers.jsx
+Removed: selectedCustomer, journeyLoading, notifTab, sendResult state; the
+notifTab-default useEffect; loadCustomerJourney; the two unused
+sendJourneyPush / sendJourneyEmail wrappers (dead code, never called);
+the 360px grid split (list is full width again); the whole right panel JSX;
+the isSel row highlight (nothing can be "selected" on a list page any more,
+so row background is now plain white/hover grey); apiSend, and the
+imports it no longer needs. A grep for selectedCustomer / journey /
+isSel / apiSend finds only one comment about "detail page".
+Pre-existing and left alone: the unused STAGE_CONFIG constant.
+
+
+WHAT MOVED WHERE (each piece exists in exactly one file)
+screens/customerShared.jsx (new, imported by both):
+  DS, StageBadge, ReachIcons
+screens/CustomerDetail.jsx (new, default export CustomerDetail):
+  SIGNAL_LABELS, EVENT_LABELS, EVENT_DOT_COLORS, getFriendlyPath,
+  SUGGESTIONS, NOTIFICATION_SUGGESTIONS, EMAIL_SUGGESTIONS,
+  ProductThumbnail, NotificationComposer, EmailComposer
+  (these are only used by the panel), plus the new page layout.
+screens/Customers.jsx keeps: PageHeader, STAGE_CONFIG, getRelativeTime,
+  GRID_COLS, FILTER_TABS and the list component.
+customers/[id]/page.js (new): Suspense + AppProvider + NavMenu wrapper.
+The move was done by line-range extraction from the original file, not
+retyping, so the composers and helpers are byte-identical. A per-name grep
+confirms each identifier is defined in one file only.
+
+
+STATES IN CustomerDetail
+- Loading: back button plus a shimmer skeleton (ShimmerBox / ShimmerCard).
+- Error: red banner with the message and a Retry button that refetches.
+  Also shown if shop or id is missing from the URL.
+- Not found: "Customer not found" card when customers[] comes back empty.
+- "No push subscription or email on file" card logic kept.
+- Send feedback: same "Sent successfully!" / "Error: ..." text, 3s clear.
+Fetch: GET /api/events/:shop/journey?profileId=X with both shop and
+profileId passed through encodeURIComponent.
+
+
+PAYLOADS
+NotificationComposer and EmailComposer were moved unedited: still
+POST /api/push/send-journey {profileId, title, body, url} and
+POST /api/push/send-journey-email {profileId, subject, body}. No backend
+file was touched.
+
+
+RESPONSIVE
+CustomerDetail tracks window.innerWidth < 900 (resize listener). At 900px
+and above: grid minmax(0,3fr) minmax(0,2fr) with Recent activity on the left
+and Most interested in + Send notification stacked on the right. Below 900px
+it is a single column. Page max width is 1100 (DS.page default 960 is
+overridden for the detail page).
+
+
+NAVMENU
+The new [id] wrapper uses the first item href="/admin" rel="home", matching
+page.js. The other wrappers (customers, dashboard, etc.) still have
+/admin/dashboard as their first item; they were not changed (not asked).
+
+
+NOTES / DEVIATIONS
+- The timeline on the detail page is no longer capped at 200px height as
+  it was in the narrow panel; it uses the full column height.
+- The old standalone screens/Journey.jsx and /admin/journey route were left
+  untouched, as instructed.
+- Recent activity heading and cards were restyled slightly for the wider
+  layout (same data and labels).
