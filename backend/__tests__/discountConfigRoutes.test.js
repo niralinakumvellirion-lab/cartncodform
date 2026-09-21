@@ -120,3 +120,39 @@ describe('GET /discount-config (App Proxy)', () => {
     expect(res.body.offerHeadline).toBe('Head');
   });
 });
+
+describe('POST /generate-discount (App Proxy)', () => {
+  const post = handlerFor(proxyRouter, '/generate-discount', 'post');
+  const Store = require('../models/Store');
+
+  beforeEach(() => {
+    global.fetch = jest.fn();
+  });
+
+  test.each(['phone', 'both'])("rejects action '%s' with 400 before any lookup or Shopify call", async (action) => {
+    const res = mockRes();
+    await post({ query: { shop: SHOP }, body: { action, email: 'a@b.co' } }, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body).toEqual({ error: 'Unsupported discount action' });
+    expect(DiscountConfig.findOne).not.toHaveBeenCalled();
+    expect(Store.findOne).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('missing action is also rejected', async () => {
+    const res = mockRes();
+    await post({ query: { shop: SHOP }, body: {} }, res);
+    expect(res.statusCode).toBe(400);
+  });
+
+  test.each(['push', 'email'])("allows action '%s' through to config lookup", async (action) => {
+    DiscountConfig.findOne.mockResolvedValue(null);
+    Store.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(null) });
+    const res = mockRes();
+    await post({ query: { shop: SHOP }, body: { action } }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(DiscountConfig.findOne).toHaveBeenCalled();
+  });
+});

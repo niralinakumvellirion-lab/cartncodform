@@ -155,6 +155,13 @@ router.post('/generate-discount', async (req, res) => {
     return res.status(403).json({ code: null, error: 'Invalid signature' });
   }
 
+  // Phone / both discounts are retired — only push and email may mint a code.
+  // Rejected before any config lookup or Shopify call.
+  const action = String((req.body && req.body.action) || '').trim();
+  if (action !== 'push' && action !== 'email') {
+    return res.status(400).json({ error: 'Unsupported discount action' });
+  }
+
   try {
     const shop = String(req.query.shop || req.body.shop || '').trim().toLowerCase();
     const result = await generateDiscount(shop, req.body || {});
