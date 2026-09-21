@@ -12,7 +12,7 @@ function CodContent() {
   return (
     <AppProvider i18n={{}}>
       <NavMenu>
-        <a href="/admin/dashboard" rel="dashboard">Dashboard</a>
+        <a href="/admin" rel="home">Dashboard</a>
         <a href="/admin/activity" rel="activity">Activity</a>
         <a href="/admin/queue" rel="queue">Queue</a>
         <a href="/admin/automation" rel="automation">Automation</a>
