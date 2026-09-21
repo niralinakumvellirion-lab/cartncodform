@@ -6,7 +6,7 @@ import { NavMenu } from '@shopify/app-bridge-react';
 import { useSearchParams } from 'next/navigation';
 import '@shopify/polaris/build/esm/styles.css';
 
-import TodayScreen from './screens/Today';
+import DashboardScreen from './dashboard/DashboardScreen';
 import OnboardingScreen from './screens/Onboarding';
 
 function AdminHomeContent() {
@@ -48,7 +48,7 @@ function AdminHomeContent() {
           }}
         />
       ) : (
-        <TodayScreen shop={shop} />
+        <DashboardScreen shop={shop} />
       )}
     </AppProvider>
   );

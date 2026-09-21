@@ -1,0 +1,64 @@
+=== LANDING DASHBOARD AUDIT ===
+Generated: 2026-09-21
+
+Onboarded users now land on DashboardScreen: yes
+OnboardingScreen still shown for non-onboarded users: yes
+NavMenu "Dashboard" item matches landing screen: partially (see below)
+Remaining imports of TodayScreen: none
+frontend build: pass
+vercel deploy: done (readyState READY, aliased to https://app.shopireachboost.com)
+git push: NOT done (left for the user, as instructed)
+
+
+FILES CHANGED
+1. frontend/app/admin/page.js
+   - line 9: import TodayScreen from './screens/Today'
+             -> import DashboardScreen from './dashboard/DashboardScreen'
+   - line 51: <TodayScreen shop={shop} /> -> <DashboardScreen shop={shop} />
+   Onboarding check, NavMenu and AppProvider untouched.
+   DashboardScreen is a default export taking { shop } (confirmed at
+   DashboardScreen.jsx line 394), the same prop the admin/dashboard/page.js
+   wrapper passes, so it renders directly with no redirect and no flash
+   of the old screen.
+2. frontend/app/admin/screens/Onboarding.jsx
+   - line 406: button label "Go to Today" -> "Go to Dashboard"
+
+
+ONBOARDING COMPLETION FLOW
+finish() (Onboarding.jsx 184-191) sets localStorage ccf_onboarded=true and
+calls onDone(). page.js's onDone sets showOnboarding=false, which re-renders
+the same page with the landing component -- now DashboardScreen. It never
+navigated to a Today route, so no routing change was needed. Only the
+button label still said "Today"; that was updated (small addition beyond the
+literal instruction, made so the label matches the destination).
+Pre-existing, not changed: page.js passes onNavigate={() => {}}, so
+onboarding steps with actionType 'nav' call a no-op (they only tick the
+step done). Worth a separate look.
+
+
+NAVMENU
+First item is <a href="/admin/dashboard" rel="dashboard">Dashboard</a>,
+unchanged, and /admin/dashboard renders the same DashboardScreen. Caveat:
+the landing URL is /admin, not /admin/dashboard, and no NavMenu link has
+rel="home" pointing at /admin, so App Bridge may not highlight "Dashboard"
+when the user is on /admin itself. Not changed because the task said to
+keep NavMenu exactly as is and this can't be checked without the embedded
+admin. If the highlight is wrong, the fix is href="/admin" rel="home" on the
+first item.
+
+
+REMAINING TodayScreen IMPORTS
+None. Searched frontend (excluding node_modules) for TodayScreen and
+screens/Today: the only hits were the two lines in page.js changed above,
+plus an unrelated comment in QueueScreen.jsx about a calendar "Today"
+button. screens/Today.jsx was not deleted, per instructions.
+
+
+GIT
+Only frontend/app/admin/page.js, frontend/app/admin/screens/Onboarding.jsx
+and this audit were staged, NOT git add -A. The working tree also holds
+unrelated uncommitted work (backend/routes/push.js and
+backend/utils/pushNotification.js send-store split, DashboardScreen.jsx
+[SendNow] console.log, pre-existing frontend/lib/api.js and
+backend/__tests__/brain.test.js edits, ~100 untracked audits). A blanket add
+would have committed all of that under this message.

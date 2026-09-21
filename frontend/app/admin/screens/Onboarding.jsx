@@ -403,7 +403,7 @@ export default function Onboarding({ shop, onNavigate, onDone }) {
               fontSize: '14px',
             }}
           >
-            Go to Today
+            Go to Dashboard
           </button>
         </div>
       </div>
