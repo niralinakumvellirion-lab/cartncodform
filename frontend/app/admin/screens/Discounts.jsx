@@ -103,20 +103,68 @@ function PageHeader({ title, subtitle, action }) {
   );
 }
 
+// Inline SVG icons (Lucide-style paths, ISC licence; no dependency).
+function Svg({ size = 20, children }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      {children}
+    </svg>
+  );
+}
+const Icons = {
+  Bell: ({ size }) => (
+    <Svg size={size}>
+      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    </Svg>
+  ),
+  Mail: ({ size }) => (
+    <Svg size={size}>
+      <rect width="20" height="16" x="2" y="4" rx="2" />
+      <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+    </Svg>
+  ),
+  Type: ({ size }) => (
+    <Svg size={size}>
+      <polyline points="4 7 4 4 20 4 20 7" />
+      <line x1="9" x2="15" y1="20" y2="20" />
+      <line x1="12" x2="12" y1="4" y2="20" />
+    </Svg>
+  ),
+  Check: ({ size }) => (
+    <Svg size={size}>
+      <path d="M20 6 9 17l-5-5" />
+    </Svg>
+  ),
+};
+
 // Phone / "Email + Phone" discounts are retired: the popup only collects an
 // email (see ccfShowPhoneField() in push-notifications.liquid) and the server
 // always saves those two rules as disabled, so they are not shown or sent.
 const DISCOUNT_ITEMS = [
   {
     key: 'pushDiscount',
-    label: '🔔 Push notification',
+    label: 'Push notification',
+    Icon: Icons.Bell,
     desc: 'Customer allows push notifications',
     defaults: { percentage: 10, maxUses: 100, expiryDays: 7 },
     autoText: (pct) => `You get ${pct}% off as a subscriber`,
   },
   {
     key: 'emailDiscount',
-    label: '✉️ Email address',
+    label: 'Email address',
+    Icon: Icons.Mail,
     desc: 'Customer provides their email',
     defaults: { percentage: 15, maxUses: 100, expiryDays: 7 },
     autoText: (pct) => `Add your email to get ${pct}% off`,
@@ -261,7 +309,17 @@ export default function Discounts({ shop }) {
           <div style={{ ...DS.card, marginBottom: 0 }}>
             <div style={{ maxWidth: 560 }}>
               <div style={labelRowStyle}>
-                <span style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>
+                <span
+                  style={{
+                    fontSize: '14px',
+                    fontWeight: 600,
+                    color: '#111827',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                >
+                  <Icons.Type size={20} />
                   Popup headline
                 </span>
                 <span style={counterStyle}>{headline.length} / {HEADLINE_MAX}</span>
@@ -294,7 +352,7 @@ export default function Discounts({ shop }) {
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 12,
+                    gap: 10,
                     marginBottom: d.enabled ? 16 : 0,
                   }}
                 >
@@ -326,6 +384,9 @@ export default function Discounts({ shop }) {
                       }}
                     />
                   </div>
+                  <span style={{ display: 'inline-flex', color: '#4f46e5' }}>
+                    <item.Icon size={20} />
+                  </span>
                   <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
                     {item.label}
                   </div>
@@ -456,7 +517,20 @@ export default function Discounts({ shop }) {
               flexWrap: 'wrap',
             }}
           >
-            {success && <span style={{ fontSize: '13px', color: DS.success }}>✓ Saved</span>}
+            {success && (
+              <span
+                style={{
+                  fontSize: '13px',
+                  color: DS.success,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                }}
+              >
+                <Icons.Check size={16} />
+                Saved
+              </span>
+            )}
             {error && <span style={{ fontSize: '13px', color: DS.danger }}>{error}</span>}
             <button
               onClick={saveConfig}

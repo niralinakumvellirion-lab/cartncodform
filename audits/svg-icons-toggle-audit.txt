@@ -1,0 +1,83 @@
+=== SVG ICONS + TOGGLE AUDIT ===
+Generated: 2026-09-21
+
+Toggle leftmost: yes (see below)
+Emojis replaced with SVGs in both files: yes (lists below); a re-scan of
+  both files for emoji/dingbat glyphs finds none
+No dependency added: confirmed (package.json untouched; paths hand-inlined)
+Merchant strings escaped, never raw innerHTML: confirmed
+No flow/fetch/storage logic changed: confirmed
+frontend build: pass; vercel deploy: READY, aliased to app.shopireachboost.com
+shopify app deploy --allow-updates: released shopireachboost-ai-122
+  (the CLI printed two "[error]: ParserBlockingScript" theme-check lines for
+  the extension; the version still released. This is the synchronous
+  Firebase <script> tags at the top of the block, not touched here.)
+git push: NOT done (left for the user)
+Not verified visually in the admin or on a live storefront.
+
+
+PART 1 - TOGGLE
+Before this task the toggle was already the first element of the card
+header: it had been on the RIGHT (after the label/description block) in the
+original Discounts.jsx and was moved to the left in the earlier
+"compact discount card" redesign (commit c4 of this series). This task did
+not need to move it. Header order now: [toggle] [icon] [action name] ....
+[summary chip]; gap between elements is 10px (was 12px), vertically
+centered (alignItems center).
+
+
+PART 2 - ADMIN (Discounts.jsx)
+Icons block at top: Svg wrapper + Icons = { Bell, Mail, Type, Check }
+(20x20 default, viewBox 0 0 24 24, fill none, stroke currentColor,
+strokeWidth 2, round caps/joins, aria-hidden). Lucide-style path data
+inlined by hand.
+  '🔔 Push notification' label -> Bell icon (20px) + text
+  '✉️ Email address' label     -> Mail icon (20px) + text
+  '✓ Saved'                    -> Check icon (16px) + "Saved"
+  "Popup headline" label       -> Type icon (20px) added (it had no icon)
+Not icons, left as text: "…" in "Loading…"/"Saving…", "·" in the chip.
+A Tag icon is not used on this screen so it was not defined.
+
+
+PART 3 - STOREFRONT (push-notifications.liquid)
+Emojis found in customer-facing UI (19 occurrences) and replacements.
+New helpers next to ccfEscapeHtml: CCF_ICONS { tag, gift, bag, check,
+loader } (stroke currentColor, size via width/height, vertical-align:
+middle), ccfIcon(name, size, marginRight) and ccfSetLabel(el, iconKey,
+text) which sets innerHTML = icon + ccfEscapeHtml(text). Loader gets class
+ccf-spin; ccfInjectPopupStyles now defines @keyframes ccfSpin + .ccf-spin.
+  Product discount button   '🎉 Buy with...'            -> gift 16
+  Unlocked state (big)      '🎉'                         -> gift 40 (green)
+  "Applying..." line        '✓'                          -> check 14
+  Code copied               '✓ Copied!'                  -> check 14 + text
+  No-image placeholder      '🛍️'                         -> bag 36 (white)
+  Card offer badge          '🏷️'                         -> tag 16 (green)
+  Allow: setting up         '⏳ Setting up...'           -> loader 16 (spin)
+  Allow: granted path       '✓ Getting your discount...' -> check 16
+  Allow: redirecting (x2)   '🎉 Redirecting...'          -> gift 16
+  Allow: subscribed         '✓ Subscribed!' and
+                            '✓ Subscribed! Getting...'    -> check 16
+  Nudge header              '🏷️' (24px)                  -> tag 24
+  Nudge button              '🏷️ Unlock N% off'           -> tag 16
+  Nudge loading             '⏳ Getting your discount...' -> loader 16 (spin)
+  Nudge unlocked            '🎉' (32px)                  -> gift 32 (green)
+  Nudge button reset (x2)   '🏷️ Unlock N% off'           -> tag 16 via
+                                                          ccfSetLabel
+Arrows such as "Shop now ... ->" are not emoji and were left.
+
+
+ESCAPING
+Every button label goes through ccfSetLabel -> ccfEscapeHtml. Where an
+innerHTML string was rewritten (product discount button), d.percentage and
+d.code are now passed through ccfEscapeHtml too. The Allow button's merchant
+text (cfg.allowText / allowLabel) is not put through innerHTML at all: it is
+still read and restored via textContent (originalButtonText/resetButton),
+so it can never be interpreted as HTML. Merchant offerText remains escaped
+at its insertion points from the earlier task. Icon strings are constants.
+
+
+NO LOGIC CHANGES
+Only the label/icon expressions changed. Same conditions, same fetch calls
+and bodies, same sessionStorage/localStorage reads/writes, same discount
+generation and redirect timing. resetButton() still restores the original
+label via textContent.
