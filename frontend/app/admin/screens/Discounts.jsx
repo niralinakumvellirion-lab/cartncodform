@@ -149,17 +149,43 @@ function buildPayload(config) {
   return out;
 }
 
-const inputStyle = {
-  width: '100%',
-  padding: '8px 10px',
-  fontSize: '13px',
+// Compact, content-sized inputs. Focus ring uses the accent color via CSS
+// (inline styles can't express :focus).
+const FOCUS_CSS =
+  '.disc-input:focus{outline:none;border-color:#4f46e5;box-shadow:0 0 0 3px rgba(79,70,229,0.18);}';
+
+const fieldStyle = {
+  height: 32,
+  fontSize: 13,
+  padding: '0 10px',
   border: '1px solid #e5e7eb',
-  borderRadius: '8px',
-  outline: 'none',
+  borderRadius: 8,
   boxSizing: 'border-box',
+  background: '#fff',
+  color: '#111827',
 };
 
-const labelStyle = { fontSize: '12px', color: '#6b7280', marginBottom: '6px' };
+const fieldLabelStyle = {
+  fontSize: 11,
+  color: '#9ca3af',
+  textTransform: 'uppercase',
+  letterSpacing: '0.05em',
+  fontWeight: 600,
+  marginBottom: 4,
+};
+
+const unitStyle = { fontSize: 13, color: '#6b7280' };
+
+const labelRowStyle = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'baseline',
+  marginBottom: 6,
+};
+
+const counterStyle = { fontSize: 11, color: '#9ca3af' };
+
+const helperStyle = { fontSize: 11, color: '#9ca3af', marginTop: 4 };
 
 export default function Discounts({ shop }) {
   const [config, setConfig] = useState({});
@@ -228,7 +254,8 @@ export default function Discounts({ shop }) {
   const headline = config.offerHeadline || '';
 
   return (
-    <div style={DS.page}>
+    <div style={{ ...DS.page, maxWidth: 720 }}>
+      <style>{FOCUS_CSS}</style>
       <PageHeader
         title="Discounts"
         subtitle="Configure discount rules for popup capture"
@@ -237,21 +264,27 @@ export default function Discounts({ shop }) {
       {loading ? (
         <div style={{ fontSize: '13px', color: '#9ca3af' }}>Loading…</div>
       ) : (
-        <>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Popup headline */}
-          <div style={DS.card}>
-            <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '12px' }}>
-              Popup headline
-            </div>
-            <input
-              value={headline}
-              maxLength={HEADLINE_MAX}
-              onChange={(e) => setConfig((c) => ({ ...c, offerHeadline: e.target.value }))}
-              placeholder="Get a discount on your first order!"
-              style={{ ...inputStyle, padding: '10px 12px' }}
-            />
-            <div style={{ fontSize: '11px', color: '#9ca3af', textAlign: 'right', marginTop: '4px' }}>
-              {headline.length} / {HEADLINE_MAX}
+          <div style={{ ...DS.card, marginBottom: 0 }}>
+            <div style={{ maxWidth: 560 }}>
+              <div style={labelRowStyle}>
+                <span style={{ fontSize: '14px', fontWeight: 600, color: '#111827' }}>
+                  Popup headline
+                </span>
+                <span style={counterStyle}>{headline.length} / {HEADLINE_MAX}</span>
+              </div>
+              <input
+                className="disc-input"
+                value={headline}
+                maxLength={HEADLINE_MAX}
+                onChange={(e) => setConfig((c) => ({ ...c, offerHeadline: e.target.value }))}
+                placeholder="Get a discount on your first order!"
+                style={{ ...fieldStyle, height: 36, width: '100%' }}
+              />
+              <div style={helperStyle}>
+                The main heading shown at the top of the popup.
+              </div>
             </div>
           </div>
 
@@ -259,26 +292,20 @@ export default function Discounts({ shop }) {
             const d = config[item.key] || {};
             const pctValue = d.percentage ?? item.defaults.percentage;
             const effectivePct = clampPct(pctValue, item.defaults.percentage);
+            const expiryShown = d.expiryDays || item.defaults.expiryDays;
             const offerText = d.offerText || '';
 
             return (
-              <div key={item.key} style={DS.card}>
+              <div key={item.key} style={{ ...DS.card, marginBottom: 0 }}>
                 {/* Header row */}
                 <div
                   style={{
                     display: 'flex',
-                    justifyContent: 'space-between',
                     alignItems: 'center',
-                    gap: '12px',
-                    marginBottom: d.enabled ? '16px' : 0,
+                    gap: 12,
+                    marginBottom: d.enabled ? 16 : 0,
                   }}
                 >
-                  <div>
-                    <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>
-                      {item.label}
-                    </div>
-                    <div style={{ fontSize: '12px', color: '#9ca3af' }}>{item.desc}</div>
-                  </div>
                   {/* Toggle */}
                   <div
                     onClick={() => updateRule(item.key, { enabled: !d.enabled })}
@@ -307,23 +334,35 @@ export default function Discounts({ shop }) {
                       }}
                     />
                   </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
+                    {item.label}
+                  </div>
+                  <div style={{ flex: 1 }} />
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontWeight: 600,
+                      padding: '3px 10px',
+                      borderRadius: 999,
+                      whiteSpace: 'nowrap',
+                      background: d.enabled ? DS.successLight : DS.gray100,
+                      color: d.enabled ? DS.success : DS.gray400,
+                    }}
+                  >
+                    {d.enabled ? `${effectivePct}% · ${expiryShown} days` : 'Off'}
+                  </span>
                 </div>
 
-                {/* Settings (shown when enabled) */}
+                {/* Body (shown when enabled) */}
                 {d.enabled && (
                   <>
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: isNarrow ? '1fr' : 'repeat(2, 1fr)',
-                        gap: '16px 12px',
-                      }}
-                    >
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20 }}>
                       {/* Percentage */}
                       <div>
-                        <div style={labelStyle}>Discount %</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <div style={fieldLabelStyle}>Discount</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <input
+                            className="disc-input"
                             type="number"
                             min="1"
                             max="100"
@@ -339,75 +378,75 @@ export default function Discounts({ shop }) {
                                 percentage: clampPct(pctValue, item.defaults.percentage),
                               })
                             }
-                            style={inputStyle}
+                            style={{ ...fieldStyle, width: 64 }}
                           />
-                          <span style={{ fontSize: '14px', fontWeight: '600', color: '#111827' }}>%</span>
+                          <span style={unitStyle}>%</span>
                         </div>
                       </div>
 
                       {/* Max uses */}
                       <div>
-                        <div style={labelStyle}>Max uses</div>
+                        <div style={fieldLabelStyle}>Max uses</div>
                         <input
+                          className="disc-input"
                           type="number"
                           min="1"
                           max="10000"
                           value={d.maxUses || item.defaults.maxUses}
                           onChange={(e) => updateRule(item.key, { maxUses: Number(e.target.value) })}
-                          style={inputStyle}
+                          style={{ ...fieldStyle, width: 88 }}
                         />
                       </div>
 
                       {/* Expiry days */}
                       <div>
-                        <div style={labelStyle}>Expires after (days)</div>
-                        <input
-                          type="number"
-                          min="1"
-                          max="365"
-                          value={d.expiryDays || item.defaults.expiryDays}
-                          onChange={(e) => updateRule(item.key, { expiryDays: Number(e.target.value) })}
-                          style={inputStyle}
-                        />
+                        <div style={fieldLabelStyle}>Expires</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <input
+                            className="disc-input"
+                            type="number"
+                            min="1"
+                            max="365"
+                            value={d.expiryDays || item.defaults.expiryDays}
+                            onChange={(e) => updateRule(item.key, { expiryDays: Number(e.target.value) })}
+                            style={{ ...fieldStyle, width: 64 }}
+                          />
+                          <span style={unitStyle}>days</span>
+                        </div>
                       </div>
 
                       {/* Code prefix */}
                       <div>
-                        <div style={labelStyle}>Code prefix</div>
+                        <div style={fieldLabelStyle}>Code prefix</div>
                         <input
+                          className="disc-input"
                           type="text"
                           maxLength="10"
                           value={d.prefix || ''}
                           onChange={(e) => updateRule(item.key, { prefix: e.target.value.toUpperCase() })}
-                          style={{ ...inputStyle, fontFamily: 'monospace' }}
+                          style={{ ...fieldStyle, width: 120, fontFamily: 'monospace' }}
                         />
                       </div>
                     </div>
 
-                    {/* Offer text — full width below the grid */}
-                    <div style={{ marginTop: '16px' }}>
-                      <div style={labelStyle}>Offer text shown in the popup</div>
-                      <textarea
+                    {/* Offer text — full width, 16px below the fields */}
+                    <div style={{ marginTop: 16 }}>
+                      <div style={labelRowStyle}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
+                          Offer text
+                        </span>
+                        <span style={counterStyle}>{offerText.length} / {OFFER_TEXT_MAX}</span>
+                      </div>
+                      <input
+                        className="disc-input"
+                        type="text"
                         value={offerText}
                         maxLength={OFFER_TEXT_MAX}
-                        rows={2}
                         onChange={(e) => updateRule(item.key, { offerText: e.target.value })}
                         placeholder={item.autoText(effectivePct)}
-                        style={{ ...inputStyle, resize: 'vertical', fontFamily: 'inherit' }}
+                        style={{ ...fieldStyle, width: '100%' }}
                       />
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          gap: '8px',
-                          fontSize: '11px',
-                          color: '#9ca3af',
-                          marginTop: '4px',
-                        }}
-                      >
-                        <span>Leave blank to use the automatic text.</span>
-                        <span style={{ flexShrink: 0 }}>{offerText.length} / {OFFER_TEXT_MAX}</span>
-                      </div>
+                      <div style={helperStyle}>Leave blank to use the automatic text.</div>
                     </div>
                   </>
                 )}
@@ -415,8 +454,18 @@ export default function Discounts({ shop }) {
             );
           })}
 
-          {/* Save button */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          {/* Save button — right aligned, status text to its left */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            {success && <span style={{ fontSize: '13px', color: DS.success }}>✓ Saved</span>}
+            {error && <span style={{ fontSize: '13px', color: DS.danger }}>{error}</span>}
             <button
               onClick={saveConfig}
               disabled={saving}
@@ -430,10 +479,8 @@ export default function Discounts({ shop }) {
             >
               {saving ? 'Saving…' : 'Save discount settings'}
             </button>
-            {success && <span style={{ fontSize: '13px', color: DS.success }}>✓ Saved</span>}
-            {error && <span style={{ fontSize: '13px', color: DS.danger }}>{error}</span>}
           </div>
-        </>
+        </div>
       )}
     </div>
   );

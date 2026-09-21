@@ -1,0 +1,63 @@
+=== DISCOUNTS COMPACT UI AUDIT ===
+Generated: 2026-09-21
+
+No state/handler/payload/validation logic changed: confirmed
+Input widths, only offer text + headline full width: confirmed
+Textarea replaced by single-line input, maxLength 120 kept: confirmed
+Summary chip on/off states: confirmed
+Wraps under 600px: confirmed by design (flex-wrap), not viewed in a browser
+frontend build: pass; vercel deploy: READY, aliased to app.shopireachboost.com
+git push: NOT done (left for the user)
+
+
+LOGIC UNTOUCHED
+Everything above the render (imports, DISCOUNT_ITEMS, clampPct, buildPayload,
+component state, resize listener, load effect, updateRule, saveConfig) is
+unchanged. A diff filtered for those identifiers shows only two handler lines
+that changed indentation (headline onChange, expiry onChange). The percentage
+onChange/onBlur still store '' while typing and clamp 1-100 on blur; the
+save payload is still {offerHeadline, pushDiscount, emailDiscount}.
+The old inputStyle/labelStyle constants were replaced by presentation-only
+style objects (fieldStyle, fieldLabelStyle, unitStyle, labelRowStyle,
+counterStyle, helperStyle) and a FOCUS_CSS string.
+
+
+WIDTHS
+Shared field style: height 32, font 13, padding 0 10px, border 1px #e5e7eb,
+radius 8. Focus ring is a <style> rule on class disc-input (border and
+3px glow in the accent #4f46e5), since inline styles can't do :focus.
+  Discount % input   64px, then inline "%"
+  Max uses           88px
+  Expires            64px, then inline "days"
+  Code prefix        120px (monospace)
+  Offer text         width 100% (the only full-width field in a card)
+  Popup headline     width 100% of a container capped at maxWidth 560,
+                     height 36
+No other input is width 100%.
+
+
+OFFER TEXT
+<textarea> replaced by <input type="text"> with maxLength 120. Label row
+"Offer text" left, "n / 120" right; helper "Leave blank to use the
+automatic text." below; the placeholder still tracks the current % via
+item.autoText(effectivePct).
+
+
+CARD HEADER AND CHIP
+Header row: toggle, action name (14px, 600), flexible spacer, chip.
+Chip on: green pill "{pct}% · {expiryDays} days" (pct is the clamped
+value, expiry falls back to the default). Chip off: grey pill "Off".
+Fields row: flex, wrap, gap 20, each field a 11px muted uppercase label
+over its input; body only renders when the toggle is on.
+
+
+PAGE
+Page max width 720; cards stacked in a flex column with 16px gap. Headline
+card has label row "Popup headline" / "n / 200", single-line input and a muted
+helper "The main heading shown at the top of the popup." Save button is
+right-aligned at the bottom with the Saved / error text on its left.
+Under 600px the field row and the button row wrap (flex-wrap); the largest
+fixed widths (64/88/120px) total well under 400px, so nothing forces
+horizontal overflow. I removed the separate isNarrow grid switch from the
+render since flex-wrap now handles it; the isNarrow state and resize
+listener were left in place (now unused by the render).
