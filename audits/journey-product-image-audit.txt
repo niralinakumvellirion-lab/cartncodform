@@ -1,102 +1,94 @@
 === JOURNEY PRODUCT IMAGE AUDIT ===
-Generated: 2026-09-15
+Generated: 2026-09-21
 
-Change 1 — topProducts shows image thumbnail: yes
-Change 2 — ProductThumbnail accepts imageUrl prop: yes
-Change 3 — imageUrl passed in NotificationComposer: yes
-  imageUrl passed in EmailComposer: yes
-frontend build: pass
-git push: done (ab65b32..451f322)
-vercel deploy: done (readyState READY, aliased to
-  https://cartncodform-beryl.vercel.app)
+3-step resolution order in buildJourneyEntry: confirmed
+URL normalisation (protocol-relative + non-http rejection): confirmed
+Admin API fallback capped / parallel / time-boxed: confirmed
+Cache write fire-and-forget, cannot fail the request: confirmed
+fetchProductImage extracted (not duplicated), webhooks behaviour unchanged: confirmed
+Response shape unchanged: confirmed
+node --check (events.js, webhooks.js, productImage.js): pass
+backend npm test: 19 of 20 suites pass (167/168 tests); 1 failure is
+  __tests__/brain.test.js test 11 "runAt lands outside quiet hours"
+  (Expected >= 6, Received 5). That test is clock-dependent, doesn't touch
+  any file changed here, and brain.test.js already carried uncommitted
+  edits before this task. Not investigated further.
+Not tested against a live Shopify store / Mongo.
 
-====================================================================
-DETAILS
-====================================================================
 
-File read in full first (1214 lines) as instructed.
+RESOLUTION ORDER (backend/routes/events.js, buildJourneyEntry)
+While building productViews, each product_view event's meta.imageUrl is
+normalised and, if valid, stored as eventImageUrl on that product. Events
+are already reversed to chronological order at that point, so the last
+non-empty value written is the most recent one. No extra query.
+For each of the top 3 products, in parallel (Promise.all):
+  1. ProductImageCache hit (one $in query, as before) -> use it.
+  2. Else eventImageUrl -> use it, and upsert it into ProductImageCache.
+  3. Else fetchProductImageWithTimeout(shop, productId, 3000).
+  Else imageUrl is null.
+A cache row whose stored URL fails normalisation is treated as a miss.
+eventImageUrl is stripped before returning.
 
-CHANGE 1 — "Most interested in" section
-  Actual location was lines ~1038-1048 (the task text estimated
-  ~778-798; the real line numbers differ because several earlier
-  tasks this session added code above this point — same class of
-  drift as previous tasks, resolved by locating the actual
-  topProducts.map(...) block by content, not by the given line
-  range). Replaced the plain title+count row with the given
-  layout: a 40x40 rounded thumbnail on the left (image or grey
-  placeholder icon), title + view count on the right, divider
-  between rows.
 
-  DEVIATION: rather than inlining the ~25-line image/placeholder
-  markup a second time exactly as given in the task text, reused
-  the ProductThumbnail component (see Change 2) since its newly
-  redesigned output is visually identical to what the task's
-  inline snippet specified (same 40x40 size, borderRadius 8,
-  border, same placeholder SVG). Avoids duplicating the same
-  markup twice in one file. Row layout/spacing/divider logic is
-  otherwise implemented exactly as given.
+NORMALISATION (backend/utils/productImage.js, normalizeImageUrl)
+"//cdn.shopify.com/x.jpg" -> "https://cdn.shopify.com/x.jpg". After that,
+anything not matching ^https?:// (empty, null, non-string, relative paths,
+data:, javascript:) returns null = missing. Applied to: event og:image,
+cached URLs on read, and the Admin API result before it is returned.
+Note: the Admin API path's own cache upsert lives inside the unchanged
+fetchProductImage and writes Shopify's src as returned (Shopify returns
+absolute https URLs). Only the step-2 upsert normalises before writing.
 
-CHANGE 2 — ProductThumbnail component
-  Found at what was lines 295-321 (already existed from an earlier
-  "Phase 4 improvements" task, previously accepting only
-  `{ imageUrl }`). Replaced with the given implementation: now
-  accepts `{ imageUrl, title }`, renders a bordered/rounded image
-  wrapper div when imageUrl is present (using title for alt text,
-  falling back to 'Product'), or the grey placeholder box with the
-  given SVG icon otherwise.
 
-  Also removed/rewrote the stale comment block above the old
-  component (previously explained that topProducts had no imageUrl
-  field yet and this would always render the placeholder as a
-  TODO) — that TODO was already resolved by the prior
-  "topproducts-image" task (see audits/topproducts-image-audit.txt),
-  so the comment no longer matched reality and was replaced with an
-  accurate one.
+ADMIN API FALLBACK
+- Only reached for products still without an image, so at most 3 calls per
+  journey entry (topProducts is sliced to 3 before resolution).
+- Parallel via Promise.all across the 3 products.
+- fetchProductImageWithTimeout races fetchProductImage against a 3s timer
+  and resolves null on timeout or any error; it never rejects, and clears
+  its timer.
+- Limitation: the race abandons the slow call but does not abort the
+  underlying fetch(); it finishes in the background and, if it succeeds,
+  still writes the cache (harmless).
+- It passes accessToken null, so fetchProductImage derives the token from
+  the Store row via refreshAccessTokenIfNeeded, same as the webhook path.
+  If there is no Store row it returns null.
 
-CHANGE 3 — imageUrl passed to ProductThumbnail in composers
-  NotificationComposer (top-level component, ~line 323 onward) and
-  EmailComposer (~line 560 onward) both already computed
-  equivalent local variables before this task even started:
-    const rawTopProductTitle = customer?.topProducts?.[0]?.title || '';
-    const productImage = customer?.topProducts?.[0]?.imageUrl || null;
-  (these were added in the earlier "Phase 4 / Change 4" suggestion-
-  thumbnail task, anticipating this exact imageUrl addition).
 
-  DEVIATION: rather than duplicating the raw
-  `customer?.topProducts?.[0]?.title || ''` /
-  `customer?.topProducts?.[0]?.imageUrl || null` expressions
-  inline a second time (as the task's literal snippet showed),
-  reused these already-correct, already-present local variables:
-    <ProductThumbnail imageUrl={productImage} title={rawTopProductTitle} />
-  This is functionally identical to the task's given JSX in both
-  components (same values, same fallbacks: '' vs null are the only
-  difference, and ProductThumbnail already treats a falsy title the
-  same as an empty string via its `alt={title || 'Product'}`
-  fallback) — done this way to stay consistent with this file's own
-  existing DRY convention rather than reintroducing duplicate
-  optional-chaining expressions right next to variables that already
-  hold the same values.
-  Applied in both suggestion-card call sites: the NotificationComposer
-  suggestion card (previously `<ProductThumbnail imageUrl={productImage} />`)
-  and the equivalent EmailComposer suggestion card.
+CACHE WRITE
+The step-2 upsert is ProductImageCache.findOneAndUpdate(..., {upsert:true})
+wrapped in Promise.resolve(...).catch(() => {}) inside a try/catch, and is
+never awaited. A rejection or a synchronous throw is swallowed, so it
+cannot fail or delay the response. A test covers a rejecting write.
 
-VERIFICATION
-====================================================================
-cd frontend && npm run build                          PASSED
-  (Compiled successfully, all 16 routes generated, no errors;
-  /admin/journey route size 9.13 kB, up from 9.04 kB)
 
-GIT / DEPLOY
-====================================================================
-Files committed: frontend/app/admin/screens/Journey.jsx (only)
-Commit message: "feat: show product images in Journey topProducts
-and suggestion cards"
-git push origin main                                   SUCCESS
-  ab65b32..451f322  main -> main
-cd frontend && npx vercel --prod                       SUCCESS
-  readyState: READY
-  Production: https://cartncodform-4jhmc5tpw-niralinakumvellirion-8853s-projects.vercel.app
-  Aliased:    https://cartncodform-beryl.vercel.app
+EXTRACTION
+fetchProductImage was moved verbatim (line-range copy, including its
+existing debug logs) from routes/webhooks.js into utils/productImage.js.
+webhooks.js now imports it, still exposes router.fetchProductImage (used by
+routes/push.js), and its call site is untouched. Removed from webhooks.js
+only what became unused: the ProductImageCache require and
+refreshAccessTokenIfNeeded in the utils/shopify import. New in
+productImage.js: normalizeImageUrl and fetchProductImageWithTimeout.
 
-No backend files were touched. No other frontend files were
-touched.
+
+RESPONSE SHAPE
+Each topProducts entry is still { productId, title, count, lastSeen,
+imageUrl }, with imageUrl null only when all three sources fail. No other
+field of the journey response changed.
+
+
+TESTS
+- __tests__/journeyEndpoint.test.js: mocks ../utils/productImage and adds
+  findOneAndUpdate to the cache mock; new cases for cache-wins, latest
+  event og:image + normalisation + upsert, non-http rejection -> API,
+  all-fail null with exact entry shape, failing cache write, and the
+  3-product cap. Existing cases unchanged.
+- __tests__/productImage.test.js (new): normalizeImageUrl cases and the
+  timeout cap.
+
+
+GIT
+Staged: backend/routes/events.js, backend/routes/webhooks.js,
+backend/utils/productImage.js (as instructed), plus the two test files and
+this audit (CLAUDE.md requires tests for new logic). Not pushed.

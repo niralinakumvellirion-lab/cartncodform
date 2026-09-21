@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const StorefrontEvent = require('../models/StorefrontEvent');
 const ProductImageCache = require('../models/ProductImageCache');
+const { normalizeImageUrl, fetchProductImageWithTimeout } = require('../utils/productImage');
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
 
 // Phase 1 attribution — incoming storefront event `type` -> AttributedEvent
@@ -474,6 +475,10 @@ async function buildJourneyEntry(shop, profile, entrySignals) {
         };
       }
       productViews[productId].count++;
+      // events are chronological (oldest first) here, so the last
+      // non-empty value written wins = the most recent og:image.
+      const evImage = normalizeImageUrl(e.meta.imageUrl);
+      if (evImage) productViews[productId].eventImageUrl = evImage;
     }
   });
 
@@ -481,7 +486,8 @@ async function buildJourneyEntry(shop, profile, entrySignals) {
     .sort((a, b) => b.count - a.count)
     .slice(0, 3);
 
-  // Enrich topProducts with cached images
+  // Resolve each top product's image: cache -> latest product_view
+  // meta.imageUrl -> Shopify Admin API (top 3 only, parallel, 3s cap each).
   const productIds = topProducts.map(p => String(p.productId));
   const cachedImages = productIds.length > 0
     ? await ProductImageCache.find({
@@ -492,12 +498,37 @@ async function buildJourneyEntry(shop, profile, entrySignals) {
 
   const imageMap = {};
   cachedImages.forEach(c => {
-    imageMap[String(c.productId)] = c.imageUrl || null;
+    imageMap[String(c.productId)] = normalizeImageUrl(c.imageUrl);
   });
 
-  const topProductsWithImages = topProducts.map(p => ({
-    ...p,
-    imageUrl: imageMap[String(p.productId)] || null,
+  const topProductsWithImages = await Promise.all(topProducts.map(async (p) => {
+    const { eventImageUrl, ...entry } = p;
+    const key = String(p.productId);
+
+    let imageUrl = imageMap[key] || null;
+    let needsCacheWrite = false;
+
+    if (!imageUrl && eventImageUrl) {
+      imageUrl = eventImageUrl;
+      needsCacheWrite = true;
+    }
+    if (!imageUrl) {
+      imageUrl = await fetchProductImageWithTimeout(shop, key, 3000);
+      // fetchProductImage already upserts the cache on success.
+    }
+
+    if (needsCacheWrite) {
+      // Fire-and-forget: never awaited, never allowed to fail the request.
+      try {
+        Promise.resolve(ProductImageCache.findOneAndUpdate(
+          { shopDomain: shop, productId: key },
+          { imageUrl, cachedAt: new Date() },
+          { upsert: true }
+        )).catch(() => {});
+      } catch (e) { /* ignore */ }
+    }
+
+    return { ...entry, imageUrl: imageUrl || null };
   }));
 
   return {
