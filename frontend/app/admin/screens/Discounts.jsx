@@ -302,9 +302,9 @@ export default function Discounts({ shop }) {
                   <div
                     onClick={() => updateRule(item.key, { enabled: !d.enabled })}
                     style={{
-                      width: '44px',
-                      height: '24px',
-                      borderRadius: '12px',
+                      width: '35.2px',
+                      height: '19.2px',
+                      borderRadius: '9.6px',
                       cursor: 'pointer',
                       background: d.enabled ? '#16a34a' : '#d1d5db',
                       position: 'relative',
@@ -315,10 +315,10 @@ export default function Discounts({ shop }) {
                     <div
                       style={{
                         position: 'absolute',
-                        top: '3px',
-                        left: d.enabled ? '23px' : '3px',
-                        width: '18px',
-                        height: '18px',
+                        top: '2.4px',
+                        left: d.enabled ? '18.4px' : '2.4px',
+                        width: '14.4px',
+                        height: '14.4px',
                         borderRadius: '50%',
                         background: '#fff',
                         transition: 'left 0.2s',
