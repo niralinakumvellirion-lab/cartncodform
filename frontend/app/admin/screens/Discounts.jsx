@@ -356,34 +356,6 @@ export default function Discounts({ shop }) {
                     marginBottom: d.enabled ? 16 : 0,
                   }}
                 >
-                  {/* Toggle */}
-                  <div
-                    onClick={() => updateRule(item.key, { enabled: !d.enabled })}
-                    style={{
-                      width: '36px',
-                      height: '20px',
-                      borderRadius: '10px',
-                      cursor: 'pointer',
-                      background: d.enabled ? '#16a34a' : '#d1d5db',
-                      position: 'relative',
-                      transition: 'background 0.2s',
-                      flexShrink: 0,
-                    }}
-                  >
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: '2px',
-                        left: d.enabled ? '18px' : '2px',
-                        width: '16px',
-                        height: '16px',
-                        borderRadius: '50%',
-                        background: '#fff',
-                        transition: 'left 0.2s',
-                        boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                      }}
-                    />
-                  </div>
                   <span style={{ display: 'inline-flex', color: '#4f46e5' }}>
                     <item.Icon size={20} />
                   </span>
@@ -404,6 +376,35 @@ export default function Discounts({ shop }) {
                   >
                     {d.enabled ? `${effectivePct}% · ${expiryShown} days` : 'Off'}
                   </span>
+                  {/* Toggle */}
+                  <div
+                    onClick={() => updateRule(item.key, { enabled: !d.enabled })}
+                    style={{
+                      width: '36px',
+                      height: '20px',
+                      borderRadius: '10px',
+                      cursor: 'pointer',
+                      background: d.enabled ? '#16a34a' : '#d1d5db',
+                      position: 'relative',
+                      transition: 'background 0.2s',
+                      flexShrink: 0,
+                      marginLeft: '2px',
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '2px',
+                        left: d.enabled ? '18px' : '2px',
+                        width: '16px',
+                        height: '16px',
+                        borderRadius: '50%',
+                        background: '#fff',
+                        transition: 'left 0.2s',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                      }}
+                    />
+                  </div>
                 </div>
 
                 {/* Body (shown when enabled) */}
