@@ -1,0 +1,326 @@
+=== POPUP STYLE FEATURE — PHASE 4 SELF-AUDIT (AFTER) ===
+Generated: 2026-09-22
+Round 1 of 2: Classic, Flash Sale, Gift Reveal only. Editorial and
+Spotlight are registered NOWHERE in this change (no id string, no enum
+value, no registry entry, no render branch) — confirmed by grep for both
+words across every file listed below; both return zero hits.
+
+Not deployed, per instruction: no git commit, no `npm run build` push to
+Render/Vercel, no `shopify app deploy`. Everything below was verified
+locally only (backend test suite, frontend production build).
+
+
+====================================================================
+1. FILES CREATED / MODIFIED
+====================================================================
+NEW:
+  backend/utils/popupStyles.js
+    Backend-mirrored style id list + per-style extra-field type map, used
+    only to validate/sanitize what the PATCH route accepts.
+  backend/__tests__/popupStyles.test.js
+    Unit tests for isValidStyleId()/sanitizeStyleFields().
+  backend/__tests__/popupConfigRoute.test.js
+    Route-level tests for PATCH /api/profiles/:shop/popup's new
+    styleId/styleFields/mobileStyleOverride handling.
+  frontend/app/admin/lib/popupStyles.js
+    The single-source-of-truth style registry (id, name,
+    shortDescription, bestFor, layoutType, supportedFields, extraFields,
+    defaultValues) the admin UI reads. Also exports getStyle()/
+    getStyleFieldValue() helpers.
+
+MODIFIED:
+  backend/models/Store.js
+    Added styleId/styleFields/mobileStyleOverride to the `popup` subdoc,
+    and styleId/styleFields to `mobilePopup` — all with safe defaults
+    ('classic', {}, false) so an old Store document with none of these
+    fields reads back as Classic with no migration needed (Mongoose
+    applies subdoc defaults on hydration; both read routes fetch a full
+    document, not .lean(), so this works without a migration script).
+  backend/routes/profiles.js
+    PATCH /:shopDomain/popup: styleId is now validated against the real
+    id list (isValidStyleId) instead of being blindly trusted like the
+    rest of POPUP_FIELDS — Model.updateOne() doesn't run Mongoose's
+    schema-level enum validator unless {runValidators:true}, which this
+    route doesn't use, so this check is the only real enforcement.
+    styleFields is sanitized (sanitizeStyleFields) before being saved,
+    for both popup and mobilePopup independently. mobileStyleOverride is
+    coerced to a boolean and only ever applies to `popup`.
+  backend/routes/proxy.js
+    No functional change — added a comment confirming GET /popup-config
+    already returns the new fields wholesale (they're schema fields on
+    the same subdocs the route already selects and returns).
+  frontend/app/admin/screens/Settings.jsx
+    - Fixed the stale "the popup customizer lives elsewhere" comment
+      (it's fully implemented in this file, always has been since the
+      Journey merge task).
+    - New emailDiscountEnabled state, read from the discount config this
+      screen already fetches — mirrors ccfShowEmailField()'s exact
+      condition (emailDiscount.enabled; phone/both are always false).
+    - New activeStyleId/activeStyleFields/mobileUsesOwnStyle/
+      setActiveStyle derived values, resolving which config (popup vs
+      mobilePopup) actually owns the style being edited/previewed.
+    - New "Popup Style" section: 3-card grid (StyleThumbnail), a details
+      panel, each style's own extra-field controls, and (Mobile tab
+      only) the "Use a different style on mobile" toggle.
+    - Layout picker is now shown only for Classic (Flash Sale/Gift
+      Reveal each force their own layout and hide it, leaving
+      popup.layout untouched underneath).
+    - New StyleCardPreview/StyleThumbnail/GiftGlyph/formatCountdown
+      helper components/functions, and both the desktop and mobile
+      preview slots branch to StyleCardPreview for a non-Classic style.
+    - A small <style> tag adds a visible focus ring for the new
+      keyboard-focusable cards/controls (native buttons/inputs already
+      get the browser's default outline; this just themes it).
+  extensions/cartncodform-embed/blocks/push-notifications.liquid
+    - New helpers: ccfFormatCountdown, ccfStartCountdown (real ticking
+      countdown, self-clearing at zero), ccfResolveStyle (mirrors
+      Settings.jsx's mobile-override resolution).
+    - showSoftPrompt(): computes ccfStyle = ccfResolveStyle(isMobile)
+      right after `layout` is resolved; a new first branch in the
+      layout if/else-if/else chain (`if (ccfStyle.id === 'flash_sale' ||
+      ccfStyle.id === 'gift_reveal')`) builds each style's own `card`-
+      shaped popup. The pre-existing banner/card/split branches are
+      completely untouched.
+    - Two bugs found and fixed WHILE wiring this in (see section 6):
+      the shared discount-fields insertion and the `wantsDiscount` flag
+      both used to read the raw `layout` variable, which is deliberately
+      left stale for non-Classic styles (popup.layout is never touched
+      while a style is active) — both are now gated on
+      `ccfStyle.id === 'classic'` first.
+    - handleDiscount()/renderDiscountCode() now take a `style` param
+      (threaded from finishDiscount()'s ccfStyle, already in its closure
+      scope) and re-theme the post-subscribe "unlocked" view's colors
+      for Flash Sale and code-chip emphasis for Gift Reveal. Classic
+      (or no style passed) renders that view's original HTML,
+      byte-for-byte.
+
+
+====================================================================
+2. STYLE TABLE
+====================================================================
+style id    | name        | image(s) (inspiration only)      | layout | extra fields
+classic     | Classic     | none (today's behavior)          | (free) | none
+flash_sale  | Flash Sale  | #1 key-portal, #3 Crown & Paw     | card   | countdownSource, countdownEndsAt, badgeText
+gift_reveal | Gift Reveal | #13 mobile gift+chip, #10 Pipcorn,| card   | giftIconEnabled, secondaryButtonStyle, codeChipEmphasis
+            |             | #15 sddefault                      |        |
+
+(Editorial and Spotlight, and their reference images #4/#5/#7/#12, are
+NOT in this table — round 2, not registered anywhere yet.)
+
+
+====================================================================
+3. STEPS TO ADD / REMOVE A STYLE
+====================================================================
+TO ADD (e.g. Editorial in round 2):
+  1. frontend/app/admin/lib/popupStyles.js — add its entry to
+     POPUP_STYLES and its id to STYLE_ORDER.
+  2. frontend/app/admin/screens/Settings.jsx — add a render branch for
+     it in StyleThumbnail() and in StyleCardPreview() (or a new sibling
+     component, if its shape doesn't fit the shared card component —
+     Editorial's split layout won't, unlike Flash Sale/Gift Reveal which
+     share one component because both wrap `card`).
+  3. backend/utils/popupStyles.js — add its id to STYLE_IDS and its
+     extra-field definitions to STYLE_EXTRA_FIELDS.
+  4. backend/models/Store.js — add its id to the styleId enum on BOTH
+     the popup and mobilePopup subdocs.
+  5. extensions/cartncodform-embed/blocks/push-notifications.liquid —
+     add a matching branch to the `if (ccfStyle.id === ...)` chain in
+     showSoftPrompt(), building that style's own DOM; update
+     ccfResolveStyle()'s fallback-to-classic guard to also accept the
+     new id.
+  6. Write/update the per-style parity notes (comments in the registry
+     + this style's two render implementations) so the admin preview and
+     the storefront stay visually in sync — see
+     audits/popup-style-audit-before.txt item 8 for why there's no
+     shared render code between them.
+  No database migration needed — Mongoose's subdoc defaults mean a shop
+  that never touches the new style just keeps defaulting to Classic.
+
+TO REMOVE:
+  1. Delete the entry from frontend's POPUP_STYLES/STYLE_ORDER and its
+     two render branches.
+  2. Delete its id from backend/utils/popupStyles.js's STYLE_IDS/
+     STYLE_EXTRA_FIELDS (so PATCH stops accepting it — an old saved
+     value is simply treated as invalid on the next save attempt, same
+     "silently ignored" handling as any other bad styleId).
+  3. Delete its branch from the liquid file.
+  4. Do NOT remove it from Store.js's enum retroactively — a shop that
+     already has that id saved needs the field to remain a valid enum
+     value so their document keeps loading without a Mongoose
+     validation error; ccfResolveStyle()'s and StyleCardPreview's own
+     fallback-to-classic guards already handle an id that's no longer
+     "supported" by rendering Classic instead, which is the intended
+     graceful degradation.
+
+
+====================================================================
+4. PASS/FAIL CHECKLIST
+====================================================================
+[PASS] Switching styles updates the preview instantly
+  — the preview reads styleId/styleFields directly from the same React
+  state the style-card buttons write to; no fetch, no save needed.
+
+[PASS] Values carry over between styles
+  — styleFields is one flat object per config (popup/mobilePopup);
+  switching styleId never clears or touches it. Confirmed no two
+  registered styles this round share a field name, so there's no
+  overwrite risk either.
+
+[PASS] Extra fields show/hide correctly and keep their values
+  — the extra-fields block renders POPUP_STYLES[activeStyleId]
+  .extraFields only; switching away and back re-reads the same
+  styleFields object, values intact (backend test
+  popupConfigRoute.test.js's sanitizeStyleFields cases cover the same
+  contract server-side).
+
+[PASS] Desktop/mobile toggle works
+  — reuses the pre-existing popupDevice tab; the Popup Style section
+  and preview both key off activeStyleId/activeStyleFields, which
+  already account for popupDevice + mobileStyleOverride.
+
+[PASS] Save -> reload -> selected style persists
+  — styleId/styleFields ride along in the exact same PATCH body/response
+  cycle every other popup field already uses (saveSettings() spreads
+  ...popup / ...mobilePopup, which now includes the style fields with
+  no extra code needed there).
+
+[PASS] Shop with no saved style shows Classic
+  — Store.js schema defaults (styleId: 'classic', styleFields: {}) apply
+  on read for any document that predates this field, confirmed this
+  works without .lean() on both the admin GET and the storefront proxy
+  route (see section 1's Store.js note).
+
+[PASS] Each popup type has its own style selection — WITH A SCOPING
+NOTE: per Phase 1's audit, this app only has ONE genuinely styleable
+customer-facing surface (the soft-prompt/discount-capture popup); the
+product-page nudge (injectProductNudge()) was explicitly left out of
+scope in Phase 1's approved recommendation and is untouched here. "Per
+popup type" was therefore implemented as decision #3's own literal
+wording: desktop (`popup`) and mobile (`mobilePopup`) each carry their
+own styleId/styleFields, with the override toggle deciding whether
+mobile actually uses its own or inherits desktop's.
+
+[PASS] Email field visible in preview where applicable
+  — StyleCardPreview renders a mock (non-functional, readOnly) email
+  input when emailDiscountEnabled is true, matching
+  ccfShowEmailField()'s condition on the storefront.
+
+[PASS] Storefront renders the saved style
+  — showSoftPrompt() calls ccfResolveStyle() and branches on the result
+  before ever touching the split/card/banner code.
+
+[PASS] Storefront "classic" is identical to before
+  — the flash_sale/gift_reveal branch is a NEW, separate `if` ahead of
+  the untouched banner/card/split chain; a shop with styleId 'classic'
+  (or no styleId at all, i.e. every existing shop) falls straight into
+  that unmodified chain. The two bugs found and fixed (section 6) were
+  both specifically about NOT letting a stale `layout` value leak
+  Classic-only behavior INTO a style, not about the Classic path itself
+  — Classic's own code paths were not edited.
+
+[PASS] admin npm run build passes, backend npm test passes
+  — frontend: `next build` compiled successfully, all 17 routes
+  generated, /admin/settings-page's bundle is now 20kB (not measured
+  against a pre-change baseline within this task, but the growth is
+  expected — this is where the registry, new UI, and preview code all
+  live).
+  — backend: 23 suites, 201/201 tests passing, including 23 new tests
+  across the two new popup-style test files.
+
+
+====================================================================
+5. ASSUMPTIONS, SKIPPED ITEMS, KNOWN ISSUES
+====================================================================
+- "Discount expiry" countdown source shows NO ticking clock in either
+  the initial popup OR the unlocked/code-revealed state, by design —
+  see the long comment directly above renderDiscountCode() in the
+  liquid file. Reasoning: before a customer redeems, there is no real
+  per-customer expiry timestamp to count down to at all (only a
+  duration-in-days, known from the Discounts config, becomes an
+  absolute deadline once a code is actually minted) — consistent with
+  decision #1's "if no real deadline exists, the timer is hidden".
+  After redemption, the unlocked view auto-redirects in exactly 2
+  seconds regardless of style (pre-existing behavior, untouched), so a
+  live ticking clock there would move for under 2 seconds before the
+  page navigates away — not meaningfully different from the existing
+  static "Expires in N days" line already shown for every style. I
+  chose not to add a redundant near-instant countdown on top of that
+  already-real, already-honest fact. The genuinely live, real-time
+  countdown IS fully implemented for the 'fixed_date' source, in the
+  INITIAL popup, where it can actually be watched for as long as the
+  popup stays open.
+- The admin preview's countdown is NOT a live-ticking clock (no
+  setInterval) — it's computed at render time and therefore updates on
+  every edit/re-render, which happens on essentially every keystroke
+  anyway. The STOREFRONT's actual popup does use a real setInterval
+  (ccfStartCountdown), since real visitors watch it for much longer
+  than a single admin edit. Disclosed simplification, not an oversight.
+- "Isolated so admin styles don't leak in" (Phase 2C) was interpreted
+  as "100% inline styles, no shared class selectors" — the existing
+  convention every other screen in this codebase already uses — rather
+  than an iframe sandbox, which would be a much larger, out-of-scope
+  addition for a feature this size. No admin-global CSS class name is
+  reused inside the preview.
+- Card thumbnails (StyleThumbnail) are small abstract block mockups
+  built from plain styled <div>s — not crops, screenshots, or traces of
+  any reference image, and not raster/SVG assets requiring a build
+  step, per the explicit instruction.
+- "Style is selected per popup type" is implemented as "per desktop/
+  mobile config", not as a new third dimension — see the checklist note
+  above; this matches decision #3's literal storage instruction
+  (popup.styleId / mobilePopup.styleId) rather than inventing a
+  separate popup-type concept Phase 1 found no evidence this app
+  actually has today.
+- Two real, pre-existing-pattern bugs were found and fixed while wiring
+  the storefront in (not part of the original ask, but necessary for
+  correctness) — see section 6.
+- Not tested in a live browser, live Shopify store, or against a real
+  MongoDB instance — verification here is limited to the backend test
+  suite and a clean production frontend build, per this task's "do not
+  deploy" instruction.
+- `theme` and `customTitle` (flagged as orphaned/unused-by-any-control
+  in Phase 1) were left alone, as instructed.
+- RECORDED FOR ROUND 2, NOT IMPLEMENTED HERE: decision #2 ("Editorial on
+  mobile: renders as a stacked card, image on top, keeping its
+  typography, divider, eyebrow and countdown") applies to a style that
+  is not registered anywhere in this round — noted here only so it
+  isn't lost before Editorial is actually built.
+
+
+====================================================================
+6. BUGS FOUND + FIXED DURING THIS CHANGE
+====================================================================
+Both are in push-notifications.liquid, both stem from the same root
+cause: `layout` (popup.layout) is deliberately left untouched/stale
+while a non-Classic style is selected (so switching back to Classic
+restores it exactly), but two pieces of shared code downstream of the
+layout if/else-if/else chain were still reading that possibly-stale
+`layout` value directly:
+  1. The shared discount-email-field insertion
+     (`if (layout === 'split') { ccfBuildDiscountFields(); ... }`) could
+     have double-inserted an email field into a Flash Sale/Gift Reveal
+     popup (which already builds its own) whenever the shop's stored
+     popup.layout happened to be 'split' — the schema's own default
+     value, so this would have hit almost every shop that had never
+     manually changed Classic's layout before trying a new style. Fixed
+     by gating on `ccfStyle.id === 'classic' && layout === 'split'`.
+  2. `wantsDiscount = layout !== 'banner' && ccfDiscountEnabled()` could
+     have silently disabled the entire discount flow for Flash Sale/
+     Gift Reveal (which are never actually banners) whenever the shop's
+     stored popup.layout happened to be 'banner' from an earlier Classic
+     session. Fixed by only applying the banner exclusion when
+     `ccfStyle.id === 'classic'`.
+Both were caught by tracing every remaining `layout ===` comparison in
+showSoftPrompt() after adding the style branch, not by a test (this
+file has no existing automated test coverage — it's a theme app embed,
+outside backend/frontend's test runners).
+
+
+====================================================================
+7. DEPLOY COMMANDS (LIST ONLY — NOT RUN)
+====================================================================
+  cd backend && git add -A && git commit -m "..." && git push
+    (Render auto-deploys on push to the connected branch)
+  cd frontend && npx vercel --prod
+  cd .. && shopify app deploy --allow-updates
+Nothing was committed or pushed as part of this task.

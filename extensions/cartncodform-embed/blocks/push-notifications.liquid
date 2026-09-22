@@ -209,6 +209,61 @@
     el.innerHTML = ccfIcon(iconKey, 16, true) + ccfEscapeHtml(text);
   }
 
+  // popup-style: format a real remaining duration (ms, already known to be
+  // > 0) as text. Never called with a fabricated per-visitor duration —
+  // see ccfResolveStyle()'s countdownSource handling below.
+  function ccfFormatCountdown(ms) {
+    if (!(ms > 0)) return null;
+    var totalSeconds = Math.floor(ms / 1000);
+    var days = Math.floor(totalSeconds / 86400);
+    var hours = Math.floor((totalSeconds % 86400) / 3600);
+    var minutes = Math.floor((totalSeconds % 3600) / 60);
+    var seconds = totalSeconds % 60;
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    if (days > 0) return days + 'd ' + pad(hours) + 'h ' + pad(minutes) + 'm';
+    return pad(hours) + ':' + pad(minutes) + ':' + pad(seconds);
+  }
+
+  // Ticks `el`'s text every second toward a real endsAtMs timestamp, and
+  // removes `containerEl` from the DOM once the deadline passes (a
+  // countdown that reaches zero is no longer a real deadline to show).
+  // Returns nothing — the interval clears itself.
+  function ccfStartCountdown(el, containerEl, endsAtMs) {
+    function tick() {
+      var remaining = endsAtMs - Date.now();
+      var text = ccfFormatCountdown(remaining);
+      if (!text) {
+        clearInterval(timer);
+        if (containerEl && containerEl.parentNode) containerEl.parentNode.removeChild(containerEl);
+        return;
+      }
+      el.textContent = text;
+    }
+    tick();
+    var timer = setInterval(tick, 1000);
+  }
+
+  // popup-style: resolve which style + extra fields are actually in force.
+  // Independent of cfg's own layout-presence mobile fallback above — the
+  // desktop style is the default for BOTH devices; mobile only diverges
+  // when popupConfig.mobileStyleOverride is explicitly on AND
+  // mobilePopupConfig actually has its own styleId saved (matches the
+  // admin's own resolution in Settings.jsx).
+  function ccfResolveStyle(isMobileDevice) {
+    var styleId = (popupConfig && popupConfig.styleId) || 'classic';
+    var styleFields = (popupConfig && popupConfig.styleFields) || {};
+    if (isMobileDevice && popupConfig && popupConfig.mobileStyleOverride &&
+        mobilePopupConfig && mobilePopupConfig.styleId) {
+      styleId = mobilePopupConfig.styleId;
+      styleFields = mobilePopupConfig.styleFields || {};
+    }
+    // An id this build of the theme extension doesn't recognize (e.g. a
+    // style registered in a later admin release than the currently-cached
+    // theme asset) falls back to Classic rather than rendering nothing.
+    if (styleId !== 'flash_sale' && styleId !== 'gift_reveal') styleId = 'classic';
+    return { id: styleId, fields: styleFields };
+  }
+
   // popup-redesign-2: shared style builders so the main popup, the
   // discount-capture popup, and the split layout all match the same
   // premium visual language.
@@ -465,7 +520,7 @@
   //   push / email / phone            -> store-wide code, popup only
   //   both (email+phone) on a PDP     -> product-specific: also inject a
   //                                      "Buy with X% OFF" button under Buy Now
-  function handleDiscount(d, action, productHandle) {
+  function handleDiscount(d, action, productHandle, style) {
     if (!d || !d.code) return;
 
     var isProductSpecific = (action === 'both') && productHandle;
@@ -474,7 +529,7 @@
     }
 
     // Always show the code inside the popup.
-    renderDiscountCode(d, action, productHandle);
+    renderDiscountCode(d, action, productHandle, style);
   }
 
   // Inject a discount CTA directly under the product page's Buy Now / Add to
@@ -516,9 +571,24 @@
   }
 
   // Render the discount code block inside the open popup, with Copy + Shop now.
-  function renderDiscountCode(d, action, productHandle) {
+  // `style` ({id, fields}, from ccfResolveStyle()) is optional — Classic (or
+  // no style passed, e.g. from a call site that predates popup-style) keeps
+  // this function's original light-on-white look, byte-for-byte.
+  // NOTE on countdowns here: this view auto-redirects 2s after it renders
+  // (see the setTimeout below), so a live ticking countdown would barely
+  // move before the page navigates away. The already-existing "Expires in
+  // N days" line below already states the REAL deadline (the discount's
+  // actual expiryDays, from the /generate-discount response) as a plain
+  // fact for every style — Flash Sale/Gift Reveal only re-theme this view's
+  // colors/emphasis to match their own initial popup, they don't add a
+  // second, practically-useless ticking clock on top of it. The real,
+  // genuinely live countdown (fixed_date source) is shown in the INITIAL
+  // popup instead, where it can matter — see the flash_sale branch above.
+  function renderDiscountCode(d, action, productHandle, style) {
     var popup = document.getElementById('ccf-push-prompt');
     if (!popup) return;
+    var sId = (style && style.id) || 'classic';
+    var sFields = (style && style.fields) || {};
 
     // Always include a ?redirect= target so Shopify lands the shopper on a
     // real page after applying the discount session — never a bare
@@ -539,24 +609,42 @@
     // popup-redesign-2: update the popup's own content section IN PLACE
     // (headline/inputs/buttons swap for the "unlocked" state) instead of
     // appending a second box below them — no more flash-then-redirect.
+    // popup-style: Flash Sale keeps this dark (matches its own wrap
+    // background, set on `wrap` in the flash_sale/gift_reveal branch
+    // above); Gift Reveal's codeChipEmphasis makes the code block bigger
+    // and bolder. Classic (sId === 'classic') is these same original
+    // colors/sizes, untouched.
+    var isDark = sId === 'flash_sale';
+    var titleColor = isDark ? '#ffffff' : '#111827';
+    var subColor = isDark ? '#d4d4d8' : '#6b7280';
+    var chipBig = sId === 'gift_reveal' && sFields.codeChipEmphasis !== false;
+    var chipBg = isDark
+      ? 'linear-gradient(135deg,#27272a,#3f3f46)'
+      : 'linear-gradient(135deg,#f0f4ff,#e8edff)';
+    var chipBorder = isDark ? '1.5px dashed #52525b' : '1.5px dashed #818cf8';
+    var chipCodeColor = isDark ? '#ffffff' : '#4338ca';
+    var chipCodeSize = chipBig ? '26px' : '22px';
+    var chipLabelColor = isDark ? '#a1a1aa' : '#6366f1';
+    var footerColor = isDark ? '#86efac' : '#16a34a';
+
     var html =
       '<div style="text-align:center;padding:8px 0 4px">' +
-      '<div style="color:#16a34a;line-height:1;margin-bottom:10px;' +
+      '<div style="color:' + footerColor + ';line-height:1;margin-bottom:10px;' +
       'animation:ccfBounce 1s ease 3">' + ccfIcon('gift', 40) + '</div>' +
-      '<div style="font-size:18px;font-weight:800;color:#111827;' +
+      '<div style="font-size:18px;font-weight:800;color:' + titleColor + ';' +
       'margin-bottom:4px">' + d.percentage + '% OFF Unlocked!</div>' +
-      '<div style="font-size:12px;color:#6b7280;margin-bottom:14px">' +
+      '<div style="font-size:12px;color:' + subColor + ';margin-bottom:14px">' +
       'Expires in ' + d.expiryDays + ' days</div>' +
-      '<div style="background:linear-gradient(135deg,#f0f4ff,#e8edff);' +
-      'border:1.5px dashed #818cf8;border-radius:14px;' +
-      'padding:14px;margin-bottom:14px">' +
-      '<div style="font-size:11px;color:#6366f1;font-weight:600;' +
+      '<div style="background:' + chipBg + ';' +
+      'border:' + chipBorder + ';border-radius:14px;' +
+      'padding:' + (chipBig ? '18px' : '14px') + ';margin-bottom:14px">' +
+      '<div style="font-size:11px;color:' + chipLabelColor + ';font-weight:600;' +
       'letter-spacing:2px;margin-bottom:6px">YOUR DISCOUNT CODE</div>' +
-      '<div style="font-size:22px;font-weight:800;letter-spacing:4px;' +
-      'font-family:monospace;color:#4338ca">' + d.code + '</div>' +
+      '<div style="font-size:' + chipCodeSize + ';font-weight:800;letter-spacing:4px;' +
+      'font-family:monospace;color:' + chipCodeColor + '">' + d.code + '</div>' +
       '</div>' +
       '<div style="display:flex;align-items:center;justify-content:center;' +
-      'gap:6px;font-size:13px;color:#16a34a;font-weight:500">' +
+      'gap:6px;font-size:13px;color:' + footerColor + ';font-weight:500">' +
       '<span style="animation:ccfPulse 1.5s ease infinite;display:inline-block;line-height:1">' + ccfIcon('check', 14) + '</span>' +
       ' Applying your discount automatically...</div>' +
       '</div>';
@@ -671,6 +759,7 @@
       '| layout:', cfg.layout,
       '| hasImage:', !!(cfg.imageUrl));
     var layout = cfg.layout || 'split';
+    var ccfStyle = ccfResolveStyle(isMobile);
     var bg = cfg.bgColor || '#ffffff';
     var fg = cfg.textColor || '#111827';
     var font = cfg.fontFamily || 'inherit';
@@ -714,7 +803,138 @@
     var allow, deny, closeBtn;
     var overlay = null;
 
-    if (layout === 'banner') {
+    if (ccfStyle.id === 'flash_sale' || ccfStyle.id === 'gift_reveal') {
+      // ---------- POPUP STYLE: Flash Sale / Gift Reveal — both wrap the
+      // `card` layout (see frontend/app/admin/lib/popupStyles.js), so
+      // `layout` itself is not consulted here; only cfg's OTHER fields
+      // (colors, image, copy) still apply, same as every other style. ----
+      var isFlashSale = ccfStyle.id === 'flash_sale';
+      var styleFields = ccfStyle.fields;
+      var cardRadius2 = (cfg.borderRadius != null ? cfg.borderRadius : 16) + 'px';
+      var sBg = isFlashSale ? '#18181b' : (cfg.bgColor || '#fff7ed');
+      var sFg = isFlashSale ? '#ffffff' : (cfg.textColor || '#111827');
+
+      wrap.style.cssText = [
+        'position:fixed',
+        'bottom:24px',
+        'left:50%',
+        'transform:translateX(-50%)',
+        'width:' + (isMobile ? '300px' : 'min(340px,90vw)'),
+        'background:' + sBg,
+        'color:' + sFg,
+        'border-radius:' + cardRadius2,
+        'overflow:hidden',
+        'box-shadow:0 20px 60px rgba(0,0,0,0.25),0 4px 12px rgba(0,0,0,0.1)',
+        'z-index:2147483647',
+        'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif'),
+        'max-width:90vw'
+      ].join(';');
+
+      var sImageUrl = cfg.imageUrl || '';
+      if (sImageUrl) {
+        var sImgEl = document.createElement('img');
+        sImgEl.src = sImageUrl;
+        sImgEl.alt = '';
+        sImgEl.style.cssText = 'width:100%;height:' + (isMobile ? '120px' : '140px') +
+          ';object-fit:cover;display:block;object-position:' + (cfg.imagePosition || '50% 50%') + ';';
+        sImgEl.onerror = function () { sImgEl.style.display = 'none'; };
+        wrap.appendChild(sImgEl);
+      } else if (!isFlashSale && styleFields.giftIconEnabled !== false) {
+        var giftWrap = document.createElement('div');
+        giftWrap.style.cssText = 'height:84px;display:flex;align-items:center;' +
+          'justify-content:center;color:' + accent + ';';
+        giftWrap.innerHTML = ccfIcon('gift', 44);
+        wrap.appendChild(giftWrap);
+      }
+
+      var sContent = document.createElement('div');
+      sContent.id = 'ccf-content-section';
+      sContent.style.cssText = 'padding:20px 18px 18px;text-align:center;';
+
+      if (isFlashSale && styleFields.badgeText) {
+        var sBadge = document.createElement('span');
+        sBadge.style.cssText = 'display:inline-block;font-size:10px;font-weight:700;' +
+          'letter-spacing:0.05em;text-transform:uppercase;color:' + accent + ';' +
+          'border:1px solid ' + accent + ';border-radius:999px;padding:3px 10px;margin-bottom:8px;';
+        sBadge.textContent = String(styleFields.badgeText).slice(0, 24);
+        sContent.appendChild(sBadge);
+      }
+
+      var sHead = document.createElement('div');
+      sHead.id = 'ccf-prompt-text';
+      sHead.style.cssText = 'font-size:17px;font-weight:800;line-height:1.3;margin-bottom:6px;';
+      sHead.textContent = headline;
+      sContent.appendChild(sHead);
+
+      if (cfg.subtext) {
+        var sSub = document.createElement('div');
+        sSub.style.cssText = 'font-size:13px;margin-bottom:12px;line-height:1.4;' +
+          'color:' + (isFlashSale ? '#d4d4d8' : '#6b7280') + ';';
+        sSub.textContent = cfg.subtext;
+        sContent.appendChild(sSub);
+      }
+
+      if (ccfShowEmailField()) {
+        var sEmailInput = document.createElement('input');
+        sEmailInput.type = 'email';
+        sEmailInput.id = 'ccf-email-input';
+        sEmailInput.className = 'ccf-input';
+        var sEp = ccfFieldPct('emailDiscount');
+        sEmailInput.placeholder = 'Your email' + (sEp ? ' (get ' + sEp + '% off)' : '');
+        sEmailInput.style.cssText = ccfInputStyle() +
+          (isFlashSale ? 'background:#27272a;color:#fff;border-color:#3f3f46;' : '');
+        sContent.appendChild(sEmailInput);
+      }
+
+      // Real-deadline countdown only — never a fake per-visitor timer.
+      // 'fixed_date' with a valid future date: shown now, ticking live.
+      // 'discount_expiry': no real deadline exists yet before a code is
+      // actually minted, so nothing is shown here; renderDiscountCode()
+      // shows a real one once the code (and its real expiry) exists.
+      if (isFlashSale && styleFields.countdownSource === 'fixed_date' && styleFields.countdownEndsAt) {
+        var sEndsAtMs = new Date(styleFields.countdownEndsAt).getTime();
+        if (sEndsAtMs > Date.now()) {
+          var sCountdownWrap = document.createElement('div');
+          sCountdownWrap.style.cssText = 'font-size:18px;font-weight:800;letter-spacing:0.08em;' +
+            'margin-bottom:10px;font-variant-numeric:tabular-nums;';
+          sContent.appendChild(sCountdownWrap);
+          ccfStartCountdown(sCountdownWrap, sCountdownWrap, sEndsAtMs);
+        }
+      }
+
+      allow = buildAllowBtn(ccfAllowButtonStyle(accent));
+      sContent.appendChild(allow);
+
+      if (!isFlashSale && styleFields.secondaryButtonStyle === 'pill') {
+        deny = buildDenyBtn(
+          'width:100%;padding:11px;font-size:13px;font-weight:600;border-radius:999px;' +
+          'border:1px solid ' + (isFlashSale ? '#3f3f46' : '#e5e7eb') + ';background:transparent;' +
+          'color:' + sFg + ';cursor:pointer;margin-top:8px;');
+      } else {
+        deny = buildDenyBtn(ccfDenyButtonStyle() +
+          (isFlashSale ? 'color:#a1a1aa;' : ''));
+      }
+      sContent.appendChild(deny);
+
+      if (cfg.showBranding) {
+        sContent.appendChild(buildBranding(
+          'margin-top:12px;font-size:10px;text-align:center;letter-spacing:0.5px;' +
+          'color:' + (isFlashSale ? '#52525b' : '#d1d5db') + ';'));
+      }
+
+      wrap.appendChild(sContent);
+
+      closeBtn = document.createElement('button');
+      closeBtn.id = 'ccf-close-btn';
+      closeBtn.type = 'button';
+      closeBtn.textContent = '×';
+      closeBtn.style.cssText = 'position:absolute;top:12px;right:12px;' +
+        'background:rgba(' + (isFlashSale ? '255,255,255,0.12' : '0,0,0,0.35') + ');color:#fff;' +
+        'border:none;border-radius:50%;width:26px;height:26px;font-size:14px;line-height:26px;' +
+        'text-align:center;cursor:pointer;z-index:10;';
+      wrap.appendChild(closeBtn);
+
+    } else if (layout === 'banner') {
       // ---------- LAYOUT 3: full-width banner bar ----------
       var atTop = /^top/.test(cfg.position || '');
       wrap.setAttribute('style',
@@ -1213,14 +1433,27 @@
     // discount-feature: the split layout still uses the shared field-builder,
     // inserted right after the deny control. Card builds its own inline
     // fields above (see the card branch); banner never shows a discount.
-    if (layout === 'split') {
+    // popup-style: Flash Sale/Gift Reveal build their own inline email
+    // field too (same as card) — gating on ccfStyle.id === 'classic' here
+    // stops this from ALSO firing when the layout field left over from an
+    // earlier Classic session still happens to read 'split' while a style
+    // is active (popup.layout is deliberately left untouched while a
+    // non-classic style is selected — see ccfResolveStyle()/Settings.jsx).
+    if (ccfStyle.id === 'classic' && layout === 'split') {
       var discountFields = ccfBuildDiscountFields();
       if (discountFields && deny && deny.parentNode) {
         if (deny.nextSibling) deny.parentNode.insertBefore(discountFields, deny.nextSibling);
         else deny.parentNode.appendChild(discountFields);
       }
     }
-    var wantsDiscount = layout !== 'banner' && ccfDiscountEnabled();
+    // popup-style: Flash Sale/Gift Reveal always render as `card`, never
+    // `banner` — but `layout` itself is left untouched while a non-classic
+    // style is active (see the note on the discountFields gate above), so
+    // it could still be a stale 'banner' from a previous Classic session.
+    // Only apply the "banner never shows a discount" exclusion for Classic.
+    var wantsDiscount = ccfStyle.id === 'classic'
+      ? (layout !== 'banner' && ccfDiscountEnabled())
+      : ccfDiscountEnabled();
 
     function cleanup() {
       if (promptAutoDismissTimer) { clearTimeout(promptAutoDismissTimer); promptAutoDismissTimer = null; }
@@ -1252,7 +1485,7 @@
         productHandle = pathParts[prodIdx + 1].split('?')[0].split('#')[0];
       }
 
-      handleDiscount(d, action, productHandle);
+      handleDiscount(d, action, productHandle, ccfStyle);
     }
 
     allow.addEventListener('click', function () {

@@ -26,3 +26,5 @@ audit.txt
 
 # Shopify CLI local state
 .shopify/
+
+docs/popup-styles/

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Banner, Button } from '@shopify/polaris';
 import { apiGet, apiSend, BACKEND_URL } from '../../../lib/api';
+import { POPUP_STYLES, STYLE_ORDER, getStyle, getStyleFieldValue } from '../lib/popupStyles';
 
 const DS = {
   page: {
@@ -139,14 +140,218 @@ function getCtaStyle(ctaStyle, accent) {
   }
 }
 
+// popup-style: real-deadline countdown formatting — ms must already be a
+// positive real duration (this app never shows a fake per-visitor timer;
+// see the countdown source rules in flash_sale's extraFields).
+function formatCountdown(ms) {
+  if (!(ms > 0)) return null;
+  const totalSeconds = Math.floor(ms / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  if (days > 0) return `${days}d ${pad(hours)}h ${pad(minutes)}m`;
+  return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+}
+
+// Original hand-drawn glyph (not traced from any reference image) used by
+// Gift Reveal's card when no merchant image is set.
+function GiftGlyph({ size = 40, color = '#4f46e5' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true">
+      <rect x="3" y="8" width="18" height="4" rx="1" />
+      <path d="M12 8v13" />
+      <path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" />
+      <path d="M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5" />
+    </svg>
+  );
+}
+
+// Small, abstract, ORIGINAL block mockups for the style picker cards —
+// deliberately not screenshots/crops of any reference image (see
+// audits/popup-style-audit-before.txt item 9's explicit instruction that
+// thumbnails must be drawn/generated previews of this app's own styles).
+function StyleThumbnail({ styleId }) {
+  const box = { width: '100%', height: 56, borderRadius: 8, overflow: 'hidden', flexShrink: 0 };
+  if (styleId === 'flash_sale') {
+    return (
+      <div style={{ ...box, background: '#18181b', display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+        <div style={{ width: '30%', height: 4, background: '#fbbf24', borderRadius: 2 }} />
+        <div style={{ width: '50%', height: 7, background: '#fff', borderRadius: 2 }} />
+        <div style={{ width: '32%', height: 9, background: '#4f46e5', borderRadius: 5, marginTop: 2 }} />
+      </div>
+    );
+  }
+  if (styleId === 'gift_reveal') {
+    return (
+      <div style={{ ...box, background: '#fff7ed', display: 'flex', flexDirection: 'column',
+                    alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+        <div style={{ width: 16, height: 13, background: '#f59e0b', borderRadius: 3 }} />
+        <div style={{ width: '50%', height: 7, background: '#111827', borderRadius: 2 }} />
+        <div style={{ width: '32%', height: 9, background: '#4f46e5', borderRadius: 5, marginTop: 2 }} />
+      </div>
+    );
+  }
+  // classic
+  return (
+    <div style={{ ...box, background: '#f3f4f6', display: 'flex' }}>
+      <div style={{ width: '38%', background: '#d1d5db' }} />
+      <div style={{ flex: 1, padding: 7, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ width: '70%', height: 5, background: '#9ca3af', borderRadius: 2 }} />
+        <div style={{ width: '50%', height: 4, background: '#d1d5db', borderRadius: 2 }} />
+        <div style={{ marginTop: 'auto', width: '55%', height: 8, background: '#4f46e5', borderRadius: 4 }} />
+      </div>
+    </div>
+  );
+}
+
+// Shared Flash Sale / Gift Reveal preview, used for BOTH the desktop and
+// mobile preview slots (both styles wrap the `card` layout — see
+// popupStyles.js). Mirrors, but does not share code with, the storefront's
+// own buildFlashSaleCard()/buildGiftRevealCard() in push-notifications.liquid
+// — see audits/popup-style-audit-before.txt item 8 for why there's no
+// shared runtime between the two, and the per-style parity checklist that
+// keeps them visually in sync instead.
+function StyleCardPreview({ styleId, cfg, styleFields, emailFieldEnabled, compact }) {
+  const style = getStyle(styleId);
+  const accent = cfg.accentColor || '#4f46e5';
+  const headline = cfg.headline ||
+    (styleId === 'flash_sale' ? 'Flash Sale — limited time!' : "You've got a gift waiting");
+  const subtext = cfg.subtext || '';
+  const allowText = cfg.allowText || 'Allow';
+  const denyText = cfg.denyText || 'No thanks';
+  const imageUrl = cfg.imageUrl || '';
+  const radius = (cfg.borderRadius ?? 12) + 'px';
+  const font = cfg.fontFamily || 'inherit';
+  const padding = compact ? '14px' : '20px';
+  const headlineSize = compact ? 14 : 18;
+
+  const field = (key) => getStyleFieldValue(style, styleFields, key);
+
+  if (styleId === 'flash_sale') {
+    const bg = '#18181b';
+    const fg = '#ffffff';
+    const badgeText = field('badgeText');
+    const countdownSource = field('countdownSource');
+    const countdownEndsAt = field('countdownEndsAt');
+    let countdownDisplay = null;
+    let countdownNote = null;
+    if (countdownSource === 'fixed_date') {
+      if (countdownEndsAt) {
+        const remaining = new Date(countdownEndsAt).getTime() - Date.now();
+        countdownDisplay = formatCountdown(remaining);
+        if (!countdownDisplay) countdownNote = 'That end date has already passed.';
+      } else {
+        countdownNote = 'Set an end date to preview the countdown.';
+      }
+    } else {
+      countdownNote = 'Shown after a customer unlocks their code (real expiry) — not shown before then.';
+    }
+
+    return (
+      <div style={{ border: '1px solid #27272a', borderRadius: radius, overflow: 'hidden',
+                    background: bg, color: fg, fontFamily: font,
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
+        {imageUrl && (
+          <img src={imageUrl} alt="" style={{ width: '100%', height: compact ? 70 : 110,
+            objectFit: 'cover', objectPosition: cfg.imagePosition || 'center center', display: 'block' }} />
+        )}
+        <div style={{ padding, textAlign: 'center' }}>
+          {badgeText && (
+            <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 700,
+              letterSpacing: '0.05em', textTransform: 'uppercase', color: accent,
+              border: `1px solid ${accent}`, borderRadius: 999, padding: '3px 10px', marginBottom: 8 }}>
+              {badgeText}
+            </span>
+          )}
+          <div style={{ fontSize: headlineSize, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
+          {subtext && <div style={{ fontSize: 12, color: '#d4d4d8', marginBottom: 10 }}>{subtext}</div>}
+          {emailFieldEnabled && (
+            <input readOnly placeholder="Email address" style={{ width: '100%', padding: '8px 12px',
+              fontSize: 12, borderRadius: 8, border: '1px solid #3f3f46', marginBottom: 8,
+              background: '#27272a', color: fg, boxSizing: 'border-box' }} />
+          )}
+          {countdownDisplay ? (
+            <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '0.08em', marginBottom: 10,
+              fontVariantNumeric: 'tabular-nums' }}>
+              {countdownDisplay}
+            </div>
+          ) : countdownNote && (
+            <div style={{ fontSize: 10, color: '#a1a1aa', marginBottom: 10, fontStyle: 'italic' }}>
+              {countdownNote}
+            </div>
+          )}
+          <button type="button" tabIndex={-1} style={{ width: '100%', padding: '10px', fontSize: 13,
+            fontWeight: 700, borderRadius: 999, border: 'none', background: accent, color: '#fff',
+            cursor: 'default', marginBottom: 6 }}>
+            {allowText}
+          </button>
+          <div style={{ fontSize: 11, color: '#a1a1aa' }}>{denyText}</div>
+        </div>
+      </div>
+    );
+  }
+
+  // gift_reveal
+  const bg = cfg.bgColor || '#fff7ed';
+  const fg = cfg.textColor || '#111827';
+  const giftIconEnabled = field('giftIconEnabled');
+  const secondaryButtonStyle = field('secondaryButtonStyle');
+
+  return (
+    <div style={{ border: '1px solid #e5e7eb', borderRadius: radius, overflow: 'hidden',
+                  background: bg, color: fg, fontFamily: font,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
+      {imageUrl ? (
+        <img src={imageUrl} alt="" style={{ width: '100%', height: compact ? 70 : 110,
+          objectFit: 'cover', objectPosition: cfg.imagePosition || 'center center', display: 'block' }} />
+      ) : giftIconEnabled ? (
+        <div style={{ height: compact ? 60 : 84, display: 'flex', alignItems: 'center',
+                      justifyContent: 'center' }}>
+          <GiftGlyph size={compact ? 32 : 44} color={accent} />
+        </div>
+      ) : null}
+      <div style={{ padding, textAlign: 'center' }}>
+        <div style={{ fontSize: headlineSize, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
+        {subtext && <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>{subtext}</div>}
+        {emailFieldEnabled && (
+          <input readOnly placeholder="Email address" style={{ width: '100%', padding: '8px 12px',
+            fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 8,
+            boxSizing: 'border-box' }} />
+        )}
+        <button type="button" tabIndex={-1} style={{ width: '100%', padding: '10px', fontSize: 13,
+          fontWeight: 700, borderRadius: 999, border: 'none', background: accent, color: '#fff',
+          cursor: 'default', marginBottom: 6 }}>
+          {allowText}
+        </button>
+        {secondaryButtonStyle === 'pill' ? (
+          <button type="button" tabIndex={-1} style={{ width: '100%', padding: '10px', fontSize: 12,
+            fontWeight: 600, borderRadius: 999, border: '1px solid #e5e7eb', background: 'transparent',
+            color: fg, cursor: 'default' }}>
+            {denyText}
+          </button>
+        ) : (
+          <div style={{ fontSize: 11, color: '#9ca3af' }}>{denyText}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings({ shop }) {
   const [voice, setVoice] = useState({});
   const [caps, setCaps] = useState({});
   const [quietHours, setQuietHours] = useState({});
   const [timezone, setTimezone] = useState('Asia/Kolkata');
-  // configs + popup are still loaded so nothing downstream breaks, but the
-  // Signals grid moved to "What to act on" and the popup customizer lives
-  // elsewhere now — neither is rendered here.
+  // The Signals grid moved to "What to act on" and is not rendered here —
+  // `configs` is still loaded so nothing downstream that reads it breaks.
+  // The popup customizer, unlike an earlier version of this comment used to
+  // claim, IS fully implemented and rendered in this same file — see
+  // `popupCard`/`popupPreviewCard` below, toggled by `showPopupCustomizer`.
   const [configs, setConfigs] = useState([]);
   const [popup, setPopup] = useState({});
   // popup-responsive: separate mobile (<=600px) override config + device tab.
@@ -166,6 +371,12 @@ export default function Settings({ shop }) {
   // discount-feature: true when a Shopify Admin API call was rejected with
   // ACCESS_DENIED (installed token predates write_discounts). Prompt reconnect.
   const [needsReauth, setNeedsReauth] = useState(false);
+  // popup-style: whether the storefront popup would show an email field —
+  // mirrors ccfShowEmailField() in push-notifications.liquid (emailDiscount
+  // enabled; phoneDiscount/bothDiscount are always saved disabled, per the
+  // discount-redesign task, so they never contribute here). Drives whether
+  // the style preview mocks up an email input.
+  const [emailDiscountEnabled, setEmailDiscountEnabled] = useState(false);
 
   // popup-responsive: mobile-first layout switch (admin viewport <= 768px).
   const [isMobileView, setIsMobileView] = useState(false);
@@ -190,6 +401,7 @@ export default function Settings({ shop }) {
       if (cancelled) return;
       if (disc.status === 'fulfilled') {
         setNeedsReauth(!!disc.value?.needsReauth);
+        setEmailDiscountEnabled(!!disc.value?.config?.emailDiscount?.enabled);
       }
       if (s.status === 'fulfilled') {
         setVoice(s.value?.voice || {});
@@ -276,6 +488,22 @@ export default function Settings({ shop }) {
   // (upload, remove, or paste-URL — all three mutate activePopup.imageUrl).
   const markImageChanged = () =>
     popupDevice === 'desktop' ? setPopupImageChanged(true) : setMobileImageChanged(true);
+
+  // popup-style: which style is actually in force on the tab being edited.
+  // Mobile only gets its own style when popup.mobileStyleOverride is on;
+  // otherwise it inherits the desktop style (mobilePopup.styleId/
+  // styleFields are simply not consulted for rendering while override is
+  // off, even if they hold stale values from a previous "override on"
+  // session — this matches the storefront's own resolution in
+  // push-notifications.liquid).
+  const mobileUsesOwnStyle = popupDevice === 'mobile' && !!popup.mobileStyleOverride;
+  const activeStyleId = (mobileUsesOwnStyle ? mobilePopup.styleId : popup.styleId) || 'classic';
+  const activeStyleFields = (mobileUsesOwnStyle ? mobilePopup.styleFields : popup.styleFields) || {};
+  // Writes always go to whichever config actually owns the active style —
+  // NOT necessarily `setActivePopup` (that would silently write mobile
+  // style edits into mobilePopup even while the override toggle is off and
+  // those fields aren't being used for anything).
+  const setActiveStyle = mobileUsesOwnStyle ? setMobilePopup : setPopup;
 
   const previews = [
     {
@@ -827,8 +1055,199 @@ export default function Settings({ shop }) {
             {/* Fields edit activePopup / setActivePopup — the desktop `popup`
                 state on the Desktop tab, `mobilePopup` on the Mobile tab. */}
             <>
-            {/* Layout — desktop only; mobile is always the Card layout */}
-            {popupDevice === 'desktop' && (
+            {/* --- Popup Style --------------------------------------------
+                Style wraps layout (see audits/popup-style-audit-before.txt
+                item 4): Classic keeps the manual Layout picker below and
+                touches nothing new; Flash Sale / Gift Reveal each force
+                their own `card` layout and hide that picker, so switching
+                back to Classic always restores whatever layout was last
+                chosen manually, untouched. */}
+            <div style={{ ...popRow, alignItems: 'flex-start', flexDirection: 'column', gap: '12px' }}>
+              <div style={popLabel}>Popup style</div>
+              <div
+                role="radiogroup"
+                aria-label="Popup style"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
+                  gap: '10px',
+                  width: '100%',
+                }}
+              >
+                {STYLE_ORDER.map((id) => {
+                  const s = POPUP_STYLES[id];
+                  const selected = activeStyleId === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => setActiveStyle((p) => ({ ...p, styleId: id }))}
+                      className="ccf-style-card"
+                      style={{
+                        textAlign: 'left',
+                        padding: '8px',
+                        borderRadius: '10px',
+                        border: selected ? '2px solid #4f46e5' : '1px solid #e5e7eb',
+                        background: selected ? '#eef2ff' : '#fff',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px',
+                      }}
+                    >
+                      <StyleThumbnail styleId={id} />
+                      <div style={{ fontSize: '12px', fontWeight: '600', color: '#111827' }}>
+                        {s.name}
+                      </div>
+                      <div style={{
+                        alignSelf: 'flex-start', fontSize: '10px', fontWeight: '600',
+                        color: '#6b7280', background: '#f3f4f6', borderRadius: '999px',
+                        padding: '2px 8px', textTransform: 'capitalize',
+                      }}>
+                        {id === 'classic' ? (activePopup.layout || 'split') : s.layoutType}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Details panel for the selected style */}
+              {(() => {
+                const s = POPUP_STYLES[activeStyleId];
+                return (
+                  <div style={{
+                    width: '100%', boxSizing: 'border-box', padding: '10px 12px',
+                    background: '#f9fafb', border: '1px solid #f3f4f6', borderRadius: '8px',
+                    fontSize: '12px', color: '#4b5563', lineHeight: 1.5,
+                  }}>
+                    <div style={{ marginBottom: '2px' }}>{s.shortDescription}</div>
+                    <div style={{ color: '#9ca3af' }}>
+                      Best for: {s.bestFor} · Layout: {s.layoutType || (activePopup.layout || 'split')}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Extra fields — only the ones this style declares */}
+              {POPUP_STYLES[activeStyleId].extraFields.length > 0 && (
+                <div style={{
+                  width: '100%', boxSizing: 'border-box', display: 'flex',
+                  flexDirection: 'column', gap: '12px', padding: '12px',
+                  border: '1px solid #f3f4f6', borderRadius: '8px',
+                }}>
+                  {POPUP_STYLES[activeStyleId].extraFields.map((f) => {
+                    if (f.showWhen) {
+                      const [depKey, depVal] = Object.entries(f.showWhen)[0];
+                      if (getStyleFieldValue(POPUP_STYLES[activeStyleId], activeStyleFields, depKey) !== depVal) {
+                        return null;
+                      }
+                    }
+                    const value = getStyleFieldValue(POPUP_STYLES[activeStyleId], activeStyleFields, f.key);
+                    const setField = (v) =>
+                      setActiveStyle((p) => ({
+                        ...p,
+                        styleFields: { ...(p.styleFields || {}), [f.key]: v },
+                      }));
+
+                    return (
+                      <div key={f.key}>
+                        <label
+                          htmlFor={`ccf-style-field-${f.key}`}
+                          style={{ display: 'block', fontSize: '12px', fontWeight: '600',
+                                   color: '#374151', marginBottom: '4px' }}
+                        >
+                          {f.label}
+                        </label>
+                        {f.type === 'boolean' && (
+                          <button
+                            id={`ccf-style-field-${f.key}`}
+                            type="button"
+                            aria-pressed={!!value}
+                            onClick={() => setField(!value)}
+                            className="ccf-style-focus"
+                            style={popPill(!!value)}
+                          >
+                            {value ? 'On' : 'Off'}
+                          </button>
+                        )}
+                        {f.type === 'select' && (
+                          <select
+                            id={`ccf-style-field-${f.key}`}
+                            className="ccf-style-focus"
+                            value={value || f.default}
+                            onChange={(e) => setField(e.target.value)}
+                            style={popSelect}
+                          >
+                            {f.options.map((opt) => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </select>
+                        )}
+                        {f.type === 'datetime' && (
+                          <input
+                            id={`ccf-style-field-${f.key}`}
+                            className="ccf-style-focus"
+                            type="datetime-local"
+                            value={value || ''}
+                            onChange={(e) => setField(e.target.value)}
+                            style={popInput}
+                          />
+                        )}
+                        {f.type === 'text' && (
+                          <input
+                            id={`ccf-style-field-${f.key}`}
+                            className="ccf-style-focus"
+                            type="text"
+                            maxLength={f.maxLength}
+                            value={value || ''}
+                            onChange={(e) => setField(e.target.value)}
+                            style={popInput}
+                          />
+                        )}
+                        {f.helper && (
+                          <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
+                            {f.helper}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Mobile-only: let the Mobile tab pick a different style than
+                  Desktop. Writes popup.mobileStyleOverride regardless of
+                  which tab is active in general, but this control only
+                  renders on the Mobile tab, so in practice it's always
+                  toggled from there. */}
+              {popupDevice === 'mobile' && (
+                <div style={{ width: '100%', display: 'flex', alignItems: 'center',
+                              justifyContent: 'space-between', gap: '12px',
+                              paddingTop: '4px' }}>
+                  <label htmlFor="ccf-mobile-style-override" style={{ fontSize: '12px',
+                    color: '#374151', fontWeight: '500' }}>
+                    Use a different style on mobile
+                  </label>
+                  <button
+                    id="ccf-mobile-style-override"
+                    type="button"
+                    aria-pressed={!!popup.mobileStyleOverride}
+                    onClick={() => setPopup((p) => ({ ...p, mobileStyleOverride: !p.mobileStyleOverride }))}
+                    className="ccf-style-focus"
+                    style={popPill(!!popup.mobileStyleOverride)}
+                  >
+                    {popup.mobileStyleOverride ? 'On' : 'Off'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Layout — desktop only, Classic only; Flash Sale/Gift Reveal
+                each force their own layout (see the note above). Mobile is
+                always the Card layout regardless of style. */}
+            {popupDevice === 'desktop' && activeStyleId === 'classic' && (
               <div style={popRow}>
                 <div style={popLabel}>Layout</div>
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -1481,6 +1900,19 @@ export default function Settings({ shop }) {
             </div>
 
             {popupDevice === 'desktop' && (() => {
+              // popup-style: a non-Classic style owns its own preview
+              // entirely — it never falls through to the split/card/banner
+              // rendering below, which stays exactly as it was for Classic.
+              if (activeStyleId !== 'classic') {
+                return (
+                  <StyleCardPreview
+                    styleId={activeStyleId}
+                    cfg={popup}
+                    styleFields={activeStyleFields}
+                    emailFieldEnabled={emailDiscountEnabled}
+                  />
+                );
+              }
               const bg = popup.bgColor || '#ffffff';
               const fg = popup.textColor || '#111827';
               const accent = popup.accentColor || '#4f46e5';
@@ -1835,6 +2267,25 @@ export default function Settings({ shop }) {
 
                     {/* Mobile popup preview — card layout */}
                     {(() => {
+                      // popup-style: same early-return rule as the desktop
+                      // preview above — uses whichever config
+                      // (mobilePopup, or popup when the override is off)
+                      // activeStyleId/activeStyleFields already resolved to.
+                      if (activeStyleId !== 'classic') {
+                        const styleCfg = mobileUsesOwnStyle ? mobilePopup : popup;
+                        return (
+                          <div style={{ position: 'absolute', bottom: '12px', left: '8px',
+                                        right: '8px', zIndex: 5 }}>
+                            <StyleCardPreview
+                              styleId={activeStyleId}
+                              cfg={styleCfg}
+                              styleFields={activeStyleFields}
+                              emailFieldEnabled={emailDiscountEnabled}
+                              compact
+                            />
+                          </div>
+                        );
+                      }
                       const mp = mobilePopup;
                       const bg = mp.bgColor || '#ffffff';
                       const fg = mp.textColor || '#111827';
@@ -1968,6 +2419,10 @@ export default function Settings({ shop }) {
 
   return (
     <div style={DS.page}>
+      <style>{
+        '.ccf-style-card:focus-visible,.ccf-style-focus:focus-visible{' +
+        'outline:2px solid #4f46e5;outline-offset:2px;}'
+      }</style>
       <PageHeader
         title="Settings"
         subtitle="Configure your automation preferences"

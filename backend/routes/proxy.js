@@ -68,6 +68,10 @@ router.get('/health', (req, res) => {
 // from here (same origin as the store, via the App Proxy).
 //   https://{shop}/apps/cartncodform/popup-config?shop={shop}
 // Signature is HARD-enforced, same as /cod-form.
+// popup-style: styleId/styleFields (and popup.mobileStyleOverride) are
+// schema fields on the same popup/mobilePopup subdocs returned below, so
+// they're already included wholesale here — no change needed in this route
+// itself for the storefront to read them.
 // ---------------------------------------------------------------------------
 router.get('/popup-config', async (req, res) => {
   if (!verifyProxySignature(req.query)) {

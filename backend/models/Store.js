@@ -109,6 +109,28 @@ const storeSchema = new mongoose.Schema({
     },
     overlayOpacity: { type: Number, default: 0.5 },
     showOverlay: { type: Boolean, default: true },
+
+    // --- popup-style: named visual style layered on top of `layout` (see
+    // backend/utils/popupStyles.js — the mirrored, authoritative id list).
+    // 'classic' is a no-op: it renders exactly as this subdoc's own fields
+    // always have, so an existing shop with no styleId saved yet defaults
+    // here to 'classic' and sees zero change. styleFields is a flat bag of
+    // every style's own extra-field values (countdownEndsAt, badgeText,
+    // etc.) — kept flat rather than nested per-style so switching styles
+    // never drops a field's value, since no two currently-registered
+    // styles share a field name; PATCH sanitizes its contents against the
+    // known field set before writing.
+    styleId: {
+      type: String,
+      enum: ['classic', 'flash_sale', 'gift_reveal'],
+      default: 'classic',
+    },
+    styleFields: { type: mongoose.Schema.Types.Mixed, default: {} },
+    // When true, the Mobile tab uses mobilePopup.styleId/styleFields
+    // instead of inheriting this (desktop) style. Lives on the desktop
+    // subdoc since it's a single shop-level "should mobile diverge"
+    // decision, not itself a per-device value.
+    mobileStyleOverride: { type: Boolean, default: false },
   },
 
   // --- popup-responsive: mobile-specific overrides (screen width <= 600px).
@@ -145,6 +167,16 @@ const storeSchema = new mongoose.Schema({
       default: 'center',
     },
     showOverlay: { type: Boolean, default: true },
+
+    // --- popup-style: only consulted when popup.mobileStyleOverride is
+    // true (see the note on that field above); otherwise the storefront
+    // and admin preview both use popup.styleId/styleFields for mobile too.
+    styleId: {
+      type: String,
+      enum: ['classic', 'flash_sale', 'gift_reveal'],
+      default: 'classic',
+    },
+    styleFields: { type: mongoose.Schema.Types.Mixed, default: {} },
   },
 
   // --- discount-feature: per-shop automatic discount codes live in their own

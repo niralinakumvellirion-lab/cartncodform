@@ -1,0 +1,733 @@
+=== POPUP STYLE FEATURE — PHASE 1 AUDIT (BEFORE) ===
+Generated: 2026-09-22
+Read-only investigation. No code was changed.
+
+
+====================================================================
+BLOCKING ISSUE — RESOLVED 2026-09-22
+====================================================================
+The images were moved into docs/popup-styles/ (15 files). Items 7 and 9
+below are now complete. Phase 1 is fully done as of this update. Still
+waiting on explicit approval before starting Phase 2, per the task's
+"STOP HERE" instruction (repeated again after this update).
+
+
+====================================================================
+1. WHERE POPUP CUSTOMIZATION LIVES
+====================================================================
+Frontend:
+  - Route: /admin/settings-page (frontend/app/admin/settings-page/page.js —
+    the standard Suspense/AppProvider/NavMenu wrapper, shop from
+    ?shop=).
+  - Screen: frontend/app/admin/screens/Settings.jsx (2043 lines). This is
+    the ONLY place the customizer lives — despite a stale comment at
+    lines ~148-150 ("the popup customizer lives elsewhere now — neither is
+    rendered here") which is WRONG / leftover from an earlier refactor:
+    the customizer is fully implemented and rendered in this same file,
+    toggled via `showPopupCustomizer` (state at line 162). Worth fixing
+    that comment in Phase 2, unrelated to the style feature itself.
+  - Entry point: a "Popup customization" card with a "Customize popup"
+    button (line ~699-731). Clicking it swaps in the full customizer
+    panel (back button, Desktop/Mobile device tabs, all fields, and a
+    live preview card) in place of the rest of the Settings screen's
+    cards.
+  - State: `popup` (desktop config) and `mobilePopup` (mobile override),
+    both loaded from the API into plain objects; `popupDevice`
+    ('desktop'|'mobile') selects which one is being edited; `activePopup
+    = popupDevice === 'desktop' ? popup : mobilePopup` (line 273) is the
+    single object every field control reads/writes via `setActivePopup`
+    (a small helper that writes back into whichever of `popup`/
+    `mobilePopup` is active). `popupImageChanged`/`mobileImageChanged`
+    track whether a NEW image was uploaded this session, so save doesn't
+    re-send an unchanged base64 blob on every edit.
+  - No separate "PopupCustomizer" component file — it's ~700 lines of
+    JSX inline inside Settings.jsx (rows ~830-1500 build the editor
+    fields; ~1480-1900 build the live preview for both layouts and both
+    devices).
+
+Backend:
+  - GET  /api/profiles/:shopDomain/popup  (backend/routes/profiles.js
+    ~line 507) — returns `{ popup, mobilePopup }` from the Store doc.
+  - PATCH /api/profiles/:shopDomain/popup (~line 526) — accepts any
+    subset of a fixed field whitelist (`POPUP_FIELDS`, ~line 498) and
+    `$set`s each as `popup.<field>` (and, if `req.body.mobilePopup` is an
+    object, each of the same fields as `mobilePopup.<field>`) — i.e. a
+    per-field dot-notation merge, never a wholesale subdocument
+    replacement (a comment there explicitly calls out why: a blind
+    replace would silently wipe fields, e.g. imageUrl, that a given save
+    didn't happen to include).
+  - GET /apps/cartncodform/popup-config (backend/routes/proxy.js ~line
+    72) — the STOREFRONT-facing read, via Shopify's App Proxy (signature
+    hard-enforced). Returns the exact same `{ popup, mobilePopup }`
+    shape, unauthenticated (public, but proxy-signed).
+  - Model: backend/models/Store.js, two subdocuments on the Store
+    schema — `popup` (~line 66) and `mobilePopup` (~line 117). Full field
+    lists are under item 6 below.
+
+Storefront:
+  - extensions/cartncodform-embed/blocks/push-notifications.liquid — a
+    single giant IIFE (~2500 lines) covering tracking, push subscribe,
+    discounts, AND the popup rendering itself. `fetchPopupConfig()`
+    (~line 1431) calls the proxy route above once on page load and
+    populates two plain vars, `popupConfig` / `mobilePopupConfig`
+    (declared ~line 137).
+
+
+====================================================================
+2. EVERY POPUP TYPE AND WHERE EACH RENDERS
+====================================================================
+There are really only TWO visually distinct customer-facing "types"
+today, plus one non-popup post-action element:
+
+  a) MAIN SOFT-PROMPT POPUP — showSoftPrompt() (liquid ~line 640).
+     - Rendered on non-product pages (home/collection/etc — gated by
+       initIntentTriggers(), which explicitly `return`s on product
+       pages), on a ~1.5s dwell timer (PAGE_LOAD trigger) for a visitor
+       with no existing subscribe token.
+     - Reads `popupConfig` or `mobilePopupConfig` (device-detected via
+       `window.innerWidth <= 600`) and branches on `cfg.layout` to build
+       one of 3 layouts (split / card / banner) via raw
+       `document.createElement(...)` DOM construction (NOT a shared
+       template string) into a `#ccf-push-prompt` element.
+     - THIS SAME FUNCTION also serves the "discount-capture" case: an
+       already-subscribed customer (`Notification.permission ===
+       'granted'`) with any discount rule enabled gets the identical
+       popup shown again (bypassing the normal permission gate) purely
+       to collect an email for a bigger discount. It is NOT a separate
+       visual design — same layout code, same `cfg`, just a different
+       trigger condition and different fields shown inside it (the email
+       input, via `ccfShowEmailField()`/`ccfBuildDiscountFields()`).
+     - After a successful subscribe/discount, `renderDiscountCode()`
+       (~line 519) replaces this same popup's content section IN PLACE
+       with an "unlocked" state (code, copy-to-clipboard, auto-redirect)
+       — still the same DOM element, not a new popup.
+
+  b) PRODUCT-PAGE NUDGE — injectProductNudge() (liquid ~line 1464).
+     - A SEPARATE, much simpler widget inserted directly after the
+       product form / Buy button on product pages only (the main
+       soft-prompt explicitly skips product pages).
+     - Has NO layout choice and reads almost nothing from
+       `popupConfig` — only `popupConfig.accentColor` for its accent;
+       everything else (copy, structure, spacing) is hardcoded in the
+       function. It is NOT currently styleable via the Popup
+       Customization screen at all.
+     - On a successful discount, this ALSO gets an in-place "unlocked"
+       state (percentage + code + "Shop now" link), built by its own
+       inline HTML, not by calling renderDiscountCode().
+
+  c) PERSISTENT DISCOUNT BUY BUTTON — injectProductDiscountButton()
+     (liquid ~line 483). Not a popup — a plain button inserted near the
+     Buy button once a discount code already exists (from a previous
+     visit/session, via sessionStorage). Mentioned for completeness
+     since the task said "any others"; out of scope for "popup style" as
+     it has no layout/appearance knobs of its own (a single hardcoded
+     green button).
+
+So for the purposes of "each popup type gets its own style selection"
+(Phase 2C), there is realistically ONE styleable popup type today (the
+soft-prompt / discount-capture popup, since they share all rendering
+code) plus the product nudge as a second, currently-unstyled surface.
+This is an important scoping question for Phase 2 — see item 4.
+
+
+====================================================================
+3. CURRENT DESIGN IN DETAIL
+====================================================================
+Layouts (cfg.layout, enum split | card | banner — Store.js popup
+subdoc; mobilePopup only allows card | banner, default card):
+
+  - SPLIT — two-column: image on one side, content (headline, subtext,
+    email/discount fields, Allow/Deny buttons) on the other. Admin JSX
+    branch ~Settings.jsx:1501; storefront branch inside showSoftPrompt().
+  - CARD — single stacked card, image on top (if any), content below.
+    This is the ONLY layout mobile ever uses by default.
+  - BANNER — full-width bar, typically image+text inline with a compact
+    CTA.
+
+Both desktop and mobile have their OWN complete config object (`popup` /
+`mobilePopup`), not a single config with a "mobile override" of a few
+fields — each carries its own layout, headline, subtext, brandName,
+image/imagePosition, colors, font, borderRadius, allow/denyText,
+showBranding, textAlign, ctaStyle (mobile defaults `ctaStyle: 'pill'`
+vs desktop's `'rounded'`). If mobilePopup's own fields are empty, the
+storefront line `if (isMobile && !cfg.layout) cfg = popupConfig || {};`
+falls back to the desktop config wholesale (not per-field).
+
+Editable fields on the customizer screen today (Settings.jsx ~1078-1340,
+one popRow per field): Layout (desktop tab only — mobile is fixed to
+"Card" in the UI, matching the schema's mobile enum), Image (upload,
+client-side canvas-resized to max 800px + JPEG-compressed to base64
+before it ever reaches the request body, plus an Image focus /
+imagePosition control), Headline, Subtext, Brand name, Allow button
+text, Deny button text, Accent color, Background color, Text color,
+Font, Border radius, Button style (`ctaStyle`: rounded/square/
+pill/outlined/soft, rendered via `getCtaStyle()`), Position (only
+meaningful together with `showOverlay`/overlay logic), Dark overlay
+on/off toggle.
+
+Schema fields that exist and are saved by the PATCH whitelist but are
+NOT exposed by any control in the current UI (confirmed via grep — no
+JSX references `activePopup.theme`, `.customTitle`, or `.overlayOpacity`
+anywhere): `theme` (enum light/dark/custom), `customTitle`,
+`overlayOpacity` (only the boolean `showOverlay` is wired up). These are
+effectively dead/orphaned in the admin today; flagging since a new
+"style" feature might want to either finally use them or explicitly
+ignore/deprecate them.
+
+Live preview: the customizer panel includes an inline preview
+(Settings.jsx ~1480-1900) that is a COMPLETELY SEPARATE, hand-written
+JSX re-implementation of the same split/card/banner rendering the
+storefront's showSoftPrompt() does in vanilla JS DOM calls. The two are
+not sharing any code or template — they are two independently
+maintained visual implementations of "the same" popup. This is the
+single most important fact for item 8 (sync strategy) below: today, any
+visual tweak to one has to be manually re-implemented in the other, and
+they can (and likely already do, in small ways) drift apart.
+
+Discount fields: `ccfShowEmailField()` (true when emailDiscount or
+bothDiscount is enabled, per the Discounts screen audited earlier this
+session) controls whether an email `<input>` appears inside the popup —
+split layout via the shared `ccfBuildDiscountFields()` helper, card
+layout via its own inline-built input. The admin's live preview does NOT
+currently render this email field at all (it previews the base
+popup fields only) — task Phase 2 explicitly asks for "email field
+visible in preview where applicable," which is new behavior, not a
+sync-gap fix.
+
+
+====================================================================
+4. HOW "STYLE" SHOULD RELATE TO THE EXISTING `layout` FIELD
+====================================================================
+Options as framed by the task:
+  a) style REPLACES layout
+  b) style WRAPS layout (each style internally picks a layout)
+  c) style sits BESIDE layout (both stay, independently selectable)
+
+RECOMMENDATION: (b) — style wraps layout.
+
+Reasoning:
+  - `layout` (split/card/banner) is a structural/geometric concept
+    (where does the image go, is it a bar or a box) that is already
+    deeply wired through BOTH the admin preview and the storefront's
+    DOM-building code, the mobile-vs-desktop schema (mobilePopup's enum
+    is a SUBSET of popup's), and the backend's PATCH whitelist. Treating
+    it as still-authoritative-but-now-derived keeps every existing
+    stored document valid with zero migration: a style's registry entry
+    just declares which `layout` value it renders as, and the existing
+    `cfg.layout` reads throughout showSoftPrompt() keep working
+    unmodified for the geometry, while the NEW style id decides which
+    decorative treatment (fonts, borders, badges, imagery treatment,
+    button chrome, whatever each reference design turns out to need) is
+    layered on top.
+  - Option (a), replacing layout outright, would require touching every
+    existing `cfg.layout === 'split'|'card'|'banner'` branch in both
+    files and would break the documented mobile-enum-is-a-subset-of-
+    desktop-enum fallback logic (`if (isMobile && !cfg.layout) cfg =
+    popupConfig`) for no real benefit — layout's job (2-col vs stacked
+    vs bar) is orthogonal to "style" as evidenced by the reference-image
+    task wording itself ("layoutType" is listed as one field the style
+    registry stores, i.e. style HAS a layout, it doesn't obsolete it).
+  - Option (c), fully independent axes (any style + any layout,
+    cross-product), sounds flexible but is very unlikely to be
+    what the reference images actually need — a "premium minimal" look
+    and a "bold banner sale" look are not the same design with
+    different image placement swapped in; they're genuinely different
+    visual systems that each happen to use ONE particular layout well.
+    A free cross-product multiplies the QA/parity surface (item 8) for
+    little real merchant value, and none of the task's Phase 2 spec
+    items (style registry has `layoutType` as ONE field per style, not a
+    separate independent selector) suggest independent axes were
+    intended.
+  - "Classic" (id `classic`) = today's exact behavior, unchanged,
+    mapping 1:1 to whatever `layout` the shop already has saved — this
+    is what makes (b) a strictly additive change: an existing shop with
+    no `style` field saved renders identically to before (task Phase 2D
+    explicitly requires this), because Classic's registry entry doesn't
+    change any existing code path, it just names the current one.
+
+Consequence for Phase 2: the style registry's `layoutType` field is the
+single source of truth for which of the 3 existing geometric layouts a
+given style renders as; a style can technically reuse the SAME layout
+another style uses (e.g. two different "card"-based styles with
+different decoration), which is exactly the flexibility (b) is meant to
+provide without (c)'s combinatorial risk.
+
+
+====================================================================
+5. ADMIN UI LIBRARY
+====================================================================
+- @shopify/polaris ^13.9.5, @shopify/app-bridge-react ^4.2.13 (from
+  frontend/package.json), Next.js 14.2.5 (App Router).
+- Polaris is used ONLY for the outer chrome: every admin page wraps its
+  content in `<AppProvider i18n={{}}>` and Shopify's `<NavMenu>` (from
+  app-bridge-react, not Polaris) for the embedded-app nav.
+- Every actual screen in this codebase, Settings.jsx (and therefore the
+  existing popup customizer) included, is built with plain React +
+  inline `style={{...}}` objects and small local helper functions/
+  constants (a hand-rolled "DS" design-token object pattern repeated
+  per-screen) — NO Polaris form/card/button components are used inside
+  the screens themselves anywhere in this codebase, confirmed by grep
+  (no `Card`, `TextField`, `Button` etc. imports from '@shopify/polaris'
+  in Settings.jsx or any other screen file touched this session). "Use
+  the admin's existing UI library/conventions" (task Phase 2C) therefore
+  means: plain inline-styled React matching the existing `popRow`/
+  `popLabel`/`popPill`/`DS.card` visual language already in Settings.jsx
+  and the other screens — NOT introducing actual Polaris components.
+
+
+====================================================================
+6. SAVE/LOAD — ENDPOINTS, FIELDS, SCHEMA
+====================================================================
+Endpoints (repeated from item 1 for completeness):
+  GET   /api/profiles/:shopDomain/popup        (admin, requireAuth)
+  PATCH /api/profiles/:shopDomain/popup        (admin, requireAuth)
+  GET   /apps/cartncodform/popup-config        (storefront, App Proxy)
+
+PATCH whitelist (`POPUP_FIELDS`, routes/profiles.js): position, theme,
+accentColor, bgColor, textColor, fontFamily, borderRadius, imageUrl,
+imagePosition, allowText, denyText, customTitle, showBranding, layout,
+headline, subtext, brandName, textAlign, ctaStyle, overlayOpacity,
+showOverlay. The SAME list is reused for `mobilePopup.*` when the
+request body includes a `mobilePopup` object — there is currently no
+separate "style" or per-popup-type concept anywhere in this whitelist,
+the Store schema, or the request/response shape; every field is a flat
+property of ONE `popup` object (plus its `mobilePopup` sibling). Adding
+a per-popup-type style selection (task Phase 2C "Style is selected per
+popup type") is new schema/API surface, not something that reuses an
+existing hook — see the "known issue for Phase 2 planning" note below.
+
+Store.js schema (backend/models/Store.js):
+  popup: { position, theme, accentColor, bgColor, textColor, fontFamily,
+    borderRadius, imageUrl, imagePosition, allowText, denyText,
+    customTitle, showBranding, layout, headline, subtext, brandName,
+    textAlign, ctaStyle, overlayOpacity, showOverlay }
+  mobilePopup: { layout (card|banner only), headline, subtext,
+    brandName, imageUrl, imagePosition, accentColor, bgColor, textColor,
+    fontFamily, borderRadius, allowText, denyText, showBranding,
+    textAlign, ctaStyle, [truncated — same shape as popup minus
+    position/theme/customTitle/overlayOpacity/showOverlay] }
+
+Save flow: Settings.jsx's single `saveSettings()` (shared with every
+other Settings field, not popup-specific) sends `voice/caps/
+quietHours/timezone` to the settings PATCH and `{...popup, mobilePopup:
+{...mobilePopup}}` (minus `imageUrl` when it hasn't changed this
+session, per `popupImageChanged`/`mobileImageChanged`) to the popup
+PATCH, in parallel via `Promise.all`. There is no separate "Save popup"
+button — the customizer panel's changes are staged in React state and
+only persisted on the screen's main Save click (the panel explicitly
+says so: "Changes save with the main Save settings button").
+
+NOTE FOR PHASE 2 PLANNING — a per-popup-type style concept (task's own
+Phase 2C: "Style is selected per popup type") is genuinely new schema:
+today there is exactly one `popup` + one `mobilePopup` config per shop,
+with no notion of "type" at all (the two visually distinct surfaces from
+item 2 — soft-prompt/discount-capture vs. product nudge — aren't even
+separately configured today, only the nudge's accent color is derived
+from the shared popup config). Phase 2's registry + "style id + extra
+fields per shop, per popup type" (Phase 2D) will need a genuinely new
+shape, most likely nesting style selection under each existing config
+object (e.g. `popup.styleId` / `popup.styleFields`, `mobilePopup.styleId`
+/ `mobilePopup.styleFields`) rather than a new top-level structure — this
+keeps it additive/non-destructive per Phase 2D's requirement, and
+naturally answers "per popup type" as "per existing config object,"
+since desktop and mobile already are independently configured.
+
+
+====================================================================
+7. REFERENCE IMAGES — BLOCKED
+====================================================================
+7. REFERENCE IMAGES — DESCRIBED (15 files, docs/popup-styles/)
+====================================================================
+These are third-party brand screenshots used only as LAYOUT INSPIRATION.
+Descriptions below are factual (what's in the screenshot), not a plan to
+reuse any brand's logo, copy, product photography, or exact visuals —
+new styles will be original designs based on the underlying PATTERN
+only (see item 9's explicit note on this).
+
+1. 14-popup-key-portal.webp
+   Single centered CARD. Dark charcoal background, thin red dotted
+   squiggle accents top-left/bottom-left. Right side: photo of wrapped
+   gift boxes with red ribbon on a red/dark gradient. Big bold white
+   headline "% FLASH SALE %", one line of subtext, a 3-box countdown
+   timer (HOURS / MINUTES / SECONDS, each its own bordered box with a
+   label underneath), solid yellow rectangular CTA button, no visible
+   email field (CTA goes to an offers page, not a capture form). No
+   secondary/decline action visible.
+
+2. 622b8bcc16005815563b350e_bombas-popup-example.png (Bombas)
+   Single centered CARD, no image at all. Plain white background, bold
+   large serif-ish blue headline "Get 20% Off Your First Order" (2
+   lines), small grey subtext (2 lines), one email input (light border,
+   rounded), one full-width solid blue rounded CTA button, and a plain
+   underlined text link below it as the decline action ("Continue
+   Shopping" — not a button). Very minimal/clean, generous whitespace,
+   close to what this app already renders as a plain default card.
+
+3. Best-Website-Popup-Examples-Crown-Paw-Limited-Offer-Popup.png
+   Single centered CARD. Dark navy background with small pink 4-point
+   star/sparkle decorations scattered around. Bold white all-caps
+   headline "ARE YOU SURE? DON'T MISS THIS OFFER!", then a very large
+   pink "10% OFF" line, a thin horizontal divider, white email input,
+   a full-width PILL-shaped (fully rounded) pink CTA button "UNLOCK 10%
+   OFF" in all-caps, and a countdown timer BELOW the button (HH:MM:SS,
+   plain digits with small labels, no boxes). No visible decline link.
+
+4. Best-Website-Popup-Examples-Kinfield-...-Shark-Tank...png (Kinfield)
+   NOT a boxed panel — a large PEACH/TAN CIRCLE floats directly over a
+   full-bleed lifestyle background photo (no separate image element
+   inside the popup; the photo IS the page background, dimmed only
+   slightly). A thin decorative squiggle line motif runs across/behind
+   the circle. Inside the circle, centered: a small "AS SEEN ON [brand
+   logo]" badge line, bold headline "Take 10% off", one line of
+   subtext, white email input, solid brown/terracotta pill CTA "LET'S
+   GO", and small plain-text "No Thanks" below it. Distinctive because
+   there is no rectangular card/panel at all — the shape itself is the
+   chrome.
+
+5. Christopher-Cloos.png
+   SPLIT layout, roughly 45/55. Left: full-height lifestyle photo (man
+   in sunglasses). Right: white panel — small-caps light serif heading
+   "LUXURY FOR LESS", thin horizontal divider, mixed-weight offer line
+   "Enjoy 15% OFF on any poducts" (bold % only), then a COUNTDOWN shown
+   as 3 solid black rounded-square digit blocks with a colon separator
+   (no HH/MM/SS labels — just raw digits), a full-width solid
+   peach/orange rounded CTA "SHOW ME MY COUPON", and one line of small
+   italic-leaning grey text below it ("Hurry! This timer is real.").
+   No visible email field in this crop — the CTA itself seems to reveal
+   the code. Elegant/editorial tone via the serif type + divider.
+
+6. de67a004721b894727f91b7dae10575e.png (dress rental site)
+   SPLIT-style but with imagery on BOTH outer edges and text in the
+   middle: a wide blush-pink card with a photo of a model bookending
+   the left edge and a second, different-pose photo of the same look
+   bookending the right edge, with the actual offer content centered
+   between them on the pink field. Bold black serif-ish heading "GET A
+   £20 VOUCHER" (2 lines), grey subtext (2 lines), a small chevron/
+   caret icon above the input, one email input, and a full-width solid
+   maroon CTA "GET YOUR FREE £20 VOUCHER". No visible decline link.
+
+7. email-pop-up-5-edited.jpg (meditation/wellness)
+   Single square CARD whose ENTIRE background is a black-and-white
+   photo (no separate white content panel) — headline and body text sit
+   directly ON TOP of the photo, left-aligned, in bold white sans-serif:
+   "Devotion cures.", then 4 lines of descriptive body copy, also
+   overlaid directly on the image. Footer is a two-part bar: a white
+   email input on the left and a solid red square CTA "SIGN UP"
+   directly beside it (input+button side-by-side, not stacked), plus
+   one small line of grey consent/legal text below. No visible decline
+   link/X close visible in this crop other than the browser chrome.
+
+8. getresponse-forms-and-popups-creator.webp
+   This is a SCREENSHOT OF A POPUP-BUILDER TOOL'S UI (visible builder
+   chrome: a "SETTINGS" panel with Type/Position/Size/Background
+   controls on the right ~35% of the image) — only the LEFT ~65%
+   (the tool's own live preview) is a usable design reference. That
+   preview shows a SPLIT layout: photo on the left (woman outdoors), a
+   near-black content panel on the right with a small orange
+   "EXCLUSIVE ACCESS" eyebrow/badge tag above a bold white 2-line
+   headline "Treat yourself this summer", grey subtext, TWO stacked
+   text inputs (Name, then Email — this is the only reference with a
+   two-field form), and a solid white/light CTA "SIGN UP" at the
+   bottom. The small eyebrow badge above the headline is a distinct,
+   reusable micro-pattern not seen elsewhere in this set.
+
+9. images (1).jpeg
+   A generic vector/stock "POPUP DESIGN" marketing graphic (blue
+   gradient background, a large illustrated hand holding a megaphone
+   with sparkle/burst lines, an envelope icon), not a real website
+   screenshot: "50% Off / Sign up for our newsletter" heading, one input
+   ("you website here" — a typo in the stock asset itself), solid white
+   pill CTA "GET IT". Weak/generic as a genuine UX reference (it's ad
+   template art), but useful as a pointer toward an illustrated-icon
+   (rather than photographic) treatment for one style.
+
+10. images (2).jpeg (Pipcorn snacks)
+    SPLIT layout, roughly 50/50. Left: product photo (several snack
+    bags arranged on a shelf). Right: warm tan/beige panel — small
+    text "Join the party!", large bold black "20% OFF", a white email
+    input with two small icon badges inset on its right edge (a lock
+    icon and an info "i" icon), a full-width solid teal/cyan rounded
+    CTA "Get 20% Off!", and playful plain-text decline link "I'm not
+    hungry :(". Casual/playful copy tone throughout.
+
+11. images.jpeg
+    SPLIT layout, roughly 50/50. Left: lifestyle photo (person holding
+    orange halves over their eyes, pink background). Right: plain white
+    panel — bold navy 2-line heading "Sign up and get $20 off.", grey
+    subtext, one white email input, full-width solid dark-navy
+    rectangular CTA "GET THE COUPON". No visible decline link. Clean,
+    high-contrast navy-on-white, bold sans-serif.
+
+12. Pop-up-Form-Design-Best-Practices-and-Creative-Examples-–-1.webp
+    (Urban-style dress site) Like #4, NOT a rectangular panel — a large
+    cream/off-white ROUNDED-OVAL (pill) shape floats over a full-bleed
+    background photo, background dimmed around the edges only. Inside
+    the oval, centered: bold black sans-serif heading "Sign Up For 5%
+    Off Your 1st Order" (2 lines), grey subtext with a small green
+    heart emoji, one email input, a full-width solid hot-pink pill CTA
+    "Yes, Babe!", and plain-text "No, thanks" below it. Same "organic
+    shape over full-bleed photo, no separate image panel" pattern as
+    Kinfield, different shape (oval vs. circle) and brighter palette.
+
+13. Pop-up-Form-Design-Best-Practices-and-Creative-Examples-–-4.webp
+    A PHONE MOCKUP (device frame) showing a MOBILE, bottom-of-viewport
+    CARD: an illustrated gift-box graphic (confetti, ribbon — icon
+    art, not a photo) sits at the top, overlapping down into a white
+    rounded card below it. Bold red heading "Exclusive Offer!! / 10%
+    OFF YOUR FIRST ORDER" (2 lines, different sizes), then a light-grey
+    PILL-shaped CODE CHIP directly showing the text "DISCOUNT10" (the
+    code is shown immediately, not emailed), and a full-width solid red
+    CTA "COPY CODE" below the chip. No email field visible in this
+    version at all — it's a code-reveal-only design. Notable because it
+    closely resembles this app's OWN existing post-subscribe "unlocked
+    code" state (renderDiscountCode()) more than the initial capture
+    step.
+
+14. Ready-Set-Judy.webp (Judy brand)
+    SPLIT layout, unusual left panel: instead of a product/lifestyle
+    photo, the left side is a literal mini "Shopping Cart" summary card
+    (title, one line item with thumbnail + price, a discount line, and
+    a new-total line). Right side: solid mustard-yellow panel — a small
+    red "Prepared at a Great Price" tag line, then a HUGE bold black
+    ultra-condensed headline "TAKE 10% OFF" (largest text of any
+    reference image here), a full-width solid black rectangular CTA
+    "Redeem Now →" (with a trailing arrow glyph), and one small line of
+    grey legal text below. The literal cart-contents left panel is
+    specific to Judy's real cart data and isn't something this popup
+    system has access to; the useful, reusable part of this reference
+    is the RIGHT panel's typographic treatment (huge condensed bold
+    headline, high-contrast color field, arrow-suffixed CTA).
+
+15. sddefault.webp (furniture/interior site)
+    Single CARD, floating centered over a dimmed full-page background.
+    Top of the card: a photo (interior/furniture product shot). Below
+    it, a white rounded panel: bold black heading "You've got 10% off",
+    grey subtext "Limited time offer, only today", then TWO full-width
+    stacked PILL buttons of EQUAL width/weight: a solid dark-brown
+    primary "Save 10% off" and a lighter tan secondary "No, thanks" —
+    both real buttons, not a button+text-link pattern like most of the
+    other references. Clean image-top card with a clearly two-button
+    (not button+link) footer.
+
+
+GROUPING — images that share essentially the same underlying pattern:
+
+  Group A — Minimal card, little/no image, single CTA + text-link
+  decline (already close to this app's existing default look):
+    #2 Bombas, #15 sddefault (adds an image-top + a real 2-button
+    footer instead of a text link, otherwise same minimalism)
+
+  Group B — Classic "photo one side, light content panel other side"
+  split (structurally identical to this app's EXISTING split layout —
+  these validate split rather than motivate a new style on their own):
+    #5 Christopher Cloos, #6 dress-rental voucher, #8 getresponse's
+    preview (dark panel variant), #10 Pipcorn, #11 orange/navy
+
+  Group C — Dark, high-urgency, countdown-driven, decorative accents
+  (sparkles/dots), card-shaped (not split):
+    #1 flash-sale key-portal, #3 Crown & Paw
+    (#5 Christopher Cloos also has a countdown, but its split layout +
+    editorial serif tone are different enough to treat separately)
+
+  Group D — Organic/full-bleed: NO boxed panel at all — a rounded
+  shape (circle/oval) or the full card itself sits directly over/on a
+  photograph, text overlaid straight onto the image:
+    #4 Kinfield (circle), #12 Urban-style oval, #7 meditation site
+    (square card, same "text directly on photo" idea, no separate
+    panel)
+
+  Group E — Illustrated/icon art (not photography) + explicit
+  coupon-code-chip reveal, mobile-leaning, playful:
+    #13 mobile gift-box + code chip, #9 generic vector ad (weak/
+    secondary reference — stock template art, not a real site)
+
+  Group F — Bold condensed display typography + arrow CTA on a
+  saturated color field (typographic inspiration only; the literal
+  cart-drawer mechanic is out of scope — this app's popup has no
+  access to real cart contents):
+    #14 Judy
+
+  Not grouped / no real design signal beyond what's already covered:
+  none — all 15 were placed in a group above.
+
+
+====================================================================
+
+
+====================================================================
+8. KEEPING ADMIN PREVIEW AND STOREFRONT POPUP IN SYNC
+====================================================================
+As established in item 3, today's split/card/banner rendering is TWO
+independent hand-written implementations (JSX in Settings.jsx vs.
+imperative DOM-building in the liquid file) with no shared code — this
+is exactly the kind of drift risk the task is asking to avoid for the
+NEW style feature.
+
+RECOMMENDATION: a documented parity checklist per style, NOT a shared
+markup/template approach — for this specific codebase, given real
+constraints:
+
+  - The storefront file is a Shopify theme app embed block: plain,
+    dependency-free vanilla JS running in the customer's browser, no
+    build step, no npm packages, no JSX. The admin is a Next.js/React
+    app. There is no existing shared-code channel between them (no
+    shared npm package, no codegen step, nothing) — introducing one
+    (e.g. a shared JSON-driven template renderer both sides interpret)
+    would be a substantial new piece of infrastructure, is explicitly
+    flagged as "unrelated refactors" being out of scope, and is far more
+    engineering than 4-6 new popup styles justify.
+  - A genuinely shared TEMPLATE (e.g. both sides consuming one HTML/CSS
+    string per style, admin via dangerouslySetInnerHTML, storefront via
+    innerHTML) is technically possible and would remove drift risk
+    entirely, but requires escaping merchant strings correctly on BOTH
+    consumption sides and moving every existing hand-tuned per-layout
+    detail (hover states, focus rings, responsive breakpoints, the
+    existing admin-only "which layout looks selected" chrome that has no
+    storefront equivalent) into one dialect both environments can
+    render identically — high risk of visual regressions in the
+    EXISTING 3 layouts for a feature whose ask is additive.
+  - Given that: recommend each new style registry entry documents its
+    own render recipe TWICE (an admin JSX render function + a storefront
+    liquid/JS render function), governed by ONE shared, versioned
+    "parity checklist" per style (documented directly in the registry
+    file as a comment block, or in a short docs/popup-styles-parity.md):
+    exact fields used, exact conditional rendering rules (e.g. email
+    field visibility, image aspect/position), exact color/spacing
+    tokens, and a screenshot-diff step as part of adding/changing a
+    style (manually compare admin preview vs. a real storefront render
+    before calling a style "done"). This mirrors how `layout` itself is
+    already kept in sync today (by convention/discipline, not
+    structurally) and is the lowest-risk, most consistent-with-existing-
+    codebase-conventions option.
+  - To reduce (not eliminate) drift risk further without a full shared-
+    template rewrite: centralize the few things that ARE pure data
+    (color/font/spacing DEFAULT values, and field lists like
+    `supportedFields`) in the ONE style registry file itself (Phase 2A
+    already asks for this), so at minimum the "what fields exist and
+    what are their defaults" facts can't drift — only the actual pixel-
+    level rendering code stays duplicated, exactly as `layout` is today.
+
+
+====================================================================
+9. PROPOSED STYLE SHORTLIST (Classic + 4 new)
+====================================================================
+IMPORTANT: every style below is an ORIGINAL design inspired by the
+underlying structural/visual PATTERN in its reference group (layout
+shape, typography weight, color contrast, element arrangement) — none
+copies any brand's logo, product photography, exact copy, or exact
+color values. Per the task's instruction, reference images will also
+NOT be used as in-app thumbnails; Phase 2 card thumbnails must be
+drawn/generated previews of this app's own rendering of each style.
+
+One honest gap: none of the 15 references is a full-width BANNER. All
+15 are either a boxed card/split panel or an organic full-bleed shape.
+So this shortlist doesn't propose a new banner-wrapping style — Classic
+continues to cover banner exactly as today, and a banner-based new
+style would need its own separate reference material if wanted later.
+
+---
+
+1) CLASSIC (baseline, unchanged)
+   Reference image(s): none — this names today's existing behavior.
+   Wraps layout: whatever the shop already has saved (split/card/
+   banner) — Classic does not force a layout.
+   Extra fields: none (existing fields only).
+   Behavior: renders EXACTLY as today, byte-for-byte (Phase 2/3
+   requirement) — the reason (b) "style wraps layout" was recommended
+   in item 4 is precisely so Classic can be a no-op.
+
+2) "FLASH SALE" — dark, urgent, countdown-driven
+   Reference image(s): #1 (14-popup-key-portal), #3 (Crown & Paw)
+   Wraps layout: card
+   Pattern taken (not copied): dark background, small decorative
+   accent motif (dots/sparkles — an original simple pattern, not
+   Crown & Paw's specific stars), bold high-contrast offer text, a
+   live countdown as a first-class visual element, pill or rounded
+   CTA.
+   Extra fields: countdownEnabled (bool), countdownMinutes (number —
+   duration from first view, or a fixed end time), badgeText (short
+   optional eyebrow label, e.g. merchant-entered "LIMITED TIME");
+   reuses existing accentColor/bgColor/ctaStyle for the dark palette
+   and pill button rather than inventing new color fields.
+
+3) "EDITORIAL" — elegant split, serif heading, countdown as digit
+   blocks
+   Reference image(s): #5 (Christopher Cloos)
+   Wraps layout: split
+   Pattern taken: light, airy split panel; small-caps/serif-leaning
+   headline treatment; a thin divider rule under the heading; a
+   countdown rendered as solid digit blocks rather than plain text;
+   understated CTA color.
+   Extra fields: countdownEnabled, dividerEnabled (bool, thin rule
+   under headline), eyebrowText (short label above the headline, e.g.
+   "MEMBERS ONLY" — same underlying concept as getresponse's badge,
+   #8, folded in here rather than given its own style).
+
+4) "SPOTLIGHT" — organic shape, image-as-background, no separate
+   panel
+   Reference image(s): #4 (Kinfield), #12 (Urban oval), #7 (meditation
+   site, for the "text directly over photo" treatment)
+   Wraps layout: card (rendered as an aggressively rounded card —
+   effectively circular/oval — rather than a rectangular panel; see
+   note below)
+   Pattern taken: the merchant's uploaded image fills the ENTIRE
+   popup shape as a background (not a side panel), heading/subtext/
+   CTA sit directly on top of the image with a scrim/overlay behind
+   the text for legibility, minimal chrome otherwise.
+   Extra fields: shapeStyle (circle | oval | rounded-rect — how
+   aggressively `borderRadius` is forced), overlayOpacity (reuses the
+   EXISTING schema field, which today is saved but has no UI control —
+   this style is a natural place to finally expose it), accentMotif
+   (bool — a simple original thin-line decorative accent, not Kinfield's
+   specific squiggle art).
+   NOTE — this is the one style that stretches the "wraps an existing
+   layout" model from item 4: `card` already supports an image (via
+   `imageUrl`), but today that image sits ABOVE or BESIDE content, never
+   BEHIND it as a full-bleed background with text overlaid. Implementing
+   this needs one new rendering mode within `card`, not a new geometric
+   layout — flagging this explicitly since it's more work than the other
+   3 new styles, which mostly recombine existing rendering with new
+   copy/color defaults.
+
+5) "GIFT REVEAL" — playful, icon-driven, prominent code chip
+   Reference image(s): #13 (mobile gift-box + code chip), #10 (Pipcorn,
+   for the playful copy tone + input-badge micro-detail), #15
+   (sddefault, for the stacked equal-weight two-button footer)
+   Wraps layout: card
+   Pattern taken: an optional simple original gift/present glyph (not
+   Pop-up-Form-4's specific illustration) shown above the heading
+   instead of a merchant photo when no image is set; a more prominent,
+   pill-chip-styled treatment for the EXISTING post-subscribe "unlocked
+   code" state (this app already has that state, via
+   renderDiscountCode() — this style makes it visually louder, it
+   doesn't add new subscribe/discount logic); a two-real-button footer
+   (primary + secondary, both full-width pills) instead of
+   button + text-link.
+   Extra fields: giftIconEnabled (bool — show the built-in glyph when
+   no imageUrl is set), secondaryButtonStyle (pill | text-link — which
+   footer pattern to use), codeChipEmphasis (bool — louder styling on
+   the existing unlocked-code display).
+
+---
+SUMMARY TABLE
+
+style id   | name          | image(s)                              | wraps layout | extra fields
+classic    | Classic       | none (today's behavior)                | (unchanged)  | none
+flash_sale | Flash Sale    | #1, #3                                 | card         | countdownEnabled, countdownMinutes, badgeText
+editorial  | Editorial     | #5                                     | split        | countdownEnabled, dividerEnabled, eyebrowText
+spotlight  | Spotlight     | #4, #12, #7                            | card         | shapeStyle, overlayOpacity*, accentMotif
+gift_reveal| Gift Reveal   | #13, #10, #15                          | card         | giftIconEnabled, secondaryButtonStyle, codeChipEmphasis
+  (* overlayOpacity already exists in the schema; not a new field.)
+
+Images not used as a style's primary anchor but noted as secondary/
+supporting inspiration above: #2, #6, #8, #9, #11, #14 (see the
+per-style "Reference image(s)" and Group descriptions in item 7 for
+where each was folded in and why).
+
+
+====================================================================
+END OF PHASE 1 AUDIT
+====================================================================
+No code was changed. All 9 Phase 1 items are now complete. Waiting for
+approval to begin Phase 2, per the task's explicit "STOP HERE"
+instruction (repeated for this update as well).
