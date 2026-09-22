@@ -267,4 +267,54 @@ router.delete('/:shopDomain/festival/:id', requireAuth,
   }
 });
 
+// TEMPORARY DEBUG ROUTE — read-only, does not modify anything.
+// GET /api/queue/:shopDomain/festival/_duplicates
+// Groups this shop's FestivalQueue items by (festival, scheduledAt DAY) and
+// returns only groups with more than one item, to help track down duplicate
+// festival-suggestion rows. Remove once the dedupe investigation is done.
+router.get('/:shopDomain/festival/_duplicates', requireAuth,
+  requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const FestivalQueue = require('../models/FestivalQueue');
+
+    const groups = await FestivalQueue.aggregate([
+      { $match: { shopDomain: shop } },
+      {
+        $group: {
+          _id: {
+            festival: '$festival',
+            date: { $dateToString: { format: '%Y-%m-%d', date: '$scheduledAt' } },
+          },
+          count: { $sum: 1 },
+          items: {
+            $push: {
+              _id: '$_id',
+              title: '$title',
+              status: '$status',
+              createdAt: '$createdAt',
+              updatedAt: '$updatedAt',
+              targetType: '$targetType',
+            },
+          },
+        },
+      },
+      { $match: { count: { $gt: 1 } } },
+      { $sort: { '_id.date': 1 } },
+    ]);
+
+    return res.json({
+      duplicateGroups: groups.map((g) => ({
+        festival: g._id.festival,
+        date: g._id.date,
+        count: g.count,
+        items: g.items,
+      })),
+    });
+  } catch (err) {
+    console.error('[queue] festival _duplicates error:', err.message);
+    return res.status(500).json({ error: 'Failed to load duplicates' });
+  }
+});
+
 module.exports = router;
