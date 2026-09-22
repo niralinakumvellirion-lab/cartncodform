@@ -86,74 +86,6 @@ const cardStyle = {
   padding: '16px 20px', marginBottom: 12,
 };
 
-function DelayInput({ value, onChange }) {
-  const isHours = value >= 60 && value % 60 === 0;
-  const isSeconds = value > 0 && value < 1;
-  const [amount, setAmount] = useState(
-    isHours ? value / 60 : isSeconds ? Math.round(value * 60) : value
-  );
-  const [unit, setUnit] = useState(
-    isHours ? 'hours' : isSeconds ? 'seconds' : 'minutes'
-  );
-
-  function update(a, u) {
-    let mins;
-    if (u === 'seconds') mins = a / 60;
-    else if (u === 'hours') mins = a * 60;
-    else mins = a;
-    onChange(mins);
-  }
-
-  return (
-    <div style={{ display: 'flex', gap: 6, alignItems: 'center',
-                  flexShrink: 0 }}>
-      <input
-        type="number" min="1" max="999"
-        value={amount}
-        onChange={(e) => {
-          const v = Math.max(1, parseInt(e.target.value) || 1);
-          setAmount(v);
-          update(v, unit);
-        }}
-        style={{
-          width: 56, padding: '7px 8px', borderRadius: 8,
-          border: '1px solid #e5e7eb', fontSize: 14,
-          fontWeight: 600, textAlign: 'center', color: '#111827',
-          background: '#f9fafb',
-        }}
-      />
-      <select
-        value={unit}
-        onChange={(e) => {
-          setUnit(e.target.value);
-          update(amount, e.target.value);
-        }}
-        style={{
-          padding: '7px 10px', borderRadius: 8,
-          border: '1px solid #e5e7eb', fontSize: 13,
-          background: '#f9fafb', color: '#374151',
-          cursor: 'pointer',
-        }}
-      >
-        <option value="seconds">sec</option>
-        <option value="minutes">min</option>
-        <option value="hours">hrs</option>
-      </select>
-    </div>
-  );
-}
-
-const DELAY_ROWS = [
-  { label: 'Cart abandoned', key: 'cartAbandonDelay',
-    desc: 'Customer adds to cart but does not checkout' },
-  { label: 'Checkout abandoned', key: 'checkoutAbandonDelay',
-    desc: 'Customer reaches checkout but does not complete' },
-  { label: 'Browse abandoned', key: 'browseAbandonDelay',
-    desc: 'Customer views products but does not add to cart' },
-  { label: 'Website visit', key: 'pageVisitDelay',
-    desc: 'Customer visits the store' },
-];
-
 const REALTIME_ROWS = [
   { label: 'Cart abandoned', key: 'cart_abandon',
     desc: 'Send the moment a customer abandons their cart' },
@@ -294,38 +226,14 @@ export default function AutomationScreen({ shop }) {
           whatever run time it already had, saved silently on every
           Save settings click. */}
 
-      {/* SECTION 3 — Signal delays */}
-      <div style={{ ...cardStyle, opacity: saving ? 0.6 : 1,
-                    pointerEvents: saving ? 'none' : 'auto',
-                    transition: 'opacity 0.15s' }}>
-        <div style={{ borderLeft: '3px solid #f59e0b', paddingLeft: 12,
-                      marginBottom: 14 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
-            Send delay after trigger
-          </div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
-            How long to wait before sending after customer action
-          </div>
-        </div>
-
-        {DELAY_ROWS.map(({ label, key, desc }) => (
-          <div key={key} style={{ display: 'flex', justifyContent: 'space-between',
-                        alignItems: 'center', padding: '12px 0',
-                        borderBottom: '1px solid #f3f4f6' }}>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600,
-                            color: '#111827' }}>{label}</div>
-              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
-                {desc}
-              </div>
-            </div>
-            <DelayInput
-              value={config[key] || 60}
-              onChange={(mins) => setConfig(c => ({ ...c, [key]: mins }))}
-            />
-          </div>
-        ))}
-      </div>
+      {/* SECTION 3 — Signal delays: removed per task instructions (see
+          audits/... this session). cartAbandonDelay/checkoutAbandonDelay/
+          browseAbandonDelay/pageVisitDelay remain in `config` state (from
+          the GET response / DEFAULT_CONFIG) and are still sent unchanged
+          in saveConfig()'s PATCH body below — only the JSX that displayed/
+          edited them (and the now-unused DelayInput component +
+          DELAY_ROWS constant) was removed, so the shop keeps whatever
+          delay values it already had. */}
 
       {/* SECTION 4 — Real-time triggers */}
       <div style={{ ...cardStyle, opacity: saving ? 0.6 : 1,
