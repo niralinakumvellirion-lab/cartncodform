@@ -266,7 +266,8 @@ function UnlockedView({ styleId, percentage, expiryDays, code, codeChipEmphasis,
           <Icon name="loader" size={11} /> REDIRECTING (SIMULATED — NO REAL NAVIGATION)
         </div>
       )}
-      <div style={{ color: footerColor, lineHeight: 1, marginBottom: 10 }}>
+      <div style={{ color: footerColor, lineHeight: 1, marginBottom: 10,
+                    display: 'flex', justifyContent: 'center' }}>
         <Icon name="gift" size={40} />
       </div>
       <div style={{ fontSize: 18, fontWeight: 800, color: titleColor, marginBottom: 4 }}>

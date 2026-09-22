@@ -624,7 +624,12 @@
 
     var html =
       '<div style="text-align:center;padding:8px 0 4px">' +
+      // display:flex + justify-content:center here (not just relying on
+      // the outer text-align:center) — some storefront themes reset
+      // svg { display:block }, which would otherwise sit left-aligned
+      // since text-align only centers inline content, not a block child.
       '<div style="color:' + footerColor + ';line-height:1;margin-bottom:10px;' +
+      'display:flex;justify-content:center;' +
       'animation:ccfBounce 1s ease 3">' + ccfIcon('gift', 40) + '</div>' +
       '<div style="font-size:18px;font-weight:800;color:' + titleColor + ';' +
       'margin-bottom:4px">' + d.percentage + '% OFF Unlocked!</div>' +
@@ -1821,7 +1826,11 @@
         if (d && d.code) {
           nudge.innerHTML =
             '<div style="padding:16px;text-align:center">' +
-            '<div style="color:#16a34a;line-height:1;margin-bottom:8px">' + ccfIcon('gift', 32) + '</div>' +
+            // Same fix as renderDiscountCode()'s unlocked view: flex+center
+            // instead of relying on the outer text-align, which some
+            // storefront themes' svg{display:block} reset would break.
+            '<div style="color:#16a34a;line-height:1;margin-bottom:8px;' +
+            'display:flex;justify-content:center">' + ccfIcon('gift', 32) + '</div>' +
             '<div style="font-size:16px;font-weight:700;' +
             'color:#111827;margin-bottom:6px">' +
             d.percentage + '% off unlocked!</div>' +
