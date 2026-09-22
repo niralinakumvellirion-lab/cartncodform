@@ -1,0 +1,21 @@
+title = "gitleaks config for cartncodform"
+
+[extend]
+useDefault = true
+
+# Both allowlisted values are intentionally public, client-side identifiers,
+# not credentials:
+#   - Firebase Web apiKey: identifies the Firebase project in browser code;
+#     access is enforced by Firebase Security Rules, not by keeping this
+#     value secret (see Firebase's own docs on Web API keys).
+#   - VAPID public key: the "applicationServerKey" passed to
+#     pushManager.subscribe() per the Web Push API spec — it is the public
+#     half of a VAPID key pair, meant to be embedded in client JS.
+# Both were already committed (in extensions/cartncodform-embed/blocks/
+# push-notifications.liquid) before this file existed; this allowlist
+# reflects that they were always meant to be public, not a new exposure.
+[allowlist]
+  regexes = [
+    '''AIzaSyASPGdEC4K_acNQYY7AeQvskDQ5Xq4-ecU''',
+    '''BMPrLf4eInbFu1IpI_ZqyblmkbSYIm0JyukselN80lglfwuBfyaU7kOQZ6FFxo1PjUqh1xnGzd2uVPdJrYEh0Jo''',
+  ]
