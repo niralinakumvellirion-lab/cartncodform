@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Banner, Button } from '@shopify/polaris';
 import { apiGet, apiSend, BACKEND_URL } from '../../../lib/api';
 import { POPUP_STYLES, STYLE_ORDER, getStyle, getStyleFieldValue } from '../lib/popupStyles';
@@ -155,18 +155,189 @@ function formatCountdown(ms) {
   return `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
 }
 
-// Original hand-drawn glyph (not traced from any reference image) used by
-// Gift Reveal's card when no merchant image is set.
-function GiftGlyph({ size = 40, color = '#4f46e5' }) {
+// Icon set matching extensions/cartncodform-embed/assets/ccf-push.js's
+// CCF_ICONS exactly (same Lucide-style paths) — the preview's step icons
+// (loader/check/gift) must be the same glyphs a real customer sees, not
+// just similar ones. 'loader' spins via the .ccf-preview-spin class (see
+// the <style> block in the main render, mirroring ccf-push.js's own
+// .ccf-spin/@keyframes ccfSpin).
+function Icon({ name, size = 16, color, style }) {
+  const common = {
+    width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
+    stroke: color || 'currentColor', strokeWidth: 2, strokeLinecap: 'round',
+    strokeLinejoin: 'round', 'aria-hidden': true,
+    style: { verticalAlign: 'middle', flexShrink: 0, ...style },
+  };
+  if (name === 'gift') {
+    return (
+      <svg {...common}>
+        <rect x="3" y="8" width="18" height="4" rx="1" /><path d="M12 8v13" />
+        <path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" />
+        <path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5" />
+      </svg>
+    );
+  }
+  if (name === 'check') {
+    return <svg {...common}><path d="M20 6 9 17l-5-5" /></svg>;
+  }
+  if (name === 'loader') {
+    return (
+      <svg {...common} className="ccf-preview-spin">
+        <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+      </svg>
+    );
+  }
+  if (name === 'bag') {
+    return (
+      <svg {...common}>
+        <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z" />
+        <path d="M3 6h18" /><path d="M16 10a4 4 0 0 1-8 0" />
+      </svg>
+    );
+  }
+  return null;
+}
+
+// --- Popup preview step machine ------------------------------------------
+// Mirrors ccf-push.js's showSoftPrompt() Allow-button flow (the "new
+// subscriber" path — Notification.permission !== 'granted' — since that's
+// what every first-time visitor actually sees) exactly: label text/icon per
+// stage, and whether a discount stage even exists at all.
+const STEP_ORDER = ['prompt', 'setting_up', 'subscribed', 'unlocked', 'redirecting'];
+const STEP_LABELS = {
+  prompt: 'Prompt',
+  setting_up: 'Setting up',
+  subscribed: 'Subscribed',
+  unlocked: 'Unlocked',
+  redirecting: 'Redirecting',
+};
+const STEP_DELAY_MS = 800;
+
+function sanitizeCodePrefix(prefix, fallback) {
+  const clean = String(prefix || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10);
+  return clean || fallback;
+}
+
+// The Allow button's own label/icon per step — matches buildAllowBtn()'s
+// plain textContent at 'prompt' and ccfSetLabel()'s icon+text at every
+// later stage, verbatim (including the exact "Subscribed! Getting your
+// discount..." vs "Subscribed!" branch on wantsDiscount).
+function AllowButtonLabel({ step, allowText, wantsDiscount }) {
+  if (step === 'setting_up') {
+    return <><Icon name="loader" size={14} style={{ marginRight: 6 }} />Setting up...</>;
+  }
+  if (step === 'subscribed') {
+    return (
+      <>
+        <Icon name="check" size={14} style={{ marginRight: 6 }} />
+        {wantsDiscount ? 'Subscribed! Getting your discount...' : 'Subscribed!'}
+      </>
+    );
+  }
+  return allowText;
+}
+
+// Shared "unlocked code" view — matches renderDiscountCode()'s HTML exactly
+// (same colors-per-style, same chipBig/codeChipEmphasis sizing, same
+// "Expires in N days" + pulsing "Applying your discount automatically..."
+// footer). Used for BOTH the 'unlocked' and 'redirecting' steps — in
+// ccf-push.js these are the SAME rendered DOM (renderDiscountCode() builds
+// one content block, then a 2s setTimeout navigates away; there is no
+// second, visually distinct DOM state in between). The preview shows a
+// small "Redirecting…" badge on top only for the 'redirecting' step, as a
+// preview-only annotation of that imminent (but never actually performed)
+// navigation — see audits/popup-preview-flow-audit.txt.
+function UnlockedView({ styleId, percentage, expiryDays, code, codeChipEmphasis, showRedirectingBadge }) {
+  const isDark = styleId === 'flash_sale';
+  const chipBig = styleId === 'gift_reveal' && codeChipEmphasis !== false;
+  const titleColor = isDark ? '#ffffff' : '#111827';
+  const subColor = isDark ? '#d4d4d8' : '#6b7280';
+  const chipBg = isDark ? 'linear-gradient(135deg,#27272a,#3f3f46)' : 'linear-gradient(135deg,#f0f4ff,#e8edff)';
+  const chipBorder = isDark ? '1.5px dashed #52525b' : '1.5px dashed #818cf8';
+  const chipCodeColor = isDark ? '#ffffff' : '#4338ca';
+  const chipLabelColor = isDark ? '#a1a1aa' : '#6366f1';
+  const footerColor = isDark ? '#86efac' : '#16a34a';
+
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-      stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"
-      aria-hidden="true">
-      <rect x="3" y="8" width="18" height="4" rx="1" />
-      <path d="M12 8v13" />
-      <path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" />
-      <path d="M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5" />
-    </svg>
+    <div style={{ textAlign: 'center', padding: '8px 0 4px', position: 'relative' }}>
+      {showRedirectingBadge && (
+        <div style={{ fontSize: 10, fontWeight: 700, color: footerColor, marginBottom: 8,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+          <Icon name="loader" size={11} /> REDIRECTING (SIMULATED — NO REAL NAVIGATION)
+        </div>
+      )}
+      <div style={{ color: footerColor, lineHeight: 1, marginBottom: 10 }}>
+        <Icon name="gift" size={40} />
+      </div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: titleColor, marginBottom: 4 }}>
+        {percentage}% OFF Unlocked!
+      </div>
+      <div style={{ fontSize: 12, color: subColor, marginBottom: 14 }}>
+        Expires in {expiryDays} days
+      </div>
+      <div style={{ background: chipBg, border: chipBorder, borderRadius: 14,
+                    padding: chipBig ? 18 : 14, marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: chipLabelColor, fontWeight: 600, letterSpacing: 2, marginBottom: 6 }}>
+          YOUR DISCOUNT CODE
+        </div>
+        <div style={{ fontSize: chipBig ? 26 : 22, fontWeight: 800, letterSpacing: 4,
+                      fontFamily: 'monospace', color: chipCodeColor }}>
+          {code}
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                    fontSize: 13, color: footerColor, fontWeight: 500 }}>
+        <Icon name="check" size={14} /> Applying your discount automatically...
+      </div>
+    </div>
+  );
+}
+
+// Preview-only: shown after Deny/"No thanks"/X (reason='dismissed'), or
+// after a no-discount subscribe completes (reason='closed', matching
+// ccf-push.js's `if (!wantsDiscount) { setTimeout(cleanup, 900); }`).
+// ccf-push.js's cleanup() just removes the popup from the DOM entirely in
+// both cases (no visible state of its own); an actually-empty preview
+// panel would look broken in the admin, so this stands in for "nothing is
+// here right now."
+function DismissedNote({ device, reason = 'dismissed' }) {
+  return (
+    <div style={{ padding: device === 'mobile' ? '32px 16px' : '40px 16px', textAlign: 'center',
+                  color: '#9ca3af', fontSize: 13, border: '1px dashed #e5e7eb', borderRadius: 12 }}>
+      {reason === 'closed'
+        ? 'Subscribed — popup closed (no discount configured). Click Replay to see it again.'
+        : 'Popup dismissed. Click Replay to see it again.'}
+    </div>
+  );
+}
+
+function StepBar({ step, onJump, hasDiscount }) {
+  const steps = STEP_ORDER.filter((s) => hasDiscount || (s !== 'unlocked' && s !== 'redirecting'));
+  return (
+    <div role="tablist" aria-label="Preview step"
+      style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 }}>
+      {steps.map((s) => {
+        const active = step === s;
+        return (
+          <button
+            key={s}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onJump(s)}
+            className="ccf-style-focus"
+            style={{
+              padding: '4px 9px', fontSize: 11, fontWeight: active ? 700 : 500,
+              borderRadius: 999, border: active ? '1px solid #4f46e5' : '1px solid #e5e7eb',
+              background: active ? '#eef2ff' : '#fff', color: active ? '#4f46e5' : '#6b7280',
+              cursor: 'pointer',
+            }}
+          >
+            {STEP_LABELS[s]}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -216,7 +387,24 @@ function StyleThumbnail({ styleId }) {
 // — see audits/popup-style-audit-before.txt item 8 for why there's no
 // shared runtime between the two, and the per-style parity checklist that
 // keeps them visually in sync instead.
-function StyleCardPreview({ styleId, cfg, styleFields, emailFieldEnabled, compact }) {
+// Small circular X, top-right — matches ccf-push.js's closeBtn exactly: a
+// sibling of the content section, so (per ccf-push.js) it stays mounted and
+// clickable through EVERY step, including 'unlocked'/'redirecting'.
+function ClosePreviewButton({ dark, onClick }) {
+  return (
+    <button type="button" onClick={onClick} aria-label="Dismiss popup" className="ccf-style-focus"
+      style={{ position: 'absolute', top: 12, right: 12, background: dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.35)',
+        color: '#fff', border: 'none', borderRadius: '50%', width: 26, height: 26, fontSize: 14,
+        lineHeight: '26px', textAlign: 'center', cursor: 'pointer', zIndex: 10 }}>
+      ×
+    </button>
+  );
+}
+
+function StyleCardPreview({
+  styleId, cfg, styleFields, emailFieldEnabled, compact,
+  step = 'prompt', email = '', onEmailChange, onAllow, onDismiss, wantsDiscount, unlockedInfo,
+}) {
   const style = getStyle(styleId);
   const accent = cfg.accentColor || '#4f46e5';
   const headline = cfg.headline ||
@@ -229,8 +417,22 @@ function StyleCardPreview({ styleId, cfg, styleFields, emailFieldEnabled, compac
   const font = cfg.fontFamily || 'inherit';
   const padding = compact ? '14px' : '20px';
   const headlineSize = compact ? 14 : 18;
+  const swapped = step === 'unlocked' || step === 'redirecting';
+  const busy = step === 'setting_up' || step === 'subscribed';
 
   const field = (key) => getStyleFieldValue(style, styleFields, key);
+
+  const allowBtnCommon = {
+    type: 'button',
+    disabled: busy,
+    onClick: step === 'prompt' ? onAllow : undefined,
+    className: 'ccf-style-focus',
+    style: {
+      width: '100%', padding: 10, fontSize: 13, fontWeight: 700, borderRadius: 999,
+      border: 'none', cursor: busy ? 'not-allowed' : 'pointer', marginBottom: 6,
+      opacity: busy ? 0.8 : 1,
+    },
+  };
 
   if (styleId === 'flash_sale') {
     const bg = '#18181b';
@@ -254,43 +456,53 @@ function StyleCardPreview({ styleId, cfg, styleFields, emailFieldEnabled, compac
 
     return (
       <div style={{ border: '1px solid #27272a', borderRadius: radius, overflow: 'hidden',
-                    background: bg, color: fg, fontFamily: font,
+                    background: bg, color: fg, fontFamily: font, position: 'relative',
                     boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
+        <ClosePreviewButton dark onClick={onDismiss} />
         {imageUrl && (
           <img src={imageUrl} alt="" style={{ width: '100%', height: compact ? 70 : 110,
             objectFit: 'cover', objectPosition: cfg.imagePosition || 'center center', display: 'block' }} />
         )}
         <div style={{ padding, textAlign: 'center' }}>
-          {badgeText && (
-            <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 700,
-              letterSpacing: '0.05em', textTransform: 'uppercase', color: accent,
-              border: `1px solid ${accent}`, borderRadius: 999, padding: '3px 10px', marginBottom: 8 }}>
-              {badgeText}
-            </span>
+          {swapped ? (
+            <UnlockedView styleId={styleId} percentage={unlockedInfo.percentage}
+              expiryDays={unlockedInfo.expiryDays} code={unlockedInfo.code}
+              showRedirectingBadge={step === 'redirecting'} />
+          ) : (
+            <>
+              {badgeText && (
+                <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 700,
+                  letterSpacing: '0.05em', textTransform: 'uppercase', color: accent,
+                  border: `1px solid ${accent}`, borderRadius: 999, padding: '3px 10px', marginBottom: 8 }}>
+                  {badgeText}
+                </span>
+              )}
+              <div style={{ fontSize: headlineSize, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
+              {subtext && <div style={{ fontSize: 12, color: '#d4d4d8', marginBottom: 10 }}>{subtext}</div>}
+              {emailFieldEnabled && (
+                <input value={email} onChange={(e) => onEmailChange(e.target.value)}
+                  placeholder="Email address" style={{ width: '100%', padding: '8px 12px',
+                  fontSize: 12, borderRadius: 8, border: '1px solid #3f3f46', marginBottom: 8,
+                  background: '#27272a', color: fg, boxSizing: 'border-box' }} />
+              )}
+              {countdownDisplay ? (
+                <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '0.08em', marginBottom: 10,
+                  fontVariantNumeric: 'tabular-nums' }}>
+                  {countdownDisplay}
+                </div>
+              ) : countdownNote && (
+                <div style={{ fontSize: 10, color: '#a1a1aa', marginBottom: 10, fontStyle: 'italic' }}>
+                  {countdownNote}
+                </div>
+              )}
+              <button {...allowBtnCommon} style={{ ...allowBtnCommon.style, background: accent, color: '#fff' }}>
+                <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
+              </button>
+              <div onClick={onDismiss} style={{ fontSize: 11, color: '#a1a1aa', cursor: 'pointer' }}>
+                {denyText}
+              </div>
+            </>
           )}
-          <div style={{ fontSize: headlineSize, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
-          {subtext && <div style={{ fontSize: 12, color: '#d4d4d8', marginBottom: 10 }}>{subtext}</div>}
-          {emailFieldEnabled && (
-            <input readOnly placeholder="Email address" style={{ width: '100%', padding: '8px 12px',
-              fontSize: 12, borderRadius: 8, border: '1px solid #3f3f46', marginBottom: 8,
-              background: '#27272a', color: fg, boxSizing: 'border-box' }} />
-          )}
-          {countdownDisplay ? (
-            <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '0.08em', marginBottom: 10,
-              fontVariantNumeric: 'tabular-nums' }}>
-              {countdownDisplay}
-            </div>
-          ) : countdownNote && (
-            <div style={{ fontSize: 10, color: '#a1a1aa', marginBottom: 10, fontStyle: 'italic' }}>
-              {countdownNote}
-            </div>
-          )}
-          <button type="button" tabIndex={-1} style={{ width: '100%', padding: '10px', fontSize: 13,
-            fontWeight: 700, borderRadius: 999, border: 'none', background: accent, color: '#fff',
-            cursor: 'default', marginBottom: 6 }}>
-            {allowText}
-          </button>
-          <div style={{ fontSize: 11, color: '#a1a1aa' }}>{denyText}</div>
         </div>
       </div>
     );
@@ -304,39 +516,257 @@ function StyleCardPreview({ styleId, cfg, styleFields, emailFieldEnabled, compac
 
   return (
     <div style={{ border: '1px solid #e5e7eb', borderRadius: radius, overflow: 'hidden',
-                  background: bg, color: fg, fontFamily: font,
+                  background: bg, color: fg, fontFamily: font, position: 'relative',
                   boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
+      <ClosePreviewButton onClick={onDismiss} />
       {imageUrl ? (
         <img src={imageUrl} alt="" style={{ width: '100%', height: compact ? 70 : 110,
           objectFit: 'cover', objectPosition: cfg.imagePosition || 'center center', display: 'block' }} />
       ) : giftIconEnabled ? (
+        // ccf-push.js appends this placeholder as a SIBLING of the content
+        // section, so — like the image above — it is never removed by the
+        // unlocked-state swap; it stays visible above the (bigger) gift
+        // icon that's part of UnlockedView's own markup too.
         <div style={{ height: compact ? 60 : 84, display: 'flex', alignItems: 'center',
                       justifyContent: 'center' }}>
-          <GiftGlyph size={compact ? 32 : 44} color={accent} />
+          <Icon name="gift" size={compact ? 32 : 44} color={accent} />
         </div>
       ) : null}
       <div style={{ padding, textAlign: 'center' }}>
-        <div style={{ fontSize: headlineSize, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
-        {subtext && <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>{subtext}</div>}
-        {emailFieldEnabled && (
-          <input readOnly placeholder="Email address" style={{ width: '100%', padding: '8px 12px',
-            fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 8,
-            boxSizing: 'border-box' }} />
-        )}
-        <button type="button" tabIndex={-1} style={{ width: '100%', padding: '10px', fontSize: 13,
-          fontWeight: 700, borderRadius: 999, border: 'none', background: accent, color: '#fff',
-          cursor: 'default', marginBottom: 6 }}>
-          {allowText}
-        </button>
-        {secondaryButtonStyle === 'pill' ? (
-          <button type="button" tabIndex={-1} style={{ width: '100%', padding: '10px', fontSize: 12,
-            fontWeight: 600, borderRadius: 999, border: '1px solid #e5e7eb', background: 'transparent',
-            color: fg, cursor: 'default' }}>
-            {denyText}
-          </button>
+        {swapped ? (
+          <UnlockedView styleId={styleId} percentage={unlockedInfo.percentage}
+            expiryDays={unlockedInfo.expiryDays} code={unlockedInfo.code}
+            codeChipEmphasis={field('codeChipEmphasis')} showRedirectingBadge={step === 'redirecting'} />
         ) : (
-          <div style={{ fontSize: 11, color: '#9ca3af' }}>{denyText}</div>
+          <>
+            <div style={{ fontSize: headlineSize, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
+            {subtext && <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>{subtext}</div>}
+            {emailFieldEnabled && (
+              <input value={email} onChange={(e) => onEmailChange(e.target.value)}
+                placeholder="Email address" style={{ width: '100%', padding: '8px 12px',
+                fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 8,
+                boxSizing: 'border-box' }} />
+            )}
+            <button {...allowBtnCommon} style={{ ...allowBtnCommon.style, background: accent, color: '#fff' }}>
+              <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
+            </button>
+            {secondaryButtonStyle === 'pill' ? (
+              <button type="button" onClick={onDismiss} className="ccf-style-focus"
+                style={{ width: '100%', padding: 10, fontSize: 12, fontWeight: 600, borderRadius: 999,
+                  border: '1px solid #e5e7eb', background: 'transparent', color: fg, cursor: 'pointer' }}>
+                {denyText}
+              </button>
+            ) : (
+              <div onClick={onDismiss} style={{ fontSize: 11, color: '#9ca3af', cursor: 'pointer' }}>
+                {denyText}
+              </div>
+            )}
+          </>
         )}
+      </div>
+    </div>
+  );
+}
+
+// Classic split/card/banner preview, step-aware — mirrors ccf-push.js's
+// showSoftPrompt() layout branches (split/card/banner DOM construction) and
+// renderDiscountCode() (the shared unlocked swap) as closely as inline
+// React styles reasonably can. Not attempted: ccf-push.js's decorative-only
+// CSS (the .ccf-img-wrap corner-dot ::after pattern, the hover
+// zoom/translateY effects, the slide-up entrance keyframe) — none of that
+// is part of any STEP's content, only ambient chrome; see
+// audits/popup-preview-flow-audit.txt.
+function ClassicPreview({
+  layout, device, popup: cfg, step, email, onEmailChange, onAllow, onDismiss,
+  showEmailField, wantsDiscount, unlockedInfo, discountOfferText, discountOfferHeadline,
+}) {
+  const bg = cfg.bgColor || '#ffffff';
+  const fg = cfg.textColor || '#111827';
+  const accent = cfg.accentColor || '#4f46e5';
+  const radius = (cfg.borderRadius ?? 12) + 'px';
+  const font = cfg.fontFamily || 'inherit';
+  const allowText = cfg.allowText || 'Allow';
+  const denyText = cfg.denyText || 'No thanks';
+  const headline = cfg.headline || 'Get notified about deals';
+  const subtext = cfg.subtext || '';
+  const brandName = cfg.brandName || '';
+  const imageUrl = cfg.imageUrl || '';
+  const imagePosition = cfg.imagePosition || 'center center';
+  const ctaCss = getCtaStyle(cfg.ctaStyle || 'rounded', accent);
+  const textAlign = cfg.textAlign || 'left';
+  const swapped = step === 'unlocked' || step === 'redirecting';
+  const busy = step === 'setting_up' || step === 'subscribed';
+  // ccf-push.js: `layout !== 'banner' && ccfDiscountEnabled()` — banner
+  // never shows a discount, no matter what's configured.
+  const effectiveWantsDiscount = layout === 'banner' ? false : wantsDiscount;
+  const effectiveShowEmailField = layout === 'banner' ? false : showEmailField;
+
+  const allowBtnProps = {
+    disabled: busy,
+    onClick: step === 'prompt' ? onAllow : undefined,
+    className: 'ccf-style-focus',
+  };
+
+  // ccf-push.js: only the CARD layout's no-image gradient fallback gets a
+  // centered bag icon (bounceable via ccfBounce there); split's gradient
+  // fallback is plain, no icon.
+  const imageBox = (heightStyle, showBagIcon) => (
+    <div style={{ width: '100%', height: heightStyle, position: 'relative', overflow: 'hidden',
+                  flexShrink: 0, background: imageUrl ? '#f9fafb' : 'linear-gradient(135deg,#667eea,#764ba2)' }}>
+      {imageUrl ? (
+        <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover',
+          objectPosition: imagePosition, display: 'block' }} />
+      ) : showBagIcon ? (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+                      justifyContent: 'center', color: '#fff' }}>
+          <Icon name="bag" size={36} />
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const brandEl = brandName && (
+    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '2px', textTransform: 'uppercase',
+                  color: '#9ca3af', marginBottom: 8 }}>{brandName}</div>
+  );
+  const subtextEl = subtext && (
+    <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12, textAlign }}>{subtext}</div>
+  );
+  const allowBtnEl = (
+    <button {...allowBtnProps} style={{ ...ctaCss, width: '100%', padding: '10px 14px', fontSize: 13,
+      fontWeight: 700, marginBottom: 8, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.8 : 1 }}>
+      <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={effectiveWantsDiscount} />
+    </button>
+  );
+  const denyEl = (
+    <div onClick={onDismiss} style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center',
+      textDecoration: 'underline', cursor: 'pointer' }}>
+      {denyText}
+    </div>
+  );
+  const brandingEl = cfg.showBranding && (
+    <div style={{ marginTop: 12, fontSize: 10, color: '#d1d5db', textAlign: 'center', letterSpacing: '0.5px' }}>
+      Powered by ShopiReachBoost AI
+    </div>
+  );
+
+  // --- BANNER --------------------------------------------------------
+  if (layout === 'banner') {
+    return (
+      <div style={{ borderRadius: 8, overflow: 'hidden', background: accent, color: '#fff',
+                    padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
+                    fontFamily: font }}>
+        {imageUrl && (
+          <img src={imageUrl} alt="" style={{ width: 44, height: 44, borderRadius: 8, objectFit: 'cover',
+            objectPosition: imagePosition, flexShrink: 0 }} />
+        )}
+        <div style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{headline}</div>
+        <button {...allowBtnProps} style={{ background: '#fff', color: accent, border: 'none',
+          borderRadius: ctaCss.borderRadius, padding: '8px 14px', fontSize: 12, fontWeight: 700,
+          flexShrink: 0, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.8 : 1 }}>
+          <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={false} />
+        </button>
+        <span onClick={onDismiss} style={{ color: 'rgba(255,255,255,0.7)', fontSize: 18, flexShrink: 0,
+          cursor: 'pointer' }}>×</span>
+      </div>
+    );
+  }
+
+  // --- CARD ------------------------------------------------------------
+  if (layout === 'card') {
+    return (
+      <div style={{ borderRadius: radius, overflow: 'hidden', position: 'relative',
+                    background: 'linear-gradient(145deg,#ffffff,#f8f9ff)',
+                    boxShadow: '0 4px 16px rgba(0,0,0,0.08)', fontFamily: font,
+                    maxWidth: device === 'mobile' ? 300 : 340 }}>
+        <ClosePreviewButton onClick={onDismiss} />
+        {imageBox(device === 'mobile' ? 160 : 170, true)}
+        <div style={{ height: 3, background: `linear-gradient(90deg,${accent},${accent}88,transparent)` }} />
+        <div style={{ padding: '20px 18px 18px', background: bg, color: fg }}>
+          {swapped ? (
+            <UnlockedView styleId="classic" percentage={unlockedInfo.percentage}
+              expiryDays={unlockedInfo.expiryDays} code={unlockedInfo.code}
+              showRedirectingBadge={step === 'redirecting'} />
+          ) : (
+            <>
+              {brandEl}
+              <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3, marginBottom: 6,
+                            color: fg, textAlign }}>{headline}</div>
+              {subtextEl}
+              {effectiveWantsDiscount && (
+                <div style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', border: '1px solid #86efac',
+                              borderRadius: 12, padding: '10px 14px', marginBottom: 14, display: 'flex',
+                              alignItems: 'center', gap: 8, justifyContent: 'center' }}>
+                  <span style={{ color: '#16a34a' }}><Icon name="gift" size={16} /></span>
+                  <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 600 }}>{discountOfferText}</span>
+                </div>
+              )}
+              {effectiveShowEmailField && (
+                <input value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder="Your email"
+                  style={{ width: '100%', padding: '11px 14px', fontSize: 13, borderRadius: 12,
+                    border: '1.5px solid #e5e7eb', marginBottom: 8, boxSizing: 'border-box',
+                    background: '#f9fafb', color: '#111827' }} />
+              )}
+              {allowBtnEl}
+              {denyEl}
+              {brandingEl}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // --- SPLIT (desktop: side-by-side; mobile: stacked) -----------------
+  const discountFieldsEl = effectiveWantsDiscount && (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8, textAlign: 'center' }}>
+        {discountOfferHeadline || 'Get a discount on your first order!'}
+      </div>
+      {effectiveShowEmailField && (
+        <input value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder="Your email"
+          style={{ width: '100%', padding: '11px 14px', fontSize: 13, borderRadius: 12,
+            border: '1.5px solid #e5e7eb', boxSizing: 'border-box', background: '#f9fafb',
+            color: '#111827' }} />
+      )}
+    </div>
+  );
+
+  const contentInner = swapped ? (
+    <UnlockedView styleId="classic" percentage={unlockedInfo.percentage}
+      expiryDays={unlockedInfo.expiryDays} code={unlockedInfo.code}
+      showRedirectingBadge={step === 'redirecting'} />
+  ) : (
+    <>
+      {brandEl}
+      <div style={{ fontSize: device === 'mobile' ? 20 : 26, fontWeight: 700, lineHeight: 1.25,
+                    marginBottom: 10, color: fg }}>{headline}</div>
+      {subtext && <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>{subtext}</div>}
+      {allowBtnEl}
+      {denyEl}
+      {discountFieldsEl}
+      {brandingEl}
+    </>
+  );
+
+  if (device === 'mobile') {
+    return (
+      <div style={{ borderRadius: radius, overflow: 'hidden', position: 'relative',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.2)', fontFamily: font }}>
+        <ClosePreviewButton onClick={onDismiss} />
+        {imageBox(200)}
+        <div style={{ padding: '20px 18px', background: bg, color: fg }}>{contentInner}</div>
+      </div>
+    );
+  }
+  return (
+    <div style={{ borderRadius: 12, overflow: 'hidden', position: 'relative', display: 'flex',
+                  minHeight: 320, boxShadow: '0 20px 60px rgba(0,0,0,0.3)', fontFamily: font }}>
+      <ClosePreviewButton onClick={onDismiss} />
+      <div style={{ width: '45%', flexShrink: 0 }}>{imageBox('100%')}</div>
+      <div style={{ width: '55%', padding: '32px 28px', display: 'flex', flexDirection: 'column',
+                    justifyContent: 'center', background: bg, color: fg }}>
+        {contentInner}
       </div>
     </div>
   );
@@ -371,12 +801,21 @@ export default function Settings({ shop }) {
   // discount-feature: true when a Shopify Admin API call was rejected with
   // ACCESS_DENIED (installed token predates write_discounts). Prompt reconnect.
   const [needsReauth, setNeedsReauth] = useState(false);
-  // popup-style: whether the storefront popup would show an email field —
-  // mirrors ccfShowEmailField() in push-notifications.liquid (emailDiscount
-  // enabled; phoneDiscount/bothDiscount are always saved disabled, per the
-  // discount-redesign task, so they never contribute here). Drives whether
-  // the style preview mocks up an email input.
-  const [emailDiscountEnabled, setEmailDiscountEnabled] = useState(false);
+  // popup-style: the push/email discount rules from the Discounts screen's
+  // own config, kept here so the interactive preview can compute the same
+  // things ccf-push.js does — ccfShowEmailField() (email rule enabled),
+  // ccfDiscountEnabled() (either rule enabled; phone/both are always saved
+  // disabled, per the discount-redesign task, so they never contribute),
+  // and a realistic sample code + real % + real expiry for the Unlocked
+  // step. Never phone/both — this app's popup can only ever collect email.
+  const [discountRules, setDiscountRules] = useState({
+    push: { enabled: false, percentage: 10, prefix: 'PUSH', expiryDays: 7, offerText: '' },
+    email: { enabled: false, percentage: 15, prefix: 'EMAIL', expiryDays: 7, offerText: '' },
+    // Split layout's discount box shows THIS (DiscountConfig.offerHeadline,
+    // via ccfBuildDiscountFields()) — a different field from either rule's
+    // own offerText, and different again from popup.headline.
+    offerHeadline: '',
+  });
 
   // popup-responsive: mobile-first layout switch (admin viewport <= 768px).
   const [isMobileView, setIsMobileView] = useState(false);
@@ -401,7 +840,24 @@ export default function Settings({ shop }) {
       if (cancelled) return;
       if (disc.status === 'fulfilled') {
         setNeedsReauth(!!disc.value?.needsReauth);
-        setEmailDiscountEnabled(!!disc.value?.config?.emailDiscount?.enabled);
+        const dc = disc.value?.config || {};
+        setDiscountRules({
+          push: {
+            enabled: !!dc.pushDiscount?.enabled,
+            percentage: dc.pushDiscount?.percentage ?? 10,
+            prefix: dc.pushDiscount?.prefix || 'PUSH',
+            expiryDays: dc.pushDiscount?.expiryDays ?? 7,
+            offerText: dc.pushDiscount?.offerText || '',
+          },
+          email: {
+            enabled: !!dc.emailDiscount?.enabled,
+            percentage: dc.emailDiscount?.percentage ?? 15,
+            prefix: dc.emailDiscount?.prefix || 'EMAIL',
+            expiryDays: dc.emailDiscount?.expiryDays ?? 7,
+            offerText: dc.emailDiscount?.offerText || '',
+          },
+          offerHeadline: dc.offerHeadline || '',
+        });
       }
       if (s.status === 'fulfilled') {
         setVoice(s.value?.voice || {});
@@ -504,6 +960,71 @@ export default function Settings({ shop }) {
   // style edits into mobilePopup even while the override toggle is off and
   // those fields aren't being used for anything).
   const setActiveStyle = mobileUsesOwnStyle ? setMobilePopup : setPopup;
+
+  // --- Interactive preview: step machine -----------------------------
+  // Config actually driving whatever's on screen right now (mobilePopup
+  // when the Mobile tab is active, popup otherwise) — used both to render
+  // the shell and as the reset trigger below.
+  const previewCfg = popupDevice === 'mobile' ? mobilePopup : popup;
+  const [previewStep, setPreviewStep] = useState('prompt');
+  const [previewEmail, setPreviewEmail] = useState('');
+
+  // ccfDiscountEnabled()/ccfShowEmailField() equivalents.
+  const previewShowEmailField = discountRules.email.enabled;
+  // ccf-push.js: `layout !== 'banner' && ccfDiscountEnabled()`. Computed
+  // here (not just inside ClassicPreview's own button-label logic) because
+  // the STEP MACHINE itself (auto-advance + the step bar's Unlocked/
+  // Redirecting tabs, both owned by this component) must also skip the
+  // discount stages entirely for a banner-layout Classic popup, exactly
+  // like a real one would.
+  const previewEffectiveLayout = activeStyleId !== 'classic'
+    ? getStyle(activeStyleId).layoutType
+    : (popupDevice === 'mobile' ? (mobilePopup.layout === 'banner' ? 'banner' : 'card') : (popup.layout || 'split'));
+  const previewWantsDiscount = previewEffectiveLayout === 'banner'
+    ? false
+    : (discountRules.push.enabled || discountRules.email.enabled);
+
+  // Which rule the CURRENTLY TYPED preview email would select — matches
+  // ccf-push.js's `var action = email ? 'email' : 'push';` exactly.
+  const previewAction = previewEmail.trim() ? 'email' : 'push';
+  const previewRule = previewAction === 'email' ? discountRules.email : discountRules.push;
+  const previewUnlockedInfo = {
+    code: sanitizeCodePrefix(previewRule.prefix, previewAction === 'email' ? 'EMAIL' : 'PUSH') + '-A1B2C3',
+    percentage: previewRule.percentage,
+    expiryDays: previewRule.expiryDays,
+  };
+  // ccfDiscountOfferText() equivalent — email path wins when the email
+  // field is actually shown, same as the storefront.
+  const previewDiscountOfferText = previewShowEmailField
+    ? (discountRules.email.offerText || `Add your email to get ${discountRules.email.percentage}% off`)
+    : (discountRules.push.offerText || `You get ${discountRules.push.percentage}% off as a subscriber`);
+
+  // "Changing style, device, or any field resets to Prompt and re-renders."
+  const previewResetKey = JSON.stringify({
+    device: popupDevice, styleId: activeStyleId, styleFields: activeStyleFields, cfg: previewCfg,
+  });
+  const previewResetKeyRef = useRef(previewResetKey);
+  useEffect(() => {
+    if (previewResetKeyRef.current === previewResetKey) return;
+    previewResetKeyRef.current = previewResetKey;
+    setPreviewStep('prompt');
+    setPreviewEmail('');
+  }, [previewResetKey]);
+
+  // Auto-advance, ~800ms per step, mirroring the real async chain's pacing
+  // (registerSW -> getToken -> saveToken -> ... -> generate-discount).
+  useEffect(() => {
+    if (previewStep !== 'setting_up' && previewStep !== 'subscribed' && previewStep !== 'unlocked') return;
+    const t = setTimeout(() => {
+      setPreviewStep((s) => {
+        if (s === 'setting_up') return 'subscribed';
+        if (s === 'subscribed') return previewWantsDiscount ? 'unlocked' : 'closed';
+        if (s === 'unlocked') return 'redirecting';
+        return s;
+      });
+    }, STEP_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [previewStep, previewWantsDiscount]);
 
   const previews = [
     {
@@ -1895,303 +2416,60 @@ export default function Settings({ shop }) {
             <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
               {popupDevice === 'mobile' ? 'Mobile preview' : 'Desktop preview'}
             </div>
-            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '16px' }}>
-              Updates live as you edit
+            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '10px' }}>
+              Click Allow to walk through the real flow — nothing here ever
+              contacts the backend or asks for a real permission.
+            </div>
+
+            <StepBar step={previewStep} hasDiscount={previewWantsDiscount}
+              onJump={(s) => setPreviewStep(s)} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+              <button
+                type="button"
+                onClick={() => { setPreviewStep('prompt'); setPreviewEmail(''); }}
+                className="ccf-style-focus"
+                style={{ fontSize: 11, fontWeight: 600, color: '#4f46e5', background: '#eef2ff',
+                  border: '1px solid #c7d2fe', borderRadius: 999, padding: '4px 10px', cursor: 'pointer' }}
+              >
+                ↺ Replay
+              </button>
             </div>
 
             {popupDevice === 'desktop' && (() => {
-              // popup-style: a non-Classic style owns its own preview
-              // entirely — it never falls through to the split/card/banner
-              // rendering below, which stays exactly as it was for Classic.
+              if (previewStep === 'dismissed' || previewStep === 'closed') {
+                return <DismissedNote device="desktop" reason={previewStep === 'closed' ? 'closed' : 'dismissed'} />;
+              }
+              const commonProps = {
+                step: previewStep,
+                email: previewEmail,
+                onEmailChange: setPreviewEmail,
+                onAllow: () => setPreviewStep('setting_up'),
+                onDismiss: () => setPreviewStep('dismissed'),
+                wantsDiscount: previewWantsDiscount,
+                unlockedInfo: previewUnlockedInfo,
+              };
               if (activeStyleId !== 'classic') {
                 return (
                   <StyleCardPreview
                     styleId={activeStyleId}
                     cfg={popup}
                     styleFields={activeStyleFields}
-                    emailFieldEnabled={emailDiscountEnabled}
+                    emailFieldEnabled={previewShowEmailField}
+                    {...commonProps}
                   />
                 );
               }
-              const bg = popup.bgColor || '#ffffff';
-              const fg = popup.textColor || '#111827';
-              const accent = popup.accentColor || '#4f46e5';
-              const radius = (popup.borderRadius ?? 12) + 'px';
-              const font = popup.fontFamily || 'inherit';
-              const allowText = popup.allowText || 'Allow';
-              const denyText = popup.denyText || 'No thanks';
-              const headline = popup.headline || 'Get notified about deals';
-              const subtext = popup.subtext || '';
-              const brandName = popup.brandName || '';
-              const imageUrl = popup.imageUrl || '';
-              const imagePosition = popup.imagePosition || 'center center';
-              const ctaStyle = popup.ctaStyle || 'rounded';
-              const ctaCss = getCtaStyle(ctaStyle, accent);
-              const textAlign = popup.textAlign || 'left';
-              const layout = popup.layout || 'split';
-
-              if (layout === 'split')
-                return (
-                  <div
-                    style={{
-                      border: '1px solid #e5e7eb',
-                      borderRadius: radius,
-                      overflow: 'hidden',
-                      display: 'flex',
-                      minHeight: '200px',
-                      boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: '40%',
-                        flexShrink: 0,
-                        background: imageUrl
-                          ? `#f9fafb url(${JSON.stringify(imageUrl)}) ${imagePosition}/cover no-repeat`
-                          : 'linear-gradient(135deg, #667eea, #764ba2)',
-                        position: 'relative',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      {imageUrl && (
-                        <img
-                          src={imageUrl}
-                          alt=""
-                          style={{
-                            width: '100%',
-                            height: '100%',
-                            objectFit: 'cover',
-                            objectPosition: imagePosition,
-                            display: 'block',
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                          }}
-                        />
-                      )}
-                      {!imageUrl && (
-                        <div
-                          style={{
-                            position: 'absolute',
-                            top: '50%',
-                            left: '50%',
-                            transform: 'translate(-50%,-50%)',
-                            color: 'rgba(255,255,255,0.6)',
-                            fontSize: '11px',
-                            textAlign: 'center',
-                            padding: '8px',
-                          }}
-                        >
-                          Add image URL
-                        </div>
-                      )}
-                    </div>
-                    <div
-                      style={{
-                        flex: 1,
-                        padding: '16px 14px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'center',
-                        background: bg,
-                        color: fg,
-                        fontFamily: font,
-                      }}
-                    >
-                      {brandName && (
-                        <div
-                          style={{
-                            fontSize: '9px',
-                            fontWeight: '700',
-                            letterSpacing: '2px',
-                            textTransform: 'uppercase',
-                            color: '#9ca3af',
-                            marginBottom: '6px',
-                          }}
-                        >
-                          {brandName}
-                        </div>
-                      )}
-                      <div
-                        style={{
-                          fontSize: '13px',
-                          fontWeight: '700',
-                          lineHeight: '1.3',
-                          marginBottom: '8px',
-                          color: fg,
-                          textAlign,
-                        }}
-                      >
-                        {headline}
-                      </div>
-                      {subtext && (
-                        <div
-                          style={{
-                            fontSize: '11px',
-                            color: '#6b7280',
-                            marginBottom: '10px',
-                            textAlign,
-                          }}
-                        >
-                          {subtext}
-                        </div>
-                      )}
-                      <button
-                        style={{
-                          ...ctaCss,
-                          padding: '7px 12px',
-                          fontSize: '12px',
-                          fontWeight: '700',
-                          marginBottom: '6px',
-                          width: '100%',
-                        }}
-                      >
-                        {allowText}
-                      </button>
-                      <div
-                        style={{
-                          fontSize: '10px',
-                          color: '#9ca3af',
-                          textAlign: 'center',
-                          textDecoration: 'underline',
-                        }}
-                      >
-                        {denyText}
-                      </div>
-                    </div>
-                  </div>
-                );
-
-              if (layout === 'card')
-                return (
-                  <div
-                    style={{
-                      border: '1px solid #e5e7eb',
-                      borderRadius: radius,
-                      padding: '16px',
-                      background: bg,
-                      color: fg,
-                      fontFamily: font,
-                      boxShadow: '0 4px 16px rgba(0,0,0,0.08)',
-                    }}
-                  >
-                    {imageUrl && (
-                      <img
-                        src={imageUrl}
-                        alt=""
-                        style={{
-                          width: '100%',
-                          borderRadius: '8px',
-                          marginBottom: '10px',
-                          objectFit: 'cover',
-                          objectPosition: imagePosition,
-                          maxHeight: '80px',
-                          display: 'block',
-                        }}
-                      />
-                    )}
-                    {brandName && (
-                      <div
-                        style={{
-                          fontSize: '9px',
-                          fontWeight: '700',
-                          letterSpacing: '2px',
-                          textTransform: 'uppercase',
-                          color: '#9ca3af',
-                          marginBottom: '4px',
-                        }}
-                      >
-                        {brandName}
-                      </div>
-                    )}
-                    <div
-                      style={{
-                        fontSize: '13px',
-                        fontWeight: '600',
-                        marginBottom: '8px',
-                        color: fg,
-                        textAlign,
-                      }}
-                    >
-                      {headline}
-                    </div>
-                    {subtext && (
-                      <div
-                        style={{
-                          fontSize: '11px',
-                          color: '#6b7280',
-                          marginBottom: '10px',
-                          textAlign,
-                        }}
-                      >
-                        {subtext}
-                      </div>
-                    )}
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      <button
-                        style={{
-                          ...ctaCss,
-                          padding: '6px 14px',
-                          fontSize: '12px',
-                          fontWeight: '700',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {allowText}
-                      </button>
-                      <span style={{ fontSize: '11px', color: '#9ca3af' }}>
-                        {denyText}
-                      </span>
-                    </div>
-                  </div>
-                );
-
-              if (layout === 'banner')
-                return (
-                  <div
-                    style={{
-                      borderRadius: '8px',
-                      overflow: 'hidden',
-                      background: accent,
-                      color: '#fff',
-                      padding: '12px 16px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      gap: '12px',
-                      fontFamily: font,
-                    }}
-                  >
-                    <div style={{ fontSize: '13px', fontWeight: '600', flex: 1 }}>
-                      {headline}
-                    </div>
-                    <button
-                      style={{
-                        background: '#fff',
-                        color: accent,
-                        border: 'none',
-                        borderRadius: ctaCss.borderRadius,
-                        padding: '6px 14px',
-                        fontSize: '12px',
-                        fontWeight: '700',
-                        flexShrink: 0,
-                      }}
-                    >
-                      {allowText}
-                    </button>
-                    <span
-                      style={{
-                        color: 'rgba(255,255,255,0.7)',
-                        fontSize: '18px',
-                        flexShrink: 0,
-                      }}
-                    >
-                      ×
-                    </span>
-                  </div>
-                );
-
-              return null;
+              return (
+                <ClassicPreview
+                  layout={popup.layout || 'split'}
+                  device="desktop"
+                  popup={popup}
+                  showEmailField={previewShowEmailField}
+                  discountOfferText={previewDiscountOfferText}
+                  discountOfferHeadline={discountRules.offerHeadline}
+                  {...commonProps}
+                />
+              );
             })()}
 
             {popupDevice === 'mobile' && (
@@ -2265,14 +2543,26 @@ export default function Settings({ shop }) {
                       <div style={{ width: '40%', height: '12px', background: '#e5e7eb', borderRadius: '4px' }} />
                     </div>
 
-                    {/* Mobile popup preview — card layout */}
+                    {/* Mobile popup preview */}
                     {(() => {
-                      // popup-style: same early-return rule as the desktop
-                      // preview above — uses whichever config
-                      // (mobilePopup, or popup when the override is off)
-                      // activeStyleId/activeStyleFields already resolved to.
+                      if (previewStep === 'dismissed' || previewStep === 'closed') {
+                        return (
+                          <div style={{ position: 'absolute', bottom: 12, left: 8, right: 8, zIndex: 5 }}>
+                            <DismissedNote device="mobile" reason={previewStep === 'closed' ? 'closed' : 'dismissed'} />
+                          </div>
+                        );
+                      }
+                      const styleCfg = mobileUsesOwnStyle ? mobilePopup : popup;
+                      const commonProps = {
+                        step: previewStep,
+                        email: previewEmail,
+                        onEmailChange: setPreviewEmail,
+                        onAllow: () => setPreviewStep('setting_up'),
+                        onDismiss: () => setPreviewStep('dismissed'),
+                        wantsDiscount: previewWantsDiscount,
+                        unlockedInfo: previewUnlockedInfo,
+                      };
                       if (activeStyleId !== 'classic') {
-                        const styleCfg = mobileUsesOwnStyle ? mobilePopup : popup;
                         return (
                           <div style={{ position: 'absolute', bottom: '12px', left: '8px',
                                         right: '8px', zIndex: 5 }}>
@@ -2280,91 +2570,25 @@ export default function Settings({ shop }) {
                               styleId={activeStyleId}
                               cfg={styleCfg}
                               styleFields={activeStyleFields}
-                              emailFieldEnabled={emailDiscountEnabled}
+                              emailFieldEnabled={previewShowEmailField}
                               compact
+                              {...commonProps}
                             />
                           </div>
                         );
                       }
-                      const mp = mobilePopup;
-                      const bg = mp.bgColor || '#ffffff';
-                      const fg = mp.textColor || '#111827';
-                      const accent = mp.accentColor || '#4f46e5';
-                      const ctaCss = getCtaStyle(mp.ctaStyle || 'pill', accent);
-                      const textAlign = mp.textAlign || 'left';
-                      const cardRadius = (mp.borderRadius ?? 16) + 'px';
-                      const imageUrl = mp.imageUrl || '';
-                      const headline = mp.headline || 'Get notified about deals';
-
                       return (
-                        <div
-                          style={{
-                            position: 'absolute',
-                            bottom: '12px',
-                            left: '8px',
-                            right: '8px',
-                            background: bg,
-                            borderRadius: cardRadius,
-                            overflow: 'hidden',
-                            boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
-                            zIndex: 5,
-                          }}
-                        >
-                          {imageUrl && (
-                            <img
-                              src={imageUrl}
-                              alt=""
-                              style={{
-                                width: '100%',
-                                height: '70px',
-                                objectFit: 'cover',
-                                display: 'block',
-                                objectPosition: mp.imagePosition || '50% 50%',
-                              }}
-                            />
-                          )}
-                          <div style={{ padding: '10px 12px' }}>
-                            <div
-                              style={{
-                                fontSize: '11px',
-                                fontWeight: '600',
-                                color: fg,
-                                marginBottom: '6px',
-                                lineHeight: 1.3,
-                                textAlign,
-                              }}
-                            >
-                              {headline}
-                            </div>
-                            {mp.subtext && (
-                              <div
-                                style={{
-                                  fontSize: '10px',
-                                  color: '#6b7280',
-                                  marginBottom: '6px',
-                                  lineHeight: '1.3',
-                                  textAlign,
-                                }}
-                              >
-                                {mp.subtext}
-                              </div>
-                            )}
-                            <button
-                              style={{
-                                ...ctaCss,
-                                width: '100%',
-                                padding: '7px',
-                                fontSize: '11px',
-                                fontWeight: '700',
-                                marginBottom: '4px',
-                              }}
-                            >
-                              {mp.allowText || 'Allow'}
-                            </button>
-                            <div style={{ fontSize: '9px', color: '#9ca3af', textAlign: 'center' }}>
-                              {mp.denyText || 'No thanks'}
-                            </div>
-                          </div>
+                        <div style={{ position: 'absolute', bottom: '12px', left: '8px',
+                                      right: '8px', zIndex: 5 }}>
+                          <ClassicPreview
+                            layout={mobilePopup.layout === 'banner' ? 'banner' : 'card'}
+                            device="mobile"
+                            popup={mobilePopup}
+                            showEmailField={previewShowEmailField}
+                            discountOfferText={previewDiscountOfferText}
+                            discountOfferHeadline={discountRules.offerHeadline}
+                            {...commonProps}
+                          />
                         </div>
                       );
                     })()}
@@ -2421,7 +2645,12 @@ export default function Settings({ shop }) {
     <div style={DS.page}>
       <style>{
         '.ccf-style-card:focus-visible,.ccf-style-focus:focus-visible{' +
-        'outline:2px solid #4f46e5;outline-offset:2px;}'
+        'outline:2px solid #4f46e5;outline-offset:2px;}' +
+        // Matches ccf-push.js's own @keyframes ccfSpin/.ccf-spin exactly —
+        // the preview's loader icon should spin the same way a real
+        // customer's does.
+        '@keyframes ccfPreviewSpin{to{transform:rotate(360deg);}}' +
+        '.ccf-preview-spin{animation:ccfPreviewSpin 0.9s linear infinite;}'
       }</style>
       <PageHeader
         title="Settings"
