@@ -1932,12 +1932,26 @@ export default function Settings({ shop }) {
       <ImageRow label="Image" imageUrl={activePopup.imageUrl}
         onUpload={handleImageUpload}
         onRemove={() => { setActivePopup((p) => ({ ...p, imageUrl: '' })); markImageChanged(); }} />
+      <TextEditRow fieldKey="imageUrl" label="Image URL" value={activePopup.imageUrl}
+        placeholder="Paste an image URL"
+        onCommit={(v) => { setActivePopup((p) => ({ ...p, imageUrl: v })); markImageChanged(); }}
+        editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
       {activePopup.imageUrl && (
-        <div style={rowShell}>
-          <div style={rowLabelStyle}>Focus</div>
-          <ImagePositionGrid value={activePopup.imagePosition || '50% 50%'}
-            onChange={(v) => setActivePopup((p) => ({ ...p, imagePosition: v }))} />
-        </div>
+        <>
+          <div style={rowShell}>
+            <div style={rowLabelStyle}>Focus</div>
+            <ImagePositionGrid value={activePopup.imagePosition || '50% 50%'}
+              onChange={(v) => setActivePopup((p) => ({ ...p, imagePosition: v }))} />
+          </div>
+          {/* image-focus-restore: the 3x3 grid only covers 9 presets — a
+              merchant who previously drag-set a custom value (e.g.
+              "38% 72%") needs a way to see/edit that exact value too, since
+              the storefront still honours whatever string is stored here. */}
+          <TextEditRow fieldKey="imagePosition" label="Focus (exact)"
+            value={activePopup.imagePosition || '50% 50%'} placeholder="x% y%"
+            onCommit={(v) => setActivePopup((p) => ({ ...p, imagePosition: v }))}
+            editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+        </>
       )}
 
       {styleExtraFieldRows.some(Boolean) && (
