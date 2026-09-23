@@ -1821,6 +1821,239 @@ export default function Settings({ shop }) {
     );
   });
 
+  // Sticky on desktop so it stays visible while scrolling the options.
+  // popup-customizer-redesign: embedded directly inside the editor view
+  // below (between the device toggle and the compact settings form) —
+  // no longer a separate sticky right-column card. Its own former
+  // "Desktop preview"/"Mobile preview" heading was dropped since the
+  // editor's device toggle right above it already says which one this is.
+  const popupPreviewCard = (
+    <div>
+            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '10px' }}>
+              Click Allow to walk through the real flow — nothing here ever
+              contacts the backend or asks for a real permission.
+            </div>
+
+            <StepBar step={previewStep} hasDiscount={previewWantsDiscount}
+              onJump={(s) => setPreviewStep(s)} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+              <button
+                type="button"
+                onClick={() => { setPreviewStep('prompt'); setPreviewEmail(''); }}
+                className="ccf-style-focus"
+                style={{ fontSize: 11, fontWeight: 600, color: '#4f46e5', background: '#eef2ff',
+                  border: '1px solid #c7d2fe', borderRadius: 999, padding: '4px 10px', cursor: 'pointer' }}
+              >
+                ↺ Replay
+              </button>
+            </div>
+
+            {popupDevice === 'desktop' && (() => {
+              if (previewStep === 'dismissed' || previewStep === 'closed') {
+                return <DismissedNote device="desktop" reason={previewStep === 'closed' ? 'closed' : 'dismissed'} />;
+              }
+              const commonProps = {
+                step: previewStep,
+                email: previewEmail,
+                onEmailChange: setPreviewEmail,
+                onAllow: () => setPreviewStep('setting_up'),
+                onDismiss: () => setPreviewStep('dismissed'),
+                wantsDiscount: previewWantsDiscount,
+                unlockedInfo: previewUnlockedInfo,
+              };
+              if (activeStyleId !== 'classic') {
+                return (
+                  <StyleCardPreview
+                    styleId={activeStyleId}
+                    cfg={popup}
+                    styleFields={activeStyleFields}
+                    emailFieldEnabled={previewShowEmailField}
+                    {...commonProps}
+                  />
+                );
+              }
+              return (
+                <ClassicPreview
+                  layout={popup.layout || 'split'}
+                  device="desktop"
+                  popup={popup}
+                  showEmailField={previewShowEmailField}
+                  discountOfferText={previewDiscountOfferText}
+                  discountOfferHeadline={discountRules.offerHeadline}
+                  {...commonProps}
+                />
+              );
+            })()}
+
+            {popupDevice === 'mobile' && (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <div
+                  style={{
+                    width: '200px',
+                    height: '360px',
+                    border: '8px solid #111827',
+                    borderRadius: '28px',
+                    overflow: 'hidden',
+                    background: '#f3f4f6',
+                    position: 'relative',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+                  }}
+                >
+                  {/* Notch */}
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                      width: '60px',
+                      height: '16px',
+                      background: '#111827',
+                      borderRadius: '0 0 12px 12px',
+                      zIndex: 10,
+                    }}
+                  />
+
+                  {/* Screen content — simulated store page */}
+                  <div
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      background: '#fff',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'flex-end',
+                      paddingBottom: '16px',
+                      position: 'relative',
+                    }}
+                  >
+                    {/* Simulated store background */}
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        background: '#f9fafb',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        paddingTop: '24px',
+                        gap: '8px',
+                      }}
+                    >
+                      <div style={{ width: '80%', height: '80px', background: '#e5e7eb', borderRadius: '8px' }} />
+                      <div style={{ width: '60%', height: '12px', background: '#e5e7eb', borderRadius: '4px' }} />
+                      <div style={{ width: '40%', height: '12px', background: '#e5e7eb', borderRadius: '4px' }} />
+                    </div>
+
+                    {/* Mobile popup preview */}
+                    {(() => {
+                      if (previewStep === 'dismissed' || previewStep === 'closed') {
+                        return (
+                          <div style={{ position: 'absolute', bottom: 12, left: 8, right: 8, zIndex: 5 }}>
+                            <DismissedNote device="mobile" reason={previewStep === 'closed' ? 'closed' : 'dismissed'} />
+                          </div>
+                        );
+                      }
+                      const styleCfg = mobileUsesOwnStyle ? mobilePopup : popup;
+                      const commonProps = {
+                        step: previewStep,
+                        email: previewEmail,
+                        onEmailChange: setPreviewEmail,
+                        onAllow: () => setPreviewStep('setting_up'),
+                        onDismiss: () => setPreviewStep('dismissed'),
+                        wantsDiscount: previewWantsDiscount,
+                        unlockedInfo: previewUnlockedInfo,
+                      };
+                      if (activeStyleId !== 'classic') {
+                        return (
+                          <div style={{ position: 'absolute', bottom: '12px', left: '8px',
+                                        right: '8px', zIndex: 5 }}>
+                            <StyleCardPreview
+                              styleId={activeStyleId}
+                              cfg={styleCfg}
+                              styleFields={activeStyleFields}
+                              emailFieldEnabled={previewShowEmailField}
+                              compact
+                              {...commonProps}
+                            />
+                          </div>
+                        );
+                      }
+                      return (
+                        <div style={{ position: 'absolute', bottom: '12px', left: '8px',
+                                      right: '8px', zIndex: 5 }}>
+                          <ClassicPreview
+                            layout={mobilePopup.layout === 'banner' ? 'banner' : 'card'}
+                            device="mobile"
+                            popup={mobilePopup}
+                            showEmailField={previewShowEmailField}
+                            discountOfferText={previewDiscountOfferText}
+                            discountOfferHeadline={discountRules.offerHeadline}
+                            {...commonProps}
+                          />
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* The one Save button while the customizer is open — pinned to
+                the bottom of the sticky right column. */}
+            <div
+              style={{
+                marginTop: '20px',
+                paddingTop: '16px',
+                borderTop: '1px solid #f3f4f6',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+              }}
+            >
+              <button
+                onClick={saveSettings}
+                disabled={saving}
+                style={{
+                  ...DS.btnPrimary,
+                  flex: 1,
+                  padding: '12px 24px',
+                  fontSize: '14px',
+                  background: saving ? DS.gray400 : DS.primary,
+                  cursor: saving ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {saving ? 'Saving…' : 'Save settings'}
+              </button>
+              {success && (
+                <span
+                  style={{
+                    fontSize: '13px',
+                    color: '#16a34a',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  ✓ Saved
+                </span>
+              )}
+              {error && (
+                <span style={{ fontSize: '13px', color: '#dc2626' }}>{error}</span>
+              )}
+            </div>
+    </div>
+  );
+
   const popupEditorView = (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
@@ -2143,239 +2376,6 @@ export default function Settings({ shop }) {
                 </div>
               </div>
             ))}
-    </div>
-  );
-
-  // Sticky on desktop so it stays visible while scrolling the options.
-  // popup-customizer-redesign: embedded directly inside the editor view
-  // below (between the device toggle and the compact settings form) —
-  // no longer a separate sticky right-column card. Its own former
-  // "Desktop preview"/"Mobile preview" heading was dropped since the
-  // editor's device toggle right above it already says which one this is.
-  const popupPreviewCard = (
-    <div>
-            <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '10px' }}>
-              Click Allow to walk through the real flow — nothing here ever
-              contacts the backend or asks for a real permission.
-            </div>
-
-            <StepBar step={previewStep} hasDiscount={previewWantsDiscount}
-              onJump={(s) => setPreviewStep(s)} />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
-              <button
-                type="button"
-                onClick={() => { setPreviewStep('prompt'); setPreviewEmail(''); }}
-                className="ccf-style-focus"
-                style={{ fontSize: 11, fontWeight: 600, color: '#4f46e5', background: '#eef2ff',
-                  border: '1px solid #c7d2fe', borderRadius: 999, padding: '4px 10px', cursor: 'pointer' }}
-              >
-                ↺ Replay
-              </button>
-            </div>
-
-            {popupDevice === 'desktop' && (() => {
-              if (previewStep === 'dismissed' || previewStep === 'closed') {
-                return <DismissedNote device="desktop" reason={previewStep === 'closed' ? 'closed' : 'dismissed'} />;
-              }
-              const commonProps = {
-                step: previewStep,
-                email: previewEmail,
-                onEmailChange: setPreviewEmail,
-                onAllow: () => setPreviewStep('setting_up'),
-                onDismiss: () => setPreviewStep('dismissed'),
-                wantsDiscount: previewWantsDiscount,
-                unlockedInfo: previewUnlockedInfo,
-              };
-              if (activeStyleId !== 'classic') {
-                return (
-                  <StyleCardPreview
-                    styleId={activeStyleId}
-                    cfg={popup}
-                    styleFields={activeStyleFields}
-                    emailFieldEnabled={previewShowEmailField}
-                    {...commonProps}
-                  />
-                );
-              }
-              return (
-                <ClassicPreview
-                  layout={popup.layout || 'split'}
-                  device="desktop"
-                  popup={popup}
-                  showEmailField={previewShowEmailField}
-                  discountOfferText={previewDiscountOfferText}
-                  discountOfferHeadline={discountRules.offerHeadline}
-                  {...commonProps}
-                />
-              );
-            })()}
-
-            {popupDevice === 'mobile' && (
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '8px',
-                }}
-              >
-                <div
-                  style={{
-                    width: '200px',
-                    height: '360px',
-                    border: '8px solid #111827',
-                    borderRadius: '28px',
-                    overflow: 'hidden',
-                    background: '#f3f4f6',
-                    position: 'relative',
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
-                  }}
-                >
-                  {/* Notch */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: '50%',
-                      transform: 'translateX(-50%)',
-                      width: '60px',
-                      height: '16px',
-                      background: '#111827',
-                      borderRadius: '0 0 12px 12px',
-                      zIndex: 10,
-                    }}
-                  />
-
-                  {/* Screen content — simulated store page */}
-                  <div
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      background: '#fff',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'flex-end',
-                      paddingBottom: '16px',
-                      position: 'relative',
-                    }}
-                  >
-                    {/* Simulated store background */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        background: '#f9fafb',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        paddingTop: '24px',
-                        gap: '8px',
-                      }}
-                    >
-                      <div style={{ width: '80%', height: '80px', background: '#e5e7eb', borderRadius: '8px' }} />
-                      <div style={{ width: '60%', height: '12px', background: '#e5e7eb', borderRadius: '4px' }} />
-                      <div style={{ width: '40%', height: '12px', background: '#e5e7eb', borderRadius: '4px' }} />
-                    </div>
-
-                    {/* Mobile popup preview */}
-                    {(() => {
-                      if (previewStep === 'dismissed' || previewStep === 'closed') {
-                        return (
-                          <div style={{ position: 'absolute', bottom: 12, left: 8, right: 8, zIndex: 5 }}>
-                            <DismissedNote device="mobile" reason={previewStep === 'closed' ? 'closed' : 'dismissed'} />
-                          </div>
-                        );
-                      }
-                      const styleCfg = mobileUsesOwnStyle ? mobilePopup : popup;
-                      const commonProps = {
-                        step: previewStep,
-                        email: previewEmail,
-                        onEmailChange: setPreviewEmail,
-                        onAllow: () => setPreviewStep('setting_up'),
-                        onDismiss: () => setPreviewStep('dismissed'),
-                        wantsDiscount: previewWantsDiscount,
-                        unlockedInfo: previewUnlockedInfo,
-                      };
-                      if (activeStyleId !== 'classic') {
-                        return (
-                          <div style={{ position: 'absolute', bottom: '12px', left: '8px',
-                                        right: '8px', zIndex: 5 }}>
-                            <StyleCardPreview
-                              styleId={activeStyleId}
-                              cfg={styleCfg}
-                              styleFields={activeStyleFields}
-                              emailFieldEnabled={previewShowEmailField}
-                              compact
-                              {...commonProps}
-                            />
-                          </div>
-                        );
-                      }
-                      return (
-                        <div style={{ position: 'absolute', bottom: '12px', left: '8px',
-                                      right: '8px', zIndex: 5 }}>
-                          <ClassicPreview
-                            layout={mobilePopup.layout === 'banner' ? 'banner' : 'card'}
-                            device="mobile"
-                            popup={mobilePopup}
-                            showEmailField={previewShowEmailField}
-                            discountOfferText={previewDiscountOfferText}
-                            discountOfferHeadline={discountRules.offerHeadline}
-                            {...commonProps}
-                          />
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* The one Save button while the customizer is open — pinned to
-                the bottom of the sticky right column. */}
-            <div
-              style={{
-                marginTop: '20px',
-                paddingTop: '16px',
-                borderTop: '1px solid #f3f4f6',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-              }}
-            >
-              <button
-                onClick={saveSettings}
-                disabled={saving}
-                style={{
-                  ...DS.btnPrimary,
-                  flex: 1,
-                  padding: '12px 24px',
-                  fontSize: '14px',
-                  background: saving ? DS.gray400 : DS.primary,
-                  cursor: saving ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {saving ? 'Saving…' : 'Save settings'}
-              </button>
-              {success && (
-                <span
-                  style={{
-                    fontSize: '13px',
-                    color: '#16a34a',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  ✓ Saved
-                </span>
-              )}
-              {error && (
-                <span style={{ fontSize: '13px', color: '#dc2626' }}>{error}</span>
-              )}
-            </div>
     </div>
   );
 
