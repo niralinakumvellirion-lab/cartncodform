@@ -1792,6 +1792,14 @@ export default function Settings({ shop }) {
   // --- STEP 1: style gallery -------------------------------------------
   const popupGalleryView = (
     <>
+      {/* style-button-header: a plain way back to the editor (keeping
+          whatever style is currently active) — distinct from the outer
+          "←" in the card header, which closes the whole customizer. */}
+      <button type="button" onClick={() => setPopupEditorOpen(true)} className="ccf-style-focus"
+        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px',
+          color: '#4f46e5', fontWeight: 600, padding: 0, marginBottom: '10px' }}>
+        ← Back
+      </button>
       <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827', marginBottom: '2px' }}>
         Choose a popup style
       </div>
@@ -1851,8 +1859,11 @@ export default function Settings({ shop }) {
       return <SelectRow key={f.key} label={f.label} value={value || f.default} options={f.options} onChange={setField} />;
     }
     if (f.type === 'datetime') {
+      // popup-customizer-2col: datetime/text style-option rows go full
+      // width — a date picker and free-text values both read awkwardly
+      // squeezed into a half column next to an unrelated toggle/select.
       return (
-        <div key={f.key} style={rowShell}>
+        <div key={f.key} className="ccf-settings-full" style={rowShell}>
           <div style={rowLabelStyle}>{f.label}</div>
           <input type="datetime-local" value={value || ''} onChange={(e) => setField(e.target.value)}
             className="ccf-style-focus" style={rowFocusInputStyle} />
@@ -1861,9 +1872,11 @@ export default function Settings({ shop }) {
     }
     // text
     return (
-      <TextEditRow key={f.key} fieldKey={`style-${f.key}`} label={f.label} value={value || ''}
-        placeholder="" maxLength={f.maxLength} onCommit={setField}
-        editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+      <div key={f.key} className="ccf-settings-full">
+        <TextEditRow fieldKey={`style-${f.key}`} label={f.label} value={value || ''}
+          placeholder="" maxLength={f.maxLength} onCommit={setField}
+          editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+      </div>
     );
   });
 
@@ -2102,17 +2115,9 @@ export default function Settings({ shop }) {
 
   const popupEditorView = (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
-        <button onClick={() => setPopupEditorOpen(false)}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px',
-            color: '#4f46e5', fontWeight: 600, padding: 0 }}>
-          ← Back to styles
-        </button>
-        <div style={{ fontSize: '13px', color: '#9ca3af' }}>
-          {selectedGalleryCard.name}
-        </div>
-      </div>
-
+      {/* header-style-button: the style name + change-style control now
+          lives in the outer card header (next to "Popup customization"),
+          not here — see popupCard below. */}
       {deviceToggle}
 
       {popupDevice === 'mobile' && (
@@ -2128,123 +2133,150 @@ export default function Settings({ shop }) {
         {popupPreviewCard}
       </div>
 
-      {/* BELOW: compact settings */}
+      {/* BELOW: compact settings. popup-customizer-2col: rows inside each
+          group flow into two columns above ~900px (.ccf-settings-grid);
+          Headline/Subtext/Image URL/Focus (exact) are marked full-width
+          (.ccf-settings-full) since they read poorly squeezed to half —
+          see the audit for the complete list. */}
       <SectionHeading>Content</SectionHeading>
-      <TextEditRow fieldKey="headline" label="Headline" value={activePopup.headline}
-        placeholder="e.g. Don't miss out on this offer"
-        onCommit={(v) => setActivePopup((p) => ({ ...p, headline: v }))}
-        editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
-      <TextEditRow fieldKey="subtext" label="Subtext" value={activePopup.subtext}
-        placeholder="e.g. Get notified when prices drop"
-        onCommit={(v) => setActivePopup((p) => ({ ...p, subtext: v }))}
-        editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
-      {activeStyleId === 'classic' && (
-        <TextEditRow fieldKey="brandName" label="Brand name" value={activePopup.brandName}
-          placeholder="e.g. SILK HOUSE"
-          onCommit={(v) => setActivePopup((p) => ({ ...p, brandName: v }))}
-          editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
-      )}
+      <div className="ccf-settings-grid">
+        <div className="ccf-settings-full">
+          <TextEditRow fieldKey="headline" label="Headline" value={activePopup.headline}
+            placeholder="e.g. Don't miss out on this offer"
+            onCommit={(v) => setActivePopup((p) => ({ ...p, headline: v }))}
+            editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+        </div>
+        <div className="ccf-settings-full">
+          <TextEditRow fieldKey="subtext" label="Subtext" value={activePopup.subtext}
+            placeholder="e.g. Get notified when prices drop"
+            onCommit={(v) => setActivePopup((p) => ({ ...p, subtext: v }))}
+            editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+        </div>
+        {activeStyleId === 'classic' && (
+          <TextEditRow fieldKey="brandName" label="Brand name" value={activePopup.brandName}
+            placeholder="e.g. SILK HOUSE"
+            onCommit={(v) => setActivePopup((p) => ({ ...p, brandName: v }))}
+            editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+        )}
+      </div>
 
       <SectionHeading>Appearance</SectionHeading>
-      {activeStyleId === 'classic' && popupDevice === 'desktop' && (
-        <PillsRow label="Layout" value={activePopup.layout || 'split'}
-          options={[{ value: 'split', label: 'Split' }, { value: 'card', label: 'Card' }, { value: 'banner', label: 'Banner' }]}
-          onChange={(v) => setActivePopup((p) => ({ ...p, layout: v }))} />
-      )}
-      <ColorRow label="Accent" value={activePopup.accentColor} defaultValue="#4f46e5"
-        onChange={(v) => setActivePopup((p) => ({ ...p, accentColor: v }))} />
-      <ColorRow label="Background" value={activePopup.bgColor} defaultValue="#ffffff"
-        onChange={(v) => setActivePopup((p) => ({ ...p, bgColor: v }))} />
-      <ColorRow label="Text color" value={activePopup.textColor} defaultValue="#111827"
-        onChange={(v) => setActivePopup((p) => ({ ...p, textColor: v }))} />
-      <SelectRow label="Font" value={activePopup.fontFamily || 'inherit'}
-        options={[
-          { value: 'inherit', label: 'Store default' },
-          { value: "'Arial', sans-serif", label: 'Arial' },
-          { value: "'Georgia', serif", label: 'Georgia' },
-          { value: "'Helvetica Neue', sans-serif", label: 'Helvetica' },
-          { value: "'Times New Roman', serif", label: 'Times New Roman' },
-          { value: "'Courier New', monospace", label: 'Courier New' },
-          { value: "'Playfair Display', serif", label: 'Playfair Display' },
-          { value: "'Montserrat', sans-serif", label: 'Montserrat' },
-        ]}
-        onChange={(v) => setActivePopup((p) => ({ ...p, fontFamily: v }))} />
-      <RadiusRow label="Border radius" value={activePopup.borderRadius ?? 12}
-        onChange={(v) => setActivePopup((p) => ({ ...p, borderRadius: v }))} />
-      {activeStyleId === 'classic' && (
-        <PillsRow label="Text align" value={activePopup.textAlign || 'left'}
-          options={[{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' }]}
-          onChange={(v) => setActivePopup((p) => ({ ...p, textAlign: v }))} />
-      )}
-      <SelectRow label="Position" value={activePopup.position || 'bottom-right'}
-        options={[
-          { value: 'bottom-right', label: 'Bottom right' },
-          { value: 'bottom-left', label: 'Bottom left' },
-          { value: 'center', label: 'Center' },
-          { value: 'top-right', label: 'Top right' },
-          { value: 'top-left', label: 'Top left' },
-        ]}
-        onChange={(v) => setActivePopup((p) => ({ ...p, position: v }))} />
-      {activeStyleId === 'classic' && (
-        <ToggleRow label="Dark overlay" checked={activePopup.showOverlay !== false}
-          onChange={(v) => setActivePopup((p) => ({ ...p, showOverlay: v }))} />
-      )}
+      <div className="ccf-settings-grid">
+        {activeStyleId === 'classic' && popupDevice === 'desktop' && (
+          <PillsRow label="Layout" value={activePopup.layout || 'split'}
+            options={[{ value: 'split', label: 'Split' }, { value: 'card', label: 'Card' }, { value: 'banner', label: 'Banner' }]}
+            onChange={(v) => setActivePopup((p) => ({ ...p, layout: v }))} />
+        )}
+        <ColorRow label="Accent" value={activePopup.accentColor} defaultValue="#4f46e5"
+          onChange={(v) => setActivePopup((p) => ({ ...p, accentColor: v }))} />
+        <ColorRow label="Background" value={activePopup.bgColor} defaultValue="#ffffff"
+          onChange={(v) => setActivePopup((p) => ({ ...p, bgColor: v }))} />
+        <ColorRow label="Text color" value={activePopup.textColor} defaultValue="#111827"
+          onChange={(v) => setActivePopup((p) => ({ ...p, textColor: v }))} />
+        <SelectRow label="Font" value={activePopup.fontFamily || 'inherit'}
+          options={[
+            { value: 'inherit', label: 'Store default' },
+            { value: "'Arial', sans-serif", label: 'Arial' },
+            { value: "'Georgia', serif", label: 'Georgia' },
+            { value: "'Helvetica Neue', sans-serif", label: 'Helvetica' },
+            { value: "'Times New Roman', serif", label: 'Times New Roman' },
+            { value: "'Courier New', monospace", label: 'Courier New' },
+            { value: "'Playfair Display', serif", label: 'Playfair Display' },
+            { value: "'Montserrat', sans-serif", label: 'Montserrat' },
+          ]}
+          onChange={(v) => setActivePopup((p) => ({ ...p, fontFamily: v }))} />
+        <RadiusRow label="Border radius" value={activePopup.borderRadius ?? 12}
+          onChange={(v) => setActivePopup((p) => ({ ...p, borderRadius: v }))} />
+        {activeStyleId === 'classic' && (
+          <PillsRow label="Text align" value={activePopup.textAlign || 'left'}
+            options={[{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' }]}
+            onChange={(v) => setActivePopup((p) => ({ ...p, textAlign: v }))} />
+        )}
+        <SelectRow label="Position" value={activePopup.position || 'bottom-right'}
+          options={[
+            { value: 'bottom-right', label: 'Bottom right' },
+            { value: 'bottom-left', label: 'Bottom left' },
+            { value: 'center', label: 'Center' },
+            { value: 'top-right', label: 'Top right' },
+            { value: 'top-left', label: 'Top left' },
+          ]}
+          onChange={(v) => setActivePopup((p) => ({ ...p, position: v }))} />
+        {activeStyleId === 'classic' && (
+          <ToggleRow label="Dark overlay" checked={activePopup.showOverlay !== false}
+            onChange={(v) => setActivePopup((p) => ({ ...p, showOverlay: v }))} />
+        )}
+      </div>
 
       <SectionHeading>Buttons</SectionHeading>
-      <TextEditRow fieldKey="allowText" label="Allow button" value={activePopup.allowText || 'Allow'}
-        placeholder="Allow"
-        onCommit={(v) => setActivePopup((p) => ({ ...p, allowText: v }))}
-        editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
-      <TextEditRow fieldKey="denyText" label="Deny button" value={activePopup.denyText || 'No thanks'}
-        placeholder="No thanks"
-        onCommit={(v) => setActivePopup((p) => ({ ...p, denyText: v }))}
-        editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
-      <PillsRow label="Button style" value={activePopup.ctaStyle || 'rounded'}
-        options={[
-          { value: 'rounded', label: 'Rounded' }, { value: 'square', label: 'Square' },
-          { value: 'pill', label: 'Pill' }, { value: 'outlined', label: 'Outlined' },
-          { value: 'soft', label: 'Soft' },
-        ]}
-        onChange={(v) => setActivePopup((p) => ({ ...p, ctaStyle: v }))} />
+      <div className="ccf-settings-grid">
+        <TextEditRow fieldKey="allowText" label="Allow button" value={activePopup.allowText || 'Allow'}
+          placeholder="Allow"
+          onCommit={(v) => setActivePopup((p) => ({ ...p, allowText: v }))}
+          editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+        <TextEditRow fieldKey="denyText" label="Deny button" value={activePopup.denyText || 'No thanks'}
+          placeholder="No thanks"
+          onCommit={(v) => setActivePopup((p) => ({ ...p, denyText: v }))}
+          editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+        {/* 5 pills (Rounded/Square/Pill/Outlined/Soft) need the room. */}
+        <div className="ccf-settings-full">
+          <PillsRow label="Button style" value={activePopup.ctaStyle || 'rounded'}
+            options={[
+              { value: 'rounded', label: 'Rounded' }, { value: 'square', label: 'Square' },
+              { value: 'pill', label: 'Pill' }, { value: 'outlined', label: 'Outlined' },
+              { value: 'soft', label: 'Soft' },
+            ]}
+            onChange={(v) => setActivePopup((p) => ({ ...p, ctaStyle: v }))} />
+        </div>
+      </div>
 
       <SectionHeading>Image</SectionHeading>
-      <ImageRow label="Image" imageUrl={activePopup.imageUrl}
-        onUpload={handleImageUpload}
-        onRemove={() => { setActivePopup((p) => ({ ...p, imageUrl: '' })); markImageChanged(); }} />
-      <TextEditRow fieldKey="imageUrl" label="Image URL" value={activePopup.imageUrl}
-        placeholder="Paste an image URL"
-        onCommit={(v) => { setActivePopup((p) => ({ ...p, imageUrl: v })); markImageChanged(); }}
-        editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
-      {activePopup.imageUrl && (
-        <>
+      <div className="ccf-settings-grid">
+        <ImageRow label="Image" imageUrl={activePopup.imageUrl}
+          onUpload={handleImageUpload}
+          onRemove={() => { setActivePopup((p) => ({ ...p, imageUrl: '' })); markImageChanged(); }} />
+        {activePopup.imageUrl && (
           <div style={rowShell}>
             <div style={rowLabelStyle}>Focus</div>
             <ImagePositionGrid value={activePopup.imagePosition || '50% 50%'}
               onChange={(v) => setActivePopup((p) => ({ ...p, imagePosition: v }))} />
           </div>
-          {/* image-focus-restore: the 3x3 grid only covers 9 presets — a
-              merchant who previously drag-set a custom value (e.g.
-              "38% 72%") needs a way to see/edit that exact value too, since
-              the storefront still honours whatever string is stored here. */}
-          <TextEditRow fieldKey="imagePosition" label="Focus (exact)"
-            value={activePopup.imagePosition || '50% 50%'} placeholder="x% y%"
-            onCommit={(v) => setActivePopup((p) => ({ ...p, imagePosition: v }))}
+        )}
+        <div className="ccf-settings-full">
+          <TextEditRow fieldKey="imageUrl" label="Image URL" value={activePopup.imageUrl}
+            placeholder="Paste an image URL"
+            onCommit={(v) => { setActivePopup((p) => ({ ...p, imageUrl: v })); markImageChanged(); }}
             editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
-        </>
-      )}
+        </div>
+        {activePopup.imageUrl && (
+          // image-focus-restore: the 3x3 grid only covers 9 presets — a
+          // merchant who previously drag-set a custom value (e.g.
+          // "38% 72%") needs a way to see/edit that exact value too, since
+          // the storefront still honours whatever string is stored here.
+          <div className="ccf-settings-full">
+            <TextEditRow fieldKey="imagePosition" label="Focus (exact)"
+              value={activePopup.imagePosition || '50% 50%'} placeholder="x% y%"
+              onCommit={(v) => setActivePopup((p) => ({ ...p, imagePosition: v }))}
+              editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+          </div>
+        )}
+      </div>
 
       {styleExtraFieldRows.some(Boolean) && (
         <>
           <SectionHeading>Style options</SectionHeading>
-          {styleExtraFieldRows}
+          <div className="ccf-settings-grid">
+            {styleExtraFieldRows}
+          </div>
         </>
       )}
 
       {popupDevice === 'mobile' && (
         <>
           <SectionHeading>Mobile</SectionHeading>
-          <ToggleRow label="Different style on mobile" checked={!!popup.mobileStyleOverride}
-            onChange={(v) => setPopup((p) => ({ ...p, mobileStyleOverride: v }))} />
+          <div className="ccf-settings-grid">
+            <ToggleRow label="Different style on mobile" checked={!!popup.mobileStyleOverride}
+              onChange={(v) => setPopup((p) => ({ ...p, mobileStyleOverride: v }))} />
+          </div>
         </>
       )}
     </>
@@ -2276,22 +2308,45 @@ export default function Settings({ shop }) {
     </div>
   ) : (
     <div style={{ ...card }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
-        <button
-          onClick={() => { setShowPopupCustomizer(false); setPopupEditorOpen(false); }}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px',
-            color: '#9ca3af', padding: '0', lineHeight: 1 }}
-        >
-          ←
-        </button>
-        <div>
-          <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
-            Popup customization
-          </div>
-          <div style={{ fontSize: '12px', color: '#9ca3af' }}>
-            Changes save with the main Save settings button
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: '12px', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+          <button
+            onClick={() => { setShowPopupCustomizer(false); setPopupEditorOpen(false); }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px',
+              color: '#9ca3af', padding: '0', lineHeight: 1, flexShrink: 0 }}
+          >
+            ←
+          </button>
+          <div>
+            <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
+              Popup customization
+            </div>
+            <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+              Changes save with the main Save settings button
+            </div>
           </div>
         </div>
+        {/* style-button-header: replaces the old "← Back to styles" link
+            that used to live inside popupEditorView — same destination
+            (opens the gallery), styled as a secondary button showing the
+            currently selected style. Only shown in the editor; the
+            gallery has its own "← Back" affordance above instead. */}
+        {popupEditorOpen && (
+          <button
+            type="button"
+            onClick={() => setPopupEditorOpen(false)}
+            aria-label="Change popup style"
+            className="ccf-style-focus"
+            style={{ ...DS.btnSecondary, display: 'flex', alignItems: 'center', gap: 8,
+              padding: '7px 12px', fontSize: 12, flexShrink: 0 }}
+          >
+            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%',
+              background: activePopup.accentColor || '#4f46e5', flexShrink: 0 }} />
+            {selectedGalleryCard.name}
+            <span aria-hidden="true" style={{ fontSize: 10, color: '#9ca3af' }}>▾</span>
+          </button>
+        )}
       </div>
 
       {popupEditorOpen ? popupEditorView : popupGalleryView}
@@ -2434,7 +2489,15 @@ export default function Settings({ shop }) {
         // the preview's loader icon should spin the same way a real
         // customer's does.
         '@keyframes ccfPreviewSpin{to{transform:rotate(360deg);}}' +
-        '.ccf-preview-spin{animation:ccfPreviewSpin 0.9s linear infinite;}'
+        '.ccf-preview-spin{animation:ccfPreviewSpin 0.9s linear infinite;}' +
+        // popup-customizer-2col: single column below ~900px (today's
+        // layout), two columns above it. Rows opt into full-width via
+        // .ccf-settings-full; group headings sit outside the grid so they
+        // always span the full panel width.
+        '.ccf-settings-grid{display:grid;grid-template-columns:1fr;' +
+        'column-gap:24px;row-gap:0;}' +
+        '.ccf-settings-full{grid-column:1/-1;}' +
+        '@media (min-width:900px){.ccf-settings-grid{grid-template-columns:1fr 1fr;}}'
       }</style>
       <PageHeader
         title="Settings"
