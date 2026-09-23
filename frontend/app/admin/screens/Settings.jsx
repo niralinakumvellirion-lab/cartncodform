@@ -633,21 +633,56 @@ function GalleryCard({ card, selected, disabled, previewNode, onClick }) {
 // real closeBtn exactly. Split passes its own real values (28/16px, and
 // 10/10 on mobile vs 12/12 on desktop) — see the two ClassicPreview split
 // branches below.
-function ClosePreviewButton({ dark, onClick, size = 26, top = 12, right = 12, fontSize = 14, background }) {
+// gallery-nested-button-fix: the gallery's mini-previews render this inside
+// GalleryCard's own <button>, so it can't be a real <button> there too
+// (invalid HTML, hydration warning) — interactive=false renders a plain,
+// unclickable <span> instead. The full-size editor preview keeps the real
+// <button> (interactive defaults to true).
+function ClosePreviewButton({ dark, onClick, size = 26, top = 12, right = 12, fontSize = 14, background, interactive = true }) {
   const bg = background || (dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.35)');
+  const sharedStyle = { position: 'absolute', top, right, background: bg,
+    color: '#fff', border: 'none', borderRadius: '50%', width: size, height: size, fontSize,
+    lineHeight: size + 'px', fontFamily: 'inherit', textAlign: 'center', zIndex: 10 };
+  if (!interactive) {
+    return <span aria-hidden="true" style={{ ...sharedStyle, cursor: 'default' }}>×</span>;
+  }
   return (
     <button type="button" onClick={onClick} aria-label="Dismiss popup" className="ccf-style-focus"
-      style={{ position: 'absolute', top, right, background: bg,
-        color: '#fff', border: 'none', borderRadius: '50%', width: size, height: size, fontSize,
-        lineHeight: size + 'px', fontFamily: 'inherit', textAlign: 'center', cursor: 'pointer', zIndex: 10 }}>
+      style={{ ...sharedStyle, cursor: 'pointer' }}>
       ×
     </button>
   );
 }
 
+// gallery-nested-button-fix: same rationale as ClosePreviewButton above —
+// Allow/Deny/email-field controls are real interactive elements too, so
+// they can't nest inside GalleryCard's <button> in the gallery's mini
+// previews either. interactive=false swaps <button> for a plain <div> and
+// <input> for a plain, read-only-looking <div> with the same text/style;
+// the full-size editor preview is untouched (interactive defaults true).
+function PreviewButton({ interactive = true, style, children, ...rest }) {
+  if (!interactive) {
+    return <div aria-hidden="true" style={{ ...style, cursor: 'default' }}>{children}</div>;
+  }
+  return <button {...rest} style={style}>{children}</button>;
+}
+
+function PreviewInput({ interactive = true, value, placeholder, style, onChange, ...rest }) {
+  if (!interactive) {
+    return (
+      <div aria-hidden="true" style={{ ...style, boxSizing: 'border-box', display: 'flex',
+        alignItems: 'center', color: value ? style.color : '#9ca3af' }}>
+        {value || placeholder}
+      </div>
+    );
+  }
+  return <input value={value} placeholder={placeholder} onChange={onChange} style={style} {...rest} />;
+}
+
 function StyleCardPreview({
   styleId, cfg, styleFields, emailFieldEnabled, compact,
   step = 'prompt', email = '', onEmailChange, onAllow, onDismiss, wantsDiscount, unlockedInfo,
+  interactive = true,
 }) {
   const style = getStyle(styleId);
   const accent = cfg.accentColor || '#4f46e5';
@@ -724,7 +759,7 @@ function StyleCardPreview({
                     // to the preview's own container as min(340px,100%).
                     width: compact ? 300 : 'min(340px, 100%)',
                     boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
-        <ClosePreviewButton dark onClick={onDismiss} />
+        <ClosePreviewButton dark onClick={onDismiss} interactive={interactive} />
         {imageUrl && (
           <img src={imageUrl} alt="" style={{ width: '100%', height: compact ? 70 : 110,
             objectFit: 'cover', objectPosition: cfg.imagePosition || 'center center', display: 'block' }} />
@@ -746,8 +781,9 @@ function StyleCardPreview({
               <div style={{ fontSize: headlineSize, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
               {subtext && <div style={{ fontSize: 12, color: '#d4d4d8', marginBottom: 10 }}>{subtext}</div>}
               {emailFieldEnabled && (
-                <input value={email} onChange={(e) => onEmailChange(e.target.value)}
-                  placeholder="Email address" style={{ width: '100%', padding: '8px 12px',
+                <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
+                  placeholder="Email address" interactive={interactive}
+                  style={{ width: '100%', padding: '8px 12px',
                   fontSize: 12, borderRadius: 8, border: '1px solid #3f3f46', marginBottom: 8,
                   background: '#27272a', color: fg, boxSizing: 'border-box',
                   fontFamily: font, lineHeight: 1.2 }} />
@@ -762,12 +798,13 @@ function StyleCardPreview({
                   {countdownNote}
                 </div>
               )}
-              <button {...allowBtnCommon}>
+              <PreviewButton {...allowBtnCommon} interactive={interactive}>
                 <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
-              </button>
-              <button type="button" onClick={onDismiss} className="ccf-style-focus" style={denyLinkStyle('#a1a1aa')}>
+              </PreviewButton>
+              <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
+                style={denyLinkStyle('#a1a1aa')} interactive={interactive}>
                 {denyText}
-              </button>
+              </PreviewButton>
             </>
           )}
         </div>
@@ -786,7 +823,7 @@ function StyleCardPreview({
                   background: bg, color: fg, fontFamily: font, position: 'relative',
                   width: compact ? 300 : 'min(340px, 100%)',
                   boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
-      <ClosePreviewButton onClick={onDismiss} />
+      <ClosePreviewButton onClick={onDismiss} interactive={interactive} />
       {imageUrl ? (
         <img src={imageUrl} alt="" style={{ width: '100%', height: compact ? 70 : 110,
           objectFit: 'cover', objectPosition: cfg.imagePosition || 'center center', display: 'block' }} />
@@ -810,23 +847,25 @@ function StyleCardPreview({
             <div style={{ fontSize: headlineSize, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
             {subtext && <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>{subtext}</div>}
             {emailFieldEnabled && (
-              <input value={email} onChange={(e) => onEmailChange(e.target.value)}
-                placeholder="Email address" style={{ width: '100%', padding: '8px 12px',
+              <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
+                placeholder="Email address" interactive={interactive}
+                style={{ width: '100%', padding: '8px 12px',
                 fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 8,
                 boxSizing: 'border-box', fontFamily: font, lineHeight: 1.2 }} />
             )}
-            <button {...allowBtnCommon}>
+            <PreviewButton {...allowBtnCommon} interactive={interactive}>
               <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
-            </button>
+            </PreviewButton>
             {secondaryButtonStyle === 'pill' ? (
-              <button type="button" onClick={onDismiss} className="ccf-style-focus"
-                style={{ ...pillDenyStyle, color: fg }}>
+              <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
+                style={{ ...pillDenyStyle, color: fg }} interactive={interactive}>
                 {denyText}
-              </button>
+              </PreviewButton>
             ) : (
-              <button type="button" onClick={onDismiss} className="ccf-style-focus" style={denyLinkStyle('#9ca3af')}>
+              <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
+                style={denyLinkStyle('#9ca3af')} interactive={interactive}>
                 {denyText}
-              </button>
+              </PreviewButton>
             )}
           </>
         )}
@@ -846,6 +885,7 @@ function StyleCardPreview({
 function ClassicPreview({
   layout, device, popup: cfg, step, email, onEmailChange, onAllow, onDismiss,
   showEmailField, wantsDiscount, unlockedInfo, discountOfferText, discountOfferHeadline,
+  interactive = true,
 }) {
   const bg = cfg.bgColor || '#ffffff';
   const fg = cfg.textColor || '#111827';
@@ -903,21 +943,21 @@ function ClassicPreview({
   // the storefront (previously this preview hardcoded a 10px/13px look
   // that ignored most of getCtaStyle's own output).
   const allowBtnEl = (
-    <button {...allowBtnProps}
+    <PreviewButton {...allowBtnProps} interactive={interactive}
       style={{ ...getAllowButtonStyle(accent, cfg.ctaStyle), fontFamily: font, lineHeight: 1.2,
         cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.8 : 1 }}>
       <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={effectiveWantsDiscount} />
-    </button>
+    </PreviewButton>
   );
   // Mirrors ccfDenyButtonStyle() exactly — a real <button>, not a styled
   // <div>, matching the storefront's own element choice and every value.
   const denyEl = (
-    <button type="button" onClick={onDismiss} className="ccf-style-focus"
+    <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus" interactive={interactive}
       style={{ display: 'block', width: '100%', textAlign: 'center', fontSize: 12, color: '#9ca3af',
         cursor: 'pointer', padding: '6px 0', background: 'none', border: 'none', fontFamily: font,
         lineHeight: 1.2, letterSpacing: '0.3px' }}>
       {denyText}
-    </button>
+    </PreviewButton>
   );
   const brandingEl = cfg.showBranding && (
     <div style={{ marginTop: 12, fontSize: 10, color: '#d1d5db', textAlign: 'center', letterSpacing: '0.5px' }}>
@@ -936,11 +976,11 @@ function ClassicPreview({
             objectPosition: imagePosition, flexShrink: 0 }} />
         )}
         <div style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{headline}</div>
-        <button {...allowBtnProps}
+        <PreviewButton {...allowBtnProps} interactive={interactive}
           style={{ ...getAllowButtonStyle(accent, cfg.ctaStyle, true), fontFamily: font, lineHeight: 1.2,
             flexShrink: 0, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.8 : 1 }}>
           <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={false} />
-        </button>
+        </PreviewButton>
         <span onClick={onDismiss} style={{ color: 'rgba(255,255,255,0.7)', fontSize: 18, flexShrink: 0,
           cursor: 'pointer' }}>×</span>
       </div>
@@ -954,7 +994,7 @@ function ClassicPreview({
                     background: 'linear-gradient(145deg,#ffffff,#f8f9ff)',
                     boxShadow: '0 4px 16px rgba(0,0,0,0.08)', fontFamily: font,
                     maxWidth: device === 'mobile' ? 300 : 340 }}>
-        <ClosePreviewButton onClick={onDismiss} />
+        <ClosePreviewButton onClick={onDismiss} interactive={interactive} />
         {imageBox(device === 'mobile' ? 160 : 170, true)}
         <div style={{ height: 3, background: `linear-gradient(90deg,${accent},${accent}88,transparent)` }} />
         <div style={{ padding: '20px 18px 18px', background: bg, color: fg }}>
@@ -977,7 +1017,8 @@ function ClassicPreview({
                 </div>
               )}
               {effectiveShowEmailField && (
-                <input value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder="Your email"
+                <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder="Your email"
+                  interactive={interactive}
                   style={{ width: '100%', padding: '11px 14px', fontSize: 13, borderRadius: 12,
                     border: '1.5px solid #e5e7eb', marginBottom: 8, boxSizing: 'border-box',
                     background: '#f9fafb', color: '#111827', fontFamily: font, lineHeight: 1.2 }} />
@@ -999,7 +1040,8 @@ function ClassicPreview({
         {discountOfferHeadline || 'Get a discount on your first order!'}
       </div>
       {effectiveShowEmailField && (
-        <input value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder="Your email"
+        <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder="Your email"
+          interactive={interactive}
           style={{ width: '100%', padding: '11px 14px', fontSize: 13, borderRadius: 12,
             border: '1.5px solid #e5e7eb', boxSizing: 'border-box', background: '#f9fafb',
             color: '#111827', fontFamily: font, lineHeight: 1.2 }} />
@@ -1032,7 +1074,7 @@ function ClassicPreview({
             mobile vs 12/12 on desktop — different from Card/Flash Sale/
             Gift Reveal's 26x26/14px defaults. */}
         <ClosePreviewButton onClick={onDismiss} size={28} top={10} right={10} fontSize={16}
-          background="rgba(0,0,0,0.4)" />
+          background="rgba(0,0,0,0.4)" interactive={interactive} />
         {imageBox(200)}
         <div style={{ padding: '20px 18px', background: bg, color: fg }}>{contentInner}</div>
       </div>
@@ -1042,7 +1084,7 @@ function ClassicPreview({
     <div style={{ borderRadius: 12, overflow: 'hidden', position: 'relative', display: 'flex',
                   minHeight: 320, boxShadow: '0 20px 60px rgba(0,0,0,0.3)', fontFamily: font }}>
       <ClosePreviewButton onClick={onDismiss} size={28} top={12} right={12} fontSize={16}
-        background="rgba(0,0,0,0.4)" />
+        background="rgba(0,0,0,0.4)" interactive={interactive} />
       <div style={{ width: '45%', flexShrink: 0 }}>{imageBox('100%')}</div>
       <div style={{ width: '55%', padding: '32px 28px', display: 'flex', flexDirection: 'column',
                     justifyContent: 'center', background: bg, color: fg }}>
@@ -1767,6 +1809,10 @@ export default function Settings({ shop }) {
           const commonPreviewProps = {
             step: 'prompt', email: '', onEmailChange: () => {}, onAllow: () => {}, onDismiss: () => {},
             wantsDiscount: previewWantsDiscount, unlockedInfo: previewUnlockedInfo,
+            // gallery-nested-button-fix: this card's own live preview sits
+            // inside GalleryCard's <button>, so its close X can't be a real
+            // <button> too — see ClosePreviewButton's interactive prop.
+            interactive: false,
           };
           const previewNode = c.styleId !== 'classic' ? (
             <StyleCardPreview styleId={c.styleId} cfg={activePopup} styleFields={activeStyleFields}
