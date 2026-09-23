@@ -205,6 +205,22 @@ function Icon({ name, size = 16, color, style }) {
       </svg>
     );
   }
+  // image-section-redesign: pencil ("change image") and trash ("remove
+  // image") — replacing the old text-only "Change"/"Remove" links on the
+  // Image row.
+  if (name === 'pencil') {
+    return <svg {...common}><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /></svg>;
+  }
+  if (name === 'trash') {
+    return (
+      <svg {...common}>
+        <path d="M3 6h18" />
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+        <line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" />
+      </svg>
+    );
+  }
   return null;
 }
 
@@ -376,13 +392,29 @@ function SectionHeading({ children }) {
 // Pencil-reveals-input pattern — only free-text fields use this (Headline,
 // Subtext, Brand name, Allow/Deny button text). Enter/blur commits, Escape
 // restores the value the row had when editing started.
-function TextEditRow({ fieldKey, label, value, placeholder, onCommit, maxLength, editingField, onStartEdit, onStopEdit }) {
-  const editing = editingField === fieldKey;
+function TextEditRow({ fieldKey, label, value, placeholder, onCommit, maxLength, editingField, onStartEdit, onStopEdit, editable = true, staticText }) {
+  const editing = editable && editingField === fieldKey;
   const [draft, setDraft] = useState(value || '');
   useEffect(() => { if (editing) setDraft(value || ''); }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const commit = () => { onCommit(draft); onStopEdit(); };
   const cancel = () => onStopEdit();
+
+  // image-url-display-fix: a base64 data: URI is meaningless as editable
+  // text — show a plain, non-interactive label instead and skip the
+  // pencil. The stored value itself is untouched; this only changes what
+  // renders when not in edit mode.
+  if (!editable) {
+    return (
+      <div style={rowShell}>
+        <div style={rowLabelStyle}>{label}</div>
+        <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: '#9ca3af', padding: '5px 2px',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {staticText ?? (value || placeholder || '—')}
+        </div>
+      </div>
+    );
+  }
 
   if (editing) {
     return (
@@ -473,8 +505,8 @@ function PillsRow({ label, value, options, onChange }) {
             <button key={opt.value} type="button" onClick={() => onChange(opt.value)}
               aria-pressed={active} className="ccf-style-focus"
               style={{ padding: '4px 10px', fontSize: 11, fontWeight: active ? 700 : 500,
-                color: active ? '#fff' : '#374151', background: active ? '#111827' : '#f9fafb',
-                border: '1px solid', borderColor: active ? '#111827' : '#e5e7eb',
+                color: active ? '#fff' : '#374151', background: active ? '#4f46e5' : '#f9fafb',
+                border: '1px solid', borderColor: active ? '#4f46e5' : '#e5e7eb',
                 borderRadius: 999, cursor: 'pointer' }}>
               {opt.label}
             </button>
@@ -485,14 +517,24 @@ function PillsRow({ label, value, options, onChange }) {
   );
 }
 
+// real-switch: same shape as the Discounts screen's own toggle (track
+// 36x20, knob 16, radius 10), blue when on / grey when off instead of
+// that screen's green — a real <button role="switch"> (Discounts' own
+// is a plain <div onClick>), so this one gets keyboard support for free
+// from native <button> Enter/Space activation, no extra handler needed.
 function ToggleRow({ label, checked, onChange }) {
   return (
     <div style={rowShell}>
       <div style={rowLabelStyle}>{label}</div>
       <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
-        <button type="button" onClick={() => onChange(!checked)} aria-pressed={checked}
-          className="ccf-style-focus" style={popPillStyle(checked)}>
-          {checked ? 'On' : 'Off'}
+        <button type="button" role="switch" aria-checked={checked} aria-label={label}
+          onClick={() => onChange(!checked)} className="ccf-style-focus"
+          style={{ width: 36, height: 20, borderRadius: 10, border: 'none', padding: 0,
+            background: checked ? '#4f46e5' : '#d1d5db', position: 'relative',
+            cursor: 'pointer', flexShrink: 0, transition: 'background 0.15s' }}>
+          <span aria-hidden="true" style={{ position: 'absolute', top: 2, left: checked ? 18 : 2,
+            width: 16, height: 16, borderRadius: '50%', background: '#fff',
+            transition: 'left 0.15s', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }} />
         </button>
       </div>
     </div>
@@ -511,12 +553,6 @@ function RadiusRow({ label, value, min = 0, max = 24, onChange }) {
     </div>
   );
 }
-
-const popPillStyle = (active) => ({
-  padding: '4px 12px', fontSize: 11, fontWeight: active ? 700 : 500,
-  color: active ? '#fff' : '#374151', background: active ? '#16a34a' : '#f3f4f6',
-  border: 'none', borderRadius: 999, cursor: 'pointer',
-});
 
 // 3x3 segmented grid — the task's spec for "Image position" ("small
 // segmented pills"), replacing the old free-drag crosshair widget. A
@@ -549,29 +585,52 @@ function ImagePositionGrid({ value, onChange }) {
   );
 }
 
+// image-section-redesign: a bigger, clearly-visible preview (was a 28px
+// swatch) with a checkerboard backdrop so transparent PNGs read
+// correctly, and icon-only pencil/trash buttons overlaid on the corner
+// instead of "Change"/"Remove" text links.
+const CCF_CHECKERBOARD_BG = {
+  backgroundColor: '#fff',
+  backgroundImage: 'linear-gradient(45deg,#e5e7eb 25%,transparent 25%),' +
+    'linear-gradient(-45deg,#e5e7eb 25%,transparent 25%),' +
+    'linear-gradient(45deg,transparent 75%,#e5e7eb 75%),' +
+    'linear-gradient(-45deg,transparent 75%,#e5e7eb 75%)',
+  backgroundSize: '16px 16px',
+  backgroundPosition: '0 0,0 8px,8px -8px,-8px 0',
+};
 function ImageRow({ label, imageUrl, onUpload, onRemove }) {
+  const iconBtnStyle = {
+    width: 28, height: 28, borderRadius: '50%', background: 'rgba(255,255,255,0.95)',
+    border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    cursor: 'pointer', boxShadow: '0 1px 3px rgba(0,0,0,0.15)', padding: 0,
+  };
   return (
-    <div style={rowShell}>
+    <div style={{ padding: '2px 0' }}>
       <div style={rowLabelStyle}>{label}</div>
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-        {imageUrl ? (
-          <img src={imageUrl} alt="" style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'cover',
-            border: '1px solid #e5e7eb', flexShrink: 0 }} />
-        ) : (
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: '#f3f4f6',
-            border: '1px dashed #e5e7eb', flexShrink: 0 }} />
-        )}
-        <label className="ccf-style-focus" style={{ fontSize: 12, fontWeight: 600, color: '#4f46e5',
-          cursor: 'pointer', padding: '3px 4px' }}>
-          {imageUrl ? 'Change' : 'Upload'}
-          <input type="file" accept="image/*" style={{ display: 'none' }} onChange={onUpload} />
-        </label>
-        {imageUrl && (
-          <button type="button" onClick={onRemove} className="ccf-style-focus"
-            style={{ fontSize: 12, color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer' }}>
-            Remove
-          </button>
-        )}
+      <div style={{ position: 'relative', marginTop: 6 }}>
+        <div style={{ width: '100%', height: 96, borderRadius: 10, overflow: 'hidden',
+          border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          ...(imageUrl ? CCF_CHECKERBOARD_BG : { background: '#f9fafb' }) }}>
+          {imageUrl ? (
+            <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          ) : (
+            <span style={{ fontSize: 12, color: '#9ca3af' }}>No image</span>
+          )}
+        </div>
+        <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 6 }}>
+          <label className="ccf-style-focus" style={iconBtnStyle}
+            aria-label={imageUrl ? 'Change image' : 'Upload image'}
+            title={imageUrl ? 'Change image' : 'Upload image'}>
+            <Icon name="pencil" size={14} color="#4f46e5" />
+            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={onUpload} />
+          </label>
+          {imageUrl && (
+            <button type="button" onClick={onRemove} className="ccf-style-focus"
+              aria-label="Remove image" title="Remove image" style={iconBtnStyle}>
+              <Icon name="trash" size={14} color="#dc2626" />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1776,7 +1835,7 @@ export default function Settings({ shop }) {
           style={{
             flex: 1, padding: '8px', fontSize: '13px',
             fontWeight: popupDevice === tab.key ? '600' : '400',
-            color: popupDevice === tab.key ? '#111827' : '#6b7280',
+            color: popupDevice === tab.key ? '#4f46e5' : '#6b7280',
             background: popupDevice === tab.key ? '#fff' : 'transparent',
             border: 'none', borderRadius: '8px', cursor: 'pointer',
             boxShadow: popupDevice === tab.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
@@ -2242,8 +2301,15 @@ export default function Settings({ shop }) {
           </div>
         )}
         <div className="ccf-settings-full">
+          {/* image-url-display-fix: an uploaded image's imageUrl is a
+              base64 data: URI — unreadable and meaningless to edit as
+              text, so show a plain "Uploaded image" label and no pencil.
+              A real http(s) URL (pasted, not uploaded) stays as-is:
+              pencil-editable, CSS-truncated with ellipsis. */}
           <TextEditRow fieldKey="imageUrl" label="Image URL" value={activePopup.imageUrl}
             placeholder="Paste an image URL"
+            editable={!(activePopup.imageUrl || '').startsWith('data:')}
+            staticText="Uploaded image"
             onCommit={(v) => { setActivePopup((p) => ({ ...p, imageUrl: v })); markImageChanged(); }}
             editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
         </div>
@@ -2332,21 +2398,40 @@ export default function Settings({ shop }) {
             (opens the gallery), styled as a secondary button showing the
             currently selected style. Only shown in the editor; the
             gallery has its own "← Back" affordance above instead. */}
-        {popupEditorOpen && (
-          <button
-            type="button"
-            onClick={() => setPopupEditorOpen(false)}
-            aria-label="Change popup style"
-            className="ccf-style-focus"
-            style={{ ...DS.btnSecondary, display: 'flex', alignItems: 'center', gap: 8,
-              padding: '7px 12px', fontSize: 12, flexShrink: 0 }}
-          >
-            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%',
-              background: activePopup.accentColor || '#4f46e5', flexShrink: 0 }} />
-            {selectedGalleryCard.name}
-            <span aria-hidden="true" style={{ fontSize: 10, color: '#9ca3af' }}>▾</span>
-          </button>
-        )}
+        {popupEditorOpen && (() => {
+          // style-button-label: show the theme the merchant thinks of
+          // ("Classic", "Flash Sale", "Gift Reveal"), not the internal
+          // "Classic — Split" gallery-card label — Classic's layout goes
+          // in its own small muted chip instead of the button's main name.
+          const isClassic = selectedGalleryCard.styleId === 'classic';
+          const themeName = isClassic ? 'Classic' : selectedGalleryCard.name;
+          const layoutLabel = selectedGalleryCard.layout
+            ? selectedGalleryCard.layout.charAt(0).toUpperCase() + selectedGalleryCard.layout.slice(1)
+            : null;
+          return (
+            <button
+              type="button"
+              onClick={() => setPopupEditorOpen(false)}
+              aria-label="Change popup style"
+              className="ccf-style-focus"
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px',
+                fontSize: 12, fontWeight: 600, color: '#fff', background: '#4f46e5',
+                border: 'none', borderRadius: 9, cursor: 'pointer', flexShrink: 0 }}
+            >
+              <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%',
+                background: 'rgba(255,255,255,0.85)', flexShrink: 0 }} />
+              {themeName}
+              {layoutLabel && (
+                <span aria-hidden="true" style={{ fontSize: 10, fontWeight: 600,
+                  color: 'rgba(255,255,255,0.85)', background: 'rgba(255,255,255,0.18)',
+                  borderRadius: 999, padding: '2px 7px' }}>
+                  {layoutLabel}
+                </span>
+              )}
+              <span aria-hidden="true" style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)' }}>▾</span>
+            </button>
+          );
+        })()}
       </div>
 
       {popupEditorOpen ? popupEditorView : popupGalleryView}
