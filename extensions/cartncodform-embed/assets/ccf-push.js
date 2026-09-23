@@ -267,11 +267,43 @@
       'border:1.5px solid #e5e7eb;border-radius:12px;box-sizing:border-box;' +
       'margin-bottom:8px;color:#111827;background:#f9fafb;font-family:inherit;';
   }
-  function ccfAllowButtonStyle(accentColor) {
-    return 'width:100%;padding:14px;font-size:15px;font-weight:700;color:#fff;' +
+  // popup-style: ctaStyle now applies to EVERY Allow button (Split, Card,
+  // Banner, Flash Sale, Gift Reveal), not just Banner. `compact` selects
+  // Banner's smaller sizing (its own inline bar) — everything else uses
+  // the full-size button. An unrecognized/missing ctaStyle falls back to
+  // 'rounded' — the exact values below for that case are what this
+  // function already returned before ctaStyle existed, so an existing
+  // shop with no ctaStyle saved sees no change on the layouts that already
+  // called this function (Split/Card/Flash Sale/Gift Reveal); Banner's own
+  // 'rounded' radius intentionally moves from its old 8px to 14px here, to
+  // actually use "the same radius/fill rules" as every other layout.
+  function ccfAllowButtonStyle(accentColor, ctaStyle, compact) {
+    var radius = ({ rounded: '14px', square: '0px', pill: '999px',
+      outlined: '14px', soft: '14px' })[ctaStyle] || '14px';
+    var pad = compact ? '8px 16px' : '14px';
+    var fontSize = compact ? '13px' : '15px';
+    var sizing = (compact ? '' : 'width:100%;') +
+      'padding:' + pad + ';font-size:' + fontSize + ';font-weight:700;' +
+      'border-radius:' + radius + ';cursor:pointer;letter-spacing:0.3px;' +
+      (compact ? '' : 'margin-bottom:10px;');
+
+    if (ctaStyle === 'outlined') {
+      var oColor = compact ? '#fff' : accentColor;
+      return sizing + 'color:' + oColor + ';background:transparent;' +
+        'border:1.5px solid ' + oColor + ';';
+    }
+    if (ctaStyle === 'soft') {
+      var sColor = compact ? '#fff' : accentColor;
+      var sBg = compact ? 'rgba(255,255,255,0.18)' : accentColor + '1f';
+      return sizing + 'color:' + sColor + ';background:' + sBg + ';border:none;';
+    }
+    // rounded / square / pill / unrecognized (-> rounded)
+    if (compact) {
+      return sizing + 'color:' + accentColor + ';background:#fff;border:none;';
+    }
+    return sizing + 'color:#fff;' +
       'background:linear-gradient(135deg,' + accentColor + ',' + accentColor + 'dd);' +
-      'border:none;border-radius:14px;cursor:pointer;margin-bottom:10px;' +
-      'letter-spacing:0.3px;box-shadow:0 4px 15px ' + accentColor + '44;';
+      'border:none;box-shadow:0 4px 15px ' + accentColor + '44;';
   }
   function ccfDenyButtonStyle() {
     return 'display:block;width:100%;text-align:center;font-size:12px;' +
@@ -772,9 +804,6 @@
     );
     var headline = cfg.headline || promptText;
 
-    var CTA_RADIUS = { rounded: '8px', square: '0px', pill: '50px' };
-    var ctaRadius = CTA_RADIUS[cfg.ctaStyle] || CTA_RADIUS.rounded;
-
     function buildAllowBtn(styleStr) {
       var b = document.createElement('button');
       b.id = 'ccf-allow-btn';
@@ -902,13 +931,16 @@
         }
       }
 
-      allow = buildAllowBtn(ccfAllowButtonStyle(accent));
+      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       sContent.appendChild(allow);
 
       if (!isFlashSale && styleFields.secondaryButtonStyle === 'pill') {
+        // Only reachable when !isFlashSale (Gift Reveal), so the border is
+        // always the light #e5e7eb — the old ternary's '#3f3f46' branch was
+        // dead code (isFlashSale can never be true here).
         deny = buildDenyBtn(
           'width:100%;padding:11px;font-size:13px;font-weight:600;border-radius:999px;' +
-          'border:1px solid ' + (isFlashSale ? '#3f3f46' : '#e5e7eb') + ';background:transparent;' +
+          'border:1px solid #e5e7eb;background:transparent;' +
           'color:' + sFg + ';cursor:pointer;margin-top:8px;');
       } else {
         deny = buildDenyBtn(ccfDenyButtonStyle() +
@@ -977,8 +1009,7 @@
         'display:flex;align-items:center;gap:12px;flex-shrink:0;' +
         (isMobile ? 'flex:1;justify-content:flex-end;' : ''));
       allow = buildAllowBtn(
-        'background:#fff;color:' + accent + ';border:none;border-radius:' + ctaRadius + ';' +
-        'padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer;' +
+        ccfAllowButtonStyle(accent, cfg.ctaStyle, true) +
         (isMobile ? 'flex:1;min-width:80px;' : ''));
       closeBtn = document.createElement('button');
       closeBtn.id = 'ccf-close-btn';
@@ -1210,7 +1241,7 @@
         cardContent.appendChild(cardEmailInput);
       }
 
-      allow = buildAllowBtn(ccfAllowButtonStyle(accent));
+      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       cardContent.appendChild(allow);
 
       // Plain text dismiss — no border/box, not underlined by default
@@ -1329,7 +1360,7 @@
           mContent.appendChild(mSub);
         }
 
-        allow = buildAllowBtn(ccfAllowButtonStyle(accent));
+        allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
         mContent.appendChild(allow);
 
         deny = buildDenyBtn(ccfDenyButtonStyle());
@@ -1396,7 +1427,7 @@
           rightPanel.appendChild(splitSub);
         }
 
-        allow = buildAllowBtn(ccfAllowButtonStyle(accent));
+        allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
         rightPanel.appendChild(allow);
 
         deny = buildDenyBtn(ccfDenyButtonStyle());

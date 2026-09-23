@@ -113,31 +113,41 @@ const LANGS = [
   { value: 'gu', label: 'Gujarati' },
 ];
 
-// The Allow-button look for each ctaStyle. borderRadius here is the BUTTON's
-// radius — the card container radius is a separate control.
-function getCtaStyle(ctaStyle, accent) {
-  switch (ctaStyle) {
-    case 'pill':
-      return { borderRadius: '50px', background: accent, color: '#fff', border: 'none' };
-    case 'square':
-      return { borderRadius: '0', background: accent, color: '#fff', border: 'none' };
-    case 'outlined':
-      return {
-        borderRadius: '8px',
-        background: 'transparent',
-        color: accent,
-        border: `2px solid ${accent}`,
-      };
-    case 'soft':
-      return {
-        borderRadius: '12px',
-        background: accent + '22', // ~13% opacity
-        color: accent,
-        border: 'none',
-      };
-    default: // rounded
-      return { borderRadius: '8px', background: accent, color: '#fff', border: 'none' };
+// Mirrors ccf-push.js's ccfAllowButtonStyle(accentColor, ctaStyle, compact)
+// exactly (same radius/fill/shadow rules, same fallback-to-'rounded' for an
+// unrecognized/missing ctaStyle) — this now drives the Allow button for
+// EVERY layout and style in the preview (Split/Card/Banner/Flash Sale/Gift
+// Reveal), not just a subset, matching the storefront's own unification.
+// `compact` selects Banner's smaller inline-bar sizing.
+function getAllowButtonStyle(accent, ctaStyle, compact) {
+  const radius = { rounded: 14, square: 0, pill: 999, outlined: 14, soft: 14 }[ctaStyle] ?? 14;
+  const sizing = {
+    ...(compact ? {} : { width: '100%' }),
+    padding: compact ? '8px 16px' : 14,
+    fontSize: compact ? 13 : 15,
+    fontWeight: 700,
+    borderRadius: radius,
+    letterSpacing: '0.3px',
+    ...(compact ? {} : { marginBottom: 10 }),
+  };
+  if (ctaStyle === 'outlined') {
+    const c = compact ? '#fff' : accent;
+    return { ...sizing, color: c, background: 'transparent', border: `1.5px solid ${c}` };
   }
+  if (ctaStyle === 'soft') {
+    const c = compact ? '#fff' : accent;
+    const bg = compact ? 'rgba(255,255,255,0.18)' : accent + '1f';
+    return { ...sizing, color: c, background: bg, border: 'none' };
+  }
+  // rounded / square / pill / unrecognized (-> rounded)
+  if (compact) {
+    return { ...sizing, color: accent, background: '#fff', border: 'none' };
+  }
+  return {
+    ...sizing, color: '#fff',
+    background: `linear-gradient(135deg, ${accent}, ${accent}dd)`,
+    border: 'none', boxShadow: `0 4px 15px ${accent}44`,
+  };
 }
 
 // popup-style: real-deadline countdown formatting — ms must already be a
@@ -391,12 +401,17 @@ function StyleThumbnail({ styleId }) {
 // Small circular X, top-right — matches ccf-push.js's closeBtn exactly: a
 // sibling of the content section, so (per ccf-push.js) it stays mounted and
 // clickable through EVERY step, including 'unlocked'/'redirecting'.
-function ClosePreviewButton({ dark, onClick }) {
+// Defaults (size 26/14px, top/right 12) match Card/Flash Sale/Gift Reveal's
+// real closeBtn exactly. Split passes its own real values (28/16px, and
+// 10/10 on mobile vs 12/12 on desktop) — see the two ClassicPreview split
+// branches below.
+function ClosePreviewButton({ dark, onClick, size = 26, top = 12, right = 12, fontSize = 14, background }) {
+  const bg = background || (dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.35)');
   return (
     <button type="button" onClick={onClick} aria-label="Dismiss popup" className="ccf-style-focus"
-      style={{ position: 'absolute', top: 12, right: 12, background: dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.35)',
-        color: '#fff', border: 'none', borderRadius: '50%', width: 26, height: 26, fontSize: 14,
-        lineHeight: '26px', textAlign: 'center', cursor: 'pointer', zIndex: 10 }}>
+      style={{ position: 'absolute', top, right, background: bg,
+        color: '#fff', border: 'none', borderRadius: '50%', width: size, height: size, fontSize,
+        lineHeight: size + 'px', fontFamily: 'inherit', textAlign: 'center', cursor: 'pointer', zIndex: 10 }}>
       ×
     </button>
   );
@@ -423,16 +438,34 @@ function StyleCardPreview({
 
   const field = (key) => getStyleFieldValue(style, styleFields, key);
 
+  // Mirrors ccf-push.js's ccfAllowButtonStyle(accent, cfg.ctaStyle) exactly
+  // — Flash Sale/Gift Reveal now respect ctaStyle's full 5-variant look too
+  // (previously always a flat-color 999px pill, ignoring ctaStyle).
   const allowBtnCommon = {
     type: 'button',
     disabled: busy,
     onClick: step === 'prompt' ? onAllow : undefined,
     className: 'ccf-style-focus',
     style: {
-      width: '100%', padding: 10, fontSize: 13, fontWeight: 700, borderRadius: 999,
-      border: 'none', cursor: busy ? 'not-allowed' : 'pointer', marginBottom: 6,
-      opacity: busy ? 0.8 : 1,
+      ...getAllowButtonStyle(accent, cfg.ctaStyle),
+      fontFamily: font, lineHeight: 1.2,
+      cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.8 : 1,
     },
+  };
+  // Matches ccfDenyButtonStyle() exactly, as a real <button> — real color
+  // overrides differ per style: '#a1a1aa' for flash_sale, plain '#9ca3af'
+  // (ccfDenyButtonStyle()'s own default) for gift_reveal.
+  const denyLinkStyle = (color) => ({
+    display: 'block', width: '100%', textAlign: 'center', fontSize: 12, color,
+    cursor: 'pointer', padding: '6px 0', background: 'none', border: 'none',
+    fontFamily: font, lineHeight: 1.2, letterSpacing: '0.3px',
+  });
+  // Real values for Gift Reveal's pill-deny variant (secondaryButtonStyle
+  // === 'pill'): 13px, padding 11px, margin-top 8px.
+  const pillDenyStyle = {
+    width: '100%', padding: 11, fontSize: 13, fontWeight: 600, borderRadius: 999,
+    border: '1px solid #e5e7eb', background: 'transparent', cursor: 'pointer',
+    fontFamily: font, lineHeight: 1.2, marginTop: 8,
   };
 
   if (styleId === 'flash_sale') {
@@ -458,6 +491,10 @@ function StyleCardPreview({
     return (
       <div style={{ border: '1px solid #27272a', borderRadius: radius, overflow: 'hidden',
                     background: bg, color: fg, fontFamily: font, position: 'relative',
+                    // Matches ccf-push.js's real wrap width for this style
+                    // (min(340px,90vw) desktop, 300px mobile) — translated
+                    // to the preview's own container as min(340px,100%).
+                    width: compact ? 300 : 'min(340px, 100%)',
                     boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
         <ClosePreviewButton dark onClick={onDismiss} />
         {imageUrl && (
@@ -484,7 +521,8 @@ function StyleCardPreview({
                 <input value={email} onChange={(e) => onEmailChange(e.target.value)}
                   placeholder="Email address" style={{ width: '100%', padding: '8px 12px',
                   fontSize: 12, borderRadius: 8, border: '1px solid #3f3f46', marginBottom: 8,
-                  background: '#27272a', color: fg, boxSizing: 'border-box' }} />
+                  background: '#27272a', color: fg, boxSizing: 'border-box',
+                  fontFamily: font, lineHeight: 1.2 }} />
               )}
               {countdownDisplay ? (
                 <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '0.08em', marginBottom: 10,
@@ -496,12 +534,12 @@ function StyleCardPreview({
                   {countdownNote}
                 </div>
               )}
-              <button {...allowBtnCommon} style={{ ...allowBtnCommon.style, background: accent, color: '#fff' }}>
+              <button {...allowBtnCommon}>
                 <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
               </button>
-              <div onClick={onDismiss} style={{ fontSize: 11, color: '#a1a1aa', cursor: 'pointer' }}>
+              <button type="button" onClick={onDismiss} className="ccf-style-focus" style={denyLinkStyle('#a1a1aa')}>
                 {denyText}
-              </div>
+              </button>
             </>
           )}
         </div>
@@ -518,6 +556,7 @@ function StyleCardPreview({
   return (
     <div style={{ border: '1px solid #e5e7eb', borderRadius: radius, overflow: 'hidden',
                   background: bg, color: fg, fontFamily: font, position: 'relative',
+                  width: compact ? 300 : 'min(340px, 100%)',
                   boxShadow: '0 4px 16px rgba(0,0,0,0.08)' }}>
       <ClosePreviewButton onClick={onDismiss} />
       {imageUrl ? (
@@ -546,21 +585,20 @@ function StyleCardPreview({
               <input value={email} onChange={(e) => onEmailChange(e.target.value)}
                 placeholder="Email address" style={{ width: '100%', padding: '8px 12px',
                 fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 8,
-                boxSizing: 'border-box' }} />
+                boxSizing: 'border-box', fontFamily: font, lineHeight: 1.2 }} />
             )}
-            <button {...allowBtnCommon} style={{ ...allowBtnCommon.style, background: accent, color: '#fff' }}>
+            <button {...allowBtnCommon}>
               <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
             </button>
             {secondaryButtonStyle === 'pill' ? (
               <button type="button" onClick={onDismiss} className="ccf-style-focus"
-                style={{ width: '100%', padding: 10, fontSize: 12, fontWeight: 600, borderRadius: 999,
-                  border: '1px solid #e5e7eb', background: 'transparent', color: fg, cursor: 'pointer' }}>
+                style={{ ...pillDenyStyle, color: fg }}>
                 {denyText}
               </button>
             ) : (
-              <div onClick={onDismiss} style={{ fontSize: 11, color: '#9ca3af', cursor: 'pointer' }}>
+              <button type="button" onClick={onDismiss} className="ccf-style-focus" style={denyLinkStyle('#9ca3af')}>
                 {denyText}
-              </div>
+              </button>
             )}
           </>
         )}
@@ -593,7 +631,6 @@ function ClassicPreview({
   const brandName = cfg.brandName || '';
   const imageUrl = cfg.imageUrl || '';
   const imagePosition = cfg.imagePosition || 'center center';
-  const ctaCss = getCtaStyle(cfg.ctaStyle || 'rounded', accent);
   const textAlign = cfg.textAlign || 'left';
   const swapped = step === 'unlocked' || step === 'redirecting';
   const busy = step === 'setting_up' || step === 'subscribed';
@@ -633,17 +670,26 @@ function ClassicPreview({
   const subtextEl = subtext && (
     <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12, textAlign }}>{subtext}</div>
   );
+  // Mirrors ccf-push.js's ccfAllowButtonStyle(accent, cfg.ctaStyle) exactly
+  // — Split and Card now respect ctaStyle's full 5-variant look, same as
+  // the storefront (previously this preview hardcoded a 10px/13px look
+  // that ignored most of getCtaStyle's own output).
   const allowBtnEl = (
-    <button {...allowBtnProps} style={{ ...ctaCss, width: '100%', padding: '10px 14px', fontSize: 13,
-      fontWeight: 700, marginBottom: 8, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.8 : 1 }}>
+    <button {...allowBtnProps}
+      style={{ ...getAllowButtonStyle(accent, cfg.ctaStyle), fontFamily: font, lineHeight: 1.2,
+        cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.8 : 1 }}>
       <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={effectiveWantsDiscount} />
     </button>
   );
+  // Mirrors ccfDenyButtonStyle() exactly — a real <button>, not a styled
+  // <div>, matching the storefront's own element choice and every value.
   const denyEl = (
-    <div onClick={onDismiss} style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center',
-      textDecoration: 'underline', cursor: 'pointer' }}>
+    <button type="button" onClick={onDismiss} className="ccf-style-focus"
+      style={{ display: 'block', width: '100%', textAlign: 'center', fontSize: 12, color: '#9ca3af',
+        cursor: 'pointer', padding: '6px 0', background: 'none', border: 'none', fontFamily: font,
+        lineHeight: 1.2, letterSpacing: '0.3px' }}>
       {denyText}
-    </div>
+    </button>
   );
   const brandingEl = cfg.showBranding && (
     <div style={{ marginTop: 12, fontSize: 10, color: '#d1d5db', textAlign: 'center', letterSpacing: '0.5px' }}>
@@ -662,9 +708,9 @@ function ClassicPreview({
             objectPosition: imagePosition, flexShrink: 0 }} />
         )}
         <div style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{headline}</div>
-        <button {...allowBtnProps} style={{ background: '#fff', color: accent, border: 'none',
-          borderRadius: ctaCss.borderRadius, padding: '8px 14px', fontSize: 12, fontWeight: 700,
-          flexShrink: 0, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.8 : 1 }}>
+        <button {...allowBtnProps}
+          style={{ ...getAllowButtonStyle(accent, cfg.ctaStyle, true), fontFamily: font, lineHeight: 1.2,
+            flexShrink: 0, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.8 : 1 }}>
           <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={false} />
         </button>
         <span onClick={onDismiss} style={{ color: 'rgba(255,255,255,0.7)', fontSize: 18, flexShrink: 0,
@@ -706,7 +752,7 @@ function ClassicPreview({
                 <input value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder="Your email"
                   style={{ width: '100%', padding: '11px 14px', fontSize: 13, borderRadius: 12,
                     border: '1.5px solid #e5e7eb', marginBottom: 8, boxSizing: 'border-box',
-                    background: '#f9fafb', color: '#111827' }} />
+                    background: '#f9fafb', color: '#111827', fontFamily: font, lineHeight: 1.2 }} />
               )}
               {allowBtnEl}
               {denyEl}
@@ -728,7 +774,7 @@ function ClassicPreview({
         <input value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder="Your email"
           style={{ width: '100%', padding: '11px 14px', fontSize: 13, borderRadius: 12,
             border: '1.5px solid #e5e7eb', boxSizing: 'border-box', background: '#f9fafb',
-            color: '#111827' }} />
+            color: '#111827', fontFamily: font, lineHeight: 1.2 }} />
       )}
     </div>
   );
@@ -754,7 +800,11 @@ function ClassicPreview({
     return (
       <div style={{ borderRadius: radius, overflow: 'hidden', position: 'relative',
                     boxShadow: '0 8px 24px rgba(0,0,0,0.2)', fontFamily: font }}>
-        <ClosePreviewButton onClick={onDismiss} />
+        {/* Split's real closeBtn is 28x28/16px/rgba(0,0,0,0.4), at 10/10 on
+            mobile vs 12/12 on desktop — different from Card/Flash Sale/
+            Gift Reveal's 26x26/14px defaults. */}
+        <ClosePreviewButton onClick={onDismiss} size={28} top={10} right={10} fontSize={16}
+          background="rgba(0,0,0,0.4)" />
         {imageBox(200)}
         <div style={{ padding: '20px 18px', background: bg, color: fg }}>{contentInner}</div>
       </div>
@@ -763,7 +813,8 @@ function ClassicPreview({
   return (
     <div style={{ borderRadius: 12, overflow: 'hidden', position: 'relative', display: 'flex',
                   minHeight: 320, boxShadow: '0 20px 60px rgba(0,0,0,0.3)', fontFamily: font }}>
-      <ClosePreviewButton onClick={onDismiss} />
+      <ClosePreviewButton onClick={onDismiss} size={28} top={12} right={12} fontSize={16}
+        background="rgba(0,0,0,0.4)" />
       <div style={{ width: '45%', flexShrink: 0 }}>{imageBox('100%')}</div>
       <div style={{ width: '55%', padding: '32px 28px', display: 'flex', flexDirection: 'column',
                     justifyContent: 'center', background: bg, color: fg }}>
