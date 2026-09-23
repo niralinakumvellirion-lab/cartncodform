@@ -1,0 +1,219 @@
+=== POPUP BUTTONS PARITY — SELF-AUDIT ===
+Generated: 2026-09-23
+
+Scope: extensions/cartncodform-embed/assets/ccf-push.js and
+frontend/app/admin/screens/Settings.jsx only. No backend, no save
+payload, no flow/fetch/storage logic touched.
+node --check ccf-push.js: pass. frontend npm run build: pass (all 17
+routes, /admin/settings-page 23kB). Deployed: Vercel READY (aliased to
+app.shopireachboost.com); shopify app deploy released
+shopireachboost-ai-125. Committed, not pushed (see end).
+
+
+====================================================================
+1. TABLE — EACH ctaStyle x EACH LAYOUT/STYLE: STOREFRONT vs PREVIEW
+====================================================================
+Both columns now come from the SAME rule set — ccfAllowButtonStyle()
+(storefront) and getAllowButtonStyle() (preview) are hand-mirrored
+copies of each other (radius map, sizing, per-variant fill/border/
+shadow). "compact" = Banner's own smaller sizing; every other layout
+(Split, Card, Flash Sale, Gift Reveal) uses the full (non-compact) size.
+
+Non-compact (Split / Card / Flash Sale / Gift Reveal) — identical in
+both files for every ctaStyle:
+  ctaStyle   | radius | fill                                    | color | border            | shadow
+  rounded    | 14px   | gradient(135deg, accent, accent+"dd")   | #fff  | none              | 0 4px 15px accent+"44"
+  square     | 0px    | same gradient                           | #fff  | none              | same
+  pill       | 999px  | same gradient                           | #fff  | none              | same
+  outlined   | 14px   | transparent                             | accent| 1.5px solid accent| none
+  soft       | 14px   | accent+"1f" (~12% opacity)               | accent| none              | none
+  (missing/unrecognized) -> treated as 'rounded', same as the row above.
+  All variants also share: padding 14px, font-size 15px, font-weight 700,
+  letter-spacing 0.3px, margin-bottom 10px, width 100%.
+
+Compact (Banner) — identical in both files for every ctaStyle:
+  ctaStyle   | radius | fill                              | color | border          | shadow
+  rounded    | 14px   | #fff (flat)                       | accent| none            | none
+  square     | 0px    | #fff                               | accent| none            | none
+  pill       | 999px  | #fff                               | accent| none            | none
+  outlined   | 14px   | transparent                        | #fff  | 1.5px solid #fff| none
+  soft       | 14px   | rgba(255,255,255,0.18)              | #fff  | none            | none
+  (missing/unrecognized) -> 'rounded' row above.
+  Shared: padding 8px 16px, font-size 13px, font-weight 700, letter-
+  spacing 0.3px, no margin-bottom (Banner is a flex item, not stacked).
+  Banner's mobile-only 'flex:1;min-width:80px' is appended by the caller
+  in both files, outside this shared function — unrelated to ctaStyle.
+
+Deny controls — identical in both files:
+  Split & Card text-link:      display block, width 100%, 12px,
+                                 padding 6px 0, letter-spacing 0.3px,
+                                 color #9ca3af, background none, border
+                                 none, real <button> element.
+  Banner:                      the X itself is the only dismiss control
+                                 (no separate text link) — unchanged.
+  Flash Sale text-link:        same base as above, color #a1a1aa.
+  Gift Reveal text-link:       same base as above, color #9ca3af
+                                 (ccfDenyButtonStyle()'s own default,
+                                 not the theme's `fg` — confirmed both
+                                 files use the literal '#9ca3af', not a
+                                 theme-derived color).
+  Gift Reveal pill variant:    width 100%, padding 11px, font-size 13px,
+                                 font-weight 600, border-radius 999px,
+                                 border 1px solid #e5e7eb, background
+                                 transparent, margin-top 8px.
+
+Close (X) — identical in both files:
+  Split (mobile):    28x28, 16px, rgba(0,0,0,0.4), top 10 / right 10.
+  Split (desktop):   28x28, 16px, rgba(0,0,0,0.4), top 12 / right 12.
+  Card:              26x26, 14px, rgba(0,0,0,0.35), top 12 / right 12.
+  Flash Sale:        26x26, 14px, rgba(255,255,255,0.12), top 12 / right 12.
+  Gift Reveal:       26x26, 14px, rgba(0,0,0,0.35), top 12 / right 12.
+
+Flash Sale / Gift Reveal shell width:
+  Storefront: min(340px, 90vw) desktop, 300px mobile (fixed).
+  Preview:    min(340px, 100%) desktop, 300px mobile (100% instead of
+              90vw since the preview sits inside its own container, not
+              the viewport — the intended equivalent per the task).
+
+
+====================================================================
+2. 'ROUNDED' / MISSING ctaStyle — PIXEL-IDENTICAL TO BEFORE?
+====================================================================
+STOREFRONT (ccf-push.js): confirmed pixel-identical to before this
+change for Split (desktop+mobile), Card, Flash Sale, and Gift Reveal —
+these four already called ccfAllowButtonStyle() unconditionally before
+Part 1, and the new function's 'rounded'/missing branch returns the
+exact same width/padding/font-size/font-weight/color/background/border-
+radius/margin-bottom/letter-spacing/box-shadow values the old
+(ctaStyle-less) function always returned. Verified by direct comparison
+of the old function body against the new one's rounded branch.
+
+BANNER is the one deliberate exception, per the task's own explicit
+instruction ("Banner... applies the same radius/fill rules... white fill
+for rounded/square/pill"): its 'rounded'/missing-ctaStyle radius moves
+from its old 8px (CTA_RADIUS.rounded) to 14px, to actually use the same
+radius rule as every other layout. Fill/color are unchanged (#fff /
+accent, same as before). This is a narrow, intentional, spec-directed
+visual change scoped to Banner's button corner radius only — nothing
+else about Banner changed, and it was called out explicitly in the task
+text, not something found here as a side effect.
+
+PREVIEW (Settings.jsx): for Banner, matches the storefront's new
+(14px) behavior exactly. For Split/Card, the preview's OWN prior
+appearance changes (it previously used a hardcoded 10px-padding/13px-
+font/getCtaStyle-based look that never matched the storefront at all —
+this was exactly the set of mismatches found and reported in the prior
+read-only audit). That change is the intended outcome of this task —
+"existing shops... look exactly as today" is read here as governing the
+real, customer-facing storefront output, not the admin's own preview
+illustration, which existed specifically to be corrected.
+
+
+====================================================================
+3. fontFamily / lineHeight SET INLINE ON EVERY PREVIEW BUTTON/INPUT
+====================================================================
+Confirmed present on every <button> and <input> across both preview
+components:
+  ClassicPreview: allowBtnEl (Split/Card, shared), Banner's own Allow
+    button, denyEl (Split/Card, shared) — all via fontFamily: font,
+    lineHeight: 1.2. Both email inputs (Card's own, Split's
+    discountFieldsEl) — fontFamily: font, lineHeight: 1.2.
+  StyleCardPreview: allowBtnCommon.style (Flash Sale + Gift Reveal
+    Allow, shared) — fontFamily: font, lineHeight: 1.2. denyLinkStyle()
+    and pillDenyStyle (Flash Sale/Gift Reveal Deny, all variants) —
+    same. Both email inputs (Flash Sale's, Gift Reveal's) — same.
+  ClosePreviewButton (shared by every layout's X): fontFamily: 'inherit'
+    (matches ccf-push.js's own closeBtn styles, which never set
+    font-family either — the × glyph itself doesn't depend on the
+    popup's chosen font, so 'inherit' here is intentionally different
+    from the merchant's `font` value used elsewhere, mirroring reality).
+
+`font` in each component is `cfg.fontFamily || 'inherit'` — when the
+merchant hasn't set a custom font, this inline value literally IS the
+CSS keyword 'inherit', which still correctly short-circuits BOTH the
+Tailwind Preflight (`button{font-family:inherit}`) and Polaris
+(`button{font-family:var(--p-font-family-sans)}`) competing rules found
+in the prior audit, since an INLINE style always wins over either
+stylesheet rule regardless of which one has higher source-order
+priority — the button no longer needs to fall through to either
+tag-selector rule to resolve its font at all.
+
+lineHeight: 1.2 was chosen as a plain, safe default (ccf-push.js's own
+Allow/Deny buttons never set an explicit line-height either — only its
+close buttons do, for glyph centering, which the preview's
+ClosePreviewButton already replicates via lineHeight: size + 'px').
+
+
+====================================================================
+4. DEAD #3f3f46 BRANCH REMOVED
+====================================================================
+extensions/cartncodform-embed/assets/ccf-push.js — Gift Reveal's
+pill-deny border-color ternary (`isFlashSale ? '#3f3f46' : '#e5e7eb'`)
+is removed; the border is now the literal '#e5e7eb' with a comment
+explaining why (the pill-deny branch only ever runs when
+`!isFlashSale`, so the '#3f3f46' arm could never be reached). No
+behavior change — the rendered value was always '#e5e7eb' before this
+edit too.
+
+
+====================================================================
+5. NO FLOW / FETCH / STORAGE LOGIC CHANGED
+====================================================================
+Confirmed by reviewing every edited region: all changes are confined to
+style-string/style-object construction (ccfAllowButtonStyle's radius/
+fill/color rules, the five call sites that pass it cfg.ctaStyle, the
+dead-branch removal, and the button/input JSX + inline styles in
+Settings.jsx). No changes to: registerSW/getToken/saveToken, Notification
+.requestPermission, fetch() calls to /generate-discount or /subscribe-
+customer, sessionStorage/localStorage reads/writes, redirect timing
+(setTimeout(...,2000) untouched), or the countdown/discount logic from
+earlier tasks. The interactive preview's step state machine
+(useState/useEffect for previewStep/previewEmail, auto-advance timing,
+reset-on-change) is entirely unmodified — AllowButtonLabel (the
+loader/check/gift state icons) is reused as-is by both allowBtnEl (Split/
+Card/Banner) and allowBtnCommon (Flash Sale/Gift Reveal), unchanged from
+the interactive-preview task.
+
+
+====================================================================
+FILES CHANGED
+====================================================================
+extensions/cartncodform-embed/assets/ccf-push.js
+  - ccfAllowButtonStyle(accentColor) -> ccfAllowButtonStyle(accentColor,
+    ctaStyle, compact): full 5-variant implementation.
+  - CTA_RADIUS / ctaRadius removed (dead once Banner uses the same
+    function).
+  - 5 call sites updated to pass cfg.ctaStyle (Flash Sale/Gift Reveal,
+    Card, Split-mobile, Split-desktop); Banner's call rebuilt to use the
+    shared function with compact:true, keeping its own mobile
+    flex/min-width append.
+  - Dead '#3f3f46' ternary removed from Gift Reveal's pill-deny.
+
+frontend/app/admin/screens/Settings.jsx
+  - getCtaStyle() replaced by getAllowButtonStyle(), mirroring
+    ccfAllowButtonStyle() exactly.
+  - ClassicPreview: allowBtnEl and Banner's own button now use
+    getAllowButtonStyle(); denyEl is now a real <button> matching
+    ccfDenyButtonStyle(); both email inputs and the Banner button gained
+    inline fontFamily/lineHeight; both split ClosePreviewButton calls
+    now pass real 28/16/rgba(0,0,0,0.4)/10-or-12 values instead of the
+    26/14/12 defaults.
+  - StyleCardPreview: allowBtnCommon now built from
+    getAllowButtonStyle(); the two call sites' flat background/color
+    overrides (which had been masking ctaStyle entirely) removed; both
+    Deny text-links converted to real <button>s via a shared
+    denyLinkStyle() helper; Gift Reveal's pill-deny updated to the real
+    13px/11px/margin-top:8px via a shared pillDenyStyle constant; both
+    outer shells gained the min(340px,100%)/300px width constraint; both
+    email inputs gained inline fontFamily/lineHeight.
+  - ClosePreviewButton: parameterized (size/top/right/fontSize/
+    background props, all defaulting to Card/Flash Sale/Gift Reveal's
+    real 26/12/12/14 values) so Split can pass its own real 28/16/0.4/
+    10-or-12 values instead of sharing Card's.
+
+
+====================================================================
+GIT
+====================================================================
+Committed: extensions/cartncodform-embed/assets/ccf-push.js and
+frontend/app/admin/screens/Settings.jsx only. Not pushed.

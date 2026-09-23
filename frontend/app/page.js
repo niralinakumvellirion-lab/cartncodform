@@ -1,108 +1,94 @@
-import Link from 'next/link';
+'use client';
 
-const features = [
-  {
-    title: 'Cart Recovery',
-    body: 'Capture every abandoned cart from your Shopify store in real time via webhooks and follow up before the sale is lost.',
-    icon: '🛒',
-  },
-  {
-    title: 'COD Forms',
-    body: 'Give customers a clean, public Cash-on-Delivery form. Orders land straight in your dashboard, ready to confirm.',
-    icon: '📦',
-  },
-  {
-    title: 'Multi-store Dashboard',
-    body: 'Connect as many Shopify stores as you run and manage abandoned carts and COD orders from one place.',
-    icon: '📊',
-  },
-];
+import { useState } from 'react';
+import Navbar from './components/landing/Navbar';
+import HeroSection from './components/landing/HeroSection';
+import AnimatedShowcase from './components/landing/AnimatedShowcase';
+import ProblemSolutionSection from './components/landing/ProblemSolutionSection';
+import FeaturesBento from './components/landing/FeaturesBento';
+import DemoStoreCallout from './components/landing/DemoStoreCallout';
+import RoiCalculator from './components/landing/RoiCalculator';
+import FaqSection from './components/landing/FaqSection';
+import Footer from './components/landing/Footer';
+import InstallModal from './components/landing/InstallModal';
 
 export default function LandingPage() {
+  const [installModalOpen, setInstallModalOpen] = useState(false);
+
   return (
-    <main className="min-h-screen bg-white">
-      {/* Nav */}
-      <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-6">
-        <span className="text-xl font-bold tracking-tight text-gray-900">
-          Cart<span className="text-brand">n</span>CodForm
-        </span>
-        <nav className="flex items-center gap-6 text-sm font-medium text-gray-600">
-          <Link href="https://admin.shopify.com" className="hover:text-gray-900">
-            Dashboard
-          </Link>
-          <Link
-            href="/install"
-            className="rounded-lg bg-brand px-4 py-2 text-white hover:bg-brand-dark"
-          >
-            Connect Your Store
-          </Link>
-        </nav>
-      </header>
+    <div className="min-h-screen bg-white font-sans text-gray-900 selection:bg-brand selection:text-white">
+      {/* Navigation */}
+      <Navbar onOpenInstall={() => setInstallModalOpen(true)} />
 
-      {/* Hero */}
-      <section className="mx-auto max-w-4xl px-6 py-24 text-center">
-        <h1 className="text-4xl font-extrabold tracking-tight text-gray-900 sm:text-5xl">
-          Recover Lost Carts &amp; Accept COD Orders
-        </h1>
-        <p className="mx-auto mt-6 max-w-2xl text-lg text-gray-600">
-          ShopireachboostAI plugs into your Shopify stores, tracks every abandoned cart,
-          and gives your customers a frictionless Cash-on-Delivery form — all managed
-          from a single multi-store dashboard.
-        </p>
-        <div className="mt-10 flex items-center justify-center gap-4">
-          <Link
-            href="/install"
-            className="rounded-lg bg-brand px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-brand-dark"
-          >
-            Connect Your Store
-          </Link>
-          <Link
-            href="https://admin.shopify.com"
-            className="rounded-lg border border-gray-300 px-6 py-3 text-base font-semibold text-gray-700 hover:bg-gray-50"
-          >
-            View Dashboard
-          </Link>
-        </div>
-      </section>
+      <main>
+        {/* Hero Section */}
+        <HeroSection onOpenInstall={() => setInstallModalOpen(true)} />
 
-      {/* Features */}
-      <section className="border-t border-gray-100 bg-gray-50 py-20">
-        <div className="mx-auto max-w-6xl px-6">
-          <h2 className="text-center text-3xl font-bold text-gray-900">
-            Everything you need to stop losing sales
-          </h2>
-          <div className="mt-14 grid gap-8 md:grid-cols-3">
-            {features.map((f) => (
-              <div
-                key={f.title}
-                className="rounded-2xl border border-gray-200 bg-white p-8 shadow-sm"
+        {/* Professional Animated Feature Showcase Section */}
+        <AnimatedShowcase onOpenInstall={() => setInstallModalOpen(true)} />
+
+        {/* Problem vs Solution Comparison */}
+        <ProblemSolutionSection />
+
+        {/* 5-Layer Bento Grid Features */}
+        <FeaturesBento />
+
+        {/* Spotlight on demostore.shopireachboost.com */}
+        <DemoStoreCallout />
+
+        {/* Interactive ROI & Revenue Recovery Calculator */}
+        <RoiCalculator onOpenInstall={() => setInstallModalOpen(true)} />
+
+        {/* FAQ Accordion */}
+        <FaqSection />
+
+        {/* Closing High-Impact CTA Banner */}
+        <section className="py-20 lg:py-28 bg-gradient-to-r from-brand via-indigo-600 to-purple-700 text-white relative overflow-hidden">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.15),transparent_50%)] pointer-events-none" />
+          <div className="mx-auto max-w-5xl px-4 sm:px-6 lg:px-8 text-center relative z-10">
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight">
+              Ready to Stop Losing Carts &amp; Multiply Repeat Purchases?
+            </h2>
+            <p className="mt-5 text-base sm:text-lg text-indigo-100 max-w-2xl mx-auto leading-relaxed">
+              Install ShopiReachBoost AI on your Shopify store in under 60 seconds. Zero liquid code edits. 14-day free trial.
+            </p>
+
+            <div className="mt-9 flex flex-col sm:flex-row items-center justify-center gap-4">
+              <button
+                onClick={() => setInstallModalOpen(true)}
+                className="w-full sm:w-auto inline-flex items-center justify-center rounded-xl bg-white px-8 py-4 text-base font-extrabold text-brand shadow-xl hover:bg-gray-50 transition transform hover:-translate-y-0.5"
               >
-                <div className="text-3xl">{f.icon}</div>
-                <h3 className="mt-4 text-lg font-semibold text-gray-900">{f.title}</h3>
-                <p className="mt-2 text-sm leading-relaxed text-gray-600">{f.body}</p>
-              </div>
-            ))}
+                Connect Your Store Free →
+              </button>
+
+              <a
+                href="https://demostore.shopireachboost.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl border border-white/30 bg-white/10 px-7 py-4 text-base font-semibold text-white backdrop-blur-sm hover:bg-white/20 transition"
+              >
+                <span>Browse Live Demo Store</span>
+                <svg className="h-4 w-4 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                </svg>
+              </a>
+            </div>
+
+            <p className="mt-5 text-xs text-indigo-200">
+              No credit card required • GDPR compliant • 100% money-back satisfaction guarantee
+            </p>
           </div>
-        </div>
-      </section>
+        </section>
+      </main>
 
-      {/* CTA */}
-      <section className="mx-auto max-w-4xl px-6 py-24 text-center">
-        <h2 className="text-3xl font-bold text-gray-900">Ready to recover revenue?</h2>
-        <p className="mt-4 text-gray-600">
-          Install the app on your Shopify store in under a minute.
-        </p>
-        <Link
-          href="/install"
-          className="mt-8 inline-block rounded-lg bg-brand px-6 py-3 text-base font-semibold text-white hover:bg-brand-dark"
-        >
-          Connect Your Store
-        </Link>
-      </section>
+      {/* Footer */}
+      <Footer onOpenInstall={() => setInstallModalOpen(true)} />
 
-      <footer className="border-t border-gray-100 py-8 text-center text-sm text-gray-400">
-        © {new Date().getFullYear()} ShopireachboostAI
-      </footer>
-    </main>
+      {/* Store Connect Modal */}
+      <InstallModal
+        isOpen={installModalOpen}
+        onClose={() => setInstallModalOpen(false)}
+      />
+    </div>
   );
 }

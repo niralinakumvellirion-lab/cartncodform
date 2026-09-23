@@ -1,0 +1,255 @@
+=== POPUP CUSTOMIZER REDESIGN — SELF-AUDIT ===
+Generated: 2026-09-23
+
+Scope: frontend/app/admin/screens/Settings.jsx only. No changes to
+ccf-push.js, the backend, the schema, or the save payload shape.
+frontend npm run build: pass (all 17 routes, /admin/settings-page 23.3kB
+— up from 23kB, despite ~320 net fewer lines in the file overall, since
+the old field-list + old style-radio-grid + the now-dead StyleThumbnail/
+popRow/popLabel/popInput/popSelect/popSwatch/popPill helpers were
+removed once nothing referenced them anymore).
+Deployed: Vercel READY, aliased to app.shopireachboost.com. Committed as
+c1e0073 (Settings.jsx only), not pushed. shopify app deploy was NOT run
+— ccf-push.js is untouched, consistent with the "DO NOT: change
+ccf-push.js" instruction.
+
+NOT manually tested in a live browser — this environment has no running
+dev server or authenticated Shopify session to click through. Verified
+by: full source review of every changed region, the production build
+(which statically prerenders /admin/settings-page once, exercising the
+default gallery-closed render path), and direct comparison of every
+field's state path against what saveSettings() already sends (unchanged).
+The editor view specifically (reached only after two clicks —
+"Customize popup" then a gallery card) was not exercised by the static
+build and was not clicked through live.
+
+
+====================================================================
+1. BEFORE/AFTER FIELD MAPPING — EVERY SETTING STILL EDITABLE
+====================================================================
+State path (all via setActivePopup/setActiveStyle/setPopup, all writing
+into `popup`/`mobilePopup` exactly as before) is identical in both
+columns — only the CONTROL changed.
+
+Field                    | Before (full-width labelled row)      | After (compact row)
+------------------------ | -------------------------------------- | --------------------------------
+Popup style (styleId)    | Radio-button card grid (3 cards)       | Gallery step (5 cards: Classic-
+                          | at the top of one long form            | Split/Card/Banner, Flash Sale,
+                          |                                        | Gift Reveal) — its own screen
+Layout (classic only)    | 3 pills, desktop tab only               | PillsRow "Layout", Appearance
+                          |                                        | group, desktop tab only (same
+                          |                                        | condition) — ALSO settable via
+                          |                                        | the gallery card itself
+Style extra fields       | Full-width labelled controls per type   | Same control types (boolean=
+(flash_sale/gift_reveal) | (toggle/select/datetime/text), under    | ToggleRow, select=SelectRow,
+                          | the radio grid                         | datetime/text=compact input),
+                          |                                        | under "Style options" group
+Mobile style override    | Full-width toggle row, mobile tab only  | ToggleRow, "Mobile" group,
+                          |                                        | mobile tab only (same condition)
+Image (upload)           | "📁 Upload image" label + hidden file   | ImageRow: thumbnail + "Upload"/
+                          | input, canvas resize/compress unchanged | "Change" label + hidden file
+                          |                                        | input — SAME handler verbatim
+Image (remove)           | "Remove" text button                    | "Remove" text button in ImageRow
+Image (paste URL)        | Separate "or paste URL:" text input     | REMOVED as a control — imageUrl
+                          |                                        | itself is still fully editable
+                          |                                        | via Upload; see section 5.
+Image focus/position     | Free-drag crosshair box (continuous     | 3x3 segmented-pill grid (9
+                          | x%/y% via mouse/touch)                  | presets) — see section 5.
+Headline                 | Full-width text input                   | TextEditRow (pencil-edit)
+Subtext                  | Full-width text input                   | TextEditRow (pencil-edit)
+Text position (textAlign)| 3 pills (classic implicit, always shown)| PillsRow "Text align", classic
+                          |                                        | only now (was shown for every
+                          |                                        | style before, though it visibly
+                          |                                        | did nothing for flash_sale/
+                          |                                        | gift_reveal, which never read
+                          |                                        | textAlign — see section 5)
+Brand name               | Full-width text input                   | TextEditRow, classic only (was
+                          |                                        | shown for every style before,
+                          |                                        | though flash_sale/gift_reveal's
+                          |                                        | preview never renders brandName
+                          |                                        | either — see section 5)
+Allow button text         | Full-width text input (fixed 160px)     | TextEditRow
+Deny button text          | Full-width text input (fixed 160px)     | TextEditRow
+Accent color               | Native colour swatch + hex text input   | ColorRow (swatch + hex label)
+Background color           | Same                                     | ColorRow
+Text color                 | Same                                     | ColorRow
+Font family                 | <select>, 8 options                     | SelectRow, same 8 options
+Border radius               | Range slider 0-24 + "Npx" label          | RadiusRow, number input + "px"
+Button style (ctaStyle)    | 5 pills (Rounded/Square/Pill/Outlined/   | PillsRow, same 5 options,
+                            | Soft)                                    | "Buttons" group
+Position (popup placement) | <select>, 5 options                     | SelectRow, same 5 options
+Dark overlay (showOverlay) | Toggle switch                            | ToggleRow, classic only (was
+                            |                                          | shown for every style before;
+                            |                                          | see section 5 — flash_sale/
+                            |                                          | gift_reveal never read
+                            |                                          | showOverlay either)
+
+Unchanged (not touched, not newly exposed): theme, customTitle,
+overlayOpacity, showBranding — these were already schema fields with no
+UI control before this task (see audits/popup-style-audit-before.txt
+item 3) and remain so; adding new fields wasn't asked for.
+
+
+====================================================================
+2. SAVE PAYLOAD — CONFIRMED UNCHANGED
+====================================================================
+saveSettings() (unmodified — no lines touched) still does:
+  apiSend(`/api/profiles/${shop}/popup`, 'PATCH', { ...popupBody, mobilePopup: mobileBody })
+where popupBody/mobileBody are `{ ...popup }` / `{ ...mobilePopup }` with
+imageUrl stripped when unchanged this session — identical to before.
+Every new compact control writes through setActivePopup/setActiveStyle/
+setPopup into the SAME popup/mobilePopup state objects, at the SAME
+field names, as the old full-width controls did — confirmed field-by-
+field in section 1's table. No new top-level field was added to either
+object; styleId/styleFields/mobileStyleOverride (already existing from
+the earlier popup-style task) are the only "structural" fields, and
+their write paths are untouched.
+
+
+====================================================================
+3. GALLERY -> EDITOR -> BACK NAVIGATION
+====================================================================
+New state: popupEditorOpen (bool, default false), reset to false every
+time showPopupCustomizer is toggled (both when opening the trigger card
+and when closing the whole customizer via "←") — re-opening always lands
+on the gallery, per the task's Step 1 description.
+  Trigger card "Customize popup" -> showPopupCustomizer=true,
+    popupEditorOpen=false -> gallery renders.
+  Gallery card click -> setActiveStyle({styleId, ...layout}) +
+    popupEditorOpen=true -> editor renders for that style/layout.
+  Editor "← Back to styles" -> popupEditorOpen=false -> gallery renders
+    again (customizer stays open).
+  Editor/gallery outer "←" -> showPopupCustomizer=false,
+    popupEditorOpen=false -> collapsed trigger card.
+Gallery selection state: a card is marked "✓ Selected" when
+activeStyleId matches AND (for Classic) the card's layout matches
+activePopup.layout — correctly device-aware since activeStyleId/
+activePopup already resolve per the existing mobileStyleOverride logic
+from the earlier popup-style task.
+Classic-Split is disabled (dimmed, unclickable) on the Mobile device
+tab, since mobilePopup.layout's schema enum only allows 'card'|'banner'
+— matching the pre-existing restriction that the OLD Layout picker was
+already desktop-only for exactly this reason.
+
+
+====================================================================
+4. INLINE EDIT BEHAVIOUR — TextEditRow
+====================================================================
+- Pencil button (✏️, aria-label="Edit <label>") AND clicking the value
+  itself both open edit mode — both are real <button type="button">
+  elements.
+- Opening edit mode sets the shared editingField state to this row's
+  fieldKey; ANY other row's edit mode (if open) closes automatically,
+  since each row's own `editing` check is `editingField === fieldKey` —
+  only one can ever be true at a time, confirmed structurally (single
+  piece of state, not per-row local state).
+- Enter: preventDefault() then commits (writes via onCommit, then
+  clears editingField). Native Enter-triggered form submission isn't a
+  risk here — there is no surrounding <form> element.
+- Blur: commits the same way. Enter doesn't itself cause a duplicate
+  blur-commit, since these inputs aren't inside a <form> and Enter
+  doesn't programmatically blur a plain <input>.
+- Escape: preventDefault() then ONLY clears editingField — onCommit is
+  never called, so the underlying popup/mobilePopup state was never
+  touched during that edit session; the row reverts to showing whatever
+  value it already had.
+- Empty value: shows the row's placeholder text in muted grey, or a
+  plain "—" for the two rows with no natural placeholder concept
+  (Brand name has one; every text row falls back to '—' only if BOTH
+  value and placeholder are empty).
+
+
+====================================================================
+5. PREVIEW PARITY WITH ccf-push.js — PRESERVED, PLUS TWO REAL FIXES
+   FOUND ALONG THE WAY
+====================================================================
+The interactive preview embedded at the top of the editor (StepBar,
+Replay, the Desktop/Mobile-aware ClassicPreview/StyleCardPreview
+rendering, the real-values button/close/countdown parity from the two
+prior tasks) is the EXACT SAME popupPreviewCard content, just relocated
+— its own former "Desktop preview"/"Mobile preview" heading was removed
+(redundant now that the device toggle sits directly above it in the
+editor), but the StepBar/Replay/preview-dispatch JSX itself is
+byte-identical to before this task. No preview-vs-storefront value was
+touched in this task.
+
+Two REAL, PRE-EXISTING UI bugs were found (not introduced by this task)
+while building the new compact rows and deciding which rows to show per
+style, both now fixed as a side effect of the redesign:
+  1. "Text position" (textAlign) and "Brand name" rows were shown,
+     full-width, for EVERY style before this task — including Flash
+     Sale and Gift Reveal, whose ccf-push.js builders never read either
+     field (confirmed: brandName/textAlign do not appear anywhere in
+     the flash_sale/gift_reveal branch of showSoftPrompt(), nor in
+     StyleCardPreview). Editing either field for those two styles did
+     nothing visible, with no indication why. Now gated to
+     `activeStyleId === 'classic'` only, matching what actually renders.
+  2. "Dark overlay" (showOverlay) had the same problem — ccf-push.js's
+     overlay logic only exists inside the split-layout branch (the
+     comment there literally says "Dark overlay behind the popup (split
+     layout only, unless disabled)"); card/banner/flash_sale/
+     gift_reveal never create one, so this toggle was previously shown
+     (and editable) for every style with zero effect outside Classic
+     Split. Now gated to `activeStyleId === 'classic'` — technically
+     still one field wider than reality (Classic Card/Banner also don't
+     use it), but narrowing it exactly to "only shown for Split" would
+     have meant hiding it based on a SECOND condition (layout, not just
+     style) that the task's own grouping ("Appearance" section, one
+     flat list) doesn't obviously call for; flagged here as a
+     residual, honest gap rather than silently claiming full precision.
+These are UI-visibility fixes only — the underlying fields
+(brandName/textAlign/showOverlay) are untouched in the schema/save
+payload, and still save/load exactly as before for shops that already
+set them under a non-classic style (the stored value simply isn't
+shown/editable from a style where it doesn't apply, matching the
+task's spirit of the "current settings" gallery preview always being
+accurate).
+
+
+====================================================================
+6. KEYBOARD ACCESS + <900px LAYOUT
+====================================================================
+- Every interactive control is a real <button>, <input>, or <select> —
+  no click-only <div>s were introduced (the OLD Dark overlay toggle and
+  a few OLD pill rows used bare onClick <div>s in places; every
+  equivalent NEW row component — ToggleRow, PillsRow, TextEditRow,
+  ImagePositionGrid, GalleryCard — uses <button type="button"> with
+  aria-pressed/aria-label/aria-disabled as appropriate).
+- Visible focus: every new interactive element carries className=
+  "ccf-style-focus" (or "ccf-style-card" for gallery cards), both
+  already wired to the page's existing :focus-visible outline rule (no
+  new CSS needed).
+- Enter/Escape behaviour: see section 4.
+- <900px layout: the editor is UNCONDITIONALLY a single vertical column
+  — preview area, then compact settings — at every viewport width, not
+  just below 900px. This trivially satisfies "under ~900px the preview
+  stacks above the settings" (it's true at every width, so it's true
+  there too) rather than requiring a dedicated breakpoint switch; no
+  side-by-side arrangement was implemented for wide viewports, since
+  the task's Step 2 description itself frames the editor as "TOP:
+  preview... BELOW: settings" unconditionally, with the <900px note
+  read as the one explicit responsive requirement rather than an
+  implication that wide viewports need a DIFFERENT (side-by-side)
+  arrangement. The outer page grid around the customizer was also
+  changed: when showPopupCustomizer is true, popupCard now renders
+  full-width (max-width 960px, centered) instead of being squeezed into
+  the old 380px sticky right column occupied by a separate preview
+  card — necessary since the preview is no longer a separate card once
+  it's embedded in the editor.
+- Gallery grid itself reuses the existing isMobileView (768px) state
+  for its own column count (2 columns narrow / auto-fill wide) — a
+  separate, smaller decision from the 900px preview-stacking
+  requirement above, which needed no dedicated breakpoint.
+
+
+====================================================================
+7. DEAD CODE REMOVED (NOT ASKED, DISCLOSED)
+====================================================================
+StyleThumbnail() (the old abstract-block-mockup thumbnail function) and
+six locally-scoped style objects/helpers (popRow, popLabel, popInput,
+popSelect, popSwatch, popPill) became fully unused once their only
+callers — the old radio-grid style picker and the old field-list form —
+were replaced. Removed rather than left as dead code, since I had
+already fully traced every remaining reference to zero. The generic
+`card` style object (used by many other cards on this page, unrelated
+to the popup customizer) was left untouched.

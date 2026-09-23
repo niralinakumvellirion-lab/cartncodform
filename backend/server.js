@@ -41,6 +41,7 @@ const allowedOrigins = [
   'https://admin.shopify.com',
   'https://cartncod-form.myshopify.com',
   'http://localhost:3000',
+  'http://localhost:3030',
 ].filter(Boolean);
 
 // --- Middleware ------------------------------------------------------------

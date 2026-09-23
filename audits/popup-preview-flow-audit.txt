@@ -1,0 +1,221 @@
+=== POPUP PREVIEW FLOW — SELF-AUDIT ===
+Generated: 2026-09-22
+
+Scope: frontend/app/admin/screens/Settings.jsx only. No backend, no
+ccf-push.js, no save payload changes (confirmed by diff: only Settings.jsx
+is modified in this commit; c87e4ce, 671 insertions / 442 deletions).
+frontend npm run build: pass (all 17 routes, /admin/settings-page 22.8kB).
+Deployed: Vercel READY, aliased to app.shopireachboost.com. Not pushed.
+
+
+====================================================================
+1. ALL 5 STEPS RENDER FOR EACH STYLE x DEVICE
+====================================================================
+style      | device  | prompt | setting_up | subscribed | unlocked | redirecting
+classic    | desktop | yes    | yes        | yes        | yes*     | yes*
+classic    | mobile  | yes    | yes        | yes        | yes*     | yes*
+flash_sale | desktop | yes    | yes        | yes        | yes*     | yes*
+flash_sale | mobile  | yes    | yes        | yes        | yes*     | yes*
+gift_reveal| desktop | yes    | yes        | yes        | yes*     | yes*
+gift_reveal| mobile  | yes    | yes        | yes        | yes*     | yes*
+(* Unlocked/Redirecting only exist — in the step bar AND as reachable
+states — when a discount is actually enabled on the Discounts screen for
+the relevant action, exactly like ccf-push.js; with none enabled the flow
+is Prompt -> Setting up -> Subscribed -> Closed, per section 2.)
+
+For classic, layout (split/card/banner) is read from popup.layout
+(desktop) / mobilePopup.layout (mobile, defaulting to 'card' unless it's
+explicitly 'banner' — see the "fixed" note in section 5) at every step;
+switching the Layout picker while the preview is open re-renders the same
+step immediately (part of "any field" triggering the reset in section 4).
+
+
+====================================================================
+2. FLOW BRANCHING — WITH/WITHOUT DISCOUNT, WITH/WITHOUT EMAIL
+====================================================================
+- previewWantsDiscount (mirrors ccfDiscountEnabled()) = pushDiscount
+  .enabled || emailDiscount.enabled, fetched from the SAME
+  /api/discounts/:shop/config this screen already calls. phone/both are
+  never consulted (they're always saved disabled — confirmed by the
+  discount-redesign task earlier this session).
+- Classic + Banner layout: previewWantsDiscount is forced false regardless
+  of what's configured, matching ccf-push.js's `layout !== 'banner' &&
+  ccfDiscountEnabled()` exactly (see the real bug this caught, section 6).
+- With NO discount enabled: Subscribed auto-advances (800ms) to a new
+  'closed' state — not part of the 5-item step bar, matching "the flow is
+  Prompt -> Setting up -> Subscribed -> closed" — shown as a DismissedNote
+  variant ("Subscribed — popup closed...").
+- With a discount enabled: Subscribed auto-advances to Unlocked, then to
+  Redirecting (both auto-advance too, same 800ms pacing) — see section 3
+  for why steps 4/5 are visually near-identical, by design.
+- Email typed in the preview's own (non-real) email input: previewAction
+  becomes 'email' instead of 'push' the moment any non-whitespace text is
+  present — matching ccf-push.js's `var action = email ? 'email' :
+  'push';` exactly (trim-checked, not just non-empty). The Unlocked step's
+  code/%/expiry then come from discountRules.email instead of
+  discountRules.push. The email INPUT itself is only rendered when
+  discountRules.email.enabled is true (ccfShowEmailField() equivalent) —
+  independent of whether the customer has typed in it yet.
+- Sample code format: `{PREFIX}-A1B2C3` where PREFIX is the shop's own
+  configured prefix (sanitized: uppercased, non-alnum stripped, capped at
+  10 chars, same rule the backend's sanitizeRule() applies), falling back
+  to 'PUSH'/'EMAIL' — matches the task's literal example exactly when the
+  shop hasn't customized its prefix.
+- Percentage and "Expires in N days" on the Unlocked step are the shop's
+  REAL configured percentage/expiryDays for whichever rule
+  (push/email) applies — never a fabricated 10%/7-days placeholder.
+
+
+====================================================================
+3. STEP 5 ("REDIRECTING") — A DESIGN NOTE, NOT A BUG
+====================================================================
+In ccf-push.js, renderDiscountCode() builds ONE html block (icon, "N% OFF
+Unlocked!", "Expires in N days", the code chip, and the pulsing "Applying
+your discount automatically..." line) and swaps it into #ccf-content-
+section in a single synchronous call; a 2-second setTimeout then performs
+the real navigation. There is no second, visually distinct DOM state
+between "just unlocked" and "about to redirect" in the real
+implementation — the button's brief 'gift'/"Redirecting..." label
+(set immediately before the swap) is created and destroyed inside that
+same synchronous call, before a browser could ever paint it, and is
+therefore never actually visible to a real customer either.
+
+Given the task's explicit request for 5 distinguishable steps including a
+named "Redirecting" one, the preview renders the SAME UnlockedView for
+both 'unlocked' and 'redirecting', with one addition: 'redirecting' shows
+a small labeled badge ("REDIRECTING (SIMULATED — NO REAL NAVIGATION)")
+above the content. This is explicitly a preview-only annotation, not a
+second real DOM state ccf-push.js has — flagged here rather than silently
+presented as if it were pixel-identical to something in production.
+
+
+====================================================================
+4. NO REAL API / PERMISSION CALLS
+====================================================================
+Confirmed by grep across the entire new preview code
+(Icon/AllowButtonLabel/UnlockedView/DismissedNote/StepBar/StyleCardPreview
+/ClassicPreview/the flow state + render dispatch in Settings): zero
+occurrences of fetch(, Notification., serviceWorker, navigator., or
+window.location — the only hit is a code COMMENT mentioning
+"Notification.permission" in prose, not a call. Every step transition is
+a plain setPreviewStep() call; the simulated email input writes only to
+local React state (previewEmail), never sent anywhere.
+
+
+====================================================================
+5. PREVIEW-VS-STOREFRONT DIFFERENCES FOUND AND FIXED
+====================================================================
+The OLD admin preview (replaced by this change) was a simplified,
+NOT-pixel-accurate mock, not a real reimplementation of ccf-push.js.
+Differences found while rebuilding it against ccf-push.js as source of
+truth, and fixed:
+
+  1. Split layout's image/content ratio was 40%/60% in the old preview;
+     ccf-push.js's real desktop split is 45%/55%. Fixed.
+  2. Card layout's "no image" state showed nothing in the old preview;
+     ccf-push.js shows a bouncing bag icon centered in the gradient.
+     Fixed (split's own "no image" gradient correctly stays icon-less,
+     matching ccf-push.js — only card gets the bag icon).
+  3. Card layout never showed the green "🏷️ {discount offer text}" badge
+     in the old preview at all. Fixed — shown when a discount is enabled,
+     using the real per-action offer text (ccfDiscountOfferText()
+     equivalent: emailDiscount.offerText or the auto "Add your email to
+     get N% off" line when the email field shows, else pushDiscount
+     .offerText or "You get N% off as a subscriber").
+  4. Split layout never showed ANY discount UI in the old preview. Fixed
+     — now shows the same generic offerHeadline text + email input
+     ccfBuildDiscountFields() adds after Deny, reading the ACTUAL
+     DiscountConfig.offerHeadline field (a value this screen wasn't even
+     fetching before this change — added to the discountRules fetch).
+  5. Banner layout's old preview didn't distinguish it from the other
+     layouts' discount handling; it had no email/discount UI to begin
+     with, which happened to already match reality (banner never shows a
+     discount) — confirmed correct, not changed, but see the real bug in
+     section 6 this exact rule required fixing in the STEP MACHINE.
+  6. The mobile preview ALWAYS rendered a card-style bottom sheet before
+     this change, regardless of mobilePopup.layout. Fixed to check
+     mobilePopup.layout === 'banner' and render the banner shell instead
+     — the admin UI still has no control to actually SET mobile's layout
+     to banner (Layout picker is desktop-only, per an earlier task), so
+     this only matters if that field is ever set another way, but it's
+     now accurate rather than silently wrong when it is.
+  7. Neither the old admin preview nor the OLD StyleCardPreview (Flash
+     Sale/Gift Reveal) had a real allow/deny CLICK target at all — every
+     button was `tabIndex={-1}`/decorative. Fixed as part of this task
+     (required for the interactive flow to exist at all): Allow now
+     calls onAllow, Deny/X now call onDismiss, both are real focusable
+     buttons.
+  8. Gift Reveal's no-image gift-icon glyph used a hand-drawn path
+     ("C10 3 12 8 12 8s2-5 4.5-5") that was a close-but-not-exact match
+     to ccf-push.js's real CCF_ICONS.gift path (an arc-based curve,
+     "A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5"). Fixed — the new Icon
+     component uses ccf-push.js's exact path data for gift/check/loader
+     (and adds 'bag', previously absent from the admin file entirely).
+  9. The loader/check/gift icons in the OLD code weren't visually
+     matched to ccf-push.js's actual SVG icons at all in most places (the
+     Setting-up/Subscribed button states didn't exist yet — see item 7,
+     nothing to compare). Fixed as part of building those states: exact
+     same paths, same 2px stroke, and the loader now spins via a
+     ccf-preview-spin keyframe matching ccf-push.js's own ccfSpin
+     keyframe (0.9s linear infinite).
+  10. Confirmed correct, NOT changed: the image (or, for Gift Reveal, the
+      no-image gift-icon placeholder) staying visible THROUGH the
+      Unlocked/Redirecting steps, since in ccf-push.js both are DOM
+      siblings of #ccf-content-section, never touched by the
+      renderDiscountCode() swap. The preview replicates this exactly
+      (UnlockedView renders inside the same content area, below the
+      still-visible image/icon).
+
+Not attempted (decorative-only CSS, doesn't affect any step's actual
+content, would need real stylesheet/pseudo-element access this preview
+doesn't have): the .ccf-img-wrap corner-dot ::after pattern, the
+#ccf-push-prompt:hover translateY/shadow transition, the entrance
+slide-up keyframe, and the discount badge's ccfBounce animation. Colors,
+copy, layout structure, and every text label ARE matched.
+
+
+====================================================================
+6. REAL BUG FOUND AND FIXED WHILE BUILDING THIS
+====================================================================
+Initial implementation computed previewWantsDiscount purely from
+discountRules (push.enabled || email.enabled), without the banner
+exception. That would have let the step bar show "Unlocked"/"Redirecting"
+tabs, and auto-advance actually reach them, for a Classic popup set to
+Banner layout with a discount configured — even though ccf-push.js's own
+`layout !== 'banner' && ccfDiscountEnabled()` guard means a real banner
+popup NEVER offers a discount at all. Fixed by computing an
+activeStyleId/layout-aware previewEffectiveLayout at the top of the
+component and gating previewWantsDiscount on `previewEffectiveLayout !==
+'banner'` — this is the single source of truth the step machine, the step
+bar, AND ClassicPreview's own (now redundant-but-harmless) internal
+banner check all agree with.
+
+
+====================================================================
+7. STEP BAR JUMP / REPLAY / RESET-ON-CHANGE
+====================================================================
+- Step bar: a real button per visible step (Unlocked/Redirecting hidden
+  when previewWantsDiscount is false), role="tablist"/role="tab" +
+  aria-selected, onClick calls setPreviewStep(id) directly — jumps
+  immediately to any step regardless of current state or whether Allow
+  was ever clicked, per the explicit "without replaying" requirement.
+- Replay: a separate button, sets previewStep back to 'prompt' and clears
+  the simulated email field.
+- Reset-on-change: a stable JSON-serialized key (device, activeStyleId,
+  activeStyleFields, and whichever of popup/mobilePopup is the config
+  actually being previewed) is compared each render via a ref; the
+  step/email only reset when that key's STRING VALUE actually changes —
+  so editing any customizer field (headline, colors, image, extra style
+  fields, switching styles, switching the device tab) resets to Prompt,
+  but re-renders caused by unrelated state (e.g. the simulated email
+  input itself, or the step bar) do not loop or reset each other.
+
+
+====================================================================
+KNOWN LIMITATION
+====================================================================
+"Style is selected per popup type" continues to mean "per desktop/mobile
+config" in this preview too (unchanged scoping decision from the earlier
+Phase 1/2/3 popup-style work) — the product-page nudge
+(injectProductNudge() in ccf-push.js) has no style concept and isn't
+represented in this preview, consistent with that earlier scoping.
