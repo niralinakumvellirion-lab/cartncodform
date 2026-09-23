@@ -1793,11 +1793,6 @@ export default function Settings({ shop }) {
     { key: 'gift_reveal', styleId: 'gift_reveal', layout: null, name: POPUP_STYLES.gift_reveal.name,
       desc: POPUP_STYLES.gift_reveal.shortDescription },
   ];
-  const selectedGalleryCard =
-    GALLERY_CARDS.find((c) => c.styleId === activeStyleId &&
-      (c.layout == null || (activePopup.layout || 'split') === c.layout)) ||
-    GALLERY_CARDS.find((c) => c.styleId === activeStyleId) ||
-    GALLERY_CARDS[0];
 
   // Same image-upload handler as before (canvas resize/compress to keep the
   // PATCH body small) — unchanged, just relocated into the compact ImageRow.
@@ -2398,40 +2393,25 @@ export default function Settings({ shop }) {
             (opens the gallery), styled as a secondary button showing the
             currently selected style. Only shown in the editor; the
             gallery has its own "← Back" affordance above instead. */}
-        {popupEditorOpen && (() => {
-          // style-button-label: show the theme the merchant thinks of
-          // ("Classic", "Flash Sale", "Gift Reveal"), not the internal
-          // "Classic — Split" gallery-card label — Classic's layout goes
-          // in its own small muted chip instead of the button's main name.
-          const isClassic = selectedGalleryCard.styleId === 'classic';
-          const themeName = isClassic ? 'Classic' : selectedGalleryCard.name;
-          const layoutLabel = selectedGalleryCard.layout
-            ? selectedGalleryCard.layout.charAt(0).toUpperCase() + selectedGalleryCard.layout.slice(1)
-            : null;
-          return (
-            <button
-              type="button"
-              onClick={() => setPopupEditorOpen(false)}
-              aria-label="Change popup style"
-              className="ccf-style-focus"
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px',
-                fontSize: 12, fontWeight: 600, color: '#fff', background: '#4f46e5',
-                border: 'none', borderRadius: 9, cursor: 'pointer', flexShrink: 0 }}
-            >
-              <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%',
-                background: 'rgba(255,255,255,0.85)', flexShrink: 0 }} />
-              {themeName}
-              {layoutLabel && (
-                <span aria-hidden="true" style={{ fontSize: 10, fontWeight: 600,
-                  color: 'rgba(255,255,255,0.85)', background: 'rgba(255,255,255,0.18)',
-                  borderRadius: 999, padding: '2px 7px' }}>
-                  {layoutLabel}
-                </span>
-              )}
-              <span aria-hidden="true" style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)' }}>▾</span>
-            </button>
-          );
-        })()}
+        {/* style-button-label: fixed "Popup theme" label — not the
+            current style/layout name — same click target (opens the
+            gallery), same styling. */}
+        {popupEditorOpen && (
+          <button
+            type="button"
+            onClick={() => setPopupEditorOpen(false)}
+            aria-label="Change popup style"
+            className="ccf-style-focus"
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px',
+              fontSize: 12, fontWeight: 600, color: '#fff', background: '#4f46e5',
+              border: 'none', borderRadius: 9, cursor: 'pointer', flexShrink: 0 }}
+          >
+            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%',
+              background: 'rgba(255,255,255,0.85)', flexShrink: 0 }} />
+            Popup theme
+            <span aria-hidden="true" style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)' }}>▾</span>
+          </button>
+        )}
       </div>
 
       {popupEditorOpen ? popupEditorView : popupGalleryView}
