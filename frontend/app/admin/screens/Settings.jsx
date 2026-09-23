@@ -229,14 +229,6 @@ function Icon({ name, size = 16, color, style }) {
 // subscriber" path — Notification.permission !== 'granted' — since that's
 // what every first-time visitor actually sees) exactly: label text/icon per
 // stage, and whether a discount stage even exists at all.
-const STEP_ORDER = ['prompt', 'setting_up', 'subscribed', 'unlocked', 'redirecting'];
-const STEP_LABELS = {
-  prompt: 'Prompt',
-  setting_up: 'Setting up',
-  subscribed: 'Subscribed',
-  unlocked: 'Unlocked',
-  redirecting: 'Redirecting',
-};
 const STEP_DELAY_MS = 800;
 
 function sanitizeCodePrefix(prefix, fallback) {
@@ -327,43 +319,16 @@ function UnlockedView({ styleId, percentage, expiryDays, code, codeChipEmphasis,
 // both cases (no visible state of its own); an actually-empty preview
 // panel would look broken in the admin, so this stands in for "nothing is
 // here right now."
+// step-bar-replay-removed: no more "Click Replay to see it again" — there
+// is no Replay control any more. Changing the style, device, or any
+// setting is what resets the preview back to Prompt (see previewResetKey).
 function DismissedNote({ device, reason = 'dismissed' }) {
   return (
     <div style={{ padding: device === 'mobile' ? '32px 16px' : '40px 16px', textAlign: 'center',
                   color: '#9ca3af', fontSize: 13, border: '1px dashed #e5e7eb', borderRadius: 12 }}>
       {reason === 'closed'
-        ? 'Subscribed — popup closed (no discount configured). Click Replay to see it again.'
-        : 'Popup dismissed. Click Replay to see it again.'}
-    </div>
-  );
-}
-
-function StepBar({ step, onJump, hasDiscount }) {
-  const steps = STEP_ORDER.filter((s) => hasDiscount || (s !== 'unlocked' && s !== 'redirecting'));
-  return (
-    <div role="tablist" aria-label="Preview step"
-      style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 }}>
-      {steps.map((s) => {
-        const active = step === s;
-        return (
-          <button
-            key={s}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            onClick={() => onJump(s)}
-            className="ccf-style-focus"
-            style={{
-              padding: '4px 9px', fontSize: 11, fontWeight: active ? 700 : 500,
-              borderRadius: 999, border: active ? '1px solid #4f46e5' : '1px solid #e5e7eb',
-              background: active ? '#eef2ff' : '#fff', color: active ? '#4f46e5' : '#6b7280',
-              cursor: 'pointer',
-            }}
-          >
-            {STEP_LABELS[s]}
-          </button>
-        );
-      })}
+        ? 'Subscribed — popup closed (no discount configured).'
+        : 'Popup dismissed.'}
     </div>
   );
 }
@@ -1844,16 +1809,12 @@ export default function Settings({ shop }) {
   );
 
   // --- STEP 1: style gallery -------------------------------------------
+  // gallery-back-removed: no more "← Back" link here — the only ways out
+  // of the gallery are now picking a card (opens the editor) or the
+  // outer "←" in the card header (closes the whole customizer). See the
+  // task's own note on this trade-off in the commit/report.
   const popupGalleryView = (
     <>
-      {/* style-button-header: a plain way back to the editor (keeping
-          whatever style is currently active) — distinct from the outer
-          "←" in the card header, which closes the whole customizer. */}
-      <button type="button" onClick={() => setPopupEditorOpen(true)} className="ccf-style-focus"
-        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px',
-          color: '#4f46e5', fontWeight: 600, padding: 0, marginBottom: '10px' }}>
-        ← Back
-      </button>
       <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827', marginBottom: '2px' }}>
         Choose a popup style
       </div>
@@ -1947,19 +1908,13 @@ export default function Settings({ shop }) {
               contacts the backend or asks for a real permission.
             </div>
 
-            <StepBar step={previewStep} hasDiscount={previewWantsDiscount}
-              onJump={(s) => setPreviewStep(s)} />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
-              <button
-                type="button"
-                onClick={() => { setPreviewStep('prompt'); setPreviewEmail(''); }}
-                className="ccf-style-focus"
-                style={{ fontSize: 11, fontWeight: 600, color: '#4f46e5', background: '#eef2ff',
-                  border: '1px solid #c7d2fe', borderRadius: 999, padding: '4px 10px', cursor: 'pointer' }}
-              >
-                ↺ Replay
-              </button>
-            </div>
+            {/* step-bar-replay-removed: the step bar and Replay button are
+                gone — clicking Allow below still drives previewStep through
+                the same setting_up -> subscribed -> unlocked -> redirecting
+                chain (see commonProps.onAllow below), and Deny/X still sets
+                'dismissed'. Returning to Prompt is now entirely the job of
+                the previewResetKey effect above (fires on style/device/
+                setting changes) — there is no other way back to Prompt. */}
 
             {popupDevice === 'desktop' && (() => {
               if (previewStep === 'dismissed' || previewStep === 'closed') {
