@@ -352,42 +352,270 @@ function StepBar({ step, onJump, hasDiscount }) {
   );
 }
 
-// Small, abstract, ORIGINAL block mockups for the style picker cards —
-// deliberately not screenshots/crops of any reference image (see
-// audits/popup-style-audit-before.txt item 9's explicit instruction that
-// thumbnails must be drawn/generated previews of this app's own styles).
-function StyleThumbnail({ styleId }) {
-  const box = { width: '100%', height: 56, borderRadius: 8, overflow: 'hidden', flexShrink: 0 };
-  if (styleId === 'flash_sale') {
-    return (
-      <div style={{ ...box, background: '#18181b', display: 'flex', flexDirection: 'column',
-                    alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-        <div style={{ width: '30%', height: 4, background: '#fbbf24', borderRadius: 2 }} />
-        <div style={{ width: '50%', height: 7, background: '#fff', borderRadius: 2 }} />
-        <div style={{ width: '32%', height: 9, background: '#4f46e5', borderRadius: 5, marginTop: 2 }} />
-      </div>
-    );
-  }
-  if (styleId === 'gift_reveal') {
-    return (
-      <div style={{ ...box, background: '#fff7ed', display: 'flex', flexDirection: 'column',
-                    alignItems: 'center', justifyContent: 'center', gap: 4 }}>
-        <div style={{ width: 16, height: 13, background: '#f59e0b', borderRadius: 3 }} />
-        <div style={{ width: '50%', height: 7, background: '#111827', borderRadius: 2 }} />
-        <div style={{ width: '32%', height: 9, background: '#4f46e5', borderRadius: 5, marginTop: 2 }} />
-      </div>
-    );
-  }
-  // classic
+// --- Compact popup-customizer rows ---------------------------------------
+// One shared visual shell (label | control | ...) for every setting row in
+// the redesigned popup editor. ~36px tall so many fit without scrolling.
+const rowShell = {
+  display: 'flex', alignItems: 'center', gap: 10, minHeight: 36, padding: '2px 0',
+};
+const rowLabelStyle = { width: 108, flexShrink: 0, fontSize: 12, color: '#6b7280' };
+const rowFocusInputStyle = {
+  flex: 1, padding: '5px 8px', fontSize: 13, border: '1px solid #c7d2fe',
+  borderRadius: 6, outline: 'none', color: '#111827', minWidth: 0,
+};
+
+function SectionHeading({ children }) {
   return (
-    <div style={{ ...box, background: '#f3f4f6', display: 'flex' }}>
-      <div style={{ width: '38%', background: '#d1d5db' }} />
-      <div style={{ flex: 1, padding: 7, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ width: '70%', height: 5, background: '#9ca3af', borderRadius: 2 }} />
-        <div style={{ width: '50%', height: 4, background: '#d1d5db', borderRadius: 2 }} />
-        <div style={{ marginTop: 'auto', width: '55%', height: 8, background: '#4f46e5', borderRadius: 4 }} />
+    <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase',
+                  letterSpacing: '0.06em', margin: '16px 0 4px' }}>
+      {children}
+    </div>
+  );
+}
+
+// Pencil-reveals-input pattern — only free-text fields use this (Headline,
+// Subtext, Brand name, Allow/Deny button text). Enter/blur commits, Escape
+// restores the value the row had when editing started.
+function TextEditRow({ fieldKey, label, value, placeholder, onCommit, maxLength, editingField, onStartEdit, onStopEdit }) {
+  const editing = editingField === fieldKey;
+  const [draft, setDraft] = useState(value || '');
+  useEffect(() => { if (editing) setDraft(value || ''); }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const commit = () => { onCommit(draft); onStopEdit(); };
+  const cancel = () => onStopEdit();
+
+  if (editing) {
+    return (
+      <div style={rowShell}>
+        <div style={rowLabelStyle}>{label}</div>
+        <input
+          autoFocus
+          value={draft}
+          maxLength={maxLength}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); commit(); }
+            else if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+          }}
+          className="ccf-style-focus"
+          style={rowFocusInputStyle}
+        />
+      </div>
+    );
+  }
+  return (
+    <div style={rowShell}>
+      <div style={rowLabelStyle}>{label}</div>
+      <button
+        type="button"
+        onClick={() => onStartEdit(fieldKey)}
+        className="ccf-style-focus"
+        style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 'none',
+          padding: '5px 2px', fontSize: 13, color: value ? '#111827' : '#9ca3af', cursor: 'pointer',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+      >
+        {value || placeholder || '—'}
+      </button>
+      <button
+        type="button"
+        onClick={() => onStartEdit(fieldKey)}
+        aria-label={`Edit ${label}`}
+        className="ccf-style-focus"
+        style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer',
+          fontSize: 13, padding: 4, color: '#9ca3af' }}
+      >
+        ✏️
+      </button>
+    </div>
+  );
+}
+
+function ColorRow({ label, value, defaultValue, onChange }) {
+  const v = value || defaultValue;
+  return (
+    <div style={rowShell}>
+      <div style={rowLabelStyle}>{label}</div>
+      <input
+        type="color"
+        value={v}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={`${label} colour`}
+        style={{ width: 26, height: 26, padding: 0, border: '1px solid #e5e7eb', borderRadius: '50%',
+          cursor: 'pointer', overflow: 'hidden' }}
+      />
+      <span style={{ fontSize: 12, color: '#6b7280', fontFamily: 'monospace' }}>{v}</span>
+    </div>
+  );
+}
+
+function SelectRow({ label, value, options, onChange }) {
+  return (
+    <div style={rowShell}>
+      <div style={rowLabelStyle}>{label}</div>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="ccf-style-focus"
+        style={{ flex: 1, padding: '5px 8px', fontSize: 12, border: '1px solid #e5e7eb',
+          borderRadius: 6, background: '#fff', color: '#374151', cursor: 'pointer', minWidth: 0 }}>
+        {options.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function PillsRow({ label, value, options, onChange }) {
+  return (
+    <div style={{ ...rowShell, alignItems: 'flex-start' }}>
+      <div style={{ ...rowLabelStyle, marginTop: 6 }}>{label}</div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: 1 }}>
+        {options.map((opt) => {
+          const active = value === opt.value;
+          return (
+            <button key={opt.value} type="button" onClick={() => onChange(opt.value)}
+              aria-pressed={active} className="ccf-style-focus"
+              style={{ padding: '4px 10px', fontSize: 11, fontWeight: active ? 700 : 500,
+                color: active ? '#fff' : '#374151', background: active ? '#111827' : '#f9fafb',
+                border: '1px solid', borderColor: active ? '#111827' : '#e5e7eb',
+                borderRadius: 999, cursor: 'pointer' }}>
+              {opt.label}
+            </button>
+          );
+        })}
       </div>
     </div>
+  );
+}
+
+function ToggleRow({ label, checked, onChange }) {
+  return (
+    <div style={rowShell}>
+      <div style={rowLabelStyle}>{label}</div>
+      <div style={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
+        <button type="button" onClick={() => onChange(!checked)} aria-pressed={checked}
+          className="ccf-style-focus" style={popPillStyle(checked)}>
+          {checked ? 'On' : 'Off'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RadiusRow({ label, value, min = 0, max = 24, onChange }) {
+  return (
+    <div style={rowShell}>
+      <div style={rowLabelStyle}>{label}</div>
+      <input type="number" min={min} max={max} value={value}
+        onChange={(e) => onChange(Number(e.target.value))} className="ccf-style-focus"
+        style={{ width: 56, padding: '5px 8px', fontSize: 12, border: '1px solid #e5e7eb',
+          borderRadius: 6, color: '#374151' }} />
+      <span style={{ fontSize: 12, color: '#9ca3af' }}>px</span>
+    </div>
+  );
+}
+
+const popPillStyle = (active) => ({
+  padding: '4px 12px', fontSize: 11, fontWeight: active ? 700 : 500,
+  color: active ? '#fff' : '#374151', background: active ? '#16a34a' : '#f3f4f6',
+  border: 'none', borderRadius: 999, cursor: 'pointer',
+});
+
+// 3x3 segmented grid — the task's spec for "Image position" ("small
+// segmented pills"), replacing the old free-drag crosshair widget. A
+// previously-set custom (drag-produced) value still applies and still
+// loads/saves correctly — it just won't highlight any one cell as
+// selected unless it exactly matches a preset; clicking a cell always
+// writes a clean preset value going forward.
+const IMAGE_POSITION_PRESETS = [
+  ['0% 0%', '↖'], ['50% 0%', '↑'], ['100% 0%', '↗'],
+  ['0% 50%', '←'], ['50% 50%', '•'], ['100% 50%', '→'],
+  ['0% 100%', '↙'], ['50% 100%', '↓'], ['100% 100%', '↘'],
+];
+function ImagePositionGrid({ value, onChange }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 24px)', gap: 3 }}>
+      {IMAGE_POSITION_PRESETS.map(([pos, glyph]) => {
+        const active = value === pos;
+        return (
+          <button key={pos} type="button" onClick={() => onChange(pos)} aria-label={`Focus ${pos}`}
+            aria-pressed={active} className="ccf-style-focus"
+            style={{ width: 24, height: 24, fontSize: 11, lineHeight: '24px', textAlign: 'center',
+              padding: 0, border: '1px solid', borderColor: active ? '#4f46e5' : '#e5e7eb',
+              borderRadius: 4, background: active ? '#eef2ff' : '#fff',
+              color: active ? '#4f46e5' : '#9ca3af', cursor: 'pointer' }}>
+            {glyph}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function ImageRow({ label, imageUrl, onUpload, onRemove }) {
+  return (
+    <div style={rowShell}>
+      <div style={rowLabelStyle}>{label}</div>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+        {imageUrl ? (
+          <img src={imageUrl} alt="" style={{ width: 28, height: 28, borderRadius: 6, objectFit: 'cover',
+            border: '1px solid #e5e7eb', flexShrink: 0 }} />
+        ) : (
+          <div style={{ width: 28, height: 28, borderRadius: 6, background: '#f3f4f6',
+            border: '1px dashed #e5e7eb', flexShrink: 0 }} />
+        )}
+        <label className="ccf-style-focus" style={{ fontSize: 12, fontWeight: 600, color: '#4f46e5',
+          cursor: 'pointer', padding: '3px 4px' }}>
+          {imageUrl ? 'Change' : 'Upload'}
+          <input type="file" accept="image/*" style={{ display: 'none' }} onChange={onUpload} />
+        </label>
+        {imageUrl && (
+          <button type="button" onClick={onRemove} className="ccf-style-focus"
+            style={{ fontSize: 12, color: '#dc2626', background: 'none', border: 'none', cursor: 'pointer' }}>
+            Remove
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// A style-gallery card: a small, LIVE (not static) preview of the actual
+// style/layout, scaled down via CSS transform so it's the merchant's real
+// current settings, not a screenshot.
+function GalleryCard({ card, selected, disabled, previewNode, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={disabled ? undefined : onClick}
+      aria-pressed={selected}
+      aria-disabled={disabled}
+      className="ccf-style-card"
+      style={{
+        textAlign: 'left', padding: 10, borderRadius: 12,
+        border: selected ? '2px solid #4f46e5' : '1px solid #e5e7eb',
+        background: selected ? '#eef2ff' : '#fff',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.45 : 1,
+        display: 'flex', flexDirection: 'column', gap: 8,
+      }}
+    >
+      <div style={{ height: 96, borderRadius: 8, overflow: 'hidden', background: '#f3f4f6',
+        position: 'relative' }}>
+        <div style={{ position: 'absolute', top: '50%', left: '50%',
+          transform: 'translate(-50%,-50%) scale(0.34)', transformOrigin: 'center',
+          width: 340, pointerEvents: 'none' }}>
+          {previewNode}
+        </div>
+      </div>
+      <div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#111827', display: 'flex',
+          alignItems: 'center', gap: 6 }}>
+          {card.name}
+          {selected && <span style={{ fontSize: 10, fontWeight: 700, color: '#4f46e5' }}>✓ Selected</span>}
+        </div>
+        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, lineHeight: 1.4 }}>
+          {card.desc}
+        </div>
+      </div>
+    </button>
   );
 }
 
@@ -847,6 +1075,13 @@ export default function Settings({ shop }) {
   const [pushCount, setPushCount] = useState(0);
   const [emailCount, setEmailCount] = useState(0);
   const [showPopupCustomizer, setShowPopupCustomizer] = useState(false);
+  // popup-customizer-redesign: which of the two steps is showing (gallery
+  // of style cards, or the editor for whichever one was clicked), and
+  // which single compact row (if any) is in inline-edit mode. Re-opening
+  // the customizer always starts at the gallery — see the close handler
+  // below.
+  const [popupEditorOpen, setPopupEditorOpen] = useState(false);
+  const [editingField, setEditingField] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
@@ -1158,58 +1393,6 @@ export default function Settings({ shop }) {
     padding: isMobileView ? '16px' : DS.card.padding,
   };
 
-  // --- popup customization row styles ---
-  const popRow = {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-    marginBottom: '16px',
-  };
-  const popLabel = {
-    width: '140px',
-    fontSize: '13px',
-    color: '#374151',
-    fontWeight: '500',
-  };
-  const popInput = {
-    flex: 1,
-    padding: '8px 12px',
-    fontSize: '13px',
-    border: '1px solid #e5e7eb',
-    borderRadius: '8px',
-    outline: 'none',
-    color: '#374151',
-  };
-  const popSelect = {
-    padding: '8px 12px',
-    fontSize: '13px',
-    border: '1px solid #e5e7eb',
-    borderRadius: '8px',
-    outline: 'none',
-    color: '#374151',
-    background: '#fff',
-    cursor: 'pointer',
-  };
-  const popSwatch = {
-    width: '36px',
-    height: '36px',
-    padding: '2px',
-    border: '1px solid #e5e7eb',
-    borderRadius: '6px',
-    cursor: 'pointer',
-  };
-  const popPill = (active) => ({
-    padding: '6px 14px',
-    fontSize: '12px',
-    fontWeight: active ? '600' : '400',
-    color: active ? '#fff' : '#374151',
-    background: active ? '#111827' : '#f9fafb',
-    border: '1px solid',
-    borderColor: active ? '#111827' : '#e5e7eb',
-    borderRadius: '20px',
-    cursor: 'pointer',
-  });
-
   // popup-responsive: each card is a variable so the mobile (single-column)
   // and desktop (2-column) layouts can arrange them without duplicating JSX.
   const voiceCard = (
@@ -1497,6 +1680,283 @@ export default function Settings({ shop }) {
 
   // The popup card is either the compact "Customize popup" trigger or the
   // full customizer panel, depending on showPopupCustomizer.
+  const GALLERY_CARDS = [
+    { key: 'classic-split', styleId: 'classic', layout: 'split', name: 'Classic — Split',
+      desc: 'Image beside your message. Full control over every field.' },
+    { key: 'classic-card', styleId: 'classic', layout: 'card', name: 'Classic — Card',
+      desc: 'A compact bottom-corner toast.' },
+    { key: 'classic-banner', styleId: 'classic', layout: 'banner', name: 'Classic — Banner',
+      desc: 'A slim full-width bar.' },
+    { key: 'flash_sale', styleId: 'flash_sale', layout: null, name: POPUP_STYLES.flash_sale.name,
+      desc: POPUP_STYLES.flash_sale.shortDescription },
+    { key: 'gift_reveal', styleId: 'gift_reveal', layout: null, name: POPUP_STYLES.gift_reveal.name,
+      desc: POPUP_STYLES.gift_reveal.shortDescription },
+  ];
+  const selectedGalleryCard =
+    GALLERY_CARDS.find((c) => c.styleId === activeStyleId &&
+      (c.layout == null || (activePopup.layout || 'split') === c.layout)) ||
+    GALLERY_CARDS.find((c) => c.styleId === activeStyleId) ||
+    GALLERY_CARDS[0];
+
+  // Same image-upload handler as before (canvas resize/compress to keep the
+  // PATCH body small) — unchanged, just relocated into the compact ImageRow.
+  function handleImageUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX = 800;
+        let w = img.width, h = img.height;
+        if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+        if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        const compressed = canvas.toDataURL('image/jpeg', 0.7);
+        setActivePopup((p) => ({ ...p, imageUrl: compressed }));
+        markImageChanged();
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  const deviceToggle = (
+    <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', background: '#f3f4f6',
+                  borderRadius: '10px', padding: '4px' }}>
+      {[{ key: 'desktop', label: '🖥 Desktop' }, { key: 'mobile', label: '📱 Mobile' }].map((tab) => (
+        <button
+          key={tab.key}
+          onClick={() => setPopupDevice(tab.key)}
+          style={{
+            flex: 1, padding: '8px', fontSize: '13px',
+            fontWeight: popupDevice === tab.key ? '600' : '400',
+            color: popupDevice === tab.key ? '#111827' : '#6b7280',
+            background: popupDevice === tab.key ? '#fff' : 'transparent',
+            border: 'none', borderRadius: '8px', cursor: 'pointer',
+            boxShadow: popupDevice === tab.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+            transition: 'all 0.15s',
+          }}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  // --- STEP 1: style gallery -------------------------------------------
+  const popupGalleryView = (
+    <>
+      <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827', marginBottom: '2px' }}>
+        Choose a popup style
+      </div>
+      <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '16px' }}>
+        Each preview uses your current settings — pick one to edit it.
+      </div>
+      <div style={{ display: 'grid',
+        gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(200px, 1fr))',
+        gap: '12px' }}>
+        {GALLERY_CARDS.map((c) => {
+          const isMobileTab = popupDevice === 'mobile';
+          const disabled = isMobileTab && c.layout === 'split';
+          const selected = c.styleId === activeStyleId &&
+            (c.layout == null || (activePopup.layout || 'split') === c.layout);
+          const commonPreviewProps = {
+            step: 'prompt', email: '', onEmailChange: () => {}, onAllow: () => {}, onDismiss: () => {},
+            wantsDiscount: previewWantsDiscount, unlockedInfo: previewUnlockedInfo,
+          };
+          const previewNode = c.styleId !== 'classic' ? (
+            <StyleCardPreview styleId={c.styleId} cfg={activePopup} styleFields={activeStyleFields}
+              emailFieldEnabled={previewShowEmailField} {...commonPreviewProps} />
+          ) : (
+            <ClassicPreview layout={c.layout} device="desktop" popup={activePopup}
+              showEmailField={previewShowEmailField} discountOfferText={previewDiscountOfferText}
+              discountOfferHeadline={discountRules.offerHeadline} {...commonPreviewProps} />
+          );
+          return (
+            <GalleryCard key={c.key} card={c} selected={selected} disabled={disabled}
+              previewNode={previewNode}
+              onClick={() => {
+                setActiveStyle((p) => ({ ...p, styleId: c.styleId,
+                  ...(c.layout ? { layout: c.layout } : {}) }));
+                setPopupEditorOpen(true);
+              }} />
+          );
+        })}
+      </div>
+    </>
+  );
+
+  // --- STEP 2: editor (preview on top, compact settings below) ---------
+  const styleExtraFieldRows = POPUP_STYLES[activeStyleId].extraFields.map((f) => {
+    if (f.showWhen) {
+      const [depKey, depVal] = Object.entries(f.showWhen)[0];
+      if (getStyleFieldValue(POPUP_STYLES[activeStyleId], activeStyleFields, depKey) !== depVal) return null;
+    }
+    const value = getStyleFieldValue(POPUP_STYLES[activeStyleId], activeStyleFields, f.key);
+    const setField = (v) => setActiveStyle((p) => ({ ...p, styleFields: { ...(p.styleFields || {}), [f.key]: v } }));
+    if (f.type === 'boolean') {
+      return <ToggleRow key={f.key} label={f.label} checked={!!value} onChange={setField} />;
+    }
+    if (f.type === 'select') {
+      return <SelectRow key={f.key} label={f.label} value={value || f.default} options={f.options} onChange={setField} />;
+    }
+    if (f.type === 'datetime') {
+      return (
+        <div key={f.key} style={rowShell}>
+          <div style={rowLabelStyle}>{f.label}</div>
+          <input type="datetime-local" value={value || ''} onChange={(e) => setField(e.target.value)}
+            className="ccf-style-focus" style={rowFocusInputStyle} />
+        </div>
+      );
+    }
+    // text
+    return (
+      <TextEditRow key={f.key} fieldKey={`style-${f.key}`} label={f.label} value={value || ''}
+        placeholder="" maxLength={f.maxLength} onCommit={setField}
+        editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+    );
+  });
+
+  const popupEditorView = (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+        <button onClick={() => setPopupEditorOpen(false)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px',
+            color: '#4f46e5', fontWeight: 600, padding: 0 }}>
+          ← Back to styles
+        </button>
+        <div style={{ fontSize: '13px', color: '#9ca3af' }}>
+          {selectedGalleryCard.name}
+        </div>
+      </div>
+
+      {deviceToggle}
+
+      {popupDevice === 'mobile' && (
+        <div style={{ fontSize: '12px', color: '#6366f1', background: '#eef2ff', borderRadius: '8px',
+          padding: '10px 12px', marginBottom: '16px' }}>
+          Mobile layout: image stacks above content automatically.
+        </div>
+      )}
+
+      {/* TOP: large interactive live preview */}
+      <div style={{ background: '#f9fafb', border: '1px solid #f3f4f6', borderRadius: '12px',
+        padding: '16px', marginBottom: '20px' }}>
+        {popupPreviewCard}
+      </div>
+
+      {/* BELOW: compact settings */}
+      <SectionHeading>Content</SectionHeading>
+      <TextEditRow fieldKey="headline" label="Headline" value={activePopup.headline}
+        placeholder="e.g. Don't miss out on this offer"
+        onCommit={(v) => setActivePopup((p) => ({ ...p, headline: v }))}
+        editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+      <TextEditRow fieldKey="subtext" label="Subtext" value={activePopup.subtext}
+        placeholder="e.g. Get notified when prices drop"
+        onCommit={(v) => setActivePopup((p) => ({ ...p, subtext: v }))}
+        editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+      {activeStyleId === 'classic' && (
+        <TextEditRow fieldKey="brandName" label="Brand name" value={activePopup.brandName}
+          placeholder="e.g. SILK HOUSE"
+          onCommit={(v) => setActivePopup((p) => ({ ...p, brandName: v }))}
+          editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+      )}
+
+      <SectionHeading>Appearance</SectionHeading>
+      {activeStyleId === 'classic' && popupDevice === 'desktop' && (
+        <PillsRow label="Layout" value={activePopup.layout || 'split'}
+          options={[{ value: 'split', label: 'Split' }, { value: 'card', label: 'Card' }, { value: 'banner', label: 'Banner' }]}
+          onChange={(v) => setActivePopup((p) => ({ ...p, layout: v }))} />
+      )}
+      <ColorRow label="Accent" value={activePopup.accentColor} defaultValue="#4f46e5"
+        onChange={(v) => setActivePopup((p) => ({ ...p, accentColor: v }))} />
+      <ColorRow label="Background" value={activePopup.bgColor} defaultValue="#ffffff"
+        onChange={(v) => setActivePopup((p) => ({ ...p, bgColor: v }))} />
+      <ColorRow label="Text color" value={activePopup.textColor} defaultValue="#111827"
+        onChange={(v) => setActivePopup((p) => ({ ...p, textColor: v }))} />
+      <SelectRow label="Font" value={activePopup.fontFamily || 'inherit'}
+        options={[
+          { value: 'inherit', label: 'Store default' },
+          { value: "'Arial', sans-serif", label: 'Arial' },
+          { value: "'Georgia', serif", label: 'Georgia' },
+          { value: "'Helvetica Neue', sans-serif", label: 'Helvetica' },
+          { value: "'Times New Roman', serif", label: 'Times New Roman' },
+          { value: "'Courier New', monospace", label: 'Courier New' },
+          { value: "'Playfair Display', serif", label: 'Playfair Display' },
+          { value: "'Montserrat', sans-serif", label: 'Montserrat' },
+        ]}
+        onChange={(v) => setActivePopup((p) => ({ ...p, fontFamily: v }))} />
+      <RadiusRow label="Border radius" value={activePopup.borderRadius ?? 12}
+        onChange={(v) => setActivePopup((p) => ({ ...p, borderRadius: v }))} />
+      {activeStyleId === 'classic' && (
+        <PillsRow label="Text align" value={activePopup.textAlign || 'left'}
+          options={[{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' }]}
+          onChange={(v) => setActivePopup((p) => ({ ...p, textAlign: v }))} />
+      )}
+      <SelectRow label="Position" value={activePopup.position || 'bottom-right'}
+        options={[
+          { value: 'bottom-right', label: 'Bottom right' },
+          { value: 'bottom-left', label: 'Bottom left' },
+          { value: 'center', label: 'Center' },
+          { value: 'top-right', label: 'Top right' },
+          { value: 'top-left', label: 'Top left' },
+        ]}
+        onChange={(v) => setActivePopup((p) => ({ ...p, position: v }))} />
+      {activeStyleId === 'classic' && (
+        <ToggleRow label="Dark overlay" checked={activePopup.showOverlay !== false}
+          onChange={(v) => setActivePopup((p) => ({ ...p, showOverlay: v }))} />
+      )}
+
+      <SectionHeading>Buttons</SectionHeading>
+      <TextEditRow fieldKey="allowText" label="Allow button" value={activePopup.allowText || 'Allow'}
+        placeholder="Allow"
+        onCommit={(v) => setActivePopup((p) => ({ ...p, allowText: v }))}
+        editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+      <TextEditRow fieldKey="denyText" label="Deny button" value={activePopup.denyText || 'No thanks'}
+        placeholder="No thanks"
+        onCommit={(v) => setActivePopup((p) => ({ ...p, denyText: v }))}
+        editingField={editingField} onStartEdit={setEditingField} onStopEdit={() => setEditingField(null)} />
+      <PillsRow label="Button style" value={activePopup.ctaStyle || 'rounded'}
+        options={[
+          { value: 'rounded', label: 'Rounded' }, { value: 'square', label: 'Square' },
+          { value: 'pill', label: 'Pill' }, { value: 'outlined', label: 'Outlined' },
+          { value: 'soft', label: 'Soft' },
+        ]}
+        onChange={(v) => setActivePopup((p) => ({ ...p, ctaStyle: v }))} />
+
+      <SectionHeading>Image</SectionHeading>
+      <ImageRow label="Image" imageUrl={activePopup.imageUrl}
+        onUpload={handleImageUpload}
+        onRemove={() => { setActivePopup((p) => ({ ...p, imageUrl: '' })); markImageChanged(); }} />
+      {activePopup.imageUrl && (
+        <div style={rowShell}>
+          <div style={rowLabelStyle}>Focus</div>
+          <ImagePositionGrid value={activePopup.imagePosition || '50% 50%'}
+            onChange={(v) => setActivePopup((p) => ({ ...p, imagePosition: v }))} />
+        </div>
+      )}
+
+      {styleExtraFieldRows.some(Boolean) && (
+        <>
+          <SectionHeading>Style options</SectionHeading>
+          {styleExtraFieldRows}
+        </>
+      )}
+
+      {popupDevice === 'mobile' && (
+        <>
+          <SectionHeading>Mobile</SectionHeading>
+          <ToggleRow label="Different style on mobile" checked={!!popup.mobileStyleOverride}
+            onChange={(v) => setPopup((p) => ({ ...p, mobileStyleOverride: v }))} />
+        </>
+      )}
+    </>
+  );
+
   const popupCard = !showPopupCustomizer ? (
     <div
       style={{
@@ -1506,833 +1966,43 @@ export default function Settings({ shop }) {
         justifyContent: 'space-between',
       }}
     >
-              <div>
-                <div
-                  style={{
-                    fontSize: '15px',
-                    fontWeight: '600',
-                    color: '#111827',
-                    marginBottom: '4px',
-                  }}
-                >
-                  Popup customization
-                </div>
-                <div style={{ fontSize: '13px', color: '#9ca3af' }}>
-                  Control how the notification prompt looks on your store.
-                </div>
-              </div>
-              <button
-                onClick={() => setShowPopupCustomizer(true)}
-                style={{
-                  ...DS.btnPrimary,
-                  padding: '8px 18px',
-                  flexShrink: 0,
-                  marginLeft: '16px',
-                }}
-              >
-                Customize popup
-              </button>
-            </div>
+      <div>
+        <div style={{ fontSize: '15px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
+          Popup customization
+        </div>
+        <div style={{ fontSize: '13px', color: '#9ca3af' }}>
+          Control how the notification prompt looks on your store.
+        </div>
+      </div>
+      <button
+        onClick={() => { setShowPopupCustomizer(true); setPopupEditorOpen(false); }}
+        style={{ ...DS.btnPrimary, padding: '8px 18px', flexShrink: 0, marginLeft: '16px' }}
+      >
+        Customize popup
+      </button>
+    </div>
   ) : (
     <div style={{ ...card }}>
-              {/* Header with back button */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  marginBottom: '20px',
-                }}
-              >
-                <button
-                  onClick={() => setShowPopupCustomizer(false)}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    cursor: 'pointer',
-                    fontSize: '18px',
-                    color: '#9ca3af',
-                    padding: '0',
-                    lineHeight: 1,
-                  }}
-                >
-                  ←
-                </button>
-                <div>
-                  <div
-                    style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}
-                  >
-                    Popup customization
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#9ca3af' }}>
-                    Changes save with the main Save settings button
-                  </div>
-                </div>
-              </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+        <button
+          onClick={() => { setShowPopupCustomizer(false); setPopupEditorOpen(false); }}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px',
+            color: '#9ca3af', padding: '0', lineHeight: 1 }}
+        >
+          ←
+        </button>
+        <div>
+          <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827' }}>
+            Popup customization
+          </div>
+          <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+            Changes save with the main Save settings button
+          </div>
+        </div>
+      </div>
 
-              {/* Device tab switcher */}
-              <div
-                style={{
-                  display: 'flex',
-                  gap: '8px',
-                  marginBottom: '20px',
-                  background: '#f3f4f6',
-                  borderRadius: '10px',
-                  padding: '4px',
-                }}
-              >
-                {[
-                  { key: 'desktop', label: '🖥 Desktop' },
-                  { key: 'mobile', label: '📱 Mobile' },
-                ].map((tab) => (
-                  <button
-                    key={tab.key}
-                    onClick={() => setPopupDevice(tab.key)}
-                    style={{
-                      flex: 1,
-                      padding: '8px',
-                      fontSize: '13px',
-                      fontWeight: popupDevice === tab.key ? '600' : '400',
-                      color: popupDevice === tab.key ? '#111827' : '#6b7280',
-                      background: popupDevice === tab.key ? '#fff' : 'transparent',
-                      border: 'none',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      boxShadow:
-                        popupDevice === tab.key
-                          ? '0 1px 3px rgba(0,0,0,0.1)'
-                          : 'none',
-                      transition: 'all 0.15s',
-                    }}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-
-              {popupDevice === 'mobile' && (
-                <div
-                  style={{
-                    fontSize: '12px',
-                    color: '#6366f1',
-                    background: '#eef2ff',
-                    borderRadius: '8px',
-                    padding: '10px 12px',
-                    marginBottom: '16px',
-                  }}
-                >
-                  Mobile layout: image stacks above content automatically.
-                </div>
-              )}
-
-            {/* Fields edit activePopup / setActivePopup — the desktop `popup`
-                state on the Desktop tab, `mobilePopup` on the Mobile tab. */}
-            <>
-            {/* --- Popup Style --------------------------------------------
-                Style wraps layout (see audits/popup-style-audit-before.txt
-                item 4): Classic keeps the manual Layout picker below and
-                touches nothing new; Flash Sale / Gift Reveal each force
-                their own `card` layout and hide that picker, so switching
-                back to Classic always restores whatever layout was last
-                chosen manually, untouched. */}
-            <div style={{ ...popRow, alignItems: 'flex-start', flexDirection: 'column', gap: '12px' }}>
-              <div style={popLabel}>Popup style</div>
-              <div
-                role="radiogroup"
-                aria-label="Popup style"
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
-                  gap: '10px',
-                  width: '100%',
-                }}
-              >
-                {STYLE_ORDER.map((id) => {
-                  const s = POPUP_STYLES[id];
-                  const selected = activeStyleId === id;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      role="radio"
-                      aria-checked={selected}
-                      onClick={() => setActiveStyle((p) => ({ ...p, styleId: id }))}
-                      className="ccf-style-card"
-                      style={{
-                        textAlign: 'left',
-                        padding: '8px',
-                        borderRadius: '10px',
-                        border: selected ? '2px solid #4f46e5' : '1px solid #e5e7eb',
-                        background: selected ? '#eef2ff' : '#fff',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '6px',
-                      }}
-                    >
-                      <StyleThumbnail styleId={id} />
-                      <div style={{ fontSize: '12px', fontWeight: '600', color: '#111827' }}>
-                        {s.name}
-                      </div>
-                      <div style={{
-                        alignSelf: 'flex-start', fontSize: '10px', fontWeight: '600',
-                        color: '#6b7280', background: '#f3f4f6', borderRadius: '999px',
-                        padding: '2px 8px', textTransform: 'capitalize',
-                      }}>
-                        {id === 'classic' ? (activePopup.layout || 'split') : s.layoutType}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Details panel for the selected style */}
-              {(() => {
-                const s = POPUP_STYLES[activeStyleId];
-                return (
-                  <div style={{
-                    width: '100%', boxSizing: 'border-box', padding: '10px 12px',
-                    background: '#f9fafb', border: '1px solid #f3f4f6', borderRadius: '8px',
-                    fontSize: '12px', color: '#4b5563', lineHeight: 1.5,
-                  }}>
-                    <div style={{ marginBottom: '2px' }}>{s.shortDescription}</div>
-                    <div style={{ color: '#9ca3af' }}>
-                      Best for: {s.bestFor} · Layout: {s.layoutType || (activePopup.layout || 'split')}
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* Extra fields — only the ones this style declares */}
-              {POPUP_STYLES[activeStyleId].extraFields.length > 0 && (
-                <div style={{
-                  width: '100%', boxSizing: 'border-box', display: 'flex',
-                  flexDirection: 'column', gap: '12px', padding: '12px',
-                  border: '1px solid #f3f4f6', borderRadius: '8px',
-                }}>
-                  {POPUP_STYLES[activeStyleId].extraFields.map((f) => {
-                    if (f.showWhen) {
-                      const [depKey, depVal] = Object.entries(f.showWhen)[0];
-                      if (getStyleFieldValue(POPUP_STYLES[activeStyleId], activeStyleFields, depKey) !== depVal) {
-                        return null;
-                      }
-                    }
-                    const value = getStyleFieldValue(POPUP_STYLES[activeStyleId], activeStyleFields, f.key);
-                    const setField = (v) =>
-                      setActiveStyle((p) => ({
-                        ...p,
-                        styleFields: { ...(p.styleFields || {}), [f.key]: v },
-                      }));
-
-                    return (
-                      <div key={f.key}>
-                        <label
-                          htmlFor={`ccf-style-field-${f.key}`}
-                          style={{ display: 'block', fontSize: '12px', fontWeight: '600',
-                                   color: '#374151', marginBottom: '4px' }}
-                        >
-                          {f.label}
-                        </label>
-                        {f.type === 'boolean' && (
-                          <button
-                            id={`ccf-style-field-${f.key}`}
-                            type="button"
-                            aria-pressed={!!value}
-                            onClick={() => setField(!value)}
-                            className="ccf-style-focus"
-                            style={popPill(!!value)}
-                          >
-                            {value ? 'On' : 'Off'}
-                          </button>
-                        )}
-                        {f.type === 'select' && (
-                          <select
-                            id={`ccf-style-field-${f.key}`}
-                            className="ccf-style-focus"
-                            value={value || f.default}
-                            onChange={(e) => setField(e.target.value)}
-                            style={popSelect}
-                          >
-                            {f.options.map((opt) => (
-                              <option key={opt.value} value={opt.value}>{opt.label}</option>
-                            ))}
-                          </select>
-                        )}
-                        {f.type === 'datetime' && (
-                          <input
-                            id={`ccf-style-field-${f.key}`}
-                            className="ccf-style-focus"
-                            type="datetime-local"
-                            value={value || ''}
-                            onChange={(e) => setField(e.target.value)}
-                            style={popInput}
-                          />
-                        )}
-                        {f.type === 'text' && (
-                          <input
-                            id={`ccf-style-field-${f.key}`}
-                            className="ccf-style-focus"
-                            type="text"
-                            maxLength={f.maxLength}
-                            value={value || ''}
-                            onChange={(e) => setField(e.target.value)}
-                            style={popInput}
-                          />
-                        )}
-                        {f.helper && (
-                          <div style={{ fontSize: '11px', color: '#9ca3af', marginTop: '4px' }}>
-                            {f.helper}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Mobile-only: let the Mobile tab pick a different style than
-                  Desktop. Writes popup.mobileStyleOverride regardless of
-                  which tab is active in general, but this control only
-                  renders on the Mobile tab, so in practice it's always
-                  toggled from there. */}
-              {popupDevice === 'mobile' && (
-                <div style={{ width: '100%', display: 'flex', alignItems: 'center',
-                              justifyContent: 'space-between', gap: '12px',
-                              paddingTop: '4px' }}>
-                  <label htmlFor="ccf-mobile-style-override" style={{ fontSize: '12px',
-                    color: '#374151', fontWeight: '500' }}>
-                    Use a different style on mobile
-                  </label>
-                  <button
-                    id="ccf-mobile-style-override"
-                    type="button"
-                    aria-pressed={!!popup.mobileStyleOverride}
-                    onClick={() => setPopup((p) => ({ ...p, mobileStyleOverride: !p.mobileStyleOverride }))}
-                    className="ccf-style-focus"
-                    style={popPill(!!popup.mobileStyleOverride)}
-                  >
-                    {popup.mobileStyleOverride ? 'On' : 'Off'}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Layout — desktop only, Classic only; Flash Sale/Gift Reveal
-                each force their own layout (see the note above). Mobile is
-                always the Card layout regardless of style. */}
-            {popupDevice === 'desktop' && activeStyleId === 'classic' && (
-              <div style={popRow}>
-                <div style={popLabel}>Layout</div>
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  {[
-                    { value: 'split', label: '⬜ Split' },
-                    { value: 'card', label: '▭ Card' },
-                    { value: 'banner', label: '▬ Banner' },
-                  ].map((opt) => (
-                    <button
-                      key={opt.value}
-                      onClick={() => setActivePopup((p) => ({ ...p, layout: opt.value }))}
-                      style={popPill(activePopup.layout === opt.value)}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Image */}
-            <div style={{ ...popRow, alignItems: 'flex-start' }}>
-              <div style={{ ...popLabel, marginTop: '8px' }}>Image</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
-                {/* Upload button */}
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <label
-                    style={{
-                      padding: '8px 16px',
-                      fontSize: '13px',
-                      fontWeight: '500',
-                      color: '#374151',
-                      background: '#f9fafb',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      display: 'inline-block',
-                    }}
-                  >
-                    📁 Upload image
-                    <input
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' }}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        const reader = new FileReader();
-                        reader.onload = (ev) => {
-                          // Resize/compress via canvas before storing as base64 —
-                          // the raw file (up to 500KB) re-encoded losslessly would
-                          // otherwise bloat the popup config's PATCH body and the
-                          // Store document it's written into. Drag-to-focus and
-                          // the layout previews read activePopup.imageUrl /
-                          // imagePosition independently of how the URL was
-                          // produced, so neither is affected by this.
-                          const img = new Image();
-                          img.onload = () => {
-                            const canvas = document.createElement('canvas');
-                            const MAX = 800;
-                            let w = img.width, h = img.height;
-                            if (w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
-                            if (h > MAX) { w = Math.round(w * MAX / h); h = MAX; }
-                            canvas.width = w;
-                            canvas.height = h;
-                            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-                            const compressed = canvas.toDataURL('image/jpeg', 0.7);
-                            setActivePopup((p) => ({ ...p, imageUrl: compressed }));
-                            markImageChanged();
-                          };
-                          img.src = ev.target.result;
-                        };
-                        reader.readAsDataURL(file);
-                      }}
-                    />
-                  </label>
-                  {activePopup.imageUrl && (
-                    <button
-                      onClick={() => {
-                        setActivePopup((p) => ({ ...p, imageUrl: '' }));
-                        markImageChanged();
-                      }}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: '#dc2626',
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                      }}
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-
-                {/* OR paste URL */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '11px', color: '#9ca3af' }}>
-                    or paste URL:
-                  </span>
-                  <input
-                    value={
-                      activePopup.imageUrl?.startsWith('data:')
-                        ? ''
-                        : activePopup.imageUrl || ''
-                    }
-                    onChange={(e) => {
-                      setActivePopup((p) => ({ ...p, imageUrl: e.target.value }));
-                      markImageChanged();
-                    }}
-                    placeholder="https://cdn.shopify.com/..."
-                    style={{
-                      flex: 1,
-                      padding: '6px 10px',
-                      fontSize: '12px',
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '6px',
-                      outline: 'none',
-                      color: '#374151',
-                    }}
-                  />
-                </div>
-
-              </div>
-            </div>
-
-            {/* Image focus — drag to set the crop focus point */}
-            {activePopup.imageUrl && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  gap: '16px',
-                  marginBottom: '16px',
-                }}
-              >
-                <div style={{ ...popLabel, paddingTop: '4px' }}>Image focus</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {/* Drag-to-focus control */}
-                  <div
-                    style={{
-                      width: '160px',
-                      height: '100px',
-                      borderRadius: '8px',
-                      border: '1px solid #e5e7eb',
-                      overflow: 'hidden',
-                      position: 'relative',
-                      cursor: 'crosshair',
-                      backgroundImage: `url(${activePopup.imageUrl})`,
-                      backgroundSize: 'cover',
-                      backgroundPosition: activePopup.imagePosition || 'center center',
-                      userSelect: 'none',
-                    }}
-                    onMouseDown={(e) => {
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const updatePos = (clientX, clientY) => {
-                        const x = Math.round(
-                          ((clientX - rect.left) / rect.width) * 100
-                        );
-                        const y = Math.round(
-                          ((clientY - rect.top) / rect.height) * 100
-                        );
-                        const xClamped = Math.max(0, Math.min(100, x));
-                        const yClamped = Math.max(0, Math.min(100, y));
-                        setActivePopup((p) => ({
-                          ...p,
-                          imagePosition: `${xClamped}% ${yClamped}%`,
-                        }));
-                      };
-                      updatePos(e.clientX, e.clientY);
-                      const onMove = (ev) => updatePos(ev.clientX, ev.clientY);
-                      const onUp = () => {
-                        window.removeEventListener('mousemove', onMove);
-                        window.removeEventListener('mouseup', onUp);
-                      };
-                      window.addEventListener('mousemove', onMove);
-                      window.addEventListener('mouseup', onUp);
-                    }}
-                    onTouchStart={(e) => {
-                      e.preventDefault();
-                      const rect = e.currentTarget.getBoundingClientRect();
-                      const updatePos = (clientX, clientY) => {
-                        const x = Math.round(
-                          ((clientX - rect.left) / rect.width) * 100
-                        );
-                        const y = Math.round(
-                          ((clientY - rect.top) / rect.height) * 100
-                        );
-                        const xClamped = Math.max(0, Math.min(100, x));
-                        const yClamped = Math.max(0, Math.min(100, y));
-                        setActivePopup((p) => ({
-                          ...p,
-                          imagePosition: `${xClamped}% ${yClamped}%`,
-                        }));
-                      };
-                      const touch = e.touches[0];
-                      updatePos(touch.clientX, touch.clientY);
-                      const onMove = (ev) => {
-                        const t = ev.touches[0];
-                        updatePos(t.clientX, t.clientY);
-                      };
-                      const onEnd = () => {
-                        window.removeEventListener('touchmove', onMove);
-                        window.removeEventListener('touchend', onEnd);
-                      };
-                      window.addEventListener('touchmove', onMove, {
-                        passive: false,
-                      });
-                      window.addEventListener('touchend', onEnd);
-                    }}
-                  >
-                    {/* Focus dot indicator */}
-                    {(() => {
-                      const pos = activePopup.imagePosition || '50% 50%';
-                      const parts = pos.split(' ');
-                      const x = parseFloat(parts[0]) || 50;
-                      const y = parseFloat(parts[1]) || 50;
-                      return (
-                        <div
-                          style={{
-                            position: 'absolute',
-                            left: `${x}%`,
-                            top: `${y}%`,
-                            transform: 'translate(-50%, -50%)',
-                            width: '20px',
-                            height: '20px',
-                            borderRadius: '50%',
-                            background: 'rgba(255,255,255,0.9)',
-                            border: '2px solid rgba(0,0,0,0.4)',
-                            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-                            pointerEvents: 'none',
-                          }}
-                        />
-                      );
-                    })()}
-                  </div>
-
-                  {/* Helper text */}
-                  <div style={{ fontSize: '11px', color: '#9ca3af' }}>
-                    Click or drag on the image to set focus point
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Headline */}
-            <div style={popRow}>
-              <div style={popLabel}>Headline</div>
-              <input
-                value={activePopup.headline || ''}
-                onChange={(e) => setActivePopup((p) => ({ ...p, headline: e.target.value }))}
-                placeholder="e.g. Don't miss out on this offer"
-                style={popInput}
-              />
-            </div>
-
-            {/* Subtext */}
-            <div style={popRow}>
-              <div style={popLabel}>Subtext</div>
-              <input
-                value={activePopup.subtext || ''}
-                onChange={(e) => setActivePopup((p) => ({ ...p, subtext: e.target.value }))}
-                placeholder="e.g. Get notified when prices drop"
-                style={popInput}
-              />
-            </div>
-
-            {/* Text position */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
-              <div style={{ width: '140px', fontSize: '13px', color: '#374151', fontWeight: '500' }}>
-                Text position
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                {[
-                  { value: 'left', label: '⬛ Left' },
-                  { value: 'center', label: '⬛ Center' },
-                  { value: 'right', label: '⬛ Right' },
-                ].map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() =>
-                      setActivePopup((p) => ({ ...p, textAlign: opt.value }))
-                    }
-                    style={{
-                      padding: '6px 14px',
-                      fontSize: '12px',
-                      fontWeight:
-                        (activePopup.textAlign || 'left') === opt.value ? '600' : '400',
-                      color:
-                        (activePopup.textAlign || 'left') === opt.value
-                          ? '#fff'
-                          : '#374151',
-                      background:
-                        (activePopup.textAlign || 'left') === opt.value
-                          ? '#111827'
-                          : '#f9fafb',
-                      border: '1px solid',
-                      borderColor:
-                        (activePopup.textAlign || 'left') === opt.value
-                          ? '#111827'
-                          : '#e5e7eb',
-                      borderRadius: '20px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {opt.value.charAt(0).toUpperCase() + opt.value.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Brand name */}
-            <div style={popRow}>
-              <div style={popLabel}>Brand name</div>
-              <input
-                value={activePopup.brandName || ''}
-                onChange={(e) => setActivePopup((p) => ({ ...p, brandName: e.target.value }))}
-                placeholder="e.g. SILK HOUSE"
-                style={popInput}
-              />
-            </div>
-
-            {/* Allow button text */}
-            <div style={popRow}>
-              <div style={popLabel}>Allow button</div>
-              <input
-                value={activePopup.allowText || 'Allow'}
-                onChange={(e) => setActivePopup((p) => ({ ...p, allowText: e.target.value }))}
-                style={{ ...popInput, flex: 'none', width: '160px' }}
-              />
-            </div>
-
-            {/* Deny button text */}
-            <div style={popRow}>
-              <div style={popLabel}>Deny button</div>
-              <input
-                value={activePopup.denyText || 'No thanks'}
-                onChange={(e) => setActivePopup((p) => ({ ...p, denyText: e.target.value }))}
-                style={{ ...popInput, flex: 'none', width: '160px' }}
-              />
-            </div>
-
-            {/* Accent color */}
-            <div style={popRow}>
-              <div style={popLabel}>Accent color</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <input
-                  type="color"
-                  value={activePopup.accentColor || '#4f46e5'}
-                  onChange={(e) => setActivePopup((p) => ({ ...p, accentColor: e.target.value }))}
-                  style={popSwatch}
-                />
-                <input
-                  value={activePopup.accentColor || '#4f46e5'}
-                  onChange={(e) => setActivePopup((p) => ({ ...p, accentColor: e.target.value }))}
-                  style={{ ...popInput, flex: 'none', width: '100px' }}
-                />
-              </div>
-            </div>
-
-            {/* Background color */}
-            <div style={popRow}>
-              <div style={popLabel}>Background</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <input
-                  type="color"
-                  value={activePopup.bgColor || '#ffffff'}
-                  onChange={(e) => setActivePopup((p) => ({ ...p, bgColor: e.target.value }))}
-                  style={popSwatch}
-                />
-                <input
-                  value={activePopup.bgColor || '#ffffff'}
-                  onChange={(e) => setActivePopup((p) => ({ ...p, bgColor: e.target.value }))}
-                  style={{ ...popInput, flex: 'none', width: '100px' }}
-                />
-              </div>
-            </div>
-
-            {/* Text color */}
-            <div style={popRow}>
-              <div style={popLabel}>Text color</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <input
-                  type="color"
-                  value={activePopup.textColor || '#111827'}
-                  onChange={(e) => setActivePopup((p) => ({ ...p, textColor: e.target.value }))}
-                  style={popSwatch}
-                />
-                <input
-                  value={activePopup.textColor || '#111827'}
-                  onChange={(e) => setActivePopup((p) => ({ ...p, textColor: e.target.value }))}
-                  style={{ ...popInput, flex: 'none', width: '100px' }}
-                />
-              </div>
-            </div>
-
-            {/* Font family */}
-            <div style={popRow}>
-              <div style={popLabel}>Font</div>
-              <select
-                value={activePopup.fontFamily || 'inherit'}
-                onChange={(e) => setActivePopup((p) => ({ ...p, fontFamily: e.target.value }))}
-                style={popSelect}
-              >
-                <option value="inherit">Store default</option>
-                <option value="'Arial', sans-serif">Arial</option>
-                <option value="'Georgia', serif">Georgia</option>
-                <option value="'Helvetica Neue', sans-serif">Helvetica</option>
-                <option value="'Times New Roman', serif">Times New Roman</option>
-                <option value="'Courier New', monospace">Courier New</option>
-                <option value="'Playfair Display', serif">Playfair Display</option>
-                <option value="'Montserrat', sans-serif">Montserrat</option>
-              </select>
-            </div>
-
-            {/* Border radius */}
-            <div style={popRow}>
-              <div style={popLabel}>Border radius</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <input
-                  type="range"
-                  min="0"
-                  max="24"
-                  value={activePopup.borderRadius ?? 12}
-                  onChange={(e) =>
-                    setActivePopup((p) => ({ ...p, borderRadius: Number(e.target.value) }))
-                  }
-                  style={{ width: '120px', cursor: 'pointer' }}
-                />
-                <span style={{ fontSize: '13px', color: '#374151', minWidth: '30px' }}>
-                  {activePopup.borderRadius ?? 12}px
-                </span>
-              </div>
-            </div>
-
-            {/* Button style */}
-            <div style={{ ...popRow, alignItems: 'flex-start' }}>
-              <div style={{ ...popLabel, marginTop: '6px' }}>Button style</div>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {[
-                  { value: 'rounded', label: 'Rounded' },
-                  { value: 'square', label: 'Square' },
-                  { value: 'pill', label: 'Pill' },
-                  { value: 'outlined', label: 'Outlined' },
-                  { value: 'soft', label: 'Soft' },
-                ].map((opt) => (
-                  <button
-                    key={opt.value}
-                    onClick={() => setActivePopup((p) => ({ ...p, ctaStyle: opt.value }))}
-                    style={popPill(activePopup.ctaStyle === opt.value)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Position */}
-            <div style={popRow}>
-              <div style={popLabel}>Position</div>
-              <select
-                value={activePopup.position || 'bottom-right'}
-                onChange={(e) => setActivePopup((p) => ({ ...p, position: e.target.value }))}
-                style={popSelect}
-              >
-                <option value="bottom-right">Bottom right</option>
-                <option value="bottom-left">Bottom left</option>
-                <option value="center">Center</option>
-                <option value="top-right">Top right</option>
-                <option value="top-left">Top left</option>
-              </select>
-            </div>
-
-            {/* Dark overlay toggle */}
-            <div style={{ ...popRow, marginBottom: 0 }}>
-              <div style={popLabel}>Dark overlay</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div
-                  onClick={() =>
-                    setActivePopup((p) => ({ ...p, showOverlay: !p.showOverlay }))
-                  }
-                  style={{
-                    width: '44px',
-                    height: '24px',
-                    borderRadius: '12px',
-                    background: activePopup.showOverlay !== false ? '#111827' : '#d1d5db',
-                    position: 'relative',
-                    cursor: 'pointer',
-                    transition: 'background 0.2s',
-                  }}
-                >
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: '3px',
-                      left: activePopup.showOverlay !== false ? '23px' : '3px',
-                      width: '18px',
-                      height: '18px',
-                      borderRadius: '50%',
-                      background: '#fff',
-                      transition: 'left 0.2s',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                    }}
-                  />
-                </div>
-                <span style={{ fontSize: '13px', color: '#9ca3af' }}>
-                  {activePopup.showOverlay !== false ? 'On' : 'Off'}
-                </span>
-              </div>
-            </div>
-            </>
-            </div>
+      {popupEditorOpen ? popupEditorView : popupGalleryView}
+    </div>
   );
 
   const pushPreviewCard = (
@@ -2463,11 +2133,13 @@ export default function Settings({ shop }) {
   );
 
   // Sticky on desktop so it stays visible while scrolling the options.
+  // popup-customizer-redesign: embedded directly inside the editor view
+  // below (between the device toggle and the compact settings form) —
+  // no longer a separate sticky right-column card. Its own former
+  // "Desktop preview"/"Mobile preview" heading was dropped since the
+  // editor's device toggle right above it already says which one this is.
   const popupPreviewCard = (
-    <div style={{ ...card }}>
-            <div style={{ fontSize: '14px', fontWeight: '600', color: '#111827', marginBottom: '4px' }}>
-              {popupDevice === 'mobile' ? 'Mobile preview' : 'Desktop preview'}
-            </div>
+    <div>
             <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '10px' }}>
               Click Allow to walk through the real flow — nothing here ever
               contacts the backend or asks for a real permission.
@@ -2733,14 +2405,21 @@ export default function Settings({ shop }) {
         </div>
       )}
 
-      {isMobileView ? (
+      {showPopupCustomizer ? (
+        // popup-customizer-redesign: the gallery/editor is now a single,
+        // self-contained flow (its own embedded preview, top-to-bottom) —
+        // it no longer shares the page's normal left-form/right-sticky-
+        // preview split, so it gets the full page width instead of being
+        // squeezed into the narrow left column while the right column
+        // sits unused.
+        <div style={{ maxWidth: '960px', margin: '0 auto' }}>{popupCard}</div>
+      ) : isMobileView ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {popupCard}
-          {showPopupCustomizer && popupPreviewCard}
-          {!showPopupCustomizer && voiceCard}
-          {!showPopupCustomizer && howOftenCard}
-          {!showPopupCustomizer && saveCard}
-          {!showPopupCustomizer && channelsCard}
+          {voiceCard}
+          {howOftenCard}
+          {saveCard}
+          {channelsCard}
         </div>
       ) : (
         <div
@@ -2753,8 +2432,8 @@ export default function Settings({ shop }) {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {popupCard}
-            {!showPopupCustomizer && voiceCard}
-            {!showPopupCustomizer && howOftenCard}
+            {voiceCard}
+            {howOftenCard}
           </div>
           <div
             style={{
@@ -2768,9 +2447,9 @@ export default function Settings({ shop }) {
               overflowY: 'auto',
             }}
           >
-            {showPopupCustomizer ? popupPreviewCard : pushPreviewCard}
-            {!showPopupCustomizer && channelsCard}
-            {!showPopupCustomizer && saveCard}
+            {pushPreviewCard}
+            {channelsCard}
+            {saveCard}
           </div>
         </div>
       )}
