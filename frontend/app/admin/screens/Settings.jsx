@@ -401,28 +401,23 @@ function TextEditRow({ fieldKey, label, value, placeholder, onCommit, maxLength,
       </div>
     );
   }
+  // pencil-removed: the value button is now the only click target — the
+  // pencil was redundant with it. Hover feedback (row tint + blue value
+  // text) replaces the icon as the "this is editable" signal; done via a
+  // CSS class (ccf-text-row) since inline styles can't express :hover.
   return (
-    <div style={rowShell}>
+    <div style={rowShell} className="ccf-text-row">
       <div style={rowLabelStyle}>{label}</div>
       <button
         type="button"
         onClick={() => onStartEdit(fieldKey)}
-        className="ccf-style-focus"
+        aria-label={`Edit ${label}`}
+        className="ccf-style-focus ccf-text-row-value"
         style={{ flex: 1, minWidth: 0, textAlign: 'left', background: 'none', border: 'none',
           padding: '5px 2px', fontSize: 13, color: value ? '#111827' : '#9ca3af', cursor: 'pointer',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
       >
         {value || placeholder || '—'}
-      </button>
-      <button
-        type="button"
-        onClick={() => onStartEdit(fieldKey)}
-        aria-label={`Edit ${label}`}
-        className="ccf-style-focus"
-        style={{ flexShrink: 0, background: 'none', border: 'none', cursor: 'pointer',
-          fontSize: 13, padding: 4, color: '#9ca3af' }}
-      >
-        ✏️
       </button>
     </div>
   );
@@ -2540,7 +2535,16 @@ export default function Settings({ shop }) {
         '.ccf-settings-grid{display:grid;grid-template-columns:1fr;' +
         'column-gap:24px;row-gap:0;}' +
         '.ccf-settings-full{grid-column:1/-1;}' +
-        '@media (min-width:900px){.ccf-settings-grid{grid-template-columns:1fr 1fr;}}'
+        '@media (min-width:900px){.ccf-settings-grid{grid-template-columns:1fr 1fr;}}' +
+        // pencil-removed: hover is now the only "this is editable" signal
+        // on a TextEditRow, since the pencil icon is gone — a subtle tint
+        // on the row plus the value text switching to accent blue. The
+        // !important is needed because the value's own inline `color`
+        // (dark vs muted-placeholder) would otherwise always win over a
+        // plain stylesheet rule.
+        '.ccf-text-row{border-radius:6px;transition:background 0.12s;}' +
+        '.ccf-text-row:hover{background:#f9fafb;}' +
+        '.ccf-text-row:hover .ccf-text-row-value{color:#4f46e5 !important;}'
       }</style>
       <PageHeader
         title="Settings"
