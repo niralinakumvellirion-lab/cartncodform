@@ -1147,6 +1147,13 @@ export default function Settings({ shop }) {
   // the customizer always starts at the gallery — see the close handler
   // below.
   const [popupEditorOpen, setPopupEditorOpen] = useState(false);
+  // gallery-close-button: tracks whether the editor has been opened at
+  // least once THIS time the customizer is open — distinguishes "picked
+  // a card, then came back to the gallery via Popup theme" (there's an
+  // editor to return to, show the gallery's ✕) from "just opened the
+  // customizer fresh" (no editor to go back to yet). Reset whenever the
+  // whole customizer closes, so the next open starts clean.
+  const [hasVisitedEditor, setHasVisitedEditor] = useState(false);
   const [editingField, setEditingField] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -1809,17 +1816,32 @@ export default function Settings({ shop }) {
   );
 
   // --- STEP 1: style gallery -------------------------------------------
-  // gallery-back-removed: no more "← Back" link here — the only ways out
-  // of the gallery are now picking a card (opens the editor) or the
-  // outer "←" in the card header (closes the whole customizer). See the
-  // task's own note on this trade-off in the commit/report.
+  // gallery-close-button: the plain "← Back" link is gone (see the prior
+  // task's note on that trade-off); this small ✕ replaces it for the one
+  // case where there IS somewhere to go back to — the merchant already
+  // had a style open in the editor and came here via "Popup theme". On a
+  // fresh "Customize popup" open (hasVisitedEditor still false) there's no
+  // editor to return to yet, so it's hidden — picking a card or the outer
+  // "←" (closes the whole customizer) remain the only options there.
   const popupGalleryView = (
     <>
-      <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827', marginBottom: '2px' }}>
-        Choose a popup style
-      </div>
-      <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '16px' }}>
-        Each preview uses your current settings — pick one to edit it.
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        <div>
+          <div style={{ fontSize: '16px', fontWeight: '600', color: '#111827', marginBottom: '2px' }}>
+            Choose a popup style
+          </div>
+          <div style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '16px' }}>
+            Each preview uses your current settings — pick one to edit it.
+          </div>
+        </div>
+        {hasVisitedEditor && (
+          <button type="button" onClick={() => setPopupEditorOpen(true)} aria-label="Close style picker"
+            className="ccf-style-focus"
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16,
+              color: '#9ca3af', padding: 4, lineHeight: 1, flexShrink: 0 }}>
+            ✕
+          </button>
+        )}
       </div>
       <div style={{ display: 'grid',
         gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(200px, 1fr))',
@@ -1852,6 +1874,7 @@ export default function Settings({ shop }) {
                 setActiveStyle((p) => ({ ...p, styleId: c.styleId,
                   ...(c.layout ? { layout: c.layout } : {}) }));
                 setPopupEditorOpen(true);
+                setHasVisitedEditor(true);
               }} />
           );
         })}
@@ -2328,7 +2351,7 @@ export default function Settings({ shop }) {
         gap: '12px', marginBottom: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
           <button
-            onClick={() => { setShowPopupCustomizer(false); setPopupEditorOpen(false); }}
+            onClick={() => { setShowPopupCustomizer(false); setPopupEditorOpen(false); setHasVisitedEditor(false); }}
             style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px',
               color: '#9ca3af', padding: '0', lineHeight: 1, flexShrink: 0 }}
           >
