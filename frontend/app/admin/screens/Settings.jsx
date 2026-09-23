@@ -558,7 +558,7 @@ const CCF_CHECKERBOARD_BG = {
   backgroundSize: '16px 16px',
   backgroundPosition: '0 0,0 8px,8px -8px,-8px 0',
 };
-function ImageRow({ label, imageUrl, onUpload, onRemove }) {
+function ImageRow({ label, imageUrl, imagePosition, onUpload, onRemove }) {
   const iconBtnStyle = {
     width: 28, height: 28, borderRadius: '50%', background: 'rgba(255,255,255,0.95)',
     border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -572,7 +572,12 @@ function ImageRow({ label, imageUrl, onUpload, onRemove }) {
           border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center',
           ...(imageUrl ? CCF_CHECKERBOARD_BG : { background: '#f9fafb' }) }}>
           {imageUrl ? (
-            <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            // image-focus-thumbnail-fix: was missing objectPosition, so the
+            // thumbnail never moved when a focus preset (or the exact x%/y%
+            // override) changed, even though the stored value and the live
+            // preview below were both already correct.
+            <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover',
+              objectPosition: imagePosition || '50% 50%' }} />
           ) : (
             <span style={{ fontSize: 12, color: '#9ca3af' }}>No image</span>
           )}
@@ -2258,7 +2263,7 @@ export default function Settings({ shop }) {
 
       <SectionHeading>Image</SectionHeading>
       <div className="ccf-settings-grid">
-        <ImageRow label="Image" imageUrl={activePopup.imageUrl}
+        <ImageRow label="Image" imageUrl={activePopup.imageUrl} imagePosition={activePopup.imagePosition}
           onUpload={handleImageUpload}
           onRemove={() => { setActivePopup((p) => ({ ...p, imageUrl: '' })); markImageChanged(); }} />
         {activePopup.imageUrl && (
