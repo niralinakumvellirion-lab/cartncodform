@@ -843,10 +843,18 @@ function StyleCardPreview({
     }
     const bg = cfg.bgColor || '#18181b';
     const fg = cfg.textColor || '#ffffff';
+    // mobile-preview-clipping-fix: was a fixed 300px-wide, 260/320px-tall
+    // box (with the mobile preview additionally anchoring it to the
+    // BOTTOM of the phone frame) — neither matches this style's own
+    // defining trait, "fills the whole frame" (ccf-push.js:
+    // position:fixed;inset:0;width:100%;height:100%, unconditionally).
+    // 100%/100% here, paired with the mobile preview's now-inset:0
+    // wrapper for this style, makes the preview genuinely fill its
+    // container instead of floating a fixed-size box inside it.
     return (
       <div style={{ borderRadius: compact ? 0 : radius, overflow: 'hidden',
                     background: imageUrl ? '#000' : bg, color: fg, fontFamily: font, position: 'relative',
-                    width: compact ? 300 : 'min(340px, 100%)', minHeight: compact ? 260 : 320,
+                    width: '100%', height: '100%',
                     display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
                     boxShadow: '0 10px 34px rgba(0,0,0,0.35)' }}>
         {imageUrl && (
@@ -2294,8 +2302,19 @@ export default function Settings({ shop }) {
               >
                 <div
                   style={{
-                    width: '200px',
-                    height: '360px',
+                    // mobile-preview-clipping-fix: was 200x360 — much
+                    // narrower than any style's own compact width (300,
+                    // or 240 for Story Card), so every "card"-shaped
+                    // style already overflowed it horizontally, and a
+                    // style with real content height (Full Screen,
+                    // anchored bottom before this fix) had nowhere near
+                    // enough room and got clipped by this div's own
+                    // overflow:hidden. 340x600 comfortably fits every
+                    // compact width used anywhere in this file with
+                    // margin to spare, while still reading as a phone
+                    // (real devices run ~360x640-430x932).
+                    width: '340px',
+                    height: '600px',
                     border: '8px solid #111827',
                     borderRadius: '28px',
                     overflow: 'hidden',
@@ -2374,9 +2393,30 @@ export default function Settings({ shop }) {
                         unlockedInfo: previewUnlockedInfo,
                       };
                       if (activeStyleId !== 'classic') {
+                        // mobile-preview-clipping-fix: every style was
+                        // force-positioned bottom:12/left:8/right:8,
+                        // which is only correct for a bottom-anchored
+                        // card. Full Screen needs to fill the frame
+                        // (matches ccf-push.js's real inset:0/100%x100%),
+                        // Top Bar needs to sit at the frame's top edge
+                        // (matches its real position:fixed;top:0), and
+                        // Story Card is shown centered per this task's
+                        // own spec (its real storefront position is
+                        // bottom:24px, but centered reads better inside a
+                        // small mockup and still shows the full card).
+                        // Classic/Flash Sale/Gift Reveal/Bottom Sheet all
+                        // keep the original bottom-anchored wrapper,
+                        // unchanged.
+                        const wrapStyle = activeStyleId === 'full_takeover'
+                          ? { position: 'absolute', inset: 0, zIndex: 5 }
+                          : activeStyleId === 'top_bar'
+                          ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }
+                          : activeStyleId === 'story_card'
+                          ? { position: 'absolute', top: '50%', left: '50%',
+                              transform: 'translate(-50%, -50%)', zIndex: 5 }
+                          : { position: 'absolute', bottom: '12px', left: '8px', right: '8px', zIndex: 5 };
                         return (
-                          <div style={{ position: 'absolute', bottom: '12px', left: '8px',
-                                        right: '8px', zIndex: 5 }}>
+                          <div style={wrapStyle}>
                             <StyleCardPreview
                               styleId={activeStyleId}
                               cfg={styleCfg}
