@@ -1711,6 +1711,31 @@ export default function Settings({ shop }) {
           </div>
   );
 
+  // save-status-banner: shared by both Save buttons (the standalone
+  // saveCard below, and the one embedded in popupPreviewCard while the
+  // customizer is open) — a full-width block ABOVE the button row, not an
+  // inline sibling of the button, so a long error can never squash the
+  // button's width. error/success are never both true (saveSettings
+  // resets both before every attempt), so this only ever renders one.
+  const isNetworkError = error.startsWith('Cannot reach the backend');
+  const saveStatusBanner = success ? (
+    <div style={{ marginBottom: 12, background: '#f0fdf4', border: '1px solid #86efac',
+      borderRadius: 8, padding: 12, fontSize: 13, color: '#166534' }}>
+      ✓ Saved
+    </div>
+  ) : error ? (
+    <div style={{ marginBottom: 12, background: '#fef2f2', border: '1px solid #fca5a5',
+      borderRadius: 8, padding: 12, fontSize: 13, color: '#991b1b', overflowWrap: 'anywhere' }}>
+      {isNetworkError ? (
+        <>
+          <div style={{ fontWeight: 600 }}>Couldn't save — can't reach the server.</div>
+          <div style={{ marginTop: 2 }}>The app's backend may be starting up. Wait a moment and try again.</div>
+          <div style={{ marginTop: 6, fontSize: 11, color: '#b91c1c', opacity: 0.85 }}>{error}</div>
+        </>
+      ) : error}
+    </div>
+  ) : null;
+
   // Standalone Save card — always the last thing in the right column (or
   // straight after the popup preview while the customizer is open).
   const saveCard = (
@@ -1719,35 +1744,25 @@ export default function Settings({ shop }) {
         ...DS.card,
         padding: '16px 20px',
         marginBottom: 0,
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
       }}
     >
-      <button
-        onClick={saveSettings}
-        disabled={saving}
-        style={{
-          ...DS.btnPrimary,
-          padding: '10px 24px',
-          fontSize: '14px',
-          background: saving ? DS.gray400 : DS.primary,
-          cursor: saving ? 'not-allowed' : 'pointer',
-          flex: 1,
-        }}
-      >
-        {saving ? 'Saving…' : 'Save settings'}
-      </button>
-      {success && (
-        <span
-          style={{ fontSize: '13px', color: '#16a34a', whiteSpace: 'nowrap' }}
+      {saveStatusBanner}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        <button
+          onClick={saveSettings}
+          disabled={saving}
+          style={{
+            ...DS.btnPrimary,
+            padding: '10px 24px',
+            fontSize: '14px',
+            background: saving ? DS.gray400 : DS.primary,
+            cursor: saving ? 'not-allowed' : 'pointer',
+            flex: 1,
+          }}
         >
-          ✓ Saved
-        </span>
-      )}
-      {error && (
-        <span style={{ fontSize: '13px', color: '#dc2626' }}>{error}</span>
-      )}
+          {saving ? 'Saving…' : 'Save settings'}
+        </button>
+      </div>
     </div>
   );
 
@@ -2102,45 +2117,33 @@ export default function Settings({ shop }) {
             )}
 
             {/* The one Save button while the customizer is open — pinned to
-                the bottom of the sticky right column. */}
+                the bottom of the sticky right column. Same save-status-
+                banner-above-the-row treatment as saveCard, so a long error
+                here can't squash this button either. */}
             <div
               style={{
                 marginTop: '20px',
                 paddingTop: '16px',
                 borderTop: '1px solid #f3f4f6',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
               }}
             >
-              <button
-                onClick={saveSettings}
-                disabled={saving}
-                style={{
-                  ...DS.btnPrimary,
-                  flex: 1,
-                  padding: '12px 24px',
-                  fontSize: '14px',
-                  background: saving ? DS.gray400 : DS.primary,
-                  cursor: saving ? 'not-allowed' : 'pointer',
-                }}
-              >
-                {saving ? 'Saving…' : 'Save settings'}
-              </button>
-              {success && (
-                <span
+              {saveStatusBanner}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <button
+                  onClick={saveSettings}
+                  disabled={saving}
                   style={{
-                    fontSize: '13px',
-                    color: '#16a34a',
-                    whiteSpace: 'nowrap',
+                    ...DS.btnPrimary,
+                    flex: 1,
+                    padding: '12px 24px',
+                    fontSize: '14px',
+                    background: saving ? DS.gray400 : DS.primary,
+                    cursor: saving ? 'not-allowed' : 'pointer',
                   }}
                 >
-                  ✓ Saved
-                </span>
-              )}
-              {error && (
-                <span style={{ fontSize: '13px', color: '#dc2626' }}>{error}</span>
-              )}
+                  {saving ? 'Saving…' : 'Save settings'}
+                </button>
+              </div>
             </div>
     </div>
   );
