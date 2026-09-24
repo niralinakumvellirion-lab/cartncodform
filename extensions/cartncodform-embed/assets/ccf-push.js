@@ -238,6 +238,11 @@
     var timer = setInterval(tick, 1000);
   }
 
+  // mobile-only styles (audits/mobile-popup-styles-proposal.txt) — mirrors
+  // frontend/app/admin/lib/popupStyles.js's MOBILE_ONLY_STYLE_IDS exactly.
+  var CCF_MOBILE_ONLY_STYLE_IDS = ['bottom_sheet', 'full_takeover', 'top_bar', 'story_card'];
+  var CCF_KNOWN_STYLE_IDS = ['flash_sale', 'gift_reveal'].concat(CCF_MOBILE_ONLY_STYLE_IDS);
+
   // popup-style: resolve which style + extra fields are actually in force.
   // Independent of cfg's own layout-presence mobile fallback above — the
   // desktop style is the default for BOTH devices; mobile only diverges
@@ -255,7 +260,15 @@
     // An id this build of the theme extension doesn't recognize (e.g. a
     // style registered in a later admin release than the currently-cached
     // theme asset) falls back to Classic rather than rendering nothing.
-    if (styleId !== 'flash_sale' && styleId !== 'gift_reveal') styleId = 'classic';
+    if (CCF_KNOWN_STYLE_IDS.indexOf(styleId) === -1) {
+      styleId = 'classic';
+    } else if (CCF_MOBILE_ONLY_STYLE_IDS.indexOf(styleId) !== -1 && !isMobileDevice) {
+      // mobile-only-fallback: never render one of these for a desktop
+      // visitor, no matter how the id got here (stale cache, a direct API
+      // write, popup.styleId somehow holding a mobile-only id) — the
+      // storefront half of the "never on desktop, anywhere" requirement.
+      styleId = 'classic';
+    }
     return { id: styleId, fields: styleFields };
   }
 
@@ -508,6 +521,20 @@
       #ccf-push-prompt.layout-banner:hover {
         transform: none;
       }
+      /* mobile-styles: Bottom Sheet genuinely slides up from the bottom
+         edge (0 horizontal transform, unlike every layout above) — its
+         own keyframe + no-hover-lift override, same reasoning as
+         layout-center/layout-banner just above. */
+      #ccf-push-prompt.layout-sheet {
+        animation: ccfSheetSlideUp 0.35s cubic-bezier(0.34,1.56,0.64,1);
+      }
+      @keyframes ccfSheetSlideUp {
+        from { opacity:0; transform:translateY(100%); }
+        to   { opacity:1; transform:translateY(0); }
+      }
+      #ccf-push-prompt.layout-sheet:hover {
+        transform: none;
+      }
     `;
     document.head.appendChild(s);
   }
@@ -640,8 +667,10 @@
     // background, set on `wrap` in the flash_sale/gift_reveal branch
     // above); Gift Reveal's codeChipEmphasis makes the code block bigger
     // and bolder. Classic (sId === 'classic') is these same original
-    // colors/sizes, untouched.
-    var isDark = sId === 'flash_sale';
+    // colors/sizes, untouched. Full Screen and Story Card also render on
+    // a dark/photo background (mobile-styles) — same light-on-dark need,
+    // mirrors Settings.jsx's UnlockedView isDark check exactly.
+    var isDark = sId === 'flash_sale' || sId === 'full_takeover' || sId === 'story_card';
     var titleColor = isDark ? '#ffffff' : '#111827';
     var subColor = isDark ? '#d4d4d8' : '#6b7280';
     var chipBig = sId === 'gift_reveal' && sFields.codeChipEmphasis !== false;
@@ -964,6 +993,360 @@
         'background:rgba(' + (isFlashSale ? '255,255,255,0.12' : '0,0,0,0.35') + ');color:#fff;' +
         'border:none;border-radius:50%;width:26px;height:26px;font-size:14px;line-height:26px;' +
         'text-align:center;cursor:pointer;z-index:10;';
+      wrap.appendChild(closeBtn);
+
+    } else if (ccfStyle.id === 'bottom_sheet') {
+      // ---------- POPUP STYLE: Bottom Sheet — anchored to the viewport's
+      // bottom edge, rounded top corners only, safe-area-inset-bottom
+      // padding, small drag handle as the swipe-down-to-dismiss
+      // affordance. Mobile-only (see ccfResolveStyle() above). ----------
+      var bsFields = ccfStyle.fields || {};
+      var bsRadius = (cfg.borderRadius != null ? cfg.borderRadius : 16) + 'px';
+      var bsBg = cfg.bgColor || '#ffffff';
+      var bsFg = cfg.textColor || '#111827';
+
+      wrap.style.cssText = [
+        'position:fixed', 'left:0', 'right:0', 'bottom:0', 'width:100%',
+        'padding-bottom:env(safe-area-inset-bottom, 0px)',
+        'background:' + bsBg, 'color:' + bsFg,
+        'border-top-left-radius:' + bsRadius, 'border-top-right-radius:' + bsRadius,
+        'overflow:hidden', 'box-shadow:0 -8px 30px rgba(0,0,0,0.2)',
+        'z-index:2147483647',
+        'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif')
+      ].join(';');
+      wrap.classList.add('layout-sheet');
+
+      var bsHandleEnabled = bsFields.dragHandleEnabled !== false;
+      if (bsHandleEnabled) {
+        var bsHandleWrap = document.createElement('div');
+        bsHandleWrap.style.cssText = 'display:flex;justify-content:center;padding-top:8px;';
+        var bsHandle = document.createElement('div');
+        bsHandle.style.cssText = 'width:36px;height:4px;border-radius:999px;background:#d1d5db;';
+        bsHandleWrap.appendChild(bsHandle);
+        wrap.appendChild(bsHandleWrap);
+      }
+
+      var bsImageUrl = cfg.imageUrl || '';
+      if (bsImageUrl) {
+        var bsImgEl = document.createElement('img');
+        bsImgEl.src = bsImageUrl;
+        bsImgEl.alt = '';
+        bsImgEl.style.cssText = 'width:100%;height:' + (isMobile ? '90px' : '110px') +
+          ';object-fit:cover;display:block;margin-top:8px;object-position:' +
+          (cfg.imagePosition || '50% 50%') + ';';
+        bsImgEl.onerror = function () { bsImgEl.style.display = 'none'; };
+        wrap.appendChild(bsImgEl);
+      } else if (bsFields.iconArtEnabled !== false) {
+        var bsIconWrap = document.createElement('div');
+        bsIconWrap.style.cssText = 'height:70px;display:flex;align-items:center;' +
+          'justify-content:center;color:' + accent + ';';
+        bsIconWrap.innerHTML = ccfIcon('gift', 40); // hardcoded icon markup — no merchant string involved
+        wrap.appendChild(bsIconWrap);
+      }
+
+      var bsContent = document.createElement('div');
+      bsContent.id = 'ccf-content-section';
+      bsContent.style.cssText = 'padding:18px 20px;text-align:center;';
+
+      var bsHead = document.createElement('div');
+      bsHead.id = 'ccf-prompt-text';
+      bsHead.style.cssText = 'font-size:17px;font-weight:800;line-height:1.3;margin-bottom:6px;';
+      bsHead.textContent = headline;
+      bsContent.appendChild(bsHead);
+
+      if (cfg.subtext) {
+        var bsSub = document.createElement('div');
+        bsSub.style.cssText = 'font-size:13px;margin-bottom:12px;line-height:1.4;color:#6b7280;';
+        bsSub.textContent = cfg.subtext;
+        bsContent.appendChild(bsSub);
+      }
+
+      if (ccfShowEmailField()) {
+        var bsEmailInput = document.createElement('input');
+        bsEmailInput.type = 'email';
+        bsEmailInput.id = 'ccf-email-input';
+        bsEmailInput.className = 'ccf-input';
+        var bsEp = ccfFieldPct('emailDiscount');
+        bsEmailInput.placeholder = 'Your email' + (bsEp ? ' (get ' + bsEp + '% off)' : '');
+        bsEmailInput.style.cssText = ccfInputStyle();
+        bsContent.appendChild(bsEmailInput);
+      }
+
+      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
+      bsContent.appendChild(allow);
+
+      deny = buildDenyBtn(ccfDenyButtonStyle());
+      bsContent.appendChild(deny);
+
+      if (cfg.showBranding) {
+        bsContent.appendChild(buildBranding(
+          'margin-top:12px;font-size:10px;text-align:center;letter-spacing:0.5px;color:#d1d5db;'));
+      }
+
+      wrap.appendChild(bsContent);
+
+      closeBtn = document.createElement('button');
+      closeBtn.id = 'ccf-close-btn';
+      closeBtn.type = 'button';
+      closeBtn.textContent = '×';
+      closeBtn.style.cssText = 'position:absolute;top:' + (bsHandleEnabled ? '18px' : '12px') +
+        ';right:12px;background:rgba(0,0,0,0.35);color:#fff;border:none;border-radius:50%;' +
+        'width:26px;height:26px;font-size:14px;line-height:26px;text-align:center;cursor:pointer;z-index:10;';
+      wrap.appendChild(closeBtn);
+
+    } else if (ccfStyle.id === 'full_takeover') {
+      // ---------- POPUP STYLE: Full Screen — full-bleed, edge-to-edge
+      // overlay for a high-urgency, time-boxed offer. Mobile-only (see
+      // ccfResolveStyle() above), and NEVER shown on the page_load trigger
+      // (see initIntentTriggers() above — registry constraint on this
+      // style in frontend/app/admin/lib/popupStyles.js). ----------
+      var ftFields = ccfStyle.fields || {};
+      var ftBg = cfg.bgColor || '#18181b';
+      var ftFg = cfg.textColor || '#ffffff';
+      var ftImageUrl = cfg.imageUrl || '';
+
+      wrap.style.cssText = [
+        'position:fixed', 'inset:0', 'width:100%', 'height:100%',
+        'padding-top:env(safe-area-inset-top, 0px)',
+        'padding-bottom:env(safe-area-inset-bottom, 0px)',
+        'background:' + (ftImageUrl ? '#000' : ftBg), 'color:' + ftFg,
+        'overflow:hidden', 'z-index:2147483647',
+        'display:flex', 'flex-direction:column', 'justify-content:flex-end',
+        'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif')
+      ].join(';');
+      wrap.classList.add('layout-banner'); // no translateX(-50%) resting transform — same reasoning as Classic Banner
+
+      if (ftImageUrl) {
+        var ftImgEl = document.createElement('img');
+        ftImgEl.src = ftImageUrl;
+        ftImgEl.alt = '';
+        ftImgEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;' +
+          'object-fit:cover;object-position:' + (cfg.imagePosition || '50% 50%') + ';';
+        ftImgEl.onerror = function () { ftImgEl.style.display = 'none'; };
+        wrap.appendChild(ftImgEl);
+
+        var ftScrim = document.createElement('div');
+        ftScrim.setAttribute('style',
+          'position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,0.15),rgba(0,0,0,0.8));');
+        wrap.appendChild(ftScrim);
+      }
+
+      var ftContent = document.createElement('div');
+      ftContent.id = 'ccf-content-section';
+      ftContent.style.cssText = 'position:relative;padding:24px 20px;text-align:center;';
+
+      if (ftFields.badgeText) {
+        var ftBadge = document.createElement('span');
+        ftBadge.style.cssText = 'display:inline-block;font-size:11px;font-weight:700;' +
+          'letter-spacing:0.05em;text-transform:uppercase;color:' + accent + ';' +
+          'border:1px solid ' + accent + ';border-radius:999px;padding:4px 12px;margin-bottom:10px;';
+        ftBadge.textContent = String(ftFields.badgeText).slice(0, 24);
+        ftContent.appendChild(ftBadge);
+      }
+
+      var ftHead = document.createElement('div');
+      ftHead.id = 'ccf-prompt-text';
+      ftHead.style.cssText = 'font-size:22px;font-weight:800;line-height:1.25;margin-bottom:8px;';
+      ftHead.textContent = headline;
+      ftContent.appendChild(ftHead);
+
+      if (cfg.subtext) {
+        var ftSub = document.createElement('div');
+        ftSub.style.cssText = 'font-size:14px;margin-bottom:14px;line-height:1.4;color:rgba(255,255,255,0.75);';
+        ftSub.textContent = cfg.subtext;
+        ftContent.appendChild(ftSub);
+      }
+
+      if (ccfShowEmailField()) {
+        var ftEmailInput = document.createElement('input');
+        ftEmailInput.type = 'email';
+        ftEmailInput.id = 'ccf-email-input';
+        ftEmailInput.className = 'ccf-input';
+        var ftEp = ccfFieldPct('emailDiscount');
+        ftEmailInput.placeholder = 'Your email' + (ftEp ? ' (get ' + ftEp + '% off)' : '');
+        ftEmailInput.style.cssText = ccfInputStyle() +
+          'background:rgba(255,255,255,0.1);color:' + ftFg + ';border-color:rgba(255,255,255,0.3);';
+        ftContent.appendChild(ftEmailInput);
+      }
+
+      // Real-deadline countdown only — never a fake per-visitor timer,
+      // same rule and same two sourcing modes as Flash Sale above.
+      if (ftFields.countdownSource === 'fixed_date' && ftFields.countdownEndsAt) {
+        var ftEndsAtMs = new Date(ftFields.countdownEndsAt).getTime();
+        if (ftEndsAtMs > Date.now()) {
+          var ftCountdownWrap = document.createElement('div');
+          ftCountdownWrap.style.cssText = 'font-size:22px;font-weight:800;letter-spacing:0.08em;' +
+            'margin-bottom:12px;font-variant-numeric:tabular-nums;';
+          ftContent.appendChild(ftCountdownWrap);
+          ccfStartCountdown(ftCountdownWrap, ftCountdownWrap, ftEndsAtMs);
+        }
+      }
+
+      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
+      ftContent.appendChild(allow);
+
+      deny = buildDenyBtn(ccfDenyButtonStyle() + 'color:rgba(255,255,255,0.7);');
+      ftContent.appendChild(deny);
+
+      if (cfg.showBranding) {
+        ftContent.appendChild(buildBranding(
+          'margin-top:12px;font-size:10px;text-align:center;letter-spacing:0.5px;color:rgba(255,255,255,0.4);'));
+      }
+
+      wrap.appendChild(ftContent);
+
+      // full-screen-close-x: registry constraint (see full_takeover's
+      // entry in frontend/app/admin/lib/popupStyles.js) — always visible,
+      // a real 44x44 touch target, HIGH CONTRAST against any background
+      // the merchant picks (solid white circle + dark glyph, not derived
+      // from cfg colors) — full screen has no page content around its
+      // edges to tap instead, so this is the one guaranteed way out
+      // besides Allow/Deny.
+      closeBtn = document.createElement('button');
+      closeBtn.id = 'ccf-close-btn';
+      closeBtn.type = 'button';
+      closeBtn.textContent = '×';
+      closeBtn.setAttribute('aria-label', 'Dismiss');
+      closeBtn.style.cssText = 'position:absolute;top:calc(env(safe-area-inset-top, 0px) + 12px);right:12px;' +
+        'background:#ffffff;color:#111827;border:none;border-radius:50%;' +
+        'width:44px;height:44px;font-size:20px;line-height:44px;text-align:center;' +
+        'cursor:pointer;z-index:11;box-shadow:0 2px 10px rgba(0,0,0,0.3);';
+      wrap.appendChild(closeBtn);
+
+    } else if (ccfStyle.id === 'top_bar') {
+      // ---------- POPUP STYLE: Top Bar — a slim bar pinned to the top of
+      // the screen, headline + inline CTA on one line. Mobile-only (see
+      // ccfResolveStyle() above). No discount/code-reveal state — same
+      // "no room for it" reasoning as Classic Banner (see wantsDiscount
+      // below). ----------
+      var tbFields = ccfStyle.fields || {};
+      var tbBg = cfg.accentColor || '#4f46e5';
+      var tbFg = cfg.textColor || '#ffffff';
+
+      wrap.style.cssText = [
+        'position:fixed', 'left:0', 'right:0', 'top:0', 'width:100%',
+        'padding-top:env(safe-area-inset-top, 0px)',
+        'z-index:2147483647',
+        'background:' + tbBg, 'color:' + tbFg,
+        'padding:10px 14px', 'display:flex', 'align-items:center', 'gap:10px',
+        'box-shadow:0 2px 12px rgba(0,0,0,0.18)',
+        'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif')
+      ].join(';');
+      wrap.classList.add('layout-banner'); // no translateX(-50%) resting transform, same as Classic Banner
+
+      var tbText = document.createElement('span');
+      tbText.id = 'ccf-prompt-text';
+      tbText.setAttribute('style',
+        'flex:1;min-width:0;font-size:13px;font-weight:700;white-space:nowrap;' +
+        'overflow:hidden;text-overflow:ellipsis;');
+      tbText.textContent = headline;
+      wrap.appendChild(tbText);
+
+      allow = buildAllowBtn(
+        ccfAllowButtonStyle(tbBg, cfg.ctaStyle, true) + 'width:auto;flex-shrink:0;margin-bottom:0;');
+      allow.textContent = (cfg.allowText || 'Allow') + (tbFields.arrowCta ? ' →' : '');
+      wrap.appendChild(allow);
+
+      closeBtn = document.createElement('button');
+      closeBtn.id = 'ccf-close-btn';
+      closeBtn.type = 'button';
+      closeBtn.textContent = '×';
+      closeBtn.style.cssText =
+        'background:none;border:none;color:' + tbFg + ';opacity:0.75;font-size:18px;' +
+        'line-height:1;cursor:pointer;flex-shrink:0;padding:2px;';
+      wrap.appendChild(closeBtn);
+      deny = closeBtn; // the × is the only dismiss control for this layout, same as Classic Banner
+
+    } else if (ccfStyle.id === 'story_card') {
+      // ---------- POPUP STYLE: Story Card — a tall, full-bleed photo card
+      // with the headline overlaid directly on the image behind a bottom
+      // gradient scrim, no separate white/colored content panel. Uses the
+      // SAME bottom-center resting position as Flash Sale/Gift Reveal
+      // above (no special animation class needed). Mobile-only (see
+      // ccfResolveStyle() above). ----------
+      var scFields = ccfStyle.fields || {};
+      var scRadius = (cfg.borderRadius != null ? cfg.borderRadius : 16) + 'px';
+      var scImageUrl = cfg.imageUrl || '';
+      var scFg = '#ffffff';
+
+      wrap.style.cssText = [
+        'position:fixed', 'bottom:24px', 'left:50%', 'transform:translateX(-50%)',
+        'width:' + (isMobile ? '260px' : 'min(280px,90vw)'),
+        'aspect-ratio:9/16',
+        'background:' + (scImageUrl ? '#111827' : ('linear-gradient(160deg,' + accent + ',' + accent + 'cc)')),
+        'color:' + scFg, 'border-radius:' + scRadius, 'overflow:hidden',
+        'display:flex', 'flex-direction:column', 'justify-content:flex-end',
+        'box-shadow:0 20px 60px rgba(0,0,0,0.3)', 'z-index:2147483647',
+        'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif'),
+        'max-width:90vw'
+      ].join(';');
+
+      if (scImageUrl) {
+        var scImgEl = document.createElement('img');
+        scImgEl.src = scImageUrl;
+        scImgEl.alt = '';
+        scImgEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;' +
+          'object-fit:cover;object-position:' + (cfg.imagePosition || '50% 50%') + ';';
+        scImgEl.onerror = function () { scImgEl.style.display = 'none'; };
+        wrap.appendChild(scImgEl);
+      }
+
+      if (scFields.scrimEnabled !== false) {
+        var scScrim = document.createElement('div');
+        scScrim.setAttribute('style', 'position:absolute;inset:0;' +
+          'background:linear-gradient(180deg,transparent 40%,rgba(0,0,0,0.78) 100%);');
+        wrap.appendChild(scScrim);
+      }
+
+      var scContent = document.createElement('div');
+      scContent.id = 'ccf-content-section';
+      scContent.style.cssText = 'position:relative;padding:20px;text-align:center;';
+
+      var scHead = document.createElement('div');
+      scHead.id = 'ccf-prompt-text';
+      scHead.style.cssText = 'font-size:19px;font-weight:800;line-height:1.3;margin-bottom:6px;';
+      scHead.textContent = headline;
+      scContent.appendChild(scHead);
+
+      if (cfg.subtext) {
+        var scSub = document.createElement('div');
+        scSub.style.cssText = 'font-size:13px;margin-bottom:12px;line-height:1.4;color:rgba(255,255,255,0.85);';
+        scSub.textContent = cfg.subtext;
+        scContent.appendChild(scSub);
+      }
+
+      if (ccfShowEmailField()) {
+        var scEmailInput = document.createElement('input');
+        scEmailInput.type = 'email';
+        scEmailInput.id = 'ccf-email-input';
+        scEmailInput.className = 'ccf-input';
+        var scEp = ccfFieldPct('emailDiscount');
+        scEmailInput.placeholder = 'Your email' + (scEp ? ' (get ' + scEp + '% off)' : '');
+        scEmailInput.style.cssText = ccfInputStyle() +
+          'background:rgba(255,255,255,0.15);color:' + scFg + ';border-color:rgba(255,255,255,0.3);';
+        scContent.appendChild(scEmailInput);
+      }
+
+      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
+      scContent.appendChild(allow);
+
+      deny = buildDenyBtn(ccfDenyButtonStyle() + 'color:rgba(255,255,255,0.7);');
+      scContent.appendChild(deny);
+
+      if (cfg.showBranding) {
+        scContent.appendChild(buildBranding(
+          'margin-top:12px;font-size:10px;text-align:center;letter-spacing:0.5px;color:rgba(255,255,255,0.4);'));
+      }
+
+      wrap.appendChild(scContent);
+
+      closeBtn = document.createElement('button');
+      closeBtn.id = 'ccf-close-btn';
+      closeBtn.type = 'button';
+      closeBtn.textContent = '×';
+      closeBtn.style.cssText = 'position:absolute;top:12px;right:12px;' +
+        'background:rgba(0,0,0,0.4);color:#fff;border:none;border-radius:50%;' +
+        'width:26px;height:26px;font-size:14px;line-height:26px;text-align:center;cursor:pointer;z-index:10;';
       wrap.appendChild(closeBtn);
 
     } else if (layout === 'banner') {
@@ -1477,13 +1860,17 @@
         else deny.parentNode.appendChild(discountFields);
       }
     }
-    // popup-style: Flash Sale/Gift Reveal always render as `card`, never
-    // `banner` — but `layout` itself is left untouched while a non-classic
-    // style is active (see the note on the discountFields gate above), so
-    // it could still be a stale 'banner' from a previous Classic session.
-    // Only apply the "banner never shows a discount" exclusion for Classic.
-    var wantsDiscount = ccfStyle.id === 'classic'
-      ? (layout !== 'banner' && ccfDiscountEnabled())
+    // popup-style: Flash Sale/Gift Reveal/Bottom Sheet/Full Screen/Story
+    // Card always render as `card`-shaped, never `banner` — but `layout`
+    // itself is left untouched while a non-classic style is active (see
+    // the note on the discountFields gate above), so it could still be a
+    // stale 'banner' from a previous Classic session. Only apply the
+    // "banner never shows a discount" exclusion for Classic. Top Bar gets
+    // the SAME exclusion Classic Banner does (layoutType: 'banner' in the
+    // registry) — no room for the unlocked-code reveal state in a slim
+    // bar, and no #ccf-content-section swap target built for it above.
+    var wantsDiscount = (ccfStyle.id === 'classic' && layout === 'banner') || ccfStyle.id === 'top_bar'
+      ? false
       : ccfDiscountEnabled();
 
     function cleanup() {
@@ -1921,7 +2308,19 @@
       hasToken = !!localStorage.getItem(PAGE_LOAD_TOKEN_KEY);
     } catch (e) {}
 
-    if (!hasToken && canPrompt()) {
+    // mobile-styles: Full Screen must never show via page_load (registry
+    // constraint on full_takeover in popupStyles.js — an edge-to-edge
+    // takeover as the very first thing a visitor sees is the one pattern
+    // this app refuses to do). Resolve which style page_load would
+    // actually render BEFORE scheduling it; if it's Full Screen, fall
+    // through to wire the other intent triggers instead (add_to_cart is
+    // the one of those still realistically reachable on mobile today —
+    // dwell/return_visit require a product page, which returns above, and
+    // exit_intent is desktop-only just below).
+    var pageLoadWouldRenderFullTakeover =
+      ccfResolveStyle(window.innerWidth <= 600).id === 'full_takeover';
+
+    if (!pageLoadWouldRenderFullTakeover && !hasToken && canPrompt()) {
       setTimeout(function () {
         if (canPrompt()) {
           showSoftPrompt('page_load', null);

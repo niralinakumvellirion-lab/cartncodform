@@ -1,0 +1,277 @@
+=== MOBILE-SPECIFIC POPUP STYLES — PHASE 1 PROPOSAL ===
+Generated: 2026-09-24
+Status: PROPOSAL ONLY. No code changed for this task. Do not implement
+until explicitly approved.
+
+Scope reminder: 4 new styles, all MOBILE-ONLY (see Q2 below), derived
+from the pattern groupings already recorded in
+audits/popup-style-audit-before.txt item 7 (15 reference screenshots,
+re-read for this proposal, images themselves not re-opened).
+
+
+====================================================================
+1. THE 4 PROPOSED STYLES
+====================================================================
+
+--------------------------------------------------------------------
+1a. BOTTOM SHEET  (id: bottom_sheet)
+--------------------------------------------------------------------
+Name shown to merchant: "Bottom Sheet"
+One-line: Slides up from the bottom edge, like a native app sheet.
+Geometry: bottom sheet — anchored to the viewport's bottom edge,
+  rounded top corners only, safe-area-inset-bottom padding, small drag
+  handle bar at the top of the sheet as a swipe-down-to-dismiss
+  affordance.
+Draws from:
+  #13 (Pop-up-...-4.webp) — PRIMARY reference. A real mobile phone
+    mockup showing exactly this geometry: icon art at the top,
+    overlapping down into a white bottom-anchored card, with a
+    discount CODE CHIP revealed directly (no email field). The audit's
+    own note on #13 already flags it as closer to this app's existing
+    post-subscribe "unlocked code" state than an initial capture step
+    — that's the intended feel here: minimal friction, code shown fast.
+  #15 (sddefault) — its two-equal-weight stacked pill buttons inform
+    this style's Allow/Deny footer instead of a button+text-link.
+Extra fields:
+  - iconArtEnabled (boolean, default true) — "Show an offer icon at
+    the top when no image is set" (same pattern as gift_reveal's
+    giftIconEnabled, different default icon).
+  - dragHandleEnabled (boolean, default true) — "Show a drag handle
+    bar" (the native-sheet affordance itself; toggle-off for a
+    plainer look).
+layoutType (implementation note, see item 5): 'card' — a bottom sheet
+  has room for the full unlocked-code reveal state, so it should NOT
+  skip the discount stage the way Banner does.
+Why mobile-specific: bottom sheets are the dominant native pattern for
+  secondary/contextual content on a phone (share sheets, action
+  sheets) — anchoring to the bottom keeps the whole interaction in
+  comfortable one-thumb reach, and the slide-up entrance is a gesture
+  vocabulary that reads as "native app," not a shrunk desktop modal.
+  Meaningless on desktop: a bottom-anchored sheet on a 1920px-wide
+  browser window just looks like an odd, off-center banner.
+
+--------------------------------------------------------------------
+1b. FULL-SCREEN TAKEOVER  (id: full_takeover)
+--------------------------------------------------------------------
+Name shown to merchant: "Full Screen"
+One-line: Full-bleed, edge-to-edge overlay for a high-urgency offer.
+Geometry: full screen — covers the entire viewport, no card chrome or
+  border-radius, safe-area-inset-top/bottom padding so content clears
+  a notch and the home-indicator, CTA placed in the lower third
+  (thumb zone).
+Draws from:
+  #1 (14-popup-key-portal) — dark charcoal full-urgency card with a
+    3-box HOURS/MINUTES/SECONDS countdown and a solid CTA.
+  #3 (Crown & Paw) — dark navy, sparkle accents, huge percentage-off
+    callout, pill CTA, countdown below the button.
+  #14 (Judy) — informs the bold/condensed display type used for the
+    headline given the extra vertical room a full screen provides.
+Extra fields: reuses flash_sale's countdown shape exactly (same
+  merchant mental model, same backend validation shape):
+  - countdownSource (select: discount_expiry | fixed_date)
+  - countdownEndsAt (datetime, shown when countdownSource=fixed_date)
+  - badgeText (text, optional, e.g. "LIMITED TIME")
+layoutType: 'card' — full room for the discount reveal stage.
+Why mobile-specific: a true full-viewport takeover only makes sense on
+  a small screen. On desktop, blacking out the entire browser window
+  is jarring and reads as broken, not intentional; on mobile, edge-to-
+  edge overlays are how native app interstitials already behave, so
+  it reads as a deliberate, high-impact moment. Safe-area insets are a
+  mobile-only concept (no desktop browser has a notch).
+
+--------------------------------------------------------------------
+1c. TOP BAR  (id: top_bar)
+--------------------------------------------------------------------
+Name shown to merchant: "Top Bar"
+One-line: A slim bar pinned to the top of the screen.
+Geometry: top bar — fixed to the viewport's top edge, safe-area-inset-
+  top padding, single line: headline + compact inline CTA, swipe-up-
+  to-dismiss.
+Draws from:
+  #14 (Judy) — bold condensed typography + arrow-suffixed CTA, which
+    is what makes a headline+button legible in a very short bar.
+  Positioned as the mobile-tuned counterpart to the existing desktop
+  Classic Banner (which the schema already keeps bottom/edge-agnostic
+    via `position`) — Top Bar is deliberately TOP-anchored and much
+  shorter, tuned for a narrow mobile viewport rather than a scaled-
+  down version of Banner.
+Extra fields:
+  - arrowCta (boolean, default false) — "Add a trailing arrow to the
+    button text" (the one typographic borrow from Judy's CTA).
+layoutType: 'banner' — same reasoning as the existing Classic Banner:
+  no room in a slim bar for the unlocked-code reveal state, so it
+  should skip the discount stage exactly like Banner does today
+  (previewWantsDiscount is forced false wherever layoutType==='banner'
+  — see item 5).
+Why mobile-specific: pinning to the TOP (not the bottom, where the
+  existing Banner effectively already lives via `position`) respects
+  that most one-handed mobile browsing scrolls content up past a
+  fixed top element without covering the thumb-reachable bottom of the
+  screen, where a phone browser's own address bar/nav chrome often
+  sits. Height and type scale are tuned for phone widths, not a
+  shrunk desktop banner.
+
+--------------------------------------------------------------------
+1d. QUICK ASK  (id: quick_ask)
+--------------------------------------------------------------------
+Name shown to merchant: "Quick Ask"
+One-line: A centered card with two equal-weight tap targets, not a
+  button-plus-text-link.
+Geometry: centered card — same general placement as today's Classic
+  Card, but the footer is always TWO full-width stacked pill buttons
+  of equal visual weight, positioned in the lower half of the card.
+Draws from:
+  #15 (sddefault) — PRIMARY reference. Image-top card, then a solid
+    primary pill button AND a real (not text-link) secondary pill
+    button, same width/weight.
+  #2 (Bombas) — informs the clean, minimal, high-whitespace baseline
+    around that footer.
+Extra fields: none beyond the existing base set (headline, subtext,
+  image, colors, allow/deny text, ctaStyle) — the two-equal-buttons
+  footer is this style's one defining, non-optional trait, which is
+  exactly what separates it from Classic/Gift Reveal's default
+  button+text-link pattern, so it isn't exposed as a toggle.
+layoutType: 'card' — full discount-reveal support.
+Why mobile-specific: replaces the classic "button + small text link"
+  decline pattern — a desktop-era convention where a text link is a
+  poor touch target (well under the ~44px recommended minimum tap
+  target size) — with two properly-sized, equal-weight buttons stacked
+  low in the card, keeping both the accept and decline actions in
+  comfortable one-thumb reach. On desktop this reads as merely a
+  bigger decline button, not a meaningfully different experience —
+  the ergonomic win is specific to touch/thumb use.
+
+
+====================================================================
+2. SUMMARY TABLE
+====================================================================
+id             | name          | geometry       | layoutType | extra fields
+bottom_sheet   | Bottom Sheet  | bottom sheet   | card       | iconArtEnabled, dragHandleEnabled
+full_takeover  | Full Screen   | full screen    | card       | countdownSource, countdownEndsAt, badgeText
+top_bar        | Top Bar       | top bar        | banner     | arrowCta
+quick_ask      | Quick Ask     | centered card  | card       | (none — base fields only)
+
+
+====================================================================
+3. ANSWERS TO THE 4 PRE-IMPLEMENTATION QUESTIONS
+====================================================================
+
+Q1. Does mobilePopup.layout's enum (['card','banner']) need widening?
+A1. No. mobilePopup.layout stays exactly ['card','banner'] — untouched.
+    All 4 new styles follow the precedent flash_sale/gift_reveal
+    already set: once styleId !== 'classic', the popup's shape comes
+    ENTIRELY from that style's own self-contained renderer (a new
+    StyleCardPreview branch in Settings.jsx / a new build<Name>Card()
+    in ccf-push.js) — popup.layout / mobilePopup.layout is never read
+    for a non-classic style, today or after this change.
+    The actual schema change is additive and lives elsewhere:
+      - popup.styleId enum (Store.js) gains the 4 new ids.
+      - mobilePopup.styleId enum (Store.js) gains the 4 new ids.
+      - backend/utils/popupStyles.js STYLE_IDS/STYLE_EXTRA_FIELDS gain
+        the 4 new ids and their extra-field shapes.
+      - frontend/app/admin/lib/popupStyles.js POPUP_STYLES/STYLE_ORDER
+        gain the 4 new entries.
+    Every one of these is a pure ADDITION (new enum values, new object
+    keys) — no existing value is removed, renamed, or redefined, so
+    every already-saved document (styleId: classic/flash_sale/
+    gift_reveal, layout: split/card/banner) stays valid and unaffected
+    with zero migration.
+
+Q2. Mobile-ONLY (hidden on Desktop tab) or selectable on both?
+A2. Recommend MOBILE-ONLY. Their entire premise is the mobile
+    geometry — a full-viewport takeover, a bottom-anchored sheet, a
+    top-pinned bar, a thumb-zone two-button card. On a desktop-width
+    viewport these either don't make sense (blacking out an entire
+    browser window) or just duplicate what Classic Split/Card/Banner
+    already do, adding gallery clutter with no real desktop upside.
+    Mechanism: the gallery already conditionally disables one card
+    (Classic — Split) on the Mobile tab today
+    (`disabled = isMobileTab && c.layout === 'split'` in Settings.jsx)
+    — the same mechanism, inverted, disables/hides these 4 cards
+    whenever the gallery is being viewed from the Desktop tab.
+    Both styleId enums (popup.* and mobilePopup.*) still get all 4 ids
+    added for schema symmetry — desktop simply never has a UI path
+    that writes one of them (see Q3).
+
+Q3. How does the existing mobileStyleOverride flow change, if at all?
+A3. One real behavior change is needed. Today, picking a style while
+    the editor is on the Mobile tab only writes to
+    mobilePopup.styleId when mobileStyleOverride is ALREADY true;
+    otherwise setActiveStyle silently falls through to popup (desktop)
+    — correct for today's 3 styles, since with the override off,
+    "picking a style" means picking THE style for both devices (mobile
+    has no independent style yet).
+    That fallthrough would be actively wrong for a mobile-only style:
+    it must never land in popup.styleId, since desktop's own gallery
+    never offers it and desktop's renderer has no branch for it.
+    Proposed fix: selecting one of the 4 mobile-only styles from the
+    gallery always writes to mobilePopup.styleId AND force-sets
+    popup.mobileStyleOverride = true in the same action, regardless of
+    the toggle's current state. This removes the need for the
+    merchant to separately flip "Different style on mobile" before or
+    after picking a mobile-only style — picking one IS turning the
+    override on. Selecting a desktop-eligible style (classic/
+    flash_sale/gift_reveal) keeps today's exact behavior unchanged.
+
+Q4. What happens to a shop with a mobile style selected, then the
+    override is turned OFF?
+A4. Nothing destructive, and no new logic is needed — this already
+    works correctly for the existing 3 styles and the same mechanism
+    covers the new 4 unchanged. mobileStyleOverride=false only changes
+    which field the storefront/admin preview READS: mobilePopup.* is
+    simply not consulted while it's off, and the mobile view falls
+    back to rendering popup's desktop styleId (defaulting to Classic
+    if desktop is also Classic). mobilePopup.styleId and its
+    styleFields are left exactly as saved. Turning the override back
+    on later restores the mobile-only style precisely as the merchant
+    left it. No migration, cleanup, or reset-on-toggle-off logic is
+    proposed.
+
+
+====================================================================
+4. ORIGINALITY / THUMBNAIL CONFIRMATION
+====================================================================
+Confirmed: all 4 proposed styles are original designs derived from the
+underlying PATTERNS described in the 15 reference screenshots (bottom-
+anchored sheet geometry, full-bleed urgency overlay, top-pinned bar,
+two-equal-button footer) — not a copy of any brand's logo, exact copy
+text, product photography, or pixel-for-pixel visual design. No brand
+name from the references (Bombas, Crown & Paw, Kinfield, Christopher
+Cloos, Pipcorn, Judy, etc.) appears in any proposed id, name, default
+copy, or styling value.
+Thumbnails: same mechanism already used for classic/flash_sale/
+gift_reveal — a small, LIVE rendered preview of the actual React
+component (GalleryCard's existing scaled-down transform trick), built
+from this app's own JSX/CSS, using the merchant's current settings.
+Never a screenshot or asset from docs/popup-styles/.
+
+
+====================================================================
+5. IMPLEMENTATION NOTES FOR PHASE 2 (not started — reference only)
+====================================================================
+- layoutType's only current FUNCTIONAL effect (not just descriptive)
+  is Settings.jsx's previewEffectiveLayout/previewWantsDiscount logic:
+  `previewWantsDiscount = previewEffectiveLayout === 'banner' ? false
+  : ...` — i.e. any layoutType literally equal to the string 'banner'
+  skips the discount/unlocked-code stage in both the admin preview and
+  (by the matching parity convention) the storefront. That's why
+  Top Bar proposes layoutType: 'banner' (no room for the reveal state
+  in a slim bar, same reasoning as Classic Banner) while the other 3
+  propose 'card' (plenty of room).
+- Files that would change in Phase 2 (none touched yet):
+  frontend/app/admin/lib/popupStyles.js (+4 entries)
+  backend/utils/popupStyles.js (+4 STYLE_IDS, +4 STYLE_EXTRA_FIELDS)
+  backend/models/Store.js (+4 values on popup.styleId enum, +4 on
+    mobilePopup.styleId enum)
+  frontend/app/admin/screens/Settings.jsx (+4 StyleCardPreview render
+    branches, +4 gallery cards gated mobile-only, the
+    mobileStyleOverride force-on-select change from Q3)
+  extensions/cartncodform-embed/assets/ccf-push.js (+4
+    build<Name>Card() branches, all new code — Classic/existing styles
+    untouched, verified byte-identical per the task's own constraint)
+- No change anywhere to subscribe/FCM/discount-generation/redirect/
+  storage logic — every new style is purely a rendering + a styleId
+  branch, same as flash_sale/gift_reveal were.
+
+
+>>> STOP — awaiting approval before any Phase 2 implementation work.

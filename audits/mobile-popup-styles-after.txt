@@ -1,0 +1,337 @@
+=== MOBILE-SPECIFIC POPUP STYLES — PHASE 3 SELF-AUDIT (AFTER) ===
+Generated: 2026-09-24
+Status: Phase 2 implemented per the approved Phase 1 proposal
+(audits/mobile-popup-styles-proposal.txt) plus the three approval
+conditions (fallback everywhere, drop quick_ask for a genuinely
+distinct 4th style, full_takeover's close-X + trigger constraint).
+NOT DEPLOYED — per the task's own instruction. Deploy commands are
+listed at the end, none were run.
+
+
+====================================================================
+1. FILES CHANGED
+====================================================================
+frontend/app/admin/lib/popupStyles.js
+  - +4 style entries: bottom_sheet, full_takeover, top_bar, story_card
+    (each mobileOnly: true).
+  - +MOBILE_ONLY_STYLE_IDS export.
+  - +resolveStyleId(styleId, device) — the device-aware fallback.
+  - STYLE_ORDER extended.
+
+frontend/app/admin/screens/Settings.jsx
+  - activeStyleId now computed via resolveStyleId(..., popupDevice) —
+    the single choke point every other read in this file already goes
+    through (POPUP_STYLES[activeStyleId], getStyle(activeStyleId), the
+    live-preview dispatch), so fixing it here made every downstream
+    read device-safe with no further changes needed there.
+  - GALLERY_CARDS: +4 entries; the gallery's .map() is now preceded by
+    a .filter() hiding the 4 mobile-only cards whenever popupDevice
+    isn't 'mobile'.
+  - Gallery card onClick: picking a mobile-only style now always writes
+    mobilePopup.styleId and force-sets popup.mobileStyleOverride=true
+    in the same action, instead of going through setActiveStyle (which
+    would fall through to popup.styleId/desktop when the override was
+    off — wrong for an id desktop can't render).
+  - StyleCardPreview: +4 render branches (bottom_sheet, full_takeover,
+    top_bar, story_card), inserted before the existing flash_sale
+    branch. Headline-fallback ternary rewritten as a per-style lookup
+    (was flash_sale-vs-everything-else, silently wrong for 4 new ids).
+  - UnlockedView: isDark now also true for full_takeover/story_card
+    (both dark/photo backgrounds) — was flash_sale-only, would have
+    rendered unreadable dark-on-dark text for the other two once they
+    reached the 'unlocked' step.
+  - ClosePreviewButton: +color prop (default '#fff', unchanged for
+    every existing caller) — needed so full_takeover's close-X can be a
+    dark glyph on its white high-contrast background.
+  - ccfInjectPopupStyles is NOT in this file (that's ccf-push.js) —
+    n/a here.
+
+extensions/cartncodform-embed/assets/ccf-push.js
+  - ccfResolveStyle(isMobileDevice): whitelist extended to the 4 new
+    ids, PLUS a second check — a recognized mobile-only id resolved
+    with isMobileDevice=false now also falls back to 'classic' (was:
+    only an unrecognized id fell back).
+  - +4 render branches inside showSoftPrompt(), inserted after the
+    existing flash_sale/gift_reveal branch, before the classic
+    banner/card/split chain — same dispatch priority those two already
+    have.
+  - +.layout-sheet CSS class + @keyframes ccfSheetSlideUp (Bottom
+    Sheet's genuine slide-up-from-bottom entrance — needed since it
+    doesn't rest at the shared translateX(-50%) transform every other
+    entrance animation assumes). full_takeover/top_bar reuse the
+    existing .layout-banner (no-transform) class for the same reason
+    Classic Banner does; story_card needs no new class (rests at the
+    same bottom-center translateX(-50%) position as Flash Sale/Gift
+    Reveal, so it gets the default animation for free).
+  - wantsDiscount computation: now also false for top_bar (was: false
+    only for classic+banner) — Top Bar has no #ccf-content-section swap
+    target built for it (same "no room for the reveal state" reasoning
+    as Classic Banner), so it must never attempt the discount flow.
+  - renderDiscountCode()'s isDark: same full_takeover/story_card
+    addition as the admin's UnlockedView, for the same reason.
+  - initIntentTriggers(): the page_load branch now resolves which
+    style it would actually render BEFORE scheduling the trigger; if
+    it's full_takeover, page_load is skipped entirely and the function
+    falls through to wire the other intent triggers instead of
+    returning early. See item 6 for the practical reachability caveat
+    this creates.
+
+backend/models/Store.js
+  - popup.styleId enum: +4 ids (schema symmetry with mobilePopup.styleId
+    — the admin UI never actually offers these for this field, see the
+    inline comment added there).
+  - mobilePopup.styleId enum: +4 ids (the field these actually get
+    saved to).
+
+backend/utils/popupStyles.js
+  - STYLE_IDS: +4 ids.
+  - +MOBILE_ONLY_STYLE_IDS export (mirrors the frontend one).
+  - STYLE_EXTRA_FIELDS: +4 entries (bottom_sheet: iconArtEnabled/
+    dragHandleEnabled; full_takeover: same countdown shape as
+    flash_sale + badgeText; top_bar: arrowCta; story_card: scrimEnabled)
+    — all boolean/enum/string, same sanitizeStyleFields() coercion
+    every existing field already gets.
+  - +resolveStyleId(id, device) mirroring the other two implementations
+    exactly. Not called by any route (save-time validation only checks
+    isValidStyleId — see the inline comment on why: the "never on
+    desktop" guarantee is the three resolution points the task named,
+    not save-time validation).
+
+backend/__tests__/popupStyles.test.js
+  - +describe('resolveStyleId') — the "add a test for this" requirement:
+    each mobile-only id resolves for 'mobile' and falls back to
+    'classic' for 'desktop'; classic/flash_sale/gift_reveal resolve
+    unchanged for both devices; unrecognized ids fall back to 'classic'
+    regardless of device.
+  - +sanitizeStyleFields coverage for the 4 new styles' extra fields.
+
+audits/mobile-popup-styles-proposal.txt (Phase 1, already written and
+  approved before this phase started).
+
+
+====================================================================
+2. STYLE TABLE
+====================================================================
+id             | name          | mobileOnly | layoutType | wantsDiscount
+classic        | Classic       | no         | (layout)   | yes (unless layout=banner)
+flash_sale     | Flash Sale    | no         | card       | yes
+gift_reveal    | Gift Reveal   | no         | card       | yes
+bottom_sheet   | Bottom Sheet  | yes        | card       | yes
+full_takeover  | Full Screen   | yes        | card       | yes (never via page_load)
+top_bar        | Top Bar       | yes        | banner     | no
+story_card     | Story Card    | yes        | card       | yes
+
+
+====================================================================
+3. HOW TO ADD/REMOVE A STYLE (updated from the registry file's own
+   header comment, restated here per the task's request)
+====================================================================
+ADD:
+  1. frontend/app/admin/lib/popupStyles.js — one POPUP_STYLES entry
+     (id/name/shortDescription/bestFor/layoutType/supportedFields/
+     extraFields/defaultValues), add the id to STYLE_ORDER, and to
+     MOBILE_ONLY_STYLE_IDS if it's device-restricted.
+  2. frontend/app/admin/screens/Settings.jsx — one GALLERY_CARDS entry,
+     one StyleCardPreview render branch (before the flash_sale check),
+     and if it's mobile-only, no other change is needed — the gallery
+     filter and the force-override-on-select logic already key off
+     MOBILE_ONLY_STYLE_IDS generically.
+  3. extensions/cartncodform-embed/assets/ccf-push.js — add the id to
+     ccfResolveStyle()'s CCF_KNOWN_STYLE_IDS (and CCF_MOBILE_ONLY_STYLE_IDS
+     if device-restricted), one render branch inside showSoftPrompt()
+     (before the classic layout chain), and if it needs the
+     'no unlocked-code room' banner treatment, add it to the
+     wantsDiscount check the same way top_bar was added.
+  4. backend/utils/popupStyles.js — add the id to STYLE_IDS (and
+     MOBILE_ONLY_STYLE_IDS if applicable) and its STYLE_EXTRA_FIELDS
+     entry.
+  5. backend/models/Store.js — add the id to popup.styleId's enum and
+     mobilePopup.styleId's enum.
+  6. Add resolveStyleId tests for the new id (backend/__tests__/
+     popupStyles.test.js already parametrizes over MOBILE_ONLY_STYLE_IDS,
+     so a mobile-only addition is covered automatically by the existing
+     test.each blocks — no new test code needed unless it's NOT
+     mobile-only, or has extra fields worth asserting on directly).
+
+REMOVE: delete the entry/branches everywhwere ADD touched — do NOT
+  remove the id from either Store.js enum retroactively for shops that
+  already saved it (breaks their save until they re-pick); leave the
+  renderers' existing unknown-id fallback (already falls back to
+  Classic) to handle it once the registry entry is gone.
+
+
+====================================================================
+4. PASS/FAIL CHECKLIST
+====================================================================
+[PASS] Gallery shows the 4 new styles on the Mobile tab only.
+  Verified live (temp route + next dev): Desktop tab gallery listed
+  only Flash Sale/Gift Reveal (+ the 3 Classic layouts); switching to
+  the Mobile tab and reopening the gallery listed all 4 new styles
+  alongside the existing ones.
+
+[PASS] Picking a mobile-only style force-sets mobileStyleOverride.
+  Verified live: after picking Bottom Sheet, the "Different style on
+  mobile" switch's aria-checked was already "true" without touching it
+  directly.
+
+[PASS] Desktop tab never renders a mobile-only style, even mid-session.
+  Verified live: with Full Screen open in the editor (Mobile tab),
+  switching to the Desktop tab in the SAME session re-rendered as
+  Classic (Layout pills reappeared, Full Screen's Badge/Countdown
+  fields disappeared) — no crash, no flash of the wrong style. This is
+  resolveStyleId's fallback firing exactly as designed, not a special
+  case — popup.styleId (desktop) was never touched by picking Full
+  Screen in the first place.
+
+[PASS] Preview renders for all 4 new styles.
+  Verified live: Bottom Sheet (phone-frame mockup, drag handle + gift
+  icon + Allow/No thanks), Top Bar (arrowCta field present), Story Card
+  (scrimEnabled field present, clicked Allow and watched it advance to
+  "Subscribed — popup closed (no discount configured)" with no error).
+  Full Screen's close-X confirmed white-background/dark-glyph via
+  computed style (interactive preview shows it at 36x36 — the
+  `compact` phone-frame-mockup scaling every other close button in this
+  preview also uses; see item 6 for why the real storefront output,
+  unconditionally 44x44, is what the task's touch-target requirement
+  is actually about).
+
+[PARTIAL] Save -> reload persists.
+  NOT verified end-to-end against a live backend — this sandbox has no
+  running Mongo-backed API server, and every save attempt in the temp
+  diagnostic route failed with the expected "Cannot reach the backend"
+  network error (same as every other task this session that needed a
+  real save). What WAS verified:
+    - The save payload shape/mechanism for a mobile-only style's
+      styleId write is byte-identical to the existing 3 styles' path
+      (same setPopup/setMobilePopup calls, same saveSettings() PATCH
+      body construction — nothing new was added to that function).
+    - backend/utils/popupStyles.js's isValidStyleId (what
+      routes/profiles.js actually calls before accepting a styleId
+      write — confirmed by reading that route) now accepts all 4 new
+      ids, backed by 41 passing Jest tests including new resolveStyleId
+      and sanitizeStyleFields coverage.
+    - backend/models/Store.js's enum widening means a document
+      round-tripped through Mongoose validators (not just
+      updateOne()) also accepts the new ids.
+  Recommend a real save/reload check against a live dev store before
+  shipping.
+
+[PASS] Classic (and flash_sale/gift_reveal) unchanged.
+  Every new branch in every file is strictly ADDITIVE — inserted as new
+  `else if` branches or new object keys, never editing an existing
+  classic/flash_sale/gift_reveal line except the two named, deliberate
+  fixes: the StyleCardPreview headline fallback (was already silently
+  wrong for any non-flash_sale/gift_reveal id — a latent bug this task
+  surfaced, not a behavior change for flash_sale/gift_reveal
+  themselves) and UnlockedView/renderDiscountCode's isDark (same: an
+  `||` was ADDED, flash_sale's own condition is untouched). node --check
+  passed on ccf-push.js; `npm run build` passed on the frontend; all 226
+  backend tests passed, including the pre-existing popupConfigRoute and
+  popupStyles suites (unmodified assertions for the original 3 styles
+  still pass).
+
+[PASS] Override off falls back correctly (non-destructive).
+  This is unchanged, pre-existing behavior — mobileStyleOverride=false
+  simply stops mobilePopup.* from being read (falls back to popup's
+  desktop style), and nothing added in this task touches that read
+  path or ever clears mobilePopup.styleId. Not independently
+  re-verified live this session (no code path was added that could
+  regress it — activeStyleId's mobileUsesOwnStyle gate is untouched, is
+  computed BEFORE resolveStyleId is even called, and resolveStyleId
+  only ever narrows an already-resolved id further, never widens one).
+
+[PASS] Build + tests pass.
+  frontend: `npm run build` — compiled successfully, /admin/settings-page
+  25.8kB (up from 24.1kB, expected given 4 new render branches + 4
+  registry entries).
+  backend: `npx jest` — 23/23 suites, 226/226 tests.
+  ccf-push.js: `node --check` — passed (no build step exists for this
+  file; this is the applicable syntax-validity check).
+
+
+====================================================================
+5. ASSUMPTIONS
+====================================================================
+- "Mobile-only" is enforced by (a) hiding the cards from the Desktop
+  tab's gallery and (b) resolveStyleId falling back for a desktop
+  context regardless of how an id got into either styleId field — NOT
+  by rejecting the enum value at the backend for popup.styleId (desktop
+  field). A direct API write could still put a mobile-only id in
+  popup.styleId; it would just never actually render there, on any of
+  the three resolution points the task named. This was an explicit,
+  discussed trade-off (Q2 in the Phase 1 proposal), not an oversight.
+- Icon art for Bottom Sheet's no-image fallback reuses the existing
+  'gift' icon (ccfIcon('gift', ...) / <Icon name="gift" .../>) rather
+  than a new bespoke icon — no new SVG path was added in either file.
+- Story Card's aspect-ratio (9/16, a tall "story" shape) and Full
+  Screen's minInvocation via full-viewport `inset:0` both assume modern
+  CSS support (aspect-ratio, env(safe-area-inset-*)) already implicitly
+  assumed elsewhere in this codebase (the mobile-popup feature itself
+  is scoped to <=600px devices, which are all modern enough).
+
+
+====================================================================
+6. KNOWN ISSUES
+====================================================================
+- Full Screen's close-X is 44x44 on the REAL storefront (ccf-push.js,
+  unconditional, not compact-scaled) — this is what the task's touch-
+  target requirement is actually about, and it's correct. The ADMIN's
+  own interactive preview shows a 36x36 version inside its scaled-down
+  phone-frame mockup (the same `compact` sizing convention every other
+  close button in that preview already uses at smaller scale) — this
+  is a preview-only illustration, not a real touch surface, so it was
+  left as-is rather than special-cased to render literally 44px inside
+  a ~200px-wide mockup.
+- Full Screen's page_load suppression, as implemented, has a real
+  practical reachability gap inherited from the trigger system's OWN
+  existing constraints (not something this task introduced or was
+  asked to fix): initIntentTriggers() returns immediately for ANY
+  product-type page (`if (pageType === 'product') return;`), so
+  dwell/return_visit never run on mobile at all today (matching the
+  pre-existing comment in that function calling them "unreachable dead
+  code"), and exit_intent is hard-gated to `window.innerWidth > 768`
+  (desktop only) a few lines below. That leaves add_to_cart (wired
+  separately from cart-add hooks) as the ONLY trigger realistically
+  capable of showing Full Screen to a mobile visitor today. This
+  satisfies the letter of the requirement ("never page_load... must
+  require the existing intent triggers") but means Full Screen will,
+  in practice, rarely fire automatically until/unless the trigger
+  system's mobile-specific gaps are addressed separately — flagged
+  here rather than silently shipping a style that looks broken in
+  practice. Out of scope for this task to fix (the task named a single
+  constraint on ONE style, not a trigger-system overhaul).
+- supportedFields (all 7 styles, not just the 4 new ones) remains
+  documentation-only — Settings.jsx never reads it to hide/show a
+  field. Top Bar's own supportedFields excludes subtext/denyText/
+  imageUrl, but the ADMIN'S generic Position SelectRow, for instance,
+  still renders for every style regardless of supportedFields (a
+  pre-existing gap for flash_sale/gift_reveal too, unrelated to this
+  task, not newly introduced).
+- ccf-push.js's new render branches were verified by `node --check`
+  (syntax) and close manual comparison against the existing flash_sale/
+  gift_reveal branch's own patterns (same helper functions, same
+  escaping convention — textContent for every merchant string, never
+  innerHTML with unescaped merchant input; the only innerHTML usage
+  added, ccfIcon('gift', 40), is a hardcoded icon-markup lookup, not
+  merchant-derived). They were NOT loaded in an actual browser against
+  a real Shopify theme/storefront — no live dev store was available in
+  this sandbox. Recommend a real-device check (phone width, actual
+  Shopify preview) before shipping, per the deploy commands below.
+
+
+====================================================================
+7. DEPLOY COMMANDS (list only — none were run, per "Do NOT deploy")
+====================================================================
+Frontend (admin):
+  cd frontend && npm run build && npx vercel --prod
+
+Storefront (theme extension — only needed because ccf-push.js changed):
+  shopify app deploy --allow-updates
+
+Backend: no deploy needed by itself for this change beyond the normal
+Render auto-deploy-on-push already in place for backend/ — but note
+the Store.js schema change (styleId enum) ships WITH whatever commits
+backend/models/Store.js, so backend and frontend should go out together
+(or backend first) rather than frontend-first, since a saved mobile-
+only styleId would otherwise briefly fail Mongoose validation on a
+backend that hasn't picked up the enum widening yet.

@@ -8,25 +8,38 @@
 // in sync by convention/checklist rather than shared code, same as the
 // pre-existing `layout` field already is today.
 //
-// Round 1 (this change): classic, flash_sale, gift_reveal only. Editorial
-// and Spotlight are NOT registered here yet — adding either later means
-// adding its entry here (+ its Settings.jsx render branch + its liquid
-// render branch + its id in backend/utils/popupStyles.js and the Store.js
-// enum), not touching anything else.
+// Round 1: classic, flash_sale, gift_reveal.
+// Round 2 (mobile-specific styles, see audits/mobile-popup-styles-
+// proposal.txt and -after.txt): bottom_sheet, full_takeover, top_bar,
+// story_card — each carries `mobileOnly: true` (see resolveStyleId below).
 //
 // To ADD a style: append one entry below with a unique `id`, then add a
 // matching case to renderStylePreview()/buildStyleCardThumbnail() in
-// Settings.jsx and a matching build<Name>Card() branch in the liquid file,
-// plus the same id in backend/utils/popupStyles.js's STYLE_IDS/
-// STYLE_EXTRA_FIELDS and in Store.js's popup.styleId/mobilePopup.styleId
-// enum arrays.
+// Settings.jsx and a matching render branch in ccf-push.js, plus the same
+// id in backend/utils/popupStyles.js's STYLE_IDS/STYLE_EXTRA_FIELDS and in
+// Store.js's popup.styleId/mobilePopup.styleId enum arrays. If the style is
+// device-restricted, set `mobileOnly: true` here AND mirror the same
+// restriction in ccf-push.js's ccfResolveStyle() — there is no shared
+// runtime between the two, so this is a manual-parity requirement like
+// every other per-style value.
 // To REMOVE a style: delete its entry here, its two render branches, and
 // its backend id — do NOT delete the id from the Store.js enum retroactively
 // for shops that already saved it (that would break their save until they
 // re-pick a style); instead have the renderers fall back to Classic for an
 // id no longer in this registry, exactly like an unrecognized/legacy id.
 
-export const STYLE_ORDER = ['classic', 'flash_sale', 'gift_reveal'];
+export const STYLE_ORDER = [
+  'classic', 'flash_sale', 'gift_reveal',
+  'bottom_sheet', 'full_takeover', 'top_bar', 'story_card',
+];
+
+// Style ids that only ever render on mobile — desktop's gallery hides
+// these cards entirely (see Settings.jsx's GALLERY_CARDS filter), and
+// resolveStyleId() below is the defensive fallback for every other path
+// (a stale desktop styleId from before this style existed, a direct API
+// write, admin preview, etc.) so one is never rendered with device:
+// 'desktop'. ccf-push.js's ccfResolveStyle() mirrors this same list.
+export const MOBILE_ONLY_STYLE_IDS = ['bottom_sheet', 'full_takeover', 'top_bar', 'story_card'];
 
 export const POPUP_STYLES = {
   classic: {
@@ -133,10 +146,165 @@ export const POPUP_STYLES = {
       codeChipEmphasis: true,
     },
   },
+
+  // --- Round 2: mobile-only styles (audits/mobile-popup-styles-
+  // proposal.txt) — each is genuinely mobile-native geometry, not a
+  // shrunk desktop layout, and is hidden from the Desktop tab's gallery.
+
+  bottom_sheet: {
+    id: 'bottom_sheet',
+    name: 'Bottom Sheet',
+    shortDescription: 'Slides up from the bottom edge, like a native app sheet.',
+    bestFor: 'A familiar, one-thumb mobile interaction instead of a floating card.',
+    mobileOnly: true,
+    layoutType: 'card',
+    supportedFields: [
+      'headline', 'subtext', 'brandName', 'imageUrl', 'imagePosition',
+      'accentColor', 'bgColor', 'textColor', 'fontFamily', 'borderRadius',
+      'allowText', 'denyText', 'ctaStyle',
+    ],
+    extraFields: [
+      {
+        key: 'iconArtEnabled',
+        type: 'boolean',
+        label: 'Show an offer icon when no image is set',
+        default: true,
+      },
+      {
+        key: 'dragHandleEnabled',
+        type: 'boolean',
+        label: 'Show a drag handle bar',
+        default: true,
+      },
+    ],
+    defaultValues: {
+      iconArtEnabled: true,
+      dragHandleEnabled: true,
+    },
+  },
+
+  full_takeover: {
+    id: 'full_takeover',
+    name: 'Full Screen',
+    shortDescription: 'Full-bleed, edge-to-edge overlay for a high-urgency offer.',
+    bestFor: 'Flash sales/restocks where the offer should command the whole screen.',
+    mobileOnly: true,
+    layoutType: 'card',
+    // trigger-constraint (enforced in ccf-push.js's initIntentTriggers(),
+    // not here — this file has no runtime link to the trigger system):
+    // this style must NEVER be shown on the 'page_load' trigger. An
+    // edge-to-edge takeover as the very first thing a visitor sees, before
+    // they've shown any intent to stay, is the one pattern this app
+    // deliberately refuses to do. It still requires the existing "four
+    // intent triggers" (dwell / return_visit / add_to_cart / exit_intent)
+    // — see the self-audit for the practical reachability caveat that
+    // follows from the trigger system's own current page-type gating.
+    neverTriggerOn: ['page_load'],
+    supportedFields: [
+      'headline', 'subtext', 'brandName', 'imageUrl', 'imagePosition',
+      'accentColor', 'bgColor', 'textColor', 'fontFamily',
+      'allowText', 'denyText', 'ctaStyle',
+    ],
+    extraFields: [
+      {
+        key: 'countdownSource',
+        type: 'select',
+        label: 'Countdown counts down to',
+        helper: 'Never a fake per-visitor timer — only a real deadline.',
+        options: [
+          { value: 'discount_expiry', label: "The discount code's real expiry (shown after unlocking)" },
+          { value: 'fixed_date', label: 'A specific end date & time' },
+        ],
+        default: 'discount_expiry',
+      },
+      {
+        key: 'countdownEndsAt',
+        type: 'datetime',
+        label: 'Ends at',
+        default: '',
+        showWhen: { countdownSource: 'fixed_date' },
+      },
+      {
+        key: 'badgeText',
+        type: 'text',
+        label: 'Badge text (optional)',
+        maxLength: 24,
+        default: '',
+      },
+    ],
+    defaultValues: {
+      countdownSource: 'discount_expiry',
+      countdownEndsAt: '',
+      badgeText: '',
+    },
+  },
+
+  top_bar: {
+    id: 'top_bar',
+    name: 'Top Bar',
+    shortDescription: 'A slim bar pinned to the top of the screen.',
+    bestFor: 'Low-friction, always-visible nudges that do not interrupt browsing.',
+    mobileOnly: true,
+    layoutType: 'banner',
+    supportedFields: [
+      'headline', 'accentColor', 'textColor', 'fontFamily',
+      'allowText', 'ctaStyle',
+    ],
+    extraFields: [
+      {
+        key: 'arrowCta',
+        type: 'boolean',
+        label: 'Add a trailing arrow to the button text',
+        default: false,
+      },
+    ],
+    defaultValues: {
+      arrowCta: false,
+    },
+  },
+
+  story_card: {
+    id: 'story_card',
+    name: 'Story Card',
+    shortDescription: 'A tall, full-bleed photo card — headline overlaid on the image.',
+    bestFor: 'Shops with strong lifestyle/product photography who want an immersive ask.',
+    mobileOnly: true,
+    layoutType: 'card',
+    supportedFields: [
+      'headline', 'subtext', 'imageUrl', 'imagePosition',
+      'accentColor', 'textColor', 'fontFamily',
+      'allowText', 'denyText', 'ctaStyle',
+    ],
+    extraFields: [
+      {
+        key: 'scrimEnabled',
+        type: 'boolean',
+        label: 'Darken the bottom of the photo so text stays readable',
+        default: true,
+      },
+    ],
+    defaultValues: {
+      scrimEnabled: true,
+    },
+  },
 };
 
 export function getStyle(styleId) {
   return POPUP_STYLES[styleId] || POPUP_STYLES.classic;
+}
+
+// Device-aware resolution — the one function every "which style is
+// actually in force" computation should go through (Settings.jsx's
+// activeStyleId, in particular). Falls back to Classic for BOTH an
+// unrecognized id and a recognized-but-mobile-only id being resolved for
+// 'desktop' — mirrors ccfResolveStyle() in ccf-push.js exactly, so a
+// mobile-only style is never rendered anywhere for a desktop context, no
+// matter how the id got there (stale save, direct API write, a style
+// removed from the registry later, etc.).
+export function resolveStyleId(styleId, device) {
+  const style = getStyle(styleId);
+  if (style.mobileOnly && device !== 'mobile') return 'classic';
+  return style.id;
 }
 
 // Merge a style's extraFields defaults under whatever the shop already has

@@ -5,13 +5,26 @@
  * the UI); this file only needs enough to VALIDATE what the admin sends —
  * the style id itself, and the shape of each style's extra `styleFields`.
  *
- * Round 1 (this change): classic, flash_sale, gift_reveal only. Editorial
- * and Spotlight are NOT registered anywhere yet — adding a style later
- * means adding its id here (and to the Store.js enum, and to the admin
- * registry) alongside its own extra-field list.
+ * Round 1: classic, flash_sale, gift_reveal.
+ * Round 2 (mobile-specific styles — see
+ * audits/mobile-popup-styles-proposal.txt and -after.txt): bottom_sheet,
+ * full_takeover, top_bar, story_card. These are device-restricted
+ * ("mobile-only") in the admin UI and in ccf-push.js's ccfResolveStyle(),
+ * but this file (like Store.js's enum) does NOT enforce that restriction —
+ * it only validates that an id/extra-field shape is a RECOGNIZED one, not
+ * which device it's allowed on. The "never on desktop" guarantee is the
+ * three resolution points named in the task (admin registry lookup, admin
+ * preview, ccf-push.js), not the save-time validation here.
  */
 
-const STYLE_IDS = ['classic', 'flash_sale', 'gift_reveal'];
+const STYLE_IDS = ['classic', 'flash_sale', 'gift_reveal',
+  'bottom_sheet', 'full_takeover', 'top_bar', 'story_card'];
+
+// Style ids that only ever render on mobile — mirrors
+// frontend/app/admin/lib/popupStyles.js's MOBILE_ONLY_STYLE_IDS. Exported
+// for tests/consumers that want to assert device-gating without needing
+// the full frontend registry.
+const MOBILE_ONLY_STYLE_IDS = ['bottom_sheet', 'full_takeover', 'top_bar', 'story_card'];
 
 // Per-style extra-field definitions, used only to sanitize incoming
 // styleFields: { key: 'boolean' | 'string' | { type: 'string', maxLength } }.
@@ -33,10 +46,42 @@ const STYLE_EXTRA_FIELDS = {
     secondaryButtonStyle: { type: 'enum', values: ['pill', 'text-link'] },
     codeChipEmphasis: { type: 'boolean' },
   },
+  bottom_sheet: {
+    iconArtEnabled: { type: 'boolean' },
+    dragHandleEnabled: { type: 'boolean' },
+  },
+  full_takeover: {
+    countdownSource: { type: 'enum', values: ['discount_expiry', 'fixed_date'] },
+    countdownEndsAt: { type: 'string', maxLength: 40 },
+    badgeText: { type: 'string', maxLength: 24 },
+  },
+  top_bar: {
+    arrowCta: { type: 'boolean' },
+  },
+  story_card: {
+    scrimEnabled: { type: 'boolean' },
+  },
 };
 
 function isValidStyleId(id) {
   return STYLE_IDS.indexOf(id) !== -1;
+}
+
+/**
+ * Device-aware resolution — mirrors frontend/app/admin/lib/popupStyles.js's
+ * resolveStyleId() and ccf-push.js's ccfResolveStyle() exactly: an
+ * unrecognized id, OR a recognized mobile-only id being resolved for
+ * 'desktop', both fall back to 'classic'. Not currently called by any
+ * route (save-time validation only checks isValidStyleId — see the header
+ * comment on why); provided so backend code/tests can assert the same
+ * fallback contract the other two implementations promise, and as the
+ * one place to update if the backend ever needs to resolve a style for a
+ * specific device itself.
+ */
+function resolveStyleId(id, device) {
+  const resolved = isValidStyleId(id) ? id : 'classic';
+  if (MOBILE_ONLY_STYLE_IDS.indexOf(resolved) !== -1 && device !== 'mobile') return 'classic';
+  return resolved;
 }
 
 /**
@@ -67,4 +112,7 @@ function sanitizeStyleFields(input) {
   return out;
 }
 
-module.exports = { STYLE_IDS, STYLE_EXTRA_FIELDS, isValidStyleId, sanitizeStyleFields };
+module.exports = {
+  STYLE_IDS, MOBILE_ONLY_STYLE_IDS, STYLE_EXTRA_FIELDS,
+  isValidStyleId, sanitizeStyleFields, resolveStyleId,
+};

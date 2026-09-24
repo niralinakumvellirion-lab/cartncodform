@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Banner, Button } from '@shopify/polaris';
 import { apiGet, apiSend, BACKEND_URL } from '../../../lib/api';
-import { POPUP_STYLES, STYLE_ORDER, getStyle, getStyleFieldValue } from '../lib/popupStyles';
+import { POPUP_STYLES, STYLE_ORDER, getStyle, getStyleFieldValue, resolveStyleId, MOBILE_ONLY_STYLE_IDS } from '../lib/popupStyles';
 
 const DS = {
   page: {
@@ -266,7 +266,10 @@ function AllowButtonLabel({ step, allowText, wantsDiscount }) {
 // preview-only annotation of that imminent (but never actually performed)
 // navigation — see audits/popup-preview-flow-audit.txt.
 function UnlockedView({ styleId, percentage, expiryDays, code, codeChipEmphasis, showRedirectingBadge }) {
-  const isDark = styleId === 'flash_sale';
+  // mobile-styles: Full Screen and Story Card also render on a dark/photo
+  // background, same as Flash Sale — the unlocked-code view needs the
+  // light-on-dark palette there too, or its text is unreadable.
+  const isDark = styleId === 'flash_sale' || styleId === 'full_takeover' || styleId === 'story_card';
   const chipBig = styleId === 'gift_reveal' && codeChipEmphasis !== false;
   const titleColor = isDark ? '#ffffff' : '#111827';
   const subColor = isDark ? '#d4d4d8' : '#6b7280';
@@ -662,10 +665,10 @@ function GalleryCard({ card, selected, disabled, previewNode, onClick }) {
 // (invalid HTML, hydration warning) — interactive=false renders a plain,
 // unclickable <span> instead. The full-size editor preview keeps the real
 // <button> (interactive defaults to true).
-function ClosePreviewButton({ dark, onClick, size = 26, top = 12, right = 12, fontSize = 14, background, interactive = true }) {
+function ClosePreviewButton({ dark, onClick, size = 26, top = 12, right = 12, fontSize = 14, background, color, interactive = true }) {
   const bg = background || (dark ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.35)');
   const sharedStyle = { position: 'absolute', top, right, background: bg,
-    color: '#fff', border: 'none', borderRadius: '50%', width: size, height: size, fontSize,
+    color: color || '#fff', border: 'none', borderRadius: '50%', width: size, height: size, fontSize,
     lineHeight: size + 'px', fontFamily: 'inherit', textAlign: 'center', zIndex: 10 };
   if (!interactive) {
     return <span aria-hidden="true" style={{ ...sharedStyle, cursor: 'default' }}>×</span>;
@@ -710,8 +713,11 @@ function StyleCardPreview({
 }) {
   const style = getStyle(styleId);
   const accent = cfg.accentColor || '#4f46e5';
-  const headline = cfg.headline ||
-    (styleId === 'flash_sale' ? 'Flash Sale — limited time!' : "You've got a gift waiting");
+  const headline = cfg.headline || {
+    flash_sale: 'Flash Sale — limited time!',
+    gift_reveal: "You've got a gift waiting",
+    full_takeover: 'Flash Sale — limited time!',
+  }[styleId] || 'Get notified about deals';
   const subtext = cfg.subtext || '';
   const allowText = cfg.allowText || 'Allow';
   const denyText = cfg.denyText || 'No thanks';
@@ -754,6 +760,239 @@ function StyleCardPreview({
     border: '1px solid #e5e7eb', background: 'transparent', cursor: 'pointer',
     fontFamily: font, lineHeight: 1.2, marginTop: 8,
   };
+
+  // --- mobile-only styles (audits/mobile-popup-styles-proposal.txt) -----
+
+  if (styleId === 'bottom_sheet') {
+    const iconArtEnabled = field('iconArtEnabled');
+    const dragHandleEnabled = field('dragHandleEnabled');
+    const bg = cfg.bgColor || '#ffffff';
+    const fg = cfg.textColor || '#111827';
+    return (
+      <div style={{ border: '1px solid #e5e7eb', borderTopLeftRadius: radius, borderTopRightRadius: radius,
+                    overflow: 'hidden', background: bg, color: fg, fontFamily: font, position: 'relative',
+                    width: compact ? 300 : 'min(340px, 100%)',
+                    boxShadow: '0 -6px 24px rgba(0,0,0,0.15)' }}>
+        {dragHandleEnabled && (
+          <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 8 }}>
+            <div aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 999, background: '#d1d5db' }} />
+          </div>
+        )}
+        <ClosePreviewButton onClick={onDismiss} interactive={interactive}
+          top={dragHandleEnabled ? 18 : 12} />
+        {imageUrl ? (
+          <img src={imageUrl} alt="" style={{ width: '100%', height: compact ? 70 : 100, marginTop: 8,
+            objectFit: 'cover', objectPosition: cfg.imagePosition || 'center center', display: 'block' }} />
+        ) : iconArtEnabled ? (
+          <div style={{ height: compact ? 50 : 70, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="gift" size={compact ? 30 : 40} color={accent} />
+          </div>
+        ) : null}
+        <div style={{ padding, textAlign: 'center' }}>
+          {swapped ? (
+            <UnlockedView styleId={styleId} percentage={unlockedInfo.percentage}
+              expiryDays={unlockedInfo.expiryDays} code={unlockedInfo.code}
+              showRedirectingBadge={step === 'redirecting'} />
+          ) : (
+            <>
+              <div style={{ fontSize: headlineSize, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
+              {subtext && <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>{subtext}</div>}
+              {emailFieldEnabled && (
+                <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
+                  placeholder="Email address" interactive={interactive}
+                  style={{ width: '100%', padding: '8px 12px', fontSize: 12, borderRadius: 8,
+                    border: '1px solid #e5e7eb', marginBottom: 8, boxSizing: 'border-box',
+                    fontFamily: font, lineHeight: 1.2 }} />
+              )}
+              <PreviewButton {...allowBtnCommon} interactive={interactive}>
+                <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
+              </PreviewButton>
+              <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
+                style={denyLinkStyle('#9ca3af')} interactive={interactive}>
+                {denyText}
+              </PreviewButton>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (styleId === 'full_takeover') {
+    const badgeText = field('badgeText');
+    const countdownSource = field('countdownSource');
+    const countdownEndsAt = field('countdownEndsAt');
+    let countdownDisplay = null;
+    let countdownNote = null;
+    if (countdownSource === 'fixed_date') {
+      if (countdownEndsAt) {
+        const remaining = new Date(countdownEndsAt).getTime() - Date.now();
+        countdownDisplay = formatCountdown(remaining);
+        if (!countdownDisplay) countdownNote = 'That end date has already passed.';
+      } else {
+        countdownNote = 'Set an end date to preview the countdown.';
+      }
+    } else {
+      countdownNote = 'Shown after a customer unlocks their code (real expiry) — not shown before then.';
+    }
+    const bg = cfg.bgColor || '#18181b';
+    const fg = cfg.textColor || '#ffffff';
+    return (
+      <div style={{ borderRadius: compact ? 0 : radius, overflow: 'hidden',
+                    background: imageUrl ? '#000' : bg, color: fg, fontFamily: font, position: 'relative',
+                    width: compact ? 300 : 'min(340px, 100%)', minHeight: compact ? 260 : 320,
+                    display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+                    boxShadow: '0 10px 34px rgba(0,0,0,0.35)' }}>
+        {imageUrl && (
+          <img src={imageUrl} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%',
+            objectFit: 'cover', objectPosition: cfg.imagePosition || 'center center' }} />
+        )}
+        {imageUrl && (
+          <div aria-hidden="true" style={{ position: 'absolute', inset: 0,
+            background: 'linear-gradient(180deg, rgba(0,0,0,0.15), rgba(0,0,0,0.8))' }} />
+        )}
+        {/* full-screen-close-x: registry constraint (see full_takeover's
+            entry in popupStyles.js) — always visible, a real 44x44 touch
+            target, high contrast against ANY background the merchant
+            picks (solid white circle + dark glyph, not derived from
+            cfg colors) — full screen has no page content around its
+            edges to tap instead, so this is the one guaranteed way out
+            besides Allow/Deny. */}
+        <ClosePreviewButton onClick={onDismiss} interactive={interactive}
+          size={compact ? 36 : 44} top={12} right={12} fontSize={compact ? 16 : 20}
+          background="#ffffff" color="#111827" />
+        <div style={{ position: 'relative', padding, textAlign: 'center' }}>
+          {swapped ? (
+            <UnlockedView styleId={styleId} percentage={unlockedInfo.percentage}
+              expiryDays={unlockedInfo.expiryDays} code={unlockedInfo.code}
+              showRedirectingBadge={step === 'redirecting'} />
+          ) : (
+            <>
+              {badgeText && (
+                <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 700,
+                  letterSpacing: '0.05em', textTransform: 'uppercase', color: accent,
+                  border: `1px solid ${accent}`, borderRadius: 999, padding: '3px 10px', marginBottom: 8 }}>
+                  {badgeText}
+                </span>
+              )}
+              <div style={{ fontSize: headlineSize + 4, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
+              {subtext && (
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', marginBottom: 10 }}>{subtext}</div>
+              )}
+              {emailFieldEnabled && (
+                <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
+                  placeholder="Email address" interactive={interactive}
+                  style={{ width: '100%', padding: '8px 12px', fontSize: 12, borderRadius: 8,
+                    border: '1px solid rgba(255,255,255,0.3)', marginBottom: 8,
+                    background: 'rgba(255,255,255,0.1)', color: fg, boxSizing: 'border-box',
+                    fontFamily: font, lineHeight: 1.2 }} />
+              )}
+              {countdownDisplay ? (
+                <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '0.08em', marginBottom: 10,
+                  fontVariantNumeric: 'tabular-nums' }}>
+                  {countdownDisplay}
+                </div>
+              ) : countdownNote && (
+                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', marginBottom: 10, fontStyle: 'italic' }}>
+                  {countdownNote}
+                </div>
+              )}
+              <PreviewButton {...allowBtnCommon} interactive={interactive}>
+                <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
+              </PreviewButton>
+              <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
+                style={denyLinkStyle('rgba(255,255,255,0.7)')} interactive={interactive}>
+                {denyText}
+              </PreviewButton>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  if (styleId === 'top_bar') {
+    const arrowCta = field('arrowCta');
+    const bg = cfg.accentColor || accent;
+    const fg = cfg.textColor && cfg.textColor !== '#111827' ? cfg.textColor : '#ffffff';
+    return (
+      <div style={{ borderRadius: compact ? 0 : 10, overflow: 'hidden', background: bg, color: fg,
+                    fontFamily: font, display: 'flex', alignItems: 'center', gap: 10,
+                    padding: compact ? '8px 10px' : '10px 14px',
+                    width: compact ? 300 : 'min(340px, 100%)',
+                    boxShadow: '0 2px 12px rgba(0,0,0,0.18)' }}>
+        <div style={{ flex: 1, fontSize: compact ? 12 : 13, fontWeight: 700, minWidth: 0,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {swapped ? `${unlockedInfo.percentage}% off — code ${unlockedInfo.code}` : headline}
+        </div>
+        {!swapped && (
+          <PreviewButton {...allowBtnCommon} interactive={interactive}
+            style={{ ...allowBtnCommon.style, width: 'auto', flexShrink: 0, marginBottom: 0,
+              padding: compact ? '6px 12px' : '8px 16px', fontSize: compact ? 12 : 13 }}>
+            {allowText}{arrowCta ? ' →' : ''}
+          </PreviewButton>
+        )}
+        <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus" interactive={interactive}
+          style={{ background: 'none', border: 'none', color: fg, opacity: 0.75, fontSize: 16,
+            cursor: 'pointer', flexShrink: 0, padding: 2, lineHeight: 1 }}>
+          ×
+        </PreviewButton>
+      </div>
+    );
+  }
+
+  if (styleId === 'story_card') {
+    const scrimEnabled = field('scrimEnabled');
+    const fg = '#ffffff';
+    return (
+      <div style={{ borderRadius: radius, overflow: 'hidden', position: 'relative',
+                    background: imageUrl ? '#111827' : `linear-gradient(160deg, ${accent}, ${accent}cc)`,
+                    color: fg, fontFamily: font,
+                    width: compact ? 240 : 'min(280px, 100%)',
+                    aspectRatio: compact ? '9 / 14' : '9 / 16',
+                    display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
+                    boxShadow: '0 8px 26px rgba(0,0,0,0.25)' }}>
+        {imageUrl && (
+          <img src={imageUrl} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%',
+            objectFit: 'cover', objectPosition: cfg.imagePosition || 'center center' }} />
+        )}
+        {scrimEnabled && (
+          <div aria-hidden="true" style={{ position: 'absolute', inset: 0,
+            background: 'linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.78) 100%)' }} />
+        )}
+        <ClosePreviewButton onClick={onDismiss} interactive={interactive} />
+        <div style={{ position: 'relative', padding, textAlign: 'center' }}>
+          {swapped ? (
+            <UnlockedView styleId={styleId} percentage={unlockedInfo.percentage}
+              expiryDays={unlockedInfo.expiryDays} code={unlockedInfo.code}
+              showRedirectingBadge={step === 'redirecting'} />
+          ) : (
+            <>
+              <div style={{ fontSize: headlineSize + 2, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
+              {subtext && (
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.85)', marginBottom: 10 }}>{subtext}</div>
+              )}
+              {emailFieldEnabled && (
+                <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
+                  placeholder="Email address" interactive={interactive}
+                  style={{ width: '100%', padding: '8px 12px', fontSize: 12, borderRadius: 8,
+                    border: '1px solid rgba(255,255,255,0.3)', marginBottom: 8,
+                    background: 'rgba(255,255,255,0.15)', color: fg, boxSizing: 'border-box',
+                    fontFamily: font, lineHeight: 1.2 }} />
+              )}
+              <PreviewButton {...allowBtnCommon} interactive={interactive}>
+                <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
+              </PreviewButton>
+              <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
+                style={denyLinkStyle('rgba(255,255,255,0.7)')} interactive={interactive}>
+                {denyText}
+              </PreviewButton>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (styleId === 'flash_sale') {
     const bg = '#18181b';
@@ -1313,7 +1552,17 @@ export default function Settings({ shop }) {
   // session — this matches the storefront's own resolution in
   // push-notifications.liquid).
   const mobileUsesOwnStyle = popupDevice === 'mobile' && !!popup.mobileStyleOverride;
-  const activeStyleId = (mobileUsesOwnStyle ? mobilePopup.styleId : popup.styleId) || 'classic';
+  // mobile-only-fallback: resolveStyleId falls back to Classic for BOTH an
+  // unrecognized id and a recognized-but-mobile-only id being resolved
+  // while popupDevice === 'desktop' — the admin-side half of the "never
+  // render a mobile-only style on desktop, anywhere" requirement. Every
+  // downstream read below (POPUP_STYLES[activeStyleId], getStyle(...),
+  // the live preview dispatch) is safe as a direct consequence, since none
+  // of them re-check the id themselves.
+  const activeStyleId = resolveStyleId(
+    (mobileUsesOwnStyle ? mobilePopup.styleId : popup.styleId) || 'classic',
+    popupDevice
+  );
   const activeStyleFields = (mobileUsesOwnStyle ? mobilePopup.styleFields : popup.styleFields) || {};
   // Writes always go to whichever config actually owns the active style —
   // NOT necessarily `setActivePopup` (that would silently write mobile
@@ -1779,6 +2028,14 @@ export default function Settings({ shop }) {
       desc: POPUP_STYLES.flash_sale.shortDescription },
     { key: 'gift_reveal', styleId: 'gift_reveal', layout: null, name: POPUP_STYLES.gift_reveal.name,
       desc: POPUP_STYLES.gift_reveal.shortDescription },
+    { key: 'bottom_sheet', styleId: 'bottom_sheet', layout: null, name: POPUP_STYLES.bottom_sheet.name,
+      desc: POPUP_STYLES.bottom_sheet.shortDescription },
+    { key: 'full_takeover', styleId: 'full_takeover', layout: null, name: POPUP_STYLES.full_takeover.name,
+      desc: POPUP_STYLES.full_takeover.shortDescription },
+    { key: 'top_bar', styleId: 'top_bar', layout: null, name: POPUP_STYLES.top_bar.name,
+      desc: POPUP_STYLES.top_bar.shortDescription },
+    { key: 'story_card', styleId: 'story_card', layout: null, name: POPUP_STYLES.story_card.name,
+      desc: POPUP_STYLES.story_card.shortDescription },
   ];
 
   // Same image-upload handler as before (canvas resize/compress to keep the
@@ -1861,7 +2118,14 @@ export default function Settings({ shop }) {
       <div style={{ display: 'grid',
         gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(200px, 1fr))',
         gap: '12px' }}>
-        {GALLERY_CARDS.map((c) => {
+        {GALLERY_CARDS
+          // mobile-only-visibility: hide these 4 cards entirely on the
+          // Desktop tab (approved Q2) — the defensive resolveStyleId
+          // fallback above covers every OTHER path to a mobile-only id
+          // ending up in a desktop context; this is the "don't even offer
+          // it" UX layer for the one path a merchant actually takes.
+          .filter((c) => popupDevice === 'mobile' || !MOBILE_ONLY_STYLE_IDS.includes(c.styleId))
+          .map((c) => {
           const isMobileTab = popupDevice === 'mobile';
           const disabled = isMobileTab && c.layout === 'split';
           const selected = c.styleId === activeStyleId &&
@@ -1886,8 +2150,20 @@ export default function Settings({ shop }) {
             <GalleryCard key={c.key} card={c} selected={selected} disabled={disabled}
               previewNode={previewNode}
               onClick={() => {
-                setActiveStyle((p) => ({ ...p, styleId: c.styleId,
-                  ...(c.layout ? { layout: c.layout } : {}) }));
+                if (MOBILE_ONLY_STYLE_IDS.includes(c.styleId)) {
+                  // mobile-only-force-override: always targets
+                  // mobilePopup.styleId and turns the override on in the
+                  // same action — never falls through to popup.styleId
+                  // (desktop's gallery never offers these, and its
+                  // renderer has no branch for them). See Q3 in
+                  // audits/mobile-popup-styles-proposal.txt.
+                  setMobilePopup((p) => ({ ...p, styleId: c.styleId,
+                    ...(c.layout ? { layout: c.layout } : {}) }));
+                  setPopup((p) => ({ ...p, mobileStyleOverride: true }));
+                } else {
+                  setActiveStyle((p) => ({ ...p, styleId: c.styleId,
+                    ...(c.layout ? { layout: c.layout } : {}) }));
+                }
                 setPopupEditorOpen(true);
                 setHasVisitedEditor(true);
               }} />
