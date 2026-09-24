@@ -607,7 +607,7 @@ function ImageRow({ label, imageUrl, imagePosition, onUpload, onRemove }) {
 // A style-gallery card: a small, LIVE (not static) preview of the actual
 // style/layout, scaled down via CSS transform so it's the merchant's real
 // current settings, not a screenshot.
-function GalleryCard({ card, selected, disabled, previewNode, onClick }) {
+function GalleryCard({ card, selected, disabled, mobileOnly, previewNode, onClick }) {
   return (
     <button
       type="button"
@@ -634,8 +634,14 @@ function GalleryCard({ card, selected, disabled, previewNode, onClick }) {
       </div>
       <div>
         <div style={{ fontSize: 12, fontWeight: 700, color: '#111827', display: 'flex',
-          alignItems: 'center', gap: 6 }}>
+          alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           {card.name}
+          {mobileOnly && (
+            <span style={{ fontSize: 9, fontWeight: 700, color: '#6366f1', background: '#eef2ff',
+              border: '1px solid #c7d2fe', borderRadius: 999, padding: '1px 6px', letterSpacing: '0.02em' }}>
+              Mobile only
+            </span>
+          )}
           {selected && <span style={{ fontSize: 10, fontWeight: 700, color: '#4f46e5' }}>✓ Selected</span>}
         </div>
         <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, lineHeight: 1.4 }}>
@@ -2115,6 +2121,15 @@ export default function Settings({ shop }) {
           </button>
         )}
       </div>
+      {/* gallery-device-toggle: same popupDevice/setPopupDevice state the
+          editor's own toggle uses (see deviceToggle above) — switching
+          here carries into the editor and vice versa, for free. Without
+          this the gallery was stuck showing whichever device it opened
+          on (always 'desktop' on a fresh "Customize popup" open, since
+          the ONLY other place this toggle rendered was inside the
+          editor — unreachable until a style was already picked), so the
+          4 mobile-only styles had no discovery path at all. */}
+      {deviceToggle}
       <div style={{ display: 'grid',
         gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(200px, 1fr))',
         gap: '12px' }}>
@@ -2148,6 +2163,7 @@ export default function Settings({ shop }) {
           );
           return (
             <GalleryCard key={c.key} card={c} selected={selected} disabled={disabled}
+              mobileOnly={MOBILE_ONLY_STYLE_IDS.includes(c.styleId)}
               previewNode={previewNode}
               onClick={() => {
                 if (MOBILE_ONLY_STYLE_IDS.includes(c.styleId)) {
