@@ -10,8 +10,8 @@
 //
 // Round 1: classic, flash_sale, gift_reveal.
 // Round 2 (mobile-specific styles, see audits/mobile-popup-styles-
-// proposal.txt and -after.txt): bottom_sheet, full_takeover, top_bar,
-// story_card — each carries `mobileOnly: true` (see resolveStyleId below).
+// proposal.txt and -after.txt): bottom_sheet, top_bar, story_card —
+// (full_takeover was removed; an old saved id resolves to classic) — each carries `mobileOnly: true` (see resolveStyleId below).
 //
 // To ADD a style: append one entry below with a unique `id`, then add a
 // matching case to renderStylePreview()/buildStyleCardThumbnail() in
@@ -30,7 +30,7 @@
 
 export const STYLE_ORDER = [
   'classic', 'flash_sale', 'gift_reveal',
-  'bottom_sheet', 'full_takeover', 'top_bar', 'story_card',
+  'bottom_sheet', 'top_bar', 'story_card',
 ];
 
 // Style ids that only ever render on mobile — desktop's gallery hides
@@ -39,7 +39,7 @@ export const STYLE_ORDER = [
 // (a stale desktop styleId from before this style existed, a direct API
 // write, admin preview, etc.) so one is never rendered with device:
 // 'desktop'. ccf-push.js's ccfResolveStyle() mirrors this same list.
-export const MOBILE_ONLY_STYLE_IDS = ['bottom_sheet', 'full_takeover', 'top_bar', 'story_card'];
+export const MOBILE_ONLY_STYLE_IDS = ['bottom_sheet', 'top_bar', 'story_card'];
 
 export const POPUP_STYLES = {
   classic: {
@@ -180,62 +180,6 @@ export const POPUP_STYLES = {
     defaultValues: {
       iconArtEnabled: true,
       dragHandleEnabled: true,
-    },
-  },
-
-  full_takeover: {
-    id: 'full_takeover',
-    name: 'Full Screen',
-    shortDescription: 'Full-bleed, edge-to-edge overlay for a high-urgency offer.',
-    bestFor: 'Flash sales/restocks where the offer should command the whole screen.',
-    mobileOnly: true,
-    layoutType: 'card',
-    // trigger-constraint (enforced in ccf-push.js's initIntentTriggers(),
-    // not here — this file has no runtime link to the trigger system):
-    // this style must NEVER be shown on the 'page_load' trigger. An
-    // edge-to-edge takeover as the very first thing a visitor sees, before
-    // they've shown any intent to stay, is the one pattern this app
-    // deliberately refuses to do. It still requires the existing "four
-    // intent triggers" (dwell / return_visit / add_to_cart / exit_intent)
-    // — see the self-audit for the practical reachability caveat that
-    // follows from the trigger system's own current page-type gating.
-    neverTriggerOn: ['page_load'],
-    supportedFields: [
-      'headline', 'subtext', 'brandName', 'imageUrl', 'imagePosition',
-      'accentColor', 'bgColor', 'textColor', 'fontFamily',
-      'allowText', 'denyText', 'ctaStyle',
-    ],
-    extraFields: [
-      {
-        key: 'countdownSource',
-        type: 'select',
-        label: 'Countdown counts down to',
-        helper: 'Never a fake per-visitor timer — only a real deadline.',
-        options: [
-          { value: 'discount_expiry', label: "The discount code's real expiry (shown after unlocking)" },
-          { value: 'fixed_date', label: 'A specific end date & time' },
-        ],
-        default: 'discount_expiry',
-      },
-      {
-        key: 'countdownEndsAt',
-        type: 'datetime',
-        label: 'Ends at',
-        default: '',
-        showWhen: { countdownSource: 'fixed_date' },
-      },
-      {
-        key: 'badgeText',
-        type: 'text',
-        label: 'Badge text (optional)',
-        maxLength: 24,
-        default: '',
-      },
-    ],
-    defaultValues: {
-      countdownSource: 'discount_expiry',
-      countdownEndsAt: '',
-      badgeText: '',
     },
   },
 

@@ -240,7 +240,7 @@
 
   // mobile-only styles (audits/mobile-popup-styles-proposal.txt) — mirrors
   // frontend/app/admin/lib/popupStyles.js's MOBILE_ONLY_STYLE_IDS exactly.
-  var CCF_MOBILE_ONLY_STYLE_IDS = ['bottom_sheet', 'full_takeover', 'top_bar', 'story_card'];
+  var CCF_MOBILE_ONLY_STYLE_IDS = ['bottom_sheet', 'top_bar', 'story_card'];
   var CCF_KNOWN_STYLE_IDS = ['flash_sale', 'gift_reveal'].concat(CCF_MOBILE_ONLY_STYLE_IDS);
 
   // popup-style: resolve which style + extra fields are actually in force.
@@ -667,10 +667,10 @@
     // background, set on `wrap` in the flash_sale/gift_reveal branch
     // above); Gift Reveal's codeChipEmphasis makes the code block bigger
     // and bolder. Classic (sId === 'classic') is these same original
-    // colors/sizes, untouched. Full Screen and Story Card also render on
-    // a dark/photo background (mobile-styles) — same light-on-dark need,
-    // mirrors Settings.jsx's UnlockedView isDark check exactly.
-    var isDark = sId === 'flash_sale' || sId === 'full_takeover' || sId === 'story_card';
+    // colors/sizes, untouched. Story Card also renders on a dark/photo
+    // background (mobile-styles) — same light-on-dark need, mirrors
+    // Settings.jsx's UnlockedView isDark check exactly.
+    var isDark = sId === 'flash_sale' || sId === 'story_card';
     var titleColor = isDark ? '#ffffff' : '#111827';
     var subColor = isDark ? '#d4d4d8' : '#6b7280';
     var chipBig = sId === 'gift_reveal' && sFields.codeChipEmphasis !== false;
@@ -1142,140 +1142,6 @@
         'width:44px;height:44px;font-size:16px;line-height:44px;text-align:center;cursor:pointer;z-index:10;';
       wrap.appendChild(closeBtn);
 
-    } else if (ccfStyle.id === 'full_takeover') {
-      // ---------- POPUP STYLE: Full Screen — full-bleed, edge-to-edge
-      // overlay for a high-urgency, time-boxed offer. Mobile-only (see
-      // ccfResolveStyle() above), and NEVER shown on the page_load trigger
-      // (see initIntentTriggers() above — registry constraint on this
-      // style in frontend/app/admin/lib/popupStyles.js). ----------
-      var ftFields = ccfStyle.fields || {};
-      var ftBg = cfg.bgColor || '#18181b';
-      var ftFg = cfg.textColor || '#ffffff';
-      var ftImageUrl = cfg.imageUrl || '';
-
-      // mobile-popup-polish: fills the whole frame by design — no
-      // max-width/max-height guard needed (it can never be taller/wider
-      // than the viewport it's inset:0 into). overflow-y:auto still
-      // guards its OWN content: if headline+subtext+countdown+buttons
-      // together exceed the available height, they scroll internally
-      // instead of clipping.
-      wrap.style.cssText = [
-        'position:fixed', 'inset:0', 'width:100%', 'height:100%',
-        'padding-top:env(safe-area-inset-top, 0px)',
-        'padding-bottom:env(safe-area-inset-bottom, 0px)',
-        'background:' + (ftImageUrl ? '#000' : ftBg), 'color:' + ftFg,
-        'overflow-x:hidden', 'overflow-y:auto', 'z-index:2147483647',
-        'display:flex', 'flex-direction:column', 'justify-content:flex-end',
-        'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif')
-      ].join(';');
-      wrap.classList.add('layout-banner'); // no translateX(-50%) resting transform — same reasoning as Classic Banner
-
-      if (ftImageUrl) {
-        var ftImgEl = document.createElement('img');
-        ftImgEl.src = ftImageUrl;
-        ftImgEl.alt = '';
-        ftImgEl.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;' +
-          'object-fit:cover;object-position:' + (cfg.imagePosition || '50% 50%') + ';';
-        ftImgEl.onerror = function () { ftImgEl.style.display = 'none'; };
-        wrap.appendChild(ftImgEl);
-
-        var ftScrim = document.createElement('div');
-        ftScrim.setAttribute('style',
-          'position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,0.15),rgba(0,0,0,0.8));');
-        wrap.appendChild(ftScrim);
-      }
-
-      // mobile-popup-polish: token padding/gaps applied; headline stays at
-      // its own larger 22px/800 — a deliberate, documented exception to
-      // the 18px token, since this style's whole design intent (see the
-      // comment on this branch above) is a big, high-urgency hero
-      // headline, and shrinking it to match Bottom Sheet/Story Card would
-      // undercut that. Subtext/gaps still move to the shared token.
-      var ftContent = document.createElement('div');
-      ftContent.id = 'ccf-content-section';
-      ftContent.style.cssText = 'position:relative;padding:' + ccfMobileOuterPad + ';text-align:center;';
-
-      if (ftFields.badgeText) {
-        var ftBadge = document.createElement('span');
-        ftBadge.style.cssText = 'display:inline-block;font-size:11px;font-weight:700;' +
-          'letter-spacing:0.05em;text-transform:uppercase;color:' + accent + ';' +
-          'border:1px solid ' + accent + ';border-radius:999px;padding:4px 12px;margin-bottom:12px;';
-        ftBadge.textContent = String(ftFields.badgeText).slice(0, 24);
-        ftContent.appendChild(ftBadge);
-      }
-
-      var ftHead = document.createElement('div');
-      ftHead.id = 'ccf-prompt-text';
-      ftHead.style.cssText = 'font-size:22px;font-weight:800;line-height:1.25;margin-bottom:12px;';
-      ftHead.textContent = headline;
-      ftContent.appendChild(ftHead);
-
-      if (cfg.subtext) {
-        var ftSub = document.createElement('div');
-        ftSub.style.cssText = 'font-size:13px;margin-bottom:12px;line-height:1.4;color:rgba(255,255,255,0.75);';
-        ftSub.textContent = cfg.subtext;
-        ftContent.appendChild(ftSub);
-      }
-
-      if (ccfShowEmailField()) {
-        var ftEmailInput = document.createElement('input');
-        ftEmailInput.type = 'email';
-        ftEmailInput.id = 'ccf-email-input';
-        ftEmailInput.className = 'ccf-input';
-        var ftEp = ccfFieldPct('emailDiscount');
-        ftEmailInput.placeholder = 'Your email' + (ftEp ? ' (get ' + ftEp + '% off)' : '');
-        ftEmailInput.style.cssText = ccfInputStyle() +
-          'background:rgba(255,255,255,0.1);color:' + ftFg + ';border-color:rgba(255,255,255,0.3);';
-        ftContent.appendChild(ftEmailInput);
-      }
-
-      // Real-deadline countdown only — never a fake per-visitor timer,
-      // same rule and same two sourcing modes as Flash Sale above.
-      if (ftFields.countdownSource === 'fixed_date' && ftFields.countdownEndsAt) {
-        var ftEndsAtMs = new Date(ftFields.countdownEndsAt).getTime();
-        if (ftEndsAtMs > Date.now()) {
-          var ftCountdownWrap = document.createElement('div');
-          ftCountdownWrap.style.cssText = 'font-size:22px;font-weight:800;letter-spacing:0.08em;' +
-            'margin-bottom:12px;font-variant-numeric:tabular-nums;';
-          ftContent.appendChild(ftCountdownWrap);
-          ccfStartCountdown(ftCountdownWrap, ftCountdownWrap, ftEndsAtMs);
-        }
-      }
-
-      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
-      ftContent.appendChild(allow);
-
-      // mobile-popup-polish: padded to a ~44px tap target, same reasoning
-      // as Bottom Sheet's Deny above — a per-style override, not a change
-      // to the shared ccfDenyButtonStyle() Classic also uses.
-      deny = buildDenyBtn(ccfDenyButtonStyle() + 'color:rgba(255,255,255,0.7);padding:15px 0;');
-      ftContent.appendChild(deny);
-
-      if (cfg.showBranding) {
-        ftContent.appendChild(buildBranding(
-          'margin-top:12px;font-size:10px;text-align:center;letter-spacing:0.5px;color:rgba(255,255,255,0.4);'));
-      }
-
-      wrap.appendChild(ftContent);
-
-      // full-screen-close-x: registry constraint (see full_takeover's
-      // entry in frontend/app/admin/lib/popupStyles.js) — always visible,
-      // a real 44x44 touch target, HIGH CONTRAST against any background
-      // the merchant picks (solid white circle + dark glyph, not derived
-      // from cfg colors) — full screen has no page content around its
-      // edges to tap instead, so this is the one guaranteed way out
-      // besides Allow/Deny.
-      closeBtn = document.createElement('button');
-      closeBtn.id = 'ccf-close-btn';
-      closeBtn.type = 'button';
-      closeBtn.textContent = '×';
-      closeBtn.setAttribute('aria-label', 'Dismiss');
-      closeBtn.style.cssText = 'position:absolute;top:calc(env(safe-area-inset-top, 0px) + 12px);right:12px;' +
-        'background:#ffffff;color:#111827;border:none;border-radius:50%;' +
-        'width:44px;height:44px;font-size:20px;line-height:44px;text-align:center;' +
-        'cursor:pointer;z-index:11;box-shadow:0 2px 10px rgba(0,0,0,0.3);';
-      wrap.appendChild(closeBtn);
-
     } else if (ccfStyle.id === 'top_bar') {
       // ---------- POPUP STYLE: Top Bar — a slim bar pinned to the top of
       // the screen, headline + inline CTA on one line. Mobile-only (see
@@ -1296,7 +1162,7 @@
       var tbFg = cfg.textColor || '#ffffff';
 
       // mobile-popup-polish: full-width, top-anchored by design (same
-      // "no side-margin guard" reasoning as Bottom Sheet/Full Screen).
+      // "no side-margin guard" reasoning as Bottom Sheet).
       // max-height/overflow-y added for consistency with every other
       // style, though a single-line bar can't realistically overflow.
       wrap.style.cssText = [
@@ -1424,7 +1290,7 @@
       scContent.appendChild(allow);
 
       // mobile-popup-polish: padded to a ~44px tap target, same as Bottom
-      // Sheet/Full Screen above — per-style override, not a change to the
+      // Sheet above — per-style override, not a change to the
       // shared ccfDenyButtonStyle().
       deny = buildDenyBtn(ccfDenyButtonStyle() + 'color:rgba(255,255,255,0.7);padding:15px 0;');
       scContent.appendChild(deny);
@@ -1985,7 +1851,7 @@
         else deny.parentNode.appendChild(discountFields);
       }
     }
-    // popup-style: Flash Sale/Gift Reveal/Bottom Sheet/Full Screen/Story
+    // popup-style: Flash Sale/Gift Reveal/Bottom Sheet/Story
     // Card always render as `card`-shaped, never `banner` — but `layout`
     // itself is left untouched while a non-classic style is active (see
     // the note on the discountFields gate above), so it could still be a
@@ -2433,19 +2299,7 @@
       hasToken = !!localStorage.getItem(PAGE_LOAD_TOKEN_KEY);
     } catch (e) {}
 
-    // mobile-styles: Full Screen must never show via page_load (registry
-    // constraint on full_takeover in popupStyles.js — an edge-to-edge
-    // takeover as the very first thing a visitor sees is the one pattern
-    // this app refuses to do). Resolve which style page_load would
-    // actually render BEFORE scheduling it; if it's Full Screen, fall
-    // through to wire the other intent triggers instead (add_to_cart is
-    // the one of those still realistically reachable on mobile today —
-    // dwell/return_visit require a product page, which returns above, and
-    // exit_intent is desktop-only just below).
-    var pageLoadWouldRenderFullTakeover =
-      ccfResolveStyle(window.innerWidth <= 600).id === 'full_takeover';
-
-    if (!pageLoadWouldRenderFullTakeover && !hasToken && canPrompt()) {
+    if (!hasToken && canPrompt()) {
       setTimeout(function () {
         if (canPrompt()) {
           showSoftPrompt('page_load', null);

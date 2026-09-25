@@ -122,15 +122,19 @@ const storeSchema = new mongoose.Schema({
     // known field set before writing.
     styleId: {
       type: String,
-      // mobile-only styles (bottom_sheet, full_takeover, top_bar,
-      // story_card — see audits/mobile-popup-styles-proposal.txt) are
+      // mobile-only styles (bottom_sheet, top_bar, story_card — see
+      // audits/mobile-popup-styles-proposal.txt) are
       // listed here too for schema symmetry with mobilePopup.styleId
       // below, even though the admin UI never offers them for THIS field
       // — resolveStyleId()/ccfResolveStyle() are the actual guards that
       // keep one from ever being rendered for a desktop context if it
       // somehow ends up here anyway (a stale save, a direct API write).
+      // A removed style ('full_takeover') is deliberately absent. Loading a
+      // shop that still has it saved is safe: Mongoose never validates on
+      // read, and updateOne() here runs without runValidators; the value
+      // is treated as unknown -> classic by resolveStyleId()/ccfResolveStyle().
       enum: ['classic', 'flash_sale', 'gift_reveal',
-        'bottom_sheet', 'full_takeover', 'top_bar', 'story_card'],
+        'bottom_sheet', 'top_bar', 'story_card'],
       default: 'classic',
     },
     styleFields: { type: mongoose.Schema.Types.Mixed, default: {} },
@@ -179,7 +183,7 @@ const storeSchema = new mongoose.Schema({
     // --- popup-style: only consulted when popup.mobileStyleOverride is
     // true (see the note on that field above); otherwise the storefront
     // and admin preview both use popup.styleId/styleFields for mobile too.
-    // bottom_sheet/full_takeover/top_bar/story_card are mobile-only styles
+    // bottom_sheet/top_bar/story_card are mobile-only styles
     // that only ever get saved here, never to the desktop popup.styleId
     // above — the admin gallery hides them on the Desktop tab and forces
     // mobileStyleOverride=true when one is picked (see
@@ -187,7 +191,7 @@ const storeSchema = new mongoose.Schema({
     styleId: {
       type: String,
       enum: ['classic', 'flash_sale', 'gift_reveal',
-        'bottom_sheet', 'full_takeover', 'top_bar', 'story_card'],
+        'bottom_sheet', 'top_bar', 'story_card'],
       default: 'classic',
     },
     styleFields: { type: mongoose.Schema.Types.Mixed, default: {} },

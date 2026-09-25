@@ -8,7 +8,8 @@
  * Round 1: classic, flash_sale, gift_reveal.
  * Round 2 (mobile-specific styles — see
  * audits/mobile-popup-styles-proposal.txt and -after.txt): bottom_sheet,
- * full_takeover, top_bar, story_card. These are device-restricted
+ * top_bar, story_card. (full_takeover was removed; see
+ * audits/remove-full-takeover-audit.txt.) These are device-restricted
  * ("mobile-only") in the admin UI and in ccf-push.js's ccfResolveStyle(),
  * but this file (like Store.js's enum) does NOT enforce that restriction —
  * it only validates that an id/extra-field shape is a RECOGNIZED one, not
@@ -18,13 +19,18 @@
  */
 
 const STYLE_IDS = ['classic', 'flash_sale', 'gift_reveal',
-  'bottom_sheet', 'full_takeover', 'top_bar', 'story_card'];
+  'bottom_sheet', 'top_bar', 'story_card'];
+
+// Ids that used to exist and may still be saved on old documents. A PATCH
+// that carries one is normalized to 'classic' instead of being dropped, so
+// the stale value gets overwritten on the shop's next save.
+const REMOVED_STYLE_IDS = ['full_takeover'];
 
 // Style ids that only ever render on mobile — mirrors
 // frontend/app/admin/lib/popupStyles.js's MOBILE_ONLY_STYLE_IDS. Exported
 // for tests/consumers that want to assert device-gating without needing
 // the full frontend registry.
-const MOBILE_ONLY_STYLE_IDS = ['bottom_sheet', 'full_takeover', 'top_bar', 'story_card'];
+const MOBILE_ONLY_STYLE_IDS = ['bottom_sheet', 'top_bar', 'story_card'];
 
 // Per-style extra-field definitions, used only to sanitize incoming
 // styleFields: { key: 'boolean' | 'string' | { type: 'string', maxLength } }.
@@ -50,11 +56,6 @@ const STYLE_EXTRA_FIELDS = {
     iconArtEnabled: { type: 'boolean' },
     dragHandleEnabled: { type: 'boolean' },
   },
-  full_takeover: {
-    countdownSource: { type: 'enum', values: ['discount_expiry', 'fixed_date'] },
-    countdownEndsAt: { type: 'string', maxLength: 40 },
-    badgeText: { type: 'string', maxLength: 24 },
-  },
   top_bar: {
     arrowCta: { type: 'boolean' },
   },
@@ -65,6 +66,12 @@ const STYLE_EXTRA_FIELDS = {
 
 function isValidStyleId(id) {
   return STYLE_IDS.indexOf(id) !== -1;
+}
+
+// PATCH-time normalization: a removed id becomes 'classic'; anything else is
+// returned as-is (callers still gate on isValidStyleId).
+function normalizeStyleId(id) {
+  return REMOVED_STYLE_IDS.indexOf(id) !== -1 ? 'classic' : id;
 }
 
 /**
@@ -114,5 +121,5 @@ function sanitizeStyleFields(input) {
 
 module.exports = {
   STYLE_IDS, MOBILE_ONLY_STYLE_IDS, STYLE_EXTRA_FIELDS,
-  isValidStyleId, sanitizeStyleFields, resolveStyleId,
+  isValidStyleId, normalizeStyleId, sanitizeStyleFields, resolveStyleId,
 };

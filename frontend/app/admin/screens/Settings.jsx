@@ -266,10 +266,10 @@ function AllowButtonLabel({ step, allowText, wantsDiscount }) {
 // preview-only annotation of that imminent (but never actually performed)
 // navigation — see audits/popup-preview-flow-audit.txt.
 function UnlockedView({ styleId, percentage, expiryDays, code, codeChipEmphasis, showRedirectingBadge }) {
-  // mobile-styles: Full Screen and Story Card also render on a dark/photo
-  // background, same as Flash Sale — the unlocked-code view needs the
-  // light-on-dark palette there too, or its text is unreadable.
-  const isDark = styleId === 'flash_sale' || styleId === 'full_takeover' || styleId === 'story_card';
+  // mobile-styles: Story Card also renders on a dark/photo background, same
+  // as Flash Sale — the unlocked-code view needs the light-on-dark palette
+  // there too, or its text is unreadable.
+  const isDark = styleId === 'flash_sale' || styleId === 'story_card';
   const chipBig = styleId === 'gift_reveal' && codeChipEmphasis !== false;
   const titleColor = isDark ? '#ffffff' : '#111827';
   const subColor = isDark ? '#d4d4d8' : '#6b7280';
@@ -728,7 +728,6 @@ function StyleCardPreview({
   const headline = cfg.headline || {
     flash_sale: 'Flash Sale — limited time!',
     gift_reveal: "You've got a gift waiting",
-    full_takeover: 'Flash Sale — limited time!',
   }[styleId] || 'Get notified about deals';
   const subtext = cfg.subtext || '';
   const allowText = cfg.allowText || 'Allow';
@@ -791,7 +790,7 @@ function StyleCardPreview({
           </div>
         )}
         {/* mobile-popup-polish: 44x44 tap target (compact fallback 36,
-            matching Full Screen's own compact/full split below) — was the
+            matching the compact/full split used by the other mobile styles) — was the
             26px ClosePreviewButton default. */}
         <ClosePreviewButton onClick={onDismiss} interactive={interactive}
           size={compact ? 36 : 44} fontSize={compact ? 14 : 16}
@@ -830,110 +829,6 @@ function StyleCardPreview({
                   also share and must stay byte-identical on desktop). */}
               <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
                 style={{ ...denyLinkStyle('#9ca3af'), padding: '15px 0' }} interactive={interactive}>
-                {denyText}
-              </PreviewButton>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  if (styleId === 'full_takeover') {
-    const badgeText = field('badgeText');
-    const countdownSource = field('countdownSource');
-    const countdownEndsAt = field('countdownEndsAt');
-    let countdownDisplay = null;
-    let countdownNote = null;
-    if (countdownSource === 'fixed_date') {
-      if (countdownEndsAt) {
-        const remaining = new Date(countdownEndsAt).getTime() - Date.now();
-        countdownDisplay = formatCountdown(remaining);
-        if (!countdownDisplay) countdownNote = 'That end date has already passed.';
-      } else {
-        countdownNote = 'Set an end date to preview the countdown.';
-      }
-    } else {
-      countdownNote = 'Shown after a customer unlocks their code (real expiry) — not shown before then.';
-    }
-    const bg = cfg.bgColor || '#18181b';
-    const fg = cfg.textColor || '#ffffff';
-    // mobile-preview-clipping-fix: was a fixed 300px-wide, 260/320px-tall
-    // box (with the mobile preview additionally anchoring it to the
-    // BOTTOM of the phone frame) — neither matches this style's own
-    // defining trait, "fills the whole frame" (ccf-push.js:
-    // position:fixed;inset:0;width:100%;height:100%, unconditionally).
-    // 100%/100% here, paired with the mobile preview's now-inset:0
-    // wrapper for this style, makes the preview genuinely fill its
-    // container instead of floating a fixed-size box inside it.
-    return (
-      <div style={{ borderRadius: compact ? 0 : radius, overflow: 'hidden',
-                    background: imageUrl ? '#000' : bg, color: fg, fontFamily: font, position: 'relative',
-                    width: '100%', height: '100%',
-                    display: 'flex', flexDirection: 'column', justifyContent: 'flex-end',
-                    boxShadow: '0 10px 34px rgba(0,0,0,0.35)' }}>
-        {imageUrl && (
-          <img src={imageUrl} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%',
-            objectFit: 'cover', objectPosition: cfg.imagePosition || 'center center' }} />
-        )}
-        {imageUrl && (
-          <div aria-hidden="true" style={{ position: 'absolute', inset: 0,
-            background: 'linear-gradient(180deg, rgba(0,0,0,0.15), rgba(0,0,0,0.8))' }} />
-        )}
-        {/* full-screen-close-x: registry constraint (see full_takeover's
-            entry in popupStyles.js) — always visible, a real 44x44 touch
-            target, high contrast against ANY background the merchant
-            picks (solid white circle + dark glyph, not derived from
-            cfg colors) — full screen has no page content around its
-            edges to tap instead, so this is the one guaranteed way out
-            besides Allow/Deny. */}
-        <ClosePreviewButton onClick={onDismiss} interactive={interactive}
-          size={compact ? 36 : 44} top={12} right={12} fontSize={compact ? 16 : 20}
-          background="#ffffff" color="#111827" />
-        <div style={{ position: 'relative', padding, textAlign: 'center' }}>
-          {swapped ? (
-            <UnlockedView styleId={styleId} percentage={unlockedInfo.percentage}
-              expiryDays={unlockedInfo.expiryDays} code={unlockedInfo.code}
-              showRedirectingBadge={step === 'redirecting'} />
-          ) : (
-            <>
-              {badgeText && (
-                <span style={{ display: 'inline-block', fontSize: 10, fontWeight: 700,
-                  letterSpacing: '0.05em', textTransform: 'uppercase', color: accent,
-                  border: `1px solid ${accent}`, borderRadius: 999, padding: '3px 10px', marginBottom: 8 }}>
-                  {badgeText}
-                </span>
-              )}
-              {/* mobile-popup-polish: headline stays larger (documented
-                  exception — see the ccf-push.js comment on this style's
-                  branch); subtext/gap move to the shared token. */}
-              <div style={{ fontSize: headlineSize + 4, fontWeight: 800, marginBottom: 12 }}>{headline}</div>
-              {subtext && (
-                <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.75)', marginBottom: 12 }}>{subtext}</div>
-              )}
-              {emailFieldEnabled && (
-                <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
-                  placeholder="Email address" interactive={interactive}
-                  style={{ width: '100%', padding: '8px 12px', fontSize: 12, borderRadius: 8,
-                    border: '1px solid rgba(255,255,255,0.3)', marginBottom: 8,
-                    background: 'rgba(255,255,255,0.1)', color: fg, boxSizing: 'border-box',
-                    fontFamily: font, lineHeight: 1.2 }} />
-              )}
-              {countdownDisplay ? (
-                <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: '0.08em', marginBottom: 10,
-                  fontVariantNumeric: 'tabular-nums' }}>
-                  {countdownDisplay}
-                </div>
-              ) : countdownNote && (
-                <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.6)', marginBottom: 10, fontStyle: 'italic' }}>
-                  {countdownNote}
-                </div>
-              )}
-              <PreviewButton {...allowBtnCommon} interactive={interactive}>
-                <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
-              </PreviewButton>
-              <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
-                style={{ ...denyLinkStyle('rgba(255,255,255,0.7)'), padding: '15px 0' }} interactive={interactive}>
                 {denyText}
               </PreviewButton>
             </>
@@ -997,7 +892,7 @@ function StyleCardPreview({
             background: 'linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.78) 100%)' }} />
         )}
         {/* mobile-popup-polish: 44x44 tap target (compact fallback 36),
-            same treatment as Bottom Sheet/Full Screen above. */}
+            same treatment as Bottom Sheet above. */}
         <ClosePreviewButton onClick={onDismiss} interactive={interactive}
           size={compact ? 36 : 44} fontSize={compact ? 14 : 16} top={compact ? 4 : 12} right={compact ? 4 : 12} />
         <div style={{ position: 'relative', padding, textAlign: 'center' }}>
@@ -2069,8 +1964,6 @@ export default function Settings({ shop }) {
       desc: POPUP_STYLES.gift_reveal.shortDescription },
     { key: 'bottom_sheet', styleId: 'bottom_sheet', layout: null, name: POPUP_STYLES.bottom_sheet.name,
       desc: POPUP_STYLES.bottom_sheet.shortDescription },
-    { key: 'full_takeover', styleId: 'full_takeover', layout: null, name: POPUP_STYLES.full_takeover.name,
-      desc: POPUP_STYLES.full_takeover.shortDescription },
     { key: 'top_bar', styleId: 'top_bar', layout: null, name: POPUP_STYLES.top_bar.name,
       desc: POPUP_STYLES.top_bar.shortDescription },
     { key: 'story_card', styleId: 'story_card', layout: null, name: POPUP_STYLES.story_card.name,
@@ -2332,8 +2225,8 @@ export default function Settings({ shop }) {
                     // narrower than any style's own compact width (300,
                     // or 240 for Story Card), so every "card"-shaped
                     // style already overflowed it horizontally, and a
-                    // style with real content height (Full Screen,
-                    // anchored bottom before this fix) had nowhere near
+                    // style with real content height (anchored bottom
+                    // before this fix) had nowhere near
                     // enough room and got clipped by this div's own
                     // overflow:hidden. 340x600 comfortably fits every
                     // compact width used anywhere in this file with
@@ -2421,7 +2314,6 @@ export default function Settings({ shop }) {
                       // mobile-popup-polish: per-style anchor, matching
                       // ccf-push.js exactly (see the anchor table in
                       // audits/mobile-popup-polish-audit.txt):
-                      //   full_takeover -> fills the frame (inset:0)
                       //   top_bar       -> pinned to the frame's top edge
                       //   bottom_sheet  -> pinned to the frame's bottom
                       //                    edge, full width (its own
@@ -2439,9 +2331,7 @@ export default function Settings({ shop }) {
                       //   regardless of what the merchant picked.
                       const CENTERED_STYLE_IDS = ['story_card', 'flash_sale', 'gift_reveal'];
                       if (activeStyleId !== 'classic') {
-                        const wrapStyle = activeStyleId === 'full_takeover'
-                          ? { position: 'absolute', inset: 0, zIndex: 5 }
-                          : activeStyleId === 'top_bar'
+                        const wrapStyle = activeStyleId === 'top_bar'
                           ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }
                           : CENTERED_STYLE_IDS.includes(activeStyleId)
                           ? { position: 'absolute', top: '50%', left: '50%',

@@ -102,3 +102,9 @@ test('an unregistered mobilePopup.styleId is dropped but other mobilePopup field
   expect(set['mobilePopup.styleId']).toBeUndefined();
   expect(set['mobilePopup.headline']).toBe('Mobile hi');
 });
+
+test('a removed style id (full_takeover) is normalized to classic on both popup and mobilePopup', async () => {
+  const { set } = await run({ styleId: 'full_takeover', mobilePopup: { styleId: 'full_takeover' } });
+  expect(set['popup.styleId']).toBe('classic');
+  expect(set['mobilePopup.styleId']).toBe('classic');
+});

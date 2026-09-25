@@ -12,14 +12,14 @@ describe('isValidStyleId', () => {
     expect(isValidStyleId(id)).toBe(true);
   });
 
-  test.each(['editorial', 'spotlight', 'made-up', '', null, undefined, 42])(
+  test.each(['editorial', 'spotlight', 'made-up', '', null, undefined, 42, 'full_takeover'])(
     'rejects unregistered id %p', (id) => {
       expect(isValidStyleId(id)).toBe(false);
     }
   );
 });
 
-// mobile-only styles: bottom_sheet/full_takeover/top_bar/story_card must
+// mobile-only styles: bottom_sheet/top_bar/story_card must
 // never resolve for a desktop context, and an unrecognized id must always
 // fall back to classic — the same contract promised by
 // frontend/app/admin/lib/popupStyles.js's resolveStyleId() and
@@ -41,8 +41,8 @@ describe('resolveStyleId', () => {
     }
   );
 
-  test.each(['editorial', 'made-up', '', null, undefined, 42])(
-    'unrecognized id %p falls back to classic regardless of device', (id) => {
+  test.each(['editorial', 'made-up', '', null, undefined, 42, 'full_takeover'])(
+    'unrecognized/removed id %p falls back to classic regardless of device', (id) => {
       expect(resolveStyleId(id, 'desktop')).toBe('classic');
       expect(resolveStyleId(id, 'mobile')).toBe('classic');
     }
@@ -100,12 +100,6 @@ describe('sanitizeStyleFields', () => {
   test('bottom_sheet: booleans coerced', () => {
     expect(sanitizeStyleFields({ iconArtEnabled: 1, dragHandleEnabled: '' }))
       .toEqual({ iconArtEnabled: true, dragHandleEnabled: false });
-  });
-
-  test('full_takeover: same countdown shape as flash_sale', () => {
-    expect(sanitizeStyleFields({ countdownSource: 'fixed_date', badgeText: 'GO' }))
-      .toEqual({ countdownSource: 'fixed_date', badgeText: 'GO' });
-    expect(sanitizeStyleFields({ countdownSource: 'minutes_from_now' })).toEqual({});
   });
 
   test('top_bar: arrowCta boolean coerced', () => {

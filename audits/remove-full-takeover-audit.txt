@@ -1,0 +1,100 @@
+REMOVE FULL_TAKEOVER (FULL SCREEN) - SELF-AUDIT
+===============================================
+
+1. FILES AND WHAT WAS REMOVED
+-----------------------------
+frontend/app/admin/lib/popupStyles.js
+  - full_takeover registry entry (name, description, neverTriggerOn, fields, defaults).
+  - 'full_takeover' from STYLE_ORDER and MOBILE_ONLY_STYLE_IDS. Header comment updated.
+backend/utils/popupStyles.js
+  - 'full_takeover' from STYLE_IDS, MOBILE_ONLY_STYLE_IDS and its STYLE_EXTRA_FIELDS entry.
+  - Added REMOVED_STYLE_IDS and normalizeStyleId() (see section 2).
+backend/models/Store.js
+  - 'full_takeover' from the popup.styleId and mobilePopup.styleId enums; comments updated.
+backend/routes/profiles.js
+  - PATCH /popup now runs styleId (desktop and mobile) through normalizeStyleId() before the
+    isValidStyleId() check. No other route logic changed.
+frontend/app/admin/screens/Settings.jsx
+  - Gallery card, the full_takeover branch of StyleCardPreview, its headline default, the
+    'full_takeover' case in UnlockedView's isDark check, its inset:0 wrapper case in the mobile
+    preview, and comments that referred to it. formatCountdown stays (flash_sale uses it).
+extensions/cartncodform-embed/assets/ccf-push.js
+  - The full_takeover builder branch (image, scrim, badge, headline, subtext, email,
+    countdown, Allow/Deny, 44x44 close X, its layout-banner class assignment).
+  - 'full_takeover' from CCF_MOBILE_ONLY_STYLE_IDS and from the isDark check in the unlocked view.
+  - The pageLoadWouldRenderFullTakeover block in initIntentTriggers (section 3).
+backend/__tests__/popupStyles.test.js
+  - full_takeover sanitizer test removed; 'full_takeover' added to the unknown-id lists for
+    isValidStyleId and resolveStyleId (must resolve to classic on both devices).
+backend/__tests__/popupConfigRoute.test.js
+  - New test: a PATCH carrying full_takeover is normalized to classic for popup and mobilePopup.
+Dead helpers/CSS/icons: none found that only full_takeover used. ccfStartCountdown,
+ccfFormatCountdown, formatCountdown, ccfMobileOuterPad and the layout-banner CSS class are all
+still used by other styles.
+Remaining references to the string 'full_takeover' are intentional: the REMOVED_STYLE_IDS list,
+tests, and explanatory comments.
+
+2. EXISTING-DOCUMENT SAFETY (Store.js enum removal)
+---------------------------------------------------
+Question: can removing the enum value reject a stored document that already has it?
+Findings:
+  - Reads never validate. Store.findOne() of a document with popup.styleId = 'full_takeover'
+    loads normally.
+  - PATCH /api/profiles/:shop/popup writes with Store.updateOne({$set}) and no runValidators
+    (profiles.js documents this), so enum validation does not run on that write.
+  - The one runValidators use in the backend (routes/automation.js findOneAndUpdate) does not
+    touch popup/mobilePopup paths, so it cannot trip on the stale value.
+  - Mongoose save() validates only modified paths, so an untouched stale styleId would not fail.
+  So a shop that saved full_takeover can still load and re-save without a validation error.
+What I did anyway:
+  - Renderers already treat unknown ids as classic: admin getStyle() falls back to classic,
+    resolveStyleId() returns classic, and ccf-push.js ccfResolveStyle() falls back to classic
+    for ids not in CCF_KNOWN_STYLE_IDS.
+  - Before this change, a PATCH carrying the old id would be silently dropped by isValidStyleId,
+    leaving the stale value in the database forever. Now the route normalizes it to 'classic'
+    (popup.styleId and mobilePopup.styleId), so it is overwritten on the shop's next save.
+  - No data migration was run. Shops that never re-save keep the stale value in Mongo but render
+    as Classic on the storefront and admin.
+Behavior change for affected shops: a shop whose mobile style was Full Screen now renders
+Classic on mobile (this is the requested fallback).
+
+3. initIntentTriggers page_load BLOCK
+-------------------------------------
+BEFORE:
+    var pageLoadWouldRenderFullTakeover =
+      ccfResolveStyle(window.innerWidth <= 600).id === 'full_takeover';
+    if (!pageLoadWouldRenderFullTakeover && !hasToken && canPrompt()) {
+      setTimeout(function () {
+        if (canPrompt()) { showSoftPrompt('page_load', null); }
+      }, DWELL_MS);
+      return; // Don't set up other triggers if we show on load
+    }
+  (preceded by a ~10-line comment explaining the Full Screen page_load exclusion)
+AFTER (identical to the code before the mobile-styles work):
+    if (!hasToken && canPrompt()) {
+      setTimeout(function () {
+        if (canPrompt()) { showSoftPrompt('page_load', null); }
+      }, DWELL_MS);
+      return; // Don't set up other triggers if we show on load
+    }
+
+4. VERIFICATION
+---------------
+backend npm test: 23/23 suites, 225/225 tests pass.
+frontend npm run build: compiled successfully. node --check on ccf-push.js: OK.
+Live (temp route + next dev, temp route deleted afterwards): Mobile gallery lists Bottom Sheet,
+Top Bar and Story Card as mobile-only styles with no Full Screen card. Each of the three still
+renders in the phone frame: Bottom Sheet anchored at the bottom with close X, Allow and No thanks;
+Top Bar pinned to the top with Allow and close; Story Card centered with close X.
+Not re-tested: the storefront script on a real store (no harness re-run for this change).
+
+5. OTHER THREE MOBILE STYLES UNAFFECTED
+---------------------------------------
+bottom_sheet, top_bar, story_card: builders, tokens, anchors and animation classes untouched;
+only shared lists (MOBILE_ONLY ids, isDark check) lost one entry.
+
+6. CLASSIC DESKTOP UNCHANGED
+----------------------------
+No Classic layout code (split/card/banner) was edited; the only ccf-push.js change outside the
+removed builder is deleting the page_load exclusion, which only mattered when the resolved style
+was full_takeover.

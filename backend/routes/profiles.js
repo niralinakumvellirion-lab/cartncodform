@@ -509,7 +509,7 @@ const POPUP_FIELDS = [
 // schema-level enum validator unless {runValidators:true} is passed, which
 // this route doesn't use), and styleFields needs sanitizing, not a blind
 // pass-through.
-const { sanitizeStyleFields, isValidStyleId } = require('../utils/popupStyles');
+const { sanitizeStyleFields, isValidStyleId, normalizeStyleId } = require('../utils/popupStyles');
 
 router.get('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, res) => {
   try {
@@ -545,7 +545,8 @@ router.patch('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, r
     // save) rather than failing the whole request, same permissive
     // pattern the rest of this route already uses for a bad field.
     if (Object.prototype.hasOwnProperty.call(req.body, 'styleId')) {
-      if (isValidStyleId(req.body.styleId)) set['popup.styleId'] = req.body.styleId;
+      const sid = normalizeStyleId(req.body.styleId);
+      if (isValidStyleId(sid)) set['popup.styleId'] = sid;
     }
     if (Object.prototype.hasOwnProperty.call(req.body, 'styleFields')) {
       set['popup.styleFields'] = sanitizeStyleFields(req.body.styleFields);
@@ -571,8 +572,9 @@ router.patch('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, r
         }
       }
       if (Object.prototype.hasOwnProperty.call(req.body.mobilePopup, 'styleId')) {
-        if (isValidStyleId(req.body.mobilePopup.styleId)) {
-          set['mobilePopup.styleId'] = req.body.mobilePopup.styleId;
+        const msid = normalizeStyleId(req.body.mobilePopup.styleId);
+        if (isValidStyleId(msid)) {
+          set['mobilePopup.styleId'] = msid;
         }
       }
       if (Object.prototype.hasOwnProperty.call(req.body.mobilePopup, 'styleFields')) {
