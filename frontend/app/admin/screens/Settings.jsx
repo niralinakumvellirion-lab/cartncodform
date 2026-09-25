@@ -2432,15 +2432,6 @@ export default function Settings({ shop }) {
             options={[{ value: 'left', label: 'Left' }, { value: 'center', label: 'Center' }, { value: 'right', label: 'Right' }]}
             onChange={(v) => setActivePopup((p) => ({ ...p, textAlign: v }))} />
         )}
-        <SelectRow label="Position" value={activePopup.position || 'bottom-right'}
-          options={[
-            { value: 'bottom-right', label: 'Bottom right' },
-            { value: 'bottom-left', label: 'Bottom left' },
-            { value: 'center', label: 'Center' },
-            { value: 'top-right', label: 'Top right' },
-            { value: 'top-left', label: 'Top left' },
-          ]}
-          onChange={(v) => setActivePopup((p) => ({ ...p, position: v }))} />
         {activeStyleId === 'classic' && (
           <ToggleRow label="Dark overlay" checked={activePopup.showOverlay !== false}
             onChange={(v) => setActivePopup((p) => ({ ...p, showOverlay: v }))} />
