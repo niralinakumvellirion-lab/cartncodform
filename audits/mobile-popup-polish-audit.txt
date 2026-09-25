@@ -1,0 +1,90 @@
+MOBILE POPUP POLISH - SELF-AUDIT
+=================================
+
+Files changed: extensions/cartncodform-embed/assets/ccf-push.js, frontend/app/admin/screens/Settings.jsx
+No schema, backend, save-payload, subscribe, FCM, discount or storage change. Backend tests: 226/226 pass.
+
+1. CLASSIC-SPLIT ON THE MOBILE TAB
+----------------------------------
+Before: card was already disabled correctly (disabled = isMobileTab && layout === 'split';
+  opacity 0.45, cursor not-allowed, onClick removed, aria-disabled). NOT clickable.
+  Gap: no explanation shown to the merchant.
+After: same disabled behaviour, plus a visible red caption "Not available on mobile" and a
+  title tooltip. Schema enum ('card' | 'banner') untouched.
+
+2. PER-STYLE ANCHOR TABLE (ccf-push.js vs admin phone preview)
+--------------------------------------------------------------
+Style            | ccf-push.js BEFORE   | Admin BEFORE        | AFTER (both sides)
+bottom_sheet     | bottom, full width   | bottom, 8px inset   | bottom, full width (admin left as-is: inset frame margin)
+full_takeover    | inset:0              | inset:0             | inset:0
+top_bar          | top, full width      | top, full width     | top, full width
+story_card       | bottom:24px (MISMATCH)| centered           | centered both axes (fixed in ccf-push.js)
+classic card     | bottom (mobile+desk) | bottom              | mobile: centered; desktop unchanged (bottom:24px)
+classic banner   | top/bottom by cfg.position | always bottom (MISMATCH) | top/bottom by position both sides
+flash_sale       | bottom               | bottom              | centered both axes
+gift_reveal      | bottom               | bottom              | centered both axes
+Mismatches found and fixed: story_card (storefront), classic banner (admin).
+Centered styles use top:50%/left:50%/translate(-50%,-50%) and the 'layout-center' animation
+class (added for flash_sale, gift_reveal, story_card, classic card on mobile only) so the
+entrance animation and hover no longer assume translateX(-50%).
+
+3. NOTHING CUT OFF (ccf-push.js)
+--------------------------------
+Floating styles (flash_sale, gift_reveal, story_card, classic card mobile):
+  width min(300px | 260px for story, calc(100vw - 32px)), max-height calc(100vh - 32px),
+  overflow-x hidden (keeps rounded-corner clipping), overflow-y auto.
+Edge-anchored styles (bottom_sheet, top_bar, full_takeover): full width by design (no side
+  margin); max-height/overflow-y auto added. Safe-area insets: bottom_sheet bottom,
+  top_bar top, full_takeover both (already present, verified).
+
+4. SPACING / SIZING TOKENS (applied to bottom_sheet, full_takeover, story_card)
+------------------------------------------------------------------------------
+Outer padding      20px; 16px when window.innerWidth < 360 (storefront only; admin mock is fixed width)
+Headline           18px / 700
+Subtext            13px
+Button text        15px / 700 (existing ccfAllowButtonStyle)
+Allow height       ~46px (14px padding), full width
+Deny               padding 15px 0 (~44px tap target), full width, per-style override
+Close X            44x44
+Stack gap          12px
+Primary/secondary  10px (existing margin-bottom on Allow)
+Documented exceptions:
+  - full_takeover headline stays 22px/800 (hero design intent).
+  - top_bar keeps 13px/700 headline and compact Allow (slim bar); close X min 36x36, not 44.
+  - flash_sale / gift_reveal / Classic values not retokenized (Classic desktop must stay byte-identical).
+
+5. ADMIN PARITY (Settings.jsx values changed)
+--------------------------------------------
+bottom_sheet: headline 800->700, mb 6->12; subtext 12->13, mb 10->12; close 26->44 (36 compact); deny padding 15px 0.
+full_takeover: subtext 12->13; gaps ->12; deny padding 15px 0 (close already 44/36).
+top_bar: close min 36x36.
+story_card: headline size+2/800 -> base/700, mb 12; subtext 13, mb 12; close 44 (36 compact); deny padding 15px 0.
+Wrapper: flash_sale/gift_reveal/story_card/classic card centered; classic banner top/bottom per position.
+ccf-push.js values changed: as sections 2-4 above (padding tokens, headline, subtext, gaps, deny padding, close X, max-width/height, overflow, centering).
+
+6. RESULTS AT 320 / 375 / 414 PX
+--------------------------------
+Method: iframe harness (each iframe has its own viewport so vw/vh are exact) using the exact
+cssText strings from ccf-push.js, at real device heights 568/667/736. The full ccf-push.js IIFE
+(Firebase, backend) was not run; storefront rendering of the real script was not tested end to end.
+flash_sale      320/375/414: centered, 16px+ side margins, buttons visible, nothing clipped.
+gift_reveal     320/375/414: centered, margins intact, nothing clipped.
+story_card      320/375/414: centered, fully visible incl. Allow and No thanks.
+classic card    320/375/414: centered, margins intact, nothing clipped.
+bottom_sheet    320/375/414: bottom-anchored full width, handle, Allow and No thanks fully visible.
+top_bar         320/375/414: top-anchored full width, headline ellipsis at 320, Allow and close visible.
+full_takeover   320: 44x44 close, headline, subtext, Allow, No thanks all visible (tightest case).
+                375/414: close and headline confirmed; bottom buttons not individually scrolled into
+                view in the capture (more headroom than 320, so not expected to differ).
+Admin preview (dev server, 340x600 frame): Classic-Split disabled and captioned on Mobile tab;
+  story_card centered with Allow/No thanks fully inside frame. Flash Sale, Gift Reveal, Classic
+  card and banner wrappers in the admin frame were NOT visually checked (verified by code only).
+
+7. DESKTOP CLASSIC UNCHANGED
+----------------------------
+Classic card cssText is split into isMobile ? [new] : [original array copied verbatim]; the
+'layout-center' class is added only when isMobile. Split and Banner code untouched.
+Shared helpers ccfAllowButtonStyle / ccfDenyButtonStyle unchanged.
+Note: flash_sale and gift_reveal are not "Classic" and now center on desktop too.
+
+Deploy: vercel --prod done; shopify app deploy released shopireachboost-ai-127.

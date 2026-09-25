@@ -607,13 +607,14 @@ function ImageRow({ label, imageUrl, imagePosition, onUpload, onRemove }) {
 // A style-gallery card: a small, LIVE (not static) preview of the actual
 // style/layout, scaled down via CSS transform so it's the merchant's real
 // current settings, not a screenshot.
-function GalleryCard({ card, selected, disabled, mobileOnly, previewNode, onClick }) {
+function GalleryCard({ card, selected, disabled, disabledReason, mobileOnly, previewNode, onClick }) {
   return (
     <button
       type="button"
       onClick={disabled ? undefined : onClick}
       aria-pressed={selected}
       aria-disabled={disabled}
+      title={disabled ? disabledReason : undefined}
       className="ccf-style-card"
       style={{
         textAlign: 'left', padding: 10, borderRadius: 12,
@@ -647,6 +648,11 @@ function GalleryCard({ card, selected, disabled, mobileOnly, previewNode, onClic
         <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, lineHeight: 1.4 }}>
           {card.desc}
         </div>
+        {disabled && disabledReason && (
+          <div style={{ fontSize: 10, fontWeight: 600, color: '#b91c1c', marginTop: 4 }}>
+            {disabledReason}
+          </div>
+        )}
       </div>
     </button>
   );
@@ -784,8 +790,13 @@ function StyleCardPreview({
             <div aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 999, background: '#d1d5db' }} />
           </div>
         )}
+        {/* mobile-popup-polish: 44x44 tap target (compact fallback 36,
+            matching Full Screen's own compact/full split below) — was the
+            26px ClosePreviewButton default. */}
         <ClosePreviewButton onClick={onDismiss} interactive={interactive}
-          top={dragHandleEnabled ? 18 : 12} />
+          size={compact ? 36 : 44} fontSize={compact ? 14 : 16}
+          top={dragHandleEnabled ? (compact ? 10 : 18) : (compact ? 4 : 12)}
+          right={compact ? 4 : 12} />
         {imageUrl ? (
           <img src={imageUrl} alt="" style={{ width: '100%', height: compact ? 70 : 100, marginTop: 8,
             objectFit: 'cover', objectPosition: cfg.imagePosition || 'center center', display: 'block' }} />
@@ -801,8 +812,8 @@ function StyleCardPreview({
               showRedirectingBadge={step === 'redirecting'} />
           ) : (
             <>
-              <div style={{ fontSize: headlineSize, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
-              {subtext && <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>{subtext}</div>}
+              <div style={{ fontSize: headlineSize, fontWeight: 700, marginBottom: 12 }}>{headline}</div>
+              {subtext && <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>{subtext}</div>}
               {emailFieldEnabled && (
                 <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
                   placeholder="Email address" interactive={interactive}
@@ -813,8 +824,12 @@ function StyleCardPreview({
               <PreviewButton {...allowBtnCommon} interactive={interactive}>
                 <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
               </PreviewButton>
+              {/* mobile-popup-polish: padded to a ~44px tap target, mirroring
+                  ccf-push.js's per-style Deny override (not a change to
+                  denyLinkStyle() itself, which Classic/Flash Sale/Gift Reveal
+                  also share and must stay byte-identical on desktop). */}
               <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
-                style={denyLinkStyle('#9ca3af')} interactive={interactive}>
+                style={{ ...denyLinkStyle('#9ca3af'), padding: '15px 0' }} interactive={interactive}>
                 {denyText}
               </PreviewButton>
             </>
@@ -889,9 +904,12 @@ function StyleCardPreview({
                   {badgeText}
                 </span>
               )}
-              <div style={{ fontSize: headlineSize + 4, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
+              {/* mobile-popup-polish: headline stays larger (documented
+                  exception — see the ccf-push.js comment on this style's
+                  branch); subtext/gap move to the shared token. */}
+              <div style={{ fontSize: headlineSize + 4, fontWeight: 800, marginBottom: 12 }}>{headline}</div>
               {subtext && (
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)', marginBottom: 10 }}>{subtext}</div>
+                <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.75)', marginBottom: 12 }}>{subtext}</div>
               )}
               {emailFieldEnabled && (
                 <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
@@ -915,7 +933,7 @@ function StyleCardPreview({
                 <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
               </PreviewButton>
               <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
-                style={denyLinkStyle('rgba(255,255,255,0.7)')} interactive={interactive}>
+                style={{ ...denyLinkStyle('rgba(255,255,255,0.7)'), padding: '15px 0' }} interactive={interactive}>
                 {denyText}
               </PreviewButton>
             </>
@@ -946,9 +964,13 @@ function StyleCardPreview({
             {allowText}{arrowCta ? ' →' : ''}
           </PreviewButton>
         )}
+        {/* mobile-popup-polish: documented exception, same as ccf-push.js's
+            top_bar close X — 36px minimum tap target, short of the full
+            44x44 token, since 44px would double this slim bar's height. */}
         <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus" interactive={interactive}
           style={{ background: 'none', border: 'none', color: fg, opacity: 0.75, fontSize: 16,
-            cursor: 'pointer', flexShrink: 0, padding: 2, lineHeight: 1 }}>
+            cursor: 'pointer', flexShrink: 0, padding: 2, lineHeight: 1,
+            minWidth: 36, minHeight: 36, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           ×
         </PreviewButton>
       </div>
@@ -974,7 +996,10 @@ function StyleCardPreview({
           <div aria-hidden="true" style={{ position: 'absolute', inset: 0,
             background: 'linear-gradient(180deg, transparent 40%, rgba(0,0,0,0.78) 100%)' }} />
         )}
-        <ClosePreviewButton onClick={onDismiss} interactive={interactive} />
+        {/* mobile-popup-polish: 44x44 tap target (compact fallback 36),
+            same treatment as Bottom Sheet/Full Screen above. */}
+        <ClosePreviewButton onClick={onDismiss} interactive={interactive}
+          size={compact ? 36 : 44} fontSize={compact ? 14 : 16} top={compact ? 4 : 12} right={compact ? 4 : 12} />
         <div style={{ position: 'relative', padding, textAlign: 'center' }}>
           {swapped ? (
             <UnlockedView styleId={styleId} percentage={unlockedInfo.percentage}
@@ -982,9 +1007,9 @@ function StyleCardPreview({
               showRedirectingBadge={step === 'redirecting'} />
           ) : (
             <>
-              <div style={{ fontSize: headlineSize + 2, fontWeight: 800, marginBottom: 6 }}>{headline}</div>
+              <div style={{ fontSize: headlineSize, fontWeight: 700, marginBottom: 12 }}>{headline}</div>
               {subtext && (
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.85)', marginBottom: 10 }}>{subtext}</div>
+                <div style={{ fontSize: 13, color: 'rgba(255,255,255,0.85)', marginBottom: 12 }}>{subtext}</div>
               )}
               {emailFieldEnabled && (
                 <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
@@ -998,7 +1023,7 @@ function StyleCardPreview({
                 <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
               </PreviewButton>
               <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
-                style={denyLinkStyle('rgba(255,255,255,0.7)')} interactive={interactive}>
+                style={{ ...denyLinkStyle('rgba(255,255,255,0.7)'), padding: '15px 0' }} interactive={interactive}>
                 {denyText}
               </PreviewButton>
             </>
@@ -2171,6 +2196,7 @@ export default function Settings({ shop }) {
           );
           return (
             <GalleryCard key={c.key} card={c} selected={selected} disabled={disabled}
+              disabledReason={disabled ? 'Not available on mobile' : undefined}
               mobileOnly={MOBILE_ONLY_STYLE_IDS.includes(c.styleId)}
               previewNode={previewNode}
               onClick={() => {
@@ -2392,26 +2418,32 @@ export default function Settings({ shop }) {
                         wantsDiscount: previewWantsDiscount,
                         unlockedInfo: previewUnlockedInfo,
                       };
+                      // mobile-popup-polish: per-style anchor, matching
+                      // ccf-push.js exactly (see the anchor table in
+                      // audits/mobile-popup-polish-audit.txt):
+                      //   full_takeover -> fills the frame (inset:0)
+                      //   top_bar       -> pinned to the frame's top edge
+                      //   bottom_sheet  -> pinned to the frame's bottom
+                      //                    edge, full width (its own
+                      //                    edge-anchored design, same as
+                      //                    real device — no side margin)
+                      //   story_card / flash_sale / gift_reveal / classic
+                      //   card -> CENTERED (both axes) — this replaced
+                      //   the old universal bottom:12/left:8/right:8
+                      //   wrapper, which was wrong for every style except
+                      //   Bottom Sheet.
+                      //   classic banner -> top or bottom per
+                      //   mobilePopup.position, mirroring ccf-push.js's
+                      //   own `atTop = /^top/.test(cfg.position)` check —
+                      //   previously always forced to the bottom
+                      //   regardless of what the merchant picked.
+                      const CENTERED_STYLE_IDS = ['story_card', 'flash_sale', 'gift_reveal'];
                       if (activeStyleId !== 'classic') {
-                        // mobile-preview-clipping-fix: every style was
-                        // force-positioned bottom:12/left:8/right:8,
-                        // which is only correct for a bottom-anchored
-                        // card. Full Screen needs to fill the frame
-                        // (matches ccf-push.js's real inset:0/100%x100%),
-                        // Top Bar needs to sit at the frame's top edge
-                        // (matches its real position:fixed;top:0), and
-                        // Story Card is shown centered per this task's
-                        // own spec (its real storefront position is
-                        // bottom:24px, but centered reads better inside a
-                        // small mockup and still shows the full card).
-                        // Classic/Flash Sale/Gift Reveal/Bottom Sheet all
-                        // keep the original bottom-anchored wrapper,
-                        // unchanged.
                         const wrapStyle = activeStyleId === 'full_takeover'
                           ? { position: 'absolute', inset: 0, zIndex: 5 }
                           : activeStyleId === 'top_bar'
                           ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }
-                          : activeStyleId === 'story_card'
+                          : CENTERED_STYLE_IDS.includes(activeStyleId)
                           ? { position: 'absolute', top: '50%', left: '50%',
                               transform: 'translate(-50%, -50%)', zIndex: 5 }
                           : { position: 'absolute', bottom: '12px', left: '8px', right: '8px', zIndex: 5 };
@@ -2428,9 +2460,16 @@ export default function Settings({ shop }) {
                           </div>
                         );
                       }
+                      const classicIsBanner = mobilePopup.layout === 'banner';
+                      const classicBannerAtTop = classicIsBanner && /^top/.test(mobilePopup.position || '');
+                      const classicWrapStyle = !classicIsBanner
+                        ? { position: 'absolute', top: '50%', left: '50%',
+                            transform: 'translate(-50%, -50%)', zIndex: 5 }
+                        : classicBannerAtTop
+                        ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }
+                        : { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 5 };
                       return (
-                        <div style={{ position: 'absolute', bottom: '12px', left: '8px',
-                                      right: '8px', zIndex: 5 }}>
+                        <div style={classicWrapStyle}>
                           <ClassicPreview
                             layout={mobilePopup.layout === 'banner' ? 'banner' : 'card'}
                             device="mobile"

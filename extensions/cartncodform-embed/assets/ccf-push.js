@@ -805,6 +805,12 @@
 
     // popup-mobile: sub-600px phones get a stacked layout, set inline.
     var isMobile = window.innerWidth <= 600;
+    // mobile-popup-polish: narrow-phone breakpoint (iPhone SE and smaller)
+    // for the 4 mobile-only styles' outer padding token (20px, 16px below
+    // this width) — see the token table in
+    // audits/mobile-popup-polish-audit.txt.
+    var isNarrowPhone = window.innerWidth < 360;
+    var ccfMobileOuterPad = isNarrowPhone ? '16px' : '20px';
 
     // ================================================================
     // popup-redesign: three layouts (split / card / banner) driven by
@@ -872,21 +878,41 @@
       var sBg = isFlashSale ? '#18181b' : (cfg.bgColor || '#fff7ed');
       var sFg = isFlashSale ? '#ffffff' : (cfg.textColor || '#111827');
 
+      // mobile-popup-polish: Flash Sale/Gift Reveal move from
+      // bottom-anchored to genuinely CENTERED (both axes) — on every
+      // device, since neither style is covered by the "Classic desktop
+      // stays byte-identical" constraint. max-height+overflow-y is a
+      // safety net so a long merchant headline/subtext can never push
+      // the Allow button off-screen; the mobile width now shrinks below
+      // 300px on a narrow viewport (100vw-32px keeps a real margin at
+      // 320px) instead of nearly touching the screen edges.
       wrap.style.cssText = [
         'position:fixed',
-        'bottom:24px',
+        'top:50%',
         'left:50%',
-        'transform:translateX(-50%)',
-        'width:' + (isMobile ? '300px' : 'min(340px,90vw)'),
+        'transform:translate(-50%,-50%)',
+        'width:' + (isMobile ? 'min(300px, calc(100vw - 32px))' : 'min(340px,90vw)'),
+        // explicit per-axis overflow, not the `overflow:hidden` shorthand
+        // this replaced — overflow-x stays hidden (still clips the image
+        // to the card's rounded corners exactly as before), overflow-y
+        // becomes scrollable so tall content scrolls internally instead
+        // of ever pushing the Allow button off-screen.
+        'max-height:calc(100vh - 32px)',
+        'overflow-x:hidden',
+        'overflow-y:auto',
         'background:' + sBg,
         'color:' + sFg,
         'border-radius:' + cardRadius2,
-        'overflow:hidden',
         'box-shadow:0 20px 60px rgba(0,0,0,0.25),0 4px 12px rgba(0,0,0,0.1)',
         'z-index:2147483647',
         'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif'),
         'max-width:90vw'
       ].join(';');
+      // mobile-popup-polish: now rests at translate(-50%,-50%) instead of
+      // the shared #ccf-push-prompt default's translateX(-50%) assumption
+      // (see ccfInjectPopupStyles) — without this class the entrance
+      // animation and hover-lift would both snap to the wrong transform.
+      wrap.classList.add('layout-center');
 
       var sImageUrl = cfg.imageUrl || '';
       if (sImageUrl) {
@@ -1005,12 +1031,21 @@
       var bsBg = cfg.bgColor || '#ffffff';
       var bsFg = cfg.textColor || '#111827';
 
+      // mobile-popup-polish: full-width edge-to-edge is this style's own
+      // anchor (bottom sheets don't float with side margins on a real
+      // device) so no max-width guard is added here — item 3's max-width
+      // requirement applies to the floating/card-shaped styles, not the
+      // edge-anchored ones. max-height+overflow-y IS added: if the sheet's
+      // own content (long headline/subtext/countdown) ever exceeds the
+      // viewport, it scrolls internally instead of pushing Allow off the
+      // bottom edge.
       wrap.style.cssText = [
         'position:fixed', 'left:0', 'right:0', 'bottom:0', 'width:100%',
+        'max-height:calc(100vh - 32px)',
         'padding-bottom:env(safe-area-inset-bottom, 0px)',
         'background:' + bsBg, 'color:' + bsFg,
         'border-top-left-radius:' + bsRadius, 'border-top-right-radius:' + bsRadius,
-        'overflow:hidden', 'box-shadow:0 -8px 30px rgba(0,0,0,0.2)',
+        'overflow-x:hidden', 'overflow-y:auto', 'box-shadow:0 -8px 30px rgba(0,0,0,0.2)',
         'z-index:2147483647',
         'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif')
       ].join(';');
@@ -1044,13 +1079,15 @@
         wrap.appendChild(bsIconWrap);
       }
 
+      // mobile-popup-polish: token set (padding/headline/subtext/gap) —
+      // see the token table in audits/mobile-popup-polish-audit.txt.
       var bsContent = document.createElement('div');
       bsContent.id = 'ccf-content-section';
-      bsContent.style.cssText = 'padding:18px 20px;text-align:center;';
+      bsContent.style.cssText = 'padding:' + ccfMobileOuterPad + ';text-align:center;';
 
       var bsHead = document.createElement('div');
       bsHead.id = 'ccf-prompt-text';
-      bsHead.style.cssText = 'font-size:17px;font-weight:800;line-height:1.3;margin-bottom:6px;';
+      bsHead.style.cssText = 'font-size:18px;font-weight:700;line-height:1.3;margin-bottom:12px;';
       bsHead.textContent = headline;
       bsContent.appendChild(bsHead);
 
@@ -1075,7 +1112,12 @@
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       bsContent.appendChild(allow);
 
-      deny = buildDenyBtn(ccfDenyButtonStyle());
+      // mobile-popup-polish: padded up from ccfDenyButtonStyle()'s shared
+      // 6px-tall default to a ~44px tap target — only for this style (not
+      // a change to ccfDenyButtonStyle() itself, which Classic/Flash Sale/
+      // Gift Reveal also share and which must stay byte-identical on
+      // desktop).
+      deny = buildDenyBtn(ccfDenyButtonStyle() + 'padding:15px 0;');
       bsContent.appendChild(deny);
 
       if (cfg.showBranding) {
@@ -1085,13 +1127,16 @@
 
       wrap.appendChild(bsContent);
 
+      // mobile-popup-polish: 26x26 -> 44x44 tap target (token: close X
+      // minimum 44x44), keeping the same visual glyph size/position feel
+      // via a larger centered hit area.
       closeBtn = document.createElement('button');
       closeBtn.id = 'ccf-close-btn';
       closeBtn.type = 'button';
       closeBtn.textContent = '×';
-      closeBtn.style.cssText = 'position:absolute;top:' + (bsHandleEnabled ? '18px' : '12px') +
-        ';right:12px;background:rgba(0,0,0,0.35);color:#fff;border:none;border-radius:50%;' +
-        'width:26px;height:26px;font-size:14px;line-height:26px;text-align:center;cursor:pointer;z-index:10;';
+      closeBtn.style.cssText = 'position:absolute;top:' + (bsHandleEnabled ? '10px' : '4px') +
+        ';right:4px;background:rgba(0,0,0,0.35);color:#fff;border:none;border-radius:50%;' +
+        'width:44px;height:44px;font-size:16px;line-height:44px;text-align:center;cursor:pointer;z-index:10;';
       wrap.appendChild(closeBtn);
 
     } else if (ccfStyle.id === 'full_takeover') {
@@ -1105,12 +1150,18 @@
       var ftFg = cfg.textColor || '#ffffff';
       var ftImageUrl = cfg.imageUrl || '';
 
+      // mobile-popup-polish: fills the whole frame by design — no
+      // max-width/max-height guard needed (it can never be taller/wider
+      // than the viewport it's inset:0 into). overflow-y:auto still
+      // guards its OWN content: if headline+subtext+countdown+buttons
+      // together exceed the available height, they scroll internally
+      // instead of clipping.
       wrap.style.cssText = [
         'position:fixed', 'inset:0', 'width:100%', 'height:100%',
         'padding-top:env(safe-area-inset-top, 0px)',
         'padding-bottom:env(safe-area-inset-bottom, 0px)',
         'background:' + (ftImageUrl ? '#000' : ftBg), 'color:' + ftFg,
-        'overflow:hidden', 'z-index:2147483647',
+        'overflow-x:hidden', 'overflow-y:auto', 'z-index:2147483647',
         'display:flex', 'flex-direction:column', 'justify-content:flex-end',
         'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif')
       ].join(';');
@@ -1131,28 +1182,34 @@
         wrap.appendChild(ftScrim);
       }
 
+      // mobile-popup-polish: token padding/gaps applied; headline stays at
+      // its own larger 22px/800 — a deliberate, documented exception to
+      // the 18px token, since this style's whole design intent (see the
+      // comment on this branch above) is a big, high-urgency hero
+      // headline, and shrinking it to match Bottom Sheet/Story Card would
+      // undercut that. Subtext/gaps still move to the shared token.
       var ftContent = document.createElement('div');
       ftContent.id = 'ccf-content-section';
-      ftContent.style.cssText = 'position:relative;padding:24px 20px;text-align:center;';
+      ftContent.style.cssText = 'position:relative;padding:' + ccfMobileOuterPad + ';text-align:center;';
 
       if (ftFields.badgeText) {
         var ftBadge = document.createElement('span');
         ftBadge.style.cssText = 'display:inline-block;font-size:11px;font-weight:700;' +
           'letter-spacing:0.05em;text-transform:uppercase;color:' + accent + ';' +
-          'border:1px solid ' + accent + ';border-radius:999px;padding:4px 12px;margin-bottom:10px;';
+          'border:1px solid ' + accent + ';border-radius:999px;padding:4px 12px;margin-bottom:12px;';
         ftBadge.textContent = String(ftFields.badgeText).slice(0, 24);
         ftContent.appendChild(ftBadge);
       }
 
       var ftHead = document.createElement('div');
       ftHead.id = 'ccf-prompt-text';
-      ftHead.style.cssText = 'font-size:22px;font-weight:800;line-height:1.25;margin-bottom:8px;';
+      ftHead.style.cssText = 'font-size:22px;font-weight:800;line-height:1.25;margin-bottom:12px;';
       ftHead.textContent = headline;
       ftContent.appendChild(ftHead);
 
       if (cfg.subtext) {
         var ftSub = document.createElement('div');
-        ftSub.style.cssText = 'font-size:14px;margin-bottom:14px;line-height:1.4;color:rgba(255,255,255,0.75);';
+        ftSub.style.cssText = 'font-size:13px;margin-bottom:12px;line-height:1.4;color:rgba(255,255,255,0.75);';
         ftSub.textContent = cfg.subtext;
         ftContent.appendChild(ftSub);
       }
@@ -1185,7 +1242,10 @@
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       ftContent.appendChild(allow);
 
-      deny = buildDenyBtn(ccfDenyButtonStyle() + 'color:rgba(255,255,255,0.7);');
+      // mobile-popup-polish: padded to a ~44px tap target, same reasoning
+      // as Bottom Sheet's Deny above — a per-style override, not a change
+      // to the shared ccfDenyButtonStyle() Classic also uses.
+      deny = buildDenyBtn(ccfDenyButtonStyle() + 'color:rgba(255,255,255,0.7);padding:15px 0;');
       ftContent.appendChild(deny);
 
       if (cfg.showBranding) {
@@ -1218,17 +1278,32 @@
       // the screen, headline + inline CTA on one line. Mobile-only (see
       // ccfResolveStyle() above). No discount/code-reveal state — same
       // "no room for it" reasoning as Classic Banner (see wantsDiscount
-      // below). ----------
+      // below).
+      // mobile-popup-polish: DELIBERATE token exception — headline stays
+      // 13px/700 (single-line, ellipsis-if-long by design) and Allow stays
+      // "compact" (8px/13px) rather than the 18px/700 headline and full
+      // 15px/700 button tokens applied to the other 3 mobile-only styles.
+      // A slim single-line bar is this style's entire reason for existing
+      // (its alternative IS Bottom Sheet/Story Card); forcing the full
+      // token set here would inflate it into one of those. The close X
+      // still gets a bigger tap target below, short of the full 44x44
+      // token for the same reason — 44px would double the bar's height. ----------
       var tbFields = ccfStyle.fields || {};
       var tbBg = cfg.accentColor || '#4f46e5';
       var tbFg = cfg.textColor || '#ffffff';
 
+      // mobile-popup-polish: full-width, top-anchored by design (same
+      // "no side-margin guard" reasoning as Bottom Sheet/Full Screen).
+      // max-height/overflow-y added for consistency with every other
+      // style, though a single-line bar can't realistically overflow.
       wrap.style.cssText = [
         'position:fixed', 'left:0', 'right:0', 'top:0', 'width:100%',
+        'max-height:calc(100vh - 32px)',
         'padding-top:env(safe-area-inset-top, 0px)',
         'z-index:2147483647',
         'background:' + tbBg, 'color:' + tbFg,
         'padding:10px 14px', 'display:flex', 'align-items:center', 'gap:10px',
+        'overflow-y:auto',
         'box-shadow:0 2px 12px rgba(0,0,0,0.18)',
         'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif')
       ].join(';');
@@ -1253,7 +1328,8 @@
       closeBtn.textContent = '×';
       closeBtn.style.cssText =
         'background:none;border:none;color:' + tbFg + ';opacity:0.75;font-size:18px;' +
-        'line-height:1;cursor:pointer;flex-shrink:0;padding:2px;';
+        'line-height:1;cursor:pointer;flex-shrink:0;padding:2px;' +
+        'min-width:36px;min-height:36px;display:flex;align-items:center;justify-content:center;';
       wrap.appendChild(closeBtn);
       deny = closeBtn; // the × is the only dismiss control for this layout, same as Classic Banner
 
@@ -1261,25 +1337,38 @@
       // ---------- POPUP STYLE: Story Card — a tall, full-bleed photo card
       // with the headline overlaid directly on the image behind a bottom
       // gradient scrim, no separate white/colored content panel. Uses the
-      // SAME bottom-center resting position as Flash Sale/Gift Reveal
-      // above (no special animation class needed). Mobile-only (see
-      // ccfResolveStyle() above). ----------
+      // SAME centered (translate(-50%,-50%)) resting position and
+      // 'layout-center' animation class as Flash Sale/Gift Reveal above.
+      // Mobile-only (see ccfResolveStyle() above). ----------
       var scFields = ccfStyle.fields || {};
       var scRadius = (cfg.borderRadius != null ? cfg.borderRadius : 16) + 'px';
       var scImageUrl = cfg.imageUrl || '';
       var scFg = '#ffffff';
 
+      // mobile-popup-polish: was bottom:24px (bottom-anchored) — the
+      // admin preview already shows this style CENTERED (both axes, per
+      // the task's own spec); this was exactly the admin/storefront
+      // disagreement the task asked to find and fix. Now genuinely
+      // centered here too, plus the same max-height/overflow-y safety
+      // net and narrow-viewport width guard as every other style.
       wrap.style.cssText = [
-        'position:fixed', 'bottom:24px', 'left:50%', 'transform:translateX(-50%)',
-        'width:' + (isMobile ? '260px' : 'min(280px,90vw)'),
+        'position:fixed', 'top:50%', 'left:50%', 'transform:translate(-50%,-50%)',
+        'width:' + (isMobile ? 'min(260px, calc(100vw - 32px))' : 'min(280px,90vw)'),
         'aspect-ratio:9/16',
+        'max-height:calc(100vh - 32px)',
         'background:' + (scImageUrl ? '#111827' : ('linear-gradient(160deg,' + accent + ',' + accent + 'cc)')),
-        'color:' + scFg, 'border-radius:' + scRadius, 'overflow:hidden',
+        'color:' + scFg, 'border-radius:' + scRadius,
+        'overflow-x:hidden', 'overflow-y:auto',
         'display:flex', 'flex-direction:column', 'justify-content:flex-end',
         'box-shadow:0 20px 60px rgba(0,0,0,0.3)', 'z-index:2147483647',
         'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif'),
         'max-width:90vw'
       ].join(';');
+      // mobile-popup-polish: was bottom-anchored (translateX(-50%)) before
+      // this task's centering fix; now needs the same translate(-50%,-50%)
+      // animation class as Flash Sale/Gift Reveal above, or the shared
+      // default entrance animation snaps to the wrong resting transform.
+      wrap.classList.add('layout-center');
 
       if (scImageUrl) {
         var scImgEl = document.createElement('img');
@@ -1298,13 +1387,14 @@
         wrap.appendChild(scScrim);
       }
 
+      // mobile-popup-polish: token padding/headline/gap applied.
       var scContent = document.createElement('div');
       scContent.id = 'ccf-content-section';
-      scContent.style.cssText = 'position:relative;padding:20px;text-align:center;';
+      scContent.style.cssText = 'position:relative;padding:' + ccfMobileOuterPad + ';text-align:center;';
 
       var scHead = document.createElement('div');
       scHead.id = 'ccf-prompt-text';
-      scHead.style.cssText = 'font-size:19px;font-weight:800;line-height:1.3;margin-bottom:6px;';
+      scHead.style.cssText = 'font-size:18px;font-weight:700;line-height:1.3;margin-bottom:12px;';
       scHead.textContent = headline;
       scContent.appendChild(scHead);
 
@@ -1330,7 +1420,10 @@
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       scContent.appendChild(allow);
 
-      deny = buildDenyBtn(ccfDenyButtonStyle() + 'color:rgba(255,255,255,0.7);');
+      // mobile-popup-polish: padded to a ~44px tap target, same as Bottom
+      // Sheet/Full Screen above — per-style override, not a change to the
+      // shared ccfDenyButtonStyle().
+      deny = buildDenyBtn(ccfDenyButtonStyle() + 'color:rgba(255,255,255,0.7);padding:15px 0;');
       scContent.appendChild(deny);
 
       if (cfg.showBranding) {
@@ -1340,13 +1433,15 @@
 
       wrap.appendChild(scContent);
 
+      // mobile-popup-polish: 26x26 -> 44x44 tap target, same as Bottom
+      // Sheet's close X above.
       closeBtn = document.createElement('button');
       closeBtn.id = 'ccf-close-btn';
       closeBtn.type = 'button';
       closeBtn.textContent = '×';
-      closeBtn.style.cssText = 'position:absolute;top:12px;right:12px;' +
+      closeBtn.style.cssText = 'position:absolute;top:4px;right:4px;' +
         'background:rgba(0,0,0,0.4);color:#fff;border:none;border-radius:50%;' +
-        'width:26px;height:26px;font-size:14px;line-height:26px;text-align:center;cursor:pointer;z-index:10;';
+        'width:44px;height:44px;font-size:16px;line-height:44px;text-align:center;cursor:pointer;z-index:10;';
       wrap.appendChild(closeBtn);
 
     } else if (layout === 'banner') {
@@ -1407,17 +1502,37 @@
       deny = closeBtn; // the × is the dismiss control for this layout
 
     } else if (layout === 'card') {
-      // ---------- LAYOUT 2: premium card — a bottom-center "toast", same
-      // design on mobile and desktop (width is the only thing that
-      // differs by device). cssText (not setAttribute) so nothing — a
-      // leftover margin or stray transform — can be inherited. ----------
+      // ---------- LAYOUT 2: premium card. DESKTOP is the exact original
+      // array, untouched (constraint: Classic desktop must stay
+      // byte-identical) — built as its own separate branch rather than
+      // sprinkling ternaries into one shared array, specifically so nothing
+      // here can silently change desktop's output string. mobile-popup-
+      // polish: MOBILE becomes genuinely centered (both axes) per the
+      // anchor-table requirement, plus the max-height/overflow-y safety
+      // net and the narrow-viewport width guard from item 3. ----------
       var cardRadius = (cfg.borderRadius != null ? cfg.borderRadius : 22) + 'px';
-      wrap.style.cssText = [
+      wrap.style.cssText = isMobile ? [
+        'position:fixed',
+        'top:50%',
+        'left:50%',
+        'transform:translate(-50%,-50%)',
+        'width:min(300px, calc(100vw - 32px))',
+        'max-height:calc(100vh - 32px)',
+        'background:linear-gradient(145deg,#ffffff,#f8f9ff)',
+        'border-radius:' + cardRadius,
+        'overflow-x:hidden',
+        'overflow-y:auto',
+        'box-shadow:0 20px 60px rgba(0,0,0,0.18),0 4px 12px rgba(0,0,0,0.08),inset 0 1px 0 rgba(255,255,255,0.8)',
+        'z-index:2147483647',
+        'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif'),
+        'border:1px solid rgba(255,255,255,0.8)',
+        'max-width:90vw'
+      ].join(';') : [
         'position:fixed',
         'bottom:24px',
         'left:50%',
         'transform:translateX(-50%)',
-        'width:' + (isMobile ? '300px' : 'min(340px,90vw)'),
+        'width:min(340px,90vw)',
         'background:linear-gradient(145deg,#ffffff,#f8f9ff)',
         'border-radius:' + cardRadius,
         'overflow:hidden',
@@ -1427,6 +1542,13 @@
         'border:1px solid rgba(255,255,255,0.8)',
         'max-width:90vw'
       ].join(';');
+      // mobile-popup-polish: mobile now rests at translate(-50%,-50%)
+      // instead of desktop's translateX(-50%) — needs 'layout-center' so
+      // the entrance animation/hover-lift use the right transform basis.
+      // Conditional on isMobile (not a class the desktop branch ever
+      // gets) so desktop's classList, like its cssText, stays exactly as
+      // it was before this task.
+      if (isMobile) wrap.classList.add('layout-center');
 
       if (cfg.imageUrl) {
         // Image wrapper with effects (dark bottom gradient, diagonal sheen,
