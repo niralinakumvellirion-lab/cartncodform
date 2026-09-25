@@ -786,6 +786,23 @@
     }
   }
 
+  // Per-field merge: mobile value wins where it is set, desktop fills the rest.
+  // '', null and undefined mean "not set"; false and 0 are real values.
+  function ccfMergeConfig(base, over) {
+    var out = {};
+    var k;
+    for (k in (base || {})) {
+      if (Object.prototype.hasOwnProperty.call(base, k)) out[k] = base[k];
+    }
+    for (k in (over || {})) {
+      if (!Object.prototype.hasOwnProperty.call(over, k)) continue;
+      var v = over[k];
+      if (v === '' || v === null || v === undefined) continue;
+      out[k] = v;
+    }
+    return out;
+  }
+
   function showSoftPrompt(trigger, productId) {
     console.log('[ccf:lifecycle] showSoftPrompt called, trigger:', arguments[0]);
     // discount-capture path: an already-subscribed customer, shown purely
@@ -820,12 +837,17 @@
     // desktop config when the merchant hasn't set a mobile one.
     // ================================================================
     var cfg = isMobile ? (mobilePopupConfig || {}) : (popupConfig || {});
-    if (isMobile && !cfg.layout) cfg = popupConfig || {};
+    // Mobile has no layout of its own: inherit desktop's config field by
+    // field instead of replacing the whole mobile config.
+    if (isMobile && !cfg.layout) cfg = ccfMergeConfig(popupConfig, mobilePopupConfig);
     // popup-mobile debug: which config are we using and does it carry an image?
     console.log('[CCF] device:', isMobile ? 'mobile' : 'desktop',
       '| layout:', cfg.layout,
       '| hasImage:', !!(cfg.imageUrl));
     var layout = cfg.layout || 'split';
+    // Split is never valid on mobile (mobilePopup.layout is card|banner);
+    // match the admin preview: anything that isn't 'banner' is 'card'.
+    if (isMobile) layout = layout === 'banner' ? 'banner' : 'card';
     var ccfStyle = ccfResolveStyle(isMobile);
     var bg = cfg.bgColor || '#ffffff';
     var fg = cfg.textColor || '#111827';
@@ -3122,13 +3144,13 @@
 
       // Inject product page discount nudge.
       setTimeout(function() {
-        if (Notification.permission === 'granted') return;
+        if (('Notification' in window) && Notification.permission === 'granted') return;
         // already subscribed — no nudge needed
         injectProductNudge();
       }, 1000);
     });
 
-    if (Notification.permission === 'granted') {
+    if (('Notification' in window) && Notification.permission === 'granted') {
       setupForegroundMessages();
     }
   }
