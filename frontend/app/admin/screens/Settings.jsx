@@ -266,10 +266,12 @@ function UnlockedView({ styleId, percentage, expiryDays, code, codeChipEmphasis,
   const chipBig = styleId === 'gift_reveal' && codeChipEmphasis !== false;
   const titleColor = isDark ? '#ffffff' : '#111827';
   const subColor = isDark ? '#d4d4d8' : '#6b7280';
-  const chipBg = isDark ? 'linear-gradient(135deg,#27272a,#3f3f46)' : 'linear-gradient(135deg,#f0f4ff,#e8edff)';
-  const chipBorder = isDark ? '1.5px dashed #52525b' : '1.5px dashed #818cf8';
-  const chipCodeColor = isDark ? '#ffffff' : '#4338ca';
-  const chipLabelColor = isDark ? '#a1a1aa' : '#6366f1';
+  const isGift = styleId === 'gift_reveal';
+  const chipBg = isDark ? 'linear-gradient(135deg,#27272a,#3f3f46)'
+    : (isGift ? 'linear-gradient(135deg,#ffedd5,#fed7aa)' : 'linear-gradient(135deg,#f0f4ff,#e8edff)');
+  const chipBorder = isDark ? '1.5px dashed #52525b' : (isGift ? '1.5px dashed #fb923c' : '1.5px dashed #818cf8');
+  const chipCodeColor = isDark ? '#ffffff' : (isGift ? '#c2410c' : '#4338ca');
+  const chipLabelColor = isDark ? '#a1a1aa' : (isGift ? '#ea580c' : '#6366f1');
   const footerColor = isDark ? '#86efac' : '#16a34a';
 
   return (
@@ -771,7 +773,7 @@ function StyleCardPreview({
                     boxShadow: '0 -6px 24px rgba(0,0,0,0.15)' }}>
         {dragHandleEnabled && (
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 8 }}>
-            <div aria-hidden="true" style={{ width: 36, height: 4, borderRadius: 999, background: '#d1d5db' }} />
+            <div aria-hidden="true" style={{ width: 40, height: 5, borderRadius: 999, background: '#9ca3af' }} />
           </div>
         )}
         {/* mobile-popup-polish: 44x44 tap target (compact fallback 36,
@@ -995,7 +997,12 @@ function StyleCardPreview({
   }
 
   // gift_reveal
-  const bg = cfg.bgColor || '#fff7ed';
+  // Cream unless the merchant picked a real bgColor; the schema default
+  // '#ffffff' is never blank, so white counts as "not chosen" (mirrors
+  // ccf-push.js's giftBgPicked).
+  const giftBgPicked = cfg.bgColor && String(cfg.bgColor).toLowerCase() !== '#ffffff' &&
+    String(cfg.bgColor).toLowerCase() !== '#fff';
+  const bg = giftBgPicked ? cfg.bgColor : '#fff7ed';
   const fg = cfg.textColor || '#111827';
   const giftIconEnabled = field('giftIconEnabled');
   const secondaryButtonStyle = field('secondaryButtonStyle');
@@ -1016,7 +1023,7 @@ function StyleCardPreview({
         // icon that's part of UnlockedView's own markup too.
         <div style={{ height: compact ? 60 : 84, display: 'flex', alignItems: 'center',
                       justifyContent: 'center' }}>
-          <Icon name="gift" size={compact ? 32 : 44} color={accent} />
+          <Icon name="gift" size={compact ? 32 : 44} color="#ea580c" />
         </div>
       ) : null}
       <div style={{ padding, textAlign: 'center' }}>

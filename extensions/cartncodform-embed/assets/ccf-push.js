@@ -669,13 +669,14 @@
     var titleColor = isDark ? '#ffffff' : '#111827';
     var subColor = isDark ? '#d4d4d8' : '#6b7280';
     var chipBig = sId === 'gift_reveal' && sFields.codeChipEmphasis !== false;
+    var isGift = sId === 'gift_reveal';
     var chipBg = isDark
       ? 'linear-gradient(135deg,#27272a,#3f3f46)'
-      : 'linear-gradient(135deg,#f0f4ff,#e8edff)';
-    var chipBorder = isDark ? '1.5px dashed #52525b' : '1.5px dashed #818cf8';
-    var chipCodeColor = isDark ? '#ffffff' : '#4338ca';
+      : (isGift ? 'linear-gradient(135deg,#ffedd5,#fed7aa)' : 'linear-gradient(135deg,#f0f4ff,#e8edff)');
+    var chipBorder = isDark ? '1.5px dashed #52525b' : (isGift ? '1.5px dashed #fb923c' : '1.5px dashed #818cf8');
+    var chipCodeColor = isDark ? '#ffffff' : (isGift ? '#c2410c' : '#4338ca');
     var chipCodeSize = chipBig ? '26px' : '22px';
-    var chipLabelColor = isDark ? '#a1a1aa' : '#6366f1';
+    var chipLabelColor = isDark ? '#a1a1aa' : (isGift ? '#ea580c' : '#6366f1');
     var footerColor = isDark ? '#86efac' : '#16a34a';
 
     var html =
@@ -898,7 +899,13 @@
       var isFlashSale = ccfStyle.id === 'flash_sale';
       var styleFields = ccfStyle.fields;
       var cardRadius2 = (cfg.borderRadius != null ? cfg.borderRadius : 16) + 'px';
-      var sBg = isFlashSale ? '#18181b' : (cfg.bgColor || '#fff7ed');
+      // Gift Reveal is cream unless the merchant picked a real bgColor.
+      // mobilePopup/popup bgColor has a non-empty schema default of '#ffffff'
+      // (never blank), so plain white is treated as "not chosen" — a merchant
+      // who actually wants white here can't be told apart from the default.
+      var giftBgPicked = cfg.bgColor && String(cfg.bgColor).toLowerCase() !== '#ffffff' &&
+        String(cfg.bgColor).toLowerCase() !== '#fff';
+      var sBg = isFlashSale ? '#18181b' : (giftBgPicked ? cfg.bgColor : '#fff7ed');
       var sFg = isFlashSale ? '#ffffff' : (cfg.textColor || '#111827');
 
       // mobile-popup-polish: MOBILE is centered (both axes) with a
@@ -952,7 +959,7 @@
       } else if (!isFlashSale && styleFields.giftIconEnabled !== false) {
         var giftWrap = document.createElement('div');
         giftWrap.style.cssText = 'height:84px;display:flex;align-items:center;' +
-          'justify-content:center;color:' + accent + ';';
+          'justify-content:center;color:#ea580c;';
         giftWrap.innerHTML = ccfIcon('gift', 44);
         wrap.appendChild(giftWrap);
       }
@@ -1082,7 +1089,7 @@
         var bsHandleWrap = document.createElement('div');
         bsHandleWrap.style.cssText = 'display:flex;justify-content:center;padding-top:8px;';
         var bsHandle = document.createElement('div');
-        bsHandle.style.cssText = 'width:36px;height:4px;border-radius:999px;background:#d1d5db;';
+        bsHandle.style.cssText = 'width:40px;height:5px;border-radius:999px;background:#9ca3af;';
         bsHandleWrap.appendChild(bsHandle);
         wrap.appendChild(bsHandleWrap);
       }
