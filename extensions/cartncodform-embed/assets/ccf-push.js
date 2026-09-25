@@ -833,13 +833,17 @@
     // popup-redesign: three layouts (split / card / banner) driven by
     // cfg.layout. Everything falls back to sensible defaults so an
     // empty config still renders a usable prompt.
-    // popup-responsive: on phones use mobilePopupConfig; fall back to the
-    // desktop config when the merchant hasn't set a mobile one.
+    // popup-responsive: on phones cfg is a per-field merge of the desktop
+    // config and mobilePopupConfig (see ccfMergeConfig): a mobile value
+    // wins wherever it is set, and desktop fills any field that is blank
+    // ('', null, undefined; false and 0 count as set). Fields with a
+    // non-empty schema default in mobilePopup (layout, colors, fonts, button
+    // text, ctaStyle, borderRadius, etc.) are never blank, so they always
+    // win over desktop; only truly blank fields (headline, subtext,
+    // brandName, imageUrl) inherit. styleId/styleFields are not read from
+    // cfg — ccfResolveStyle() reads them.
     // ================================================================
     var cfg = isMobile ? (mobilePopupConfig || {}) : (popupConfig || {});
-    // On mobile, always inherit desktop's config field by field: a mobile
-    // value wins where it is set, desktop fills any blank. (styleId /
-    // styleFields are not read from cfg — ccfResolveStyle() reads them.)
     if (isMobile) cfg = ccfMergeConfig(popupConfig || {}, mobilePopupConfig || {});
     // popup-mobile debug: which config are we using and does it carry an image?
     console.log('[CCF] device:', isMobile ? 'mobile' : 'desktop',
