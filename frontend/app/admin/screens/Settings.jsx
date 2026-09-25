@@ -607,21 +607,18 @@ function ImageRow({ label, imageUrl, imagePosition, onUpload, onRemove }) {
 // A style-gallery card: a small, LIVE (not static) preview of the actual
 // style/layout, scaled down via CSS transform so it's the merchant's real
 // current settings, not a screenshot.
-function GalleryCard({ card, selected, disabled, disabledReason, mobileOnly, previewNode, onClick }) {
+function GalleryCard({ card, selected, mobileOnly, previewNode, onClick }) {
   return (
     <button
       type="button"
-      onClick={disabled ? undefined : onClick}
+      onClick={onClick}
       aria-pressed={selected}
-      aria-disabled={disabled}
-      title={disabled ? disabledReason : undefined}
       className="ccf-style-card"
       style={{
         textAlign: 'left', padding: 10, borderRadius: 12,
         border: selected ? '2px solid #4f46e5' : '1px solid #e5e7eb',
         background: selected ? '#eef2ff' : '#fff',
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.45 : 1,
+        cursor: 'pointer',
         display: 'flex', flexDirection: 'column', gap: 8,
       }}
     >
@@ -648,11 +645,6 @@ function GalleryCard({ card, selected, disabled, disabledReason, mobileOnly, pre
         <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2, lineHeight: 1.4 }}>
           {card.desc}
         </div>
-        {disabled && disabledReason && (
-          <div style={{ fontSize: 10, fontWeight: 600, color: '#b91c1c', marginTop: 4 }}>
-            {disabledReason}
-          </div>
-        )}
       </div>
     </button>
   );
@@ -2065,10 +2057,12 @@ export default function Settings({ shop }) {
           // fallback above covers every OTHER path to a mobile-only id
           // ending up in a desktop context; this is the "don't even offer
           // it" UX layer for the one path a merchant actually takes.
-          .filter((c) => popupDevice === 'mobile' || !MOBILE_ONLY_STYLE_IDS.includes(c.styleId))
+          // Classic-Split has no mobile layout (mobilePopup.layout is card|banner),
+          // so it is not offered on the Mobile tab at all.
+          .filter((c) => popupDevice === 'mobile'
+            ? c.layout !== 'split'
+            : !MOBILE_ONLY_STYLE_IDS.includes(c.styleId))
           .map((c) => {
-          const isMobileTab = popupDevice === 'mobile';
-          const disabled = isMobileTab && c.layout === 'split';
           const selected = c.styleId === activeStyleId &&
             (c.layout == null || (activePopup.layout || 'split') === c.layout);
           const commonPreviewProps = {
@@ -2088,8 +2082,7 @@ export default function Settings({ shop }) {
               discountOfferHeadline={discountRules.offerHeadline} {...commonPreviewProps} />
           );
           return (
-            <GalleryCard key={c.key} card={c} selected={selected} disabled={disabled}
-              disabledReason={disabled ? 'Not available on mobile' : undefined}
+            <GalleryCard key={c.key} card={c} selected={selected}
               mobileOnly={MOBILE_ONLY_STYLE_IDS.includes(c.styleId)}
               previewNode={previewNode}
               onClick={() => {
