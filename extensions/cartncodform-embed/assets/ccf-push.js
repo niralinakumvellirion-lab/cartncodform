@@ -878,25 +878,16 @@
       var sBg = isFlashSale ? '#18181b' : (cfg.bgColor || '#fff7ed');
       var sFg = isFlashSale ? '#ffffff' : (cfg.textColor || '#111827');
 
-      // mobile-popup-polish: Flash Sale/Gift Reveal move from
-      // bottom-anchored to genuinely CENTERED (both axes) — on every
-      // device, since neither style is covered by the "Classic desktop
-      // stays byte-identical" constraint. max-height+overflow-y is a
-      // safety net so a long merchant headline/subtext can never push
-      // the Allow button off-screen; the mobile width now shrinks below
-      // 300px on a narrow viewport (100vw-32px keeps a real margin at
-      // 320px) instead of nearly touching the screen edges.
-      wrap.style.cssText = [
+      // mobile-popup-polish: MOBILE is centered (both axes) with a
+      // max-height/overflow-y safety net and a narrow-viewport width guard.
+      // DESKTOP is the exact original array (bottom-anchored), kept as its
+      // own separate branch so its output string stays byte-identical.
+      wrap.style.cssText = isMobile ? [
         'position:fixed',
         'top:50%',
         'left:50%',
         'transform:translate(-50%,-50%)',
-        'width:' + (isMobile ? 'min(300px, calc(100vw - 32px))' : 'min(340px,90vw)'),
-        // explicit per-axis overflow, not the `overflow:hidden` shorthand
-        // this replaced — overflow-x stays hidden (still clips the image
-        // to the card's rounded corners exactly as before), overflow-y
-        // becomes scrollable so tall content scrolls internally instead
-        // of ever pushing the Allow button off-screen.
+        'width:min(300px, calc(100vw - 32px))',
         'max-height:calc(100vh - 32px)',
         'overflow-x:hidden',
         'overflow-y:auto',
@@ -907,12 +898,24 @@
         'z-index:2147483647',
         'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif'),
         'max-width:90vw'
+      ].join(';') : [
+        'position:fixed',
+        'bottom:24px',
+        'left:50%',
+        'transform:translateX(-50%)',
+        'width:' + (isMobile ? '300px' : 'min(340px,90vw)'),
+        'background:' + sBg,
+        'color:' + sFg,
+        'border-radius:' + cardRadius2,
+        'overflow:hidden',
+        'box-shadow:0 20px 60px rgba(0,0,0,0.25),0 4px 12px rgba(0,0,0,0.1)',
+        'z-index:2147483647',
+        'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif'),
+        'max-width:90vw'
       ].join(';');
-      // mobile-popup-polish: now rests at translate(-50%,-50%) instead of
-      // the shared #ccf-push-prompt default's translateX(-50%) assumption
-      // (see ccfInjectPopupStyles) — without this class the entrance
-      // animation and hover-lift would both snap to the wrong transform.
-      wrap.classList.add('layout-center');
+      // Mobile rests at translate(-50%,-50%); desktop keeps the default
+      // translateX(-50%) animation, so the class is mobile-only.
+      if (isMobile) wrap.classList.add('layout-center');
 
       var sImageUrl = cfg.imageUrl || '';
       if (sImageUrl) {
