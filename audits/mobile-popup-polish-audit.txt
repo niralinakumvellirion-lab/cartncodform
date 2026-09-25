@@ -21,8 +21,8 @@ top_bar          | top, full width      | top, full width     | top, full width
 story_card       | bottom:24px (MISMATCH)| centered           | centered both axes (fixed in ccf-push.js)
 classic card     | bottom (mobile+desk) | bottom              | mobile: centered; desktop unchanged (bottom:24px)
 classic banner   | top/bottom by cfg.position | always bottom (MISMATCH) | top/bottom by position both sides
-flash_sale       | bottom               | bottom              | centered both axes
-gift_reveal      | bottom               | bottom              | centered both axes
+flash_sale       | bottom               | bottom              | mobile: centered both axes; desktop: bottom, unchanged
+gift_reveal      | bottom               | bottom              | mobile: centered both axes; desktop: bottom, unchanged
 Mismatches found and fixed: story_card (storefront), classic banner (admin).
 Centered styles use top:50%/left:50%/translate(-50%,-50%) and the 'layout-center' animation
 class (added for flash_sale, gift_reveal, story_card, classic card on mobile only) so the
@@ -59,7 +59,7 @@ bottom_sheet: headline 800->700, mb 6->12; subtext 12->13, mb 10->12; close 26->
 full_takeover: subtext 12->13; gaps ->12; deny padding 15px 0 (close already 44/36).
 top_bar: close min 36x36.
 story_card: headline size+2/800 -> base/700, mb 12; subtext 13, mb 12; close 44 (36 compact); deny padding 15px 0.
-Wrapper: flash_sale/gift_reveal/story_card/classic card centered; classic banner top/bottom per position.
+Wrapper (mobile preview only): flash_sale/gift_reveal/story_card/classic card centered; classic banner top/bottom per position.
 ccf-push.js values changed: as sections 2-4 above (padding tokens, headline, subtext, gaps, deny padding, close X, max-width/height, overflow, centering).
 
 6. RESULTS AT 320 / 375 / 414 PX
@@ -85,6 +85,7 @@ Admin preview (dev server, 340x600 frame): Classic-Split disabled and captioned 
 Classic card cssText is split into isMobile ? [new] : [original array copied verbatim]; the
 'layout-center' class is added only when isMobile. Split and Banner code untouched.
 Shared helpers ccfAllowButtonStyle / ccfDenyButtonStyle unchanged.
-Note: flash_sale and gift_reveal are not "Classic" and now center on desktop too.
+Note: flash_sale and gift_reveal desktop rendering is also byte-identical to before this task (commit 1cf6638
+reverted an earlier desktop centering); they are centered on mobile only, via the same isMobile branch pattern as Classic card.
 
 Deploy: vercel --prod done; shopify app deploy released shopireachboost-ai-127.
