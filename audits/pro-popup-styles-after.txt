@@ -1,0 +1,113 @@
+PRO POPUP STYLES - SELF-AUDIT (spotlight, noir, color_block)
+============================================================
+
+1. SCHEMA DEFAULT CHANGE AND ITS EFFECT ON EXISTING SHOPS
+---------------------------------------------------------
+Changed in backend/models/Store.js:
+  mobilePopup.bgColor   '#ffffff' -> ''
+  mobilePopup.textColor '#111827' -> ''
+  mobilePopup.fontFamily 'inherit' -> ''
+  popup.bgColor (desktop) '#ffffff' -> ''      (see note below)
+  popup.textColor (desktop) '#111827' -> ''    (see note below)
+Note on the desktop change: you asked for the mobilePopup defaults only. I also blanked the two
+desktop colour defaults because the resolution order (mobile -> desktop -> style default) can only
+reach the style default if desktop is blank too; otherwise a desktop default of #ffffff would win
+for every shop that never picked a colour. Desktop fontFamily keeps its 'inherit' default (blanking
+it would switch every existing style's fallback from the theme font to the system stack).
+Resolution order per field (storefront ccfMergeConfig + style fallbacks; admin mergeConfig):
+  merchant mobile value -> merchant desktop value -> the style's own default (defaultColors).
+Existing documents: Mongoose applies a default only when the path is missing. A document that
+already stores '#ffffff' keeps '#ffffff'; that is now a real chosen value and applies on both
+devices. Nothing is rewritten; no migration was run. I cannot inspect Mongo.
+What changes for a shop that never touched mobile colours:
+  - If its stored mobilePopup has no bgColor/textColor/fontFamily (missing paths): they now read as
+    '', so mobile inherits desktop, and the desktop value (or the style default) applies.
+  - If those values were persisted as '#ffffff' / '#111827' when the store document was created
+    (likely for most shops, but I could not verify), nothing changes: mobile keeps white/dark text.
+    For those shops a new style on mobile shows the chosen white (rendered as a light variant; see
+    section 4) until the merchant picks a colour or a preset.
+  - Existing styles are unchanged in behaviour: every existing consumer already fell back with
+    `cfg.bgColor || <default>`.
+  - Gift Reveal: its cream-vs-white workaround is removed; it now uses the same clean order
+    (cfg.bgColor || '#fff7ed'). A shop with a persisted '#ffffff' therefore sees a WHITE Gift Reveal
+    again (reverting last round's visual fix for those shops) until they pick a colour. Its warm
+    gift icon and code chip stay.
+Not changed: mobilePopup.accentColor ('#4f46e5') and ctaStyle ('pill') still default to non-empty
+values and still win over desktop on mobile (seen in testing: the desktop accent did not reach the
+mobile CTA). Same root cause; left for a follow-up decision.
+
+2. PER-STYLE GEOMETRY, FIELDS, PALETTE
+--------------------------------------
+Shared: entrance 260ms (opacity, 10px rise, scale .98 -> 1), content children staggered 45ms, dim
+overlay, 44px close X on mobile / 36px desktop, 16px/700 CTA, 13px underlined decline link, email
+input 48px. A prefers-reduced-motion rule (new, additive) disables animation/transition on the popup
+and overlay. Real-discount-only figure. Merchant strings only via textContent.
+Palette: bg = cfg.bgColor || style default; text = cfg.textColor || style default; a luminance test
+(ccfIsDarkColor) picks readable input/border/CTA/unlocked-code colours for any merchant colour.
+spotlight
+  Desktop: 460px circle (or 520x430 oval), page dimmed 45% with 3px blur, optional squiggle, 64px seal
+  photo overlapping the top edge, centered 68%-wide column, 30px headline.
+  Mobile: "pebble", width min(360, 100vw-32), radius 56px, seal in flow, 26px headline, max-height
+  calc(100vh-32px) with scroll.
+  Fields: spotlightTone (cream/blush/sage/ink presets), shape (circle/oval), showSquiggle, badgeText.
+  Default palette: bg #fbf4e8, text #1c1917.
+noir
+  Desktop: 780x440 split (46/54), photo left or right (imageSide), seam gradient, dark panel, champagne
+  eyebrow pill, 34px headline, white CTA on dark palettes.
+  Mobile: centered card min(400, 100vw-32), radius 20, 168px hero photo fading into the panel, eyebrow
+  overlapping the hero, 26px headline.
+  Fields: noirTone (noir/slate/plum/forest presets), imageSide, badgeText. Default bg #0f1115, text #f4f4f5.
+color_block
+  Desktop: 740x420 split 50/50, photo left, colour field right, 56px serif offer figure (real
+  discount only), divider, email with lock icon, optional real countdown, dotted decline.
+  Mobile: centered card, photo strip 110px (84px on short screens), rounded panel overlapping the
+  photo, figure 52px (44px on narrow/short).
+  Fields: fieldTone (sand/apricot/blush/mint), offerFigure (12 chars), badgeText, countdownSource,
+  countdownEndsAt. Default bg #f6e3c4, text #1c1917.
+  Offer figure: shown only while a discount rule is on; text = merchant offerFigure or the largest
+  real configured percentage. The countdown is one rounded block (the shared helper produces a text
+  string), not three separate digit blocks.
+Presets: the tone/fieldTone selects WRITE bgColor + textColor on the device being edited (a
+shortcut); the colour rows stay fully editable and now show the style's own default.
+Admin preview: mobile preview and mobile Classic preview now use the same per-field merge
+(mergeConfig) as the storefront, so inherited colours show in the phone frame.
+
+3. MERCHANT COLOURS APPLY ON BOTH DEVICES
+-----------------------------------------
+Tested with the REAL ccf-push.js in an iframe harness (each iframe has its own viewport; storage and
+fetch stubbed), desktop popup with bgColor set, mobile config with blank bg/text: mobile inherited the
+desktop colours for all styles (for example a persisted white Noir rendered as a light, legible Noir
+on mobile, and a slate preset would carry through). Mobile-set values win where set. Desktop uses
+its own value. Verified visually for noir with white bg; spotlight/color_block/noir with the style
+default on both devices.
+
+4. LIVE VERIFICATION (results)
+------------------------------
+Storefront (real script, harness): spotlight, noir and color_block at 320, 375 and 414 px wide
+(heights 568/667/736) - all fully visible, centered, nothing clipped (color_block needed the
+short-screen sizing above at 320x568; it now fits without scrolling); desktop 1024px for all three
+(spotlight was a squashed oval due to a percentage-padding bug, found and fixed; it is now a true circle).
+Admin (temp route + next dev, route deleted): Desktop and Mobile galleries both show the three new
+cards; at 0.34 scale they read as: Spotlight = cream circle, Noir = dark split with a white CTA,
+Colour Block = sand split with a photo. Editor opened for Colour Block with the "Colour preset"
+control; its phone-frame preview renders. Not individually checked in the admin editor: Spotlight and
+Noir phone-frame previews and the desktop editor previews.
+Backend npm test: 23 suites, 235 tests. Frontend build compiled.
+
+5. GIFT REVEAL
+--------------
+Workaround removed on both sides (ccf-push.js: sBg = cfg.bgColor || '#fff7ed'; Settings.jsx:
+bg = cfg.bgColor || '#fff7ed'). It looks cream only where no colour is stored. Not retired.
+
+6. UNCHANGED
+------------
+Classic (split/card) builders, Flash Sale, Bottom Sheet, Top Bar, Story Card: not edited. Shared
+changes: reduced-motion CSS rule, CCF_KNOWN_STYLE_IDS/registry entries, the lock icon, and the
+schema defaults above. Classic desktop cssText is untouched.
+
+7. OTHER FILES
+--------------
+backend/utils/popupStyles.js, backend/models/Store.js (enums + defaults), frontend registry
+(frontend/app/admin/lib/popupStyles.js: three entries, defaultColors, presets), tests updated (the
+old tests used "spotlight" as an example of an unregistered id; they now use another made-up id).
+audits/pro-popup-styles-proposal.txt (phase 1) is committed with this work.

@@ -12,7 +12,7 @@ describe('isValidStyleId', () => {
     expect(isValidStyleId(id)).toBe(true);
   });
 
-  test.each(['editorial', 'spotlight', 'made-up', '', null, undefined, 42, 'full_takeover'])(
+  test.each(['editorial', 'hologram', 'made-up', '', null, undefined, 42, 'full_takeover'])(
     'rejects unregistered id %p', (id) => {
       expect(isValidStyleId(id)).toBe(false);
     }
@@ -118,5 +118,31 @@ describe('normalizeLayout', () => {
     expect(normalizeLayout('split')).toBe('split');
     expect(normalizeLayout('card')).toBe('card');
     expect(normalizeLayout(undefined)).toBe(undefined);
+  });
+});
+
+describe('round 3 styles (spotlight, noir, color_block)', () => {
+  test('registered as valid, not mobile-only', () => {
+    ['spotlight', 'noir', 'color_block'].forEach((id) => {
+      expect(isValidStyleId(id)).toBe(true);
+      expect(resolveStyleId(id, 'desktop')).toBe(id);
+      expect(resolveStyleId(id, 'mobile')).toBe(id);
+    });
+  });
+  test('spotlight fields are validated', () => {
+    expect(sanitizeStyleFields({ spotlightTone: 'sage', showSquiggle: 1, shape: 'oval' }))
+      .toEqual({ spotlightTone: 'sage', showSquiggle: true, shape: 'oval' });
+    expect(sanitizeStyleFields({ spotlightTone: 'neon', shape: 'star' })).toEqual({});
+  });
+  test('noir fields are validated', () => {
+    expect(sanitizeStyleFields({ noirTone: 'plum', imageSide: 'right' }))
+      .toEqual({ noirTone: 'plum', imageSide: 'right' });
+    expect(sanitizeStyleFields({ noirTone: 'pink', imageSide: 'top' })).toEqual({});
+  });
+  test('color_block fields are validated and offerFigure is capped', () => {
+    const out = sanitizeStyleFields({ fieldTone: 'mint', offerFigure: '  ' + 'x'.repeat(30) + '  ' });
+    expect(out.fieldTone).toBe('mint');
+    expect(out.offerFigure).toHaveLength(12);
+    expect(sanitizeStyleFields({ fieldTone: 'lime' })).toEqual({});
   });
 });

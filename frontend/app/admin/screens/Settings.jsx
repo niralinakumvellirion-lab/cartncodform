@@ -143,6 +143,33 @@ function getAllowButtonStyle(accent, ctaStyle) {
   };
 }
 
+// Mirrors ccf-push.js's ccfMergeConfig: mobile value wins where it is set,
+// desktop fills the rest ('', null, undefined are unset; false/0 are real).
+function mergeConfig(base, over) {
+  const out = { ...(base || {}) };
+  Object.keys(over || {}).forEach((k) => {
+    const v = over[k];
+    if (v === '' || v === null || v === undefined) return;
+    out[k] = v;
+  });
+  return out;
+}
+
+// Perceived-brightness test used to pick readable secondary colours for the
+// round-3 styles no matter which background the merchant chose.
+function isDarkColor(hex) {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return false;
+  let h = m[1];
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.45;
+}
+
+const PRO_SERIF = "Georgia, 'Iowan Old Style', 'Times New Roman', serif";
+
 // popup-style: real-deadline countdown formatting — ms must already be a
 // positive real duration (this app never shows a fake per-visitor timer;
 // see the countdown source rules in flash_sale's extraFields).
@@ -258,11 +285,11 @@ function AllowButtonLabel({ step, allowText, wantsDiscount }) {
 // small "Redirecting…" badge on top only for the 'redirecting' step, as a
 // preview-only annotation of that imminent (but never actually performed)
 // navigation — see audits/popup-preview-flow-audit.txt.
-function UnlockedView({ styleId, percentage, expiryDays, code, codeChipEmphasis, showRedirectingBadge }) {
+function UnlockedView({ styleId, percentage, expiryDays, code, codeChipEmphasis, showRedirectingBadge, dark }) {
   // mobile-styles: Story Card also renders on a dark/photo background, same
   // as Flash Sale — the unlocked-code view needs the light-on-dark palette
   // there too, or its text is unreadable.
-  const isDark = styleId === 'flash_sale' || styleId === 'story_card';
+  const isDark = dark !== undefined ? dark : (styleId === 'flash_sale' || styleId === 'story_card');
   const chipBig = styleId === 'gift_reveal' && codeChipEmphasis !== false;
   const titleColor = isDark ? '#ffffff' : '#111827';
   const subColor = isDark ? '#d4d4d8' : '#6b7280';
@@ -915,6 +942,188 @@ function StyleCardPreview({
     );
   }
 
+  // --- Round 3: professional styles (audits/pro-popup-styles-proposal.txt) ---
+  if (styleId === 'spotlight' || styleId === 'noir' || styleId === 'color_block') {
+    const dc = style.defaultColors || {};
+    const proBg = cfg.bgColor || dc.bgColor || '#ffffff';
+    const proFg = cfg.textColor || dc.textColor || '#111827';
+    const dark = isDarkColor(proBg);
+    const eyebrow = field('badgeText');
+    const inputBg = dark ? 'rgba(255,255,255,0.08)' : '#ffffff';
+    const inputBorder = dark ? '1px solid rgba(255,255,255,0.18)' : '1px solid rgba(0,0,0,0.14)';
+    const ctaLight = styleId === 'noir' && dark;
+    const align = styleId === 'spotlight' ? 'center' : 'left';
+    const eyebrowStyle = styleId === 'noir'
+      ? { border: '1px solid #e7c07d', color: '#e7c07d', padding: '4px 10px', borderRadius: 999 }
+      : { opacity: 0.7 };
+    const headSize = compact ? 22 : (styleId === 'color_block' ? 20 : 28);
+    const proForm = (before, lockIcon) => (
+      <>
+        {eyebrow ? (
+          <div style={{ marginBottom: 10 }}>
+            <span style={{ display: 'inline-block', fontSize: 11, fontWeight: 700, letterSpacing: '0.14em',
+              textTransform: 'uppercase', ...eyebrowStyle }}>{eyebrow}</span>
+          </div>
+        ) : null}
+        {before}
+        <div style={{ fontSize: headSize, fontWeight: 700, lineHeight: 1.12, letterSpacing: '-0.02em',
+          marginBottom: 10 }}>{headline}</div>
+        {subtext && <div style={{ fontSize: compact ? 13 : 14, lineHeight: 1.5, opacity: 0.75,
+          marginBottom: 16 }}>{subtext}</div>}
+        {emailFieldEnabled && (
+          <div style={{ position: 'relative', marginBottom: 10 }}>
+            <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
+              placeholder="Email address" interactive={interactive}
+              style={{ width: '100%', height: 44, padding: lockIcon ? '0 40px 0 16px' : '0 16px', fontSize: 14,
+                borderRadius: styleId === 'spotlight' ? 999 : 12, border: inputBorder,
+                background: inputBg, color: proFg, boxSizing: 'border-box', fontFamily: font,
+                lineHeight: 1.2 }} />
+            {lockIcon && (
+              <span style={{ position: 'absolute', right: 14, top: 13, color: proFg, opacity: 0.5,
+                display: 'flex' }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect width="18" height="11" x="3" y="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              </span>
+            )}
+          </div>
+        )}
+        <PreviewButton {...allowBtnCommon} interactive={interactive}
+          style={{ ...allowBtnCommon.style, fontSize: 15, padding: 14,
+            ...(ctaLight ? { background: '#ffffff', color: '#0f1115', boxShadow: 'none', border: 'none' } : {}) }}>
+          <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
+        </PreviewButton>
+        <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus" interactive={interactive}
+          style={{ ...denyLinkStyle(proFg), opacity: 0.65, fontSize: 13, textDecoration: 'underline',
+            ...(styleId === 'color_block' ? { textDecorationStyle: 'dotted' } : {}) }}>
+          {denyText}
+        </PreviewButton>
+      </>
+    );
+    const unlocked = (
+      <UnlockedView styleId={styleId} dark={dark} percentage={unlockedInfo.percentage}
+        expiryDays={unlockedInfo.expiryDays} code={unlockedInfo.code}
+        showRedirectingBadge={step === 'redirecting'} />
+    );
+    const closeStyle = dark ? { background: 'rgba(255,255,255,0.16)' } : {};
+    const photo = (h) => (
+      <div style={{ position: 'relative', height: h, background: imageUrl ? '#000' : `linear-gradient(135deg, ${accent}, ${proBg})`,
+        overflow: 'hidden' }}>
+        {imageUrl && (
+          <img src={imageUrl} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%',
+            objectFit: 'cover', objectPosition: cfg.imagePosition || 'center center' }} />
+        )}
+      </div>
+    );
+
+    if (styleId === 'spotlight') {
+      const shape = field('shape');
+      const squiggle = field('showSquiggle');
+      const oval = !compact && shape === 'oval';
+      const round = !compact;
+      return (
+        <div style={{ position: 'relative', background: proBg, color: proFg, fontFamily: font,
+          textAlign: 'center', boxSizing: 'border-box', boxShadow: '0 24px 60px rgba(0,0,0,0.25)',
+          width: compact ? 300 : 'min(400px, 100%)',
+          ...(round ? { aspectRatio: oval ? '520 / 430' : '1 / 1', borderRadius: '50%',
+            display: 'flex', flexDirection: 'column', justifyContent: 'center' }
+            : { borderRadius: 48, padding: '30px 22px 24px' }) }}>
+          {squiggle && (
+            <svg viewBox="0 0 120 20" aria-hidden="true" style={{ position: 'absolute',
+              ...(round ? { bottom: '22%', left: '14%', width: '14%' } : { top: 26, left: 26, width: 64 }),
+              opacity: 0.35, pointerEvents: 'none' }}>
+              <path d="M0 10 Q 15 0 30 10 T 60 10 T 90 10 T 120 10" fill="none" stroke={accent}
+                strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+          )}
+          <ClosePreviewButton onClick={onDismiss} interactive={interactive}
+            size={compact ? 36 : 32} top={round ? '13%' : 10} right={round ? '13%' : 10}
+            background={dark ? 'rgba(255,255,255,0.16)' : undefined} />
+          {swapped ? unlocked : (
+            <>
+              {imageUrl ? (
+                <div style={{ width: compact ? 56 : 64, height: compact ? 56 : 64, borderRadius: '50%',
+                  overflow: 'hidden', margin: '0 auto 12px', flexShrink: 0 }}>
+                  <img src={imageUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover',
+                    objectPosition: cfg.imagePosition || 'center center', display: 'block' }} />
+                </div>
+              ) : null}
+              <div style={round ? { width: '68%', margin: '0 auto' } : undefined}>{proForm(null, false)}</div>
+            </>
+          )}
+        </div>
+      );
+    }
+
+    if (styleId === 'noir') {
+      const right = field('imageSide') === 'right';
+      const panel = (
+        <div style={{ position: 'relative', textAlign: 'left', boxSizing: 'border-box',
+          padding: compact ? '0 22px 22px' : '11% 7% 7%', marginTop: compact ? -34 : 0,
+          display: 'flex', flexDirection: 'column', justifyContent: 'center', order: right ? 1 : 2 }}>
+          {swapped ? unlocked : proForm(null, false)}
+        </div>
+      );
+      return (
+        <div style={{ position: 'relative', background: proBg, color: proFg, fontFamily: font, overflow: 'hidden',
+          borderRadius: compact ? 20 : 18, boxShadow: '0 20px 50px rgba(0,0,0,0.3)',
+          width: compact ? 300 : '100%', maxWidth: 780,
+          ...(compact ? {} : { display: 'grid', gridTemplateColumns: right ? '54fr 46fr' : '46fr 54fr',
+            aspectRatio: '780 / 440' }) }}>
+          <div style={{ order: right ? 2 : 1, position: 'relative' }}>
+            {photo(compact ? 168 : '100%')}
+            {compact && (
+              <div aria-hidden="true" style={{ position: 'absolute', inset: 0,
+                background: `linear-gradient(180deg, transparent 35%, ${proBg} 100%)` }} />
+            )}
+          </div>
+          {panel}
+          <ClosePreviewButton onClick={onDismiss} interactive={interactive} size={compact ? 36 : 30}
+            top={10} right={10} background="rgba(255,255,255,0.16)" />
+        </div>
+      );
+    }
+
+    // color_block
+    const figureText = wantsDiscount
+      ? (field('offerFigure') || (unlockedInfo && unlockedInfo.percentage ? `${unlockedInfo.percentage}% OFF` : ''))
+      : '';
+    let cdText = null;
+    if (field('countdownSource') === 'fixed_date' && field('countdownEndsAt')) {
+      cdText = formatCountdown(new Date(field('countdownEndsAt')).getTime() - Date.now());
+    }
+    const figure = (
+      <>
+        {figureText ? (
+          <div style={{ fontFamily: PRO_SERIF, fontSize: compact ? 48 : 52, fontWeight: 900, lineHeight: 1,
+            letterSpacing: '-0.04em', marginBottom: 10 }}>{figureText}</div>
+        ) : null}
+        {figureText ? <div style={{ width: 44, height: 1, background: proFg, opacity: 0.3, marginBottom: 12 }} /> : null}
+        {cdText ? (
+          <div style={{ display: 'inline-block', fontSize: 16, fontWeight: 800, letterSpacing: '0.08em',
+            fontVariantNumeric: 'tabular-nums', padding: '6px 12px', borderRadius: 10,
+            background: proFg, color: proBg, marginBottom: 12 }}>{cdText}</div>
+        ) : null}
+      </>
+    );
+    return (
+      <div style={{ position: 'relative', background: proBg, color: proFg, fontFamily: font, overflow: 'hidden',
+        borderRadius: 24, boxShadow: '0 20px 50px rgba(0,0,0,0.25)', width: compact ? 300 : '100%', maxWidth: 740,
+        ...(compact ? {} : { display: 'grid', gridTemplateColumns: '1fr 1fr', aspectRatio: '740 / 420' }) }}>
+        <div>{photo(compact ? 110 : '100%')}</div>
+        <div style={{ position: 'relative', background: proBg, textAlign: 'left', boxSizing: 'border-box',
+          padding: compact ? '20px 22px 22px' : '7% 7%', marginTop: compact ? -18 : 0,
+          borderRadius: compact ? '24px 24px 0 0' : 0, display: 'flex', flexDirection: 'column',
+          justifyContent: 'center' }}>
+          {swapped ? unlocked : proForm(figure, true)}
+        </div>
+        <ClosePreviewButton onClick={onDismiss} interactive={interactive} size={compact ? 36 : 30}
+          top={10} right={10} />
+      </div>
+    );
+  }
+
   if (styleId === 'flash_sale') {
     const bg = '#18181b';
     const fg = '#ffffff';
@@ -997,12 +1206,7 @@ function StyleCardPreview({
   }
 
   // gift_reveal
-  // Cream unless the merchant picked a real bgColor; the schema default
-  // '#ffffff' is never blank, so white counts as "not chosen" (mirrors
-  // ccf-push.js's giftBgPicked).
-  const giftBgPicked = cfg.bgColor && String(cfg.bgColor).toLowerCase() !== '#ffffff' &&
-    String(cfg.bgColor).toLowerCase() !== '#fff';
-  const bg = giftBgPicked ? cfg.bgColor : '#fff7ed';
+  const bg = cfg.bgColor || '#fff7ed';
   const fg = cfg.textColor || '#111827';
   const giftIconEnabled = field('giftIconEnabled');
   const secondaryButtonStyle = field('secondaryButtonStyle');
@@ -1930,6 +2134,12 @@ export default function Settings({ shop }) {
       desc: POPUP_STYLES.top_bar.shortDescription },
     { key: 'story_card', styleId: 'story_card', layout: null, name: POPUP_STYLES.story_card.name,
       desc: POPUP_STYLES.story_card.shortDescription },
+    { key: 'spotlight', styleId: 'spotlight', layout: null, name: POPUP_STYLES.spotlight.name,
+      desc: POPUP_STYLES.spotlight.shortDescription },
+    { key: 'noir', styleId: 'noir', layout: null, name: POPUP_STYLES.noir.name,
+      desc: POPUP_STYLES.noir.shortDescription },
+    { key: 'color_block', styleId: 'color_block', layout: null, name: POPUP_STYLES.color_block.name,
+      desc: POPUP_STYLES.color_block.shortDescription },
   ];
 
   // Same image-upload handler as before (canvas resize/compress to keep the
@@ -2091,7 +2301,10 @@ export default function Settings({ shop }) {
       return <ToggleRow key={f.key} label={f.label} checked={!!value} onChange={setField} />;
     }
     if (f.type === 'select') {
-      return <SelectRow key={f.key} label={f.label} value={value || f.default} options={f.options} onChange={setField} />;
+      const onSelect = f.presets
+        ? (v) => { setField(v); if (f.presets[v]) setActivePopup((p) => ({ ...p, ...f.presets[v] })); }
+        : setField;
+      return <SelectRow key={f.key} label={f.label} value={value || f.default} options={f.options} onChange={onSelect} />;
     }
     if (f.type === 'datetime') {
       // popup-customizer-2col: datetime/text style-option rows go full
@@ -2264,7 +2477,7 @@ export default function Settings({ shop }) {
                           </div>
                         );
                       }
-                      const styleCfg = mobileUsesOwnStyle ? mobilePopup : popup;
+                      const styleCfg = mergeConfig(popup, mobilePopup);
                       const commonProps = {
                         step: previewStep,
                         email: previewEmail,
@@ -2287,7 +2500,7 @@ export default function Settings({ shop }) {
                       //   the old universal bottom:12/left:8/right:8
                       //   wrapper, which was wrong for every style except
                       //   Bottom Sheet.
-                      const CENTERED_STYLE_IDS = ['story_card', 'flash_sale', 'gift_reveal'];
+                      const CENTERED_STYLE_IDS = ['story_card', 'flash_sale', 'gift_reveal', 'spotlight', 'noir', 'color_block'];
                       if (activeStyleId !== 'classic') {
                         const wrapStyle = activeStyleId === 'top_bar'
                           ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }
@@ -2314,7 +2527,7 @@ export default function Settings({ shop }) {
                           <ClassicPreview
                             layout="card"
                             device="mobile"
-                            popup={mobilePopup}
+                            popup={mergeConfig(popup, mobilePopup)}
                             showEmailField={previewShowEmailField}
                             discountOfferText={previewDiscountOfferText}
                             discountOfferHeadline={discountRules.offerHeadline}
@@ -2416,9 +2629,11 @@ export default function Settings({ shop }) {
         )}
         <ColorRow label="Accent" value={activePopup.accentColor} defaultValue="#4f46e5"
           onChange={(v) => setActivePopup((p) => ({ ...p, accentColor: v }))} />
-        <ColorRow label="Background" value={activePopup.bgColor} defaultValue="#ffffff"
+        <ColorRow label="Background" value={activePopup.bgColor}
+          defaultValue={(POPUP_STYLES[activeStyleId].defaultColors || {}).bgColor || '#ffffff'}
           onChange={(v) => setActivePopup((p) => ({ ...p, bgColor: v }))} />
-        <ColorRow label="Text color" value={activePopup.textColor} defaultValue="#111827"
+        <ColorRow label="Text color" value={activePopup.textColor}
+          defaultValue={(POPUP_STYLES[activeStyleId].defaultColors || {}).textColor || '#111827'}
           onChange={(v) => setActivePopup((p) => ({ ...p, textColor: v }))} />
         <SelectRow label="Font" value={activePopup.fontFamily || 'inherit'}
           options={[

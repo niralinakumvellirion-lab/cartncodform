@@ -31,6 +31,7 @@
 export const STYLE_ORDER = [
   'classic', 'flash_sale', 'gift_reveal',
   'bottom_sheet', 'top_bar', 'story_card',
+  'spotlight', 'noir', 'color_block',
 ];
 
 // Style ids that only ever render on mobile — desktop's gallery hides
@@ -111,6 +112,7 @@ export const POPUP_STYLES = {
     shortDescription: 'Playful card with a bold, gift-styled code reveal.',
     bestFor: 'Casual/DTC brands that want a fun, low-pressure ask.',
     layoutType: 'card',
+    defaultColors: { bgColor: '#fff7ed', textColor: '#111827' },
     supportedFields: [
       'headline', 'subtext', 'brandName', 'imageUrl', 'imagePosition',
       'accentColor', 'bgColor', 'textColor', 'fontFamily', 'borderRadius',
@@ -229,6 +231,144 @@ export const POPUP_STYLES = {
     ],
     defaultValues: {
       scrimEnabled: true,
+    },
+  },
+
+  // --- Round 3: professional styles (audits/pro-popup-styles-proposal.txt).
+  // Both devices; mobile gets its own geometry in each builder. bgColor/
+  // textColor/fontFamily stay merchant controls; `defaultColors` is the
+  // style's own fallback when neither the mobile nor the desktop value is
+  // set, and each tone/fieldTone select carries `presets` that WRITE
+  // bgColor+textColor when picked (a shortcut, not a replacement).
+
+  spotlight: {
+    id: 'spotlight',
+    name: 'Spotlight',
+    shortDescription: 'A soft round shape floats over your page. No box, no hard edges.',
+    bestFor: 'Brands with a lifestyle look who want the offer to feel like part of the page.',
+    layoutType: 'card',
+    defaultColors: { bgColor: '#fbf4e8', textColor: '#1c1917' },
+    supportedFields: [
+      'headline', 'subtext', 'brandName', 'imageUrl', 'imagePosition',
+      'accentColor', 'bgColor', 'textColor', 'fontFamily',
+      'allowText', 'denyText', 'ctaStyle',
+    ],
+    extraFields: [
+      {
+        key: 'spotlightTone', type: 'select', label: 'Colour preset',
+        helper: 'Sets the background and text colours. You can still fine-tune them below.',
+        options: [
+          { value: 'cream', label: 'Cream' }, { value: 'blush', label: 'Blush' },
+          { value: 'sage', label: 'Sage' }, { value: 'ink', label: 'Ink' },
+        ],
+        default: 'cream',
+        presets: {
+          cream: { bgColor: '#fbf4e8', textColor: '#1c1917' },
+          blush: { bgColor: '#fbe4e6', textColor: '#3b1d22' },
+          sage: { bgColor: '#e4eddc', textColor: '#1f2a1a' },
+          ink: { bgColor: '#15171c', textColor: '#f4f4f5' },
+        },
+      },
+      {
+        key: 'shape', type: 'select', label: 'Shape (desktop)',
+        options: [{ value: 'circle', label: 'Circle' }, { value: 'oval', label: 'Oval' }],
+        default: 'circle',
+      },
+      { key: 'showSquiggle', type: 'boolean', label: 'Show a decorative squiggle', default: true },
+      { key: 'badgeText', type: 'text', label: 'Eyebrow text (optional)', maxLength: 24, default: '' },
+    ],
+    defaultValues: { spotlightTone: 'cream', shape: 'circle', showSquiggle: true, badgeText: '' },
+  },
+
+  noir: {
+    id: 'noir',
+    name: 'Noir Split',
+    shortDescription: 'Photo on one side, a dark calm panel on the other. Premium and quiet.',
+    bestFor: 'Higher-priced or design-led shops that want a restrained, editorial ask.',
+    layoutType: 'card',
+    defaultColors: { bgColor: '#0f1115', textColor: '#f4f4f5' },
+    supportedFields: [
+      'headline', 'subtext', 'brandName', 'imageUrl', 'imagePosition',
+      'accentColor', 'bgColor', 'textColor', 'fontFamily',
+      'allowText', 'denyText', 'ctaStyle',
+    ],
+    extraFields: [
+      {
+        key: 'noirTone', type: 'select', label: 'Colour preset',
+        helper: 'Sets the background and text colours. You can still fine-tune them below.',
+        options: [
+          { value: 'noir', label: 'Noir' }, { value: 'slate', label: 'Slate' },
+          { value: 'plum', label: 'Plum' }, { value: 'forest', label: 'Forest' },
+        ],
+        default: 'noir',
+        presets: {
+          noir: { bgColor: '#0f1115', textColor: '#f4f4f5' },
+          slate: { bgColor: '#1e293b', textColor: '#f1f5f9' },
+          plum: { bgColor: '#2a1a2e', textColor: '#f5eef7' },
+          forest: { bgColor: '#14261c', textColor: '#eef5f0' },
+        },
+      },
+      {
+        key: 'imageSide', type: 'select', label: 'Photo side (desktop)',
+        options: [{ value: 'left', label: 'Left' }, { value: 'right', label: 'Right' }],
+        default: 'left',
+      },
+      { key: 'badgeText', type: 'text', label: 'Eyebrow text (optional)', maxLength: 24, default: '' },
+    ],
+    defaultValues: { noirTone: 'noir', imageSide: 'left', badgeText: '' },
+  },
+
+  color_block: {
+    id: 'color_block',
+    name: 'Colour Block',
+    shortDescription: 'A warm colour panel with a big offer number and a friendly decline link.',
+    bestFor: 'Playful, food, beauty and gifting shops that want the discount to be the hero.',
+    layoutType: 'card',
+    defaultColors: { bgColor: '#f6e3c4', textColor: '#1c1917' },
+    supportedFields: [
+      'headline', 'subtext', 'brandName', 'imageUrl', 'imagePosition',
+      'accentColor', 'bgColor', 'textColor', 'fontFamily',
+      'allowText', 'denyText', 'ctaStyle',
+    ],
+    extraFields: [
+      {
+        key: 'fieldTone', type: 'select', label: 'Colour preset',
+        helper: 'Sets the background and text colours. You can still fine-tune them below.',
+        options: [
+          { value: 'sand', label: 'Sand' }, { value: 'apricot', label: 'Apricot' },
+          { value: 'blush', label: 'Blush' }, { value: 'mint', label: 'Mint' },
+        ],
+        default: 'sand',
+        presets: {
+          sand: { bgColor: '#f6e3c4', textColor: '#1c1917' },
+          apricot: { bgColor: '#fbd5b0', textColor: '#2a1608' },
+          blush: { bgColor: '#f9d3d8', textColor: '#2e1418' },
+          mint: { bgColor: '#d5ecdd', textColor: '#0f2a1c' },
+        },
+      },
+      {
+        key: 'offerFigure', type: 'text', label: 'Offer figure (blank = your real discount %)',
+        helper: 'Shown only while a discount is turned on. Never invented.',
+        maxLength: 12, default: '',
+      },
+      { key: 'badgeText', type: 'text', label: 'Eyebrow text (optional)', maxLength: 24, default: '' },
+      {
+        key: 'countdownSource', type: 'select', label: 'Countdown (optional) counts down to',
+        helper: 'Never a fake per-visitor timer, only a real deadline.',
+        options: [
+          { value: 'discount_expiry', label: 'No countdown before unlocking' },
+          { value: 'fixed_date', label: 'A specific end date and time' },
+        ],
+        default: 'discount_expiry',
+      },
+      {
+        key: 'countdownEndsAt', type: 'datetime', label: 'Ends at', default: '',
+        showWhen: { countdownSource: 'fixed_date' },
+      },
+    ],
+    defaultValues: {
+      fieldTone: 'sand', offerFigure: '', badgeText: '',
+      countdownSource: 'discount_expiry', countdownEndsAt: '',
     },
   },
 };

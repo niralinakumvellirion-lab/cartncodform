@@ -187,6 +187,8 @@
       '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/>' +
       '<path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/>' +
       '<path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5"/></svg>',
+    lock: CCF_SVG_OPEN +
+      '<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
     bag: CCF_SVG_OPEN +
       '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/>' +
       '<path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>',
@@ -241,7 +243,8 @@
   // mobile-only styles (audits/mobile-popup-styles-proposal.txt) — mirrors
   // frontend/app/admin/lib/popupStyles.js's MOBILE_ONLY_STYLE_IDS exactly.
   var CCF_MOBILE_ONLY_STYLE_IDS = ['bottom_sheet', 'top_bar', 'story_card'];
-  var CCF_KNOWN_STYLE_IDS = ['flash_sale', 'gift_reveal'].concat(CCF_MOBILE_ONLY_STYLE_IDS);
+  var CCF_KNOWN_STYLE_IDS = ['flash_sale', 'gift_reveal', 'spotlight', 'noir', 'color_block']
+    .concat(CCF_MOBILE_ONLY_STYLE_IDS);
 
   // popup-style: resolve which style + extra fields are actually in force.
   // Independent of cfg's own layout-presence mobile fallback above — the
@@ -520,6 +523,33 @@
          edge (0 horizontal transform, unlike every layout above) — its
          own keyframe + no-hover-lift override, same reasoning as
          layout-center/layout-bar just above. */
+      /* round-3 styles (spotlight / noir / color_block): centered entrance
+         with a short rise, staggered content, and reduced-motion opt-out. */
+      #ccf-push-prompt.layout-pro {
+        animation: ccfProIn 260ms cubic-bezier(0.2,0.8,0.2,1) both;
+      }
+      @keyframes ccfProIn {
+        from { opacity:0; transform:translate(-50%,-50%) translateY(10px) scale(0.98); }
+        to   { opacity:1; transform:translate(-50%,-50%) translateY(0) scale(1); }
+      }
+      #ccf-push-prompt.layout-pro:hover {
+        transform: translate(-50%,-50%);
+      }
+      @keyframes ccfRise {
+        from { opacity:0; transform:translateY(8px); }
+        to   { opacity:1; transform:translateY(0); }
+      }
+      .ccf-input.ccf-input-dark:focus {
+        background: rgba(255,255,255,0.14) !important;
+        border-color: rgba(255,255,255,0.5) !important;
+        box-shadow: 0 0 0 3px rgba(255,255,255,0.16) !important;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #ccf-push-prompt, #ccf-push-prompt *, #ccf-overlay {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
       #ccf-push-prompt.layout-sheet {
         animation: ccfSheetSlideUp 0.35s cubic-bezier(0.34,1.56,0.64,1);
       }
@@ -665,7 +695,8 @@
     // colors/sizes, untouched. Story Card also renders on a dark/photo
     // background (mobile-styles) — same light-on-dark need, mirrors
     // Settings.jsx's UnlockedView isDark check exactly.
-    var isDark = sId === 'flash_sale' || sId === 'story_card';
+    var isDark = sId === 'flash_sale' || sId === 'story_card' ||
+      popup.getAttribute('data-ccf-dark') === '1';
     var titleColor = isDark ? '#ffffff' : '#111827';
     var subColor = isDark ? '#d4d4d8' : '#6b7280';
     var chipBig = sId === 'gift_reveal' && sFields.codeChipEmphasis !== false;
@@ -782,6 +813,17 @@
     }
   }
 
+  // Perceived-brightness test so the round-3 styles pick readable secondary
+  // colours (input, subtext, CTA) whatever background the merchant chose.
+  function ccfIsDarkColor(hex) {
+    var m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(hex || '').trim());
+    if (!m) return false;
+    var h = m[1];
+    if (h.length === 3) h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2);
+    var r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 < 0.45;
+  }
+
   // Per-field merge: mobile value wins where it is set, desktop fills the rest.
   // '', null and undefined mean "not set"; false and 0 are real values.
   function ccfMergeConfig(base, over) {
@@ -886,6 +928,130 @@
       return d;
     }
 
+    // ---- Round 3 (spotlight / noir / color_block) shared pieces ----
+    function ccfProPalette(defBg, defFg) {
+      var pBg = cfg.bgColor || defBg;
+      var pFg = cfg.textColor || defFg;
+      var dark = ccfIsDarkColor(pBg);
+      return {
+        bg: pBg, fg: pFg, dark: dark,
+        inputBg: dark ? 'rgba(255,255,255,0.08)' : '#ffffff',
+        inputBorder: dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.14)',
+        font: cfg.fontFamily || '-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif'
+      };
+    }
+    function ccfProOverlay(alpha, blurPx) {
+      var o = document.createElement('div');
+      o.id = 'ccf-overlay';
+      o.setAttribute('style',
+        'position:fixed;top:0;left:0;width:100%;height:100%;z-index:2147483646;' +
+        'background:rgba(0,0,0,' + alpha + ');' +
+        (blurPx ? '-webkit-backdrop-filter:blur(' + blurPx + 'px);backdrop-filter:blur(' + blurPx + 'px);' : ''));
+      return o;
+    }
+    function buildProClose(pal, posCss, onPhoto) {
+      var b = document.createElement('button');
+      b.id = 'ccf-close-btn';
+      b.type = 'button';
+      b.textContent = '×';
+      b.setAttribute('aria-label', 'Dismiss');
+      var sz = isMobile ? 44 : 36;
+      b.style.cssText = 'position:absolute;' + posCss + 'width:' + sz + 'px;height:' + sz + 'px;border:none;' +
+        'border-radius:50%;font-size:18px;line-height:' + sz + 'px;text-align:center;cursor:pointer;z-index:10;' +
+        (onPhoto ? 'background:rgba(0,0,0,0.5);color:#ffffff;'
+          : 'background:' + (pal.dark ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.08)') + ';color:' + pal.fg + ';');
+      closeBtn = b;
+      return b;
+    }
+    // Headline + subtext + email + Allow + Deny (+ branding) in one
+    // #ccf-content-section, children staggered in. `o` carries per-style
+    // sizing/alignment; merchant strings only ever go through textContent.
+    function buildProContent(pal, o) {
+      var c = document.createElement('div');
+      c.id = 'ccf-content-section';
+      c.style.cssText = 'text-align:' + o.align + ';' + (o.contentStyle || '');
+      if (o.eyebrow) {
+        var eb = document.createElement('div');
+        eb.style.cssText = 'margin-bottom:12px;';
+        var ebi = document.createElement('span');
+        ebi.style.cssText = 'display:inline-block;font-size:11px;font-weight:700;letter-spacing:0.14em;' +
+          'text-transform:uppercase;' + (o.eyebrowStyle || '');
+        ebi.textContent = String(o.eyebrow).slice(0, 24);
+        eb.appendChild(ebi);
+        c.appendChild(eb);
+      }
+      (o.before || []).forEach(function (el) { c.appendChild(el); });
+      var hd = document.createElement('div');
+      hd.id = 'ccf-prompt-text';
+      hd.style.cssText = 'font-size:' + o.headSize + 'px;font-weight:700;line-height:1.12;' +
+        'letter-spacing:-0.02em;margin-bottom:12px;';
+      hd.textContent = headline;
+      c.appendChild(hd);
+      if (cfg.subtext) {
+        var sb = document.createElement('div');
+        sb.style.cssText = 'font-size:' + o.subSize + 'px;line-height:1.5;opacity:0.75;margin-bottom:20px;';
+        sb.textContent = cfg.subtext;
+        c.appendChild(sb);
+      }
+      if (ccfShowEmailField()) {
+        var ew = document.createElement('div');
+        ew.style.cssText = 'position:relative;margin-bottom:12px;';
+        var ei = document.createElement('input');
+        ei.type = 'email';
+        ei.id = 'ccf-email-input';
+        ei.className = 'ccf-input' + (pal.dark ? ' ccf-input-dark' : '');
+        var pctE = ccfFieldPct('emailDiscount');
+        ei.placeholder = 'Your email' + (pctE ? ' (get ' + pctE + '% off)' : '');
+        ei.style.cssText = ccfInputStyle() + 'height:48px;padding:0 ' + (o.lockIcon ? '44px' : '16px') +
+          ' 0 16px;font-size:15px;margin-bottom:0;border-radius:' + o.inputRadius + ';background:' + pal.inputBg +
+          ';color:' + pal.fg + ';border-color:' + pal.inputBorder + ';box-sizing:border-box;';
+        ew.appendChild(ei);
+        if (o.lockIcon) {
+          var lk = document.createElement('span');
+          lk.style.cssText = 'position:absolute;right:16px;top:50%;transform:translateY(-50%);opacity:0.5;' +
+            'display:flex;color:' + pal.fg + ';';
+          lk.innerHTML = ccfIcon('lock', 16); // hardcoded icon markup, no merchant string
+          ew.appendChild(lk);
+        }
+        c.appendChild(ew);
+      }
+      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle) + 'font-size:16px;padding:15px;' +
+        (o.ctaLight ? 'background:#ffffff;color:#0f1115;box-shadow:none;border:none;' : ''));
+      c.appendChild(allow);
+      deny = buildDenyBtn(ccfDenyButtonStyle() + 'color:' + pal.fg + ';opacity:0.65;font-size:13px;' +
+        'text-decoration:underline;padding:12px 0;' + (o.denyDotted ? 'text-decoration-style:dotted;' : ''));
+      c.appendChild(deny);
+      if (cfg.showBranding) {
+        c.appendChild(buildBranding('margin-top:8px;font-size:10px;text-align:center;letter-spacing:0.5px;' +
+          'opacity:0.45;color:' + pal.fg + ';'));
+      }
+      for (var ci = 0; ci < c.children.length; ci++) {
+        c.children[ci].style.animation = 'ccfRise 340ms cubic-bezier(0.2,0.8,0.2,1) both';
+        c.children[ci].style.animationDelay = (80 + ci * 45) + 'ms';
+      }
+      return c;
+    }
+    function ccfProPhoto(pal, heightCss, fadeCss) {
+      var ph = document.createElement('div');
+      ph.style.cssText = 'position:relative;overflow:hidden;' + heightCss + 'background:' +
+        (cfg.imageUrl ? '#000' : ('linear-gradient(135deg,' + accent + ',' + pal.bg + ')')) + ';';
+      if (cfg.imageUrl) {
+        var pim = document.createElement('img');
+        pim.src = cfg.imageUrl;
+        pim.alt = '';
+        pim.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;' +
+          'object-position:' + (cfg.imagePosition || '50% 50%') + ';';
+        pim.onerror = function () { pim.style.display = 'none'; };
+        ph.appendChild(pim);
+      }
+      if (fadeCss) {
+        var fd = document.createElement('div');
+        fd.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;background:' + fadeCss + ';';
+        ph.appendChild(fd);
+      }
+      return ph;
+    }
+
     var wrap = document.createElement('div');
     wrap.id = 'ccf-push-prompt';
     var allow, deny, closeBtn;
@@ -899,13 +1065,7 @@
       var isFlashSale = ccfStyle.id === 'flash_sale';
       var styleFields = ccfStyle.fields;
       var cardRadius2 = (cfg.borderRadius != null ? cfg.borderRadius : 16) + 'px';
-      // Gift Reveal is cream unless the merchant picked a real bgColor.
-      // mobilePopup/popup bgColor has a non-empty schema default of '#ffffff'
-      // (never blank), so plain white is treated as "not chosen" — a merchant
-      // who actually wants white here can't be told apart from the default.
-      var giftBgPicked = cfg.bgColor && String(cfg.bgColor).toLowerCase() !== '#ffffff' &&
-        String(cfg.bgColor).toLowerCase() !== '#fff';
-      var sBg = isFlashSale ? '#18181b' : (giftBgPicked ? cfg.bgColor : '#fff7ed');
+      var sBg = isFlashSale ? '#18181b' : (cfg.bgColor || '#fff7ed');
       var sFg = isFlashSale ? '#ffffff' : (cfg.textColor || '#111827');
 
       // mobile-popup-polish: MOBILE is centered (both axes) with a
@@ -1053,6 +1213,154 @@
         'border:none;border-radius:50%;width:26px;height:26px;font-size:14px;line-height:26px;' +
         'text-align:center;cursor:pointer;z-index:10;';
       wrap.appendChild(closeBtn);
+
+    } else if (ccfStyle.id === 'spotlight') {
+      // ---------- POPUP STYLE: Spotlight — a soft round shape floating over
+      // the page, no boxed panel. Desktop circle/oval; mobile a rounded
+      // "pebble" (a circle can't hold the input and CTA at 320px). ----------
+      var spF = ccfStyle.fields || {};
+      var spPal = ccfProPalette('#fbf4e8', '#1c1917');
+      var spOval = !isMobile && spF.shape === 'oval';
+      wrap.style.cssText = [
+        'position:fixed', 'top:50%', 'left:50%', 'transform:translate(-50%,-50%)',
+        isMobile ? 'width:min(360px, calc(100vw - 32px))'
+          : (spOval ? 'width:min(520px, calc(100vw - 48px));aspect-ratio:520/430'
+            : 'width:min(460px, calc(100vw - 48px));aspect-ratio:1/1'),
+        isMobile ? 'max-height:calc(100vh - 32px);overflow-x:hidden;overflow-y:auto' : 'overflow:visible',
+        'border-radius:' + (isMobile ? '56px' : '50%'),
+        'box-sizing:border-box',
+        'padding:' + (isMobile ? '40px 24px 28px' : '0'),
+        'display:flex', 'flex-direction:column', 'justify-content:center',
+        'background:' + spPal.bg, 'color:' + spPal.fg, 'text-align:center',
+        'box-shadow:0 24px 70px rgba(0,0,0,0.28)',
+        'z-index:2147483647', 'font-family:' + spPal.font
+      ].join(';');
+      wrap.classList.add('layout-pro');
+      wrap.setAttribute('data-ccf-dark', spPal.dark ? '1' : '0');
+      overlay = ccfProOverlay(0.45, 3);
+
+      if (spF.showSquiggle !== false) {
+        var sqg = document.createElement('span');
+        sqg.setAttribute('aria-hidden', 'true');
+        sqg.style.cssText = 'position:absolute;pointer-events:none;opacity:0.35;color:' + accent + ';' +
+          (isMobile ? 'top:26px;left:26px;width:64px;' : 'bottom:22%;left:14%;width:14%;');
+        sqg.innerHTML = '<svg viewBox="0 0 120 20" width="100%" fill="none" stroke="currentColor" ' +
+          'stroke-width="2.5" stroke-linecap="round"><path d="M0 10 Q 15 0 30 10 T 60 10 T 90 10 T 120 10"/></svg>';
+        wrap.appendChild(sqg);
+      }
+      if (cfg.imageUrl) {
+        var seal = document.createElement('div');
+        seal.style.cssText = 'width:64px;height:64px;border-radius:50%;overflow:hidden;flex-shrink:0;' +
+          (isMobile ? 'margin:0 auto 14px;'
+            : 'position:absolute;top:-32px;left:50%;transform:translateX(-50%);border:4px solid ' + spPal.bg + ';');
+        var sealImg = document.createElement('img');
+        sealImg.src = cfg.imageUrl;
+        sealImg.alt = '';
+        sealImg.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;object-position:' +
+          (cfg.imagePosition || '50% 50%') + ';';
+        sealImg.onerror = function () { seal.style.display = 'none'; };
+        seal.appendChild(sealImg);
+        wrap.appendChild(seal);
+      }
+      wrap.appendChild(buildProContent(spPal, {
+        align: 'center', headSize: isMobile ? 26 : 30, subSize: isMobile ? 14 : 15,
+        eyebrow: spF.badgeText, eyebrowStyle: 'opacity:0.7;', inputRadius: '999px',
+        contentStyle: isMobile ? '' : 'width:68%;margin:0 auto;'
+      }));
+      wrap.appendChild(buildProClose(spPal, isMobile ? 'top:12px;right:12px;' : 'top:13%;right:13%;'));
+
+    } else if (ccfStyle.id === 'noir') {
+      // ---------- POPUP STYLE: Noir Split — photo one side, dark calm panel
+      // the other, small uppercase eyebrow tag. Mobile: centered card, hero
+      // photo fading into the panel. ----------
+      var nF = ccfStyle.fields || {};
+      var nPal = ccfProPalette('#0f1115', '#f4f4f5');
+      var nRight = !isMobile && nF.imageSide === 'right';
+      wrap.style.cssText = [
+        'position:fixed', 'top:50%', 'left:50%', 'transform:translate(-50%,-50%)',
+        isMobile ? 'width:min(400px, calc(100vw - 32px));max-height:calc(100vh - 32px);overflow-x:hidden;overflow-y:auto'
+          : 'width:min(780px, calc(100vw - 48px));display:grid;min-height:440px;overflow:hidden;grid-template-columns:' +
+            (nRight ? '54fr 46fr' : '46fr 54fr'),
+        'border-radius:' + (isMobile ? '20px' : '18px'),
+        'background:' + nPal.bg, 'color:' + nPal.fg,
+        'box-shadow:0 24px 70px rgba(0,0,0,0.35)',
+        'z-index:2147483647', 'font-family:' + nPal.font
+      ].join(';');
+      wrap.classList.add('layout-pro');
+      wrap.setAttribute('data-ccf-dark', nPal.dark ? '1' : '0');
+      overlay = ccfProOverlay(0.5, 0);
+      var nPhoto = ccfProPhoto(nPal, isMobile ? 'height:168px;' : 'order:' + (nRight ? 2 : 1) + ';',
+        isMobile ? 'linear-gradient(180deg,transparent 35%,' + nPal.bg + ' 100%)'
+          : 'linear-gradient(' + (nRight ? '270deg' : '90deg') + ',transparent 75%,' + nPal.bg + ' 100%)');
+      wrap.appendChild(nPhoto);
+      wrap.appendChild(buildProContent(nPal, {
+        align: 'left', headSize: isMobile ? 26 : 34, subSize: isMobile ? 14 : 15,
+        eyebrow: nF.badgeText,
+        eyebrowStyle: 'border:1px solid ' + (nPal.dark ? '#e7c07d' : '#9a6b1f') + ';color:' +
+          (nPal.dark ? '#e7c07d' : '#9a6b1f') + ';padding:4px 10px;border-radius:999px;',
+        inputRadius: '12px', ctaLight: nPal.dark,
+        contentStyle: isMobile ? 'position:relative;padding:0 24px 24px;margin-top:-36px;'
+          : 'position:relative;padding:48px 44px;display:flex;flex-direction:column;justify-content:center;order:' +
+            (nRight ? 1 : 2) + ';'
+      }));
+      wrap.appendChild(buildProClose(nPal, 'top:12px;right:12px;', isMobile || nRight));
+
+    } else if (ccfStyle.id === 'color_block') {
+      // ---------- POPUP STYLE: Colour Block — warm colour field, big serif
+      // offer figure (real discount only), playful decline link. ----------
+      var cbF = ccfStyle.fields || {};
+      var cbPal = ccfProPalette('#f6e3c4', '#1c1917');
+      wrap.style.cssText = [
+        'position:fixed', 'top:50%', 'left:50%', 'transform:translate(-50%,-50%)',
+        isMobile ? 'width:min(400px, calc(100vw - 32px));max-height:calc(100vh - 32px);overflow-x:hidden;overflow-y:auto'
+          : 'width:min(740px, calc(100vw - 48px));display:grid;grid-template-columns:1fr 1fr;min-height:420px;overflow:hidden',
+        'border-radius:24px',
+        'background:' + cbPal.bg, 'color:' + cbPal.fg,
+        'box-shadow:0 24px 70px rgba(0,0,0,0.3)',
+        'z-index:2147483647', 'font-family:' + cbPal.font
+      ].join(';');
+      wrap.classList.add('layout-pro');
+      wrap.setAttribute('data-ccf-dark', cbPal.dark ? '1' : '0');
+      overlay = ccfProOverlay(0.5, 0);
+      var cbShort = window.innerHeight < 620;
+      wrap.appendChild(ccfProPhoto(cbPal, isMobile ? 'height:' + (cbShort ? '84' : '110') + 'px;' : 'order:1;', ''));
+
+      var cbBefore = [];
+      var cbPct = Math.max(ccfPct('pushDiscount'), ccfPct('emailDiscount'), ccfPct('bothDiscount'));
+      var cbFigure = '';
+      if (ccfDiscountEnabled()) {
+        cbFigure = cbF.offerFigure ? String(cbF.offerFigure).slice(0, 12) : (cbPct ? cbPct + '% OFF' : '');
+      }
+      if (cbFigure) {
+        var cbFig = document.createElement('div');
+        cbFig.style.cssText = 'font-family:Georgia,\'Iowan Old Style\',\'Times New Roman\',serif;font-size:' +
+          (isMobile ? (window.innerWidth < 360 || cbShort ? '44px' : '52px') : '56px') + ';font-weight:900;line-height:1;letter-spacing:-0.04em;margin-bottom:12px;';
+        cbFig.textContent = cbFigure;
+        cbBefore.push(cbFig);
+        var cbDiv = document.createElement('div');
+        cbDiv.style.cssText = 'width:44px;height:1px;background:' + cbPal.fg + ';opacity:0.3;margin-bottom:14px;';
+        cbBefore.push(cbDiv);
+      }
+      if (cbF.countdownSource === 'fixed_date' && cbF.countdownEndsAt) {
+        var cbEnds = new Date(cbF.countdownEndsAt).getTime();
+        if (cbEnds > Date.now()) {
+          var cbCd = document.createElement('div');
+          cbCd.style.cssText = 'display:inline-block;font-size:16px;font-weight:800;letter-spacing:0.08em;' +
+            'font-variant-numeric:tabular-nums;padding:6px 12px;border-radius:10px;margin-bottom:14px;' +
+            'background:' + cbPal.fg + ';color:' + cbPal.bg + ';';
+          cbBefore.push(cbCd);
+          ccfStartCountdown(cbCd, cbCd, cbEnds);
+        }
+      }
+      wrap.appendChild(buildProContent(cbPal, {
+        align: 'left', headSize: isMobile ? 22 : 24, subSize: 14,
+        eyebrow: cbF.badgeText, eyebrowStyle: 'opacity:0.75;', before: cbBefore,
+        inputRadius: '12px', lockIcon: true, denyDotted: true,
+        contentStyle: isMobile
+          ? 'position:relative;margin-top:-20px;border-radius:24px 24px 0 0;padding:24px 24px 26px;background:' + cbPal.bg + ';'
+          : 'position:relative;padding:44px 40px;display:flex;flex-direction:column;justify-content:center;order:2;'
+      }));
+      wrap.appendChild(buildProClose(cbPal, 'top:12px;right:12px;', isMobile));
 
     } else if (ccfStyle.id === 'bottom_sheet') {
       // ---------- POPUP STYLE: Bottom Sheet — anchored to the viewport's

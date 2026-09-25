@@ -65,7 +65,7 @@ test('unregistered styleId is silently dropped, not saved', async () => {
 });
 
 test('unregistered styleId alongside a real field: only the real field is set', async () => {
-  const { set } = await run({ styleId: 'spotlight', headline: 'Hello' });
+  const { set } = await run({ styleId: 'hologram', headline: 'Hello' });
   expect(set['popup.styleId']).toBeUndefined();
   expect(set['popup.headline']).toBe('Hello');
 });

@@ -1,0 +1,131 @@
+PRO POPUP STYLES - PHASE 1 PROPOSAL (NO CODE WRITTEN)
+======================================================
+
+Inspiration only: docs/popup-styles/ (see audits/popup-style-audit-before.txt item 7). Layout
+patterns only. No brand logos, copy, imagery or exact colours; all previews are our own renders.
+Every colour below is our own value, chosen for contrast, not sampled from a reference.
+
+0. CONSTRAINTS THAT SHAPE THE DESIGN (found in the current code)
+----------------------------------------------------------------
+- Config merge: on mobile the storefront merges desktop and mobile config. mobilePopup has
+  non-empty schema defaults (bgColor #ffffff, accentColor #4f46e5, textColor #111827, fontFamily
+  'inherit', borderRadius 16, ctaStyle 'pill'), so those ALWAYS win and can't be told apart from a
+  merchant's choice. Gift Reveal already needed a workaround for this. So the new styles own their
+  palette through a style field ("tone") and do NOT read bgColor/textColor/fontFamily. Only
+  accentColor (CTA button) and ctaStyle stay merchant-driven. The registry's supportedFields list
+  hides the controls that would do nothing.
+- Fonts: no external webfont loading (theme performance and privacy). Type uses the system stack;
+  the serif is Georgia / 'Iowan Old Style' / 'Times New Roman' fallback.
+- Discount flow: each builder must own a #ccf-content-section that the unlocked-code view swaps
+  into, and must keep the real-deadline-only countdown rule. Merchant strings go through textContent.
+- Both-device styles (like Flash Sale) branch on isMobile in one builder; they are not mobileOnly.
+- Admin gallery thumbnails are the real preview scaled to 0.34, so any detail must survive that.
+
+1. THE THREE STYLES
+-------------------
+STYLE 1 - id: spotlight  | name: Spotlight
+  From: #12 (oval over photo) + #4 (circle over photo). Pattern: no boxed panel; the shape is the chrome.
+  Description: "A soft round shape floats over your page. No box, no hard edges."
+  Desktop: centered, 460x460 circle (or 520x430 oval, field "shape"); page dimmed 45% with a 3px
+    backdrop blur; optional original squiggle arc behind the shape. Inside, centered column: eyebrow
+    (badgeText, 11px uppercase, 0.14em tracking), headline 34/760 tracking -0.02em, subtext 15/1.5,
+    pill email input 48px, pill CTA 52px, decline as a plain 13px underlined link. Optional 72px
+    circular photo (imageUrl) overlapping the top edge like a seal.
+  MOBILE adaptation: a circle does not work on a phone (at 320px a 288px circle leaves a ~200px
+    text column, too narrow for the input and CTA). Mobile becomes a "pebble": width
+    min(360, 100vw-32), border-radius 56px, generous 32/24 padding, seal photo overlapping the top,
+    same floating margin and dimmed page. The "no panel" feel comes from the extreme radius and the
+    float, not from a literal circle. max-height calc(100vh-32px) with internal scroll.
+  Extra fields: tone (enum: cream / blush / sage / ink), showSquiggle (boolean), shape
+    (enum: circle / oval, desktop only). Reuses badgeText, imageUrl, imagePosition.
+  Palette: cream #fbf4e8 on text #1c1917 (contrast 15:1); CTA uses accentColor.
+
+STYLE 2 - id: noir  | name: Noir Split
+  From: #8 (dark content panel, eyebrow badge, whitespace). Pattern: split, dark panel, small tag.
+  Description: "Photo on one side, a dark, calm panel on the other. Premium and quiet."
+  Desktop: centered 780x440, radius 18, 46/54 split. Photo left (imageUrl, imagePosition, cover)
+    with a soft inner gradient at the seam; near-black panel #0f1115 on the right with 48/44 padding.
+    Eyebrow pill (badgeText, 11px uppercase, 0.14em, champagne #e7c07d outline), headline 34/750
+    white tracking -0.02em line-height 1.1, subtext 15/1.55 #a1a1aa (7.6:1), single email input
+    (dark #1a1d23, 1px #2f333b border), CTA 52px white with #0f1115 text (18:1), decline 13px #71717a
+    link. Field "imageSide" (left/right).
+  MOBILE adaptation: centered card, 92vw max 400, radius 20 (not a bottom sheet; Bottom Sheet already
+    owns that slot). 168px hero photo on top that fades into the dark panel with a gradient; eyebrow
+    sits over the photo bottom-left; content stacks with 24px padding; headline drops to 26px.
+  Extra fields: imageSide (enum left / right; desktop only). Reuses badgeText as the eyebrow. No
+    name field: the backend subscribe flow only takes an email, so I am NOT copying the reference's
+    two-field form.
+  Palette: fixed dark, ignores bgColor/textColor; accentColor is used only for the input focus ring.
+
+STYLE 3 - id: color_block  | name: Colour Block
+  From: #10 (warm colour-field panel, big offer figure, playful decline) + #5 (serif, divider, digit blocks).
+  Description: "A warm colour panel with a big offer number and a friendly decline link."
+  Desktop: centered 740x420, radius 24, 50/50 split. Photo left; warm field right (default sand
+    #f6e3c4; tones: sand / apricot / blush / mint). Small eyebrow (badgeText), then the OFFER FIGURE
+    in a serif display face at 72px/900, tracking -0.04em, colour #1c1917, a 1px divider, headline
+    22/700, subtext 14/1.5. Email input 52px with an inline lock icon at the right edge, full-width
+    CTA 54px radius 14 (accentColor). Optional real-deadline countdown as three rounded digit
+    blocks (reuses countdownSource/countdownEndsAt). Decline is a lowercase, dotted-underline link
+    (merchant copy from denyText).
+  Offer figure source: field offerFigure (max 12 chars); when blank it is auto-filled from the REAL
+    discount rule ("20% OFF" from the configured percentage). If no discount is on, the figure hides.
+    Never a made-up number.
+  MOBILE adaptation: centered card 92vw max 400. A 120px photo strip on top; the color field below;
+    the offer figure (56px) overlaps the seam between them; content stacks with 24px padding.
+  Extra fields: fieldTone (enum sand / apricot / blush / mint), offerFigure (string, 12). Reuses
+    badgeText, imageUrl, denyText, countdownSource, countdownEndsAt.
+  Palette: text #1c1917 on sand #f6e3c4 = 13:1; CTA white on the merchant accent (indigo default 6.3:1).
+
+2. WHY THESE READ AS MORE MODERN THAN THE CURRENT SET
+----------------------------------------------------
+Typography scale: current styles use one weight (800) and small sizes (17px headline, 12px decline,
+  ~300px wide cards). New: a real hierarchy. Display 56-72 / headline 26-34 / body 14-15 / eyebrow 11
+  uppercase tracked / button 16-700. Ratio between display or headline and body is at least 2.2:1
+  (today about 1.3:1). Tight tracking (-0.02 to -0.04em) on large text, 1.5-1.55 line-height on body.
+Spacing: an 8-point rhythm (8/16/24/32/48). Desktop panels get 40-48px padding (today 18-20px). Whitespace
+  is the main "premium" signal in every reference.
+Contrast: fixed designed palettes, all text at AA or better (numbers above), instead of an
+  accent-tinted gradient plus a heavy 60px shadow. Shadows become restrained (0 12px 40px at 14-18%).
+Motion: today one bounce slide. New: 260ms ease-out (cubic-bezier .2,.8,.2,1) entrance, opacity plus
+  8px rise; page dim fades in 180ms; content children stagger 40ms (eyebrow, headline, field, CTA);
+  CTA lifts 1px on hover with a shadow bloom; Colour Block's figure scales 0.92 to 1 with a -2deg
+  settle. All motion is disabled under prefers-reduced-motion (a rule the storefront does not
+  currently have; this would add it). Focus rings are 3px and visible.
+
+3. ANSWERS
+----------
+Q: Should any existing style be retired?
+  Honest answer: not in this round, but the gallery is getting crowded and one style is on borrowed
+  time. After these three ship, the Mobile tab would offer 9 choices (Card, Flash Sale, Gift Reveal,
+  Bottom Sheet, Top Bar, Story Card + 3), which is a lot to choose from. Gift Reveal is the one I would
+  retire: after its palette fix it is a small warm centered card with a gift icon, and Colour Block
+  covers the same warm, playful, code-reveal role at a much higher design level. Flash Sale is NOT a
+  duplicate (its point is the countdown and urgency). Classic Split stays as the configurable default;
+  Noir Split is a designed variant, not a replacement. Story Card, Bottom Sheet and Top Bar each own a
+  distinct mobile shape. Because Gift Reveal renders on desktop, retiring it needs the same
+  fall-back-to-classic migration used for full_takeover, so I suggest deciding after Colour Block ships
+  and you have seen them side by side, not now. (You asked me last round not to drop it, so I am only
+  recommending, not proposing it as part of this build.)
+Q: Do these need new extra fields, or can they reuse what exists?
+  Mostly reuse. Reused: badgeText (eyebrow), imageUrl, imagePosition, headline, subtext, allowText,
+  denyText, ctaStyle, accentColor, countdownSource, countdownEndsAt. New (all fit the three existing
+  sanitizer types: enum, boolean, string): spotlight tone / showSquiggle / shape; noir imageSide;
+  color_block fieldTone / offerFigure. styleFields is a flat Mixed bag, so no schema change. What does
+  change: three new ids in Store.js's two styleId enums, backend/utils/popupStyles.js STYLE_IDS and
+  STYLE_EXTRA_FIELDS, the frontend registry, Settings.jsx (gallery card, preview, thumbnail), ccf-push.js
+  (three builders, a lock icon, entrance animation and reduced-motion CSS), and tests. Note badgeText
+  is shared, so switching styles keeps the same text; that is intended.
+
+4. RISKS / OPEN POINTS
+----------------------
+- The three styles would ignore bgColor/textColor/fontFamily, so merchants lose those controls for
+  them; the tone field replaces them. This is deliberate (see section 0).
+- Spotlight's backdrop blur (backdrop-filter) is not supported on very old mobile browsers; it
+  degrades to the plain dim.
+- The auto offer figure needs the discount config, which is already fetched on load; if that fetch
+  fails the figure just hides.
+- Adding a prefers-reduced-motion rule touches shared CSS, but only adds a rule.
+- Thumbnails will be our own renders at 0.34 scale; the eyebrow text and lock icon will be too small
+  to read there, so the thumbnails rely on shape, palette and the big figure.
+
+STOPPING HERE. Nothing is implemented until approved.

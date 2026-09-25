@@ -19,7 +19,8 @@
  */
 
 const STYLE_IDS = ['classic', 'flash_sale', 'gift_reveal',
-  'bottom_sheet', 'top_bar', 'story_card'];
+  'bottom_sheet', 'top_bar', 'story_card',
+  'spotlight', 'noir', 'color_block'];
 
 // Ids that used to exist and may still be saved on old documents. A PATCH
 // that carries one is normalized to 'classic' instead of being dropped, so
@@ -61,6 +62,23 @@ const STYLE_EXTRA_FIELDS = {
   },
   story_card: {
     scrimEnabled: { type: 'boolean' },
+  },
+  // Round 3 (audits/pro-popup-styles-proposal.txt). The tone keys are
+  // deliberately distinct per style (styleFields is one flat bag).
+  spotlight: {
+    spotlightTone: { type: 'enum', values: ['cream', 'blush', 'sage', 'ink'] },
+    showSquiggle: { type: 'boolean' },
+    shape: { type: 'enum', values: ['circle', 'oval'] },
+  },
+  noir: {
+    noirTone: { type: 'enum', values: ['noir', 'slate', 'plum', 'forest'] },
+    imageSide: { type: 'enum', values: ['left', 'right'] },
+  },
+  color_block: {
+    fieldTone: { type: 'enum', values: ['sand', 'apricot', 'blush', 'mint'] },
+    offerFigure: { type: 'string', maxLength: 12 },
+    countdownSource: { type: 'enum', values: ['discount_expiry', 'fixed_date'] },
+    countdownEndsAt: { type: 'string', maxLength: 40 },
   },
 };
 

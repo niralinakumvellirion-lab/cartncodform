@@ -75,8 +75,11 @@ const storeSchema = new mongoose.Schema({
       default: 'light',
     },
     accentColor: { type: String, default: '#4f46e5' },
-    bgColor: { type: String, default: '#ffffff' },
-    textColor: { type: String, default: '#111827' },
+    // '' = "not chosen". Resolution per field: merchant mobile value ->
+    // merchant desktop value -> the style's own default. Existing documents
+    // that already store a value (including '#ffffff') keep it.
+    bgColor: { type: String, default: '' },
+    textColor: { type: String, default: '' },
     fontFamily: { type: String, default: 'inherit' },
     borderRadius: { type: Number, default: 12 },
     imageUrl: { type: String, default: '' },
@@ -137,7 +140,8 @@ const storeSchema = new mongoose.Schema({
       // read, and updateOne() here runs without runValidators; the value
       // is treated as unknown -> classic by resolveStyleId()/ccfResolveStyle().
       enum: ['classic', 'flash_sale', 'gift_reveal',
-        'bottom_sheet', 'top_bar', 'story_card'],
+        'bottom_sheet', 'top_bar', 'story_card',
+        'spotlight', 'noir', 'color_block'],
       default: 'classic',
     },
     styleFields: { type: mongoose.Schema.Types.Mixed, default: {} },
@@ -159,9 +163,11 @@ const storeSchema = new mongoose.Schema({
     imageUrl: { type: String, default: '' },
     imagePosition: { type: String, default: '50% 50%' },
     accentColor: { type: String, default: '#4f46e5' },
-    bgColor: { type: String, default: '#ffffff' },
-    textColor: { type: String, default: '#111827' },
-    fontFamily: { type: String, default: 'inherit' },
+    // '' = "not chosen" (see popup.bgColor above): mobile then inherits the
+    // desktop value through the storefront's per-field merge.
+    bgColor: { type: String, default: '' },
+    textColor: { type: String, default: '' },
+    fontFamily: { type: String, default: '' },
     borderRadius: { type: Number, default: 16 },
     allowText: { type: String, default: 'Allow' },
     denyText: { type: String, default: 'No thanks' },
@@ -194,7 +200,8 @@ const storeSchema = new mongoose.Schema({
     styleId: {
       type: String,
       enum: ['classic', 'flash_sale', 'gift_reveal',
-        'bottom_sheet', 'top_bar', 'story_card'],
+        'bottom_sheet', 'top_bar', 'story_card',
+        'spotlight', 'noir', 'color_block'],
       default: 'classic',
     },
     styleFields: { type: mongoose.Schema.Types.Mixed, default: {} },
