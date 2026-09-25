@@ -1,0 +1,77 @@
+REMOVE CLASSIC "BANNER" LAYOUT - SELF-AUDIT
+===========================================
+
+1. BEFORE-CHANGE ANSWERS
+------------------------
+Q1. What happens to a shop that has layout === 'banner' saved (popup and/or mobilePopup)?
+  Storefront (ccf-push.js): the layout value 'banner' is coerced to 'card' on every device,
+    so the popup renders as the Classic Card, never blank or broken. (On mobile the layout is
+    always 'card'.) The email/discount field appears as on any Card, since the banner-only
+    "no discount" exclusion is gone. Top Bar keeps its own no-discount rule.
+  Admin (Settings.jsx): on load, a stored 'banner' in popup or mobilePopup is shown as 'card'
+    (fixLayout in the load handler), so the Layout pill shows Card selected, the desktop
+    preview renders Card, and the Mobile preview renders Card. The next Save sends 'card'.
+  Backend: the popup PATCH converts an incoming 'banner' to 'card' (popup.layout and
+    mobilePopup.layout). A shop that never saves keeps 'banner' in Mongo but renders as Card.
+  I cannot query Mongo, so I do not know whether any shop currently has 'banner' saved.
+Q2. Can removing 'banner' from the enums reject or break an existing document?
+  No. Verified in the code:
+  - Reads: Mongoose does not validate on read; a stored 'banner' loads normally.
+  - PATCH /api/profiles/:shop/popup writes via Store.updateOne({$set}) with no runValidators.
+    The only runValidators in the backend is routes/automation.js, on the AutomationConfig
+    model, which does not touch popup paths. Still true after this change.
+  - Mongoose save() validates modified paths only, so an untouched stored 'banner' would not fail.
+  mobilePopup.layout enum is now ['card']; popup.layout enum is ['split','card'].
+
+2. FILES AND WHAT WAS REMOVED
+-----------------------------
+backend/models/Store.js: 'banner' from popup.layout and mobilePopup.layout enums; comments.
+backend/utils/popupStyles.js: added REMOVED_LAYOUTS and normalizeLayout() (banner -> card).
+backend/routes/profiles.js: PATCH runs layout (desktop and mobile) through normalizeLayout().
+backend/__tests__/popupStyles.test.js: normalizeLayout test.
+backend/__tests__/popupConfigRoute.test.js: PATCH tests - banner becomes card for popup and
+  mobilePopup; split/card pass through unchanged.
+frontend/app/admin/lib/popupStyles.js: Classic bestFor text no longer mentions Banner; top_bar
+  layoutType 'banner' renamed 'bar' (no code reads layoutType any more).
+frontend/app/admin/screens/Settings.jsx:
+  - Gallery card "Classic - Banner".
+  - "Banner" option of the Layout pill.
+  - The banner branch of ClassicPreview and the layout==='banner' discount/email special cases
+    (effectiveWantsDiscount / effectiveShowEmailField).
+  - previewEffectiveLayout (its only job was the banner check); previewWantsDiscount now only
+    excludes Top Bar.
+  - The classic banner top/bottom wrapper in the mobile preview; Classic Card is always centered.
+  - The compact branches of getAllowButtonStyle (only the banner preview used them).
+  - Load handler now maps a stored 'banner' to 'card'.
+extensions/cartncodform-embed/assets/ccf-push.js:
+  - The banner builder (bar, thumbnail, text, Allow, close, cfg.position top/bottom logic).
+  - wantsDiscount no longer has the classic-banner case (Top Bar case kept).
+  - Layout coercion: mobile, or a stored 'banner', renders as 'card'.
+  - The CSS class 'layout-banner' was NOT removed: Top Bar still uses it. It was renamed
+    'layout-bar' (3 CSS/JS uses) and comments updated. ccfAllowButtonStyle's compact option is
+    also still used by Top Bar.
+Not removed: the 'position' field. Only the banner used cfg.position on the storefront, so it
+  is now unused there (the editor still shows it, the schema still has it). Flagged for a
+  follow-up decision.
+
+3. STORED 'banner' STILL LOADS, RENDERS AS CARD, MIGRATES ON NEXT SAVE
+----------------------------------------------------------------------
+Loads: yes (no read validation; admin maps it to 'card'). Renders as Card: storefront coerces
+in showSoftPrompt, admin preview uses the mapped value. Migrates: the admin sends 'card' on the
+next save and the backend PATCH would convert 'banner' to 'card' even if a client sent it. Covered
+by the new PATCH tests. No data migration was run.
+
+4. VERIFICATION
+---------------
+backend npm test: 23/23 suites, 228/228 tests. frontend npm run build: compiled. node --check OK.
+Live (temp route + next dev, route deleted afterwards): Desktop gallery = Split, Card, Flash Sale,
+Gift Reveal (no Banner). Mobile gallery = Card, Flash Sale, Gift Reveal, Bottom Sheet, Top Bar,
+Story Card (no Split, no Banner). Desktop Layout pill = Split, Card. Mobile phone-frame preview of
+Classic Card renders centered with close, Allow, No thanks. Not re-tested: the real storefront
+script; the desktop Split preview was seen only as its gallery thumbnail.
+
+5. SPLIT AND CARD UNCHANGED
+---------------------------
+The split and card builders in ccf-push.js and the Split/Card preview branches were not edited
+apart from the shared changes above (layout coercion, admin load mapping, removal of the compact
+Allow-button branches which neither used).

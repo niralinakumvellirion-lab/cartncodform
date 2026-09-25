@@ -280,16 +280,11 @@
       'border:1.5px solid #e5e7eb;border-radius:12px;box-sizing:border-box;' +
       'margin-bottom:8px;color:#111827;background:#f9fafb;font-family:inherit;';
   }
-  // popup-style: ctaStyle now applies to EVERY Allow button (Split, Card,
-  // Banner, Flash Sale, Gift Reveal), not just Banner. `compact` selects
-  // Banner's smaller sizing (its own inline bar) — everything else uses
-  // the full-size button. An unrecognized/missing ctaStyle falls back to
-  // 'rounded' — the exact values below for that case are what this
-  // function already returned before ctaStyle existed, so an existing
-  // shop with no ctaStyle saved sees no change on the layouts that already
-  // called this function (Split/Card/Flash Sale/Gift Reveal); Banner's own
-  // 'rounded' radius intentionally moves from its old 8px to 14px here, to
-  // actually use "the same radius/fill rules" as every other layout.
+  // popup-style: ctaStyle applies to EVERY Allow button (Split, Card, Flash
+  // Sale, Gift Reveal, Bottom Sheet, Top Bar, Story Card). `compact`
+  // selects Top Bar's smaller sizing (its own inline bar) — everything else
+  // uses the full-size button. An unrecognized/missing ctaStyle falls back
+  // to 'rounded'.
   function ccfAllowButtonStyle(accentColor, ctaStyle, compact) {
     var radius = ({ rounded: '14px', square: '0px', pill: '999px',
       outlined: '14px', soft: '14px' })[ctaStyle] || '14px';
@@ -338,8 +333,8 @@
   // #ccf-push-prompt (main popup, any layout) gets the bottom-anchored
   // slide-up by default; layouts positioned screen-center (split) opt into
   // a scale+fade via the 'layout-center' class instead, and the full-width
-  // banner opts OUT of animation entirely via 'layout-banner' — both
-  // classes are added where the wrap is built in showSoftPrompt().
+  // full-width Top Bar opts OUT of animation entirely via 'layout-bar' —
+  // both classes are added where the wrap is built in showSoftPrompt().
   function ccfInjectPopupStyles() {
     var styleId = 'ccf-popup-styles';
     if (document.getElementById(styleId)) return;
@@ -501,8 +496,8 @@
       }
 
       /* Safety overrides — NOT part of the requested design, kept from the
-         prior redesign pass. Split (translate(-50%,-50%) centering) and the
-         full-width banner (no transform at all) don't rest at
+         prior redesign pass. Centered popups (translate(-50%,-50%)) and the
+         full-width Top Bar (no transform at all) don't rest at
          translateX(-50%), which every rule above assumes; without these
          they visibly glitch on open and on hover. */
       #ccf-push-prompt.layout-center {
@@ -515,16 +510,16 @@
       #ccf-push-prompt.layout-center:hover {
         transform: translate(-50%,-50%);
       }
-      #ccf-push-prompt.layout-banner {
+      #ccf-push-prompt.layout-bar {
         animation: none;
       }
-      #ccf-push-prompt.layout-banner:hover {
+      #ccf-push-prompt.layout-bar:hover {
         transform: none;
       }
       /* mobile-styles: Bottom Sheet genuinely slides up from the bottom
          edge (0 horizontal transform, unlike every layout above) — its
          own keyframe + no-hover-lift override, same reasoning as
-         layout-center/layout-banner just above. */
+         layout-center/layout-bar just above. */
       #ccf-push-prompt.layout-sheet {
         animation: ccfSheetSlideUp 0.35s cubic-bezier(0.34,1.56,0.64,1);
       }
@@ -830,7 +825,7 @@
     var ccfMobileOuterPad = isNarrowPhone ? '16px' : '20px';
 
     // ================================================================
-    // popup-redesign: three layouts (split / card / banner) driven by
+    // popup-redesign: two layouts (split / card) driven by
     // cfg.layout. Everything falls back to sensible defaults so an
     // empty config still renders a usable prompt.
     // popup-responsive: on phones cfg is a per-field merge of the desktop
@@ -850,9 +845,10 @@
       '| layout:', cfg.layout,
       '| hasImage:', !!(cfg.imageUrl));
     var layout = cfg.layout || 'split';
-    // Split is never valid on mobile (mobilePopup.layout is card|banner);
-    // match the admin preview: anything that isn't 'banner' is 'card'.
-    if (isMobile) layout = layout === 'banner' ? 'banner' : 'card';
+    // Split is never valid on mobile, so mobile is always 'card'. 'banner'
+    // (a removed layout that may still be stored) renders as 'card' on
+    // every device, never blank.
+    if (isMobile || layout === 'banner') layout = 'card';
     var ccfStyle = ccfResolveStyle(isMobile);
     var bg = cfg.bgColor || '#ffffff';
     var fg = cfg.textColor || '#111827';
@@ -1173,12 +1169,12 @@
       // ---------- POPUP STYLE: Top Bar — a slim bar pinned to the top of
       // the screen, headline + inline CTA on one line. Mobile-only (see
       // ccfResolveStyle() above). No discount/code-reveal state — same
-      // "no room for it" reasoning as Classic Banner (see wantsDiscount
+      // "no room for it" (see wantsDiscount
       // below).
       // mobile-popup-polish: DELIBERATE token exception — headline stays
       // 13px/700 (single-line, ellipsis-if-long by design) and Allow stays
       // "compact" (8px/13px) rather than the 18px/700 headline and full
-      // 15px/700 button tokens applied to the other 3 mobile-only styles.
+      // 15px/700 button tokens applied to the other 2 mobile-only styles.
       // A slim single-line bar is this style's entire reason for existing
       // (its alternative IS Bottom Sheet/Story Card); forcing the full
       // token set here would inflate it into one of those. The close X
@@ -1203,7 +1199,7 @@
         'box-shadow:0 2px 12px rgba(0,0,0,0.18)',
         'font-family:' + (cfg.fontFamily || '-apple-system,BlinkMacSystemFont,sans-serif')
       ].join(';');
-      wrap.classList.add('layout-banner'); // no translateX(-50%) resting transform, same as Classic Banner
+      wrap.classList.add('layout-bar'); // no translateX(-50%) resting transform, same reasoning as the other full-width bar layouts
 
       var tbText = document.createElement('span');
       tbText.id = 'ccf-prompt-text';
@@ -1227,7 +1223,7 @@
         'line-height:1;cursor:pointer;flex-shrink:0;padding:2px;' +
         'min-width:36px;min-height:36px;display:flex;align-items:center;justify-content:center;';
       wrap.appendChild(closeBtn);
-      deny = closeBtn; // the × is the only dismiss control for this layout, same as Classic Banner
+      deny = closeBtn; // the × is the only dismiss control for this layout
 
     } else if (ccfStyle.id === 'story_card') {
       // ---------- POPUP STYLE: Story Card — a tall, full-bleed photo card
@@ -1339,63 +1335,6 @@
         'background:rgba(0,0,0,0.4);color:#fff;border:none;border-radius:50%;' +
         'width:44px;height:44px;font-size:16px;line-height:44px;text-align:center;cursor:pointer;z-index:10;';
       wrap.appendChild(closeBtn);
-
-    } else if (layout === 'banner') {
-      // ---------- LAYOUT 3: full-width banner bar ----------
-      var atTop = /^top/.test(cfg.position || '');
-      wrap.setAttribute('style',
-        'position:fixed;left:0;right:0;width:100%;' + (atTop ? 'top:0;' : 'bottom:0;') +
-        'z-index:999999;padding:12px ' + (isMobile ? '16px' : '24px') + ';display:flex;align-items:center;gap:10px;' +
-        'justify-content:space-between;' + (isMobile ? 'flex-wrap:wrap;gap:8px;' : '') +
-        'background:' + accent + ';color:#fff;' +
-        'font-size:14px;font-family:' + font + ';box-shadow:0 2px 10px rgba(0,0,0,0.2);');
-      // The injected slide-up keyframe assumes translateX(-50%)-based
-      // centering; the banner has no such transform (full-width top/bottom
-      // bar), so it opts out of the shared #ccf-push-prompt animation.
-      wrap.classList.add('layout-banner');
-
-      // Optional 44x44 thumbnail on the left of the banner.
-      if (cfg.imageUrl) {
-        var bannerImg = document.createElement('img');
-        bannerImg.src = cfg.imageUrl;
-        bannerImg.alt = '';
-        bannerImg.style.cssText = [
-          'width:44px',
-          'height:44px',
-          'border-radius:8px',
-          'object-fit:cover',
-          'flex-shrink:0',
-          'object-position:' + (cfg.imagePosition || '50% 50%')
-        ].join(';');
-        bannerImg.onerror = function () {
-          bannerImg.style.display = 'none';
-        };
-        wrap.appendChild(bannerImg);
-      }
-
-      var bnText = document.createElement('span');
-      bnText.id = 'ccf-prompt-text';
-      bnText.setAttribute('style', 'flex:1;min-width:60%;' + (isMobile ? '' : 'margin-right:16px;'));
-      bnText.textContent = headline;
-
-      var bnRight = document.createElement('span');
-      bnRight.setAttribute('style',
-        'display:flex;align-items:center;gap:12px;flex-shrink:0;' +
-        (isMobile ? 'flex:1;justify-content:flex-end;' : ''));
-      allow = buildAllowBtn(
-        ccfAllowButtonStyle(accent, cfg.ctaStyle, true) +
-        (isMobile ? 'flex:1;min-width:80px;' : ''));
-      closeBtn = document.createElement('button');
-      closeBtn.id = 'ccf-close-btn';
-      closeBtn.type = 'button';
-      closeBtn.textContent = '×';
-      closeBtn.setAttribute('style',
-        'background:none;border:none;color:#fff;font-size:18px;line-height:1;cursor:pointer;');
-      bnRight.appendChild(allow);
-      bnRight.appendChild(closeBtn);
-      wrap.appendChild(bnText);
-      wrap.appendChild(bnRight);
-      deny = closeBtn; // the × is the dismiss control for this layout
 
     } else if (layout === 'card') {
       // ---------- LAYOUT 2: premium card. DESKTOP is the exact original
@@ -1864,7 +1803,7 @@
 
     // discount-feature: the split layout still uses the shared field-builder,
     // inserted right after the deny control. Card builds its own inline
-    // fields above (see the card branch); banner never shows a discount.
+    // fields above (see the card branch).
     // popup-style: Flash Sale/Gift Reveal build their own inline email
     // field too (same as card) — gating on ccfStyle.id === 'classic' here
     // stops this from ALSO firing when the layout field left over from an
@@ -1878,16 +1817,10 @@
         else deny.parentNode.appendChild(discountFields);
       }
     }
-    // popup-style: Flash Sale/Gift Reveal/Bottom Sheet/Story
-    // Card always render as `card`-shaped, never `banner` — but `layout`
-    // itself is left untouched while a non-classic style is active (see
-    // the note on the discountFields gate above), so it could still be a
-    // stale 'banner' from a previous Classic session. Only apply the
-    // "banner never shows a discount" exclusion for Classic. Top Bar gets
-    // the SAME exclusion Classic Banner does (layoutType: 'banner' in the
-    // registry) — no room for the unlocked-code reveal state in a slim
-    // bar, and no #ccf-content-section swap target built for it above.
-    var wantsDiscount = (ccfStyle.id === 'classic' && layout === 'banner') || ccfStyle.id === 'top_bar'
+    // Top Bar never shows a discount — no room for the unlocked-code reveal
+    // state in a slim bar, and no #ccf-content-section swap target is built
+    // for it above.
+    var wantsDiscount = ccfStyle.id === 'top_bar'
       ? false
       : ccfDiscountEnabled();
 

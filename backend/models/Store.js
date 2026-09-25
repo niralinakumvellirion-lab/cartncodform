@@ -91,7 +91,10 @@ const storeSchema = new mongoose.Schema({
     // --- popup-redesign: layout system + split-layout content ---
     layout: {
       type: String,
-      enum: ['split', 'card', 'banner'],
+      // 'banner' was removed; a stored 'banner' still loads (reads never
+      // validate; updateOne runs without runValidators) and is treated as
+      // 'card' by the renderers and normalized on the next PATCH.
+      enum: ['split', 'card'],
       default: 'split',
     },
     headline: { type: String, default: '' },
@@ -146,10 +149,10 @@ const storeSchema = new mongoose.Schema({
   },
 
   // --- popup-responsive: mobile-specific overrides (screen width <= 600px).
-  // Mobile only supports card + banner (split is too wide); when a mobile
+  // Mobile only supports card (split is too wide); when a mobile
   // config is empty the storefront falls back to the desktop `popup` above.
   mobilePopup: {
-    layout: { type: String, enum: ['card', 'banner'], default: 'card' },
+    layout: { type: String, enum: ['card'], default: 'card' },
     headline: { type: String, default: '' },
     subtext: { type: String, default: '' },
     brandName: { type: String, default: '' },

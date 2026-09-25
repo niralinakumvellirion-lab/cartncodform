@@ -46,7 +46,7 @@ export const POPUP_STYLES = {
     id: 'classic',
     name: 'Classic',
     shortDescription: "Today's default look. Full control over layout.",
-    bestFor: 'Any shop — pick Split, Card, or Banner yourself.',
+    bestFor: 'Any shop — pick Split or Card yourself.',
     // null = not forced; Classic keeps using popup.layout / mobilePopup.layout
     // exactly as the existing Layout picker already sets it.
     layoutType: null,
@@ -189,7 +189,7 @@ export const POPUP_STYLES = {
     shortDescription: 'A slim bar pinned to the top of the screen.',
     bestFor: 'Low-friction, always-visible nudges that do not interrupt browsing.',
     mobileOnly: true,
-    layoutType: 'banner',
+    layoutType: 'bar',
     supportedFields: [
       'headline', 'accentColor', 'textColor', 'fontFamily',
       'allowText', 'ctaStyle',

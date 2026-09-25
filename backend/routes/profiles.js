@@ -509,7 +509,7 @@ const POPUP_FIELDS = [
 // schema-level enum validator unless {runValidators:true} is passed, which
 // this route doesn't use), and styleFields needs sanitizing, not a blind
 // pass-through.
-const { sanitizeStyleFields, isValidStyleId, normalizeStyleId } = require('../utils/popupStyles');
+const { sanitizeStyleFields, isValidStyleId, normalizeStyleId, normalizeLayout } = require('../utils/popupStyles');
 
 router.get('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, res) => {
   try {
@@ -536,7 +536,7 @@ router.patch('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, r
     const set = {};
     for (const key of POPUP_FIELDS) {
       if (Object.prototype.hasOwnProperty.call(req.body, key)) {
-        set[`popup.${key}`] = req.body[key];
+        set[`popup.${key}`] = key === 'layout' ? normalizeLayout(req.body[key]) : req.body[key];
       }
     }
 
@@ -568,7 +568,9 @@ router.patch('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, r
     if (req.body.mobilePopup && typeof req.body.mobilePopup === 'object') {
       for (const key of POPUP_FIELDS) {
         if (Object.prototype.hasOwnProperty.call(req.body.mobilePopup, key)) {
-          set[`mobilePopup.${key}`] = req.body.mobilePopup[key];
+          set[`mobilePopup.${key}`] = key === 'layout'
+            ? normalizeLayout(req.body.mobilePopup[key])
+            : req.body.mobilePopup[key];
         }
       }
       if (Object.prototype.hasOwnProperty.call(req.body.mobilePopup, 'styleId')) {

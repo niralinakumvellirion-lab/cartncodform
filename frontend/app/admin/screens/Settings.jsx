@@ -113,36 +113,29 @@ const LANGS = [
   { value: 'gu', label: 'Gujarati' },
 ];
 
-// Mirrors ccf-push.js's ccfAllowButtonStyle(accentColor, ctaStyle, compact)
-// exactly (same radius/fill/shadow rules, same fallback-to-'rounded' for an
-// unrecognized/missing ctaStyle) — this now drives the Allow button for
-// EVERY layout and style in the preview (Split/Card/Banner/Flash Sale/Gift
-// Reveal), not just a subset, matching the storefront's own unification.
-// `compact` selects Banner's smaller inline-bar sizing.
-function getAllowButtonStyle(accent, ctaStyle, compact) {
+// Mirrors ccf-push.js's ccfAllowButtonStyle(accentColor, ctaStyle) exactly
+// (same radius/fill/shadow rules, same fallback-to-'rounded' for an
+// unrecognized/missing ctaStyle) — this drives the Allow button for EVERY
+// layout and style in the preview (Split/Card/Flash Sale/Gift Reveal),
+// matching the storefront's own unification.
+function getAllowButtonStyle(accent, ctaStyle) {
   const radius = { rounded: 14, square: 0, pill: 999, outlined: 14, soft: 14 }[ctaStyle] ?? 14;
   const sizing = {
-    ...(compact ? {} : { width: '100%' }),
-    padding: compact ? '8px 16px' : 14,
-    fontSize: compact ? 13 : 15,
+    width: '100%',
+    padding: 14,
+    fontSize: 15,
     fontWeight: 700,
     borderRadius: radius,
     letterSpacing: '0.3px',
-    ...(compact ? {} : { marginBottom: 10 }),
+    marginBottom: 10,
   };
   if (ctaStyle === 'outlined') {
-    const c = compact ? '#fff' : accent;
-    return { ...sizing, color: c, background: 'transparent', border: `1.5px solid ${c}` };
+    return { ...sizing, color: accent, background: 'transparent', border: `1.5px solid ${accent}` };
   }
   if (ctaStyle === 'soft') {
-    const c = compact ? '#fff' : accent;
-    const bg = compact ? 'rgba(255,255,255,0.18)' : accent + '1f';
-    return { ...sizing, color: c, background: bg, border: 'none' };
+    return { ...sizing, color: accent, background: accent + '1f', border: 'none' };
   }
   // rounded / square / pill / unrecognized (-> rounded)
-  if (compact) {
-    return { ...sizing, color: accent, background: '#fff', border: 'none' };
-  }
   return {
     ...sizing, color: '#fff',
     background: `linear-gradient(135deg, ${accent}, ${accent}dd)`,
@@ -1063,8 +1056,8 @@ function StyleCardPreview({
   );
 }
 
-// Classic split/card/banner preview, step-aware — mirrors ccf-push.js's
-// showSoftPrompt() layout branches (split/card/banner DOM construction) and
+// Classic split/card preview, step-aware — mirrors ccf-push.js's
+// showSoftPrompt() layout branches (split/card DOM construction) and
 // renderDiscountCode() (the shared unlocked swap) as closely as inline
 // React styles reasonably can. Not attempted: ccf-push.js's decorative-only
 // CSS (the .ccf-img-wrap corner-dot ::after pattern, the hover
@@ -1091,10 +1084,6 @@ function ClassicPreview({
   const textAlign = cfg.textAlign || 'left';
   const swapped = step === 'unlocked' || step === 'redirecting';
   const busy = step === 'setting_up' || step === 'subscribed';
-  // ccf-push.js: `layout !== 'banner' && ccfDiscountEnabled()` — banner
-  // never shows a discount, no matter what's configured.
-  const effectiveWantsDiscount = layout === 'banner' ? false : wantsDiscount;
-  const effectiveShowEmailField = layout === 'banner' ? false : showEmailField;
 
   const allowBtnProps = {
     disabled: busy,
@@ -1135,7 +1124,7 @@ function ClassicPreview({
     <PreviewButton {...allowBtnProps} interactive={interactive}
       style={{ ...getAllowButtonStyle(accent, cfg.ctaStyle), fontFamily: font, lineHeight: 1.2,
         cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.8 : 1 }}>
-      <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={effectiveWantsDiscount} />
+      <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
     </PreviewButton>
   );
   // Mirrors ccfDenyButtonStyle() exactly — a real <button>, not a styled
@@ -1153,28 +1142,6 @@ function ClassicPreview({
       Powered by ShopiReachBoost AI
     </div>
   );
-
-  // --- BANNER --------------------------------------------------------
-  if (layout === 'banner') {
-    return (
-      <div style={{ borderRadius: 8, overflow: 'hidden', background: accent, color: '#fff',
-                    padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
-                    fontFamily: font }}>
-        {imageUrl && (
-          <img src={imageUrl} alt="" style={{ width: 44, height: 44, borderRadius: 8, objectFit: 'cover',
-            objectPosition: imagePosition, flexShrink: 0 }} />
-        )}
-        <div style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{headline}</div>
-        <PreviewButton {...allowBtnProps} interactive={interactive}
-          style={{ ...getAllowButtonStyle(accent, cfg.ctaStyle, true), fontFamily: font, lineHeight: 1.2,
-            flexShrink: 0, cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.8 : 1 }}>
-          <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={false} />
-        </PreviewButton>
-        <span onClick={onDismiss} style={{ color: 'rgba(255,255,255,0.7)', fontSize: 18, flexShrink: 0,
-          cursor: 'pointer' }}>×</span>
-      </div>
-    );
-  }
 
   // --- CARD ------------------------------------------------------------
   if (layout === 'card') {
@@ -1197,7 +1164,7 @@ function ClassicPreview({
               <div style={{ fontSize: 16, fontWeight: 700, lineHeight: 1.3, marginBottom: 6,
                             color: fg, textAlign }}>{headline}</div>
               {subtextEl}
-              {effectiveWantsDiscount && (
+              {wantsDiscount && (
                 <div style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', border: '1px solid #86efac',
                               borderRadius: 12, padding: '10px 14px', marginBottom: 14, display: 'flex',
                               alignItems: 'center', gap: 8, justifyContent: 'center' }}>
@@ -1205,7 +1172,7 @@ function ClassicPreview({
                   <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 600 }}>{discountOfferText}</span>
                 </div>
               )}
-              {effectiveShowEmailField && (
+              {showEmailField && (
                 <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder="Your email"
                   interactive={interactive}
                   style={{ width: '100%', padding: '11px 14px', fontSize: 13, borderRadius: 12,
@@ -1223,12 +1190,12 @@ function ClassicPreview({
   }
 
   // --- SPLIT (desktop: side-by-side; mobile: stacked) -----------------
-  const discountFieldsEl = effectiveWantsDiscount && (
+  const discountFieldsEl = wantsDiscount && (
     <div style={{ marginTop: 10 }}>
       <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 8, textAlign: 'center' }}>
         {discountOfferHeadline || 'Get a discount on your first order!'}
       </div>
-      {effectiveShowEmailField && (
+      {showEmailField && (
         <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder="Your email"
           interactive={interactive}
           style={{ width: '100%', padding: '11px 14px', fontSize: 13, borderRadius: 12,
@@ -1396,8 +1363,11 @@ export default function Settings({ shop }) {
         setConfigs(Array.isArray(c.value?.configs) ? c.value.configs : []);
       }
       if (pop.status === 'fulfilled') {
-        setPopup(pop.value?.popup || {});
-        setMobilePopup(pop.value?.mobilePopup || {});
+        // A stored layout 'banner' (removed) is shown as 'card'; the next
+        // save sends 'card', and the backend PATCH normalizes it too.
+        const fixLayout = (o) => (o && o.layout === 'banner' ? { ...o, layout: 'card' } : o);
+        setPopup(fixLayout(pop.value?.popup) || {});
+        setMobilePopup(fixLayout(pop.value?.mobilePopup) || {});
       }
       if (ps.status === 'fulfilled') {
         setPushCount(ps.value?.attemptedLast7d || 0);
@@ -1506,16 +1476,11 @@ export default function Settings({ shop }) {
 
   // ccfDiscountEnabled()/ccfShowEmailField() equivalents.
   const previewShowEmailField = discountRules.email.enabled;
-  // ccf-push.js: `layout !== 'banner' && ccfDiscountEnabled()`. Computed
-  // here (not just inside ClassicPreview's own button-label logic) because
-  // the STEP MACHINE itself (auto-advance + the step bar's Unlocked/
-  // Redirecting tabs, both owned by this component) must also skip the
-  // discount stages entirely for a banner-layout Classic popup, exactly
-  // like a real one would.
-  const previewEffectiveLayout = activeStyleId !== 'classic'
-    ? getStyle(activeStyleId).layoutType
-    : (popupDevice === 'mobile' ? (mobilePopup.layout === 'banner' ? 'banner' : 'card') : (popup.layout || 'split'));
-  const previewWantsDiscount = previewEffectiveLayout === 'banner'
+  // ccf-push.js: Top Bar never shows a discount (no room for the unlocked
+  // state). Computed here (not just inside the preview's button-label logic)
+  // because the STEP MACHINE itself (auto-advance + the step bar's
+  // Unlocked/Redirecting tabs) must also skip the discount stages for it.
+  const previewWantsDiscount = activeStyleId === 'top_bar'
     ? false
     : (discountRules.push.enabled || discountRules.email.enabled);
 
@@ -1948,8 +1913,6 @@ export default function Settings({ shop }) {
       desc: 'Image beside your message. Full control over every field.' },
     { key: 'classic-card', styleId: 'classic', layout: 'card', name: 'Classic — Card',
       desc: 'A compact bottom-corner toast.' },
-    { key: 'classic-banner', styleId: 'classic', layout: 'banner', name: 'Classic — Banner',
-      desc: 'A slim full-width bar.' },
     { key: 'flash_sale', styleId: 'flash_sale', layout: null, name: POPUP_STYLES.flash_sale.name,
       desc: POPUP_STYLES.flash_sale.shortDescription },
     { key: 'gift_reveal', styleId: 'gift_reveal', layout: null, name: POPUP_STYLES.gift_reveal.name,
@@ -2057,7 +2020,7 @@ export default function Settings({ shop }) {
           // fallback above covers every OTHER path to a mobile-only id
           // ending up in a desktop context; this is the "don't even offer
           // it" UX layer for the one path a merchant actually takes.
-          // Classic-Split has no mobile layout (mobilePopup.layout is card|banner),
+          // Classic-Split has no mobile layout (mobilePopup.layout is card only),
           // so it is not offered on the Mobile tab at all.
           .filter((c) => popupDevice === 'mobile'
             ? c.layout !== 'split'
@@ -2317,11 +2280,6 @@ export default function Settings({ shop }) {
                       //   the old universal bottom:12/left:8/right:8
                       //   wrapper, which was wrong for every style except
                       //   Bottom Sheet.
-                      //   classic banner -> top or bottom per
-                      //   mobilePopup.position, mirroring ccf-push.js's
-                      //   own `atTop = /^top/.test(cfg.position)` check —
-                      //   previously always forced to the bottom
-                      //   regardless of what the merchant picked.
                       const CENTERED_STYLE_IDS = ['story_card', 'flash_sale', 'gift_reveal'];
                       if (activeStyleId !== 'classic') {
                         const wrapStyle = activeStyleId === 'top_bar'
@@ -2343,18 +2301,11 @@ export default function Settings({ shop }) {
                           </div>
                         );
                       }
-                      const classicIsBanner = mobilePopup.layout === 'banner';
-                      const classicBannerAtTop = classicIsBanner && /^top/.test(mobilePopup.position || '');
-                      const classicWrapStyle = !classicIsBanner
-                        ? { position: 'absolute', top: '50%', left: '50%',
-                            transform: 'translate(-50%, -50%)', zIndex: 5 }
-                        : classicBannerAtTop
-                        ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }
-                        : { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 5 };
                       return (
-                        <div style={classicWrapStyle}>
+                        <div style={{ position: 'absolute', top: '50%', left: '50%',
+                                      transform: 'translate(-50%, -50%)', zIndex: 5 }}>
                           <ClassicPreview
-                            layout={mobilePopup.layout === 'banner' ? 'banner' : 'card'}
+                            layout="card"
                             device="mobile"
                             popup={mobilePopup}
                             showEmailField={previewShowEmailField}
@@ -2453,7 +2404,7 @@ export default function Settings({ shop }) {
       <div className="ccf-settings-grid">
         {activeStyleId === 'classic' && popupDevice === 'desktop' && (
           <PillsRow label="Layout" value={activePopup.layout || 'split'}
-            options={[{ value: 'split', label: 'Split' }, { value: 'card', label: 'Card' }, { value: 'banner', label: 'Banner' }]}
+            options={[{ value: 'split', label: 'Split' }, { value: 'card', label: 'Card' }]}
             onChange={(v) => setActivePopup((p) => ({ ...p, layout: v }))} />
         )}
         <ColorRow label="Accent" value={activePopup.accentColor} defaultValue="#4f46e5"

@@ -68,6 +68,13 @@ function isValidStyleId(id) {
   return STYLE_IDS.indexOf(id) !== -1;
 }
 
+// Layout values that used to exist and may still be stored. Converted to
+// 'card' on PATCH so the stale value is overwritten on the next save.
+const REMOVED_LAYOUTS = ['banner'];
+function normalizeLayout(layout) {
+  return REMOVED_LAYOUTS.indexOf(layout) !== -1 ? 'card' : layout;
+}
+
 // PATCH-time normalization: a removed id becomes 'classic'; anything else is
 // returned as-is (callers still gate on isValidStyleId).
 function normalizeStyleId(id) {
@@ -121,5 +128,5 @@ function sanitizeStyleFields(input) {
 
 module.exports = {
   STYLE_IDS, MOBILE_ONLY_STYLE_IDS, STYLE_EXTRA_FIELDS,
-  isValidStyleId, normalizeStyleId, sanitizeStyleFields, resolveStyleId,
+  isValidStyleId, normalizeStyleId, normalizeLayout, sanitizeStyleFields, resolveStyleId,
 };

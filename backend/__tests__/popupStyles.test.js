@@ -110,3 +110,13 @@ describe('sanitizeStyleFields', () => {
     expect(sanitizeStyleFields({ scrimEnabled: 0 })).toEqual({ scrimEnabled: false });
   });
 });
+
+describe('normalizeLayout', () => {
+  const { normalizeLayout } = require('../utils/popupStyles');
+  test('banner becomes card; other values are untouched', () => {
+    expect(normalizeLayout('banner')).toBe('card');
+    expect(normalizeLayout('split')).toBe('split');
+    expect(normalizeLayout('card')).toBe('card');
+    expect(normalizeLayout(undefined)).toBe(undefined);
+  });
+});

@@ -108,3 +108,15 @@ test('a removed style id (full_takeover) is normalized to classic on both popup 
   expect(set['popup.styleId']).toBe('classic');
   expect(set['mobilePopup.styleId']).toBe('classic');
 });
+
+test('a removed layout (banner) is normalized to card on both popup and mobilePopup', async () => {
+  const { set } = await run({ layout: 'banner', mobilePopup: { layout: 'banner' } });
+  expect(set['popup.layout']).toBe('card');
+  expect(set['mobilePopup.layout']).toBe('card');
+});
+
+test('valid layouts (split, card) are passed through unchanged', async () => {
+  const { set } = await run({ layout: 'split', mobilePopup: { layout: 'card' } });
+  expect(set['popup.layout']).toBe('split');
+  expect(set['mobilePopup.layout']).toBe('card');
+});
