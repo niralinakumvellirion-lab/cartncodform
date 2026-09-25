@@ -837,9 +837,10 @@
     // desktop config when the merchant hasn't set a mobile one.
     // ================================================================
     var cfg = isMobile ? (mobilePopupConfig || {}) : (popupConfig || {});
-    // Mobile has no layout of its own: inherit desktop's config field by
-    // field instead of replacing the whole mobile config.
-    if (isMobile && !cfg.layout) cfg = ccfMergeConfig(popupConfig, mobilePopupConfig);
+    // On mobile, always inherit desktop's config field by field: a mobile
+    // value wins where it is set, desktop fills any blank. (styleId /
+    // styleFields are not read from cfg — ccfResolveStyle() reads them.)
+    if (isMobile) cfg = ccfMergeConfig(popupConfig || {}, mobilePopupConfig || {});
     // popup-mobile debug: which config are we using and does it carry an image?
     console.log('[CCF] device:', isMobile ? 'mobile' : 'desktop',
       '| layout:', cfg.layout,
