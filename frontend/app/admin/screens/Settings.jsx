@@ -973,8 +973,8 @@ function StyleCardPreview({
                 <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
                   placeholder="Email address" interactive={interactive}
                   style={{ width: '100%', padding: '8px 12px',
-                  fontSize: 12, borderRadius: 8, border: '1px solid #3f3f46', marginBottom: 8,
-                  background: '#27272a', color: fg, boxSizing: 'border-box',
+                  fontSize: 12, borderRadius: 8, border: '1px solid #d4d4d8', marginBottom: 8,
+                  background: '#ffffff', color: '#111827', boxSizing: 'border-box',
                   fontFamily: font, lineHeight: 1.2 }} />
               )}
               {countdownDisplay ? (

@@ -996,7 +996,7 @@
         var sEp = ccfFieldPct('emailDiscount');
         sEmailInput.placeholder = 'Your email' + (sEp ? ' (get ' + sEp + '% off)' : '');
         sEmailInput.style.cssText = ccfInputStyle() +
-          (isFlashSale ? 'background:#27272a;color:#fff;border-color:#3f3f46;' : '');
+          (isFlashSale ? 'background:#ffffff;color:#111827;border-color:#d4d4d8;' : '');
         sContent.appendChild(sEmailInput);
       }
 
