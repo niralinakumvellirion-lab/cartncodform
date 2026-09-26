@@ -55,4 +55,40 @@ function zonedTimeToUtc(y, mo, d, h, mi, tz) {
   return new Date(guess - tzOffsetMs(new Date(first), tz));
 }
 
-module.exports = { DEFAULT_TZ, resolveTz, zonedParts, hourInTz, tzOffsetMs, zonedTimeToUtc };
+// --- quiet hours ------------------------------------------------------------
+// One definition, used by the Brain (choosing a send time) and the poller
+// (deciding whether to send now), so the two can never disagree.
+
+const DEFAULT_QUIET = { start: 22, end: 8 };
+
+// The store's saved { start, end } (whole hours 0-23), else the default window.
+// A missing or malformed value (non-integer / out of range) falls back per side.
+function resolveQuietWindow(quietHours) {
+  const ok = (v) => Number.isInteger(v) && v >= 0 && v <= 23;
+  const q = quietHours || {};
+  return {
+    start: ok(q.start) ? q.start : DEFAULT_QUIET.start,
+    end: ok(q.end) ? q.end : DEFAULT_QUIET.end,
+  };
+}
+
+// Is `hour` inside the [start, end) quiet window? Handles a window that wraps
+// past midnight (e.g. 22 -> 8); start === end means "no quiet hours".
+function isQuietHour(hour, start, end) {
+  if (start === end) return false;
+  if (start < end) return hour >= start && hour < end;
+  return hour >= start || hour < end;
+}
+
+// Is `now` inside the store's quiet window, on the STORE's wall clock?
+// `store` is any object with optional { timezone, quietHours }.
+function isQuietNow(store, now = new Date()) {
+  const s = store || {};
+  const { start, end } = resolveQuietWindow(s.quietHours);
+  return isQuietHour(hourInTz(now, s.timezone), start, end);
+}
+
+module.exports = {
+  DEFAULT_TZ, DEFAULT_QUIET, resolveTz, zonedParts, hourInTz, tzOffsetMs, zonedTimeToUtc,
+  resolveQuietWindow, isQuietHour, isQuietNow,
+};

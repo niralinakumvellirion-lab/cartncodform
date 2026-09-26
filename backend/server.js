@@ -27,6 +27,7 @@ const { runBrainForShop } = require('./services/brain');
 const { generateCopy, generateEmailCopy } = require('./services/aiService');
 const { checkUnopenedThreshold, updateDeliveredRate } = require('./services/pushHygiene');
 const { computeWeights } = require('./services/weightsService');
+const { isQuietNow } = require('./utils/timezone');
 
 const app = express();
 // Render sits behind a reverse proxy — trust the X-Forwarded-For
@@ -165,28 +166,6 @@ app.use((err, _req, res, _next) => {
 });
 
 // --- Automation: scheduled job sender -----------------------------------
-/**
- * Returns true if sending a push right now would violate quiet
- * hours (10pm-8am) in the given IANA timezone.
- */
-function isQuietHours(timezone) {
-  try {
-    const now = new Date();
-    const hour = parseInt(
-      new Intl.DateTimeFormat('en-US', {
-        hour: 'numeric',
-        hour12: false,
-        timeZone: timezone || 'Asia/Kolkata',
-      }).format(now),
-      10
-    );
-    return hour >= 22 || hour < 8;
-  } catch (err) {
-    console.error('[automation] isQuietHours error:', err.message);
-    return false; // fail open — don't block sends on a bad timezone
-  }
-}
-
 /**
  * Returns true if this cartToken/customerId has already received
  * 3+ automation pushes in the last 24 hours.
@@ -335,11 +314,14 @@ async function processScheduledJobs() {
       // blocked, leave the job pending and re-check next tick
       // (quiet hours) or skip it permanently (frequency cap).
       const Store = require('./models/Store');
-      const store = await Store.findOne({ shopDomain: job.shopDomain }).select('timezone').lean();
-      const timezone = store?.timezone || 'Asia/Kolkata';
+      const store = await Store.findOne({ shopDomain: job.shopDomain })
+        .select('timezone quietHours').lean();
 
-      if (isQuietHours(timezone)) {
-        console.log(`[automation] Job ${job._id} deferred — quiet hours (${timezone})`);
+      // Same window + wrap-past-midnight logic the Brain schedules against
+      // (utils/timezone.js), read from the store's saved quietHours (default
+      // 22:00-08:00) on the store's own wall clock.
+      if (isQuietNow(store)) {
+        console.log(`[automation] Job ${job._id} deferred — quiet hours (${store?.timezone || 'default tz'})`);
         continue; // leave pending, retry next tick
       }
 

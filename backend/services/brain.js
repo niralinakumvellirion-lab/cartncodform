@@ -3,7 +3,9 @@ const Signal = require('../models/Signal');
 const SignalConfig = require('../models/SignalConfig');
 const ScheduledJob = require('../models/ScheduledJob');
 const Store = require('../models/Store');
-const { DEFAULT_TZ, resolveTz, zonedParts, zonedTimeToUtc } = require('../utils/timezone');
+const {
+  DEFAULT_TZ, resolveTz, zonedParts, zonedTimeToUtc, resolveQuietWindow, isQuietHour,
+} = require('../utils/timezone');
 
 /**
  * Layer 3 — Brain. For one profile per day: rank its active signals, apply
@@ -46,14 +48,6 @@ function rateFromMap(mapLike, key) {
   if (!mapLike) return 1.0;
   const v = typeof mapLike.get === 'function' ? mapLike.get(String(key)) : mapLike[String(key)];
   return v && typeof v.rate === 'number' ? v.rate : 1.0;
-}
-
-// --- quiet hours -----------------------------------------------------------
-
-function isQuietHour(hour, start, end) {
-  if (start === end) return false;
-  if (start < end) return hour >= start && hour < end; // same-day window
-  return hour >= start || hour < end;                  // wraps midnight (e.g. 22->8)
 }
 
 // --- channel selection ---------------------------------------------------
@@ -164,9 +158,7 @@ async function runBrainForProfile(profileId, shopDomain, cfg = null) {
   const caps = (store && store.caps) || {};
   const perDay = caps.perDay != null ? caps.perDay : 2;
   const perWeek = caps.perWeek != null ? caps.perWeek : 5;
-  const qh = (store && store.quietHours) || {};
-  const quietStart = qh.start != null ? qh.start : 22;
-  const quietEnd = qh.end != null ? qh.end : 8;
+  const { start: quietStart, end: quietEnd } = resolveQuietWindow(store && store.quietHours);
   const timezone = (store && store.timezone) || DEFAULT_TZ;
 
   // Phase H — learned per-shop weights (all rates default 1.0 = neutral).
