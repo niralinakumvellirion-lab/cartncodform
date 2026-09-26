@@ -173,16 +173,37 @@ test('10. does not create a duplicate pending job for the same profile+signal', 
   expect(ScheduledJob.create).not.toHaveBeenCalled();
 });
 
-test('11. runAt lands outside quiet hours', async () => {
-  Store.findOne.mockResolvedValue({
-    caps: { perDay: 2, perWeek: 5 },
-    quietHours: { start: 0, end: 6 },
-    timezone: 'UTC',
+// Clock pinned (only Date is faked; promises/timers stay real). Both pinned
+// instants sit at UTC minute :30 on purpose, and one is INSIDE the 0..5 quiet
+// window while the other is just before it (so the next slot wraps past
+// midnight) — each forces the "skip quiet hours" branch instead of the
+// trivial "next hour is fine" one. :30 also keeps the assertion independent of
+// the machine's timezone: brain.js zeroes minutes with the LOCAL setMinutes(),
+// and at :00/:15/:45 UTC a half-hour-offset machine (e.g. IST) would round the
+// result back into the previous UTC hour (05:30) — the old flake.
+describe('11. runAt lands outside quiet hours', () => {
+  const ALL_REAL_BUT_DATE = [
+    'nextTick', 'setImmediate', 'clearImmediate', 'setInterval', 'clearInterval',
+    'setTimeout', 'clearTimeout', 'queueMicrotask', 'performance', 'hrtime',
+    'requestAnimationFrame', 'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback',
+  ];
+  afterEach(() => jest.useRealTimers());
+
+  test.each([
+    ['inside the quiet window (02:30 UTC)', '2026-03-10T02:30:00.000Z'],
+    ['just before it, wrapping midnight (23:30 UTC)', '2026-03-10T23:30:00.000Z'],
+  ])('%s', async (_label, iso) => {
+    jest.useFakeTimers({ now: new Date(iso), doNotFake: ALL_REAL_BUT_DATE });
+    Store.findOne.mockResolvedValue({
+      caps: { perDay: 2, perWeek: 5 },
+      quietHours: { start: 0, end: 6 },
+      timezone: 'UTC',
+    });
+    const r = await runBrainForProfile('p1', SHOP);
+    const h = r.runAt.getUTCHours();
+    expect(h).toBeGreaterThanOrEqual(6); // 0..5 is quiet
+    expect(r.runAt.getTime()).toBeGreaterThan(Date.now());
   });
-  const r = await runBrainForProfile('p1', SHOP);
-  const h = r.runAt.getUTCHours();
-  expect(h).toBeGreaterThanOrEqual(6); // 0..5 is quiet
-  expect(r.runAt.getTime()).toBeGreaterThan(Date.now());
 });
 
 test('12. stores a human-readable reason on the ScheduledJob', async () => {
