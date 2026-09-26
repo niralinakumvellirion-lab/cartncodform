@@ -55,20 +55,49 @@ function isQuietHour(hour, start, end) {
   return hour >= start || hour < end;                  // wraps midnight (e.g. 22->8)
 }
 
-function hourInTz(date, tz) {
+const DEFAULT_TZ = 'Asia/Kolkata';
+
+// A usable IANA zone: the store's own, else the app default. A bad/unknown
+// string (Intl throws RangeError) also falls back to the default rather than
+// to the server's local zone.
+function resolveTz(tz) {
+  const z = tz || DEFAULT_TZ;
   try {
-    const h = parseInt(
-      new Intl.DateTimeFormat('en-US', {
-        hour: 'numeric',
-        hour12: false,
-        timeZone: tz || 'Asia/Kolkata',
-      }).format(date),
-      10
-    );
-    return h % 24; // some ICU builds emit "24" at midnight
+    new Intl.DateTimeFormat('en-US', { timeZone: z });
+    return z;
   } catch {
-    return date.getHours();
+    return DEFAULT_TZ;
   }
+}
+
+// Wall-clock parts of `date` in `tz` (zone-aware, incl. half-hour offsets).
+function zonedParts(date, tz) {
+  const f = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hourCycle: 'h23',
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', second: 'numeric',
+  });
+  const o = {};
+  for (const p of f.formatToParts(date)) {
+    if (p.type !== 'literal') o[p.type] = parseInt(p.value, 10);
+  }
+  return { y: o.year, mo: o.month, d: o.day, h: o.hour % 24, mi: o.minute, s: o.second };
+}
+
+// Offset (ms) of `tz` from UTC at the instant `date`.
+function tzOffsetMs(date, tz) {
+  const p = zonedParts(date, tz);
+  return Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s) -
+    (date.getTime() - date.getUTCMilliseconds());
+}
+
+// The UTC instant at which the wall clock in `tz` reads y-mo-d h:mi. The
+// second pass re-reads the offset at the first answer so a DST change between
+// the guess and the result is settled correctly.
+function zonedTimeToUtc(y, mo, d, h, mi, tz) {
+  const guess = Date.UTC(y, mo - 1, d, h, mi, 0);
+  const first = guess - tzOffsetMs(new Date(guess), tz);
+  return new Date(guess - tzOffsetMs(new Date(first), tz));
 }
 
 // --- channel selection ---------------------------------------------------
@@ -96,8 +125,10 @@ function selectChannel(signalType, config, profile) {
 // --- send time ---------------------------------------------------------
 
 function computeRunAt(profile, quietStart, quietEnd, timezone, hourRates) {
+  const tz = resolveTz(timezone);
   const now = new Date();
-  const curHour = hourInTz(now, timezone);
+  const cur = zonedParts(now, tz);
+  const curHour = cur.h;
 
   let targetHour = null;
 
@@ -151,11 +182,17 @@ function computeRunAt(profile, quietStart, quietEnd, timezone, hourRates) {
     if (targetHour == null) targetHour = (curHour + 1) % 24; // all-quiet fallback
   }
 
-  // Next occurrence of targetHour (store-local), aligned to the top of the hour.
-  let deltaHours = targetHour - curHour;
-  if (deltaHours <= 0) deltaHours += 24;
-  const runAt = new Date(now.getTime() + deltaHours * HOUR);
-  runAt.setMinutes(0, 0, 0);
+  // Next occurrence of targetHour:00 on the STORE's wall clock (strictly after
+  // now), built from store-local date parts — so it is right for half-hour
+  // zones (+05:30, +05:45) and across DST changes, and never depends on the
+  // server's own timezone.
+  let runAt = zonedTimeToUtc(cur.y, cur.mo, cur.d, targetHour, 0, tz);
+  if (runAt.getTime() <= now.getTime()) {
+    const next = new Date(Date.UTC(cur.y, cur.mo - 1, cur.d + 1));
+    runAt = zonedTimeToUtc(
+      next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), targetHour, 0, tz
+    );
+  }
   return runAt;
 }
 
@@ -382,4 +419,4 @@ async function runBrainForShop(shopDomain) {
   return { scheduled, skipped };
 }
 
-module.exports = { runBrainForProfile, runBrainForShop };
+module.exports = { runBrainForProfile, runBrainForShop, computeRunAt, zonedTimeToUtc };

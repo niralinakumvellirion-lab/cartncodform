@@ -22,7 +22,7 @@ const Store = require('../models/Store');
 const ShopWeights = require('../models/ShopWeights');
 const AbandonedCustomer = require('../models/AbandonedCustomer');
 
-const { runBrainForProfile } = require('../services/brain');
+const { runBrainForProfile, computeRunAt } = require('../services/brain');
 
 const SHOP = 'demo.myshopify.com';
 const HOUR = 60 * 60 * 1000;
@@ -261,4 +261,68 @@ test('17. non-cart/checkout-abandon signals never query AbandonedCustomer for an
   expect(ScheduledJob.create).toHaveBeenCalledWith(
     expect.objectContaining({ payload: expect.objectContaining({ imageUrl: '' }) })
   );
+});
+
+
+// --- computeRunAt: zone-aware send time ------------------------------------
+// A send scheduled for H:00 must fire at H:00 ON THE STORE'S WALL CLOCK,
+// including half-hour offsets and across DST, whatever the server's own zone.
+describe('computeRunAt is store-timezone aware', () => {
+  const DATE_ONLY = [
+    'nextTick', 'setImmediate', 'clearImmediate', 'setInterval', 'clearInterval',
+    'setTimeout', 'clearTimeout', 'queueMicrotask', 'performance', 'hrtime',
+    'requestAnimationFrame', 'cancelAnimationFrame', 'requestIdleCallback', 'cancelIdleCallback',
+  ];
+  const pin = (iso) => jest.useFakeTimers({ now: new Date(iso), doNotFake: DATE_ONLY });
+  afterEach(() => jest.useRealTimers());
+  // A profile whose own history says "best hour = h" (needs >= 3 samples).
+  const prefers = (h) => ({ activeHours: [h, h, h] });
+  const run = (h, tz) => computeRunAt(prefers(h), 22, 8, tz, null).toISOString();
+
+  test('UTC', () => {
+    pin('2026-03-10T06:10:00.000Z');
+    expect(run(11, 'UTC')).toBe('2026-03-10T11:00:00.000Z');
+  });
+
+  test('Asia/Kolkata (+05:30): 13:00 IST is 07:30 UTC, not 07:00 or 08:00', () => {
+    pin('2026-03-10T06:10:00.000Z'); // 11:40 IST
+    expect(run(13, 'Asia/Kolkata')).toBe('2026-03-10T07:30:00.000Z');
+  });
+
+  test('Asia/Kolkata: an hour already passed today rolls to tomorrow, still on the hour', () => {
+    pin('2026-03-10T06:10:00.000Z'); // 11:40 IST, so 11:00 has passed
+    expect(run(11, 'Asia/Kolkata')).toBe('2026-03-11T05:30:00.000Z');
+  });
+
+  test('Asia/Kathmandu (+05:45): 13:00 NPT is 07:15 UTC', () => {
+    pin('2026-03-10T06:10:00.000Z'); // 11:55 NPT
+    expect(run(13, 'Asia/Kathmandu')).toBe('2026-03-10T07:15:00.000Z');
+  });
+
+  test('America/New_York, no DST change: 15:00 EDT is 19:00 UTC', () => {
+    pin('2026-06-10T14:20:00.000Z'); // 10:20 EDT
+    expect(run(15, 'America/New_York')).toBe('2026-06-10T19:00:00.000Z');
+  });
+
+  test('America/New_York, spring-forward day: 09:00 is EDT (13:00 UTC), not now+9h', () => {
+    pin('2026-03-08T05:30:00.000Z'); // 00:30 EST; clocks jump at 07:00 UTC
+    expect(run(9, 'America/New_York')).toBe('2026-03-08T13:00:00.000Z');
+  });
+
+  test('America/New_York, fall-back day: 09:00 is EST (14:00 UTC), not now+9h', () => {
+    pin('2026-11-01T04:30:00.000Z'); // 00:30 EDT; clocks fall back at 06:00 UTC
+    expect(run(9, 'America/New_York')).toBe('2026-11-01T14:00:00.000Z');
+  });
+
+  test('an unknown timezone string falls back to the Kolkata default, not the server zone', () => {
+    pin('2026-03-10T06:10:00.000Z');
+    expect(run(13, 'Not/A_Zone')).toBe('2026-03-10T07:30:00.000Z');
+  });
+
+  test('a store with no timezone set is scheduled on the default (Kolkata) wall clock', async () => {
+    pin('2026-03-10T02:30:00.000Z'); // 08:00 IST: not quiet, so the next slot is 09:00 IST
+    Store.findOne.mockResolvedValue({ caps: { perDay: 2, perWeek: 5 } }); // no timezone, no quietHours
+    const r = await runBrainForProfile('p1', SHOP);
+    expect(r.runAt.toISOString()).toBe('2026-03-10T03:30:00.000Z');
+  });
 });
