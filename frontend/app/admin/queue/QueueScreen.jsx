@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
+import QuietHoursWarning, { useQuietHoursSettings } from '../components/QuietHoursWarning';
 import { ShimmerCard } from '../components/Shimmer';
 import { ImageUploadPair } from '../components/ImageUploadPair';
 import { ProductPicker } from '../components/ProductPicker';
@@ -644,6 +645,7 @@ export default function QueueScreen({ shop }) {
 
   // Edit modal state — Planning List's "Edit" action.
   const [editingItem, setEditingItem] = useState(null);
+  const quietSettings = useQuietHoursSettings(shop);
   const [editTitle, setEditTitle] = useState('');
   const [editBody, setEditBody] = useState('');
   const [editMobileImageUrl, setEditMobileImageUrl] = useState('');
@@ -1489,6 +1491,7 @@ export default function QueueScreen({ shop }) {
                            borderRadius: 8, border: '1px solid #e5e7eb',
                            fontSize: 13, boxSizing: 'border-box' }}
                 />
+                <QuietHoursWarning value={editScheduledAt} settings={quietSettings} />
               </div>
             </div>
 

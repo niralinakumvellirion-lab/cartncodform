@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
+import QuietHoursWarning, { useQuietHoursSettings } from '../components/QuietHoursWarning';
 import { ShimmerRow, ShimmerCard } from '../components/Shimmer';
 import { ImageUploadPair } from '../components/ImageUploadPair';
 import { ProductPicker } from '../components/ProductPicker';
@@ -458,6 +459,7 @@ export default function DashboardScreen({ shop }) {
   const [editorDesktopImageUrl, setEditorDesktopImageUrl] = useState('');
   const [editorAction, setEditorAction] = useState(null);
   const [editorDate, setEditorDate] = useState('');
+  const quietSettings = useQuietHoursSettings(shop);
   const [editorTargetType, setEditorTargetType] = useState('home');
   const [editorProductId, setEditorProductId] = useState('');
   const [editorProductHandle, setEditorProductHandle] = useState('');
@@ -1771,6 +1773,7 @@ export default function DashboardScreen({ shop }) {
                              borderRadius: 8, border: '1px solid #e5e7eb',
                              fontSize: 13, boxSizing: 'border-box' }}
                   />
+                  <QuietHoursWarning value={editorDate} settings={quietSettings} />
                 </div>
 
                 {/* Action buttons */}
