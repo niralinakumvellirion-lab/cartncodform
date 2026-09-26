@@ -86,12 +86,6 @@
   }
 
   function canPrompt() {
-    console.log('[ccf:lifecycle] canPrompt check:', {
-      notificationInWindow: 'Notification' in window,
-      permission: typeof Notification !== 'undefined' ? Notification.permission : 'N/A',
-      promptAlreadyShown: promptAlreadyShown(),
-      subscribedKey: localStorage.getItem(SUBSCRIBED_KEY),
-    });
     if (!('Notification' in window)) return false;
     if (Notification.permission !== 'default') return false; // already granted or denied
     if (promptAlreadyShown()) return false;
@@ -842,7 +836,6 @@
   }
 
   function showSoftPrompt(trigger, productId) {
-    console.log('[ccf:lifecycle] showSoftPrompt called, trigger:', arguments[0]);
     // discount-capture path: an already-subscribed customer, shown purely
     // to collect email/phone for a bigger discount — bypasses canPrompt()'s
     // permission-state gate (there's no push permission left to ask for).
@@ -2173,7 +2166,6 @@
     }
 
     allow.addEventListener('click', function () {
-      console.log('[ccf:lifecycle] Allow button clicked');
       // Read the discount inputs BEFORE any teardown.
       var emailEl = document.getElementById('ccf-email-input');
       var email = emailEl && emailEl.value ? emailEl.value.trim() : '';
@@ -2209,21 +2201,6 @@
           .then(function (t) { return saveToken(t); })
           .catch(function (err) {
             console.error('[ccf] granted-path subscribe failed:', err.message);
-            // Report to backend so the error is visible in server logs
-            try {
-              fetch(window.location.origin + '/apps/cartncodform/subscribe-customer', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  shopDomain: SHOP_DOMAIN,
-                  token: 'DEBUG_ERROR_REPORT',
-                  deviceType: /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) ? 'mobile' : 'desktop',
-                  debugError: (err && err.message) || String(err),
-                  debugCode: (err && err.code) || null,
-                  debugUA: navigator.userAgent.slice(0, 120)
-                })
-              }).catch(function(){});
-            } catch(e) {}
             // do not block the discount on a subscribe failure
           })
           .then(function () {
@@ -2673,7 +2650,6 @@
 
   function registerSW() {
     return new Promise(function(resolve, reject) {
-      console.log('[ccf:lifecycle] registerSW: starting...');
       if (!('serviceWorker' in navigator)) {
         return reject(new Error('SW not supported'));
       }
@@ -2682,7 +2658,6 @@
 
       // Unregister any stale SWs (blob URLs, wrong scope) before registering
       navigator.serviceWorker.getRegistrations().then(function(regs) {
-        console.log('[ccf:lifecycle] existing SW registrations:', regs.length, regs.map(function(r) { return { scope: r.scope, active: !!r.active, installing: !!r.installing, waiting: !!r.waiting }; }));
         var unregisterPromises = regs.map(function(reg) {
           var swScope = window.location.origin + '/apps/cartncodform/';
           var sw = reg.active || reg.waiting || reg.installing;
@@ -2714,7 +2689,6 @@
         }
 
         // Register fresh
-        console.log('[ccf:lifecycle] registering SW at:', swUrl, 'scope: /apps/cartncodform/');
         navigator.serviceWorker.register(swUrl, {
           scope: '/apps/cartncodform/',
           updateViaCache: 'none'
@@ -2795,7 +2769,6 @@
         }).then(function(token) {
           if (token) {
             resolve(token);
-            console.log('[ccf:lifecycle] FCM token obtained:', token.slice(-8));
           } else {
             reject(new Error('No token returned'));
           }
@@ -2815,7 +2788,6 @@
     var oldToken = localStorage.getItem(TOKEN_KEY);
     var isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
     var deviceType = isMobile ? 'mobile' : 'desktop';
-    console.log('[ccf:lifecycle] saveToken called, deviceType:', deviceType);
 
     var customerId = (window.Shopify && window.Shopify.customerId)
       ? String(window.Shopify.customerId)
@@ -2835,12 +2807,6 @@
         var rawCartToken = cart.token || null;
         var cartToken = rawCartToken ? rawCartToken.split('?')[0].trim() || null : null;
 
-        console.log('[ccf:lifecycle] POSTing to subscribe-customer, body:', {
-          shopDomain: SHOP_DOMAIN,
-          tokenSnippet: token.slice(-8),
-          deviceType: deviceType,
-          cartToken: cartToken
-        });
         return fetch(window.location.origin + '/apps/cartncodform/subscribe-customer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2857,11 +2823,9 @@
         });
       })
       .then(function(r) {
-        console.log('[ccf:lifecycle] subscribe POST response status:', r.status);
         return r.json();
       })
       .then(function(data) {
-        console.log('[ccf:lifecycle] subscribe POST data:', JSON.stringify(data));
         if (data.success) {
           localStorage.setItem(TOKEN_KEY, token);
           localStorage.setItem(SUBSCRIBED_KEY, '1');
@@ -2909,8 +2873,6 @@
   // ============================================
 
   function checkAndInit() {
-    console.log('[ccf:lifecycle] checkAndInit called, permission:',
-      typeof Notification !== 'undefined' ? Notification.permission : 'N/A');
     if (!('Notification' in window)) {
       return;
     }

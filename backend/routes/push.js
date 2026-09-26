@@ -669,25 +669,6 @@ router.post('/send-store', requireAuth, async (req, res) => {
   }
 });
 
-router.get('/test-mobile-push', async (req, res) => {
-  try {
-    const { sendPushToCustomers } = require('../utils/pushNotification');
-    const result = await sendPushToCustomers(
-      'cartncod-form.myshopify.com',
-      'Test Mobile Push',
-      'Can you see this on mobile?',
-      'https://cartncod-form.myshopify.com',
-      '',
-      true,
-      null,
-      false
-    );
-    res.json(result);
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
 // GET /api/push/festivals
 // Serves the shared festival calendar (backend/data/festivals.json) to the
 // admin dashboard. Not shop-scoped — every store sees the same calendar —
