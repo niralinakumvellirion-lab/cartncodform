@@ -2367,17 +2367,10 @@
     } catch(e) {}
     if (discAlreadyClaimed) return;
 
-    // Same stylesheet the main popup uses (hover/focus states, the
-    // ccfNudgeSlideUp keyframe below) — the main popup never runs on
-    // product pages, so nothing else would inject it here.
-    ccfInjectPopupStyles();
-
-    var emailPct = (discountConfig.emailDiscount &&
-      discountConfig.emailDiscount.percentage) || 15;
-    var pushPct = (discountConfig.pushDiscount &&
-      discountConfig.pushDiscount.percentage) || 10;
-
-    var accent = popupConfig.accentColor || '#4f46e5';
+    // Real percentages only: ccfPct() is 0 for a disabled rule, so a number
+    // is never invented (no fallback constants). Nothing to honour = no nudge.
+    var emailPct = ccfFieldPct('emailDiscount');
+    var pushPct = ccfPct('pushDiscount');
     var showEmail = ccfShowEmailField();
 
     // Determine best discount to show.
@@ -2386,6 +2379,14 @@
     if (showEmail) {
       bestPct = emailPct; bestAction = 'email';
     }
+    if (!(bestPct > 0)) return;
+
+    // Same stylesheet the main popup uses (hover/focus states, the
+    // ccfNudgeSlideUp keyframe below) — the main popup never runs on
+    // product pages, so nothing else would inject it here.
+    ccfInjectPopupStyles();
+
+    var accent = popupConfig.accentColor || '#4f46e5';
 
     // Find Buy It Now button.
     var buyBtn = document.querySelector(
@@ -2466,6 +2467,14 @@
       var email = document.getElementById('ccf-nudge-email');
       var emailVal = email ? email.value.trim() : '';
 
+      // When the offer shown is the EMAIL discount, an email is required to
+      // claim it — an empty submit would fall through to the push rule, which
+      // is a different (or disabled) percentage than the one on the button.
+      if (showEmail && !emailVal) {
+        if (email) { email.style.borderColor = '#dc2626'; email.focus(); }
+        return;
+      }
+
       // Determine action based on what was entered.
       var action = emailVal ? 'email' : 'push';
 
@@ -2494,7 +2503,7 @@
             'display:flex;justify-content:center">' + ccfIcon('gift', 32) + '</div>' +
             '<div style="font-size:16px;font-weight:700;' +
             'color:#111827;margin-bottom:6px">' +
-            d.percentage + '% off unlocked!</div>' +
+            (d.percentage ? d.percentage + '% off unlocked!' : 'Discount unlocked!') + '</div>' +
             '<div style="background:linear-gradient(135deg,' +
             '#f0f4ff,#e8edff);border:1.5px dashed #818cf8;' +
             'border-radius:12px;padding:12px;margin:10px 0">' +
@@ -2511,7 +2520,7 @@
             'background:linear-gradient(135deg,#16a34a,#15803d);' +
             'color:#fff;border-radius:12px;font-weight:700;' +
             'font-size:14px;text-decoration:none;margin-top:8px">' +
-            'Shop now with ' + d.percentage + '% off →</a>' +
+            (d.percentage ? 'Shop now with ' + d.percentage + '% off →' : 'Shop now with your discount →') + '</a>' +
             '</div>';
           try {
             sessionStorage.setItem('ccf_disc_redirected', '1');
