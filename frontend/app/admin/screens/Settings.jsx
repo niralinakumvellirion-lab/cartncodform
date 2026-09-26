@@ -662,7 +662,7 @@ function frameSpec(key, device, popupCfg, styleFields) {
 // overlay, popup) is laid out at native size inside a fixed viewport and then
 // scaled together with a single transform, so the popup can never be resized
 // independently of the mock page.
-function DeviceFrameThumb({ device, spec, children }) {
+function DeviceFrameThumb({ device, spec, children, maxH = 210 }) {
   const phone = device === 'mobile';
   const W = phone ? 410 : 1280;
   const H = phone ? 800 : 776;
@@ -673,11 +673,11 @@ function DeviceFrameThumb({ device, spec, children }) {
     if (!el || typeof ResizeObserver === 'undefined') return undefined;
     const ro = new ResizeObserver(() => {
       const w = el.clientWidth;
-      if (w > 0) setK(phone ? Math.min(w / W, 210 / H) : w / W);
+      if (w > 0) setK(phone ? Math.min(w / W, maxH / H) : w / W);
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [phone, W, H]);
+  }, [phone, W, H, maxH]);
 
   const block = (w, h, r, bg) => ({ width: w, height: h, borderRadius: r, background: bg, flexShrink: 0 });
   const ink = '#eceef2';
@@ -775,6 +775,33 @@ function DeviceFrameThumb({ device, spec, children }) {
       </div>
     </div>
   );
+}
+
+// The single place that turns (style, device, merchant settings) into a
+// framed popup. The gallery renders it non-interactive at card size; the
+// editor renders the same component larger with live handlers. Geometry comes
+// only from frameSpec() above.
+function FramedStyleThumb({ device, styleId, layout, cfg, styleFields, emailFieldEnabled,
+  discountOfferText, discountOfferHeadline, maxH, dismissedReason, previewProps }) {
+  const key = styleId === 'classic' ? `classic-${layout}` : styleId;
+  const spec = frameSpec(key, device, cfg, styleFields || {});
+  if (dismissedReason) {
+    return (
+      <DeviceFrameThumb device={device} maxH={maxH}
+        spec={{ anchor: 'center', width: device === 'mobile' ? 300 : 360 }}>
+        <DismissedNote device={device} reason={dismissedReason} />
+      </DeviceFrameThumb>
+    );
+  }
+  const popupEl = styleId !== 'classic' ? (
+    <StyleCardPreview styleId={styleId} cfg={cfg} styleFields={styleFields}
+      emailFieldEnabled={emailFieldEnabled} compact={!!spec.compact} {...previewProps} />
+  ) : (
+    <ClassicPreview layout={layout} device={device} popup={cfg}
+      showEmailField={emailFieldEnabled} discountOfferText={discountOfferText}
+      discountOfferHeadline={discountOfferHeadline} {...previewProps} />
+  );
+  return <DeviceFrameThumb device={device} spec={spec} maxH={maxH}>{popupEl}</DeviceFrameThumb>;
 }
 
 // A style-gallery card: a small, LIVE (not static) preview of the actual
@@ -2402,17 +2429,11 @@ export default function Settings({ shop }) {
             interactive: false,
           };
           const galleryCfg = popupDevice === 'mobile' ? mergeConfig(popup, mobilePopup) : popup;
-          const fSpec = frameSpec(c.key, popupDevice, galleryCfg, activeStyleFields);
-          const popupEl = c.styleId !== 'classic' ? (
-            <StyleCardPreview styleId={c.styleId} cfg={galleryCfg} styleFields={activeStyleFields}
-              emailFieldEnabled={previewShowEmailField} compact={!!fSpec.compact} {...commonPreviewProps} />
-          ) : (
-            <ClassicPreview layout={c.layout} device={popupDevice} popup={galleryCfg}
-              showEmailField={previewShowEmailField} discountOfferText={previewDiscountOfferText}
-              discountOfferHeadline={discountRules.offerHeadline} {...commonPreviewProps} />
-          );
           const previewNode = (
-            <DeviceFrameThumb device={popupDevice} spec={fSpec}>{popupEl}</DeviceFrameThumb>
+            <FramedStyleThumb device={popupDevice} styleId={c.styleId} layout={c.layout}
+              cfg={galleryCfg} styleFields={activeStyleFields} emailFieldEnabled={previewShowEmailField}
+              discountOfferText={previewDiscountOfferText} discountOfferHeadline={discountRules.offerHeadline}
+              previewProps={commonPreviewProps} />
           );
           return (
             <GalleryCard key={c.key} card={c} selected={selected}
@@ -2502,11 +2523,22 @@ export default function Settings({ shop }) {
                 the previewResetKey effect above (fires on style/device/
                 setting changes) — there is no other way back to Prompt. */}
 
-            {popupDevice === 'desktop' && (() => {
-              if (previewStep === 'dismissed' || previewStep === 'closed') {
-                return <DismissedNote device="desktop" reason={previewStep === 'closed' ? 'closed' : 'dismissed'} />;
-              }
-              const commonProps = {
+            {/* Same frame, page mock, anchor and overlay as the gallery card
+                (one geometry source: frameSpec/FramedStyleThumb), rendered
+                larger and interactive. */}
+            <FramedStyleThumb
+              device={popupDevice}
+              styleId={activeStyleId}
+              layout={popupDevice === 'mobile' ? 'card' : (popup.layout || 'split')}
+              cfg={popupDevice === 'mobile' ? mergeConfig(popup, mobilePopup) : popup}
+              styleFields={activeStyleFields}
+              emailFieldEnabled={previewShowEmailField}
+              discountOfferText={previewDiscountOfferText}
+              discountOfferHeadline={discountRules.offerHeadline}
+              maxH={640}
+              dismissedReason={previewStep === 'dismissed' || previewStep === 'closed'
+                ? (previewStep === 'closed' ? 'closed' : 'dismissed') : null}
+              previewProps={{
                 step: previewStep,
                 email: previewEmail,
                 onEmailChange: setPreviewEmail,
@@ -2514,185 +2546,8 @@ export default function Settings({ shop }) {
                 onDismiss: () => setPreviewStep('dismissed'),
                 wantsDiscount: previewWantsDiscount,
                 unlockedInfo: previewUnlockedInfo,
-              };
-              if (activeStyleId !== 'classic') {
-                return (
-                  <StyleCardPreview
-                    styleId={activeStyleId}
-                    cfg={popup}
-                    styleFields={activeStyleFields}
-                    emailFieldEnabled={previewShowEmailField}
-                    {...commonProps}
-                  />
-                );
-              }
-              return (
-                <ClassicPreview
-                  layout={popup.layout || 'split'}
-                  device="desktop"
-                  popup={popup}
-                  showEmailField={previewShowEmailField}
-                  discountOfferText={previewDiscountOfferText}
-                  discountOfferHeadline={discountRules.offerHeadline}
-                  {...commonProps}
-                />
-              );
-            })()}
-
-            {popupDevice === 'mobile' && (
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: '8px',
-                }}
-              >
-                <div
-                  style={{
-                    // mobile-preview-clipping-fix: was 200x360 — much
-                    // narrower than any style's own compact width (300,
-                    // or 240 for Story Card), so every "card"-shaped
-                    // style already overflowed it horizontally, and a
-                    // style with real content height (anchored bottom
-                    // before this fix) had nowhere near
-                    // enough room and got clipped by this div's own
-                    // overflow:hidden. 340x600 comfortably fits every
-                    // compact width used anywhere in this file with
-                    // margin to spare, while still reading as a phone
-                    // (real devices run ~360x640-430x932).
-                    width: '340px',
-                    height: '600px',
-                    border: '8px solid #111827',
-                    borderRadius: '28px',
-                    overflow: 'hidden',
-                    background: '#f3f4f6',
-                    position: 'relative',
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
-                  }}
-                >
-                  {/* Notch */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: '50%',
-                      transform: 'translateX(-50%)',
-                      width: '60px',
-                      height: '16px',
-                      background: '#111827',
-                      borderRadius: '0 0 12px 12px',
-                      zIndex: 10,
-                    }}
-                  />
-
-                  {/* Screen content — simulated store page */}
-                  <div
-                    style={{
-                      width: '100%',
-                      height: '100%',
-                      background: '#fff',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'flex-end',
-                      paddingBottom: '16px',
-                      position: 'relative',
-                    }}
-                  >
-                    {/* Simulated store background */}
-                    <div
-                      style={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        background: '#f9fafb',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        paddingTop: '24px',
-                        gap: '8px',
-                      }}
-                    >
-                      <div style={{ width: '80%', height: '80px', background: '#e5e7eb', borderRadius: '8px' }} />
-                      <div style={{ width: '60%', height: '12px', background: '#e5e7eb', borderRadius: '4px' }} />
-                      <div style={{ width: '40%', height: '12px', background: '#e5e7eb', borderRadius: '4px' }} />
-                    </div>
-
-                    {/* Mobile popup preview */}
-                    {(() => {
-                      if (previewStep === 'dismissed' || previewStep === 'closed') {
-                        return (
-                          <div style={{ position: 'absolute', bottom: 12, left: 8, right: 8, zIndex: 5 }}>
-                            <DismissedNote device="mobile" reason={previewStep === 'closed' ? 'closed' : 'dismissed'} />
-                          </div>
-                        );
-                      }
-                      const styleCfg = mergeConfig(popup, mobilePopup);
-                      const commonProps = {
-                        step: previewStep,
-                        email: previewEmail,
-                        onEmailChange: setPreviewEmail,
-                        onAllow: () => setPreviewStep('setting_up'),
-                        onDismiss: () => setPreviewStep('dismissed'),
-                        wantsDiscount: previewWantsDiscount,
-                        unlockedInfo: previewUnlockedInfo,
-                      };
-                      // mobile-popup-polish: per-style anchor, matching
-                      // ccf-push.js exactly (see the anchor table in
-                      // audits/mobile-popup-polish-audit.txt):
-                      //   top_bar       -> pinned to the frame's top edge
-                      //   bottom_sheet  -> pinned to the frame's bottom
-                      //                    edge, full width (its own
-                      //                    edge-anchored design, same as
-                      //                    real device — no side margin)
-                      //   story_card / flash_sale / gift_reveal / classic
-                      //   card -> CENTERED (both axes) — this replaced
-                      //   the old universal bottom:12/left:8/right:8
-                      //   wrapper, which was wrong for every style except
-                      //   Bottom Sheet.
-                      const CENTERED_STYLE_IDS = ['story_card', 'flash_sale', 'gift_reveal', 'spotlight', 'noir', 'color_block'];
-                      if (activeStyleId !== 'classic') {
-                        const wrapStyle = activeStyleId === 'top_bar'
-                          ? { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 5 }
-                          : CENTERED_STYLE_IDS.includes(activeStyleId)
-                          ? { position: 'absolute', top: '50%', left: '50%',
-                              transform: 'translate(-50%, -50%)', zIndex: 5 }
-                          : { position: 'absolute', bottom: '12px', left: '8px', right: '8px', zIndex: 5 };
-                        return (
-                          <div style={wrapStyle}>
-                            <StyleCardPreview
-                              styleId={activeStyleId}
-                              cfg={styleCfg}
-                              styleFields={activeStyleFields}
-                              emailFieldEnabled={previewShowEmailField}
-                              compact
-                              {...commonProps}
-                            />
-                          </div>
-                        );
-                      }
-                      return (
-                        <div style={{ position: 'absolute', top: '50%', left: '50%',
-                                      transform: 'translate(-50%, -50%)', zIndex: 5 }}>
-                          <ClassicPreview
-                            layout="card"
-                            device="mobile"
-                            popup={mergeConfig(popup, mobilePopup)}
-                            showEmailField={previewShowEmailField}
-                            discountOfferText={previewDiscountOfferText}
-                            discountOfferHeadline={discountRules.offerHeadline}
-                            {...commonProps}
-                          />
-                        </div>
-                      );
-                    })()}
-                  </div>
-                </div>
-              </div>
-            )}
+              }}
+            />
 
             {/* The one Save button while the customizer is open — pinned to
                 the bottom of the sticky right column. Same save-status-
