@@ -37,6 +37,12 @@ function job(over = {}) {
 function mockJobs(list) {
   ScheduledJob.find.mockReturnValue({ lean: () => Promise.resolve(list) });
 }
+// The store's timezone as computeWeights reads it: Store.findOne().select().lean().
+function mockTz(tz) {
+  Store.findOne.mockReturnValue({
+    select: () => ({ lean: () => Promise.resolve(tz === undefined ? {} : { timezone: tz }) }),
+  });
+}
 function lastUpsertSet() {
   const call = ShopWeights.findOneAndUpdate.mock.calls.at(-1);
   return { filter: call[0], set: call[1].$set, opts: call[2] };
@@ -104,6 +110,9 @@ describe('computeWeights — channelRates', () => {
 });
 
 describe('computeWeights — hourRates', () => {
+  // These legacy cases are written in UTC hours, so they run for a UTC store.
+  beforeEach(() => mockTz('UTC'));
+
   test('5. the hour with the most conversions gets the highest rate', async () => {
     mockJobs([
       ...Array.from({ length: 5 }, () =>
@@ -137,6 +146,51 @@ describe('computeWeights — hourRates', () => {
     ]);
     await computeWeights(SHOP);
     expect(lastUpsertSet().set.hourRates['3'].rate).toBe(1.0); // 3 sends < 5
+  });
+});
+
+// hourRates keys are hours on the STORE's wall clock (what brain.computeRunAt
+// reads them as), not UTC hours. 2026-09-01T14:00Z is:
+//   UTC 14:00 | Asia/Kolkata 19:30 (hour 19) | Asia/Kathmandu 19:45 (hour 19)
+describe('computeWeights — hourRates use the store timezone', () => {
+  const sends = (iso, n, outcome) =>
+    Array.from({ length: n }, () => job({ sentAt: new Date(iso), outcome }));
+  const bucketsFor = async (tz) => {
+    mockTz(tz);
+    mockJobs([...sends('2026-09-01T14:00:00Z', 5, 'clicked'), ...sends('2026-09-01T14:00:00Z', 5, null)]);
+    await computeWeights(SHOP);
+    return Object.keys(lastUpsertSet().set.hourRates);
+  };
+
+  test('UTC store: 14:00Z is hour 14', async () => {
+    expect(await bucketsFor('UTC')).toEqual(['14']);
+  });
+
+  test('Asia/Kolkata (+05:30): 14:00Z is hour 19, not 14', async () => {
+    expect(await bucketsFor('Asia/Kolkata')).toEqual(['19']);
+  });
+
+  test('Asia/Kathmandu (+05:45): 14:00Z is hour 19', async () => {
+    expect(await bucketsFor('Asia/Kathmandu')).toEqual(['19']);
+  });
+
+  test('a half-hour zone puts 18:40Z (00:10 IST next day) in hour 0', async () => {
+    mockTz('Asia/Kolkata');
+    mockJobs(sends('2026-09-01T18:40:00Z', 5, 'clicked'));
+    await computeWeights(SHOP);
+    expect(Object.keys(lastUpsertSet().set.hourRates)).toEqual(['0']);
+  });
+
+  test('no timezone on the store falls back to the Kolkata default', async () => {
+    expect(await bucketsFor(undefined)).toEqual(['19']);
+  });
+
+  test('a job with no sentAt is bucketed by its runAt in the store zone', async () => {
+    mockTz('Asia/Kolkata');
+    mockJobs(Array.from({ length: 5 }, () =>
+      job({ sentAt: null, runAt: new Date('2026-09-01T14:00:00Z'), outcome: 'clicked' })));
+    await computeWeights(SHOP);
+    expect(Object.keys(lastUpsertSet().set.hourRates)).toEqual(['19']);
   });
 });
 

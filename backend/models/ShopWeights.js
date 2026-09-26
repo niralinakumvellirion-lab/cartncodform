@@ -43,7 +43,7 @@ const shopWeightsSchema = new mongoose.Schema({
     },
   },
 
-  // Per hour of day (0-23, UTC): conversions / sends
+  // Per hour of day (0-23, in the STORE's timezone): conversions / sends
   hourRates: {
     type: Map,
     of: new mongoose.Schema(

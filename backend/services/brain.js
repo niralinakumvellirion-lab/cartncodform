@@ -3,6 +3,7 @@ const Signal = require('../models/Signal');
 const SignalConfig = require('../models/SignalConfig');
 const ScheduledJob = require('../models/ScheduledJob');
 const Store = require('../models/Store');
+const { DEFAULT_TZ, resolveTz, zonedParts, zonedTimeToUtc } = require('../utils/timezone');
 
 /**
  * Layer 3 — Brain. For one profile per day: rank its active signals, apply
@@ -53,51 +54,6 @@ function isQuietHour(hour, start, end) {
   if (start === end) return false;
   if (start < end) return hour >= start && hour < end; // same-day window
   return hour >= start || hour < end;                  // wraps midnight (e.g. 22->8)
-}
-
-const DEFAULT_TZ = 'Asia/Kolkata';
-
-// A usable IANA zone: the store's own, else the app default. A bad/unknown
-// string (Intl throws RangeError) also falls back to the default rather than
-// to the server's local zone.
-function resolveTz(tz) {
-  const z = tz || DEFAULT_TZ;
-  try {
-    new Intl.DateTimeFormat('en-US', { timeZone: z });
-    return z;
-  } catch {
-    return DEFAULT_TZ;
-  }
-}
-
-// Wall-clock parts of `date` in `tz` (zone-aware, incl. half-hour offsets).
-function zonedParts(date, tz) {
-  const f = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, hourCycle: 'h23',
-    year: 'numeric', month: 'numeric', day: 'numeric',
-    hour: 'numeric', minute: 'numeric', second: 'numeric',
-  });
-  const o = {};
-  for (const p of f.formatToParts(date)) {
-    if (p.type !== 'literal') o[p.type] = parseInt(p.value, 10);
-  }
-  return { y: o.year, mo: o.month, d: o.day, h: o.hour % 24, mi: o.minute, s: o.second };
-}
-
-// Offset (ms) of `tz` from UTC at the instant `date`.
-function tzOffsetMs(date, tz) {
-  const p = zonedParts(date, tz);
-  return Date.UTC(p.y, p.mo - 1, p.d, p.h, p.mi, p.s) -
-    (date.getTime() - date.getUTCMilliseconds());
-}
-
-// The UTC instant at which the wall clock in `tz` reads y-mo-d h:mi. The
-// second pass re-reads the offset at the first answer so a DST change between
-// the guess and the result is settled correctly.
-function zonedTimeToUtc(y, mo, d, h, mi, tz) {
-  const guess = Date.UTC(y, mo - 1, d, h, mi, 0);
-  const first = guess - tzOffsetMs(new Date(guess), tz);
-  return new Date(guess - tzOffsetMs(new Date(first), tz));
 }
 
 // --- channel selection ---------------------------------------------------
@@ -211,7 +167,7 @@ async function runBrainForProfile(profileId, shopDomain, cfg = null) {
   const qh = (store && store.quietHours) || {};
   const quietStart = qh.start != null ? qh.start : 22;
   const quietEnd = qh.end != null ? qh.end : 8;
-  const timezone = (store && store.timezone) || 'Asia/Kolkata';
+  const timezone = (store && store.timezone) || DEFAULT_TZ;
 
   // Phase H — learned per-shop weights (all rates default 1.0 = neutral).
   const ShopWeights = require('../models/ShopWeights');
@@ -419,4 +375,4 @@ async function runBrainForShop(shopDomain) {
   return { scheduled, skipped };
 }
 
-module.exports = { runBrainForProfile, runBrainForShop, computeRunAt, zonedTimeToUtc };
+module.exports = { runBrainForProfile, runBrainForShop, computeRunAt };

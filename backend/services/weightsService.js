@@ -1,5 +1,7 @@
 const ScheduledJob = require('../models/ScheduledJob');
 const ShopWeights = require('../models/ShopWeights');
+const Store = require('../models/Store');
+const { hourInTz } = require('../utils/timezone');
 
 /**
  * Phase H — recompute a shop's learned weights from the last 90 days of
@@ -17,8 +19,19 @@ const MIN_SIGNAL_SENDS = 10;
 const MIN_CHANNEL_SENDS = 10;
 const MIN_HOUR_SENDS = 5;
 
+// The store's IANA timezone (null -> hourInTz falls back to the app default).
+async function storeTimezone(shop) {
+  try {
+    const s = await Store.findOne({ shopDomain: shop }).select('timezone').lean();
+    return (s && s.timezone) || null;
+  } catch {
+    return null;
+  }
+}
+
 async function computeWeights(shopDomain) {
   const shop = String(shopDomain || '').trim().toLowerCase();
+  const timezone = await storeTimezone(shop);
   const since = new Date(Date.now() - 90 * DAY);
 
   const jobs = await ScheduledJob.find(
@@ -65,12 +78,13 @@ async function computeWeights(shopDomain) {
     channelRates[c] = { ...b, rate };
   }
 
-  // --- hourRates: by UTC hour of send (falls back to runAt when unsent) ---
+  // --- hourRates: by STORE-LOCAL hour of send (falls back to runAt when
+  // unsent). Bucket keys mean the same thing brain.computeRunAt reads them as.
   const byHour = {};
   for (const j of jobs) {
     const when = j.sentAt || j.runAt;
     if (!when) continue;
-    const h = new Date(when).getUTCHours();
+    const h = hourInTz(new Date(when), timezone);
     const b = (byHour[h] = byHour[h] || { sends: 0, conversions: 0 });
     b.sends += 1;
     if (j.outcome === 'clicked' || j.outcome === 'converted') b.conversions += 1;
