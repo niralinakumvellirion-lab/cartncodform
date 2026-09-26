@@ -74,7 +74,8 @@ const storeSchema = new mongoose.Schema({
       enum: ['light', 'dark', 'custom'],
       default: 'light',
     },
-    accentColor: { type: String, default: '#4f46e5' },
+    // '' = "not chosen": the style's own default accent then applies.
+    accentColor: { type: String, default: '' },
     // '' = "not chosen". Resolution per field: merchant mobile value ->
     // merchant desktop value -> the style's own default. Existing documents
     // that already store a value (including '#ffffff') keep it.
@@ -162,7 +163,8 @@ const storeSchema = new mongoose.Schema({
     brandName: { type: String, default: '' },
     imageUrl: { type: String, default: '' },
     imagePosition: { type: String, default: '50% 50%' },
-    accentColor: { type: String, default: '#4f46e5' },
+    // '' = inherit desktop, then the style's own default accent.
+    accentColor: { type: String, default: '' },
     // '' = "not chosen" (see popup.bgColor above): mobile then inherits the
     // desktop value through the storefront's per-field merge.
     bgColor: { type: String, default: '' },
@@ -177,10 +179,12 @@ const storeSchema = new mongoose.Schema({
       enum: ['left', 'center', 'right'],
       default: 'left',
     },
+    // '' = inherit desktop's ctaStyle (must be in the enum: Mongoose enum
+    // validation rejects '' otherwise when a document is created).
     ctaStyle: {
       type: String,
-      enum: ['rounded', 'square', 'pill', 'outlined', 'soft'],
-      default: 'pill',
+      enum: ['', 'rounded', 'square', 'pill', 'outlined', 'soft'],
+      default: '',
     },
     position: {
       type: String,

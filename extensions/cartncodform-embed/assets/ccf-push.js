@@ -929,12 +929,12 @@
     }
 
     // ---- Round 3 (spotlight / noir / color_block) shared pieces ----
-    function ccfProPalette(defBg, defFg) {
+    function ccfProPalette(defBg, defFg, defAccent) {
       var pBg = cfg.bgColor || defBg;
       var pFg = cfg.textColor || defFg;
       var dark = ccfIsDarkColor(pBg);
       return {
-        bg: pBg, fg: pFg, dark: dark,
+        bg: pBg, fg: pFg, dark: dark, accent: cfg.accentColor || defAccent,
         inputBg: dark ? 'rgba(255,255,255,0.08)' : '#ffffff',
         inputBorder: dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.14)',
         font: cfg.fontFamily || '-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif'
@@ -1015,7 +1015,7 @@
         }
         c.appendChild(ew);
       }
-      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle) + 'font-size:16px;padding:15px;' +
+      allow = buildAllowBtn(ccfAllowButtonStyle(pal.accent, cfg.ctaStyle) + 'font-size:16px;padding:15px;' +
         (o.ctaLight ? 'background:#ffffff;color:#0f1115;box-shadow:none;border:none;' : ''));
       c.appendChild(allow);
       deny = buildDenyBtn(ccfDenyButtonStyle() + 'color:' + pal.fg + ';opacity:0.65;font-size:13px;' +
@@ -1034,7 +1034,7 @@
     function ccfProPhoto(pal, heightCss, fadeCss) {
       var ph = document.createElement('div');
       ph.style.cssText = 'position:relative;overflow:hidden;' + heightCss + 'background:' +
-        (cfg.imageUrl ? '#000' : ('linear-gradient(135deg,' + accent + ',' + pal.bg + ')')) + ';';
+        (cfg.imageUrl ? '#000' : ('linear-gradient(135deg,' + pal.accent + ',' + pal.bg + ')')) + ';';
       if (cfg.imageUrl) {
         var pim = document.createElement('img');
         pim.src = cfg.imageUrl;
@@ -1219,7 +1219,7 @@
       // the page, no boxed panel. Desktop circle/oval; mobile a rounded
       // "pebble" (a circle can't hold the input and CTA at 320px). ----------
       var spF = ccfStyle.fields || {};
-      var spPal = ccfProPalette('#fbf4e8', '#1c1917');
+      var spPal = ccfProPalette('#fbf4e8', '#1c1917', '#c2410c');
       var spOval = !isMobile && spF.shape === 'oval';
       wrap.style.cssText = [
         'position:fixed', 'top:50%', 'left:50%', 'transform:translate(-50%,-50%)',
@@ -1242,7 +1242,7 @@
       if (spF.showSquiggle !== false) {
         var sqg = document.createElement('span');
         sqg.setAttribute('aria-hidden', 'true');
-        sqg.style.cssText = 'position:absolute;pointer-events:none;opacity:0.35;color:' + accent + ';' +
+        sqg.style.cssText = 'position:absolute;pointer-events:none;opacity:0.35;color:' + spPal.accent + ';' +
           (isMobile ? 'top:26px;left:26px;width:64px;' : 'bottom:22%;left:14%;width:14%;');
         sqg.innerHTML = '<svg viewBox="0 0 120 20" width="100%" fill="none" stroke="currentColor" ' +
           'stroke-width="2.5" stroke-linecap="round"><path d="M0 10 Q 15 0 30 10 T 60 10 T 90 10 T 120 10"/></svg>';
@@ -1274,7 +1274,7 @@
       // the other, small uppercase eyebrow tag. Mobile: centered card, hero
       // photo fading into the panel. ----------
       var nF = ccfStyle.fields || {};
-      var nPal = ccfProPalette('#0f1115', '#f4f4f5');
+      var nPal = ccfProPalette('#0f1115', '#f4f4f5', '#9a6b1f');
       var nRight = !isMobile && nF.imageSide === 'right';
       wrap.style.cssText = [
         'position:fixed', 'top:50%', 'left:50%', 'transform:translate(-50%,-50%)',
@@ -1309,7 +1309,7 @@
       // ---------- POPUP STYLE: Colour Block — warm colour field, big serif
       // offer figure (real discount only), playful decline link. ----------
       var cbF = ccfStyle.fields || {};
-      var cbPal = ccfProPalette('#f6e3c4', '#1c1917');
+      var cbPal = ccfProPalette('#f6e3c4', '#1c1917', '#0f766e');
       wrap.style.cssText = [
         'position:fixed', 'top:50%', 'left:50%', 'transform:translate(-50%,-50%)',
         isMobile ? 'width:min(400px, calc(100vw - 32px));max-height:calc(100vh - 32px);overflow-x:hidden;overflow-y:auto'

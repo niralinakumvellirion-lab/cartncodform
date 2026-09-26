@@ -247,7 +247,7 @@ export const POPUP_STYLES = {
     shortDescription: 'A soft round shape floats over your page. No box, no hard edges.',
     bestFor: 'Brands with a lifestyle look who want the offer to feel like part of the page.',
     layoutType: 'card',
-    defaultColors: { bgColor: '#fbf4e8', textColor: '#1c1917' },
+    defaultColors: { bgColor: '#fbf4e8', textColor: '#1c1917', accentColor: '#c2410c' },
     supportedFields: [
       'headline', 'subtext', 'brandName', 'imageUrl', 'imagePosition',
       'accentColor', 'bgColor', 'textColor', 'fontFamily',
@@ -286,7 +286,7 @@ export const POPUP_STYLES = {
     shortDescription: 'Photo on one side, a dark calm panel on the other. Premium and quiet.',
     bestFor: 'Higher-priced or design-led shops that want a restrained, editorial ask.',
     layoutType: 'card',
-    defaultColors: { bgColor: '#0f1115', textColor: '#f4f4f5' },
+    defaultColors: { bgColor: '#0f1115', textColor: '#f4f4f5', accentColor: '#9a6b1f' },
     supportedFields: [
       'headline', 'subtext', 'brandName', 'imageUrl', 'imagePosition',
       'accentColor', 'bgColor', 'textColor', 'fontFamily',
@@ -324,7 +324,7 @@ export const POPUP_STYLES = {
     shortDescription: 'A warm colour panel with a big offer number and a friendly decline link.',
     bestFor: 'Playful, food, beauty and gifting shops that want the discount to be the hero.',
     layoutType: 'card',
-    defaultColors: { bgColor: '#f6e3c4', textColor: '#1c1917' },
+    defaultColors: { bgColor: '#f6e3c4', textColor: '#1c1917', accentColor: '#0f766e' },
     supportedFields: [
       'headline', 'subtext', 'brandName', 'imageUrl', 'imagePosition',
       'accentColor', 'bgColor', 'textColor', 'fontFamily',

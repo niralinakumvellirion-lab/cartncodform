@@ -738,7 +738,7 @@ function StyleCardPreview({
   interactive = true,
 }) {
   const style = getStyle(styleId);
-  const accent = cfg.accentColor || '#4f46e5';
+  const accent = cfg.accentColor || (style.defaultColors && style.defaultColors.accentColor) || '#4f46e5';
   const headline = cfg.headline || {
     flash_sale: 'Flash Sale — limited time!',
     gift_reveal: "You've got a gift waiting",
@@ -2627,7 +2627,8 @@ export default function Settings({ shop }) {
             options={[{ value: 'split', label: 'Split' }, { value: 'card', label: 'Card' }]}
             onChange={(v) => setActivePopup((p) => ({ ...p, layout: v }))} />
         )}
-        <ColorRow label="Accent" value={activePopup.accentColor} defaultValue="#4f46e5"
+        <ColorRow label="Accent" value={activePopup.accentColor}
+          defaultValue={(POPUP_STYLES[activeStyleId].defaultColors || {}).accentColor || '#4f46e5'}
           onChange={(v) => setActivePopup((p) => ({ ...p, accentColor: v }))} />
         <ColorRow label="Background" value={activePopup.bgColor}
           defaultValue={(POPUP_STYLES[activeStyleId].defaultColors || {}).bgColor || '#ffffff'}
