@@ -314,7 +314,7 @@ function UnlockedView({ styleId, percentage, expiryDays, code, codeChipEmphasis,
         <Icon name="gift" size={40} />
       </div>
       <div style={{ fontSize: 18, fontWeight: 800, color: titleColor, marginBottom: 4 }}>
-        {percentage}% OFF Unlocked!
+        {percentage ? `${percentage}% OFF` : 'Discount'} Unlocked!
       </div>
       <div style={{ fontSize: 12, color: subColor, marginBottom: 14 }}>
         Expires in {expiryDays} days
@@ -909,6 +909,7 @@ function PreviewInput({ interactive = true, value, placeholder, style, onChange,
 function StyleCardPreview({
   styleId, cfg, styleFields, emailFieldEnabled, compact,
   step = 'prompt', email = '', onEmailChange, onAllow, onDismiss, wantsDiscount, unlockedInfo,
+  emailHint = '', offerPct = 0,
   interactive = true,
 }) {
   const style = getStyle(styleId);
@@ -1003,7 +1004,7 @@ function StyleCardPreview({
               {subtext && <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>{subtext}</div>}
               {emailFieldEnabled && (
                 <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
-                  placeholder="Email address" interactive={interactive}
+                  placeholder={`Email address${emailHint}`} interactive={interactive}
                   style={{ width: '100%', padding: '8px 12px', fontSize: 12, borderRadius: 8,
                     border: '1px solid #e5e7eb', marginBottom: 8, boxSizing: 'border-box',
                     fontFamily: font, lineHeight: 1.2 }} />
@@ -1038,7 +1039,7 @@ function StyleCardPreview({
                     boxShadow: '0 2px 12px rgba(0,0,0,0.18)' }}>
         <div style={{ flex: 1, fontSize: compact ? 12 : 13, fontWeight: 700, minWidth: 0,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {swapped ? `${unlockedInfo.percentage}% off — code ${unlockedInfo.code}` : headline}
+          {swapped ? `${unlockedInfo.percentage ? unlockedInfo.percentage + '% off' : 'Discount'} — code ${unlockedInfo.code}` : headline}
         </div>
         {!swapped && (
           <PreviewButton {...allowBtnCommon} interactive={interactive}
@@ -1096,7 +1097,7 @@ function StyleCardPreview({
               )}
               {emailFieldEnabled && (
                 <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
-                  placeholder="Email address" interactive={interactive}
+                  placeholder={`Email address${emailHint}`} interactive={interactive}
                   style={{ width: '100%', padding: '8px 12px', fontSize: 12, borderRadius: 8,
                     border: '1px solid rgba(255,255,255,0.3)', marginBottom: 8,
                     background: 'rgba(255,255,255,0.15)', color: fg, boxSizing: 'border-box',
@@ -1147,7 +1148,7 @@ function StyleCardPreview({
         {emailFieldEnabled && (
           <div style={{ position: 'relative', marginBottom: 10 }}>
             <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
-              placeholder="Email address" interactive={interactive}
+              placeholder={`Email address${emailHint}`} interactive={interactive}
               style={{ width: '100%', height: 44, padding: lockIcon ? '0 40px 0 16px' : '0 16px', fontSize: 14,
                 borderRadius: styleId === 'spotlight' ? 999 : 12, border: inputBorder,
                 background: inputBg, color: proFg, boxSizing: 'border-box', fontFamily: font,
@@ -1261,7 +1262,7 @@ function StyleCardPreview({
 
     // color_block
     const figureText = wantsDiscount
-      ? (field('offerFigure') || (unlockedInfo && unlockedInfo.percentage ? `${unlockedInfo.percentage}% OFF` : ''))
+      ? (field('offerFigure') || (offerPct ? `${offerPct}% OFF` : ''))
       : '';
     let cdText = null;
     if (field('countdownSource') === 'fixed_date' && field('countdownEndsAt')) {
@@ -1349,7 +1350,7 @@ function StyleCardPreview({
               {subtext && <div style={{ fontSize: 12, color: '#d4d4d8', marginBottom: 10 }}>{subtext}</div>}
               {emailFieldEnabled && (
                 <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
-                  placeholder="Email address" interactive={interactive}
+                  placeholder={`Email address${emailHint}`} interactive={interactive}
                   style={{ width: '100%', padding: '8px 12px',
                   fontSize: 12, borderRadius: 8, border: '1px solid #d4d4d8', marginBottom: 8,
                   background: '#ffffff', color: '#111827', boxSizing: 'border-box',
@@ -1415,7 +1416,7 @@ function StyleCardPreview({
             {subtext && <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 10 }}>{subtext}</div>}
             {emailFieldEnabled && (
               <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)}
-                placeholder="Email address" interactive={interactive}
+                placeholder={`Email address${emailHint}`} interactive={interactive}
                 style={{ width: '100%', padding: '8px 12px',
                 fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 8,
                 boxSizing: 'border-box', fontFamily: font, lineHeight: 1.2 }} />
@@ -1452,6 +1453,7 @@ function StyleCardPreview({
 function ClassicPreview({
   layout, device, popup: cfg, step, email, onEmailChange, onAllow, onDismiss,
   showEmailField, wantsDiscount, unlockedInfo, discountOfferText, discountOfferHeadline,
+  emailHint = '',
   interactive = true,
 }) {
   const bg = cfg.bgColor || '#ffffff';
@@ -1558,7 +1560,7 @@ function ClassicPreview({
                 </div>
               )}
               {showEmailField && (
-                <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder="Your email"
+                <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder={`Your email${emailHint}`}
                   interactive={interactive}
                   style={{ width: '100%', padding: '11px 14px', fontSize: 13, borderRadius: 12,
                     border: '1.5px solid #e5e7eb', marginBottom: 8, boxSizing: 'border-box',
@@ -1581,7 +1583,7 @@ function ClassicPreview({
         {discountOfferHeadline || 'Get a discount on your first order!'}
       </div>
       {showEmailField && (
-        <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder="Your email"
+        <PreviewInput value={email} onChange={(e) => onEmailChange(e.target.value)} placeholder={`Your email${emailHint}`}
           interactive={interactive}
           style={{ width: '100%', padding: '11px 14px', fontSize: 13, borderRadius: 12,
             border: '1.5px solid #e5e7eb', boxSizing: 'border-box', background: '#f9fafb',
@@ -1686,12 +1688,15 @@ export default function Settings({ shop }) {
   // and a realistic sample code + real % + real expiry for the Unlocked
   // step. Never phone/both — this app's popup can only ever collect email.
   const [discountRules, setDiscountRules] = useState({
-    push: { enabled: false, percentage: 10, prefix: 'PUSH', expiryDays: 7, offerText: '' },
-    email: { enabled: false, percentage: 15, prefix: 'EMAIL', expiryDays: 7, offerText: '' },
+    // percentage stays null until the real config has loaded: the preview
+    // shows neutral wording rather than an invented number.
+    push: { enabled: false, percentage: null, prefix: 'PUSH', expiryDays: 7, offerText: '' },
+    email: { enabled: false, percentage: null, prefix: 'EMAIL', expiryDays: 7, offerText: '' },
     // Split layout's discount box shows THIS (DiscountConfig.offerHeadline,
     // via ccfBuildDiscountFields()) — a different field from either rule's
     // own offerText, and different again from popup.headline.
     offerHeadline: '',
+    loaded: false,
   });
 
   // popup-responsive: mobile-first layout switch (admin viewport <= 768px).
@@ -1721,19 +1726,20 @@ export default function Settings({ shop }) {
         setDiscountRules({
           push: {
             enabled: !!dc.pushDiscount?.enabled,
-            percentage: dc.pushDiscount?.percentage ?? 10,
+            percentage: dc.pushDiscount?.percentage ?? null,
             prefix: dc.pushDiscount?.prefix || 'PUSH',
             expiryDays: dc.pushDiscount?.expiryDays ?? 7,
             offerText: dc.pushDiscount?.offerText || '',
           },
           email: {
             enabled: !!dc.emailDiscount?.enabled,
-            percentage: dc.emailDiscount?.percentage ?? 15,
+            percentage: dc.emailDiscount?.percentage ?? null,
             prefix: dc.emailDiscount?.prefix || 'EMAIL',
             expiryDays: dc.emailDiscount?.expiryDays ?? 7,
             offerText: dc.emailDiscount?.offerText || '',
           },
           offerHeadline: dc.offerHeadline || '',
+          loaded: true,
         });
       }
       if (s.status === 'fulfilled') {
@@ -1870,19 +1876,34 @@ export default function Settings({ shop }) {
     : (discountRules.push.enabled || discountRules.email.enabled);
 
   // Which rule the CURRENTLY TYPED preview email would select — matches
-  // ccf-push.js's `var action = email ? 'email' : 'push';` exactly.
+  // ccf-push.js's `var action = email ? 'email' : 'push';` exactly, and the
+  // server's generateDiscount(), which reads config[action + 'Discount'].
   const previewAction = previewEmail.trim() ? 'email' : 'push';
   const previewRule = previewAction === 'email' ? discountRules.email : discountRules.push;
+  // ccfPct(): a rule contributes its percentage only while enabled.
+  const rulePct = (r) => (r && r.enabled && r.percentage) ? r.percentage : 0;
+  // A code is minted only when the selected action's rule is enabled; else the
+  // storefront closes after subscribing ("no discount configured").
+  const previewMintsCode = activeStyleId !== 'top_bar' && !!previewRule.enabled;
+  // ccfFieldPct('emailDiscount'): the "(get N% off)" hint on the email input.
+  const previewEmailPct = rulePct(discountRules.email);
+  const previewEmailHint = previewEmailPct ? ` (get ${previewEmailPct}% off)` : '';
+  // Colour Block's figure: max over the real enabled rules (ccf-push cbPct).
+  const previewOfferPct = Math.max(rulePct(discountRules.push), rulePct(discountRules.email));
   const previewUnlockedInfo = {
     code: sanitizeCodePrefix(previewRule.prefix, previewAction === 'email' ? 'EMAIL' : 'PUSH') + '-A1B2C3',
-    percentage: previewRule.percentage,
+    // null (config not loaded / no percentage) renders as neutral wording.
+    percentage: previewRule.percentage || null,
     expiryDays: previewRule.expiryDays,
   };
   // ccfDiscountOfferText() equivalent — email path wins when the email
-  // field is actually shown, same as the storefront.
+  // field is actually shown, same as the storefront. Neutral wording while
+  // the percentage is unknown.
   const previewDiscountOfferText = previewShowEmailField
-    ? (discountRules.email.offerText || `Add your email to get ${discountRules.email.percentage}% off`)
-    : (discountRules.push.offerText || `You get ${discountRules.push.percentage}% off as a subscriber`);
+    ? (discountRules.email.offerText || (discountRules.email.percentage
+      ? `Add your email to get ${discountRules.email.percentage}% off` : 'Add your email to get a discount'))
+    : (discountRules.push.offerText || (discountRules.push.percentage
+      ? `You get ${discountRules.push.percentage}% off as a subscriber` : 'You get a discount as a subscriber'));
 
   // "Changing style, device, or any field resets to Prompt and re-renders."
   const previewResetKey = JSON.stringify({
@@ -1903,13 +1924,13 @@ export default function Settings({ shop }) {
     const t = setTimeout(() => {
       setPreviewStep((s) => {
         if (s === 'setting_up') return 'subscribed';
-        if (s === 'subscribed') return previewWantsDiscount ? 'unlocked' : 'closed';
+        if (s === 'subscribed') return previewMintsCode ? 'unlocked' : 'closed';
         if (s === 'unlocked') return 'redirecting';
         return s;
       });
     }, STEP_DELAY_MS);
     return () => clearTimeout(t);
-  }, [previewStep, previewWantsDiscount]);
+  }, [previewStep, previewMintsCode]);
 
   const previews = [
     {
@@ -2423,6 +2444,7 @@ export default function Settings({ shop }) {
           const commonPreviewProps = {
             step: 'prompt', email: '', onEmailChange: () => {}, onAllow: () => {}, onDismiss: () => {},
             wantsDiscount: previewWantsDiscount, unlockedInfo: previewUnlockedInfo,
+            emailHint: previewEmailHint, offerPct: previewOfferPct,
             // gallery-nested-button-fix: this card's own live preview sits
             // inside GalleryCard's <button>, so its close X can't be a real
             // <button> too — see ClosePreviewButton's interactive prop.
@@ -2546,6 +2568,8 @@ export default function Settings({ shop }) {
                 onDismiss: () => setPreviewStep('dismissed'),
                 wantsDiscount: previewWantsDiscount,
                 unlockedInfo: previewUnlockedInfo,
+                emailHint: previewEmailHint,
+                offerPct: previewOfferPct,
               }}
             />
 
