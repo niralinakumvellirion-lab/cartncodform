@@ -626,6 +626,157 @@ function ImageRow({ label, imageUrl, imagePosition, onUpload, onRemove }) {
   );
 }
 
+// Real anchor / real width (px, in the frame's own viewport) / real overlay of
+// each gallery style, taken from ccf-push.js. Desktop viewport is 1280x720,
+// phone viewport 390x746; the whole frame is scaled down as one unit.
+function frameSpec(key, device, popupCfg, styleFields) {
+  const overlayOn = popupCfg.showOverlay !== false;
+  const splitAlpha = typeof popupCfg.overlayOpacity === 'number' ? popupCfg.overlayOpacity : 0.5;
+  if (device === 'desktop') {
+    const spec = {
+      'classic-split': { anchor: 'center', width: 680, overlay: overlayOn ? { alpha: splitAlpha } : null },
+      'classic-card': { anchor: 'bottom', width: 340 },
+      flash_sale: { anchor: 'bottom', width: 340 },
+      gift_reveal: { anchor: 'bottom', width: 340 },
+      spotlight: { anchor: 'center', width: styleFields.shape === 'oval' ? 520 : 460, overlay: { alpha: 0.45, blur: 3 } },
+      noir: { anchor: 'center', width: 780, overlay: { alpha: 0.5 } },
+      color_block: { anchor: 'center', width: 740, overlay: { alpha: 0.5 } },
+    };
+    return spec[key] || { anchor: 'center', width: 340 };
+  }
+  const spec = {
+    'classic-card': { anchor: 'center', width: 300 },
+    flash_sale: { anchor: 'center', width: 300 },
+    gift_reveal: { anchor: 'center', width: 300 },
+    bottom_sheet: { anchor: 'bottom', width: 390, flush: true },
+    top_bar: { anchor: 'top', width: 390 },
+    story_card: { anchor: 'center', width: 260 },
+    spotlight: { anchor: 'center', width: 358, compact: true, overlay: { alpha: 0.45, blur: 3 } },
+    noir: { anchor: 'center', width: 358, compact: true, overlay: { alpha: 0.5 } },
+    color_block: { anchor: 'center', width: 358, compact: true, overlay: { alpha: 0.5 } },
+  };
+  return spec[key] || { anchor: 'center', width: 300 };
+}
+
+// One component for both device frames. Everything (chrome, quiet page mock,
+// overlay, popup) is laid out at native size inside a fixed viewport and then
+// scaled together with a single transform, so the popup can never be resized
+// independently of the mock page.
+function DeviceFrameThumb({ device, spec, children }) {
+  const phone = device === 'mobile';
+  const W = phone ? 410 : 1280;
+  const H = phone ? 800 : 776;
+  const hostRef = useRef(null);
+  const [k, setK] = useState(phone ? 0.25 : 0.2);
+  useEffect(() => {
+    const el = hostRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(() => {
+      const w = el.clientWidth;
+      if (w > 0) setK(phone ? Math.min(w / W, 210 / H) : w / W);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [phone, W, H]);
+
+  const block = (w, h, r, bg) => ({ width: w, height: h, borderRadius: r, background: bg, flexShrink: 0 });
+  const ink = '#eceef2';
+  const ink2 = '#e3e6eb';
+  const pageMock = phone ? (
+    <div style={{ position: 'absolute', inset: 0 }}>
+      <div style={{ height: 52, background: '#f1f3f6', display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between', padding: '0 20px' }}>
+        <div style={block(90, 18, 6, ink2)} /><div style={block(26, 18, 5, ink2)} />
+      </div>
+      <div style={{ margin: '16px 16px 0', ...block('auto', 170, 14, ink) }} />
+      <div style={{ margin: '16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} style={{ height: 150, borderRadius: 12, background: ink, padding: 10, boxSizing: 'border-box' }}>
+            <div style={{ height: 90, borderRadius: 8, background: ink2 }} />
+            <div style={{ ...block('70%', 10, 5, ink2), marginTop: 12 }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  ) : (
+    <div style={{ position: 'absolute', inset: 0 }}>
+      <div style={{ height: 64, background: '#f1f3f6', display: 'flex', alignItems: 'center',
+        justifyContent: 'space-between', padding: '0 48px' }}>
+        <div style={block(130, 24, 7, ink2)} />
+        <div style={{ display: 'flex', gap: 18 }}>
+          {[0, 1, 2].map((i) => <div key={i} style={block(64, 14, 7, ink2)} />)}
+        </div>
+      </div>
+      <div style={{ margin: '28px 48px 0', ...block('auto', 230, 16, ink) }} />
+      <div style={{ margin: '28px 48px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 28 }}>
+        {[0, 1, 2].map((i) => (
+          <div key={i} style={{ height: 210, borderRadius: 14, background: ink, padding: 16, boxSizing: 'border-box' }}>
+            <div style={{ height: 120, borderRadius: 10, background: ink2 }} />
+            <div style={{ ...block('60%', 12, 6, ink2), marginTop: 16 }} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const anchorStyle = spec.anchor === 'bottom'
+    ? { bottom: spec.flush ? 0 : 24, left: '50%', transform: 'translateX(-50%)' }
+    : spec.anchor === 'top'
+    ? { top: 0, left: '50%', transform: 'translateX(-50%)' }
+    : { top: '50%', left: '50%', transform: 'translate(-50%, -50%)' };
+
+  const viewport = (
+    <div style={{ position: 'relative', flex: 1, background: '#f9fafb', overflow: 'hidden' }}>
+      {pageMock}
+      {spec.overlay && (
+        <div style={{ position: 'absolute', inset: 0, background: `rgba(0,0,0,${spec.overlay.alpha})`,
+          ...(spec.overlay.blur ? { backdropFilter: `blur(${spec.overlay.blur}px)`,
+            WebkitBackdropFilter: `blur(${spec.overlay.blur}px)` } : {}) }} />
+      )}
+      <div className="ccf-frame-pop" style={{ position: 'absolute', width: spec.width, ...anchorStyle }}>
+        {children}
+      </div>
+    </div>
+  );
+
+  const frame = phone ? (
+    <div style={{ width: W, height: H, borderRadius: 54, background: '#111827', padding: 10, boxSizing: 'border-box' }}>
+      <div style={{ width: '100%', height: '100%', borderRadius: 44, background: '#f9fafb', overflow: 'hidden',
+        display: 'flex', flexDirection: 'column' }}>
+        <div style={{ height: 34, background: '#f1f3f6', position: 'relative', flexShrink: 0 }}>
+          <div style={{ position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)',
+            ...block(110, 22, 11, '#111827') }} />
+          <div style={{ position: 'absolute', top: 12, left: 26, ...block(38, 9, 5, '#d5d9df') }} />
+          <div style={{ position: 'absolute', top: 12, right: 26, ...block(28, 9, 5, '#d5d9df') }} />
+        </div>
+        {viewport}
+      </div>
+    </div>
+  ) : (
+    <div style={{ width: W, height: H, borderRadius: 20, border: '2px solid #d1d5db', background: '#fff',
+      overflow: 'hidden', boxSizing: 'border-box', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ height: 56, background: '#f3f4f6', borderBottom: '1px solid #e5e7eb', display: 'flex',
+        alignItems: 'center', padding: '0 22px', gap: 10, flexShrink: 0 }}>
+        {[0, 1, 2].map((i) => <div key={i} style={block(14, 14, 7, '#d1d5db')} />)}
+        <div style={{ marginLeft: 26, ...block(520, 28, 14, '#e5e7eb') }} />
+      </div>
+      {viewport}
+    </div>
+  );
+
+  return (
+    <div ref={hostRef} style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+      <style>{'.ccf-frame-pop > * { width: 100% !important; max-width: none !important; box-sizing: border-box; }'}</style>
+      <div style={{ width: W * k, height: H * k, position: 'relative', flexShrink: 0 }}>
+        <div style={{ width: W, height: H, transform: `scale(${k})`, transformOrigin: 'top left',
+          position: 'absolute', top: 0, left: 0 }}>
+          {frame}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // A style-gallery card: a small, LIVE (not static) preview of the actual
 // style/layout, scaled down via CSS transform so it's the merchant's real
 // current settings, not a screenshot.
@@ -644,13 +795,9 @@ function GalleryCard({ card, selected, mobileOnly, previewNode, onClick }) {
         display: 'flex', flexDirection: 'column', gap: 8,
       }}
     >
-      <div style={{ height: 96, borderRadius: 8, overflow: 'hidden', background: '#f3f4f6',
-        position: 'relative' }}>
-        <div style={{ position: 'absolute', top: '50%', left: '50%',
-          transform: 'translate(-50%,-50%) scale(0.34)', transformOrigin: 'center',
-          width: 340, pointerEvents: 'none' }}>
-          {previewNode}
-        </div>
+      <div style={{ pointerEvents: 'none', borderRadius: 8, overflow: 'hidden', background: '#f3f4f6',
+        padding: '8px 0' }}>
+        {previewNode}
       </div>
       <div>
         <div style={{ fontSize: 12, fontWeight: 700, color: '#111827', display: 'flex',
@@ -2229,7 +2376,8 @@ export default function Settings({ shop }) {
           4 mobile-only styles had no discovery path at all. */}
       {deviceToggle}
       <div style={{ display: 'grid',
-        gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(auto-fill, minmax(200px, 1fr))',
+        gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)'
+          : (popupDevice === 'mobile' ? 'repeat(auto-fill, minmax(150px, 1fr))' : 'repeat(auto-fill, minmax(250px, 1fr))'),
         gap: '12px' }}>
         {GALLERY_CARDS
           // mobile-only-visibility: hide these 4 cards entirely on the
@@ -2253,13 +2401,18 @@ export default function Settings({ shop }) {
             // <button> too — see ClosePreviewButton's interactive prop.
             interactive: false,
           };
-          const previewNode = c.styleId !== 'classic' ? (
-            <StyleCardPreview styleId={c.styleId} cfg={activePopup} styleFields={activeStyleFields}
-              emailFieldEnabled={previewShowEmailField} {...commonPreviewProps} />
+          const galleryCfg = popupDevice === 'mobile' ? mergeConfig(popup, mobilePopup) : popup;
+          const fSpec = frameSpec(c.key, popupDevice, galleryCfg, activeStyleFields);
+          const popupEl = c.styleId !== 'classic' ? (
+            <StyleCardPreview styleId={c.styleId} cfg={galleryCfg} styleFields={activeStyleFields}
+              emailFieldEnabled={previewShowEmailField} compact={!!fSpec.compact} {...commonPreviewProps} />
           ) : (
-            <ClassicPreview layout={c.layout} device="desktop" popup={activePopup}
+            <ClassicPreview layout={c.layout} device={popupDevice} popup={galleryCfg}
               showEmailField={previewShowEmailField} discountOfferText={previewDiscountOfferText}
               discountOfferHeadline={discountRules.offerHeadline} {...commonPreviewProps} />
+          );
+          const previewNode = (
+            <DeviceFrameThumb device={popupDevice} spec={fSpec}>{popupEl}</DeviceFrameThumb>
           );
           return (
             <GalleryCard key={c.key} card={c} selected={selected}
