@@ -3,6 +3,10 @@
  * Shared by the Brain (send time) and the weights job (hour buckets) so both
  * agree on what "hour 11" means: 11 o'clock on the STORE's wall clock, including
  * half-hour zones (+05:30, +05:45) and across DST.
+ *
+ * MIRRORED in frontend/app/admin/components/QuietHoursWarning.jsx (resolveTz,
+ * hourInTz, resolveQuietWindow, isQuietHour) — the browser bundle can't import
+ * this file, so that copy must be kept EXACTLY in sync with the functions here.
  */
 
 const DEFAULT_TZ = 'Asia/Kolkata';
