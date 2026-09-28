@@ -489,8 +489,22 @@ router.patch('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req
       }
       merge('quietHours', qh);
     }
+    // timezone must be a real IANA zone name when present — same "reject,
+    // don't silently default" pattern as quietHours above. An unrecognised
+    // string used to save as-is and get silently replaced by the Kolkata
+    // default everywhere it's read (utils/timezone.js's resolveTz), with the
+    // merchant never told. Intl throws RangeError on an unknown zone.
     if (typeof req.body.timezone === 'string' && req.body.timezone) {
-      set.timezone = req.body.timezone;
+      const tz = req.body.timezone;
+      try {
+        // eslint-disable-next-line no-new
+        new Intl.DateTimeFormat('en-US', { timeZone: tz });
+      } catch {
+        return res.status(400).json({
+          error: `timezone must be a valid IANA zone name (got ${JSON.stringify(tz)})`,
+        });
+      }
+      set.timezone = tz;
     }
 
     if (Object.keys(set).length === 0) {

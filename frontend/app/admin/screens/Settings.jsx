@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { Banner, Button } from '@shopify/polaris';
 import { apiGet, apiSend, BACKEND_URL } from '../../../lib/api';
 import { POPUP_STYLES, STYLE_ORDER, getStyle, getStyleFieldValue, resolveStyleId, MOBILE_ONLY_STYLE_IDS } from '../lib/popupStyles';
@@ -462,6 +462,66 @@ function ColorRow({ label, value, defaultValue, onChange }) {
           cursor: 'pointer', overflow: 'hidden' }}
       />
       <span style={{ fontSize: 12, color: '#6b7280', fontFamily: 'monospace' }}>{v}</span>
+    </div>
+  );
+}
+
+// UTC offset of `tz` right now, e.g. "UTC+05:30" — lets a merchant sanity
+// check a zone against their own clock. Falls back to '' for a bad zone
+// string (the <select> itself only ever offers real Intl-recognised zones,
+// so this really only matters for a stale/invalid saved value).
+function tzOffsetLabel(tz) {
+  try {
+    const part = new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'longOffset' })
+      .formatToParts(new Date())
+      .find((p) => p.type === 'timeZoneName');
+    return (part?.value || '').replace('GMT', 'UTC');
+  } catch {
+    return '';
+  }
+}
+
+// Searchable IANA timezone picker — a text filter above a plain <select>,
+// per the task's own "a plain <select> with a text filter is fine" call.
+// Intl.supportedValuesOf('timeZone') needs no new dependency; a browser
+// without it (old Safari) just falls back to offering the current value.
+function TimezoneSelect({ value, onChange }) {
+  const [filter, setFilter] = useState('');
+  const zones = useMemo(() => {
+    try {
+      return Intl.supportedValuesOf('timeZone');
+    } catch {
+      return value ? [value] : [];
+    }
+  }, [value]);
+  const filtered = useMemo(() => {
+    const f = filter.trim().toLowerCase();
+    const list = f ? zones.filter((z) => z.toLowerCase().includes(f)) : zones;
+    // Never let a filter hide the merchant's own saved zone out of the
+    // <select> entirely — that would silently change the value on the next
+    // unrelated change to this control.
+    return value && !list.includes(value) ? [value, ...list] : list;
+  }, [zones, filter, value]);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <input
+        type="text"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="Search…"
+        aria-label="Search timezones"
+        style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 12, width: 110 }}
+      />
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="ccf-style-focus"
+        style={{ padding: '4px 6px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13, minWidth: 260 }}
+      >
+        {filtered.map((z) => (
+          <option key={z} value={z}>{z} ({tzOffsetLabel(z)})</option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -2219,6 +2279,16 @@ export default function Settings({ shop }) {
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Timezone — drives quiet hours, computeRunAt, the weights hour
+                buckets and the poller's quiet-hours check (all read
+                store.timezone), so this is a real setting, not just display. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px' }}>
+              <div style={{ width: '180px', fontSize: '13px', color: '#374151' }}>
+                Timezone
+              </div>
+              <TimezoneSelect value={timezone || 'Asia/Kolkata'} onChange={setTimezone} />
             </div>
 
             {/* Quiet hours */}

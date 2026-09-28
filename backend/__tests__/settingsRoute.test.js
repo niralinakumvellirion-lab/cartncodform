@@ -93,3 +93,34 @@ test('a quietHours object with only one side set is valid', async () => {
     { $set: { 'quietHours.start': 21 } }
   );
 });
+
+test('an unrecognised timezone string is rejected with 400', async () => {
+  const res = await run({ timezone: 'Not/A_Zone' });
+  expect(res.statusCode).toBe(400);
+  expect(res.body.error).toMatch(/timezone/);
+  expect(res.body.error).toMatch(/Not\/A_Zone/);
+  expect(Store.updateOne).not.toHaveBeenCalled();
+});
+
+test('a valid IANA timezone is saved', async () => {
+  const res = await run({ timezone: 'America/New_York' });
+  expect(res.statusCode).toBe(200);
+  expect(Store.updateOne).toHaveBeenCalledWith(
+    { shopDomain: SHOP },
+    { $set: { timezone: 'America/New_York' } }
+  );
+});
+
+test('a half-hour-offset timezone (Asia/Kolkata) is accepted', async () => {
+  const res = await run({ timezone: 'Asia/Kolkata' });
+  expect(res.statusCode).toBe(200);
+});
+
+test('an empty timezone string is a no-op, not an error (existing behaviour)', async () => {
+  const res = await run({ timezone: '', voice: { tone: 'warm' } });
+  expect(res.statusCode).toBe(200);
+  expect(Store.updateOne).toHaveBeenCalledWith(
+    { shopDomain: SHOP },
+    { $set: { 'voice.tone': 'warm' } }
+  );
+});
