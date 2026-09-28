@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useId } from 'react';
 import { Banner, Button } from '@shopify/polaris';
 import { apiGet, apiSend, BACKEND_URL } from '../../../lib/api';
 import { POPUP_STYLES, STYLE_ORDER, getStyle, getStyleFieldValue, resolveStyleId, MOBILE_ONLY_STYLE_IDS } from '../lib/popupStyles';
@@ -481,47 +481,172 @@ function tzOffsetLabel(tz) {
   }
 }
 
-// Searchable IANA timezone picker — a text filter above a plain <select>,
-// per the task's own "a plain <select> with a text filter is fine" call.
-// Intl.supportedValuesOf('timeZone') needs no new dependency; a browser
-// without it (old Safari) just falls back to offering the current value.
-function TimezoneSelect({ value, onChange }) {
+// Searchable IANA timezone combobox: a button showing the current zone +
+// offset; clicking it opens a panel (search input on top, filtered results
+// below, one control) right under the button. Intl.supportedValuesOf
+// ('timeZone') needs no new dependency; a browser without it (old Safari)
+// falls back to offering just the current value.
+function TimezoneCombobox({ value, onChange }) {
+  const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState('');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const containerRef = useRef(null);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+  const idBase = useId();
+  const listboxId = `${idBase}-listbox`;
+
   const zones = useMemo(() => {
     try {
-      return Intl.supportedValuesOf('timeZone');
+      const list = Intl.supportedValuesOf('timeZone');
+      // Some ICU builds omit an alias the app itself defaults to/stores
+      // (e.g. this browser's list has 'Asia/Calcutta' but not the identical
+      // 'Asia/Kolkata') — without this, the merchant's own saved zone could
+      // be unfindable in its own picker: never highlighted, never scrolled
+      // into view on open, and indistinguishable from "no zone selected".
+      return value && !list.includes(value) ? [value, ...list] : list;
     } catch {
       return value ? [value] : [];
     }
   }, [value]);
   const filtered = useMemo(() => {
     const f = filter.trim().toLowerCase();
-    const list = f ? zones.filter((z) => z.toLowerCase().includes(f)) : zones;
-    // Never let a filter hide the merchant's own saved zone out of the
-    // <select> entirely — that would silently change the value on the next
-    // unrelated change to this control.
-    return value && !list.includes(value) ? [value, ...list] : list;
-  }, [zones, filter, value]);
+    return f ? zones.filter((z) => z.toLowerCase().includes(f)) : zones;
+  }, [zones, filter]);
+
+  function openPanel() {
+    setFilter('');
+    setActiveIndex(Math.max(zones.indexOf(value), 0));
+    setOpen(true);
+  }
+  function closePanel() {
+    setOpen(false);
+  }
+  function selectZone(z) {
+    onChange(z);
+    closePanel();
+  }
+
+  // Focus the search box the moment the panel opens.
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  // Keep the highlighted row in view as the merchant arrows through it (also
+  // scrolls the current selection into view right on open).
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.querySelector(`[data-index="${activeIndex}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [open, activeIndex]);
+
+  // A new filter always re-highlights the top result.
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [filter]);
+
+  // Click outside the button+panel closes without changing the selection.
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDocMouseDown = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) closePanel();
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [open]);
+
+  function onInputKeyDown(e) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveIndex((i) => Math.min(i + 1, filtered.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filtered[activeIndex]) selectZone(filtered[activeIndex]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closePanel();
+    }
+  }
+
+  const activeOptionId = filtered[activeIndex] ? `${idBase}-opt-${activeIndex}` : undefined;
+
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-      <input
-        type="text"
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        placeholder="Search…"
-        aria-label="Search timezones"
-        style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 12, width: 110 }}
-      />
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+    <div ref={containerRef} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        onClick={() => (open ? closePanel() : openPanel())}
+        onKeyDown={(e) => {
+          if (!open && (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            openPanel();
+          }
+        }}
+        aria-haspopup="listbox"
+        aria-expanded={open}
         className="ccf-style-focus"
-        style={{ padding: '4px 6px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: 13, minWidth: 260 }}
+        style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px',
+          borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', fontSize: 13,
+          color: '#374151', cursor: 'pointer', minWidth: 260, justifyContent: 'space-between' }}
       >
-        {filtered.map((z) => (
-          <option key={z} value={z}>{z} ({tzOffsetLabel(z)})</option>
-        ))}
-      </select>
+        <span>{value} ({tzOffsetLabel(value)})</span>
+        <span aria-hidden="true" style={{ color: '#9ca3af', fontSize: 10,
+          transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s ease' }}>▾</span>
+      </button>
+
+      {open && (
+        <div style={{ position: 'absolute', zIndex: 20, top: 'calc(100% + 4px)', left: 0, width: 300,
+          background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.14)', padding: 6, boxSizing: 'border-box' }}>
+          <input
+            ref={inputRef}
+            type="text"
+            role="combobox"
+            aria-expanded={open}
+            aria-controls={listboxId}
+            aria-activedescendant={activeOptionId}
+            aria-autocomplete="list"
+            aria-label="Search timezones"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            onKeyDown={onInputKeyDown}
+            placeholder="Search timezones…"
+            style={{ width: '100%', padding: '6px 8px', borderRadius: 6, border: '1px solid #e5e7eb',
+              fontSize: 13, boxSizing: 'border-box', marginBottom: 6 }}
+          />
+          <div
+            ref={listRef}
+            id={listboxId}
+            role="listbox"
+            aria-label="Timezones"
+            style={{ maxHeight: 240, overflowY: 'auto' }}
+          >
+            {filtered.length === 0 ? (
+              <div style={{ padding: '8px', fontSize: 12, color: '#9ca3af' }}>No matches</div>
+            ) : filtered.map((z, i) => {
+              const active = i === activeIndex;
+              const selected = z === value;
+              return (
+                <div
+                  key={z}
+                  id={`${idBase}-opt-${i}`}
+                  data-index={i}
+                  role="option"
+                  aria-selected={selected}
+                  onMouseEnter={() => setActiveIndex(i)}
+                  onClick={() => selectZone(z)}
+                  style={{ padding: '6px 8px', borderRadius: 6, fontSize: 13, cursor: 'pointer',
+                    background: active ? '#eef2ff' : 'transparent',
+                    color: selected ? '#4f46e5' : '#374151', fontWeight: selected ? 700 : 400 }}
+                >
+                  {z} ({tzOffsetLabel(z)})
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2288,7 +2413,7 @@ export default function Settings({ shop }) {
               <div style={{ width: '180px', fontSize: '13px', color: '#374151' }}>
                 Timezone
               </div>
-              <TimezoneSelect value={timezone || 'Asia/Kolkata'} onChange={setTimezone} />
+              <TimezoneCombobox value={timezone || 'Asia/Kolkata'} onChange={setTimezone} />
             </div>
 
             {/* Quiet hours */}
