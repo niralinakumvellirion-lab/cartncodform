@@ -11,6 +11,7 @@ const ShopWeights = require('../models/ShopWeights');
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
 const { computeWeeklyStats, computeInsights } = require('../services/analyticsService');
 const { generateWeeklyNarrative, generateInsights } = require('../services/aiService');
+const { computeWeights } = require('../services/weightsService');
 
 const SIGNAL_TYPES = [
   'cart_abandon', 'checkout_abandon', 'browse_abandon',
@@ -511,10 +512,31 @@ router.patch('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req
       return res.status(400).json({ error: 'No settings provided' });
     }
 
-    await Store.updateOne({ shopDomain: shop }, { $set: set });
+    // findOneAndUpdate (default new:false) hands back the PRE-update doc in
+    // the same round trip, so a real timezone change can be detected below
+    // without a second query.
+    const before = await Store.findOneAndUpdate({ shopDomain: shop }, { $set: set });
 
     // A voice change invalidates the cached narrative for this shop.
     narrativeCache.delete(shop);
+
+    // ShopWeights.hourRates is bucketed by store-local hour (utils/timezone.js
+    // hourInTz) — a timezone change makes every existing bucket mean a
+    // different wall-clock hour than the one computeRunAt will read it as
+    // (same mismatch shape as the earlier UTC-bucketing bug). Only recompute
+    // when the value actually changed, not just because the field was
+    // present in the payload (e.g. re-saving the same zone). Fire-and-forget:
+    // must never block or fail the save response.
+    if (set.timezone && before && before.timezone !== set.timezone) {
+      const fromTz = before.timezone || '(unset)';
+      computeWeights(shop)
+        .then(() => console.log(
+          `[settings] recomputed weights for ${shop} after timezone change: ${fromTz} -> ${set.timezone}`
+        ))
+        .catch((err) => console.error(
+          `[settings] weights recompute failed for ${shop} after timezone change:`, err.message
+        ));
+    }
 
     return res.json({ updated: true });
   } catch (err) {

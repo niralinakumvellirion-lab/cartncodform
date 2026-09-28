@@ -170,20 +170,24 @@ async function getOnlineToken(shop, sessionToken) {
 }
 
 /**
- * Fetch the shop record from the Admin API and return its contact email.
- * Used to link a connected store to an owner when no owner_email was supplied.
+ * Fetch the shop record from the Admin API and return the fields we need at
+ * install time: contact email (links a connected store to an owner when no
+ * owner_email was supplied) and the shop's own IANA timezone (iana_timezone).
+ * One call for both — needs no scope beyond what an installed app already
+ * has, since the Shop resource is always readable.
  */
-async function fetchShopEmail(shop, accessToken) {
+async function fetchShopInfo(shop, accessToken) {
   try {
     const url = `https://${shop}/admin/api/${API_VERSION}/shop.json`;
     const { data } = await axios.get(url, {
       headers: { 'X-Shopify-Access-Token': accessToken },
     });
-    return (data && data.shop && data.shop.email) || null;
+    const s = data && data.shop;
+    return { email: (s && s.email) || null, ianaTimezone: (s && s.iana_timezone) || null };
   } catch (err) {
     const detail = err.response ? JSON.stringify(err.response.data) : err.message;
-    console.error(`[shopify] Failed to fetch shop email for ${shop}: ${detail}`);
-    return null;
+    console.error(`[shopify] Failed to fetch shop info for ${shop}: ${detail}`);
+    return { email: null, ianaTimezone: null };
   }
 }
 
@@ -297,7 +301,7 @@ module.exports = {
   exchangeCodeForToken,
   exchangeSessionToken,
   getOnlineToken,
-  fetchShopEmail,
+  fetchShopInfo,
   registerWebhook,
   registerAllWebhooks,
   refreshAccessTokenIfNeeded,

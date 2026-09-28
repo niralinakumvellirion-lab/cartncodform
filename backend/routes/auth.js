@@ -8,7 +8,7 @@ const {
   verifyHmac,
   exchangeCodeForToken,
   getOnlineToken,
-  fetchShopEmail,
+  fetchShopInfo,
   registerAllWebhooks,
   refreshAccessTokenIfNeeded,
 } = require('../utils/shopify');
@@ -109,11 +109,24 @@ router.get('/callback', async (req, res) => {
       ? new Date(Date.now() + tokenData.expires_in * 1000)
       : null;
 
-    // Owner email: prefer the one passed at install time, otherwise pull the
-    // shop's contact email from the Shopify Admin API (GET /admin/api/<v>/shop.json).
+    // A store document already existing under this shopDomain (checked
+    // BEFORE the upsert below) is how a fresh install is told apart from a
+    // reconnect/re-auth of a known store — never by comparing the timezone
+    // value itself, since the schema default ('Asia/Kolkata') is
+    // indistinguishable from a merchant who genuinely chose Kolkata.
+    const isNewInstall = !(await Store.exists({ shopDomain }));
+
+    // Owner email + the shop's own timezone both come off the same Admin API
+    // call (GET /admin/api/<v>/shop.json) — no second request. Timezone is
+    // only ever read for a NEW install (see isNewInstall above); a merchant
+    // who has since picked their own timezone in Settings must never be
+    // overwritten by a later reconnect.
     let ownerEmail = savedState.ownerEmail || null;
-    if (!ownerEmail) {
-      ownerEmail = await fetchShopEmail(shopDomain, accessToken);
+    let shopTimezone = null;
+    if (!ownerEmail || isNewInstall) {
+      const info = await fetchShopInfo(shopDomain, accessToken);
+      if (!ownerEmail) ownerEmail = info.email;
+      shopTimezone = info.ianaTimezone;
     }
 
     const update = {
@@ -126,6 +139,21 @@ router.get('/callback', async (req, res) => {
       needsReauth: false,
     };
     if (ownerEmail) update.ownerEmail = ownerEmail;
+    if (isNewInstall) {
+      // Same validation as the settings PATCH (routes/profiles.js): Intl
+      // throws on an unrecognised zone. A missing or bad value falls back to
+      // the schema's own Kolkata default by simply not setting the field —
+      // setDefaultsOnInsert below fills it in.
+      if (shopTimezone) {
+        try {
+          // eslint-disable-next-line no-new
+          new Intl.DateTimeFormat('en-US', { timeZone: shopTimezone });
+          update.timezone = shopTimezone;
+        } catch {
+          console.warn(`[auth] Shop ${shopDomain} returned an unrecognised iana_timezone "${shopTimezone}" — keeping the Asia/Kolkata default`);
+        }
+      }
+    }
 
     const store = await Store.findOneAndUpdate(
       { shopDomain },
