@@ -2233,9 +2233,29 @@ export default function Settings({ shop }) {
               <div style={{ width: '180px', fontSize: '13px', color: '#374151' }}>
                 Quiet hours
               </div>
-              <div style={{ fontSize: '13px', color: '#374151' }}>
-                {quietHours.start ?? 22}:00 pm – {quietHours.end ?? 8}:00 am,{' '}
-                {timezone || 'Asia/Kolkata'}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', color: '#374151' }}>
+                {/* A <select> of 0-23 can't submit an out-of-range value —
+                    matches the backend's own integer 0-23 check on save. */}
+                <select
+                  value={quietHours.start ?? 22}
+                  onChange={(e) => setQuietHours((q) => ({ ...q, start: Number(e.target.value) }))}
+                  style={{ padding: '4px 6px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: '13px' }}
+                >
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>
+                  ))}
+                </select>
+                <span>–</span>
+                <select
+                  value={quietHours.end ?? 8}
+                  onChange={(e) => setQuietHours((q) => ({ ...q, end: Number(e.target.value) }))}
+                  style={{ padding: '4px 6px', borderRadius: 6, border: '1px solid #e5e7eb', fontSize: '13px' }}
+                >
+                  {Array.from({ length: 24 }, (_, h) => (
+                    <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>
+                  ))}
+                </select>
+                <span style={{ color: '#9ca3af' }}>{timezone || 'Asia/Kolkata'}</span>
               </div>
             </div>
 

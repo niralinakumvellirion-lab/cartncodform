@@ -470,7 +470,25 @@ router.patch('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req
     };
     merge('voice', req.body.voice);
     merge('caps', req.body.caps);
-    merge('quietHours', req.body.quietHours);
+
+    // quietHours.start/end must be an integer hour 0-23 when present — a bad
+    // value (e.g. 99, -1, "late") used to save as-is and get silently
+    // replaced by the default (22/8) wherever it's read (utils/timezone.js),
+    // with the merchant never told their input didn't take effect. A missing
+    // object, or a missing side, is still valid — the existing default applies.
+    const qh = req.body.quietHours;
+    if (qh && typeof qh === 'object') {
+      for (const side of ['start', 'end']) {
+        if (!Object.prototype.hasOwnProperty.call(qh, side)) continue;
+        const v = qh[side];
+        if (!Number.isInteger(v) || v < 0 || v > 23) {
+          return res.status(400).json({
+            error: `quietHours.${side} must be an integer between 0 and 23 (got ${JSON.stringify(v)})`,
+          });
+        }
+      }
+      merge('quietHours', qh);
+    }
     if (typeof req.body.timezone === 'string' && req.body.timezone) {
       set.timezone = req.body.timezone;
     }
