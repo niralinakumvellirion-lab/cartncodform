@@ -434,12 +434,28 @@ async function handleCustomersDataRequest(req, res) {
       if (customerId) query.customerId = customerId;
       else if (customerEmail) query.email = customerEmail.toLowerCase();
 
-      const carts = await AbandonedCustomer.find(query).lean();
-      const events = await StorefrontEvent.find(
-        customerId ? { shopDomain, customerId } : {}
-      ).limit(100).lean();
+      const profileOr = [];
+      if (customerId) profileOr.push({ 'identifiers.customerId': customerId });
+      if (customerEmail) profileOr.push({ 'identifiers.emails': customerEmail.toLowerCase() });
 
-      console.log(`[gdpr] Data on file — AbandonedCustomer rows: ${carts.length}, StorefrontEvent rows: ${events.length}`);
+      const [carts, events, profiles] = await Promise.all([
+        AbandonedCustomer.find(query).lean(),
+        StorefrontEvent.find(customerId ? { shopDomain, customerId } : {}).limit(100).lean(),
+        profileOr.length
+          ? Profile.find({ shopDomain, $or: profileOr }).lean()
+          : Promise.resolve([]),
+      ]);
+
+      const jobQuery = { shopDomain, $or: [] };
+      if (customerId) jobQuery.$or.push({ customerId });
+      const profileIds = profiles.map((p) => p._id);
+      if (profileIds.length) jobQuery.$or.push({ profileId: { $in: profileIds } });
+      const jobs = jobQuery.$or.length ? await ScheduledJob.find(jobQuery).limit(100).lean() : [];
+
+      console.log(
+        `[gdpr] Data on file — AbandonedCustomer rows: ${carts.length}, StorefrontEvent rows: ${events.length}, ` +
+        `Profile rows: ${profiles.length}, ScheduledJob rows: ${jobs.length}`
+      );
     }
 
     return res.status(200).json({ received: true });
@@ -466,10 +482,11 @@ async function handleCustomersRedact(req, res) {
       .toString().trim().toLowerCase();
     const customerId = req.body.customer?.id ? String(req.body.customer.id) : null;
     const customerEmail = req.body.customer?.email || null;
+    const customerPhone = req.body.customer?.phone || null;
 
     console.log(`[gdpr] customers/redact for shop ${shopDomain}, customer ${customerId || customerEmail || 'unknown'}`);
 
-    if (!customerId && !customerEmail) {
+    if (!customerId && !customerEmail && !customerPhone) {
       console.warn('[gdpr] customers/redact — no customer identifier in payload, nothing to delete');
       return res.status(200).json({ received: true });
     }
@@ -477,6 +494,24 @@ async function handleCustomersRedact(req, res) {
     const orClauses = [];
     if (customerId) orClauses.push({ customerId });
     if (customerEmail) orClauses.push({ email: customerEmail.toLowerCase() });
+
+    // Profile is matched separately (it's keyed by identifiers.*, not the
+    // flat customerId/email fields AbandonedCustomer/StorefrontEvent use).
+    const profileOr = [];
+    if (customerId) profileOr.push({ 'identifiers.customerId': customerId });
+    if (customerEmail) profileOr.push({ 'identifiers.emails': customerEmail.toLowerCase() });
+    if (customerPhone) profileOr.push({ 'identifiers.phones': customerPhone });
+
+    // Read the Profile(s) BEFORE deleting them — we need their cartTokens to
+    // find ScheduledJob rows that never got a customerId (e.g. a job
+    // scheduled while the visitor was still anonymous).
+    const profiles = profileOr.length
+      ? await Profile.find({ shopDomain, $or: profileOr }).lean()
+      : [];
+    const profileIds = profiles.map((p) => p._id);
+    const cartTokens = [...new Set(
+      profiles.flatMap((p) => (p.identifiers && p.identifiers.cartTokens) || [])
+    )];
 
     const cartResult = await AbandonedCustomer.deleteMany({ shopDomain, $or: orClauses });
     const eventResult = customerId
@@ -486,7 +521,42 @@ async function handleCustomersRedact(req, res) {
       ? await CustomerPushSubscription.deleteMany({ shopDomain, customerId })
       : { deletedCount: 0 };
 
-    console.log(`[gdpr] Redacted — carts: ${cartResult.deletedCount}, events: ${eventResult.deletedCount}, subscriptions: ${subResult.deletedCount}`);
+    // ScheduledJob rows are ANONYMISED, not deleted — the poller's per-send
+    // outcome (channel/status/sentAt/outcome) feeds the nightly weights job
+    // (services/weightsService.js, 90-day lookback) and the Activity/Insights
+    // screens' aggregate counts, which the merchant relies on. Only the
+    // fields that identify or quote this specific customer are stripped.
+    const jobOr = [];
+    if (customerId) jobOr.push({ customerId });
+    if (cartTokens.length) jobOr.push({ cartToken: { $in: cartTokens } });
+    if (profileIds.length) jobOr.push({ profileId: { $in: profileIds } });
+    const jobResult = jobOr.length
+      ? await ScheduledJob.updateMany(
+          { shopDomain, $or: jobOr },
+          {
+            $set: {
+              customerId: null,
+              cartToken: null,
+              sessionId: null,
+              subscriptionToken: null,
+              profileId: null,
+              payload: null,
+            },
+          }
+        )
+      : { modifiedCount: 0 };
+
+    // Profile IS the customer record — nothing worth keeping survives
+    // redaction, so it's deleted outright, same as AbandonedCustomer.
+    const profileResult = profileOr.length
+      ? await Profile.deleteMany({ shopDomain, $or: profileOr })
+      : { deletedCount: 0 };
+
+    console.log(
+      `[gdpr] Redacted — carts: ${cartResult.deletedCount}, events: ${eventResult.deletedCount}, ` +
+      `subscriptions: ${subResult.deletedCount}, profiles: ${profileResult.deletedCount}, ` +
+      `jobs anonymised: ${jobResult.modifiedCount}`
+    );
 
     return res.status(200).json({ received: true });
   } catch (err) {

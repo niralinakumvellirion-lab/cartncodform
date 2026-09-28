@@ -44,6 +44,15 @@ const scheduledJobSchema = new mongoose.Schema({
 // Compound index for the sender's poll query.
 scheduledJobSchema.index({ status: 1, runAt: 1 });
 
+// TTL: auto-delete after 90 days, same retention as StorefrontEvent/
+// AttributedEvent. Keyed on createdAt (set by { timestamps: true } above)
+// rather than sentAt, since pending/cancelled/failed/skipped jobs never get
+// a sentAt — createdAt is the only date field every row always has. 90 days
+// matches services/weightsService.js's own lookback window (its longest
+// consumer), well beyond analyticsService.js's 30-day window and the Queue
+// screen's unbounded-but-recent listing.
+scheduledJobSchema.index({ createdAt: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
+
 // Prevent duplicate first-step scheduling for the same rule+cart+step
 // when carts/create and carts/update fire near-simultaneously.
 // Phase C: scoped to rule-based jobs (ruleId is an ObjectId) so brain jobs,

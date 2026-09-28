@@ -37,6 +37,36 @@ if (!getApps().length) {
   firebaseReady = true;
 }
 
+// Firebase Admin's sendEachForMulticast hard-rejects more than this many
+// registration tokens in one call. Every broadcast-shaped send below chunks
+// its token list into batches of this size and sends them sequentially,
+// aggregating the results back into one FCM-response-shaped object so every
+// existing caller (stale-token pruning, success counts) keeps working
+// unchanged regardless of how many batches it took.
+const FCM_BATCH_SIZE = 500;
+
+/**
+ * Send `baseMessage` (everything except `tokens`) to every token in
+ * `tokens`, chunked into FCM_BATCH_SIZE-token batches sent sequentially
+ * (parallel batches would multiply Firebase Admin's own per-project rate
+ * limit against us for no benefit here — these sends are not
+ * latency-sensitive to a human). Returns { successCount, responses }
+ * with `responses` in the SAME ORDER as the input `tokens`, so
+ * `responses[i]` still corresponds 1:1 to `tokens[i]` exactly as a single
+ * unchunked sendEachForMulticast() call would have returned.
+ */
+async function sendMulticastInBatches(baseMessage, tokens) {
+  let successCount = 0;
+  const responses = [];
+  for (let i = 0; i < tokens.length; i += FCM_BATCH_SIZE) {
+    const batch = tokens.slice(i, i + FCM_BATCH_SIZE);
+    const res = await getMessaging().sendEachForMulticast({ ...baseMessage, tokens: batch });
+    successCount += res.successCount;
+    responses.push(...res.responses);
+  }
+  return { successCount, responses };
+}
+
 /**
  * Build an absolute click-through URL for a push notification. FCM's
  * webpush fcm_options.link (and the data.url this app also sends) both
@@ -69,9 +99,8 @@ async function sendPushToStore(shopDomain, title, body) {
     const tokens = subs.map((s) => s.token);
     const message = {
       notification: { title, body },
-      tokens,
     };
-    const response = await getMessaging().sendEachForMulticast(message);
+    const response = await sendMulticastInBatches(message, tokens);
 
     const staleTokens = [];
     response.responses?.forEach((r, i) => {
@@ -249,9 +278,8 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
           link: url || `https://${shopDomain}`,
         },
       },
-      tokens,
     };
-    const response = await getMessaging().sendEachForMulticast(message);
+    const response = await sendMulticastInBatches(message, tokens);
 
     console.log('[push-customer] FCM responses:', JSON.stringify(response.responses, null, 2));
 
