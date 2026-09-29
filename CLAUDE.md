@@ -25,6 +25,14 @@ Product plan: `docs/cartncodform-v2-product-plan.md`. Target UI: `docs/cartncodf
 - One phase per prompt. Branch `phase-<x>-<slug>`. Don't start the next phase.
 - Audit files go in `/audits/`. Pre-audit before edits, self-audit after. Stop after writing the self-audit.
 
+## Efficiency rules
+- Prefer reading a line range over a whole file. Settings.jsx and ccf-push.js are both 2000+ lines — never read either in full unless the task genuinely spans the file.
+- Never re-read a file you already read this session unless you edited it.
+- Run only the test suite affected by the change: frontend-only edits don't need `npm test`; backend-only edits don't need `npm run build`.
+- Comment-only or string-only changes need a syntax check, not a build.
+- Only spin up a temp route + next dev when a change is genuinely visual and can't be verified by reading. Say so when you skip it.
+- Audit files: match length to the change. A one-line fix gets a five-line audit.
+
 ## Out of scope — do not add
 Flow builder · campaigns · email editor · segments UI · multi-store · WhatsApp · SMS · ScriptTags · NextAuth
 
