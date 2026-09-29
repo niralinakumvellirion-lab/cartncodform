@@ -67,7 +67,8 @@ describe('sendPushToCustomers — FCM 500-token batching', () => {
     expect(batchSizes).toEqual([500, 500, 200]);
     // Every call's tokens stay within the 500-token FCM limit.
     batchSizes.forEach((n) => expect(n).toBeLessThanOrEqual(500));
-    expect(result).toEqual({ success: true, sent: 1200, tokensFound: 1200 });
+    expect(result).toMatchObject({ success: true, sent: 1200, tokensFound: 1200 });
+    expect(result.recipients).toHaveLength(1200);
   });
 
   test('exactly 500 tokens send in a single batch (boundary)', async () => {
@@ -105,6 +106,14 @@ describe('sendPushToCustomers — FCM 500-token batching', () => {
     expect(handleStaleToken).toHaveBeenCalledWith('t1150', 'shop.myshopify.com');
     expect(result.sent).toBe(1198);
     expect(result.tokensFound).toBe(1200);
+
+    // Per-recipient detail (feeds services/sendLogService.js's send log)
+    // reflects each token's own outcome, not just the aggregate count.
+    expect(result.recipients).toHaveLength(1200);
+    const failed = result.recipients.filter((r) => !r.success);
+    expect(failed.map((r) => r.token).sort()).toEqual(['t10', 't1150']);
+    failed.forEach((r) => expect(r.errorCode).toBe('messaging/registration-token-not-registered'));
+    expect(result.recipients.find((r) => r.token === 't0').success).toBe(true);
   });
 });
 

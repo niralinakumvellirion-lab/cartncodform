@@ -3,6 +3,7 @@ const PushSubscription = require('../models/PushSubscription');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const { sendPushToStore, sendPushToCustomers, buildClickUrl } = require('../utils/pushNotification');
 const { sendAbandonedCartEmail } = require('../utils/email');
+const { logBroadcastSend } = require('../services/sendLogService');
 const { fetchProductImage } = require('./webhooks');
 const { requireAuth } = require('../middleware/requireOwner');
 const { upsertProfile } = require('../services/profileService');
@@ -647,6 +648,28 @@ router.post('/send-store', requireAuth, async (req, res) => {
     const desktopResult = await sendPushToCustomers(
       shop, title, body, clickUrl, desktopImage, false, null, false, true
     );
+
+    // Per-recipient send log (queue-notification-detail-audit.txt finding
+    // #2) — same helper processFestivalQueue uses, festivalQueueId null
+    // since this is a manual Send Now broadcast, not a queued item.
+    await logBroadcastSend({
+      shopDomain: shop,
+      festivalQueueId: null,
+      signalType: 'manual',
+      title,
+      body,
+      imageUrl: mobileImage,
+      recipients: mobileResult.recipients,
+    });
+    await logBroadcastSend({
+      shopDomain: shop,
+      festivalQueueId: null,
+      signalType: 'manual',
+      title,
+      body,
+      imageUrl: desktopImage,
+      recipients: desktopResult.recipients,
+    });
 
     if (!mobileResult.success && !desktopResult.success) {
       return res.status(500).json({

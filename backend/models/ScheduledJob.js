@@ -18,6 +18,12 @@ const scheduledJobSchema = new mongoose.Schema({
   cartToken: { type: String, index: true },  // Shopify cart token, for cancellation matching
   customerId: { type: String, index: true },
 
+  // Per-recipient send-log rows for festival/broadcast sends (queue-
+  // notification-detail-audit.txt finding #2) link back to the
+  // FestivalQueue item they came from. null for brain/automation jobs
+  // and for manual "Send Now" broadcasts (routes/push.js /send-store).
+  festivalQueueId: { type: mongoose.Schema.Types.ObjectId, ref: 'FestivalQueue', default: null, index: true },
+
   runAt: { type: Date, required: true, index: true },
   status: {
     type: String,

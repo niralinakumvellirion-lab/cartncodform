@@ -28,6 +28,7 @@ const { generateCopy, generateEmailCopy } = require('./services/aiService');
 const { checkUnopenedThreshold, updateDeliveredRate } = require('./services/pushHygiene');
 const { computeWeights } = require('./services/weightsService');
 const { isQuietNow } = require('./utils/timezone');
+const { logBroadcastSend } = require('./services/sendLogService');
 
 const app = express();
 // Render sits behind a reverse proxy — trust the X-Forwarded-For
@@ -638,6 +639,29 @@ async function processFestivalQueue() {
         const desktopResult = await sendPushToCustomers(
           item.shopDomain, item.title, item.body, clickUrl, desktopImage, false, null, false, true
         );
+
+        // Per-recipient send log (queue-notification-detail-audit.txt
+        // finding #2) — one ScheduledJob row per token, not per query
+        // pass merged, and never allowed to affect the send outcome
+        // above (logBroadcastSend swallows its own errors).
+        await logBroadcastSend({
+          shopDomain: item.shopDomain,
+          festivalQueueId: item._id,
+          signalType: 'festival',
+          title: item.title,
+          body: item.body,
+          imageUrl: mobileImage,
+          recipients: mobileResult.recipients,
+        });
+        await logBroadcastSend({
+          shopDomain: item.shopDomain,
+          festivalQueueId: item._id,
+          signalType: 'festival',
+          title: item.title,
+          body: item.body,
+          imageUrl: desktopImage,
+          recipients: desktopResult.recipients,
+        });
 
         const totalSent = (mobileResult.sent || 0) + (desktopResult.sent || 0);
         console.log(

@@ -242,7 +242,7 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
     const subs = await CustomerPushSubscription.find(query);
     if (!subs.length) {
       console.log(`[push] No customer subscribers for ${shop}`);
-      return { success: true, sent: 0, tokensFound: 0 };
+      return { success: true, sent: 0, tokensFound: 0, recipients: [] };
     }
     const tokens = subs.map((s) => s.token);
     tokens.forEach((t, i) => {
@@ -307,7 +307,24 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
     console.log(
       `[push] Sent ${response.successCount}/${tokens.length} to customers of ${shop}`
     );
-    return { success: true, sent: response.successCount, tokensFound: tokens.length };
+
+    // Per-recipient detail for the caller's send log (routes/push.js
+    // /send-store, server.js processFestivalQueue) — same order as
+    // `subs`/`tokens`/`response.responses`, so this is a straight zip
+    // rather than a re-derivation of anything already inspected above.
+    const recipients = subs.map((s, i) => {
+      const r = response.responses[i];
+      return {
+        token: s.token,
+        customerId: s.customerId || null,
+        cartToken: s.cartToken || null,
+        sessionId: s.ccfSessionId || null,
+        success: !!(r && r.success),
+        errorCode: (r && !r.success && r.error?.code) || null,
+      };
+    });
+
+    return { success: true, sent: response.successCount, tokensFound: tokens.length, recipients };
   } catch (err) {
     console.error('[push] Error (customers):', err.message);
     return { success: false, error: err.message, tokensFound: 0 };
