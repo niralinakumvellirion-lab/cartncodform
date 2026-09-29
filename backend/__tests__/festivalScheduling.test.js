@@ -101,10 +101,25 @@ describe('POST /:shop/festival — store-timezone-aware scheduling', () => {
     expect(createArg.scheduledAt.toISOString()).toBe('2026-09-29T14:01:00.000Z');
   });
 
-  test('rejects a malformed scheduledAt (not "YYYY-MM-DDTHH:mm") with 400', async () => {
+  // A full ISO string (e.g. a festival-suggestion prefill the merchant
+  // never edited) is already an unambiguous instant — no store-timezone
+  // conversion needed or wanted, and it must NOT be rejected.
+  test('a full ISO scheduledAt passes through unchanged (not run through store-timezone conversion)', async () => {
     mockStoreTimezone('Asia/Kolkata');
+    FestivalQueue.findOneAndUpdate.mockResolvedValue(null);
+    FestivalQueue.create.mockImplementation((fields) => Promise.resolve({ _id: 'new1', ...fields }));
 
     const res = await post({ title: 'T', scheduledAt: '2026-09-29T19:31:00.000Z' });
+
+    expect(res.status).toBe(200);
+    const [createArg] = FestivalQueue.create.mock.calls[0];
+    expect(createArg.scheduledAt.toISOString()).toBe('2026-09-29T19:31:00.000Z');
+  });
+
+  test('rejects a genuinely unparseable scheduledAt with 400', async () => {
+    mockStoreTimezone('Asia/Kolkata');
+
+    const res = await post({ title: 'T', scheduledAt: 'not-a-date' });
     expect(res.status).toBe(400);
     expect(FestivalQueue.create).not.toHaveBeenCalled();
   });
@@ -123,7 +138,27 @@ describe('PATCH /:shop/festival/:id — store-timezone-aware scheduling', () => 
     expect(updateArg.$set.scheduledAt.toISOString()).toBe('2026-09-29T13:46:00.000Z');
   });
 
-  test('rejects a malformed scheduledAt with 400 and does not touch other fields', async () => {
+  // Regression: the Edit modal's Save button always sends `scheduledAt`,
+  // even when the merchant never touched the date field — in that case
+  // it's still the item's existing FULL ISO string from the database
+  // (set by openEditModal, never replaced by onChange), not a freshly
+  // typed local string. An earlier version of resolveScheduledAt() only
+  // accepted the "YYYY-MM-DDTHH:mm" shape and silently 400'd on this
+  // (commit 60c2010's regression) — this must pass straight through
+  // unchanged instead, since it's already an unambiguous instant.
+  test('a full ISO scheduledAt (date field untouched this edit) passes through unchanged', async () => {
+    mockStoreTimezone('Asia/Kolkata');
+    FestivalQueue.findOneAndUpdate.mockImplementation((_q, update) => Promise.resolve({ _id: 'fq1', ...update.$set }));
+
+    const res = await patch('fq1', { title: 'New title', scheduledAt: '2026-09-29T14:01:00.000Z' });
+
+    expect(res.status).toBe(200);
+    const [, updateArg] = FestivalQueue.findOneAndUpdate.mock.calls[0];
+    expect(updateArg.$set.scheduledAt.toISOString()).toBe('2026-09-29T14:01:00.000Z');
+    expect(updateArg.$set.title).toBe('New title');
+  });
+
+  test('rejects a genuinely unparseable scheduledAt with 400 and does not touch other fields', async () => {
     mockStoreTimezone('Asia/Kolkata');
 
     const res = await patch('fq1', { title: 'New title', scheduledAt: 'not-a-date' });

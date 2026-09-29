@@ -10,18 +10,35 @@ const { zonedTimeToUtc, resolveTz } = require('../utils/timezone');
 const LOCAL_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
 
 // The Schedule Date & Time input sends a "YYYY-MM-DDTHH:mm" string with no
-// timezone — it represents the STORE's wall-clock time (a merchant entering
-// 19:31 means 19:31 in the store's own timezone), so it must be converted
-// with the store's real IANA timezone via zonedTimeToUtc. `new Date(str)`
-// on that same string would instead use the server PROCESS's own local
-// zone (whatever Node/Render happens to be running as) — unrelated to any
-// shop's configured timezone. Returns null if `raw` isn't in that shape.
+// timezone when the merchant actually picks a value — it represents the
+// STORE's wall-clock time (entering 19:31 means 19:31 in the store's own
+// timezone), so THAT shape is converted with the store's real IANA
+// timezone via zonedTimeToUtc. `new Date(str)` on that same shape would
+// instead use the server PROCESS's own local zone (whatever Node/Render
+// happens to be running as) — unrelated to any shop's configured timezone.
+//
+// The Edit modal's Save button always sends `scheduledAt`, even when the
+// merchant never touched the date field — in that case it's still holding
+// the value the modal was opened with (the item's existing full ISO string
+// from the database, e.g. "2026-09-29T14:01:00.000Z"), not a freshly-typed
+// local string. That shape is already an unambiguous instant, so it's
+// passed straight to `new Date()` — no store-timezone conversion needed or
+// wanted, since it isn't a local wall-clock value at all. Treating it as
+// "not the expected shape -> reject" (an earlier version of this function)
+// broke every PATCH that didn't touch the date field, since it 400s with
+// no console.error — silent from the server's own logs, "Failed to save
+// changes" from the frontend. Returns null only when `raw` is neither
+// shape (i.e. genuinely unparseable).
 async function resolveScheduledAt(shopDomain, raw) {
-  const m = LOCAL_DATETIME_RE.exec(String(raw || ''));
-  if (!m) return null;
-  const store = await Store.findOne({ shopDomain }).select('timezone').lean();
-  const tz = resolveTz(store?.timezone);
-  return zonedTimeToUtc(+m[1], +m[2], +m[3], +m[4], +m[5], tz);
+  const s = String(raw || '').trim();
+  const m = LOCAL_DATETIME_RE.exec(s);
+  if (m) {
+    const store = await Store.findOne({ shopDomain }).select('timezone').lean();
+    const tz = resolveTz(store?.timezone);
+    return zonedTimeToUtc(+m[1], +m[2], +m[3], +m[4], +m[5], tz);
+  }
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 // GET /api/queue/:shopDomain
@@ -286,6 +303,18 @@ router.patch('/:shopDomain/festival/:id', requireAuth,
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
     const FestivalQueue = require('../models/FestivalQueue');
+
+    // Diagnostic — added after a 400 here went completely silent (no
+    // console.error, since it was an explicit `return res.status(400)`,
+    // not a thrown error) and looked from the server logs like the
+    // handler hung. Cheap enough to leave in permanently.
+    if (req.body.scheduledAt !== undefined) {
+      const store = await Store.findOne({ shopDomain: shop }).select('timezone').lean();
+      console.log(
+        `[queue] festival PATCH ${req.params.id} — received scheduledAt: ${JSON.stringify(req.body.scheduledAt)}, ` +
+        `resolved store timezone: ${resolveTz(store?.timezone)}`
+      );
+    }
 
     const updates = {};
     for (const key of FESTIVAL_PATCH_FIELDS) {
