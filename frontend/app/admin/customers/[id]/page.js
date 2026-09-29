@@ -11,6 +11,13 @@ function CustomerDetailContent() {
   const params = useParams();
   const shop = searchParams.get('shop') || '';
   const id = params?.id ? decodeURIComponent(String(params.id)) : '';
+  // Where the merchant came from, so the back link can return them there
+  // instead of always going to /admin/customers — currently only
+  // FestivalDetail.jsx sets these (from=queue&fid=<festivalId>); absent
+  // for every other entry point (the customers list, etc.), which keeps
+  // today's "← Back to customers" behaviour unchanged.
+  const from = searchParams.get('from') || '';
+  const fid = searchParams.get('fid') || '';
   return (
     <AppProvider i18n={{}}>
       <NavMenu>
@@ -25,7 +32,7 @@ function CustomerDetailContent() {
         <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
       </NavMenu>
-      <CustomerDetailScreen shop={shop} profileId={id} />
+      <CustomerDetailScreen shop={shop} profileId={id} from={from} fid={fid} />
     </AppProvider>
   );
 }

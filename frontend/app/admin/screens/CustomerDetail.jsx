@@ -769,7 +769,7 @@ const cardTitle = {
   textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8,
 };
 
-export default function CustomerDetail({ shop, profileId }) {
+export default function CustomerDetail({ shop, profileId, from, fid }) {
   const router = useRouter();
   // Carries `shop` forward on client-side nav (every admin/*/page.js
   // wrapper reads it from searchParams.get('shop')).
@@ -869,7 +869,16 @@ export default function CustomerDetail({ shop, profileId }) {
     }
   }, [customer]);
 
-  const backButton = (
+  // Explicit param, not router.back() — predictable regardless of how the
+  // page was reached (reload, shared link, etc.), unlike browser history.
+  const backButton = from === 'queue' && fid ? (
+    <button
+      onClick={() => navigate(`/admin/queue/${fid}`)}
+      style={{ ...DS.btnSecondary, marginBottom: 16 }}
+    >
+      ← Back to notification
+    </button>
+  ) : (
     <button
       onClick={() => navigate('/admin/customers')}
       style={{ ...DS.btnSecondary, marginBottom: 16 }}

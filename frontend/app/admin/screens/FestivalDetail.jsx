@@ -294,7 +294,7 @@ export default function FestivalDetail({ shop, festivalId }) {
               {rows.map((r) => (
                 <div
                   key={r._id}
-                  onClick={() => r.profileId && navigate(`/admin/customers/${r.profileId}`)}
+                  onClick={() => r.profileId && navigate(`/admin/customers/${r.profileId}?from=queue&fid=${festivalId}`)}
                   onMouseEnter={(e) => { if (r.profileId) e.currentTarget.style.background = '#f9fafb'; }}
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                   style={{
