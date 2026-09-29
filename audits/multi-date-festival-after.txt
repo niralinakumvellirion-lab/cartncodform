@@ -1,0 +1,186 @@
+MULTI-DATE FESTIVAL SCHEDULING - SELF-AUDIT (after implementation)
+====================================================================
+Implements the approved design in audits/multi-date-festival-audit.txt:
+one FestivalQueue document per date, linked by a shared groupId.
+
+1. BACKEND
+-------------
+backend/models/FestivalQueue.js
+  + groupId: { type: ObjectId, default: null, index: true }
+  No other schema change. Every existing document reads as groupId:
+  null (untouched field, no migration).
+
+backend/routes/queue.js
+
+  resolveScheduledAt(shopDomain, raw, knownTz) — added an optional 3rd
+  arg. Every existing single-date caller omits it and behaves exactly
+  as before (does its own Store lookup). The new array-creation path
+  looks the store's timezone up ONCE and passes it through for every
+  date in the array, instead of one redundant identical DB lookup per
+  date.
+
+  POST /:shopDomain/festival — three changes:
+    a) Dedupe fix. Was:
+         { shopDomain: shop, festival, status: { $in: ['draft','approved'] } }
+       Now:
+         { shopDomain: shop, festival, scheduledAt: scheduledAtUtc,
+           status: { $in: ['draft','approved'] } }
+       scheduledAt is now part of the match. Two different dates for
+       the same festival can no longer find and overwrite each other's
+       document; only a genuine resubmission of the SAME date is still
+       idempotent (unchanged intent from before — re-clicking Approve
+       for the same suggestion doesn't create a duplicate).
+    b) Array support. scheduledAt: [...] (instead of a single string)
+       creates one document per entry, all sharing one new groupId
+       (mongoose.Types.ObjectId()), via insertMany. Every entry is
+       converted through the same resolveScheduledAt/zonedTimeToUtc
+       path as the single-date shape (using knownTz to avoid N Store
+       lookups). Empty array -> 400. Any one malformed entry -> 400
+       for the WHOLE request, nothing created (no partial group) —
+       confirmed by test.
+    c) DEVIATION, stated explicitly: the array path never dedupes
+       against an existing draft/approved document — it always
+       creates fresh documents in a fresh group. The task's dedupe
+       instruction (item 2) was about the single-date path; extending
+       per-date dedupe into the array path would mean deciding whether
+       a resubmitted date joins the OLD group or starts a new one,
+       which risks silently merging two different campaigns and wasn't
+       asked for. Left as the single most predictable behaviour:
+       resubmitting a multi-date form always creates a new group. If a
+       merchant needs to guard against accidental double-submission of
+       the SAME multi-date form, that's a frontend concern (disable
+       the buttons while the request is in flight — not added here,
+       out of the task's stated scope), not a backend dedupe concern.
+
+  PATCH /:shopDomain/festival/:id — bulk propagation via applyToGroup:
+       req.body.applyToGroup (boolean, default falsy — unchanged,
+       this-date-only behaviour when omitted). When true and the
+       target document has a groupId, a SECOND write runs after the
+       normal single-document update:
+         FestivalQueue.updateMany(
+           { groupId: item.groupId, _id: { $ne: item._id },
+             status: { $in: ['draft','approved'] } },
+           { $set: bulkUpdates }
+         )
+       bulkUpdates is built from FESTIVAL_BULK_FIELDS — title, body,
+       mobileImageUrl, desktopImageUrl, targetType, productId,
+       productHandle, productTitle. scheduledAt and status are
+       DELIBERATELY excluded from the whitelist (not just "not sent
+       today" — actively stripped even if present in the request body)
+       — each date keeps its own schedule and its own send state, only
+       shared notification content propagates. A 'sent' sibling is
+       never matched by the status guard, so an already-delivered
+       date's content is never rewritten after the fact. Response adds
+       groupItems (the refreshed group, sorted by scheduledAt) only
+       when applyToGroup actually ran, so the default response shape
+       for every existing caller is unchanged.
+
+  DELETE /:shopDomain/festival/:id?group=true — same status guard as
+       bulk edit (deleteMany scoped to groupId + status in
+       [draft,approved]). Without ?group=true, or when the target has
+       no groupId, behaviour is byte-for-byte the same single-document
+       delete as before this task.
+
+2. FRONTEND
+--------------
+frontend/app/admin/dashboard/DashboardScreen.jsx (festival editor)
+  - The original single datetime-local input is untouched and remains
+    the default path (multiDateMode starts false, reset to false every
+    time openFestivalEditor runs).
+  - New "+ Schedule multiple dates" toggle reveals two sub-modes:
+      individual — the existing date input is date #1; "+ Add date"
+        appends more datetime-local rows, each independently removable.
+      range — date-only Start/End inputs, a shared Time input (labelled
+        with the store's timezone, same convention as the single-date
+        input), and a "Every N day(s)" interval control that only
+        renders once an End date is chosen (per the task: it has
+        nothing to apply to before that).
+  - Live preview ("N notifications: Oct 2, Oct 5, Oct 8") computed from
+    computeMultiDates(), re-derived on every render from whichever
+    sub-mode is active — never a stored/stale value.
+  - Zero dates (bad range/interval) blocks Approve and Add to Queue
+    (disabled, greyed) with an inline red message; more than 10 dates
+    shows a non-blocking amber note, buttons stay enabled, per spec.
+  - Send Now is disabled while multiDateMode is on — it's a single
+    synchronous push via /api/push/send-store, unrelated to
+    FestivalQueue and to "schedule N dates" by construction; a
+    disabled state with a title tooltip explains why rather than
+    silently doing something misleading.
+  - Approve/Add to Queue now send scheduledAt: multiDateMode ?
+    multiDatePreview : editorDate — the single-date shape is completely
+    unchanged when the toggle is off.
+
+frontend/app/admin/screens/FestivalDetail.jsx
+  - loadItem now also derives groupSiblings from the SAME list fetch it
+    already made (GET .../festival, which already returns every item's
+    groupId) — no new endpoint. When there's more than one sibling, the
+    header shows "Date X of Y in this campaign: <date>, <date>, ..."
+    with every OTHER date as a link to its own /admin/queue/<id>; the
+    current date is shown in bold, not a link.
+
+frontend/app/admin/queue/QueueScreen.jsx (Planning List Edit modal)
+  - New editApplyToGroup checkbox, shown ONLY when the item being
+    edited has a groupId, defaulting to unchecked every time the modal
+    opens (openEditModal resets it) — this-date-only stays the default
+    regardless of what a previous edit session left it at.
+  - saveEdit() includes applyToGroup in the PATCH body only when the
+    item has a groupId at all (spreads {} otherwise) — an ungrouped
+    item's PATCH payload is byte-for-byte the same shape as before this
+    task.
+
+3. TESTS
+-----------
+backend/__tests__/multiDateFestival.test.js — 11 tests, all passing:
+  - single-date POST unchanged (exact response shape, no groupId field
+    on the created doc, idempotent resubmit for the SAME date)
+  - the exact audited bug: two Approve submissions for two different
+    dates of the same festival create two documents (asserted via two
+    distinct findOneAndUpdate match calls with two distinct
+    scheduledAt values, and FestivalQueue.create called twice) — this
+    is the regression test for section 1 of the before-audit
+  - array scheduledAt creates one doc per date sharing one groupId;
+    empty array -> 400; one malformed entry -> 400 for the whole
+    request, insertMany never called (no partial group)
+  - bulk edit: applyToGroup propagates ONLY the content-field subset,
+    the match excludes 'sent'/'cancelled' siblings and the target
+    document itself; without applyToGroup only the target updates;
+    applyToGroup on an ungrouped item is a no-op beyond the normal
+    single update
+  - group delete: ?group=true deletes siblings with the same status
+    guard; plain delete is unchanged
+
+Full backend suite: 32 suites, 323 tests, all passing.
+Frontend build: next build compiles clean, all 17 routes generated
+  (including /admin/dashboard and /admin/queue/[id], the two routes
+  this task's frontend changes touched).
+
+"Range with interval produces the right dates" — this is pure frontend
+  logic (computeMultiDates in DashboardScreen.jsx) with no backend
+  equivalent to unit-test; there is no frontend test runner in this
+  repo (backend-only per CLAUDE.md, same limitation noted in the
+  earlier timezone-fix task's self-audit). Verified by reading the
+  function and by the array-creation backend tests above, which
+  confirm the BACKEND side of "here are N dates -> N correctly-
+  converted documents" end to end; the date-stepping arithmetic itself
+  (start/end/interval -> the list of YYYY-MM-DDTHH:mm strings) is pure
+  date-only stepping with no timezone conversion in it at all (see the
+  code comment on computeMultiDates), so there's no ambiguity for a
+  test to catch that reading the function doesn't already settle.
+
+4. KNOWN LIMITATIONS / FOLLOW-UPS NOT DONE (out of this task's stated scope)
+-------------------------------------------------------------------------
+- No "delete whole group" button in the UI yet — the backend endpoint
+  (?group=true) exists and is tested, but QueueScreen.jsx's Planning
+  List delete button still calls single-id delete only. The task's UI
+  section only asked for the calendar (unchanged), the detail page
+  (Date X of Y line) and the edit modal (this-date-only vs
+  all-remaining checkbox) — a group-delete UI control wasn't listed and
+  wasn't added.
+  - Same for a bulk "cancel whole group" action.
+- The array-creation path doesn't guard against a double-submit
+  (double-click) creating two groups — see the dedupe deviation above.
+- FestivalDetail.jsx's "Date X of Y" list shows every sibling's short
+  date label but doesn't show each sibling's own status (sent/approved/
+  draft) inline — a merchant has to click through to see whether a
+  given sibling date already sent. Not asked for; flagging as a
+  reasonable small follow-up if this feature gets used.

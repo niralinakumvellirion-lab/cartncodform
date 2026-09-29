@@ -1,0 +1,270 @@
+MULTI-DATE FESTIVAL SCHEDULING - AUDIT (READ ONLY, NOTHING IMPLEMENTED)
+========================================================================
+
+1. CURRENT MODEL
+-------------------
+backend/models/FestivalQueue.js:10 — scheduledAt: { type: Date, required:
+  true }. A single scalar Date. One document == one send, at one instant,
+  full stop. Nothing in the schema (or anywhere downstream) treats it as
+  anything but a single point in time.
+
+Every path that CREATES a FestivalQueue document (grepped the whole
+frontend for POST .../festival, and the whole backend for
+FestivalQueue.create/findOneAndUpdate/insertMany — there are exactly two
+call sites, both in DashboardScreen.jsx, both hitting the same backend
+route):
+  - DashboardScreen.jsx:1830-1846 — "Approve" button on a Notification
+    Suggestion. POST /api/queue/:shop/festival, status: 'approved'.
+  - DashboardScreen.jsx:1874-1890 — "Add to Queue" (Draft) button, same
+    suggestion editor. Same POST, status: 'draft'.
+That's it. QueueScreen.jsx never creates a document — its "Approve"
+button (QueueScreen.jsx:988-1003) PATCHes an existing draft's status,
+its Edit modal (saveEdit, QueueScreen.jsx:709-728) PATCHes an existing
+document's fields, and Delete (QueueScreen.jsx:1012-1019) removes one by
+_id. The Dashboard's "Send Now" button is unrelated — it hits
+/api/push/send-store directly and never touches FestivalQueue at all.
+
+So: one creation endpoint (routes/queue.js:165, POST
+/:shopDomain/festival), reached from exactly two buttons, always with
+one scheduledAt.
+
+Dedupe logic (routes/queue.js:203-216):
+  if (festival) {
+    item = await FestivalQueue.findOneAndUpdate(
+      { shopDomain: shop, festival, status: { $in: ['draft', 'approved'] } },
+      { $set: fields },
+      { new: true }
+    );
+  }
+  if (!item) item = await FestivalQueue.create(fields);
+
+What happens if a festival legitimately has 5 dates: the FIRST Approve/
+Add-to-Queue creates a doc. Every SUBSEQUENT Approve/Add-to-Queue for
+the SAME shop+festival (which is exactly what "pick 5 dates" would have
+to do today, one submission per date, since scheduledAt is a scalar)
+matches that same doc by (shopDomain, festival, status in
+[draft,approved]) and OVERWRITES it via $set — including scheduledAt.
+Confirmed by reading the code, not just inferred: this doesn't collapse
+5 dates into one document holding 5 dates: it collapses 5 submissions
+into ONE document holding only the LAST date submitted. The other 4
+dates are silently discarded — no error, no warning, "Approved!" toasts
+on every submission. This is the concrete thing that breaks today, and
+it's the dedupe logic specifically, not the scheduledAt field alone —
+the scalar field is a symptom, the findOneAndUpdate-by-(shop,festival)
+match is what actively destroys the other dates.
+
+2. TWO DESIGNS
+-----------------
+(a) One document per date, linked by a shared groupId
+    (new field: groupId: { type: ObjectId, default: null, index: true })
+
+(b) One document holding an array of dates, sent once per date
+    (scheduledAt becomes an array, or a dates: [{ date, status, sentAt,
+    recipientCount, failedAttempts }] subdocument array)
+
+Sender (server.js processFestivalQueue, :613-708):
+  (a) No change to the query shape. FestivalQueue.find({status:
+      'approved', scheduledAt: { $lte: now }}) still matches individual
+      documents exactly as it does today; each due document is sent and
+      marked 'sent' independently, same as today. groupId is inert here
+      — the poller never needs to know a document belongs to a group.
+  (b) The query and the update both need to become array-aware. Mongo
+      CAN match "$lte: now" against an array element, but then the
+      handler has to work out WHICH element(s) are due, send for those
+      specifically, and flip only those sub-entries to 'sent' via
+      arrayFilters / positional $[elem] updates, leaving the rest of the
+      array (and the document's own top-level status, which would need
+      to become "some dates pending" — a status the current enum has no
+      room for) alone. This turns one straightforward query+update into
+      per-element state tracking inside a single document — the same
+      complexity the many-documents design already has "for free" via
+      Mongo's own per-document querying, just relocated into
+      hand-rolled array-element bookkeeping.
+
+Calendar (QueueScreen.jsx MonthCalendar, :359-467; the day-match at
+  :411-415 is `items.filter(item => { const d = new
+  Date(item.scheduledAt); return d.getFullYear()===... })`):
+  (a) Unchanged. It already renders one chip per document per day;
+      multiple dates for one festival are just multiple documents that
+      happen to land on different days, which the existing per-document
+      loop already handles with zero new code.
+  (b) The day-match has to change from "does this document's scheduledAt
+      fall on day X" to "does this document have ANY array entry that
+      falls on day X", and — critically — the chip's click target
+      (onItemClick/onSentClick, :456-459) currently identifies a
+      document by _id alone. With an array, a chip now has to identify a
+      document AND a specific date within it (a compound key), and every
+      downstream consumer of "which item was clicked" (openEditModal,
+      goToFestivalDetail) has to be taught to carry that pair instead of
+      a single id.
+
+Detail page (screens/FestivalDetail.jsx, built this session — header at
+  :195-221, summary at :99 hitting GET .../festival/:id/summary, recipient
+  table at :132 hitting GET .../festival/:id/recipients):
+  (a) Unchanged, and this is the strongest point in (a)'s favor. Every
+      recipient row already has festivalQueueId set on it (added to
+      ScheduledJob this session specifically for the per-recipient send
+      log), and it's already scoped to ONE document == ONE send. A
+      multi-date festival just means N documents, so opening any one
+      date's chip opens that date's own, already-correct, already-built
+      detail page. No schema change, no query change, nothing to build.
+  (b) festivalQueueId alone no longer identifies one send — the
+      ScheduledJob rows for a multi-date document's five sends would all
+      share the same festivalQueueId (there's only one document id to
+      reference), so recipients from date 1 and date 3 would be
+      indistinguishable via the current field. The detail page's whole
+      "recipients for THIS send" query breaks unless ScheduledJob also
+      gets a second field (e.g. occurrenceIndex or occurrenceDate) to
+      disambiguate — a second schema change, on the collection this
+      session's earlier work explicitly designed around
+      one-row-per-recipient-per-send.
+
+Per-recipient send log (services/sendLogService.js, built this session
+  — logBroadcastSend takes festivalQueueId and stamps it on every
+  ScheduledJob row it writes):
+  (a) Unchanged. Each date is its own document with its own _id, so
+      logBroadcastSend already tags rows correctly per send with no
+      changes to that file at all.
+  (b) Needs the same occurrence-disambiguating field ScheduledJob would
+      need for the detail page above, threaded through
+      logBroadcastSend's call sites (server.js processFestivalQueue,
+      routes/push.js /send-store — though /send-store is single-date by
+      construction and wouldn't be affected either way).
+
+Editing / deleting:
+  (a) Editing ONE date: unchanged, PATCH by _id exactly as today.
+      Editing shared content (title/body/image) across all
+      not-yet-sent dates: a genuinely NEW operation — bulk-update by
+      groupId, explicitly scoped to status in [draft, approved] so
+      already-'sent' documents are never touched
+      (FestivalQueue.updateMany({ groupId, status: { $in: ['draft',
+      'approved'] } }, { $set: sharedFields })). Deleting one date:
+      unchanged, DELETE by _id. Deleting the whole campaign:
+      new — delete-by-groupId, same $in status guard.
+  (b) Editing shared content is arguably simpler in the abstract (it's
+      one document, so "edit the title" just is editing the one
+      document) — but editing or removing ONE specific date needs
+      array-index or subdocument $pull/$ operators, and the
+      already-sent-vs-not-yet-sent split (2 of 5 sent, 3 pending) has to
+      be expressed and defended PER ARRAY ELEMENT rather than per
+      document status, which is exactly the state machine the 'draft'/
+      'approved'/'sent'/'cancelled' enum already models at the document
+      level today.
+
+RECOMMENDATION: (a), one document per date linked by a shared groupId.
+It is less invasive because every mechanism that already exists — the
+poller's query, the calendar's per-document-per-day chip loop, the
+detail page's festivalQueueId scoping, the ScheduledJob per-recipient
+log, PATCH/DELETE by _id — keeps working completely unchanged. The
+entire net-new surface is: one nullable indexed field on FestivalQueue
+(groupId), a way to create N documents in one submission instead of one
+(either a small loop server-side over the existing create path, or a new
+bulk-create endpoint), a fix to the dedupe logic so it keys on date too
+(not just shopDomain+festival), and one new, explicit, well-scoped bulk
+operation for "edit shared content across a group's still-pending
+dates." Design (b) would require restructuring the schema, the poller's
+query/update shape, the calendar's click-target identity, and adding a
+disambiguating field to ScheduledJob and every logBroadcastSend call
+site touching it — a genuinely bigger and riskier change for the same
+end-user outcome.
+
+3. KNOCK-ON EFFECTS (for the recommended design, one-doc-per-date + groupId)
+--------------------------------------------------------------------------
+- processFestivalQueue's query/mark-sent (server.js:618-621 query,
+  :672-678 mark-sent): needs NO change. It already finds and sends one
+  document at a time and marks THAT document 'sent'. With groupId, five
+  dates for one festival are five separate documents that individually
+  become due on their own days and get marked 'sent' independently, one
+  at a time, exactly as today. The only thing that changes is the
+  dedupe logic UPSTREAM at creation time (section 1/2) — the sender
+  itself is untouched.
+
+- The calendar still renders one chip per document per day
+  (MonthCalendar's existing per-item loop, :410-486) with zero new
+  code, since multi-date is just "more documents," and clicking any
+  chip already opens the right detail page for THAT document
+  (onSentClick -> goToFestivalDetail(q._id) -> /admin/queue/[id] with
+  that specific _id) — correct today for a single date, and stays
+  correct for any date in a group, since each one is its own document
+  with its own _id.
+
+- The festival detail page should show ONE send (the document/
+  festivalQueueId it was opened for), not "all of them." That's what it
+  already does, and it's the right behavior: "who got the Diwali push
+  that went out on the 8th" and "who got the one on the 10th" are
+  different, useful, separately-answerable questions — collapsing them
+  into one aggregate view would hide exactly the kind of per-date
+  delivery detail this feature exists to show (see
+  audits/queue-notification-detail-audit.txt, which this session's
+  earlier work was built against). A "this is date 2 of 5 in the
+  <festival name> campaign, view the others" link using groupId would
+  be a reasonable small addition, not a replacement for the per-send
+  view.
+
+- Editing after some dates have already sent: the natural rule, and the
+  one groupId makes trivial to enforce, is that editing content
+  propagates ONLY to documents in the group still in draft or approved
+  — 'sent' documents (and their already-issued FCM sends and recorded
+  recipients) are historical fact and must never be rewritten after the
+  push already went out. A bulk edit call scoped as
+  updateMany({ groupId, status: { $in: ['draft','approved'] } }, ...)
+  gets this for free from the status enum that already exists; no new
+  state needs to be invented. The merchant edits the campaign, the 2
+  already-sent dates keep whatever they actually sent (correct, matches
+  what customers actually received), and the 3 remaining dates pick up
+  the new content the next time each of them is individually due.
+
+4. UI
+--------
+Smallest UI that supports both modes without complicating the common
+single-date case: keep today's single datetime-local input as the
+default, untouched, with a small toggle/link next to it — e.g. "+ Add
+another date" or "Schedule multiple dates" — that reveals a second mode
+only when the merchant asks for it. Two sub-modes once expanded:
+  - Individual dates: a simple repeatable list of datetime-local rows
+    ("Add date" appends another row), each independently removable.
+    This is the more common real case (Diwali + Dhanteras + Bhai Dooj as
+    3 specific festival days, not evenly spaced) and needs no new
+    concept beyond "more than one of the input that's already there."
+  - Start/end + interval: two date inputs (start, end) plus a small
+    "every N days" number input. The interval control belongs directly
+    under/next to the end-date input, visually grouped with it, since it
+    only makes sense once both a start and an end exist — showing it
+    unconditionally (before an end date is picked) invites entering an
+    interval with nothing for it to apply to.
+  Whichever sub-mode is active, submit turns into an array of
+  scheduledAt values sent in one POST; the backend is what turns that
+  into N documents sharing one groupId (section 2's smallest-diff
+  reasoning — keep the "how many documents get created" decision
+  server-side, not duplicated in the frontend).
+
+If the range produces zero dates (end before start, or an interval
+larger than the span): block submission with an inline message stating
+that plainly, rather than silently submitting nothing or silently
+falling back to a single date the merchant didn't ask for — of the two
+silent failure modes, a document silently not being created is at least
+consistent with "nothing happened," but neither is acceptable next to a
+clear, immediate inline validation message costing nothing to add.
+
+5. RISKS
+-----------
+- Existing FestivalQueue documents: fully valid under design (a) with no
+  migration. groupId is a new NULLABLE field
+  (default: null, per this session's identical pattern for
+  ScheduledJob.festivalQueueId) — every document ever created stays a
+  complete, valid, ungrouped single-date item exactly as it is today.
+  Nothing reads groupId today, so nothing breaks by its absence on old
+  rows.
+
+- Anything that assumes one send per festival: the dedupe logic
+  (section 1) is the one place that actively assumes this and actively
+  destroys data if violated — it must change as part of this feature,
+  not as an afterthought, or "5 dates" silently becomes "1 date, four
+  times overwritten" again under the new UI too. Everything else audited
+  above (poller, calendar, detail page, send log, PATCH/DELETE-by-id)
+  already operates per-document and carries no such assumption — they
+  assume one send per DOCUMENT, which multi-date-via-groupId keeps
+  true by construction. FestivalQueue.recipientCount (server.js:676,
+  mobileResult.sent + desktopResult.sent) is also already scoped
+  per-document/per-send and needs no change: "how many people got THIS
+  date's push" stays exactly as meaningful as it is today, per document.

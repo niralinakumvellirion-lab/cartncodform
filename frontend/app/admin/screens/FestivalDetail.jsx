@@ -61,6 +61,12 @@ export default function FestivalDetail({ shop, festivalId }) {
   const [item, setItem] = useState(null);
   const [itemLoading, setItemLoading] = useState(true);
   const [itemError, setItemError] = useState('');
+  // Other dates in the same multi-date campaign (audits/
+  // multi-date-festival-audit.txt design (a) — one document per date,
+  // linked by groupId). Derived client-side from the same list fetch
+  // rather than a new endpoint — the list already has every item's
+  // groupId.
+  const [groupSiblings, setGroupSiblings] = useState([]);
 
   const loadItem = useCallback(async (ctl) => {
     if (!shop || !festivalId) { setItemLoading(false); return; }
@@ -69,9 +75,21 @@ export default function FestivalDetail({ shop, festivalId }) {
     try {
       const data = await apiGet(`/api/queue/${encodeURIComponent(shop)}/festival`);
       if (ctl?.aborted) return;
-      const found = (data.items || []).find((i) => i._id === festivalId);
+      const items = data.items || [];
+      const found = items.find((i) => i._id === festivalId);
       setItem(found || null);
-      if (!found) setItemError('Festival item not found');
+      if (!found) {
+        setItemError('Festival item not found');
+        setGroupSiblings([]);
+      } else if (found.groupId) {
+        setGroupSiblings(
+          items
+            .filter((i) => i.groupId === found.groupId)
+            .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt))
+        );
+      } else {
+        setGroupSiblings([]);
+      }
     } catch (e) {
       if (ctl?.aborted) return;
       setItemError(e.message || 'Failed to load festival');
@@ -211,6 +229,29 @@ export default function FestivalDetail({ shop, festivalId }) {
           </div>
           <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{item.title}</div>
           {item.body && <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>{item.body}</div>}
+          {groupSiblings.length > 1 && (
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 10, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
+              <span>
+                Date {groupSiblings.findIndex((i) => i._id === item._id) + 1} of {groupSiblings.length} in this campaign:
+              </span>
+              {groupSiblings.map((sibling, i) => (
+                <span key={sibling._id}>
+                  {sibling._id === item._id ? (
+                    <strong style={{ color: '#111827' }}>{formatDateTime(sibling.scheduledAt).split(',')[0]}</strong>
+                  ) : (
+                    <a
+                      href="#"
+                      onClick={(e) => { e.preventDefault(); navigate(`/admin/queue/${sibling._id}`); }}
+                      style={{ color: '#4f46e5', textDecoration: 'underline' }}
+                    >
+                      {formatDateTime(sibling.scheduledAt).split(',')[0]}
+                    </a>
+                  )}
+                  {i < groupSiblings.length - 1 ? ',' : ''}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

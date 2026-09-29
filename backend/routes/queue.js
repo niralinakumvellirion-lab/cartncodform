@@ -29,12 +29,17 @@ const LOCAL_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
 // no console.error — silent from the server's own logs, "Failed to save
 // changes" from the frontend. Returns null only when `raw` is neither
 // shape (i.e. genuinely unparseable).
-async function resolveScheduledAt(shopDomain, raw) {
+// `knownTz` lets a caller that already looked up the store's timezone once
+// (e.g. converting an array of dates for one shop) skip a repeat DB lookup
+// per date — every existing single-date caller omits it and behaves exactly
+// as before.
+async function resolveScheduledAt(shopDomain, raw, knownTz) {
   const s = String(raw || '').trim();
   const m = LOCAL_DATETIME_RE.exec(s);
   if (m) {
-    const store = await Store.findOne({ shopDomain }).select('timezone').lean();
-    const tz = resolveTz(store?.timezone);
+    const tz = knownTz || resolveTz(
+      (await Store.findOne({ shopDomain }).select('timezone').lean())?.timezone
+    );
     return zonedTimeToUtc(+m[1], +m[2], +m[3], +m[4], +m[5], tz);
   }
   const d = new Date(s);
@@ -176,22 +181,14 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
       });
     }
 
-    const scheduledAtUtc = await resolveScheduledAt(shop, scheduledAt);
-    if (!scheduledAtUtc) {
-      return res.status(400).json({
-        error: 'scheduledAt must be a "YYYY-MM-DDTHH:mm" local date-time',
-      });
-    }
-
     const FestivalQueue = require('../models/FestivalQueue');
-    const fields = {
+    const baseFields = {
       shopDomain: shop,
       title,
       body: body || '',
       imageUrl: imageUrl || '',
       mobileImageUrl: mobileImageUrl || '',
       desktopImageUrl: desktopImageUrl || '',
-      scheduledAt: scheduledAtUtc,
       festival: festival || '',
       targetType: targetType || 'home',
       productId: productId || '',
@@ -200,16 +197,70 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
       status: status || 'draft',
     };
 
-    // Idempotent per festival: a repeat Approve/Add-to-Queue for the same
-    // shop+festival (e.g. re-clicking, or Add-to-Queue after an earlier
-    // Approve) updates the existing draft/approved item instead of
-    // creating a second one. A festival that's already 'sent' or
-    // 'cancelled' doesn't match here, so it can be queued fresh — same
-    // rule the Suggestions sidebar uses to decide what's re-suggestible.
+    // Multi-date: scheduledAt as an array of local datetime strings —
+    // audits/multi-date-festival-audit.txt's design (a). Creates one
+    // document per date, all sharing one new groupId, and always creates
+    // fresh — unlike the single-date path below, this never matches
+    // against/overwrites an existing draft or approved document. Doing
+    // per-date dedupe here would mean deciding whether a resubmitted date
+    // joins the OLD group or a new one, which the task didn't ask for and
+    // risks silently merging two campaigns; always-create is the
+    // unambiguous, predictable behaviour.
+    if (Array.isArray(scheduledAt)) {
+      if (scheduledAt.length === 0) {
+        return res.status(400).json({ error: 'scheduledAt array must not be empty' });
+      }
+
+      const store = await Store.findOne({ shopDomain: shop }).select('timezone').lean();
+      const tz = resolveTz(store?.timezone);
+
+      const converted = [];
+      for (const raw of scheduledAt) {
+        const utc = await resolveScheduledAt(shop, raw, tz);
+        if (!utc) {
+          return res.status(400).json({
+            error: `scheduledAt entry "${raw}" must be a "YYYY-MM-DDTHH:mm" local date-time`,
+          });
+        }
+        converted.push(utc);
+      }
+
+      const groupId = new mongoose.Types.ObjectId();
+      const docs = converted.map((scheduledAtUtc) => ({ ...baseFields, scheduledAt: scheduledAtUtc, groupId }));
+      const items = await FestivalQueue.insertMany(docs);
+
+      return res.json({ success: true, groupId, items });
+    }
+
+    const scheduledAtUtc = await resolveScheduledAt(shop, scheduledAt);
+    if (!scheduledAtUtc) {
+      return res.status(400).json({
+        error: 'scheduledAt must be a "YYYY-MM-DDTHH:mm" local date-time',
+      });
+    }
+    const fields = { ...baseFields, scheduledAt: scheduledAtUtc };
+
+    // Idempotent per (festival, date): a repeat Approve/Add-to-Queue for
+    // the same shop+festival+date (e.g. re-clicking, or Add-to-Queue
+    // after an earlier Approve) updates the existing draft/approved item
+    // for THAT date instead of creating a second one. A festival that's
+    // already 'sent' or 'cancelled' doesn't match here, so it can be
+    // queued fresh — same rule the Suggestions sidebar uses to decide
+    // what's re-suggestible.
+    //
+    // FIX (was matched on shopDomain+festival+status alone, with no date
+    // in the match): that let a second date for the same festival find
+    // and silently overwrite the first date's document via $set — five
+    // Approve submissions for five dates collapsed into one document
+    // holding only the last date, discarding the other four with no
+    // error (see audits/multi-date-festival-audit.txt section 1).
+    // scheduledAt is now part of the match, so two different dates for
+    // the same festival can never collide into one document; only a
+    // genuine resubmission of the SAME date is idempotent.
     let item = null;
     if (festival) {
       item = await FestivalQueue.findOneAndUpdate(
-        { shopDomain: shop, festival, status: { $in: ['draft', 'approved'] } },
+        { shopDomain: shop, festival, scheduledAt: scheduledAtUtc, status: { $in: ['draft', 'approved'] } },
         { $set: fields },
         { new: true }
       );
@@ -298,6 +349,15 @@ const FESTIVAL_PATCH_FIELDS = [
   'title', 'body', 'mobileImageUrl', 'desktopImageUrl', 'scheduledAt', 'status',
   'targetType', 'productId', 'productHandle', 'productTitle',
 ];
+// The subset of FESTIVAL_PATCH_FIELDS that a bulk ("all remaining dates")
+// edit is allowed to propagate to sibling documents — deliberately
+// excludes scheduledAt and status: each date in a group keeps its own
+// schedule and its own send state, only the shared notification content
+// (what the customer sees) is meant to apply across the group.
+const FESTIVAL_BULK_FIELDS = [
+  'title', 'body', 'mobileImageUrl', 'desktopImageUrl',
+  'targetType', 'productId', 'productHandle', 'productTitle',
+];
 router.patch('/:shopDomain/festival/:id', requireAuth,
   requireStoreOwner, async (req, res) => {
   try {
@@ -337,7 +397,33 @@ router.patch('/:shopDomain/festival/:id', requireAuth,
       { $set: updates },
       { new: true }
     );
-    return res.json({ success: true, item });
+
+    if (!item) {
+      return res.json({ success: true, item: null });
+    }
+
+    // Bulk propagation to the rest of the group — opt-in via
+    // applyToGroup, default false so a plain PATCH keeps today's
+    // this-date-only behaviour exactly. Only the content-field subset
+    // propagates (never scheduledAt/status), and only to sibling
+    // documents still 'draft' or 'approved' — a document that already
+    // sent is historical fact and is never rewritten after the fact.
+    let groupItems = null;
+    if (req.body.applyToGroup && item.groupId) {
+      const bulkUpdates = {};
+      for (const key of FESTIVAL_BULK_FIELDS) {
+        if (updates[key] !== undefined) bulkUpdates[key] = updates[key];
+      }
+      if (Object.keys(bulkUpdates).length) {
+        await FestivalQueue.updateMany(
+          { groupId: item.groupId, _id: { $ne: item._id }, status: { $in: ['draft', 'approved'] } },
+          { $set: bulkUpdates }
+        );
+      }
+      groupItems = await FestivalQueue.find({ groupId: item.groupId }).sort({ scheduledAt: 1 }).lean();
+    }
+
+    return res.json({ success: true, item, ...(groupItems ? { groupItems } : {}) });
   } catch (err) {
     console.error('[queue] festival PATCH error:', err.message);
     return res.status(500).json({ error: 'Failed to update' });
@@ -345,11 +431,28 @@ router.patch('/:shopDomain/festival/:id', requireAuth,
 });
 
 // DELETE /api/queue/:shopDomain/festival/:id
+// ?group=true deletes every OTHER document in the target's group that is
+// still 'draft' or 'approved' (same guard as bulk edit — a 'sent'
+// document is never deleted this way), in addition to the target itself.
+// Without ?group=true (or when the target has no groupId), behaviour is
+// unchanged: exactly the one document is deleted.
 router.delete('/:shopDomain/festival/:id', requireAuth,
   requireStoreOwner, async (req, res) => {
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
     const FestivalQueue = require('../models/FestivalQueue');
+
+    if (req.query.group === 'true') {
+      const target = await FestivalQueue.findOne({ _id: req.params.id, shopDomain: shop }).select('groupId');
+      if (target && target.groupId) {
+        const result = await FestivalQueue.deleteMany({
+          shopDomain: shop,
+          groupId: target.groupId,
+          status: { $in: ['draft', 'approved'] },
+        });
+        return res.json({ success: true, deletedCount: result.deletedCount });
+      }
+    }
 
     await FestivalQueue.findOneAndDelete({
       _id: req.params.id,

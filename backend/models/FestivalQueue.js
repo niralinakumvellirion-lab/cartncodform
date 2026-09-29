@@ -8,6 +8,11 @@ const festivalQueueSchema = new mongoose.Schema({
   mobileImageUrl: { type: String, default: '' },
   desktopImageUrl: { type: String, default: '' },
   scheduledAt: { type: Date, required: true },
+  // Links documents created together as one multi-date campaign (one
+  // document per date — audits/multi-date-festival-audit.txt design (a)).
+  // null for every ungrouped/single-date item, including every document
+  // that existed before this field was added — no migration needed.
+  groupId: { type: mongoose.Schema.Types.ObjectId, default: null, index: true },
   festival: { type: String, default: '' },
   targetType: { type: String, enum: ['home', 'product'], default: 'home' },
   productId: { type: String, default: '' },

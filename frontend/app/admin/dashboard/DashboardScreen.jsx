@@ -465,6 +465,63 @@ export default function DashboardScreen({ shop }) {
   const [editorProductHandle, setEditorProductHandle] = useState('');
   const [editorProductTitle, setEditorProductTitle] = useState('');
   const [sendingNow, setSendingNow] = useState(false);
+
+  // Multi-date scheduling (audits/multi-date-festival-audit.txt design
+  // (a) — one FestivalQueue document per date, linked server-side by a
+  // shared groupId). The single editorDate input above stays the
+  // untouched default; this is purely additive, off unless the merchant
+  // opts in.
+  const [multiDateMode, setMultiDateMode] = useState(false);
+  const [multiDateSubMode, setMultiDateSubMode] = useState('individual'); // 'individual' | 'range'
+  // Individual mode: editorDate is the first date; these are the rest.
+  const [extraDates, setExtraDates] = useState([]);
+  // Range mode: date-only start/end, a shared time-of-day, and the
+  // interval in days between occurrences.
+  const [rangeStart, setRangeStart] = useState('');
+  const [rangeEnd, setRangeEnd] = useState('');
+  const [rangeTime, setRangeTime] = useState('09:00');
+  const [rangeIntervalDays, setRangeIntervalDays] = useState(1);
+
+  const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  // Formats a raw "YYYY-MM-DDTHH:mm" string for the preview list without
+  // ever constructing a Date — these are local values the merchant
+  // picked (or the range generated); parsing them as a Date would risk
+  // reinterpreting them in the browser's own timezone for no reason,
+  // since the preview only needs the digits that are already right there.
+  function shortDateLabel(localDateTimeStr) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(localDateTimeStr || '');
+    if (!m) return '';
+    return `${MONTH_ABBR[(+m[2]) - 1]} ${+m[3]}`;
+  }
+
+  // The resolved list of dates that will actually be submitted when
+  // multiDateMode is on. Individual mode: editorDate plus every
+  // non-empty extra row. Range mode: every rangeStart..rangeEnd date
+  // (inclusive) stepped by rangeIntervalDays, at the shared rangeTime —
+  // empty if the range/interval produces nothing (end before start, or
+  // an interval too long), which the UI below blocks submission on.
+  function computeMultiDates() {
+    if (multiDateSubMode === 'individual') {
+      return [editorDate, ...extraDates].filter(Boolean);
+    }
+    if (!rangeStart || !rangeEnd || !rangeTime) return [];
+    const interval = Math.max(1, parseInt(rangeIntervalDays, 10) || 0);
+    const start = new Date(`${rangeStart}T00:00:00`);
+    const end = new Date(`${rangeEnd}T00:00:00`);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
+    const dates = [];
+    const cur = new Date(start);
+    while (cur <= end) {
+      const y = cur.getFullYear();
+      const mo = String(cur.getMonth() + 1).padStart(2, '0');
+      const d = String(cur.getDate()).padStart(2, '0');
+      dates.push(`${y}-${mo}-${d}T${rangeTime}`);
+      cur.setDate(cur.getDate() + interval);
+    }
+    return dates;
+  }
+  const multiDatePreview = multiDateMode ? computeMultiDates() : [];
+  const multiDateEmpty = multiDateMode && multiDatePreview.length === 0;
   const [successMsg, setSuccessMsg] = useState('');
   // FestivalQueue items already queued for this shop — used to hide
   // already-queued festivals from the Suggestions list. Holds raw items
@@ -742,6 +799,13 @@ export default function DashboardScreen({ shop }) {
     setEditorMobileImageUrl(f.imageUrl || '');
     setEditorDesktopImageUrl(f.imageUrl || '');
     setEditorDate(f.date);
+    setMultiDateMode(false);
+    setMultiDateSubMode('individual');
+    setExtraDates([]);
+    setRangeStart('');
+    setRangeEnd('');
+    setRangeTime('09:00');
+    setRangeIntervalDays(1);
     setEditorAction(null);
     // Every suggestion starts targeting the storefront home page — the
     // merchant picks a specific product via ProductPicker if they want one.
@@ -1777,6 +1841,136 @@ export default function DashboardScreen({ shop }) {
                   <QuietHoursWarning value={editorDate} settings={quietSettings} />
                 </div>
 
+                {/* Multi-date scheduling — off by default, purely
+                    additive on top of the single date input above. */}
+                <div style={{ marginBottom: 20 }}>
+                  <button
+                    type="button"
+                    onClick={() => setMultiDateMode(v => !v)}
+                    style={{
+                      background: 'none', border: 'none', padding: 0,
+                      color: '#4f46e5', fontSize: 12, fontWeight: 600,
+                      cursor: 'pointer', textDecoration: 'underline',
+                    }}
+                  >
+                    {multiDateMode ? '− Schedule a single date instead' : '+ Schedule multiple dates'}
+                  </button>
+
+                  {multiDateMode && (
+                    <div style={{
+                      marginTop: 12, padding: 12, borderRadius: 8,
+                      border: '1px solid #e5e7eb', background: '#fafafa',
+                    }}>
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                        {[['individual', 'Individual dates'], ['range', 'Start / end / every N days']].map(([key, label]) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => setMultiDateSubMode(key)}
+                            style={{
+                              borderRadius: 7, padding: '6px 12px', fontSize: 12, fontWeight: 600,
+                              cursor: 'pointer', border: 'none',
+                              background: multiDateSubMode === key ? '#4f46e5' : '#fff',
+                              color: multiDateSubMode === key ? '#fff' : '#6b7280',
+                            }}
+                          >{label}</button>
+                        ))}
+                      </div>
+
+                      {multiDateSubMode === 'individual' ? (
+                        <div>
+                          <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>
+                            The date above is the first notification. Add as many more as you need.
+                          </div>
+                          {extraDates.map((d, i) => (
+                            <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+                              <input
+                                type="datetime-local"
+                                value={d || ''}
+                                onChange={e => setExtraDates(prev => prev.map((v, vi) => vi === i ? e.target.value : v))}
+                                style={{ flex: 1, padding: '7px 10px', borderRadius: 7,
+                                         border: '1px solid #e5e7eb', fontSize: 12, boxSizing: 'border-box' }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setExtraDates(prev => prev.filter((_, vi) => vi !== i))}
+                                style={{
+                                  padding: '0 10px', borderRadius: 7, border: '1px solid #e5e7eb',
+                                  background: '#fff', color: '#dc2626', fontSize: 12, cursor: 'pointer',
+                                }}
+                                aria-label="Remove date"
+                              >×</button>
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => setExtraDates(prev => [...prev, ''])}
+                            style={{
+                              padding: '6px 12px', borderRadius: 7, border: '1px dashed #d1d5db',
+                              background: '#fff', color: '#4f46e5', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                            }}
+                          >+ Add date</button>
+                        </div>
+                      ) : (
+                        <div>
+                          <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                            <div style={{ flex: 1, minWidth: 120 }}>
+                              <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Start</div>
+                              <input type="date" value={rangeStart} onChange={e => setRangeStart(e.target.value)}
+                                style={{ width: '100%', padding: '7px 10px', borderRadius: 7,
+                                         border: '1px solid #e5e7eb', fontSize: 12, boxSizing: 'border-box' }} />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 120 }}>
+                              <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>End</div>
+                              <input type="date" value={rangeEnd} onChange={e => setRangeEnd(e.target.value)}
+                                style={{ width: '100%', padding: '7px 10px', borderRadius: 7,
+                                         border: '1px solid #e5e7eb', fontSize: 12, boxSizing: 'border-box' }} />
+                            </div>
+                            <div style={{ flex: 1, minWidth: 90 }}>
+                              <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Time ({quietSettings.timezone || 'Asia/Kolkata'})</div>
+                              <input type="time" value={rangeTime} onChange={e => setRangeTime(e.target.value)}
+                                style={{ width: '100%', padding: '7px 10px', borderRadius: 7,
+                                         border: '1px solid #e5e7eb', fontSize: 12, boxSizing: 'border-box' }} />
+                            </div>
+                          </div>
+                          {/* Interval sits with the end date, not before it —
+                              it has nothing to apply to until both ends of
+                              the range exist. */}
+                          {rangeEnd && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 12, color: '#374151' }}>Every</span>
+                              <input
+                                type="number" min="1" value={rangeIntervalDays}
+                                onChange={e => setRangeIntervalDays(e.target.value)}
+                                style={{ width: 56, padding: '6px 8px', borderRadius: 7,
+                                         border: '1px solid #e5e7eb', fontSize: 12, boxSizing: 'border-box' }}
+                              />
+                              <span style={{ fontSize: 12, color: '#374151' }}>day(s)</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Live preview — exactly what will be created. */}
+                      {multiDateEmpty ? (
+                        <div style={{ marginTop: 10, fontSize: 12, color: '#dc2626' }}>
+                          This produces no dates — check the start, end and interval.
+                        </div>
+                      ) : multiDatePreview.length > 0 && (
+                        <div style={{ marginTop: 10, fontSize: 12, color: '#374151' }}>
+                          {multiDatePreview.length} notification{multiDatePreview.length !== 1 ? 's' : ''}:{' '}
+                          {multiDatePreview.map(shortDateLabel).join(', ')}
+                          {multiDatePreview.length > 10 && (
+                            <div style={{ marginTop: 4, color: '#d97706' }}>
+                              That's {multiDatePreview.length} notifications — double check that's what you want.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Action buttons */}
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button
@@ -1802,14 +1996,15 @@ export default function DashboardScreen({ shop }) {
                         alert('Failed to send notification');
                       }
                     }}
-                    disabled={sendingNow}
+                    disabled={sendingNow || multiDateMode}
+                    title={multiDateMode ? 'Send Now is a single immediate send — turn off multi-date scheduling to use it' : undefined}
                     style={{
                       flex: 1, padding: '10px 0', borderRadius: 8,
                       border: 'none',
-                      background: sendingNow ? '#818cf8' : '#4f46e5',
+                      background: (sendingNow || multiDateMode) ? '#818cf8' : '#4f46e5',
                       color: '#fff', fontSize: 13, fontWeight: 700,
-                      cursor: sendingNow ? 'not-allowed' : 'pointer',
-                      opacity: sendingNow ? 0.8 : 1,
+                      cursor: (sendingNow || multiDateMode) ? 'not-allowed' : 'pointer',
+                      opacity: (sendingNow || multiDateMode) ? 0.5 : 1,
                       display: 'flex', alignItems: 'center',
                       justifyContent: 'center', gap: 6,
                     }}>
@@ -1836,7 +2031,7 @@ export default function DashboardScreen({ shop }) {
                             body: editorBody,
                             mobileImageUrl: editorMobileImageUrl,
                             desktopImageUrl: editorDesktopImageUrl,
-                            scheduledAt: editorDate,
+                            scheduledAt: multiDateMode ? multiDatePreview : editorDate,
                             festival: selectedFestival.name,
                             targetType: editorTargetType,
                             productId: editorProductId,
@@ -1853,7 +2048,11 @@ export default function DashboardScreen({ shop }) {
                         setEditorMobileImageUrl('');
                         setEditorDesktopImageUrl('');
                         setSendingNow(false);
-                        setSuccessMsg('Added to queue as approved!');
+                        setSuccessMsg(
+                          multiDateMode
+                            ? `Added ${multiDatePreview.length} notifications to the queue as approved!`
+                            : 'Added to queue as approved!'
+                        );
                         setTimeout(() => {
                           setSuccessMsg('');
                           navigate('/admin/queue');
@@ -1862,10 +2061,14 @@ export default function DashboardScreen({ shop }) {
                         alert('Failed to approve');
                       }
                     }}
+                    disabled={multiDateEmpty}
                     style={{
                       flex: 1, padding: '10px 0', borderRadius: 8,
-                      border: 'none', background: '#16a34a', color: '#fff',
-                      fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                      border: 'none',
+                      background: multiDateEmpty ? '#86efac' : '#16a34a',
+                      color: '#fff', fontSize: 13, fontWeight: 700,
+                      cursor: multiDateEmpty ? 'not-allowed' : 'pointer',
+                      opacity: multiDateEmpty ? 0.6 : 1,
                     }}>
                     Approve
                   </button>
@@ -1880,7 +2083,7 @@ export default function DashboardScreen({ shop }) {
                             body: editorBody,
                             mobileImageUrl: editorMobileImageUrl,
                             desktopImageUrl: editorDesktopImageUrl,
-                            scheduledAt: editorDate,
+                            scheduledAt: multiDateMode ? multiDatePreview : editorDate,
                             festival: selectedFestival.name,
                             targetType: editorTargetType,
                             productId: editorProductId,
@@ -1897,7 +2100,11 @@ export default function DashboardScreen({ shop }) {
                         setEditorMobileImageUrl('');
                         setEditorDesktopImageUrl('');
                         setSendingNow(false);
-                        setSuccessMsg('Added to queue');
+                        setSuccessMsg(
+                          multiDateMode
+                            ? `Added ${multiDatePreview.length} notifications to the queue`
+                            : 'Added to queue'
+                        );
                         setTimeout(() => {
                           setSuccessMsg('');
                           navigate('/admin/queue');
@@ -1906,11 +2113,13 @@ export default function DashboardScreen({ shop }) {
                         alert('Failed to save');
                       }
                     }}
+                    disabled={multiDateEmpty}
                     style={{
                       flex: 1, padding: '10px 0', borderRadius: 8,
                       border: '1px solid #e5e7eb', background: '#fff',
-                      color: '#374151', fontSize: 13, fontWeight: 700,
-                      cursor: 'pointer',
+                      color: multiDateEmpty ? '#d1d5db' : '#374151',
+                      fontSize: 13, fontWeight: 700,
+                      cursor: multiDateEmpty ? 'not-allowed' : 'pointer',
                     }}>
                     Add to Queue
                   </button>

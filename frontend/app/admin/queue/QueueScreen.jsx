@@ -688,6 +688,9 @@ export default function QueueScreen({ shop }) {
   const [editProductHandle, setEditProductHandle] = useState('');
   const [editProductTitle, setEditProductTitle] = useState('');
   const [editSaving, setEditSaving] = useState(false);
+  // this-date-only (default, today's behaviour) vs all-remaining-dates —
+  // only meaningful, and only shown, when editingItem.groupId is set.
+  const [editApplyToGroup, setEditApplyToGroup] = useState(false);
 
   function openEditModal(item) {
     setEditingItem(item);
@@ -700,6 +703,7 @@ export default function QueueScreen({ shop }) {
     setEditProductId(item.productId || '');
     setEditProductHandle(item.productHandle || '');
     setEditProductTitle(item.productTitle || '');
+    setEditApplyToGroup(false);
   }
 
   function closeEditModal() {
@@ -723,6 +727,7 @@ export default function QueueScreen({ shop }) {
           productId: editProductId,
           productHandle: editProductHandle,
           productTitle: editProductTitle,
+          ...(editingItem.groupId ? { applyToGroup: editApplyToGroup } : {}),
         }
       );
       setEditingItem(null);
@@ -1527,6 +1532,29 @@ export default function QueueScreen({ shop }) {
                 />
                 <QuietHoursWarning value={editScheduledAt} settings={quietSettings} />
               </div>
+
+              {/* Only shown for a date that belongs to a multi-date
+                  campaign (audits/multi-date-festival-audit.txt design
+                  (a)). Defaults unchecked — this-date-only, today's
+                  behaviour — every time the modal is opened
+                  (openEditModal resets it). Never touches scheduledAt or
+                  status on siblings, and never touches a sibling that
+                  already sent — see the PATCH handler's applyToGroup
+                  handling in routes/queue.js. */}
+              {editingItem.groupId && (
+                <label style={{
+                  display: 'flex', alignItems: 'center', gap: 8, marginTop: 14,
+                  fontSize: 12, color: '#374151', cursor: 'pointer',
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={editApplyToGroup}
+                    onChange={e => setEditApplyToGroup(e.target.checked)}
+                  />
+                  Apply title/body/image changes to all remaining dates in this campaign
+                  <span style={{ color: '#9ca3af' }}>(not yet sent — this date's own schedule is unaffected)</span>
+                </label>
+              )}
             </div>
 
             {/* Footer — right-aligned, separated by a 1px divider */}
