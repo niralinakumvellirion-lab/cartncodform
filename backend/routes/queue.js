@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const router = express.Router();
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
 const ScheduledJob = require('../models/ScheduledJob');
@@ -195,7 +196,38 @@ router.get('/:shopDomain/festival', requireAuth, requireStoreOwner,
       .sort({ scheduledAt: 1 })
       .lean();
 
-    return res.json({ items });
+    // Per-item delivery summary for the calendar chips — ONE aggregation
+    // across every item's ScheduledJob rows, not a query per item (the
+    // calendar must not make N+1 requests).
+    const ids = items.map((i) => i._id);
+    const stats = ids.length
+      ? await ScheduledJob.aggregate([
+          { $match: { shopDomain: shop, festivalQueueId: { $in: ids } } },
+          {
+            $group: {
+              _id: '$festivalQueueId',
+              total: { $sum: 1 },
+              delivered: { $sum: { $cond: [{ $eq: ['$outcome', 'delivered'] }, 1, 0] } },
+              failed: { $sum: { $cond: [{ $eq: ['$outcome', 'failed'] }, 1, 0] } },
+            },
+          },
+        ])
+      : [];
+
+    const statsMap = {};
+    stats.forEach((s) => { statsMap[s._id.toString()] = s; });
+
+    const enriched = items.map((i) => {
+      const s = statsMap[i._id.toString()];
+      return {
+        ...i,
+        summary: s
+          ? { total: s.total, delivered: s.delivered, failed: s.failed }
+          : { total: 0, delivered: 0, failed: 0 },
+      };
+    });
+
+    return res.json({ items: enriched });
   } catch (err) {
     console.error('[queue] festival GET error:', err.message);
     return res.status(500).json({ error: 'Failed to load' });
@@ -264,6 +296,165 @@ router.delete('/:shopDomain/festival/:id', requireAuth,
   } catch (err) {
     console.error('[queue] festival DELETE error:', err.message);
     return res.status(500).json({ error: 'Failed to delete' });
+  }
+});
+
+// GET /api/queue/:shopDomain/festival/:id/summary
+// Aggregate counts for the festival detail page's summary cards and the
+// calendar chip's muted line — an aggregation, not a full fetch.
+router.get('/:shopDomain/festival/:id/summary', requireAuth,
+  requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const festivalQueueId = new mongoose.Types.ObjectId(req.params.id);
+
+    const rows = await ScheduledJob.aggregate([
+      { $match: { shopDomain: shop, festivalQueueId } },
+      {
+        $group: {
+          _id: '$channel',
+          total: { $sum: 1 },
+          delivered: { $sum: { $cond: [{ $eq: ['$outcome', 'delivered'] }, 1, 0] } },
+          failed: { $sum: { $cond: [{ $eq: ['$outcome', 'failed'] }, 1, 0] } },
+        },
+      },
+    ]);
+
+    const summary = { total: 0, delivered: 0, failed: 0, byChannel: {} };
+    rows.forEach((r) => {
+      summary.total += r.total;
+      summary.delivered += r.delivered;
+      summary.failed += r.failed;
+      summary.byChannel[r._id || 'push'] = { total: r.total, delivered: r.delivered, failed: r.failed };
+    });
+
+    return res.json({ summary });
+  } catch (err) {
+    console.error('[queue] festival summary error:', err.message);
+    return res.status(500).json({ error: 'Failed to load summary' });
+  }
+});
+
+// GET /api/queue/:shopDomain/festival/:id/recipients
+// Paginated per-recipient rows for one festival send (ScheduledJob rows
+// written by services/sendLogService.js). Never returns a full FCM
+// token — only its last 8 characters. ?outcome=delivered|failed filters;
+// ?page= paginates.
+router.get('/:shopDomain/festival/:id/recipients', requireAuth,
+  requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const page = parseInt(req.query.page || '0', 10);
+    const limit = 20;
+
+    const query = { shopDomain: shop, festivalQueueId: req.params.id };
+    if (req.query.outcome === 'delivered' || req.query.outcome === 'failed') {
+      query.outcome = req.query.outcome;
+    }
+
+    const [jobs, total] = await Promise.all([
+      ScheduledJob.find(query)
+        .sort({ sentAt: -1 })
+        .skip(page * limit)
+        .limit(limit)
+        .lean(),
+      ScheduledJob.countDocuments(query),
+    ]);
+
+    // Resolve email + profileId via customerId first, cartToken as a
+    // fallback — festival rows never carry profileId directly (see
+    // services/sendLogService.js, which only knows what
+    // CustomerPushSubscription had on file at send time).
+    const customerIds = [...new Set(jobs.map((j) => j.customerId).filter(Boolean))];
+    const cartTokens = [...new Set(jobs.map((j) => j.cartToken).filter(Boolean))];
+    const profileOr = [];
+    if (customerIds.length) profileOr.push({ 'identifiers.customerId': { $in: customerIds } });
+    if (cartTokens.length) profileOr.push({ 'identifiers.cartTokens': { $in: cartTokens } });
+
+    const profiles = profileOr.length
+      ? await Profile.find({ shopDomain: shop, $or: profileOr })
+          .select('identifiers.customerId identifiers.cartTokens identifiers.emails channels.email.address')
+          .lean()
+      : [];
+
+    const byCustomerId = {};
+    const byCartToken = {};
+    profiles.forEach((p) => {
+      const email = p.channels?.email?.address || p.identifiers?.emails?.[0] || null;
+      if (p.identifiers?.customerId) byCustomerId[p.identifiers.customerId] = { profileId: p._id, email };
+      (p.identifiers?.cartTokens || []).forEach((ct) => { byCartToken[ct] = { profileId: p._id, email }; });
+    });
+
+    const rows = jobs.map((j) => {
+      const match = (j.customerId && byCustomerId[j.customerId])
+        || (j.cartToken && byCartToken[j.cartToken])
+        || null;
+      return {
+        _id: j._id,
+        channel: j.channel,
+        outcome: j.outcome,
+        sentAt: j.sentAt,
+        customerId: j.customerId || null,
+        cartToken: j.cartToken || null,
+        subscriptionTokenMasked: j.subscriptionToken ? j.subscriptionToken.slice(-8) : null,
+        email: match?.email || null,
+        profileId: match?.profileId || null,
+      };
+    });
+
+    return res.json({ rows, total, page, limit });
+  } catch (err) {
+    console.error('[queue] festival recipients error:', err.message);
+    return res.status(500).json({ error: 'Failed to load recipients' });
+  }
+});
+
+// GET /api/queue/:shopDomain/customer/:profileId/notifications
+// Every ScheduledJob for one customer — brain/automation sends AND
+// festival/manual broadcasts — newest first. Powers CustomerDetail.jsx's
+// "Notifications sent" section. Matches by profileId (brain jobs) OR by
+// the profile's own customerId/cartTokens (festival/manual jobs never
+// carry profileId — see services/sendLogService.js).
+router.get('/:shopDomain/customer/:profileId/notifications', requireAuth,
+  requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const profile = await Profile.findOne({ _id: req.params.profileId, shopDomain: shop })
+      .select('identifiers.customerId identifiers.cartTokens')
+      .lean();
+
+    if (!profile) {
+      return res.status(404).json({ error: 'Customer not found' });
+    }
+
+    const or = [{ profileId: profile._id }];
+    if (profile.identifiers?.customerId) or.push({ customerId: profile.identifiers.customerId });
+    if (profile.identifiers?.cartTokens?.length) {
+      or.push({ cartToken: { $in: profile.identifiers.cartTokens } });
+    }
+
+    const jobs = await ScheduledJob.find({ shopDomain: shop, $or: or })
+      .sort({ updatedAt: -1 })
+      .limit(50)
+      .select('signalType channel status outcome sentAt runAt payload festivalQueueId')
+      .lean();
+
+    const notifications = jobs.map((j) => ({
+      _id: j._id,
+      signalType: j.signalType,
+      channel: j.channel,
+      status: j.status,
+      outcome: j.outcome,
+      title: j.payload?.title || null,
+      sentAt: j.sentAt || null,
+      runAt: j.runAt,
+      isFestival: !!j.festivalQueueId,
+    }));
+
+    return res.json({ notifications });
+  } catch (err) {
+    console.error('[queue] customer notifications error:', err.message);
+    return res.status(500).json({ error: 'Failed to load notifications' });
   }
 });
 

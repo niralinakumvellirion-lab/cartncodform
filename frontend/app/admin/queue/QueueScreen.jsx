@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import QuietHoursWarning, { useQuietHoursSettings } from '../components/QuietHoursWarning';
 import { ShimmerCard } from '../components/Shimmer';
@@ -355,7 +356,7 @@ const MAX_CHIPS_PER_DAY = 2;
 // `onItemClick` is a new prop (this component is local to this file,
 // not a shared/exported one, so this isn't touching any external API) —
 // wires the existing openEditModal() into the previously-inert chips.
-function MonthCalendar({ month, items, festivals, onItemClick }) {
+function MonthCalendar({ month, items, festivals, onItemClick, onSentClick }) {
   const year = month.getFullYear();
   const mon = month.getMonth();
   const firstDay = new Date(year, mon, 1).getDay();
@@ -442,18 +443,44 @@ function MonthCalendar({ month, items, festivals, onItemClick }) {
                 fontWeight: 600,
               }}>{festival.emoji} {festival.name}</div>
             )}
-            {visibleChips.map(q => (
-              <div key={q._id}
-                onClick={() => onItemClick && onItemClick(q)}
-                style={{
-                  fontSize: 11,
-                  background: q.status === 'approved' ? '#dcfce7' : '#dbeafe',
-                  color: q.status === 'approved' ? '#16a34a' : '#2563eb',
-                  borderRadius: 5, padding: '2px 5px', marginBottom: 2,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  cursor: 'pointer', fontWeight: 600,
-                }}>{q.title}</div>
-            ))}
+            {visibleChips.map(q => {
+              // Reuse the same status->color mapping the Planning List
+              // already uses (FESTIVAL_STATUS_BADGE) — previously sent
+              // items shared draft's blue here, indistinguishable at a
+              // glance from "not sent yet".
+              const badge = FESTIVAL_STATUS_BADGE[q.status] || FESTIVAL_STATUS_BADGE.draft;
+              const summary = q.summary;
+              const showStats = q.status === 'sent' && summary && summary.total > 0;
+              return (
+                <div key={q._id}
+                  onClick={() => {
+                    if (q.status === 'sent' && onSentClick) onSentClick(q._id);
+                    else onItemClick && onItemClick(q);
+                  }}
+                  style={{
+                    fontSize: 11,
+                    background: badge.bg,
+                    color: badge.color,
+                    borderRadius: 5, padding: '2px 5px', marginBottom: 2,
+                    cursor: 'pointer', fontWeight: 600,
+                    textDecoration: badge.strike ? 'line-through' : 'none',
+                  }}
+                >
+                  <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {q.title}
+                  </div>
+                  {showStats && (
+                    <div style={{
+                      fontSize: 9, fontWeight: 500, opacity: 0.75, marginTop: 1,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      Push · {summary.delivered} delivered
+                      {summary.failed > 0 ? ` · ${summary.failed} failed` : ''}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             {extraCount > 0 && (
               <div style={{ fontSize: 10, color: '#9ca3af', padding: '1px 5px', fontWeight: 600 }}>
                 +{extraCount} more
@@ -467,6 +494,11 @@ function MonthCalendar({ month, items, festivals, onItemClick }) {
 }
 
 export default function QueueScreen({ shop }) {
+  const router = useRouter();
+  const goToFestivalDetail = (id) => {
+    router.push(`/admin/queue/${id}?shop=${encodeURIComponent(shop)}`);
+  };
+
   // One-time style injection — same idempotent pattern DashboardScreen
   // uses for its own keyframes. Only rule here: stack ImageUploadPair's
   // two upload boxes under 600px (that component's props/API are
@@ -854,6 +886,7 @@ export default function QueueScreen({ shop }) {
             items={festivalItems}
             festivals={festivalCalendar}
             onItemClick={openEditModal}
+            onSentClick={goToFestivalDetail}
           />
         )
       ) : (

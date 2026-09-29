@@ -1,0 +1,65 @@
+[10:59:42] BASH | mkdir-check / init audits/process-log-stageB.txt | starting per-action log for this task per instructions
+[10:59:46] BASH | wc -l backend/routes/queue.js | check file length before deciding read range
+[10:59:54] READ | backend/routes/queue.js lines 41-320 (already read 1-40 earlier this session) | need full picture of existing routes to add 2 new endpoints + extend festival list without duplicating patterns
+[11:00:05] SEARCH | grep server.js for queueRouter mount | confirm /api/queue prefix before designing new endpoint paths
+[11:00:41] BASH | wc -l CustomerDetail.jsx | check length before deciding read strategy (audit noted 1047 lines)
+[11:01:13] READ | frontend/.../CustomerDetail.jsx lines 762-1047 (main component) + 1-100 (imports/labels) + 742-761 (DetailSkeleton/cardTitle) — targeted ranges, not full 1047-line file, first time reading this file | need fetch pattern, layout, existing SIGNAL_LABELS map, shared style tokens to slot in a Notifications-sent card without re-deriving conventions
+[11:01:21] BASH | wc -l QueueScreen.jsx page.js | check length before targeted read
+[11:12:03] READ | frontend/app/admin/queue/page.js (full, 37 lines) | short file, need exact NavMenu/page-wrapper pattern to mirror for new [id] route
+[11:12:20] READ | frontend/app/admin/customers/[id]/page.js (full, 39 lines) | this is the exact dynamic-route pattern (useParams + useSearchParams + Screen component) to mirror for queue/[id]
+[11:13:05] SEARCH | grep QueueScreen.jsx for MonthCalendar/festivalItems/apiGet/router — confirmed no useRouter import exists yet | scope the calendar-chip edit and find where festival list is fetched before designing summary wiring
+[11:13:40] READ | frontend/app/admin/queue/QueueScreen.jsx lines 349-523 (MonthCalendar + component state) | targeted range, not full 1532-line file — this is the exact chip-rendering code item 1 asks to change
+[11:14:10] READ | frontend/app/admin/queue/QueueScreen.jsx lines 840-930 (calendar/planning-list render + FESTIVAL_STATUS_BADGE/openEditModal refs) | need to see how MonthCalendar is invoked (onItemClick=openEditModal) before deciding how sent items should navigate instead
+[11:14:35] READ | frontend/app/admin/queue/QueueScreen.jsx lines 1-20 (imports/STATUS_FILTERS) | confirm current import list before adding useRouter
+[11:14:55] SEARCH | grep QueueScreen.jsx for openEditModal/FESTIVAL_STATUS_BADGE definitions | need exact status->badge mapping and openEditModal's param shape
+[11:15:15] READ | frontend/app/admin/queue/QueueScreen.jsx lines 585-604 (festival fetch effect) | confirm festivalItems already comes straight from GET .../festival's items array — so extending that endpoint's response needs zero extra frontend fetch, just render logic
+[11:03:51] EDIT | backend/routes/queue.js | added mongoose require, extended GET .../festival list with per-item summary aggregation, added GET .../festival/:id/summary, GET .../festival/:id/recipients, GET .../customer/:profileId/notifications
+[11:03:51] VERIFY | node --check backend/routes/queue.js | syntax check after multi-route edit
+[11:04:01] SEARCH | ls backend/__tests__ | grep -i queue — no existing queue route test file | confirms a new test file is needed, not an extension of one
+[11:04:40] CREATE | backend/__tests__/queueFestivalDetail.test.js | new tests for list-with-summary, festival summary, recipients (masking/email-resolution/filter/pagination), customer notifications
+[11:04:40] VERIFY | npx jest __tests__/queueFestivalDetail.test.js -> 8/8 passed | confirm new backend endpoints work before moving to frontend
+[11:04:56] VERIFY | cd backend && npm test -> 30/30 suites, 301/301 tests passed | full backend regression check before starting frontend work
+[11:05:46] EDIT | frontend/app/admin/queue/QueueScreen.jsx | added useRouter import + goToFestivalDetail nav helper; MonthCalendar chip now reuses FESTIVAL_STATUS_BADGE colors (was sharing blue between draft+sent), shows a muted 'Push · N delivered [· M failed]' line for sent items with data, sent chips navigate to /admin/queue/[id] instead of opening the edit modal
+[11:06:21] EDIT | frontend/app/admin/screens/CustomerDetail.jsx | added notifications state + loadNotifications fetch (GET /api/queue/:shop/customer/:profileId/notifications), SIGNAL_LABELS extended with festival/manual, NOTIF_OUTCOME_COLORS, new notificationsCard with loading/error/empty states, placed above timelineCard in the left column
+[11:06:58] READ | frontend/app/admin/queue/QueueScreen.jsx lines 770-790 (page container + header style) | need exact padding/maxWidth/h1 style tokens to match visual language in the new FestivalDetail screen, per constraint 'match admin's existing inline-style visual language'
+[11:08:20] CREATE | frontend/app/admin/queue/[id]/page.js | new dynamic route, mirrors customers/[id]/page.js's NavMenu+useParams+useSearchParams pattern exactly
+[11:08:20] CREATE | frontend/app/admin/screens/FestivalDetail.jsx | new festival detail screen: header (title/date/status/image), summary cards (total/delivered/failed/byChannel via .../summary endpoint), paginated recipient table with outcome filter (.../recipients endpoint), row click-through to /admin/customers/[profileId], loading/error/empty states, responsive at 600px
+[11:09:13] BASH | cd frontend && npm run build | full production build, required by task instructions (not skippable — new page route, JSX structural edits in 2 existing screens)
+[11:09:13] VERIFY | frontend build output: Compiled successfully, /admin/queue/[id] listed as new dynamic route alongside existing /admin/customers/[id] | confirms new route + all edited JSX files are syntactically/type valid
+[11:42:00] BASH | git add (6 files) + git status --short | stage only files this task touched, confirm nothing stray included
+[11:42:30] CREATE | audits/process-log-stageB.txt REFLECTION section (this entry)
+
+=== REFLECTION ===
+- Redundant reads: reading QueueScreen.jsx lines 1-20 as a dedicated Read
+  call was unnecessary — the prior grep for imports/MonthCalendar/apiGet
+  already printed lines 1, 3-8 verbatim. The extra Read added nothing new
+  except STATUS_FILTERS (lines 10-14), which I didn't end up using.
+- node --check on backend/routes/queue.js right after editing it was
+  redundant given npx jest on the new test file ran two steps later and
+  would have caught the same syntax errors (a require() of a broken file
+  throws immediately). Kept it out of habit, not because it added
+  information the test run wouldn't have.
+- No file was read in full where a range would have done — CustomerDetail
+  (1047 lines) and QueueScreen (1532 lines) were both read only in
+  targeted ranges. The two full-file reads (queue/page.js, 37 lines;
+  customers/[id]/page.js, 39 lines) were already whole-file-sized, so
+  "full" was the only option there, not a choice to flag.
+- Verification was proportionate on the backend (new test file first,
+  then one full-suite run) and on the frontend (one build at the end
+  covering all three edited/new files, not a build per file). Neither
+  was disproportionate to a change of this size.
+- Real gap, not just a redundant-read question: I never opened the new
+  /admin/queue/[id] page or the edited QueueScreen calendar chips in a
+  running browser. The build only proves the JSX compiles and types
+  check — it says nothing about whether the chip's new muted line
+  actually reads well at a glance, whether the recipient table's flex
+  columns hold up at 600px, or whether the status-badge color reuse
+  looks right next to the existing Planning List. This is a genuinely
+  visual change and I'm flagging, not claiming, that it's unverified
+  beyond compilation.
+- Doing this again: skip the QueueScreen.jsx lines-1-20 read (use the
+  grep output directly), skip the standalone node --check on queue.js
+  (let the test run be the syntax check), and actually spin up `npm run
+  dev` + open the new festival detail page once instead of relying on
+  the build alone — that's the one step this run genuinely should have
+  included and didn't.

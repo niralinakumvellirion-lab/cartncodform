@@ -19,6 +19,16 @@ const SIGNAL_LABELS = {
   email_capture: 'Ask for an email',
   cod_to_prepaid: 'Offer prepaid on COD',
   winback: 'Win back',
+  festival: 'Festival broadcast',
+  manual: 'Manual send',
+};
+
+const NOTIF_OUTCOME_COLORS = {
+  clicked: '#2563eb',
+  converted: '#16a34a',
+  delivered: '#6b7280',
+  failed: '#dc2626',
+  skipped: '#9ca3af',
 };
 
 const EVENT_LABELS = {
@@ -776,6 +786,41 @@ export default function CustomerDetail({ shop, profileId }) {
   const [sendResult, setSendResult] = useState('');
   const [isNarrow, setIsNarrow] = useState(false);
 
+  // "Notifications sent" section — every ScheduledJob for this customer
+  // (brain/automation + festival/manual broadcasts), a separate fetch
+  // from the journey load above so a slow/failed notifications call
+  // never blocks the rest of the page.
+  const [notifications, setNotifications] = useState([]);
+  const [notifLoading, setNotifLoading] = useState(true);
+  const [notifError, setNotifError] = useState('');
+
+  const loadNotifications = useCallback(async (ctl) => {
+    if (!shop || !profileId) {
+      setNotifLoading(false);
+      return;
+    }
+    setNotifLoading(true);
+    setNotifError('');
+    try {
+      const data = await apiGet(
+        `/api/queue/${encodeURIComponent(shop)}/customer/${encodeURIComponent(profileId)}/notifications`
+      );
+      if (ctl?.aborted) return;
+      setNotifications(data?.notifications || []);
+    } catch (e) {
+      if (ctl?.aborted) return;
+      setNotifError(e.message || 'Failed to load notifications');
+    } finally {
+      if (!ctl?.aborted) setNotifLoading(false);
+    }
+  }, [shop, profileId]);
+
+  useEffect(() => {
+    const ctl = { aborted: false };
+    loadNotifications(ctl);
+    return () => { ctl.aborted = true; };
+  }, [loadNotifications]);
+
   useEffect(() => {
     const check = () => setIsNarrow(window.innerWidth < 900);
     check();
@@ -880,6 +925,73 @@ export default function CustomerDetail({ shop, profileId }) {
   const hasEmail = !!(profile.channels?.email?.address || email);
 
   const events = (customer.recentEvents || []).filter((e) => EVENT_LABELS[e.type]);
+
+  const notificationsCard = (
+    <div style={{ ...DS.card, marginBottom: 0 }}>
+      <div style={cardTitle}>Notifications sent</div>
+      {notifLoading ? (
+        <div style={{ fontSize: 12, color: '#9ca3af', padding: '4px 0' }}>
+          Loading…
+        </div>
+      ) : notifError ? (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 8, fontSize: 12, color: '#b91c1c', padding: '4px 0',
+        }}>
+          <span>{notifError}</span>
+          <button
+            onClick={() => loadNotifications({ aborted: false })}
+            style={{ ...DS.btnSecondary, padding: '4px 10px', fontSize: 11 }}
+          >
+            Retry
+          </button>
+        </div>
+      ) : notifications.length === 0 ? (
+        <div style={{ fontSize: 12, color: '#9ca3af', padding: '4px 0' }}>
+          No notifications sent yet
+        </div>
+      ) : (
+        notifications.map((n) => (
+          <div key={n._id} style={{
+            display: 'flex', gap: 8, alignItems: 'flex-start',
+            padding: '6px 0', borderBottom: '1px solid #f9fafb', fontSize: 12,
+          }}>
+            <span style={{
+              display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+              background: NOTIF_OUTCOME_COLORS[n.outcome] || '#d1d5db',
+              flexShrink: 0, marginTop: 6,
+            }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ color: '#374151' }}>
+                {n.channel === 'email' ? '✉️' : '🔔'} {SIGNAL_LABELS[n.signalType] || n.signalType || 'Notification'}
+              </div>
+              {n.title && (
+                <div style={{
+                  color: '#6b7280', fontSize: 11, overflow: 'hidden',
+                  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {n.title}
+                </div>
+              )}
+            </div>
+            <div style={{ flexShrink: 0, textAlign: 'right' }}>
+              <div style={{
+                fontSize: 10, fontWeight: 600, textTransform: 'capitalize',
+                color: NOTIF_OUTCOME_COLORS[n.outcome] || '#9ca3af',
+              }}>
+                {n.outcome || n.status}
+              </div>
+              {(n.sentAt || n.runAt) && (
+                <div style={{ color: '#9ca3af', fontSize: 11 }}>
+                  {new Date(n.sentAt || n.runAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              )}
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
 
   const timelineCard = (
     <div style={{ ...DS.card, marginBottom: 0 }}>
@@ -1036,7 +1148,10 @@ export default function CustomerDetail({ shop, profileId }) {
         gap: 16,
         alignItems: 'start',
       }}>
-        <div style={{ minWidth: 0 }}>{timelineCard}</div>
+        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {notificationsCard}
+          {timelineCard}
+        </div>
         <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
           {interestedCard}
           {sendCard}
