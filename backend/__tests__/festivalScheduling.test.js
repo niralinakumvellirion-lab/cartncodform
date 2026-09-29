@@ -166,3 +166,74 @@ describe('PATCH /:shop/festival/:id — store-timezone-aware scheduling', () => 
     expect(FestivalQueue.findOneAndUpdate).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Full round trip: store -> read back -> reformat for the input (what the
+// merchant would see on reopen) -> resave that exact displayed value ->
+// repeat. A one-way "does POST convert correctly" test can't catch drift
+// that only appears after several open/save cycles; this can. formatLocal
+// DateTimeInput below is a literal copy of the frontend's (QuietHours
+// Warning.jsx) — there is no frontend test runner in this repo (backend-
+// only per CLAUDE.md), so this mirrors it here, same "must stay in sync"
+// convention that file already documents against utils/timezone.js.
+// ---------------------------------------------------------------------------
+const LOCAL_INPUT_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+const pad2 = (n) => String(n).padStart(2, '0');
+function formatLocalDateTimeInput(value, tz) {
+  const { zonedParts, resolveTz } = require('../utils/timezone');
+  if (!value) return '';
+  const s = String(value);
+  if (LOCAL_INPUT_RE.test(s)) return s;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = zonedParts(d, resolveTz(tz));
+  return `${p.y}-${pad2(p.mo)}-${pad2(p.d)}T${pad2(p.h)}:${pad2(p.mi)}`;
+}
+
+describe('Full round trip — store, read back, resave, repeated 3x', () => {
+  test('re-picking the displayed value every reopen never drifts (Asia/Kolkata)', async () => {
+    mockStoreTimezone('Asia/Kolkata');
+    let stored = null;
+    FestivalQueue.findOneAndUpdate.mockImplementation((_q, update) => {
+      stored = { _id: 'fq1', ...update.$set };
+      return Promise.resolve(stored);
+    });
+
+    // Cycle 1: merchant types 28/09/2026 12:00 IST for the first time.
+    let res = await patch('fq1', { scheduledAt: '2026-09-28T12:00' });
+    expect(res.status).toBe(200);
+    expect(stored.scheduledAt.toISOString()).toBe('2026-09-28T06:30:00.000Z');
+
+    for (let cycle = 2; cycle <= 3; cycle++) {
+      // Reopen: the input displays formatLocalDateTimeInput of whatever's
+      // now stored. Merchant re-touches it (worst case — re-selects the
+      // exact same date/time shown) and saves again.
+      const displayed = formatLocalDateTimeInput(stored.scheduledAt.toISOString(), 'Asia/Kolkata');
+      expect(displayed).toBe('2026-09-28T12:00');
+      res = await patch('fq1', { scheduledAt: displayed });
+      expect(res.status).toBe(200);
+      expect(stored.scheduledAt.toISOString()).toBe('2026-09-28T06:30:00.000Z');
+    }
+  });
+
+  test('leaving the date field untouched every reopen (Save resends the stored ISO) never drifts', async () => {
+    mockStoreTimezone('Asia/Kolkata');
+    let stored = null;
+    FestivalQueue.findOneAndUpdate.mockImplementation((_q, update) => {
+      stored = { _id: 'fq1', ...update.$set };
+      return Promise.resolve(stored);
+    });
+
+    let res = await patch('fq1', { scheduledAt: '2026-09-28T12:00' });
+    expect(res.status).toBe(200);
+    expect(stored.scheduledAt.toISOString()).toBe('2026-09-28T06:30:00.000Z');
+
+    for (let cycle = 2; cycle <= 3; cycle++) {
+      // openEditModal set editScheduledAt to the full ISO from the DB;
+      // the merchant edits something else and Save resends it unchanged.
+      res = await patch('fq1', { title: `edit #${cycle}`, scheduledAt: stored.scheduledAt.toISOString() });
+      expect(res.status).toBe(200);
+      expect(stored.scheduledAt.toISOString()).toBe('2026-09-28T06:30:00.000Z');
+    }
+  });
+});
