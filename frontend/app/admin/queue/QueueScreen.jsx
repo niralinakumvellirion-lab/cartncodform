@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
-import QuietHoursWarning, { useQuietHoursSettings } from '../components/QuietHoursWarning';
+import QuietHoursWarning, { useQuietHoursSettings, formatLocalDateTimeInput } from '../components/QuietHoursWarning';
 import { ShimmerCard } from '../components/Shimmer';
 import { ImageUploadPair } from '../components/ImageUploadPair';
 import { ProductPicker } from '../components/ProductPicker';
@@ -1508,17 +1508,18 @@ export default function QueueScreen({ shop }) {
                 />
               </div>
 
-              {/* Scheduled date */}
+              {/* Scheduled date — entered and displayed in the STORE's
+                  timezone (never UTC, never the browser's local zone). See
+                  formatLocalDateTimeInput in QuietHoursWarning.jsx. */}
               <div>
                 <label style={{ fontSize: 12, fontWeight: 600,
                                 color: '#374151', display: 'block',
                                 marginBottom: 6 }}>
-                  Schedule Date & Time
+                  Schedule Date & Time ({quietSettings.timezone || 'Asia/Kolkata'})
                 </label>
                 <input
                   type="datetime-local"
-                  value={editScheduledAt ?
-                    new Date(editScheduledAt).toISOString().slice(0,16) : ''}
+                  value={formatLocalDateTimeInput(editScheduledAt, quietSettings.timezone)}
                   onChange={e => setEditScheduledAt(e.target.value)}
                   style={{ width: '100%', padding: '8px 12px',
                            borderRadius: 8, border: '1px solid #e5e7eb',

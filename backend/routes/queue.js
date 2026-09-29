@@ -4,6 +4,25 @@ const router = express.Router();
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
 const ScheduledJob = require('../models/ScheduledJob');
 const Profile = require('../models/Profile');
+const Store = require('../models/Store');
+const { zonedTimeToUtc, resolveTz } = require('../utils/timezone');
+
+const LOCAL_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
+
+// The Schedule Date & Time input sends a "YYYY-MM-DDTHH:mm" string with no
+// timezone — it represents the STORE's wall-clock time (a merchant entering
+// 19:31 means 19:31 in the store's own timezone), so it must be converted
+// with the store's real IANA timezone via zonedTimeToUtc. `new Date(str)`
+// on that same string would instead use the server PROCESS's own local
+// zone (whatever Node/Render happens to be running as) — unrelated to any
+// shop's configured timezone. Returns null if `raw` isn't in that shape.
+async function resolveScheduledAt(shopDomain, raw) {
+  const m = LOCAL_DATETIME_RE.exec(String(raw || ''));
+  if (!m) return null;
+  const store = await Store.findOne({ shopDomain }).select('timezone').lean();
+  const tz = resolveTz(store?.timezone);
+  return zonedTimeToUtc(+m[1], +m[2], +m[3], +m[4], +m[5], tz);
+}
 
 // GET /api/queue/:shopDomain
 // Returns paginated job list with filters
@@ -140,6 +159,13 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
       });
     }
 
+    const scheduledAtUtc = await resolveScheduledAt(shop, scheduledAt);
+    if (!scheduledAtUtc) {
+      return res.status(400).json({
+        error: 'scheduledAt must be a "YYYY-MM-DDTHH:mm" local date-time',
+      });
+    }
+
     const FestivalQueue = require('../models/FestivalQueue');
     const fields = {
       shopDomain: shop,
@@ -148,7 +174,7 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
       imageUrl: imageUrl || '',
       mobileImageUrl: mobileImageUrl || '',
       desktopImageUrl: desktopImageUrl || '',
-      scheduledAt: new Date(scheduledAt),
+      scheduledAt: scheduledAtUtc,
       festival: festival || '',
       targetType: targetType || 'home',
       productId: productId || '',
@@ -263,8 +289,17 @@ router.patch('/:shopDomain/festival/:id', requireAuth,
 
     const updates = {};
     for (const key of FESTIVAL_PATCH_FIELDS) {
-      if (req.body[key] !== undefined) {
-        updates[key] = key === 'scheduledAt' ? new Date(req.body[key]) : req.body[key];
+      if (req.body[key] === undefined) continue;
+      if (key === 'scheduledAt') {
+        const scheduledAtUtc = await resolveScheduledAt(shop, req.body[key]);
+        if (!scheduledAtUtc) {
+          return res.status(400).json({
+            error: 'scheduledAt must be a "YYYY-MM-DDTHH:mm" local date-time',
+          });
+        }
+        updates.scheduledAt = scheduledAtUtc;
+      } else {
+        updates[key] = req.body[key];
       }
     }
 
