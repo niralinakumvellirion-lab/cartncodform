@@ -1,0 +1,212 @@
+QUEUE SCREEN MULTI-DATE SCHEDULING - SELF-AUDIT (after implementation)
+=========================================================================
+Extends the multi-date festival feature (commit aa199d9, audits/
+multi-date-festival-audit.txt / -after.txt) into QueueScreen.jsx and
+FestivalDetail.jsx.
+
+REPORTED GAP (task said "backend only unless you find a gap" — found one)
+---------------------------------------------------------------------------
+The array-creation POST from aa199d9 always generates a brand-new groupId
+— it has no way to add dates to an EXISTING item's group. That's exactly
+what "add dates while editing an existing item" (task section 1) needs,
+so it was a real gap, not just a frontend wiring task. Fixed in
+backend/routes/queue.js's POST /:shopDomain/festival, array branch:
+  - optional joinGroupId in the request body: if present, the new
+    documents use it instead of generating a fresh ObjectId (validated
+    with a try/catch around `new mongoose.Types.ObjectId(joinGroupId)`,
+    400 on a bad value).
+  - optional joinItemId: after creating the new documents, folds that
+    existing item into the (possibly-just-generated) group via
+    `updateOne({_id: joinItemId, shopDomain, groupId: null}, {$set:
+    {groupId}})` — guarded to only touch a document that's currently
+    ungrouped, so it can't silently reassign an item that's already in
+    a different group.
+  joinGroupId isn't verified to belong to this shop beyond the ObjectId
+  cast — every place that actually reads by groupId already scopes by
+  {shopDomain, groupId} together (PATCH's applyToGroup, DELETE's
+  ?group=true, the calendar/detail-page lookups), so a bogus id here
+  can only produce documents that don't match any real group for this
+  shop; it can't expose another shop's data.
+Tests added to backend/__tests__/multiDateFestival.test.js: joinGroupId
+  reuses the given group (13 tests total in that file now, up from 11;
+  full suite 325 passing).
+
+1. SHARED COMPONENT
+-----------------------
+frontend/app/admin/components/MultiDateScheduler.jsx (new file) — the
+  "Schedule multiple dates" toggle + individual/range sub-modes + live
+  preview + zero-date validation, extracted verbatim from
+  DashboardScreen.jsx's inline implementation (commit aa199d9). Same
+  logic, same styling, no behavioural change for Dashboard.
+  Props: firstDate (the caller's own single-date input value, used as
+  date #1 in individual mode), timezone (label only), onDatesChange
+  (called with null while off, an array — possibly empty — while on),
+  individualHint (optional override for the individual-mode helper
+  text, since "the date above is the first notification" doesn't read
+  right in the Queue edit modal, where there's no "date above" being
+  freshly created — see section 2).
+  Reset strategy: no imperative reset method. Both callers mount it
+  with a `key` tied to whatever identifies the thing being edited
+  (selectedFestival.name in Dashboard, editingItem._id in Queue) — a
+  key change remounts a fresh instance, which is the idiomatic React
+  way to reset a component's internal state and avoids a second,
+  parallel reset API to keep in sync with openFestivalEditor/
+  openEditModal.
+  DashboardScreen.jsx: the old inline state (multiDateMode,
+  multiDateSubMode, extraDates, rangeStart/End/Time/IntervalDays,
+  MONTH_ABBR, shortDateLabel, computeMultiDates) is gone, replaced by
+  one `multiDates` state (null | array) fed from
+  onDatesChange={setMultiDates}. Approve/Add to Queue send
+  `multiDateMode ? multiDates : editorDate` exactly as before, just
+  reading from the new single state variable.
+
+2. QUEUE EDIT MODAL
+-----------------------
+Reused MultiDateScheduler with firstDate="" (there is no "new first
+  date" being created here — the item being edited already has its own
+  date, shown in the existing single input above) and a Queue-specific
+  individualHint. New dates collected in editMultiDates.
+
+saveEdit() now does two requests when editMultiDates has entries: the
+  existing PATCH (unchanged), then a POST with scheduledAt:
+  editMultiDates, festival: editingItem.festival, status matching the
+  edited item's own status (approved stays approved, draft stays
+  draft — so a merchant approving a whole campaign's remaining dates
+  doesn't have to individually approve each new one), and either
+  joinGroupId (item already grouped) or joinItemId (item is currently
+  ungrouped — folds it into the new group the backend creates). Save
+  is disabled (same greyed/not-allowed styling as the existing
+  editSaving state) when editMultiDates is a non-null empty array,
+  mirroring Dashboard's zero-date validation.
+
+REPORT (task section 2's explicit question) — does the edit modal have
+  sibling dates available, or does it need a new fetch?
+  It already has them. openEditModal receives `item` straight from
+  festivalItems (the state GET /:shop/festival already populated,
+  which already includes every item's groupId — no projection strips
+  it). editGroupSiblings is a plain derived `const` —
+  festivalItems.filter(i => i.groupId === editingItem.groupId), sorted
+  by scheduledAt — recomputed each render, no new state, no new
+  endpoint, no extra request. Same reasoning FestivalDetail.jsx's
+  groupSiblings already used (both derive from a list fetch the screen
+  makes anyway).
+
+"Dates in this campaign" list (only rendered when > 1 sibling exists):
+  each row shows a Sent/Pending badge (status === 'sent') and the
+  formatted date; the currently-edited row is highlighted and marked
+  "(editing)"; a Remove button appears only on rows that are neither
+  the current item nor 'sent' — removeGroupSibling() confirms, then
+  DELETEs that one document by _id (the existing single-id delete,
+  NOT ?group=true — removing one date must not touch its siblings) and
+  updates festivalItems locally so the row disappears without a full
+  refetch. A 'sent' document is never offered a Remove button at all —
+  the constraint "never edit or delete a 'sent' document" is enforced
+  in the UI (no control exists) on top of the backend's own status
+  guards on PATCH/DELETE ?group=true (this is a plain single-id
+  DELETE, which the backend has never guarded by status — same as
+  today's per-row Delete button in the Planning List, unchanged).
+
+3. FESTIVALDETAIL DATE PICKER
+---------------------------------
+Replaced the inline "Date X of Y in this campaign: <links>" line with:
+  - a short "Date X of Y in this campaign" label (index kept from the
+    existing chronological groupSiblings ordering) left in the content
+    column, and
+  - a new right-side picker block (only rendered when
+    groupSiblings.length > 1), listing every sibling NEWEST FIRST
+    ([...groupSiblings].reverse()), each row showing a Sent/Pending
+    badge and the short date; the current item's row is highlighted
+    and non-interactive (cursor: default, no-op onClick), every other
+    row navigates to /admin/queue/<siblingId> on click — same
+    navigate() helper (and same URL shape) the old inline links used,
+    so this is a page transition, not in-place state mutation: the
+    destination page's own loadItem/loadSummary/loadRecipients run
+    fresh for the new festivalId, which is how "switches to that
+    date's own summary cards and recipient table" is satisfied without
+    threading extra fetch logic through this component.
+  Responsive: the header container already had flexWrap: 'wrap'; the
+  picker gets width: isNarrow ? '100%' : 200 (isNarrow was already
+  tracked in this component) so it stacks full-width below the content
+  under ~600px instead of squeezing beside it — verified in the live
+  harness (section 4 below), not just asserted from the CSS.
+
+4. SINGLE-DATE ITEMS — UNCHANGED BEHAVIOUR
+-----------------------------------------------
+- Dashboard: multiDateMode defaults to null every time
+  openFestivalEditor runs; Approve/Add to Queue send editorDate alone
+  when it's null — byte-for-byte the same payload shape as before this
+  feature existed.
+- Queue edit modal: editGroupSiblings is [] for any item with no
+  groupId (the filter itself never matches), so the sibling list
+  simply doesn't render; editMultiDates stays null unless the merchant
+  explicitly opens MultiDateScheduler, so saveEdit's second POST never
+  fires; editApplyToGroup and its checkbox are unchanged from aa199d9
+  (still gated on editingItem.groupId).
+- FestivalDetail: groupSiblings.length > 1 gates both the "Date X of Y"
+  label and the picker block — an ungrouped item shows neither, exactly
+  today's header.
+
+5. LIVE VERIFICATION
+------------------------
+This app requires a real Shopify-embedded session (App Bridge session
+  token) for every admin API call — `next dev` outside the actual
+  Shopify iframe has no valid session, so festivalItems/groupSiblings
+  can never populate from a bare browser tab, meaning the edit modal
+  and detail page can't be exercised end-to-end from here regardless
+  of environment. Confirmed `next dev` itself serves /admin/queue
+  cleanly (GET 200, clean compile, no server crash) before ruling this
+  out — the blocker is Shopify session auth, not a build issue.
+  Fell back to the same isolated-harness technique this session's
+  TimezoneCombobox verification already established for this exact
+  constraint: a static HTML page (React/ReactDOM/Babel-standalone from
+  CDN, no build step) mounting the ACTUAL MultiDateScheduler.jsx source
+  (adapted only to read React off the CDN global instead of an ES
+  import — no logic changes) plus faithful copies of the sibling-list
+  and date-picker JSX/styles, served over a local static file server
+  (file:// URLs are blocked by the browser extension) and driven with
+  the Chrome browser tool. Verified interactively, not just read:
+    - Individual mode: toggle on, add a date, remove a date, live
+      preview text updates correctly, onDatesChange fires the expected
+      array/null values at each step.
+    - Range mode: interval control appears only after an End date is
+      set (confirmed absent with only Start filled); a 1-day interval
+      across Jan 10 - Oct 10 produced exactly 274 dates and the
+      non-blocking ">10" amber warning; changing to a 7-day interval
+      recomputed to exactly 40 correctly-spaced dates (every entry
+      exactly 7 days apart, verified from the raw onDatesChange array);
+      an empty/unset range showed the blocking red "produces no dates"
+      message and an empty onDatesChange array.
+    - Sibling list: Sent rows have no Remove button, the current row is
+      marked "(editing)" and has no Remove button, pending non-current
+      rows do.
+    - Date picker: newest-first ordering, Sent/Pending badges, clicking
+      a non-current row (including a 'sent' one) switches the
+      highlighted/selected item and updates the header's own date/
+      "Date X of Y" text; toggling a narrow-width simulation moved the
+      picker to stack full-width below the content instead of beside
+      it.
+  Harness file and the two ad hoc local servers used to serve/preview
+  it were deleted/stopped after verification — nothing left running,
+  nothing added to the repo.
+
+cd frontend && npm run build: compiles clean (17 routes, including
+  /admin/dashboard and /admin/queue/[id], the two touched by this
+  task's frontend changes).
+cd backend && npm test: 32 suites, 325 tests, all passing (13 in
+  multiDateFestival.test.js, up from 11 — the 2 new joinGroupId/
+  joinItemId tests).
+
+6. NOT DONE / OUT OF SCOPE
+------------------------------
+- No group-delete or group-cancel control in the Queue UI — the
+  backend endpoint from aa199d9 (?group=true) still isn't wired to any
+  button; this task's scope was the edit modal, the sibling list, and
+  the detail-page picker, none of which needed it.
+- MultiDateScheduler's range mode still has no upper bound on how far
+  a bad interval/range can run before hitting the non-blocking ">10"
+  warning (274 dates rendered fine in the live check, but a merchant
+  could enter a multi-year range with a 1-day interval and generate
+  thousands of documents in one submit — the task said "no cap on the
+  count," so this is intentional, not an oversight, but worth naming:
+  "no cap" was a deliberate product choice made upstream in aa199d9,
+  carried forward unchanged here).

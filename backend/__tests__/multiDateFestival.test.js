@@ -174,6 +174,50 @@ describe('array scheduledAt — multi-date creation', () => {
     expect(res.status).toBe(400);
     expect(FestivalQueue.insertMany).not.toHaveBeenCalled();
   });
+
+  test('joinGroupId adds new dates to an EXISTING group instead of starting a new one', async () => {
+    FestivalQueue.insertMany.mockImplementation((docs) =>
+      Promise.resolve(docs.map((d, i) => ({ _id: `fq${i + 1}`, ...d })))
+    );
+    const existingGroupId = '507f1f77bcf86cd799439011';
+
+    const res = await post({
+      title: 'Festival Sale',
+      scheduledAt: ['2026-10-12T09:00'],
+      festival: 'Navratri',
+      joinGroupId: existingGroupId,
+    });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(String(data.groupId)).toBe(existingGroupId);
+    const [docs] = FestivalQueue.insertMany.mock.calls[0];
+    expect(String(docs[0].groupId)).toBe(existingGroupId);
+    expect(FestivalQueue.updateOne).not.toHaveBeenCalled();
+  });
+
+  test('joinItemId folds a previously-ungrouped item into the new group', async () => {
+    FestivalQueue.insertMany.mockImplementation((docs) =>
+      Promise.resolve(docs.map((d, i) => ({ _id: `fq${i + 1}`, ...d })))
+    );
+    FestivalQueue.updateOne.mockResolvedValue({ modifiedCount: 1 });
+
+    const res = await post({
+      title: 'Festival Sale',
+      scheduledAt: ['2026-10-12T09:00'],
+      festival: 'Navratri',
+      joinItemId: 'existing-item-1',
+    });
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(FestivalQueue.updateOne).toHaveBeenCalledWith(
+      { _id: 'existing-item-1', shopDomain: SHOP, groupId: null },
+      { $set: { groupId: expect.anything() } }
+    );
+    const [updateMatchArg, updateSetArg] = FestivalQueue.updateOne.mock.calls[0];
+    expect(String(updateSetArg.$set.groupId)).toBe(String(data.groupId));
+  });
 });
 
 describe('bulk edit — applyToGroup', () => {

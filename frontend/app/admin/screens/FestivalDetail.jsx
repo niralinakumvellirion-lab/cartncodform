@@ -230,29 +230,62 @@ export default function FestivalDetail({ shop, festivalId }) {
           <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>{item.title}</div>
           {item.body && <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>{item.body}</div>}
           {groupSiblings.length > 1 && (
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 10, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
-              <span>
-                Date {groupSiblings.findIndex((i) => i._id === item._id) + 1} of {groupSiblings.length} in this campaign:
-              </span>
-              {groupSiblings.map((sibling, i) => (
-                <span key={sibling._id}>
-                  {sibling._id === item._id ? (
-                    <strong style={{ color: '#111827' }}>{formatDateTime(sibling.scheduledAt).split(',')[0]}</strong>
-                  ) : (
-                    <a
-                      href="#"
-                      onClick={(e) => { e.preventDefault(); navigate(`/admin/queue/${sibling._id}`); }}
-                      style={{ color: '#4f46e5', textDecoration: 'underline' }}
-                    >
-                      {formatDateTime(sibling.scheduledAt).split(',')[0]}
-                    </a>
-                  )}
-                  {i < groupSiblings.length - 1 ? ',' : ''}
-                </span>
-              ))}
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 10 }}>
+              Date {groupSiblings.findIndex((i) => i._id === item._id) + 1} of {groupSiblings.length} in this campaign
             </div>
           )}
         </div>
+
+        {/* Date picker — only when this item belongs to a group. Newest
+            first, each marked sent/pending; picking one navigates to that
+            date's own report (its own summary + recipient table, fetched
+            fresh via festivalId changing — same mechanism the "Date X of
+            Y" links used before this, just repackaged as a picker). */}
+        {groupSiblings.length > 1 && (
+          <div style={{
+            width: isNarrow ? '100%' : 200, flexShrink: 0,
+            border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden',
+          }}>
+            <div style={{
+              fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase',
+              letterSpacing: '0.5px', padding: '8px 10px', background: '#f9fafb',
+              borderBottom: '1px solid #e5e7eb',
+            }}>
+              Dates in this campaign
+            </div>
+            <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+              {[...groupSiblings].reverse().map((sibling, i, arr) => {
+                const isCurrent = sibling._id === item._id;
+                const isSent = sibling.status === 'sent';
+                return (
+                  <button
+                    key={sibling._id}
+                    type="button"
+                    onClick={() => !isCurrent && navigate(`/admin/queue/${sibling._id}`)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                      padding: '8px 10px', fontSize: 12, textAlign: 'left',
+                      border: 'none', borderBottom: i < arr.length - 1 ? '1px solid #f3f4f6' : 'none',
+                      background: isCurrent ? '#eef2ff' : '#fff',
+                      color: isCurrent ? '#4f46e5' : '#374151',
+                      fontWeight: isCurrent ? 700 : 500,
+                      cursor: isCurrent ? 'default' : 'pointer',
+                    }}
+                  >
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 20, flexShrink: 0,
+                      background: isSent ? '#dbeafe' : '#dcfce7',
+                      color: isSent ? '#2563eb' : '#16a34a',
+                    }}>{isSent ? 'Sent' : 'Pending'}</span>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {formatDateTime(sibling.scheduledAt).split(',')[0]}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* SUMMARY CARDS */}

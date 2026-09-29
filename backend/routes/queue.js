@@ -199,16 +199,43 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
 
     // Multi-date: scheduledAt as an array of local datetime strings —
     // audits/multi-date-festival-audit.txt's design (a). Creates one
-    // document per date, all sharing one new groupId, and always creates
-    // fresh — unlike the single-date path below, this never matches
-    // against/overwrites an existing draft or approved document. Doing
-    // per-date dedupe here would mean deciding whether a resubmitted date
-    // joins the OLD group or a new one, which the task didn't ask for and
-    // risks silently merging two campaigns; always-create is the
-    // unambiguous, predictable behaviour.
+    // document per date. Unlike the single-date path below, this never
+    // matches against/overwrites an existing draft or approved document
+    // by (festival, date) — doing per-date dedupe here would mean
+    // deciding whether a resubmitted date joins the OLD group or a new
+    // one, which risks silently merging two campaigns; always-create is
+    // the unambiguous, predictable behaviour.
+    //
+    // Group membership (audits/queue-multi-date-audit.txt — added when
+    // QueueScreen.jsx's edit modal gained the ability to add dates to an
+    // EXISTING item): the new documents join joinGroupId when the
+    // caller already has a group to add to (the item being edited
+    // already has a groupId). When it doesn't yet (an ungrouped
+    // single-date item is having dates added to it for the first time),
+    // the caller instead passes joinItemId — a fresh groupId is
+    // generated and that existing item is folded into it too, in the
+    // same request, so it isn't left orphaned outside its own new group.
+    // joinGroupId isn't verified to belong to this shop beyond the
+    // ObjectId cast: every read/write elsewhere in this file already
+    // scopes by { shopDomain, groupId } together (PATCH's applyToGroup,
+    // DELETE's ?group=true, the calendar/detail-page group lookups), so
+    // a bogus/foreign id here can create documents that don't match any
+    // real group for this shop, never cross-shop data exposure.
     if (Array.isArray(scheduledAt)) {
       if (scheduledAt.length === 0) {
         return res.status(400).json({ error: 'scheduledAt array must not be empty' });
+      }
+
+      const { joinGroupId, joinItemId } = req.body;
+      let groupId;
+      if (joinGroupId) {
+        try {
+          groupId = new mongoose.Types.ObjectId(joinGroupId);
+        } catch {
+          return res.status(400).json({ error: 'invalid joinGroupId' });
+        }
+      } else {
+        groupId = new mongoose.Types.ObjectId();
       }
 
       const store = await Store.findOne({ shopDomain: shop }).select('timezone').lean();
@@ -225,9 +252,15 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
         converted.push(utc);
       }
 
-      const groupId = new mongoose.Types.ObjectId();
       const docs = converted.map((scheduledAtUtc) => ({ ...baseFields, scheduledAt: scheduledAtUtc, groupId }));
       const items = await FestivalQueue.insertMany(docs);
+
+      if (joinItemId) {
+        await FestivalQueue.updateOne(
+          { _id: joinItemId, shopDomain: shop, groupId: null },
+          { $set: { groupId } }
+        );
+      }
 
       return res.json({ success: true, groupId, items });
     }

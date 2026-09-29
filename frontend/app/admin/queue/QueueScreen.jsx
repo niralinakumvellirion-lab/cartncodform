@@ -7,6 +7,7 @@ import QuietHoursWarning, { useQuietHoursSettings, formatLocalDateTimeInput } fr
 import { ShimmerCard } from '../components/Shimmer';
 import { ImageUploadPair } from '../components/ImageUploadPair';
 import { ProductPicker } from '../components/ProductPicker';
+import MultiDateScheduler from '../components/MultiDateScheduler';
 
 const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
@@ -691,6 +692,13 @@ export default function QueueScreen({ shop }) {
   // this-date-only (default, today's behaviour) vs all-remaining-dates —
   // only meaningful, and only shown, when editingItem.groupId is set.
   const [editApplyToGroup, setEditApplyToGroup] = useState(false);
+  // New dates added while editing this item (audits/queue-multi-date-
+  // audit.txt) — null while the MultiDateScheduler toggle is off, an
+  // array (possibly empty) once the merchant opts in. These join the
+  // item's existing group (or a fresh one, folding this ungrouped item
+  // into it) on save — see saveEdit below.
+  const [editMultiDates, setEditMultiDates] = useState(null);
+  const [editRemovingSibling, setEditRemovingSibling] = useState(null);
 
   function openEditModal(item) {
     setEditingItem(item);
@@ -704,6 +712,32 @@ export default function QueueScreen({ shop }) {
     setEditProductHandle(item.productHandle || '');
     setEditProductTitle(item.productTitle || '');
     setEditApplyToGroup(false);
+    setEditMultiDates(null);
+  }
+
+  // Every OTHER document sharing this item's group — already available
+  // from the same festivalItems list fetch, no new endpoint needed (see
+  // audits/queue-multi-date-audit.txt section 2). Only computed when the
+  // modal is actually open on a grouped item.
+  const editMultiDateEmpty = editMultiDates !== null && editMultiDates.length === 0;
+  const editGroupSiblings = (editingItem && editingItem.groupId)
+    ? festivalItems
+        .filter((i) => i.groupId === editingItem.groupId)
+        .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt))
+    : [];
+
+  async function removeGroupSibling(siblingId) {
+    if (!editingItem) return;
+    if (!window.confirm('Remove this date from the campaign?')) return;
+    setEditRemovingSibling(siblingId);
+    try {
+      await apiSend(`/api/queue/${encodeURIComponent(shop)}/festival/${siblingId}`, 'DELETE', {});
+      setFestivalItems((prev) => prev.filter((i) => i._id !== siblingId));
+    } catch (e) {
+      alert('Failed to remove date');
+    } finally {
+      setEditRemovingSibling(null);
+    }
   }
 
   function closeEditModal() {
@@ -730,6 +764,35 @@ export default function QueueScreen({ shop }) {
           ...(editingItem.groupId ? { applyToGroup: editApplyToGroup } : {}),
         }
       );
+
+      // New dates added via MultiDateScheduler join this item's group —
+      // its existing groupId if it has one, or a fresh group that folds
+      // this (previously ungrouped) item in, so it isn't left as an
+      // orphan outside the campaign it's now part of. See the backend's
+      // joinGroupId/joinItemId handling in routes/queue.js.
+      if (editMultiDates && editMultiDates.length > 0) {
+        await apiSend(
+          `/api/queue/${encodeURIComponent(shop)}/festival`,
+          'POST',
+          {
+            title: editTitle,
+            body: editBody,
+            mobileImageUrl: editMobileImageUrl,
+            desktopImageUrl: editDesktopImageUrl,
+            scheduledAt: editMultiDates,
+            festival: editingItem.festival,
+            targetType: editTargetType,
+            productId: editProductId,
+            productHandle: editProductHandle,
+            productTitle: editProductTitle,
+            status: editingItem.status === 'approved' ? 'approved' : 'draft',
+            ...(editingItem.groupId
+              ? { joinGroupId: editingItem.groupId }
+              : { joinItemId: editingItem._id }),
+          }
+        );
+      }
+
       setEditingItem(null);
       // Refresh festivalItems so both the calendar and planning list show
       // the saved changes.
@@ -1533,6 +1596,69 @@ export default function QueueScreen({ shop }) {
                 <QuietHoursWarning value={editScheduledAt} settings={quietSettings} />
               </div>
 
+              {/* Dates already in this item's campaign — pulled from the
+                  same festivalItems list fetch already in memory, no new
+                  endpoint (audits/queue-multi-date-audit.txt section 2).
+                  Only the currently-edited row and 'sent' rows are
+                  non-removable; a 'sent' document is never deleted here. */}
+              {editGroupSiblings.length > 1 && (
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                    Dates in this campaign ({editGroupSiblings.length})
+                  </div>
+                  <div style={{ border: '1px solid #e5e7eb', borderRadius: 8, overflow: 'hidden' }}>
+                    {editGroupSiblings.map((sibling, i) => {
+                      const isCurrent = sibling._id === editingItem._id;
+                      const isSent = sibling.status === 'sent';
+                      return (
+                        <div key={sibling._id} style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '8px 10px', fontSize: 12,
+                          background: isCurrent ? '#eef2ff' : '#fff',
+                          borderBottom: i < editGroupSiblings.length - 1 ? '1px solid #f3f4f6' : 'none',
+                        }}>
+                          <span style={{
+                            fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                            background: isSent ? '#dbeafe' : '#dcfce7',
+                            color: isSent ? '#2563eb' : '#16a34a',
+                          }}>{isSent ? 'Sent' : 'Pending'}</span>
+                          <span style={{ flex: 1, color: '#374151' }}>
+                            {new Date(sibling.scheduledAt).toLocaleString('en-IN', {
+                              day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                            })}
+                            {isCurrent && <span style={{ color: '#4f46e5', fontWeight: 600 }}> (editing)</span>}
+                          </span>
+                          {!isCurrent && !isSent && (
+                            <button
+                              type="button"
+                              onClick={() => removeGroupSibling(sibling._id)}
+                              disabled={editRemovingSibling === sibling._id}
+                              style={{
+                                padding: '3px 9px', borderRadius: 6, border: '1px solid #e5e7eb',
+                                background: '#fff', color: '#dc2626', fontSize: 11, cursor: 'pointer',
+                              }}
+                            >{editRemovingSibling === sibling._id ? 'Removing…' : 'Remove'}</button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Add more dates to this campaign — shared with
+                  DashboardScreen.jsx's festival editor (frontend/app/
+                  admin/components/MultiDateScheduler.jsx). Keyed on
+                  editingItem._id so it resets whenever a different item
+                  is opened for editing. */}
+              <MultiDateScheduler
+                key={editingItem._id}
+                firstDate=""
+                timezone={quietSettings.timezone}
+                onDatesChange={setEditMultiDates}
+                individualHint="Add more dates to this campaign — they'll join the dates listed above."
+              />
+
               {/* Only shown for a date that belongs to a multi-date
                   campaign (audits/multi-date-festival-audit.txt design
                   (a)). Defaults unchecked — this-date-only, today's
@@ -1576,12 +1702,14 @@ export default function QueueScreen({ shop }) {
               </button>
               <button
                 onClick={saveEdit}
-                disabled={editSaving}
+                disabled={editSaving || editMultiDateEmpty}
                 style={{
                   padding: '10px 20px', borderRadius: 8,
-                  border: 'none', background: editSaving ? '#818cf8' : '#4f46e5',
+                  border: 'none',
+                  background: (editSaving || editMultiDateEmpty) ? '#818cf8' : '#4f46e5',
                   color: '#fff', fontSize: 13, fontWeight: 700,
-                  cursor: editSaving ? 'not-allowed' : 'pointer',
+                  cursor: (editSaving || editMultiDateEmpty) ? 'not-allowed' : 'pointer',
+                  opacity: editMultiDateEmpty ? 0.6 : 1,
                 }}>
                 {editSaving ? 'Saving...' : 'Save'}
               </button>
