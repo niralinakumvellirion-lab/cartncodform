@@ -471,12 +471,16 @@ function MonthCalendar({ month, items, festivals, onItemClick, onSentClick }) {
                     {q.title}
                   </div>
                   {showStats && (
-                    <div style={{
-                      fontSize: 9, fontWeight: 500, opacity: 0.75, marginTop: 1,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
-                      Push · {summary.delivered} delivered
-                      {summary.failed > 0 ? ` · ${summary.failed} failed` : ''}
+                    <div style={{ fontSize: 10, fontWeight: 500, opacity: 0.75, marginTop: 1, lineHeight: 1.25 }}>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Push</div>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {summary.delivered} delivered
+                      </div>
+                      {summary.failed > 0 && (
+                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {summary.failed} failed
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
