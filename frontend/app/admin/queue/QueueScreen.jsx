@@ -1053,43 +1053,60 @@ export default function QueueScreen({ shop }) {
                           display: 'flex', gap: 6, flexShrink: 0,
                           opacity: 0.55, transition: 'opacity 0.15s',
                         }}>
-                          {item.status === 'draft' && (
+                          {/* A 'sent' document is historical fact — never
+                              editable or deletable (the backend now
+                              rejects both with 409 regardless). "View"
+                              is the only action, same detail page a
+                              sent calendar chip already links to. */}
+                          {item.status === 'sent' ? (
                             <button
-                              onClick={async () => {
-                                await apiSend(
-                                  `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
-                                  'PATCH', { status: 'approved' }
-                                );
-                                setFestivalItems(prev => prev.map(i =>
-                                  i._id === item._id ? {...i, status: 'approved'} : i
-                                ));
-                              }}
+                              onClick={() => goToFestivalDetail(item._id)}
                               style={{
-                                padding: '5px 10px', borderRadius: 6, border: 'none',
-                                background: '#4f46e5', color: '#fff', fontSize: 11,
-                                fontWeight: 600, cursor: 'pointer',
-                              }}>Approve</button>
+                                padding: '5px 10px', borderRadius: 6,
+                                border: '1px solid #e5e7eb', background: '#fff',
+                                color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                              }}>View</button>
+                          ) : (
+                            <>
+                              {item.status === 'draft' && (
+                                <button
+                                  onClick={async () => {
+                                    await apiSend(
+                                      `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
+                                      'PATCH', { status: 'approved' }
+                                    );
+                                    setFestivalItems(prev => prev.map(i =>
+                                      i._id === item._id ? {...i, status: 'approved'} : i
+                                    ));
+                                  }}
+                                  style={{
+                                    padding: '5px 10px', borderRadius: 6, border: 'none',
+                                    background: '#4f46e5', color: '#fff', fontSize: 11,
+                                    fontWeight: 600, cursor: 'pointer',
+                                  }}>Approve</button>
+                              )}
+                              <button
+                                onClick={() => openEditModal(item)}
+                                style={{
+                                  padding: '5px 10px', borderRadius: 6,
+                                  border: '1px solid #e5e7eb', background: '#fff',
+                                  color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                                }}>Edit</button>
+                              <button
+                                onClick={async () => {
+                                  await apiSend(
+                                    `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
+                                    'DELETE', {}
+                                  );
+                                  setFestivalItems(prev => prev.filter(i => i._id !== item._id));
+                                }}
+                                style={{
+                                  padding: '5px 10px', borderRadius: 6,
+                                  border: '1px solid #fee2e2', background: '#fff',
+                                  color: '#dc2626', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                                }}>Delete</button>
+                            </>
                           )}
-                          <button
-                            onClick={() => openEditModal(item)}
-                            style={{
-                              padding: '5px 10px', borderRadius: 6,
-                              border: '1px solid #e5e7eb', background: '#fff',
-                              color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                            }}>Edit</button>
-                          <button
-                            onClick={async () => {
-                              await apiSend(
-                                `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
-                                'DELETE', {}
-                              );
-                              setFestivalItems(prev => prev.filter(i => i._id !== item._id));
-                            }}
-                            style={{
-                              padding: '5px 10px', borderRadius: 6,
-                              border: '1px solid #fee2e2', background: '#fff',
-                              color: '#dc2626', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                            }}>Delete</button>
                         </div>
                       </div>
                     );

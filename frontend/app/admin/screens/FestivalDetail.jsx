@@ -317,7 +317,9 @@ export default function FestivalDetail({ shop, festivalId }) {
         </div>
       ) : (
         <div style={{ ...card, textAlign: 'center', color: '#9ca3af', fontSize: 13, marginBottom: 20 }}>
-          Not sent yet — no recipient data.
+          {item.status === 'sent'
+            ? 'Sent, but no delivery data was recorded for this date.'
+            : `Not sent yet — scheduled for ${formatDateTime(item.scheduledAt).split(',')[0]}.`}
         </div>
       )}
 
@@ -360,7 +362,9 @@ export default function FestivalDetail({ shop, festivalId }) {
           </div>
         ) : rows.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '32px 16px', color: '#9ca3af', fontSize: 13 }}>
-            No recipients{outcomeFilter !== 'all' ? ` with outcome "${outcomeFilter}"` : ''} yet.
+            {item.status !== 'sent'
+              ? `Not sent yet — scheduled for ${formatDateTime(item.scheduledAt).split(',')[0]}.`
+              : `No recipients${outcomeFilter !== 'all' ? ` with outcome "${outcomeFilter}"` : ''} yet.`}
           </div>
         ) : (
           <>

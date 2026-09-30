@@ -288,13 +288,16 @@ describe('group delete', () => {
     expect(FestivalQueue.findOneAndDelete).not.toHaveBeenCalled();
   });
 
-  test('single-id delete (no ?group=true) is unchanged', async () => {
+  test('single-id delete (no ?group=true) is otherwise unchanged, for a non-sent document', async () => {
     FestivalQueue.findOneAndDelete.mockResolvedValue({ _id: 'fq1' });
 
     const res = await del('fq1');
 
     expect(res.status).toBe(200);
-    expect(FestivalQueue.findOneAndDelete).toHaveBeenCalledWith({ _id: 'fq1', shopDomain: SHOP });
+    // status: { $ne: 'sent' } added by audits/queue-detail-picker-bugs-
+    // audit.txt's fix — see festivalSentGuard.test.js for that guard's
+    // own dedicated coverage.
+    expect(FestivalQueue.findOneAndDelete).toHaveBeenCalledWith({ _id: 'fq1', shopDomain: SHOP, status: { $ne: 'sent' } });
     expect(FestivalQueue.deleteMany).not.toHaveBeenCalled();
   });
 });

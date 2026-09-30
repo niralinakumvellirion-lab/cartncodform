@@ -1,0 +1,156 @@
+FESTIVAL DETAIL DATE PICKER - TWO BUGS - SELF-AUDIT (after fix)
+==================================================================
+Follows commit 81cec42 (Queue screen multi-date scheduling extension).
+
+BUG 1 — sent/pending badges wrong
+------------------------------------
+Investigation (as requested, before fixing):
+
+- What does the badge read from? frontend/app/admin/screens/
+  FestivalDetail.jsx:259 — `const isSent = sibling.status === 'sent';`
+  A plain field read on the document's own `status`. Not a date
+  comparison anywhere. Confirms the DISPLAY logic is faithful — if a
+  future-dated sibling shows "Sent", its stored `status` really is
+  'sent'. This is a DATA bug, not a display bug.
+
+- Did the multi-date creation path (added in 81cec42) cause it? I
+  re-read the exact line: QueueScreen.jsx's saveEdit(),
+  `status: editingItem.status === 'approved' ? 'approved' : 'draft'`.
+  This does NOT reproduce the suspected mechanism — a 'sent' parent
+  evaluates to 'draft' here, never 'sent'. Traced the backend's
+  corresponding field too (`status: status || 'draft'` in routes/
+  queue.js's array-creation branch) — it passes the client's value
+  through unchanged, no override toward 'sent' anywhere. This specific
+  path is NOT the cause; the self-audit for 81cec42 described it with
+  slightly imprecise prose ("approved stays approved, draft stays
+  draft") that glossed over the sent->draft case without actually being
+  wrong in the code.
+
+- What IS the cause: neither the Planning List's "Edit" button
+  (QueueScreen.jsx, was unconditional — no `item.status !== 'sent'`
+  check anywhere) nor the plain PATCH/DELETE endpoints in routes/
+  queue.js had any guard against acting on an already-'sent' document.
+  The PATCH handler's own comment already claimed "a document that
+  already sent is historical fact and is never rewritten after the
+  fact" — true for the BULK/sibling-propagation path (status filtered
+  to draft/approved there), false for the TARGET document hit directly
+  by the same endpoint. A merchant opening Edit on a sent item and
+  changing its "Schedule Date & Time" field to a future date got that
+  update applied with no resistance — scheduledAt moves forward,
+  status stays 'sent' (PATCH never touches status unless explicitly
+  sent in the body, and the Edit modal's Save doesn't send one). That
+  produces exactly the reported shape: a future date carrying a 'Sent'
+  badge.
+
+Fix:
+  - routes/queue.js PATCH: match query is now
+    `{ _id, shopDomain, status: { $ne: 'sent' } }` — a sent document is
+    simply never matched. When the update returns null, a follow-up
+    findOne disambiguates "not found" (unchanged 200/item:null response)
+    from "found but sent" (409, "Cannot edit a notification that has
+    already been sent").
+  - routes/queue.js DELETE (single-id path): same treatment —
+    `{ _id, shopDomain, status: { $ne: 'sent' } }`, 409 on a sent
+    target, unchanged 200 on a genuinely-missing one (idempotent delete
+    stays idempotent).
+  - QueueScreen.jsx Planning List: a 'sent' row now shows a single
+    "View" button (navigates to the existing /admin/queue/[id] detail
+    page — the same place a sent calendar chip already links to)
+    instead of Approve/Edit/Delete. This closes the actual entry point,
+    not just the backend symptom.
+  Tests: backend/__tests__/festivalSentGuard.test.js (7 tests) — PATCH
+  and DELETE both reject a sent target with 409 and the right match
+  shape; a genuinely-missing document keeps its existing (success)
+  response shape; a draft/approved document is unaffected. One
+  pre-existing test in multiDateFestival.test.js updated for the new
+  match shape (delete's match now includes `status: { $ne: 'sent' }`).
+
+Existing wrongly-'sent' documents — reported, not migrated, per the
+  task: query `FestivalQueue.find({ status: 'sent', $expr: { $gt:
+  ['$scheduledAt', '$sentAt'] } })`. Reasoning: a genuine send only ever
+  sets `sentAt` to "now" at the moment `scheduledAt <= now` becomes
+  true, so for every untouched sent document `sentAt >= scheduledAt`
+  holds by construction. `scheduledAt > sentAt` is only reachable by
+  editing scheduledAt AFTER the send already happened — exactly the
+  bug's mechanism, and the one clean, precise signature for it. I did
+  not run this query or touch any data (no DB access from here, and the
+  task said not to migrate) — it's a query to hand to whoever can check
+  live data.
+
+BUG 2 — clicking a date doesn't show that date's report
+------------------------------------------------------------
+Investigation (as requested, before fixing): read the click handler
+  (`onClick={() => !isCurrent && navigate(\`/admin/queue/${sibling._id}\`)}`)
+  and navigate() (`router.push` to the same URL shape the old inline
+  links already used). Structurally this looked correct — festivalId
+  changes, and loadItem/loadSummary/loadRecipients's useEffects all
+  already depend on it. Rather than conclude "should be fine" from
+  reading alone, verified it directly: this app requires a real
+  Shopify-embedded App Bridge session for every admin API call, so
+  first confirmed that's a genuine environment constraint (not an
+  excuse) by trying the real /admin/queue/[id] route in a bare
+  browser tab — App Bridge's own AppProvider/NavMenu detected "not
+  embedded" and redirected the whole tab to admin.shopify.com,
+  independent of anything in this app's own code. Worked around it by
+  mounting FestivalDetailScreen directly (no AppProvider/NavMenu) under
+  a temporary throwaway Next.js route, with window.shopify.idToken and
+  window.fetch mocked to serve a 4-document test group, then drove the
+  REAL /admin/queue/[id] route (once window.shopify was already primed
+  from the same tab's prior page) with the Chrome browser tool.
+
+  Result: clicking a sibling correctly navigated
+  (/admin/queue/id3 -> id2 -> id1), and each destination correctly
+  showed that document's OWN date, "Date X of 4" index, status badge,
+  summary numbers (120/110/10), and recipient row — fresh data every
+  time, confirmed across three sequential navigations (ruling out a
+  stale-closure issue on repeated clicks too). I could not reproduce a
+  navigation/data-loading failure.
+
+  My conclusion: the click handler was not the actual defect. The most
+  likely real-world explanation is Bug 1's downstream effect — clicking
+  a document that's wrongly marked 'sent' (per Bug 1) but was never
+  genuinely processed by the poller correctly loads an EMPTY report
+  (no ScheduledJob rows exist for it, because it was never actually
+  sent), and a "Sent" badge next to a blank summary/recipient table
+  reads exactly like "clicking did nothing" even though the fetch and
+  render both worked. Fixing Bug 1 removes the specific scenario that
+  produces this.
+
+Fix (the concrete, requested improvement, independent of whether a
+  navigation defect existed): FestivalDetail.jsx's two empty states now
+  read the item's own status/date instead of a single generic line:
+    - Summary block: "Not sent yet — scheduled for <date>." for a
+      pending item; "Sent, but no delivery data was recorded for this
+      date." for the (now guarded-against, but not migrated) sent-with-
+      no-data case, so that anomaly is at least legible if it's ever
+      seen instead of looking identical to "not sent yet".
+    - Recipient table: same "Not sent yet — scheduled for <date>."
+      for a pending item in place of the old generic "No recipients
+      yet."; the outcome-filtered "No recipients yet" message is kept
+      for a genuinely-sent item with no matching rows.
+  No change to the navigate()/click-handler code itself — nothing in
+  it needed changing once bug 1 is fixed and the empty states are
+  clearer.
+
+VERIFIED LIVE
+-----------------
+- The click-through/navigation mechanism: verified as described above,
+  via the real /admin/queue/[id] route (not just an isolated harness),
+  clicking through 3 sibling documents in sequence.
+- The new empty-state text: verified via the same mocked-fetch
+  approach on a pending sibling — both the summary block and the
+  recipient table correctly rendered "Not sent yet — scheduled for
+  30 Sept 2026." (today's date in this dev environment).
+- Did not live-verify the new PATCH/DELETE 409 responses or the
+  Planning List's "View" button against a real Shopify session, for
+  the same reason as always (no live embedded session available here);
+  covered instead by the 7 backend tests plus a plain code read of the
+  QueueScreen.jsx button-branch change, which is a simple status-gated
+  conditional with no async/timing complexity to hide a bug in.
+- Temporary route and its mocks were removed after each check; nothing
+  left running, nothing added to the repo.
+
+cd backend && npm test: 33 suites, 332 tests, all passing (7 new in
+  festivalSentGuard.test.js; 1 existing test in multiDateFestival.test.js
+  updated for the DELETE match's new shape).
+cd frontend && npm run build: compiles clean, 17 routes.

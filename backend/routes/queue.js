@@ -425,13 +425,27 @@ router.patch('/:shopDomain/festival/:id', requireAuth,
       }
     }
 
+    // A 'sent' document is historical fact — the bulk-propagation guard
+    // below already refuses to rewrite a sent SIBLING, but until now
+    // nothing stopped this same PATCH from rewriting the TARGET document
+    // itself when it's the one that's already sent (e.g. changing its
+    // own scheduledAt to a future date while status stays 'sent' —
+    // exactly how a document ends up showing a "Sent" badge next to a
+    // future date, see audits/queue-detail-picker-bugs-audit.txt). The
+    // match is scoped to status != 'sent' so a sent document simply
+    // isn't found; findOneAndUpdate returning null is disambiguated
+    // below into "not found" vs "found but sent" for a clear error.
     const item = await FestivalQueue.findOneAndUpdate(
-      { _id: req.params.id, shopDomain: shop },
+      { _id: req.params.id, shopDomain: shop, status: { $ne: 'sent' } },
       { $set: updates },
       { new: true }
     );
 
     if (!item) {
+      const existing = await FestivalQueue.findOne({ _id: req.params.id, shopDomain: shop }).select('status');
+      if (existing && existing.status === 'sent') {
+        return res.status(409).json({ error: 'Cannot edit a notification that has already been sent' });
+      }
       return res.json({ success: true, item: null });
     }
 
@@ -487,10 +501,22 @@ router.delete('/:shopDomain/festival/:id', requireAuth,
       }
     }
 
-    await FestivalQueue.findOneAndDelete({
+    // Same "never touch a sent document" guard as the PATCH handler
+    // above and the ?group=true path's own status filter — a sent
+    // document is historical fact and is never deleted via this route
+    // either.
+    const deleted = await FestivalQueue.findOneAndDelete({
       _id: req.params.id,
       shopDomain: shop,
+      status: { $ne: 'sent' },
     });
+
+    if (!deleted) {
+      const existing = await FestivalQueue.findOne({ _id: req.params.id, shopDomain: shop }).select('status');
+      if (existing && existing.status === 'sent') {
+        return res.status(409).json({ error: 'Cannot delete a notification that has already been sent' });
+      }
+    }
 
     return res.json({ success: true });
   } catch (err) {
