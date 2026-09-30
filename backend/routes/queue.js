@@ -528,11 +528,42 @@ router.delete('/:shopDomain/festival/:id', requireAuth,
 // GET /api/queue/:shopDomain/festival/:id/summary
 // Aggregate counts for the festival detail page's summary cards and the
 // calendar chip's muted line — an aggregation, not a full fetch.
+//
+// Extended (rather than adding a new endpoint) to also return a `preview`
+// for a PENDING item — a live count of who would currently be targeted,
+// split mobile/desktop, plus the item's own scheduledAt. Chose to extend
+// this endpoint over adding a new one because the detail page already
+// fetches it unconditionally on load; a separate endpoint would mean a
+// second round trip for data the page needs at the exact same time, and
+// this handler already needs to look up the FestivalQueue item's own
+// status to decide whether ScheduledJob even has anything to aggregate
+// (previously it didn't — the aggregation ran blind to whether the item
+// was sent or pending, and simply returned zeros either way for a
+// pending one). `preview` is present only when status !== 'sent' — a
+// sent item already has real ScheduledJob-derived numbers in `summary`
+// and a preview of who "would" receive it makes no sense after the fact.
+//
+// The mobile/desktop split reuses buildCustomerSubscriptionQuery from
+// utils/pushNotification.js — the exact same query
+// sendPushToCustomers()/processFestivalQueue build for a real send —
+// rather than hand-duplicating the deviceType filter here, so the
+// preview count can't silently drift from what would actually be
+// targeted. sendPushToCustomers() itself can't be called for this: it
+// has irreducible side effects (it sends via Firebase and prunes stale
+// tokens), which a mere preview must never trigger.
 router.get('/:shopDomain/festival/:id/summary', requireAuth,
   requireStoreOwner, async (req, res) => {
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
     const festivalQueueId = new mongoose.Types.ObjectId(req.params.id);
+
+    const FestivalQueue = require('../models/FestivalQueue');
+    const item = await FestivalQueue.findOne({ _id: req.params.id, shopDomain: shop })
+      .select('status scheduledAt')
+      .lean();
+    if (!item) {
+      return res.status(404).json({ error: 'Festival item not found' });
+    }
 
     const rows = await ScheduledJob.aggregate([
       { $match: { shopDomain: shop, festivalQueueId } },
@@ -554,7 +585,18 @@ router.get('/:shopDomain/festival/:id/summary', requireAuth,
       summary.byChannel[r._id || 'push'] = { total: r.total, delivered: r.delivered, failed: r.failed };
     });
 
-    return res.json({ summary });
+    let preview = null;
+    if (item.status !== 'sent') {
+      const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+      const { buildCustomerSubscriptionQuery } = require('../utils/pushNotification');
+      const [mobile, desktop] = await Promise.all([
+        CustomerPushSubscription.countDocuments(buildCustomerSubscriptionQuery(shop, { mobileOnly: true })),
+        CustomerPushSubscription.countDocuments(buildCustomerSubscriptionQuery(shop, { desktopOnly: true })),
+      ]);
+      preview = { mobile, desktop, total: mobile + desktop, scheduledAt: item.scheduledAt };
+    }
+
+    return res.json({ summary, preview });
   } catch (err) {
     console.error('[queue] festival summary error:', err.message);
     return res.status(500).json({ error: 'Failed to load summary' });

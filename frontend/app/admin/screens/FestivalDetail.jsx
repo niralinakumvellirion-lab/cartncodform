@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet } from '../../../lib/api';
+import { useQuietHoursSettings } from '../components/QuietHoursWarning';
 
 // Same status->color mapping as QueueScreen.jsx's FESTIVAL_STATUS_BADGE
 // (that constant is local/unexported there, so duplicated here rather
@@ -20,10 +21,15 @@ const card = {
   background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: 16,
 };
 
-function formatDateTime(d) {
+// `tz` is optional so every existing call site (browser-local display)
+// is unchanged; the new pending-item preview card passes the store's
+// own timezone explicitly, since that's what the merchant's quiet-hours/
+// schedule settings — and the send itself — actually run on.
+function formatDateTime(d, tz) {
   if (!d) return '—';
   return new Date(d).toLocaleString('en-IN', {
     day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+    ...(tz ? { timeZone: tz } : {}),
   });
 }
 
@@ -41,6 +47,7 @@ function StatCard({ label, value, color }) {
 
 export default function FestivalDetail({ shop, festivalId }) {
   const router = useRouter();
+  const quietSettings = useQuietHoursSettings(shop);
   const navigate = (path) => {
     const sep = path.includes('?') ? '&' : '?';
     router.push(`${path}${sep}shop=${encodeURIComponent(shop)}`);
@@ -105,6 +112,11 @@ export default function FestivalDetail({ shop, festivalId }) {
   }, [loadItem]);
 
   const [summary, setSummary] = useState(null);
+  // Live pre-send recipient estimate for a PENDING item — null for a sent
+  // item (the backend never computes it there; real ScheduledJob-derived
+  // numbers already exist in `summary` instead). See routes/queue.js's
+  // festival summary endpoint.
+  const [preview, setPreview] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summaryError, setSummaryError] = useState('');
 
@@ -118,6 +130,7 @@ export default function FestivalDetail({ shop, festivalId }) {
       );
       if (ctl?.aborted) return;
       setSummary(data.summary || null);
+      setPreview(data.preview || null);
     } catch (e) {
       if (ctl?.aborted) return;
       setSummaryError(e.message || 'Failed to load summary');
@@ -142,6 +155,11 @@ export default function FestivalDetail({ shop, festivalId }) {
 
   const loadRecipients = useCallback(async (ctl) => {
     if (!shop || !festivalId) { setRowsLoading(false); return; }
+    // A pending item has no recipients yet by definition (no ScheduledJob
+    // rows exist until it actually sends) — the pre-send preview card
+    // covers this case instead, so skip the fetch entirely rather than
+    // hitting the endpoint just to get an empty array back.
+    if (item && item.status !== 'sent') { setRowsLoading(false); setRows([]); setRowsTotal(0); return; }
     setRowsLoading(true);
     setRowsError('');
     try {
@@ -158,7 +176,7 @@ export default function FestivalDetail({ shop, festivalId }) {
     } finally {
       if (!ctl?.aborted) setRowsLoading(false);
     }
-  }, [shop, festivalId, outcomeFilter, page]);
+  }, [shop, festivalId, outcomeFilter, page, item]);
 
   useEffect(() => {
     const ctl = { aborted: false };
@@ -288,9 +306,148 @@ export default function FestivalDetail({ shop, festivalId }) {
         )}
       </div>
 
-      {/* SUMMARY CARDS */}
-      {summaryLoading ? (
-        <div style={{ color: '#9ca3af', fontSize: 13, padding: '12px 0' }}>Loading summary…</div>
+      {item.status === 'sent' ? (
+        <>
+          {/* SUMMARY CARDS — sent item: real ScheduledJob-derived numbers. */}
+          {summaryLoading ? (
+            <div style={{ color: '#9ca3af', fontSize: 13, padding: '12px 0' }}>Loading summary…</div>
+          ) : summaryError ? (
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              color: '#b91c1c', fontSize: 13, padding: '12px 0',
+            }}>
+              <span>{summaryError}</span>
+              <button onClick={() => loadSummary({ aborted: false })} style={{
+                background: '#f3f4f6', border: 'none', borderRadius: 6, padding: '5px 12px',
+                fontSize: 11, fontWeight: 600, cursor: 'pointer', color: '#374151',
+              }}>Retry</button>
+            </div>
+          ) : summary && summary.total > 0 ? (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: isNarrow ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(120px, 1fr))',
+              gap: 12, marginBottom: 20,
+            }}>
+              <StatCard label="Total" value={summary.total} />
+              <StatCard label="Delivered" value={summary.delivered} color="#16a34a" />
+              <StatCard label="Failed" value={summary.failed} color={summary.failed > 0 ? '#dc2626' : undefined} />
+              {Object.entries(summary.byChannel || {}).map(([ch, s]) => (
+                <StatCard key={ch} label={ch} value={s.total} />
+              ))}
+            </div>
+          ) : (
+            <div style={{ ...card, textAlign: 'center', color: '#9ca3af', fontSize: 13, marginBottom: 20 }}>
+              Sent, but no delivery data was recorded for this date.
+            </div>
+          )}
+
+          {/* RECIPIENT TABLE — sent item only. */}
+          <div style={card}>
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              flexWrap: 'wrap', gap: 10, marginBottom: 12,
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>Recipients</div>
+              <div style={{ display: 'inline-flex', gap: 4, padding: 3, background: '#f3f4f6', borderRadius: 8 }}>
+                {['all', 'delivered', 'failed'].map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => setOutcomeFilter(k)}
+                    style={{
+                      border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 11,
+                      fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
+                      background: outcomeFilter === k ? '#fff' : 'transparent',
+                      color: outcomeFilter === k ? '#111827' : '#6b7280',
+                      boxShadow: outcomeFilter === k ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
+                    }}
+                  >{k}</button>
+                ))}
+              </div>
+            </div>
+
+            {rowsLoading ? (
+              <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 32 }}>Loading…</div>
+            ) : rowsError ? (
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                color: '#b91c1c', fontSize: 13, padding: '12px 0',
+              }}>
+                <span>{rowsError}</span>
+                <button onClick={() => loadRecipients({ aborted: false })} style={{
+                  background: '#f3f4f6', border: 'none', borderRadius: 6, padding: '5px 12px',
+                  fontSize: 11, fontWeight: 600, cursor: 'pointer', color: '#374151',
+                }}>Retry</button>
+              </div>
+            ) : rows.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '32px 16px', color: '#9ca3af', fontSize: 13 }}>
+                No recipients{outcomeFilter !== 'all' ? ` with outcome "${outcomeFilter}"` : ''} yet.
+              </div>
+            ) : (
+              <>
+                <div style={{ overflowX: 'auto' }}>
+                  {rows.map((r) => (
+                    <div
+                      key={r._id}
+                      onClick={() => r.profileId && navigate(`/admin/customers/${r.profileId}?from=queue&fid=${festivalId}`)}
+                      onMouseEnter={(e) => { if (r.profileId) e.currentTarget.style.background = '#f9fafb'; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 12,
+                        padding: '10px 4px', borderBottom: '1px solid #f9fafb',
+                        cursor: r.profileId ? 'pointer' : 'default',
+                        minWidth: isNarrow ? 480 : 0,
+                      }}
+                    >
+                      <div style={{ flex: 2, minWidth: 0, fontSize: 13, color: '#111827', fontWeight: 500 }}>
+                        {r.email || `Anonymous · #${(r.subscriptionTokenMasked || r.cartToken || '?????').slice(-5)}`}
+                      </div>
+                      <div style={{ flex: 1, fontSize: 12, color: '#6b7280' }}>
+                        {r.channel === 'email' ? '✉️ Email' : '🔔 Push'}
+                      </div>
+                      <div style={{
+                        flex: 1, fontSize: 12, fontWeight: 600, textTransform: 'capitalize',
+                        color: OUTCOME_COLORS[r.outcome] || '#9ca3af',
+                      }}>
+                        {r.outcome || '—'}
+                      </div>
+                      <div style={{ flex: 1, fontSize: 12, color: '#9ca3af', textAlign: 'right' }}>
+                        {formatDateTime(r.sentAt)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {totalPages > 1 && (
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
+                    <button
+                      disabled={page === 0}
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                      style={{
+                        padding: '5px 12px', fontSize: 12, borderRadius: 6, border: 'none',
+                        background: '#f3f4f6', color: page === 0 ? '#d1d5db' : '#374151',
+                        cursor: page === 0 ? 'not-allowed' : 'pointer',
+                      }}
+                    >Prev</button>
+                    <span style={{ fontSize: 12, color: '#6b7280', alignSelf: 'center' }}>
+                      Page {page + 1} of {totalPages}
+                    </span>
+                    <button
+                      disabled={page + 1 >= totalPages}
+                      onClick={() => setPage((p) => p + 1)}
+                      style={{
+                        padding: '5px 12px', fontSize: 12, borderRadius: 6, border: 'none',
+                        background: '#f3f4f6', color: page + 1 >= totalPages ? '#d1d5db' : '#374151',
+                        cursor: page + 1 >= totalPages ? 'not-allowed' : 'pointer',
+                      }}
+                    >Next</button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </>
+      ) : summaryLoading ? (
+        <div style={{ color: '#9ca3af', fontSize: 13, padding: '12px 0' }}>Loading…</div>
       ) : summaryError ? (
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -302,133 +459,50 @@ export default function FestivalDetail({ shop, festivalId }) {
             fontSize: 11, fontWeight: 600, cursor: 'pointer', color: '#374151',
           }}>Retry</button>
         </div>
-      ) : summary && summary.total > 0 ? (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: isNarrow ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(120px, 1fr))',
-          gap: 12, marginBottom: 20,
-        }}>
-          <StatCard label="Total" value={summary.total} />
-          <StatCard label="Delivered" value={summary.delivered} color="#16a34a" />
-          <StatCard label="Failed" value={summary.failed} color={summary.failed > 0 ? '#dc2626' : undefined} />
-          {Object.entries(summary.byChannel || {}).map(([ch, s]) => (
-            <StatCard key={ch} label={ch} value={s.total} />
-          ))}
-        </div>
       ) : (
-        <div style={{ ...card, textAlign: 'center', color: '#9ca3af', fontSize: 13, marginBottom: 20 }}>
-          {item.status === 'sent'
-            ? 'Sent, but no delivery data was recorded for this date.'
-            : `Not sent yet — scheduled for ${formatDateTime(item.scheduledAt).split(',')[0]}.`}
+        /* PRE-SEND PREVIEW — pending item. Live count at view time, not a
+           promise: subscriber numbers change before the send, hence
+           "Approximate" below rather than a firm figure. */
+        <div style={card}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginBottom: 10 }}>
+            Before this sends
+          </div>
+          {preview && preview.total === 0 ? (
+            <div style={{
+              background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8,
+              padding: '10px 12px', color: '#92400e', fontSize: 13,
+            }}>
+              No subscribers yet — this won't reach anyone.
+            </div>
+          ) : preview ? (
+            <>
+              <div style={{ fontSize: 22, fontWeight: 800, color: '#111827' }}>
+                ~{preview.total} subscriber{preview.total !== 1 ? 's' : ''} will receive this
+              </div>
+              <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>
+                {preview.mobile} mobile · {preview.desktop} desktop
+              </div>
+            </>
+          ) : null}
+          <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 10, fontStyle: 'italic' }}>
+            Approximate — the actual number depends on who's subscribed when it sends.
+          </div>
+          {preview && (
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #f3f4f6' }}>
+              <div style={{
+                fontSize: 11, color: '#9ca3af', fontWeight: 600,
+                textTransform: 'uppercase', letterSpacing: '0.5px',
+              }}>
+                Scheduled for
+              </div>
+              <div style={{ fontSize: 13, color: '#374151', marginTop: 2 }}>
+                {formatDateTime(preview.scheduledAt, quietSettings.timezone)}
+                <span style={{ color: '#9ca3af' }}> ({quietSettings.timezone || 'Asia/Kolkata'})</span>
+              </div>
+            </div>
+          )}
         </div>
       )}
-
-      {/* RECIPIENT TABLE */}
-      <div style={card}>
-        <div style={{
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          flexWrap: 'wrap', gap: 10, marginBottom: 12,
-        }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>Recipients</div>
-          <div style={{ display: 'inline-flex', gap: 4, padding: 3, background: '#f3f4f6', borderRadius: 8 }}>
-            {['all', 'delivered', 'failed'].map((k) => (
-              <button
-                key={k}
-                onClick={() => setOutcomeFilter(k)}
-                style={{
-                  border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 11,
-                  fontWeight: 600, cursor: 'pointer', textTransform: 'capitalize',
-                  background: outcomeFilter === k ? '#fff' : 'transparent',
-                  color: outcomeFilter === k ? '#111827' : '#6b7280',
-                  boxShadow: outcomeFilter === k ? '0 1px 2px rgba(0,0,0,0.08)' : 'none',
-                }}
-              >{k}</button>
-            ))}
-          </div>
-        </div>
-
-        {rowsLoading ? (
-          <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 32 }}>Loading…</div>
-        ) : rowsError ? (
-          <div style={{
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            color: '#b91c1c', fontSize: 13, padding: '12px 0',
-          }}>
-            <span>{rowsError}</span>
-            <button onClick={() => loadRecipients({ aborted: false })} style={{
-              background: '#f3f4f6', border: 'none', borderRadius: 6, padding: '5px 12px',
-              fontSize: 11, fontWeight: 600, cursor: 'pointer', color: '#374151',
-            }}>Retry</button>
-          </div>
-        ) : rows.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '32px 16px', color: '#9ca3af', fontSize: 13 }}>
-            {item.status !== 'sent'
-              ? `Not sent yet — scheduled for ${formatDateTime(item.scheduledAt).split(',')[0]}.`
-              : `No recipients${outcomeFilter !== 'all' ? ` with outcome "${outcomeFilter}"` : ''} yet.`}
-          </div>
-        ) : (
-          <>
-            <div style={{ overflowX: 'auto' }}>
-              {rows.map((r) => (
-                <div
-                  key={r._id}
-                  onClick={() => r.profileId && navigate(`/admin/customers/${r.profileId}?from=queue&fid=${festivalId}`)}
-                  onMouseEnter={(e) => { if (r.profileId) e.currentTarget.style.background = '#f9fafb'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '10px 4px', borderBottom: '1px solid #f9fafb',
-                    cursor: r.profileId ? 'pointer' : 'default',
-                    minWidth: isNarrow ? 480 : 0,
-                  }}
-                >
-                  <div style={{ flex: 2, minWidth: 0, fontSize: 13, color: '#111827', fontWeight: 500 }}>
-                    {r.email || `Anonymous · #${(r.subscriptionTokenMasked || r.cartToken || '?????').slice(-5)}`}
-                  </div>
-                  <div style={{ flex: 1, fontSize: 12, color: '#6b7280' }}>
-                    {r.channel === 'email' ? '✉️ Email' : '🔔 Push'}
-                  </div>
-                  <div style={{
-                    flex: 1, fontSize: 12, fontWeight: 600, textTransform: 'capitalize',
-                    color: OUTCOME_COLORS[r.outcome] || '#9ca3af',
-                  }}>
-                    {r.outcome || '—'}
-                  </div>
-                  <div style={{ flex: 1, fontSize: 12, color: '#9ca3af', textAlign: 'right' }}>
-                    {formatDateTime(r.sentAt)}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {totalPages > 1 && (
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
-                <button
-                  disabled={page === 0}
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  style={{
-                    padding: '5px 12px', fontSize: 12, borderRadius: 6, border: 'none',
-                    background: '#f3f4f6', color: page === 0 ? '#d1d5db' : '#374151',
-                    cursor: page === 0 ? 'not-allowed' : 'pointer',
-                  }}
-                >Prev</button>
-                <span style={{ fontSize: 12, color: '#6b7280', alignSelf: 'center' }}>
-                  Page {page + 1} of {totalPages}
-                </span>
-                <button
-                  disabled={page + 1 >= totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                  style={{
-                    padding: '5px 12px', fontSize: 12, borderRadius: 6, border: 'none',
-                    background: '#f3f4f6', color: page + 1 >= totalPages ? '#d1d5db' : '#374151',
-                    cursor: page + 1 >= totalPages ? 'not-allowed' : 'pointer',
-                  }}
-                >Next</button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
     </div>
   );
 }

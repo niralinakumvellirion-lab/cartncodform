@@ -131,6 +131,23 @@ async function sendPushToStore(shopDomain, title, body) {
  * Send a push notification to every STOREFRONT CUSTOMER who subscribed via the
  * Shopify theme script (CustomerPushSubscription), for one shop.
  */
+// The device-split query broadcast sends target — factored out so a
+// pending-item recipient PREVIEW (routes/queue.js's festival summary
+// endpoint) can count against the exact same criteria a real send would
+// use, without duplicating it by hand and risking the two drifting
+// apart. Exported for that reason; sendPushToCustomers itself can't be
+// reused directly for a preview since it has irreducible side effects
+// (it actually sends via Firebase and prunes stale tokens).
+function buildCustomerSubscriptionQuery(shopDomain, { mobileOnly = false, desktopOnly = false } = {}) {
+  const query = { shopDomain: String(shopDomain || '').trim().toLowerCase() };
+  if (mobileOnly) {
+    query.deviceType = { $in: ['mobile', 'unknown'] };
+  } else if (desktopOnly) {
+    query.deviceType = { $in: ['desktop'] };
+  }
+  return query;
+}
+
 async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobileOnly = false, cartToken = null, skipStaleCleanup = false, desktopOnly = false) {
   const CustomerPushSubscription = require('../models/CustomerPushSubscription');
   try {
@@ -144,12 +161,7 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
     const shop = String(shopDomain || '').trim().toLowerCase();
     console.log(`[push-customer] querying subscriptions for shopDomain: ${shop}`);
 
-    const query = { shopDomain: shop };
-    if (mobileOnly) {
-      query.deviceType = { $in: ['mobile', 'unknown'] };
-    } else if (desktopOnly) {
-      query.deviceType = { $in: ['desktop'] };
-    }
+    const query = buildCustomerSubscriptionQuery(shop, { mobileOnly, desktopOnly });
     if (cartToken) {
       query.cartToken = cartToken;
       console.log(`[push-customer] targeting cartToken: ${cartToken}`);
@@ -331,4 +343,4 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
   }
 }
 
-module.exports = { sendPushToStore, sendPushToCustomers, buildClickUrl };
+module.exports = { sendPushToStore, sendPushToCustomers, buildClickUrl, buildCustomerSubscriptionQuery };

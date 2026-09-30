@@ -1,0 +1,137 @@
+PENDING FESTIVAL PRE-SEND PREVIEW - SELF-AUDIT (after implementation)
+========================================================================
+Replaces the pending-item empty summary/recipients area on the festival
+detail page with a live pre-send preview.
+
+1. BACKEND
+-------------
+Extended the existing GET /:shopDomain/festival/:id/summary endpoint
+  rather than adding a new one. Why: the detail page already fetches
+  this endpoint unconditionally on load (for the sent-item case); a
+  separate preview endpoint would mean a second round trip for data
+  needed at the exact same moment, and this handler needed to start
+  looking up the FestivalQueue item's own status anyway to know whether
+  to compute a preview at all — it previously ran the ScheduledJob
+  aggregation blind to the item's status, returning zeros for a pending
+  item with no idea why. Response shape is additive:
+  `{ summary, preview }` — `summary` unchanged in shape; `preview` is
+  `null` for a sent item (never computed — see "must not run for sent"
+  below) and `{ mobile, desktop, total, scheduledAt }` for a pending
+  one. A request for a festival id that doesn't belong to this shop now
+  404s (previously it silently aggregated against a possibly-wrong id
+  with no existence check at all) — a strictly-more-correct behaviour
+  that no existing caller relied on the old looseness for.
+
+Reused the query, did not duplicate it: extracted
+  buildCustomerSubscriptionQuery(shopDomain, {mobileOnly, desktopOnly})
+  out of utils/pushNotification.js's sendPushToCustomers() — it was
+  inline there (`query.deviceType = mobileOnly ? {$in:['mobile',
+  'unknown']} : desktopOnly ? {$in:['desktop']} : undefined`). Now both
+  the real send path and this preview call the SAME function, so the
+  preview count can never silently drift from what a real send would
+  target. Could NOT reuse sendPushToCustomers() itself for the count —
+  it has irreducible side effects (it actually calls Firebase and
+  prunes stale tokens on a failed send), which a mere preview must
+  never trigger. The preview uses
+  CustomerPushSubscription.countDocuments(buildCustomerSubscriptionQuery(...))
+  — two count queries (mobile, desktop), run in parallel — instead of
+  find()+send.
+
+Must not run for a 'sent' item: enforced by construction, not a
+  separate check — `preview` is only ever assigned inside
+  `if (item.status !== 'sent')`; for a sent item it stays `null` and
+  neither CustomerPushSubscription query executes at all (confirmed
+  by a dedicated test asserting countDocuments was never called for a
+  sent item).
+
+Live count, not a promise: the endpoint doc comment and the code itself
+  make no attempt to snapshot/cache this — it's a plain countDocuments
+  at request time, correctly described to the merchant in the UI text
+  below ("Approximate — the actual number depends on who's subscribed
+  when it sends").
+
+Tests: backend/__tests__/queueFestivalDetail.test.js, extended — sent
+  item gets summary + preview:null and never queries subscriptions;
+  missing item 404s; pending item gets the mobile/desktop split via the
+  exact buildCustomerSubscriptionQuery shape a real send would use;
+  zero-subscriber pending item previews {mobile:0, desktop:0, total:0}.
+  Full backend suite: 33 suites, 335 tests, all passing.
+
+2. FRONTEND (FestivalDetail.jsx)
+-------------------------------------
+The old single generic empty-state branch (item.status check ->
+  "Not sent yet — scheduled for X" in both the summary block and the
+  recipient table, from last task's fix) is gone, replaced by a real
+  branch at the top of that whole region:
+    - item.status === 'sent': the EXACT existing StatCard grid +
+      recipient table JSX, unchanged (only simplified by removing the
+      now-always-false half of two ternaries that existed purely to
+      handle the pending case inline — no visual or behavioural change
+      for a sent item, confirmed by direct comparison against what
+      shipped last task and by live-checking a sent sibling below).
+    - otherwise (pending): a single new card —
+        "Before this sends"
+        "~5 subscribers will receive this" (or the zero-subscriber
+          amber warning below instead)
+        "3 mobile · 2 desktop"
+        "Approximate — the actual number depends on who's subscribed
+          when it sends." (italic, muted)
+        "SCHEDULED FOR" / "30 Sept 2026, 02:41 pm (Asia/Kolkata)"
+      Zero subscribers: the count/breakdown lines are replaced by a
+      single amber warning box, "No subscribers yet — this won't reach
+      anyone." — matches the existing QuietHoursWarning amber styling
+      already used elsewhere in this admin (#fffbeb background, #fcd34d
+      border, #92400e text).
+  Loading/error states for this new card reuse the SAME summaryLoading/
+  summaryError/loadSummary state the sent-item branch already had —
+  one fetch, one loading lifecycle, for both branches.
+
+  Recipients endpoint is no longer even called for a pending item:
+  loadRecipients() now short-circuits (rows: [], rowsTotal: 0) once
+  `item` has loaded and its status isn't 'sent' — that endpoint would
+  only ever return an empty array for a document with no ScheduledJob
+  rows yet, so the extra network round trip was pure waste once the
+  preview card replaced what that empty response used to render.
+
+  Store timezone: FestivalDetail.jsx previously had none — added
+  useQuietHoursSettings(shop) (already used by DashboardScreen.jsx/
+  QueueScreen.jsx for exactly this) rather than a new fetch. Also gave
+  the shared formatDateTime(d, tz) helper an optional tz argument
+  (every existing call site omits it and is unchanged — still
+  browser-local display) so the new "Scheduled for" line can pass the
+  store's real timezone explicitly, same as the Schedule Date & Time
+  inputs elsewhere in this app already do.
+
+  Sent-item view: unchanged. Verified this directly, not just by
+  inspection — see below.
+
+3. VERIFIED LIVE
+--------------------
+Same constraint as every prior task on this feature: no real Shopify-
+  embedded session is available from here, so the actual /admin/
+  queue/[id] route was driven with window.shopify.idToken and
+  window.fetch mocked (including /api/profiles/:shop/settings, needed
+  for the new timezone lookup), via a temporary throwaway route that
+  mounts FestivalDetailScreen directly (bypassing AppProvider/NavMenu,
+  which redirect out of a non-embedded tab on their own). Checked, on
+  the real route with real navigation between siblings:
+    - A pending item with subscribers: "Before this sends / ~5
+      subscribers will receive this / 3 mobile · 2 desktop /
+      Approximate.../ SCHEDULED FOR 30 Sept 2026, 02:41 pm
+      (Asia/Kolkata)" — exact wording and numbers matched the mock.
+    - A pending item with zero subscribers: the amber "No subscribers
+      yet — this won't reach anyone." box, in place of the count.
+    - A sent sibling (clicked from the same picker): the original
+      StatCard grid (120/110/10/120) and recipient row rendered exactly
+      as before this task — no preview card, no regression.
+  Did not re-verify 600px stacking with an actual window resize in this
+  session (the browser tool's resize_window did not change the
+  captured viewport in this environment) — the new card has no grid or
+  fixed-width layout at all, just stacked block-level text, inside the
+  same header container whose 600px stacking was already verified live
+  in the previous task; nothing added here introduces new responsive
+  surface to re-check.
+  Temporary route and its mocks were removed after verification.
+
+cd backend && npm test: 33 suites, 335 tests, passing.
+cd frontend && npm run build: compiles clean, 17 routes.

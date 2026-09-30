@@ -23,11 +23,13 @@ jest.mock('../middleware/requireOwner', () => ({
 jest.mock('../models/ScheduledJob');
 jest.mock('../models/Profile');
 jest.mock('../models/FestivalQueue');
+jest.mock('../models/CustomerPushSubscription');
 
 const express = require('express');
 const ScheduledJob = require('../models/ScheduledJob');
 const Profile = require('../models/Profile');
 const FestivalQueue = require('../models/FestivalQueue');
+const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const queueRouter = require('../routes/queue');
 
 const SHOP = 'demo.myshopify.com';
@@ -83,7 +85,14 @@ describe('GET /:shop/festival — list carries per-item summary, no N+1', () => 
 });
 
 describe('GET /:shop/festival/:id/summary', () => {
-  test('aggregates delivered/failed by channel', async () => {
+  function mockItem(fields) {
+    FestivalQueue.findOne.mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve(fields) }),
+    });
+  }
+
+  test('aggregates delivered/failed by channel, no preview for a sent item', async () => {
+    mockItem({ status: 'sent', scheduledAt: new Date('2026-10-08T03:30:00.000Z') });
     ScheduledJob.aggregate.mockResolvedValue([
       { _id: 'push', total: 10, delivered: 8, failed: 2 },
     ]);
@@ -95,6 +104,53 @@ describe('GET /:shop/festival/:id/summary', () => {
     expect(data.summary).toEqual({
       total: 10, delivered: 8, failed: 2,
       byChannel: { push: { total: 10, delivered: 8, failed: 2 } },
+    });
+    expect(data.preview).toBeNull();
+    expect(CustomerPushSubscription.countDocuments).not.toHaveBeenCalled();
+  });
+
+  test('404s when the festival item does not exist for this shop', async () => {
+    mockItem(null);
+
+    const res = await get(`/api/queue/${SHOP}/festival/${FQ_ID}/summary`);
+    expect(res.status).toBe(404);
+  });
+
+  test('a pending item gets a live mobile/desktop recipient preview instead', async () => {
+    mockItem({ status: 'approved', scheduledAt: new Date('2026-10-08T03:30:00.000Z') });
+    ScheduledJob.aggregate.mockResolvedValue([]);
+    CustomerPushSubscription.countDocuments
+      .mockResolvedValueOnce(3) // mobile
+      .mockResolvedValueOnce(2); // desktop
+
+    const res = await get(`/api/queue/${SHOP}/festival/${FQ_ID}/summary`);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.preview).toEqual({
+      mobile: 3, desktop: 2, total: 5,
+      scheduledAt: '2026-10-08T03:30:00.000Z',
+    });
+    // Split by deviceType exactly the way a real send would target them —
+    // reuses buildCustomerSubscriptionQuery from utils/pushNotification.js.
+    const [mobileQuery] = CustomerPushSubscription.countDocuments.mock.calls[0];
+    const [desktopQuery] = CustomerPushSubscription.countDocuments.mock.calls[1];
+    expect(mobileQuery).toEqual({ shopDomain: SHOP, deviceType: { $in: ['mobile', 'unknown'] } });
+    expect(desktopQuery).toEqual({ shopDomain: SHOP, deviceType: { $in: ['desktop'] } });
+  });
+
+  test('a pending item with zero subscribers previews total: 0', async () => {
+    mockItem({ status: 'draft', scheduledAt: new Date('2026-10-08T03:30:00.000Z') });
+    ScheduledJob.aggregate.mockResolvedValue([]);
+    CustomerPushSubscription.countDocuments.mockResolvedValue(0);
+
+    const res = await get(`/api/queue/${SHOP}/festival/${FQ_ID}/summary`);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.preview).toEqual({
+      mobile: 0, desktop: 0, total: 0,
+      scheduledAt: '2026-10-08T03:30:00.000Z',
     });
   });
 });
