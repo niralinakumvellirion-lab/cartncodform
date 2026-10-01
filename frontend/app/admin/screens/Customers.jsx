@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet } from '../../../lib/api';
-// ShimmerTable removed — loading state uses inline skeleton cards
+import { ShimmerTable } from '../components/Shimmer';
 import { DS, StageBadge, ReachIcons } from './customerShared';
 import DateRangeFilter, { getDateRange, matchDatePreset } from '../components/DateRangeFilter';
 
@@ -46,31 +46,7 @@ function getRelativeTime(date) {
   return `${days} days ago`;
 }
 
-const AVATAR_COLORS = [
-  { bg: '#eef2ff', text: '#4f46e5' },
-  { bg: '#dcfce7', text: '#16a34a' },
-  { bg: '#dbeafe', text: '#2563eb' },
-  { bg: '#fef3c7', text: '#d97706' },
-  { bg: '#fce7f3', text: '#be185d' },
-];
-function getAvatarColor(str) {
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) & 0xffffffff;
-  return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
-}
-function getStageLabel(customer) {
-  const orders = customer.orders?.count || 0;
-  if (orders > 1) return 'Repeat buyer';
-  if (orders === 1) return 'Bought once';
-  if (customer.identifiers?.cartTokens?.length > 0) return 'Has cart';
-  return customer.stage === 'lapsed' ? 'Going quiet' : 'Visitor';
-}
-function formatShortDate(dateStr) {
-  if (!dateStr) return '—';
-  const d = new Date(dateStr);
-  if (isNaN(d)) return '—';
-  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-}
+const GRID_COLS = 'minmax(180px,2fr) 100px minmax(100px,1fr) 90px 110px 70px';
 
 const FILTER_TABS = [
   { key: 'everyone', label: 'Everyone' },
@@ -112,13 +88,8 @@ export default function Customers({ shop, initialFilter, initialFrom, initialTo 
   const [search, setSearch] = useState('');
 
   const [isMobileView, setIsMobileView] = useState(false);
-  const [gridCols, setGridCols] = useState(4);
   useEffect(() => {
-    const check = () => {
-      const w = window.innerWidth;
-      setIsMobileView(w <= 768);
-      setGridCols(w < 600 ? 1 : w < 800 ? 2 : w < 1100 ? 3 : 4);
-    };
+    const check = () => setIsMobileView(window.innerWidth <= 768);
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
@@ -292,151 +263,300 @@ export default function Customers({ shop, initialFilter, initialFrom, initialTo 
         </div>
       </div>
 
-      {/* Card grid */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: `repeat(${gridCols}, 1fr)`,
-        gap: 16,
-      }}>
-        {loading ? (
-          Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} style={{
-              background: '#fff', border: '1px solid #e5e7eb',
-              borderRadius: 14, padding: 16,
-              display: 'flex', flexDirection: 'column', gap: 10,
-            }}>
-              <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#f3f4f6' }} />
-              <div style={{ height: 13, background: '#f3f4f6', borderRadius: 4, width: '75%' }} />
-              <div style={{ height: 11, background: '#f3f4f6', borderRadius: 4, width: '50%' }} />
-              <div style={{ height: 76, background: '#f3f4f6', borderRadius: 8, marginTop: 4 }} />
-            </div>
-          ))
-        ) : profiles.length ? (
-          profiles.map((p) => {
-            const nameSource = p.identifiers?.emails?.[0] || p.identifiers?.phones?.[0] || null;
-            const displayName = nameSource || `Anonymous #${p._id?.toString().slice(-5)}`;
-            const initial = displayName.charAt(0).toUpperCase();
-            const avatarColor = getAvatarColor(displayName);
-            const stageLabel = getStageLabel(p);
-            const email = p.identifiers?.emails?.[0] || p.channels?.email?.address;
-            const phone = p.identifiers?.phones?.[0];
-            // FIRST SEEN: p.createdAt (no firstSeenAt on Profile docs; createdAt is closest)
-            const firstSeen = formatShortDate(p.createdAt);
-            const lastSeen = p.lastSeenAt ? getRelativeTime(new Date(p.lastSeenAt)) : '—';
-
-            return (
+        <div style={{ minWidth: 0, overflow: 'hidden' }}>
+          <div
+            style={{ ...DS.card, padding: 0, overflow: 'hidden',
+                     overflowX: 'auto', minWidth: 600 }}
+          >
+            {/* Table header — desktop only */}
+            {!isMobileView && (
               <div
-                key={p._id}
                 style={{
-                  background: '#fff', border: '1px solid #e5e7eb',
-                  borderRadius: 14, boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-                  display: 'flex', flexDirection: 'column',
-                  overflow: 'hidden', position: 'relative',
+                  display: 'grid',
+                  gridTemplateColumns: GRID_COLS,
+                  padding: '8px 16px',
+                  borderBottom: '1px solid #e5e7eb',
+                  background: '#f9fafb',
                 }}
-                onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'; }}
-                onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)'; }}
               >
-                {/* Stage badge — top right */}
-                <div style={{ position: 'absolute', top: 12, right: 12 }}>
-                  <StageBadge customer={p} />
-                </div>
-
-                {/* Avatar + name + sub-line */}
-                <div style={{ padding: '16px 16px 0' }}>
-                  <div style={{
-                    width: 44, height: 44, borderRadius: '50%',
-                    background: avatarColor.bg, color: avatarColor.text,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 17, fontWeight: 700, marginBottom: 10,
-                  }}>
-                    {initial}
-                  </div>
-                  <div style={{
-                    fontSize: 13, fontWeight: 600, color: '#111827',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    paddingRight: 72, marginBottom: 2,
-                  }}>
-                    {displayName}
-                  </div>
-                  <div style={{ fontSize: 11, color: '#9ca3af' }}>{stageLabel}</div>
-                </div>
-
-                {/* FIRST SEEN / LAST SEEN */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, padding: '10px 16px 0' }}>
-                  {[{ label: 'First Seen', val: firstSeen }, { label: 'Last Seen', val: lastSeen }].map(({ label, val }) => (
-                    <div key={label}>
-                      <div style={{
-                        fontSize: 10, fontWeight: 600, color: '#9ca3af',
-                        textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2,
-                      }}>{label}</div>
-                      <div style={{ fontSize: 12, color: '#374151', fontWeight: 500 }}>{val}</div>
+                {['Customer', 'Stage', 'Most interested in', 'Reach', 'Last messaged', 'Spent'].map(
+                  (h) => (
+                    <div
+                      key={h}
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: '#9ca3af',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                      }}
+                    >
+                      {h}
                     </div>
-                  ))}
-                </div>
-
-                {/* Contact inset */}
-                {(email || phone) && (
-                  <div style={{
-                    margin: '10px 16px 0', padding: '8px 10px',
-                    background: '#f9fafb', border: '1px solid #f3f4f6',
-                    borderRadius: 10, display: 'flex', flexDirection: 'column', gap: 5,
-                  }}>
-                    {email && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: '#374151' }}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                          stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                          <polyline points="22,6 12,13 2,6"/>
-                        </svg>
-                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {email}
-                        </span>
-                      </div>
-                    )}
-                    {phone && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11, color: '#374151' }}>
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                          stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.6 1.18h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.77a16 16 0 0 0 6.29 6.29l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
-                        </svg>
-                        <span>{phone}</span>
-                      </div>
-                    )}
-                  </div>
+                  )
                 )}
+              </div>
+            )}
 
-                {/* View button */}
-                <div style={{ padding: '12px 16px', marginTop: 'auto' }}>
-                  <button
-                    type="button"
-                    aria-label={`View ${displayName}`}
+            {/* Rows */}
+            {loading ? (
+              <ShimmerTable rows={8} />
+            ) : profiles.length ? (
+              profiles.map((p, i) => {
+                // `sig` (this profile's strongest signal, from signalMap)
+                // is no longer read here — the rebuilt desktop row's
+                // "Most interested in" column dropped the secondary
+                // signal-type sub-line the earlier design had (the given
+                // rebuild JSX's column is a single non-wrapping line with
+                // no room for a second line). signalMap/signalCountMap
+                // state itself is untouched — see
+                // audits/customers-row-rebuild-audit.txt.
+                const lastMsg = p.messages?.length
+                  ? p.messages[p.messages.length - 1]
+                  : null;
+
+                const name =
+                  p.identifiers?.emails?.[0] || p.identifiers?.phones?.[0] || null;
+                const displayName = name
+                  ? name
+                  : `Anonymous shopper · #${p._id?.toString().slice(-5)}`;
+
+                const lastSeen = p.lastSeenAt
+                  ? getRelativeTime(new Date(p.lastSeenAt))
+                  : null;
+
+                const interests = p.interests ? Object.entries(p.interests) : [];
+                const topInterest = interests.sort((a, b) => b[1] - a[1])[0];
+
+                if (isMobileView) {
+                  const sigN = signalCountMap[p._id] || 0;
+                  return (
+                    <div
+                      key={p._id}
+                      onClick={() => navigate(`/admin/customers/${encodeURIComponent(p._id)}`)}
+                      style={{
+                        padding: '14px 16px',
+                        borderBottom:
+                          i < profiles.length - 1 ? '1px solid #f9fafb' : 'none',
+                        cursor: 'pointer',
+                        background: 'transparent',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = '#f9fafb';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = '#fff';
+                      }}
+                    >
+                      {/* Row 1: Name + Stage badge */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: '6px',
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: '14px',
+                            fontWeight: '600',
+                            color: '#111827',
+                          }}
+                        >
+                          {p.identifiers?.emails?.[0] ||
+                            p.identifiers?.phones?.[0] ||
+                            `Anonymous #${p._id?.toString().slice(-5)}`}
+                        </div>
+                        <div style={{ flexShrink: 0, marginLeft: '8px' }}>
+                          <StageBadge customer={p} />
+                        </div>
+                      </div>
+
+                      {/* Row 2: Last seen + Signal */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginBottom: '4px',
+                        }}
+                      >
+                        <div style={{ fontSize: '12px', color: '#9ca3af' }}>
+                          {p.lastSeenAt
+                            ? `seen ${getRelativeTime(new Date(p.lastSeenAt))}`
+                            : ''}
+                        </div>
+                        {sigN > 0 && (
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              color: '#f97316',
+                              fontWeight: '500',
+                            }}
+                          >
+                            {sigN} signal{sigN > 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Row 3: Channels + LTV */}
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <ReachIcons customer={p} />
+                        {p.orders?.ltv > 0 && (
+                          <div
+                            style={{
+                              fontSize: '13px',
+                              fontWeight: '600',
+                              color: '#111827',
+                            }}
+                          >
+                            ₹{p.orders.ltv.toLocaleString('en-IN')}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                }
+
+                // "Most interested in" truncated to 20 chars, per the
+                // redesign spec. NOTE: the task described this as a
+                // "product title", but no per-product data is fetched
+                // for the list view (topProducts only exists once a
+                // customer's detail page is loaded, per-row, on
+                // click) — the only "most interested in" data actually
+                // available for every row up front is the existing
+                // topInterest name (from p.interests), so that's what
+                // gets truncated here. See
+                // audits/customers-ui-redesign-audit.txt.
+                const interestRaw = topInterest?.[0] || null;
+                const interestDisplay = interestRaw
+                  ? (interestRaw.length > 20 ? interestRaw.slice(0, 20) + '…' : interestRaw)
+                  : '—';
+
+                const avatarSource = p.identifiers?.emails?.[0];
+                const avatarInitial = (avatarSource || '?').charAt(0).toUpperCase();
+
+                // Rebuilt row (see audits/customers-row-rebuild-audit.txt).
+                // NOTE: the task's given JSX referenced customer.email,
+                // customer.lastSeenLabel, customer.topInterest,
+                // customer.lastMessaged, customer.ltv, and
+                // customer.profileId — NONE of these fields exist on the
+                // Profile documents this screen actually fetches (GET
+                // /api/profiles/:shop/profiles). Verified this by reading
+                // the pre-existing derived-variable block directly above
+                // (displayName/lastSeen/interestRaw/interestDisplay/
+                // avatarInitial, already computed a few lines up in this
+                // same .map callback) plus the real field paths used
+                // throughout the rest of this file: p.identifiers.emails/
+                // phones, p.lastSeenAt (via getRelativeTime), p.interests
+                // (via topInterest/interestRaw), p.messages (via lastMsg),
+                // p.orders.ltv. Used those real values/paths below instead
+                // of the given (nonexistent) field names, per this task's
+                // own explicit instruction not to guess. Kept the loop's
+                // existing variable name `p` (not `customer`, matching
+                // every other row/section in this file).
+                const lastMessagedDisplay = lastMsg
+                  ? getRelativeTime(new Date(lastMsg.sentAt))
+                  : 'Never';
+
+                return (
+                  <div
+                    key={p._id}
                     onClick={() => navigate(`/admin/customers/${encodeURIComponent(p._id)}`)}
-                    onFocus={e => { e.currentTarget.style.outline = '2px solid #818cf8'; e.currentTarget.style.outlineOffset = '2px'; }}
-                    onBlur={e => { e.currentTarget.style.outline = 'none'; }}
                     style={{
-                      width: '100%', padding: '8px 0',
-                      background: '#4f46e5', color: '#fff',
-                      border: 'none', borderRadius: 8,
-                      fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                      display: 'grid',
+                      gridTemplateColumns: GRID_COLS,
+                      alignItems: 'center',
+                      padding: '10px 16px',
+                      borderBottom: '1px solid #f3f4f6',
+                      cursor: 'pointer',
+                      background: '#fff',
+                      transition: 'background 0.1s',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = '#f9fafb';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = '#fff';
                     }}
                   >
-                    View
-                  </button>
-                </div>
+                    {/* CUSTOMER column */}
+                    <div style={{ display: 'flex', alignItems: 'center',
+                                  gap: 10, minWidth: 0 }}>
+                      <div style={{
+                        width: 34, height: 34, borderRadius: '50%',
+                        background: '#eef2ff', color: '#4f46e5',
+                        display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', fontSize: 13,
+                        fontWeight: 700, flexShrink: 0,
+                      }}>
+                        {avatarInitial}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#111827',
+                                      overflow: 'hidden', textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap' }}>
+                          {displayName}
+                        </div>
+                        {lastSeen && (
+                          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>
+                            seen {lastSeen}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* STAGE column */}
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <StageBadge customer={p} />
+                    </div>
+
+                    {/* MOST INTERESTED IN column */}
+                    <div style={{ fontSize: 12, color: '#374151',
+                                  overflow: 'hidden', textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap', paddingRight: 8 }}>
+                      {interestDisplay}
+                    </div>
+
+                    {/* REACH column */}
+                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                      <ReachIcons customer={p} />
+                    </div>
+
+                    {/* LAST MESSAGED column */}
+                    <div style={{ fontSize: 12, color: '#6b7280', whiteSpace: 'nowrap' }}>
+                      {lastMessagedDisplay}
+                    </div>
+
+                    {/* SPENT column */}
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#111827',
+                                  display: 'flex', justifyContent: 'flex-end' }}>
+                      {p.orders?.ltv > 0 ? `₹${p.orders.ltv.toLocaleString('en-IN')}` : '—'}
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div
+                style={{
+                  padding: '32px 16px',
+                  textAlign: 'center',
+                  fontSize: '13px',
+                  color: '#9ca3af',
+                }}
+              >
+                No customers match this view.
               </div>
-            );
-          })
-        ) : (
-          <div style={{
-            gridColumn: `span ${gridCols}`,
-            padding: '32px 16px', textAlign: 'center',
-            fontSize: 13, color: '#9ca3af',
-            background: '#fff', borderRadius: 14, border: '1px solid #e5e7eb',
-          }}>
-            No customers match this view.
+            )}
           </div>
-        )}
-      </div>
+        </div>
     </div>
   );
 }
