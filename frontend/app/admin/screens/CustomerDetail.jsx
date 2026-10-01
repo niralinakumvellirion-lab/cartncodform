@@ -792,7 +792,7 @@ function DetailSkeleton() {
 
 const cardTitle = {
   fontSize: 11, color: '#9ca3af', fontWeight: 600,
-  textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 8,
+  textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6,
 };
 
 export default function CustomerDetail({ shop, profileId, from, fid }) {
@@ -993,7 +993,7 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
         notifications.map((n) => (
           <div key={n._id} style={{
             display: 'flex', gap: 8, alignItems: 'flex-start',
-            padding: '6px 0', borderBottom: '1px solid #f9fafb', fontSize: 12,
+            padding: '4px 0', borderBottom: '1px solid #f9fafb', fontSize: 12,
           }}>
             <span style={{
               display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
@@ -1043,7 +1043,7 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
         events.map((e, i) => (
           <div key={i} style={{
             display: 'flex', gap: 8, alignItems: 'flex-start',
-            padding: '6px 0', borderBottom: '1px solid #f9fafb', fontSize: 12,
+            padding: '4px 0', borderBottom: '1px solid #f9fafb', fontSize: 12,
           }}>
             <span style={{
               display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
@@ -1102,7 +1102,7 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
     </div>
   ) : (
     <div style={{ ...DS.card, padding: 16, marginBottom: 0 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginBottom: 10 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginBottom: 8 }}>
         Send notification
       </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -1173,20 +1173,20 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
       {backButton}
 
       {/* Customer header card */}
-      <div style={{ ...DS.card, marginBottom: 20 }}>
+      <div style={{ ...DS.card, marginBottom: 16, maxWidth: 420, padding: 16 }}>
         {/* Avatar + name + badge */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
           <div style={{
-            width: 52, height: 52, borderRadius: '50%', flexShrink: 0,
+            width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
             background: cdAvatarColor.bg, color: cdAvatarColor.text,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 20, fontWeight: 700,
+            fontSize: 18, fontWeight: 700,
           }}>
             {cdInitial}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-              <h1 style={{ ...DS.pageTitle, fontSize: 18, wordBreak: 'break-word', lineHeight: 1.3, margin: 0, flex: 1 }}>
+              <h1 style={{ ...DS.pageTitle, fontSize: 16, wordBreak: 'break-word', lineHeight: 1.3, margin: 0, flex: 1 }}>
                 {displayName}
               </h1>
               <div style={{ flexShrink: 0 }}><StageBadge customer={profile} /></div>
@@ -1197,7 +1197,7 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
         </div>
 
         {/* FIRST SEEN / LAST SEEN */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12, marginBottom: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
           {[
             { label: 'First Seen', val: formatCDDate(profile.createdAt) },
             { label: 'Last Seen',  val: formatCDDate(profile.lastSeenAt) },
@@ -1215,9 +1215,9 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
         {/* Contact inset */}
         {(email || phone) && (
           <div style={{
-            padding: '10px 12px', background: '#f9fafb',
+            padding: '8px 10px', background: '#f9fafb',
             border: '1px solid #f3f4f6', borderRadius: 10,
-            display: 'flex', flexDirection: 'column', gap: 6,
+            display: 'flex', flexDirection: 'column', gap: 4,
           }}>
             {email && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151' }}>
