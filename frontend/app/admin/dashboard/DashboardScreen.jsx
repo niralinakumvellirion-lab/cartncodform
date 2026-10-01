@@ -8,6 +8,7 @@ import { ShimmerRow, ShimmerCard } from '../components/Shimmer';
 import { ImageUploadPair } from '../components/ImageUploadPair';
 import { ProductPicker } from '../components/ProductPicker';
 import MultiDateScheduler from '../components/MultiDateScheduler';
+import DateRangeFilter, { DATE_FILTERS, getDateRange } from '../components/DateRangeFilter';
 
 const DS = {
   page: {
@@ -116,13 +117,7 @@ const SORT_TABS = [
   { key: 'cartRate', label: 'Cart rate' },
 ];
 
-// --- from Today.jsx ---
-const DATE_FILTERS = [
-  { key: 'today', label: 'Today' },
-  { key: 'yesterday', label: 'Yesterday' },
-  { key: '7d', label: 'Last 7 days' },
-  { key: '30d', label: 'Last 30 days' },
-];
+// DATE_FILTERS and getDateRange are imported from ../components/DateRangeFilter
 
 const NOTIF_STATS = [
   { key: 'pushSent', label: 'Push Sent' },
@@ -139,18 +134,6 @@ const ACTIVITY_STATS = [
   { key: 'revisit', label: 'Revisited' },
 ];
 
-function getDateRange(f) {
-  const to = new Date();
-  const from = new Date();
-  if (f === 'today') { from.setHours(0, 0, 0, 0); }
-  else if (f === 'yesterday') {
-    from.setDate(from.getDate() - 1); from.setHours(0, 0, 0, 0);
-    to.setDate(to.getDate() - 1); to.setHours(23, 59, 59, 999);
-  }
-  else if (f === '7d') { from.setDate(from.getDate() - 7); }
-  else if (f === '30d') { from.setDate(from.getDate() - 30); }
-  return { from: from.toISOString(), to: to.toISOString() };
-}
 
 const SIGNAL_LABELS = {
   cart_abandon: 'Cart left behind',
@@ -1015,34 +998,7 @@ export default function DashboardScreen({ shop }) {
           <p style={DS.pageSubtitle}>{todaySubtitle}</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div
-            style={{
-              display: 'flex',
-              gap: 4,
-              padding: 4,
-              background: '#f3f4f6',
-              borderRadius: 8,
-            }}
-          >
-            {DATE_FILTERS.map((f) => (
-              <button
-                key={f.key}
-                onClick={() => setDateFilter(f.key)}
-                style={{
-                  padding: '6px 14px',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  border: 'none',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  background: dateFilter === f.key ? '#4f46e5' : 'transparent',
-                  color: dateFilter === f.key ? '#fff' : '#6b7280',
-                }}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+          <DateRangeFilter value={dateFilter} onChange={setDateFilter} showAllTime={false} />
           {refreshButton}
         </div>
       </div>

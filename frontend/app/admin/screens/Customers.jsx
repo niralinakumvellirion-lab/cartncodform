@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { apiGet } from '../../../lib/api';
 import { ShimmerTable } from '../components/Shimmer';
 import { DS, StageBadge, ReachIcons } from './customerShared';
+import DateRangeFilter, { getDateRange, matchDatePreset } from '../components/DateRangeFilter';
 
 function PageHeader({ title, subtitle, action }) {
   return (
@@ -79,8 +80,11 @@ export default function Customers({ shop, initialFilter, initialFrom, initialTo 
   const [filter, setFilter] = useState(
     FILTER_TABS.some((t) => t.key === initialFilter) ? initialFilter : 'everyone'
   );
-  const [fromParam] = useState(initialFrom || '');
-  const [toParam] = useState(initialTo || '');
+  // Date range filter: same preset-matching logic as Messages.jsx.
+  const initialPreset = matchDatePreset(initialFrom, initialTo);
+  const [dateFilter, setDateFilter] = useState(
+    initialPreset || (initialFrom ? 'custom' : '7d')
+  );
   const [search, setSearch] = useState('');
 
   const [isMobileView, setIsMobileView] = useState(false);
@@ -97,10 +101,13 @@ export default function Customers({ shop, initialFilter, initialFrom, initialTo 
       setLoading(true);
       setError('');
       try {
+        const { from: rangeFrom, to: rangeTo } = dateFilter === 'custom'
+          ? { from: initialFrom || null, to: initialTo || null }
+          : getDateRange(dateFilter);
         const params = new URLSearchParams({ limit: '50' });
         if (filter && filter !== 'everyone') params.set('filter', filter);
-        if (fromParam) params.set('from', fromParam);
-        if (toParam) params.set('to', toParam);
+        if (rangeFrom) params.set('from', rangeFrom);
+        if (rangeTo) params.set('to', rangeTo);
         if (search.trim()) params.set('search', search.trim());
 
         const [profRes, sigRes] = await Promise.all([
@@ -137,7 +144,7 @@ export default function Customers({ shop, initialFilter, initialFrom, initialTo 
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [shop, filter, fromParam, toParam, search]
+    [shop, filter, dateFilter, initialFrom, initialTo, search]
   );
 
   useEffect(() => {
@@ -172,6 +179,19 @@ export default function Customers({ shop, initialFilter, initialFrom, initialTo 
           {error}
         </div>
       )}
+
+      {/* Date range filter */}
+      <div style={{ marginBottom: '12px' }}>
+        <DateRangeFilter
+          value={dateFilter}
+          onChange={setDateFilter}
+          customLabel={
+            dateFilter === 'custom' && initialFrom && initialTo
+              ? `${new Date(initialFrom).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} – ${new Date(initialTo).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}`
+              : undefined
+          }
+        />
+      </div>
 
       {/* Search + Filter row — stacks on mobile */}
       <div

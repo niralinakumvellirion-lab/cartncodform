@@ -1,0 +1,125 @@
+SELF-AUDIT: Messages and Customers date range filter
+Task: Add visible date range filter to Messages and Customers screens
+Date: 2026-10-01
+Files changed:
+  frontend/app/admin/components/DateRangeFilter.jsx (NEW)
+  frontend/app/admin/dashboard/DashboardScreen.jsx
+  frontend/app/admin/screens/Messages.jsx
+  frontend/app/admin/screens/Customers.jsx
+
+=== GAP FOUND ===
+
+Both Messages and Customers screens received from/to via URL from the Dashboard's
+drill-down tiles, but had no visible date filter UI. The merchant could not see what
+range they were viewing and had no way to change it. Both screens stored from/to as
+frozen useState initial values (never reactive), so the dates were applied to the
+initial fetch but not exposed to the user.
+
+=== SHARED COMPONENT ===
+
+File: frontend/app/admin/components/DateRangeFilter.jsx
+
+Exports:
+  - DATE_FILTERS: [{key:'today'}, {key:'yesterday'}, {key:'7d'}, {key:'30d'}, {key:'all'}]
+    Note: Dashboard's existing 4 presets plus 'All time', which Messages and Customers
+    expose but Dashboard doesn't (showAllTime=false keeps Dashboard unchanged).
+  - getDateRange(f): same pure function previously inlined in DashboardScreen; returns
+    {from: null, to: null} for 'all' and 'custom' (backend interprets missing params
+    as no date filter — additive-only convention already established).
+  - matchDatePreset(fromISO, toISO): compares incoming ISO strings to today's calendar
+    boundaries; returns a DATE_FILTERS key or null. Calendar-date comparison is used
+    rather than millisecond equality so a 5-minute-old Dashboard link still matches
+    the correct preset.
+  - default export DateRangeFilter: segmented-pill component. Props:
+      value        — DATE_FILTERS key or 'custom'
+      onChange     — called with a key on click
+      customLabel  — label shown in the active pill when value==='custom'
+      showAllTime  — whether to include 'All time' pill (default true)
+    Matching visual language: same #4f46e5 / transparent pill, #f3f4f6 container,
+    borderRadius 8/6, fontSize 13, fontWeight 600. flexWrap:'wrap' for <=600px.
+
+=== DASHBOARD REFACTOR ===
+
+DashboardScreen.jsx: removed the local DATE_FILTERS const, getDateRange function, and
+the 27-line inline pill <div>. Replaced with:
+  import DateRangeFilter, { DATE_FILTERS, getDateRange } from '../components/DateRangeFilter';
+  <DateRangeFilter value={dateFilter} onChange={setDateFilter} showAllTime={false} />
+Behavior is identical. No new state, no new features. Dashboard still shows only 4
+presets (no 'All time').
+
+=== MESSAGES SCREEN ===
+
+Part 1 — Date range filter:
+  - matchDatePreset(initialFrom, initialTo) determines the initial preset.
+  - If no match and initialFrom is present: dateFilter='custom', custom range pill shown
+    with formatted label (e.g. "23 Sept – 30 Sept").
+  - If no URL from/to: dateFilter='7d' (default, same as before since the frozen
+    fromParam/toParam were both empty on a fresh visit).
+  - DateRangeFilter rendered above the channel tabs.
+  - load() now uses getDateRange(dateFilter) for the date bounds, except when
+    dateFilter==='custom', where it falls back to initialFrom/initialTo. This means
+    clicking a preset pill triggers a refetch with the new range — the date filter
+    is now interactive, not frozen.
+  - fromParam/toParam state removed; dateFilter added to load()'s dep array (along
+    with initialFrom/initialTo as stable props for the 'custom' fallback).
+
+Part 2 — Channel tab and status visibility check:
+  Channel tab: ALREADY VISIBLE. The Push/Email tabs are rendered as a scrollable
+  pill row, and filter state is seeded from initialChannel. The Push tab was
+  pre-highlighted on the Dashboard drill-down click (live-verified in the prior
+  session). No change needed.
+
+  Status: WAS NOT VISIBLE. statusParam was applied to the fetch but not shown
+  anywhere in the UI. A merchant landing from a "Push Sent" Dashboard tile
+  (which passes status=sent) would see only sent messages but have no indication
+  that skipped/failed/cancelled were filtered out. Fix: a small badge "Sent only"
+  (or the raw statusParam value for other values) appears to the right of the date
+  filter pills whenever statusParam is set. statusParam remains frozen (it comes
+  from the Dashboard's drill-down context, not user-changeable on this screen).
+
+=== CUSTOMERS SCREEN ===
+
+Same gap confirmed: fromParam/toParam were frozen initial values, no date filter
+UI shown. Fix mirrors Messages exactly:
+  - matchDatePreset seeds dateFilter; 'custom' pill with label when no preset match.
+  - DateRangeFilter inserted above the existing search + segment-tab row.
+  - loadData() uses getDateRange(dateFilter) or initialFrom/initialTo for 'custom'.
+  - dep array updated from [shop, filter, fromParam, toParam, search] to
+    [shop, filter, dateFilter, initialFrom, initialTo, search].
+
+No statusParam in Customers (Dashboard never sends one to this screen). The date
+filter applies to push_subscribed and email_captured backend filters only; other
+segment filters (has_cart etc.) pass from/to but the backend ignores them — harmless,
+and showing the date filter consistently avoids confusing the merchant into thinking
+"7 days" means something different per tab.
+
+=== BUILD ===
+
+cd frontend && npm run build: clean, 17 routes, no errors.
+  /admin/messages: 4.86 kB (was 4.18 kB, +0.68 kB for DateRangeFilter)
+  /admin/customers: 6.68 kB (unchanged — component already shared, no duplication)
+  /admin/dashboard: 13.8 kB (was 13.5 kB, minor delta from import path change)
+
+=== LIVE VERIFICATION ===
+
+Temporary devtest routes (deleted after):
+  /devtest123/messages, /devtest123/customers
+
+Messages with channel=push&status=sent&from=2026-09-23&to=2026-09-30:
+  - Custom pill "23 Sept – 30 Sept" shown and active (#4f46e5) ✓
+    (2026-09-23 is not today-7 = 2026-09-24, so no preset match → custom)
+  - "Sent only" badge visible to the right ✓
+  - All 5 date preset pills shown, none highlighted ✓
+  - "All / Push / Email / Led to a sale" channel tabs shown ✓
+  - Mock message row rendered ✓
+
+Messages with no URL params (default):
+  - "Last 7 days" pill highlighted (verified via button.style.background check) ✓
+  - No "Sent only" badge ✓
+  - "No messages yet." empty state ✓
+
+Customers with filter=push_subscribed&from=2026-09-23&to=2026-09-30:
+  - Custom pill "23 Sept – 30 Sept" shown and active ✓
+  - All 5 date preset pills shown ✓
+  - All 7 segment tabs shown ✓
+  - "No customers match this view." empty state (empty mock data) ✓

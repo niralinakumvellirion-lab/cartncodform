@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { apiGet } from '../../../lib/api';
+import DateRangeFilter, { getDateRange, matchDatePreset, DATE_FILTERS } from '../components/DateRangeFilter';
 
 const DS = {
   page: {
@@ -217,8 +218,16 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
     initialChannel === 'push' || initialChannel === 'email' ? initialChannel : 'all'
   );
   const [statusParam] = useState(initialStatus || '');
-  const [fromParam] = useState(initialFrom || '');
-  const [toParam] = useState(initialTo || '');
+  // Date range filter: try to match the incoming from/to against a named preset
+  // so the merchant sees "Last 7 days" highlighted rather than a raw ISO range.
+  // matchDatePreset returns null when nothing matches (e.g. the Dashboard sent a
+  // precise mid-day timestamp that's a few minutes off the calendar-date boundary) —
+  // that case shows a "Custom range" pill so the range is still visible. Clicking
+  // any preset pill overrides it and triggers a fresh fetch.
+  const initialPreset = matchDatePreset(initialFrom, initialTo);
+  const [dateFilter, setDateFilter] = useState(
+    initialPreset || (initialFrom ? 'custom' : '7d')
+  );
 
   const [isMobileView, setIsMobileView] = useState(false);
   useEffect(() => {
@@ -233,11 +242,14 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
     setLoading(true);
     setError('');
     try {
+      const { from: rangeFrom, to: rangeTo } = dateFilter === 'custom'
+        ? { from: initialFrom || null, to: initialTo || null }
+        : getDateRange(dateFilter);
       const params = new URLSearchParams({ limit: '50' });
       if (filter === 'push' || filter === 'email') params.set('channel', filter);
       if (statusParam) params.set('status', statusParam);
-      if (fromParam) params.set('from', fromParam);
-      if (toParam) params.set('to', toParam);
+      if (rangeFrom) params.set('from', rangeFrom);
+      if (rangeTo) params.set('to', rangeTo);
       const data = await apiGet(
         `/api/profiles/${encodeURIComponent(shop)}/messages?${params.toString()}`
       );
@@ -248,7 +260,7 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
     } finally {
       setLoading(false);
     }
-  }, [shop, filter, statusParam, fromParam, toParam]);
+  }, [shop, filter, statusParam, dateFilter, initialFrom, initialTo]);
 
   useEffect(() => {
     load();
@@ -284,7 +296,43 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
         </div>
       )}
 
-      {/* Filter tabs — horizontally scrollable on mobile */}
+      {/* Date range filter + status context badge */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '8px',
+          marginBottom: '12px',
+        }}
+      >
+        <DateRangeFilter
+          value={dateFilter}
+          onChange={setDateFilter}
+          customLabel={
+            dateFilter === 'custom' && initialFrom && initialTo
+              ? `${new Date(initialFrom).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} – ${new Date(initialTo).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}`
+              : undefined
+          }
+        />
+        {statusParam && (
+          <span
+            style={{
+              fontSize: 12,
+              color: '#6b7280',
+              background: '#f3f4f6',
+              borderRadius: 20,
+              padding: '4px 12px',
+              flexShrink: 0,
+            }}
+          >
+            {statusParam === 'sent' ? 'Sent only' : statusParam}
+          </span>
+        )}
+      </div>
+
+      {/* Channel / outcome tabs — horizontally scrollable on mobile */}
       <div
         style={{
           display: 'flex',
@@ -298,6 +346,7 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
         {FILTER_TABS.map((tab) => (
           <button
             key={tab.key}
+            type="button"
             onClick={() => setFilter(tab.key)}
             style={{
               padding: '6px 14px',
