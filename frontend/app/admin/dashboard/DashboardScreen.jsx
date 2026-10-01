@@ -89,6 +89,174 @@ const DS = {
   },
 };
 
+const CAL_MONTHS = ['January','February','March','April','May','June',
+                    'July','August','September','October','November','December'];
+const CAL_DAYS = ['SU','MO','TU','WE','TH','FR','SA'];
+
+function getCustomRange(from, to) {
+  if (!from || !to) return { from: null, to: null };
+  const [fy, fm, fd] = from.split('-').map(Number);
+  const [ty, tm, td] = to.split('-').map(Number);
+  return {
+    from: new Date(fy, fm - 1, fd, 0, 0, 0, 0).toISOString(),
+    to:   new Date(ty, tm - 1, td, 23, 59, 59, 999).toISOString(),
+  };
+}
+
+function SidebarCalendar({ from, to, onRangeSelect, onClear }) {
+  const [viewYear, setViewYear]   = useState(() => new Date().getFullYear());
+  const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
+  const [pendingFrom, setPendingFrom] = useState(null);
+
+  const todayISO = (() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  })();
+
+  function prevMonth() {
+    if (viewMonth === 0) { setViewYear(y => y - 1); setViewMonth(11); }
+    else setViewMonth(m => m - 1);
+  }
+  function nextMonth() {
+    if (viewMonth === 11) { setViewYear(y => y + 1); setViewMonth(0); }
+    else setViewMonth(m => m + 1);
+  }
+
+  const firstDayOfWeek = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth    = new Date(viewYear, viewMonth + 1, 0).getDate();
+
+  function dayISO(d) {
+    return `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+  }
+
+  function handleDayClick(iso) {
+    if (pendingFrom === null) {
+      setPendingFrom(iso);
+    } else {
+      const f = iso < pendingFrom ? iso : pendingFrom;
+      const t = iso < pendingFrom ? pendingFrom : iso;
+      setPendingFrom(null);
+      onRangeSelect(f, t);
+    }
+  }
+
+  const displayFrom = pendingFrom || from;
+  const displayTo   = pendingFrom ? null : to;
+
+  function formatField(iso) {
+    if (!iso) return null;
+    const [y, m, d] = iso.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  }
+
+  const accent      = '#4f46e5';
+  const accentLight = '#eef2ff';
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginBottom: 10 }}>
+        Custom Range
+      </div>
+
+      {/* From / To read-only fields */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        {[{ label: 'From', val: formatField(displayFrom) },
+          { label: 'To',   val: formatField(displayTo)   }].map(({ label, val }) => (
+          <div key={label} style={{
+            flex: 1, minWidth: 0,
+            background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: '6px 8px',
+          }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
+                          textTransform: 'uppercase', marginBottom: 2 }}>
+              {label}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <span style={{ flex: 1, fontSize: 12, color: val ? '#111827' : '#d1d5db',
+                             fontWeight: val ? 500 : 400, whiteSpace: 'nowrap',
+                             overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {val || '—'}
+              </span>
+              {val && (
+                <button
+                  type="button"
+                  aria-label={`Clear ${label}`}
+                  onClick={(e) => { e.stopPropagation(); setPendingFrom(null); onClear(); }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer',
+                           color: '#9ca3af', fontSize: 14, lineHeight: 1,
+                           padding: '0 2px', flexShrink: 0 }}
+                >×</button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Month navigation */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        <button type="button" onClick={prevMonth} aria-label="Previous month"
+          style={{ background: 'none', border: 'none', cursor: 'pointer',
+                   color: '#6b7280', fontSize: 18, lineHeight: 1, padding: '2px 6px' }}>
+          ‹
+        </button>
+        <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+          {CAL_MONTHS[viewMonth]} {viewYear}
+        </span>
+        <button type="button" onClick={nextMonth} aria-label="Next month"
+          style={{ background: 'none', border: 'none', cursor: 'pointer',
+                   color: '#6b7280', fontSize: 18, lineHeight: 1, padding: '2px 6px' }}>
+          ›
+        </button>
+      </div>
+
+      {/* Weekday headers */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', marginBottom: 2 }}>
+        {CAL_DAYS.map(d => (
+          <div key={d} style={{ textAlign: 'center', fontSize: 10, fontWeight: 600,
+                                color: '#9ca3af', padding: '3px 0' }}>
+            {d}
+          </div>
+        ))}
+      </div>
+
+      {/* Day grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '2px' }}>
+        {Array.from({ length: firstDayOfWeek }).map((_, i) => (
+          <div key={`p${i}`} style={{ aspectRatio: '1' }} />
+        ))}
+        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(d => {
+          const iso  = dayISO(d);
+          const isF  = iso === displayFrom;
+          const isT  = iso === displayTo;
+          const inR  = !!displayFrom && !!displayTo && iso > displayFrom && iso < displayTo;
+          const isTod = iso === todayISO;
+          return (
+            <button
+              key={iso}
+              type="button"
+              aria-label={new Date(viewYear, viewMonth, d).toLocaleDateString('en-IN', {
+                weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+              })}
+              onClick={() => handleDayClick(iso)}
+              style={{
+                aspectRatio: '1', width: '100%',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, fontWeight: (isF || isT || isTod) ? 700 : 400,
+                border: (isTod && !isF && !isT) ? `1px solid ${accent}` : 'none',
+                borderRadius: 6,
+                background: (isF || isT) ? accent : inR ? accentLight : 'transparent',
+                color: (isF || isT) ? '#fff' : isTod ? accent : '#374151',
+                cursor: 'pointer', padding: 0, boxSizing: 'border-box',
+              }}
+            >
+              {d}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PageHeader({ title, subtitle, action }) {
   return (
     <div style={{ marginBottom: 24 }}>
@@ -532,6 +700,7 @@ export default function DashboardScreen({ shop }) {
   const [todayError, setTodayError] = useState('');
 
   const [dateFilter, setDateFilter] = useState('7d');
+  const [customRange, setCustomRange] = useState({ from: null, to: null });
   const [activity, setActivity] = useState(null);
   const [notifStats, setNotifStats] = useState(null);
   const [notifLoading, setNotifLoading] = useState(true);
@@ -654,8 +823,11 @@ export default function DashboardScreen({ shop }) {
   // --- Today.jsx: activity + notifStats fetch, keyed on date filter ---
   useEffect(() => {
     if (!shop) return;
+    if (dateFilter === 'custom' && (!customRange.from || !customRange.to)) return;
     let cancelled = false;
-    const { from, to } = getDateRange(dateFilter);
+    const { from, to } = dateFilter === 'custom'
+      ? getCustomRange(customRange.from, customRange.to)
+      : getDateRange(dateFilter);
     setNotifLoading(true);
     Promise.allSettled([
       apiGet(`/api/activity?shop=${encodeURIComponent(shop)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
@@ -673,7 +845,7 @@ export default function DashboardScreen({ shop }) {
     return () => {
       cancelled = true;
     };
-  }, [shop, dateFilter, refreshKey]);
+  }, [shop, dateFilter, customRange, refreshKey]);
 
   // --- Today.jsx: poll for new subscribers every 30s ---
   useEffect(() => {
@@ -839,7 +1011,19 @@ export default function DashboardScreen({ shop }) {
   // computed fresh here (cheap, pure) rather than reading it back out of
   // whatever the notifStats fetch last used, so a tile always links to
   // exactly the range it's currently displaying.
-  const { from: kpiFrom, to: kpiTo } = getDateRange(dateFilter);
+  const { from: kpiFrom, to: kpiTo } = dateFilter === 'custom'
+    ? getCustomRange(customRange.from, customRange.to)
+    : getDateRange(dateFilter);
+
+  const customLabel = (customRange.from && customRange.to)
+    ? (() => {
+        const fmt = (iso) => {
+          const [y, m, d] = iso.split('-').map(Number);
+          return new Date(y, m - 1, d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+        };
+        return `${fmt(customRange.from)} – ${fmt(customRange.to)}`;
+      })()
+    : 'Custom range';
   const kpiRow1 = [
     {
       label: 'Push Sent', value: notifStats?.pushSent,
@@ -998,7 +1182,12 @@ export default function DashboardScreen({ shop }) {
           <p style={DS.pageSubtitle}>{todaySubtitle}</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <DateRangeFilter value={dateFilter} onChange={setDateFilter} showAllTime={false} />
+          <DateRangeFilter
+            value={dateFilter}
+            onChange={(key) => { setCustomRange({ from: null, to: null }); setDateFilter(key); }}
+            customLabel={customLabel}
+            showAllTime={false}
+          />
           {refreshButton}
         </div>
       </div>
@@ -1535,6 +1724,24 @@ export default function DashboardScreen({ shop }) {
           gap: 12,
           overflowY: 'auto',
         }}>
+
+          {/* Custom date-range calendar */}
+          <SidebarCalendar
+            from={customRange.from}
+            to={customRange.to}
+            onRangeSelect={(f, t) => {
+              setCustomRange({ from: f, to: t });
+              if (dateFilter !== 'custom') {
+                setDateFilter('custom');
+              } else {
+                setRefreshKey(k => k + 1);
+              }
+            }}
+            onClear={() => {
+              setCustomRange({ from: null, to: null });
+              setDateFilter('7d');
+            }}
+          />
 
           {/* Notification Suggestions card */}
           <div style={{

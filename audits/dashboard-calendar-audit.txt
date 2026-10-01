@@ -1,0 +1,60 @@
+DASHBOARD CALENDAR — PRE-AUDIT
+================================
+Date: 2026-10-01
+File: frontend/app/admin/dashboard/DashboardScreen.jsx
+
+SCOPE
+- Add a date-range picker calendar card to the right sidebar, above
+  Notification Suggestions.
+- Wire it to the existing pill-based date filter via shared
+  `customRange` state + `dateFilter === 'custom'` signal.
+
+PRE-CHANGE STATE
+- Right sidebar (line 1529-1739) contains only the Notification
+  Suggestions card.
+- `dateFilter` state (line 534) drives the data fetch via
+  `getDateRange(dateFilter)` (line 658). No 'custom' range path exists.
+- `kpiFrom`/`kpiTo` (line 842) also use `getDateRange(dateFilter)`.
+- `DateRangeFilter` at line 1001 only calls `setDateFilter(key)`.
+- `matchDatePreset` is not imported (not needed here).
+
+FILES CHANGED
+- frontend/app/admin/dashboard/DashboardScreen.jsx only.
+
+CHANGES PLANNED
+1. Add after DS block (line 91):
+   - CAL_MONTHS, CAL_DAYS constants
+   - getCustomRange(from, to) helper — parses YYYY-MM-DD as local
+     midnight/23:59:59, returns ISO strings
+   - SidebarCalendar component — pure, all state local except
+     `from`/`to`/`onRangeSelect`/`onClear` props.
+     Manages `pendingFrom` internally so the parent only receives a
+     completed range.
+
+2. After `dateFilter` state (line 534):
+   - `const [customRange, setCustomRange] = useState({ from: null, to: null })`
+
+3. Data fetch effect (lines 655-676):
+   - Guard: if (dateFilter === 'custom' && (!customRange.from || !customRange.to)) return
+   - Compute from/to conditionally: getCustomRange when custom, else getDateRange
+   - Add `customRange` to deps
+
+4. kpiFrom/kpiTo (line 842):
+   - Use getCustomRange when dateFilter === 'custom'
+   - Add customLabel derivation (shown in DateRangeFilter's custom pill)
+
+5. DateRangeFilter (line 1001):
+   - onChange also clears customRange
+   - Pass customLabel prop
+
+6. Sidebar (between lines 1537 and 1539):
+   - Insert <SidebarCalendar> above Notification Suggestions
+   - onRangeSelect: setCustomRange + setDateFilter('custom') or bump refreshKey
+   - onClear: setCustomRange(null,null) + setDateFilter('7d')
+
+CONSTRAINTS VERIFIED
+- No pill logic duplicated; getDateRange imported and used.
+- No new API routes, no localStorage, no backend changes.
+- Day cells are <button> with aria-label (full date, long form).
+- 7-col grid at 300px sidebar fits without horizontal scroll (~38px/cell).
+- Only the listed files change.
