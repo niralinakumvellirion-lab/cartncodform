@@ -1,0 +1,200 @@
+SELF-AUDIT: Dashboard KPI Drilldown
+Task: Make every Dashboard KPI tile clickable
+Date: 2026-10-01
+Files changed: backend/routes/profiles.js, backend/__tests__/dashboardDrilldown.test.js,
+  frontend/app/admin/activity/page.js, frontend/app/admin/activity/ActivityScreen.jsx,
+  frontend/app/admin/dashboard/DashboardScreen.jsx, frontend/app/admin/messages/page.js,
+  frontend/app/admin/screens/Messages.jsx, frontend/app/admin/customers/page.js,
+  frontend/app/admin/screens/Customers.jsx
+
+=== PART 1: Fix the 4 already-broken attributed links ===
+
+Problem: activity/page.js dropped ?type= from searchParams entirely; ActivityScreen
+  defaulted activeType to null and filter to '7d' unconditionally, so a Dashboard
+  click always landed on "All types, last 7 days" regardless of what was clicked.
+
+Fix:
+- activity/page.js: reads type, from, to from searchParams; passes as initialType,
+  initialFrom, initialTo to ActivityScreen.
+- ActivityScreen.jsx: seeds activeType = initialType || null; if initialFrom+initialTo
+  are both present, starts in 'custom' filter mode with customFrom/customTo sliced to
+  .slice(0,10) for the type="date" inputs (day granularity — same pre-existing limit).
+  Otherwise defaults to '7d' as before.
+- DashboardScreen.jsx: attributed-tile onClick now appends
+  &from=<encodeURIComponent(kpiFrom)>&to=<encodeURIComponent(kpiTo)> to every
+  /admin/activity?type=<key> link, using a single getDateRange(dateFilter) call shared
+  across all tiles.
+
+No backend change — /api/activity already accepts eventType, from, to.
+
+=== PART 2: Push Sent / Emails Sent -> Messages ===
+
+Backend (backend/routes/profiles.js — GET /:shopDomain/messages):
+- Added channel param: 'push' or 'email' narrows filter.channel; any other value ignored.
+- Added status param: narrows filter.status to exactly that value (e.g. 'sent');
+  default stays {$in:['sent','skipped','failed','cancelled']} so a plain screen visit
+  is unchanged.
+- Added from/to params: adds filter.sentAt = {$gte, $lte} ONLY when from or to is
+  present. Doing this unconditionally would silently drop skipped/failed/cancelled rows
+  from the default view (those rows may have no sentAt); the additive-only approach
+  avoids that regression.
+
+Client-side vs server-side channel filter decision:
+  The existing Messages.jsx Push/Email tabs filtered client-side on whatever single
+  page of <=50 already-fetched rows. That undercounts whenever the channel split
+  across pages (e.g. 40 push + 15 email = 55 total, push tab would show only 35
+  because limit=50 returned a mixed first page). Moved to server-side: filter=push
+  or filter=email now triggers a refetch with channel=push|email. 'converted' tab
+  stays client-side (no backend outcome filter; out of scope). This is a correctness
+  fix, not just plumbing.
+
+Frontend:
+- messages/page.js: reads channel, status, from, to from searchParams; passes as
+  initialChannel, initialStatus, initialFrom, initialTo to MessagesScreen.
+- Messages.jsx: seeds filter state from initialChannel (push|email or 'all');
+  statusParam, fromParam, toParam are read-only initial values threaded into the load()
+  useCallback dep array; all four go into the fetch query string.
+- DashboardScreen.jsx tiles: Push Sent -> /admin/messages?channel=push&status=sent&from&to;
+  Emails Sent -> /admin/messages?channel=email&status=sent&from&to.
+
+=== PART 3: Emails Captured / Push Subscribers -> Customers ===
+
+Field existence check (channels.push.subscribedAt):
+  Confirmed present. Every genuine opt-in write path sets it:
+    - routes/push.js:177 (FCM subscribe endpoint)
+    - routes/proxy.js:547 (storefront proxy)
+  One exception: services/pushHygiene.js:163 (clearPushSuppression) sets
+  subscribed:true WITHOUT touching subscribedAt. This is correct — it's a
+  re-activation after suppression, not a new opt-in, so the original subscribedAt
+  should stand.
+
+pushSubscribers tile count fix (today-stats handler):
+  Was: Profile.countDocuments({shopDomain, 'channels.push.subscribed': true})
+       — all-time count, silently ignores the Dashboard's date range selector.
+  Now: adds 'channels.push.subscribedAt': {$gte: from, $lte: to}
+       so the tile answers "subscribed within the selected range" like every
+       other tile in the today-stats response.
+
+Backend (backend/routes/profiles.js — GET /:shopDomain/profiles):
+- Added from/to params: parsed to rangeFrom/rangeTo Date objects (null if absent).
+- email_captured filter: adds {$exists: true, ...(rangeFrom? $gte), ...(rangeTo? $lte)}.
+  Without from/to: just {$exists: true} — same as before.
+- push_subscribed filter: NEW filter value. Sets channels.push.subscribed: true;
+  if rangeFrom or rangeTo: adds channels.push.subscribedAt range. Without from/to:
+  no date filter (shows all subscribers — consistent with full-tab view intent).
+- Existing has_cart / bought_once / repeat_buyer / going_quiet branches untouched.
+
+Frontend:
+- customers/page.js: reads filter, from, to from searchParams; passes as
+  initialFilter, initialFrom, initialTo to CustomersScreen.
+- Customers.jsx: seeds filter state from initialFilter if it matches FILTER_TABS
+  (otherwise falls back to 'everyone'); fromParam/toParam are read-only initial
+  values in the load() dep array.
+- DashboardScreen.jsx tiles: Push Subscribers -> /admin/customers?filter=push_subscribed&from&to;
+  Emails Captured -> /admin/customers?filter=email_captured&from&to.
+
+=== PART 4: Popups Shown -> slide-out panel ===
+
+Backend: New endpoint GET /api/profiles/:shopDomain/popups-shown
+  - StorefrontEvent rows of type 'push_prompt_shown' within from/to, paginated.
+  - Returns {events: [{ts, path, customerId}], total, page, limit}.
+  - customerId returned as stored, ONLY when the event already carries one — no
+    Profile lookup step. Most rows have customerId=null (event fires before opt-in).
+  - StorefrontEvent was already required at the top of profiles.js (used by today-stats).
+  - requireAuth + requireStoreOwner; scoped by shopDomain param.
+
+Frontend: PopupsShownPanel component (module-level, inside DashboardScreen.jsx)
+  - Fixed-position slide-out overlay with backdrop.
+  - role="dialog", aria-modal, aria-label="Popups Shown".
+  - Escape key closes it (useEffect listener).
+  - Fetches GET /api/profiles/:shop/popups-shown?from&to&page&limit on open.
+  - Displays per-row: formatted timestamp, path (or "unknown page"), customer ID if present.
+  - Prev/Next pagination.
+  - Empty state: "No popups shown in this range."
+  - Opened by Popups Shown KPI tile onClick -> setPopupsPanelOpen(true).
+
+=== PART 5: New Subscribers Today -> scroll + highlight ===
+
+- DashboardScreen.jsx: newSubsRef = useRef(null) attached to the pre-existing new
+  subscribers section div.
+- scrollToNewSubscribers(): calls newSubsRef.current.scrollIntoView({behavior:'smooth',
+  block:'center'}); sets highlightNewSubs=true; clears after 1600ms.
+- highlightNewSubs drives an outline/boxShadow pulse on that section.
+- New Subscribers Today tile onClick -> scrollToNewSubscribers() (noop if list empty).
+- No fetch, no navigation — tile scrolls within the same page.
+
+=== CONSTRAINTS ===
+
+Keyboard accessibility:
+  ALL clickable tiles — both the 6 newly-clickable KPI tiles AND the 4 pre-existing
+  attributed activity tiles (which were <div onClick>, not keyboard-focusable) —
+  converted to <button type="button"> with aria-label. Button resets applied:
+  textAlign:'left', width:'100%', display:'block', fontFamily:'inherit' so layout
+  is visually identical to the pre-existing card style.
+
+Date range carry-through:
+  getDateRange(dateFilter) called ONCE per render at the top of the KPI section.
+  kpiFrom/kpiTo reused across all 10 tile onClick handlers and the PopupsShownPanel.
+
+No new personal data categories:
+  popups-shown endpoint returns ts, path, customerId — all already stored. No new
+  fields collected or exposed.
+
+=== TESTS ===
+
+New test file: backend/__tests__/dashboardDrilldown.test.js (10 tests)
+  - today-stats pushSubscribers now queries with subscribedAt range.
+  - /messages: default (no params) keeps broad status set.
+  - /messages: channel=push&status=sent&from&to narrows correctly.
+  - /messages: invalid channel value ignored.
+  - /profiles: email_captured with/without range.
+  - /profiles: push_subscribed with range.
+  - /profiles: existing filter (repeat_buyer) unaffected by new from/to path.
+  - /popups-shown: correct query shape, ts/path/customerId returned.
+  - /popups-shown: customerId null when absent.
+  - /popups-shown: pagination via page/limit.
+
+Full suite (cd backend && npm test): 34 suites, 345 tests, all passing.
+  One transient failure in queueFestivalDetail.test.js on first run — re-run
+  of that file alone and full suite both passed clean. Pre-existing parallel
+  Jest worker flakiness (ephemeral-port contention); not a regression.
+
+Build (cd frontend && npm run build): clean, 17 routes, no errors.
+
+=== LIVE VERIFICATION ===
+
+Verified using bare devtest123/ route mounting (no AppProvider/NavMenu) to avoid
+App-Bridge-outside-iframe environment resets, with window.shopify.idToken mocked
+and window.fetch intercepted per screen. Devtest routes deleted after verification.
+
+Dashboard (DashboardScreen):
+  - All 6 KPI tiles + 4 attributed activity tiles render as real buttons.
+  - Values: Push Sent=42, Emails Sent=17, Push Subscribers=88, Popups Shown=310,
+    Emails Captured=25, New Subscribers Today=2; attributed tiles: 4/2/1/9.
+  - Popups Shown tile: panel opens with 2 events; customerId shown only when
+    present; Escape closes it.
+  - New Subscribers Today tile: scrolled to and highlighted (green outline) the
+    pre-existing subscriber list section.
+
+ActivityScreen:
+  - ?type=purchased&from=2026-09-23T...&to=2026-09-30T...: Custom tab selected,
+    date inputs "23/09/2026" to "30/09/2026", "Purchased" type tile highlighted,
+    filtered table row rendered.
+
+Messages:
+  - ?channel=push&status=sent&from&to: Push tab pre-selected and highlighted.
+    Message row rendered (pushuser@example.com, Cart left behind, delivered).
+    Fetch intercepted with channel=push, status=sent, from, to all confirmed in
+    outgoing query string (verified via boolean flag check; query string itself
+    was redacted by browser tool privacy filter).
+
+Customers:
+  - ?filter=push_subscribed&from&to: "All push notification subscribers" subtitle
+    rendered (the push_subscribed filter's heading in Customers.jsx). Customer row
+    rendered. Fetch intercepted, from and to confirmed present in URL search params
+    (boolean check; query string itself redacted by browser tool privacy filter).
+
+Full cross-page click-chain not tested end-to-end in a single browser session
+(App Bridge outside iframe corrupts window state on router.push to a real
+AppProvider-wrapped route). Each destination screen verified independently at its
+own URL — sufficient to confirm the URL-param-to-initial-state wiring works as coded.

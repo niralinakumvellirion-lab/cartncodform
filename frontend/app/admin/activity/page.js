@@ -9,6 +9,13 @@ import '@shopify/polaris/build/esm/styles.css';
 function ActivityContent() {
   const searchParams = useSearchParams();
   const shop = searchParams.get('shop') || '';
+  // Set by the Dashboard's attributed-activity tiles (navigate(`/admin/
+  // activity?type=${key}&from=...&to=...`)) — ActivityScreen seeds its
+  // own filter state from these instead of always defaulting to "all
+  // types, last 7 days".
+  const type = searchParams.get('type') || '';
+  const from = searchParams.get('from') || '';
+  const to = searchParams.get('to') || '';
   return (
     <AppProvider i18n={{}}>
       <NavMenu>
@@ -23,7 +30,7 @@ function ActivityContent() {
         <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
       </NavMenu>
-      <ActivityScreen shop={shop} />
+      <ActivityScreen shop={shop} initialType={type} initialFrom={from} initialTo={to} />
     </AppProvider>
   );
 }

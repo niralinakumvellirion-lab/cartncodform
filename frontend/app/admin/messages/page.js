@@ -9,6 +9,14 @@ import '@shopify/polaris/build/esm/styles.css';
 function MessagesContent() {
   const searchParams = useSearchParams();
   const shop = searchParams.get('shop') || '';
+  // Set by the Dashboard's Push Sent / Emails Sent tiles (navigate(`/admin/
+  // messages?channel=...&status=sent&from=...&to=...`)) — Messages seeds
+  // its own filter tab and date range from these instead of always
+  // opening on "All", unfiltered by date.
+  const channel = searchParams.get('channel') || '';
+  const status = searchParams.get('status') || '';
+  const from = searchParams.get('from') || '';
+  const to = searchParams.get('to') || '';
   return (
     <AppProvider i18n={{}}>
       <NavMenu>
@@ -23,7 +31,7 @@ function MessagesContent() {
         <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
       </NavMenu>
-      <MessagesScreen shop={shop} />
+      <MessagesScreen shop={shop} initialChannel={channel} initialStatus={status} initialFrom={from} initialTo={to} />
     </AppProvider>
   );
 }

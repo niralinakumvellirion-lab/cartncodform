@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import QuietHoursWarning, { useQuietHoursSettings, formatLocalDateTimeInput } from '../components/QuietHoursWarning';
@@ -393,6 +393,135 @@ function formatFestivalDate(dateStr) {
   });
 }
 
+// Popups Shown drill-down — a slide-out panel rather than a navigation,
+// since there's no existing screen that lists raw StorefrontEvent rows
+// (audits/dashboard-kpi-drilldown-audit.txt section 3). customerId is
+// shown exactly as the backend returned it — only present on an event
+// that already carried one; never resolved/joined to an email here.
+function PopupsShownPanel({ shop, from, to, open, onClose }) {
+  const [events, setEvents] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const limit = 20;
+
+  useEffect(() => { if (open) setPage(0); }, [open, from, to]);
+
+  useEffect(() => {
+    if (!open || !shop) return;
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    apiGet(
+      `/api/profiles/${encodeURIComponent(shop)}/popups-shown?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}&page=${page}&limit=${limit}`
+    )
+      .then((data) => {
+        if (cancelled) return;
+        setEvents(Array.isArray(data.events) ? data.events : []);
+        setTotal(Number.isFinite(data.total) ? data.total : 0);
+      })
+      .catch((e) => { if (!cancelled) setError(e.message || 'Failed to load'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [open, shop, from, to, page]);
+
+  // Esc closes — the only keyboard affordance a slide-out panel needs
+  // beyond its own focusable Close button.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  if (!open) return null;
+
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        aria-hidden="true"
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 50 }}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Popups Shown"
+        style={{
+          position: 'fixed', top: 0, right: 0, bottom: 0, width: 420, maxWidth: '100vw',
+          background: '#fff', boxShadow: '-4px 0 24px rgba(0,0,0,0.15)', zIndex: 51,
+          display: 'flex', flexDirection: 'column', padding: 20, overflowY: 'auto',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h2 style={{ fontSize: 16, fontWeight: 700, color: '#111827', margin: 0 }}>Popups Shown</h2>
+          <button
+            type="button" onClick={onClose} aria-label="Close"
+            style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280', lineHeight: 1 }}
+          >×</button>
+        </div>
+
+        {loading ? (
+          <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 32 }}>Loading…</div>
+        ) : error ? (
+          <div style={{ color: '#b91c1c', fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>{error}</span>
+            <button type="button" onClick={() => setPage((p) => p)} style={{
+              background: '#f3f4f6', border: 'none', borderRadius: 6, padding: '5px 12px',
+              fontSize: 11, fontWeight: 600, cursor: 'pointer', color: '#374151',
+            }}>Retry</button>
+          </div>
+        ) : events.length === 0 ? (
+          <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 32 }}>
+            No popups shown in this range.
+          </div>
+        ) : (
+          <>
+            <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>{total} total</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {events.map((e, i) => (
+                <div key={i} style={{ padding: '10px 12px', border: '1px solid #f3f4f6', borderRadius: 8, fontSize: 13 }}>
+                  <div style={{ color: '#111827', fontWeight: 500 }}>{e.path || '—'}</div>
+                  <div style={{ color: '#9ca3af', fontSize: 11, marginTop: 2 }}>
+                    {new Date(e.ts).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    {e.customerId ? ` · Customer #${e.customerId}` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {totalPages > 1 && (
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 16 }}>
+                <button
+                  type="button" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  style={{
+                    padding: '5px 12px', fontSize: 12, borderRadius: 6, border: 'none',
+                    background: '#f3f4f6', color: page === 0 ? '#d1d5db' : '#374151',
+                    cursor: page === 0 ? 'not-allowed' : 'pointer',
+                  }}
+                >Prev</button>
+                <span style={{ fontSize: 12, color: '#6b7280', alignSelf: 'center' }}>
+                  Page {page + 1} of {totalPages}
+                </span>
+                <button
+                  type="button" disabled={page + 1 >= totalPages} onClick={() => setPage((p) => p + 1)}
+                  style={{
+                    padding: '5px 12px', fontSize: 12, borderRadius: 6, border: 'none',
+                    background: '#f3f4f6', color: page + 1 >= totalPages ? '#d1d5db' : '#374151',
+                    cursor: page + 1 >= totalPages ? 'not-allowed' : 'pointer',
+                  }}
+                >Next</button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 export default function DashboardScreen({ shop }) {
   const router = useRouter();
 
@@ -434,6 +563,21 @@ export default function DashboardScreen({ shop }) {
   const [subsLoading, setSubsLoading] = useState(false);
   const [sendingTo, setSendingTo] = useState(null);
   const [sendResults, setSendResults] = useState({});
+
+  // KPI tile drill-downs (audits/dashboard-kpi-drilldown-audit.txt):
+  // Popups Shown opens an in-page slide-out panel (nothing existing to
+  // navigate to); New Subscribers Today scrolls to + briefly highlights
+  // the section that already renders this same list further down the
+  // page, rather than navigating anywhere.
+  const [popupsPanelOpen, setPopupsPanelOpen] = useState(false);
+  const newSubsRef = useRef(null);
+  const [highlightNewSubs, setHighlightNewSubs] = useState(false);
+  function scrollToNewSubscribers() {
+    if (!newSubscribers.length || !newSubsRef.current) return;
+    newSubsRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setHighlightNewSubs(true);
+    setTimeout(() => setHighlightNewSubs(false), 1600);
+  }
 
   const [isMobileView, setIsMobileView] = useState(false);
 
@@ -708,15 +852,44 @@ export default function DashboardScreen({ shop }) {
 
   // --- Redesign-only derived data (render-time groupings, no new
   // fetches/state — mirrors the existing TILES/groupedSignals pattern) ---
+  // Every tile's drill-down carries the Dashboard's OWN current range —
+  // computed fresh here (cheap, pure) rather than reading it back out of
+  // whatever the notifStats fetch last used, so a tile always links to
+  // exactly the range it's currently displaying.
+  const { from: kpiFrom, to: kpiTo } = getDateRange(dateFilter);
   const kpiRow1 = [
-    { label: 'Push Sent', value: notifStats?.pushSent },
-    { label: 'Emails Sent', value: notifStats?.emailsSent },
-    { label: 'Push Subscribers', value: notifStats?.pushSubscribers },
+    {
+      label: 'Push Sent', value: notifStats?.pushSent,
+      ariaLabel: 'Push Sent — view sent push notifications',
+      onClick: () => navigate(`/admin/messages?channel=push&status=sent&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
+    },
+    {
+      label: 'Emails Sent', value: notifStats?.emailsSent,
+      ariaLabel: 'Emails Sent — view sent emails',
+      onClick: () => navigate(`/admin/messages?channel=email&status=sent&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
+    },
+    {
+      label: 'Push Subscribers', value: notifStats?.pushSubscribers,
+      ariaLabel: 'Push Subscribers — view subscribed customers',
+      onClick: () => navigate(`/admin/customers?filter=push_subscribed&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
+    },
   ];
   const kpiRow2 = [
-    { label: 'Popups Shown', value: notifStats?.popupsShown },
-    { label: 'Emails Captured', value: notifStats?.emailsCaptured },
-    { label: 'New Subscribers Today', value: newSubscribers.length },
+    {
+      label: 'Popups Shown', value: notifStats?.popupsShown,
+      ariaLabel: 'Popups Shown — view popup impressions',
+      onClick: () => setPopupsPanelOpen(true),
+    },
+    {
+      label: 'Emails Captured', value: notifStats?.emailsCaptured,
+      ariaLabel: 'Emails Captured — view customers who gave an email',
+      onClick: () => navigate(`/admin/customers?filter=email_captured&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
+    },
+    {
+      label: 'New Subscribers Today', value: newSubscribers.length,
+      ariaLabel: 'New Subscribers Today — jump to the list below',
+      onClick: scrollToNewSubscribers,
+    },
   ];
   const ACT_COLORS = {
     add_to_cart: '#f59e0b',
@@ -964,10 +1137,25 @@ export default function DashboardScreen({ shop }) {
               }}
             >
               {[...kpiRow1, ...kpiRow2].map((kpi) => (
-                <div
+                <button
                   key={kpi.label}
-                  style={{ ...DS.card, padding: '10px 14px', marginBottom: 0,
-                           borderLeft: '3px solid #4f46e5' }}
+                  type="button"
+                  onClick={kpi.onClick}
+                  aria-label={kpi.ariaLabel || kpi.label}
+                  style={{
+                    ...DS.card, padding: '10px 14px', marginBottom: 0,
+                    borderLeft: '3px solid #4f46e5', textAlign: 'left',
+                    width: '100%', display: 'block', fontFamily: 'inherit',
+                    cursor: 'pointer', transition: 'box-shadow 0.15s, background 0.15s',
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                    e.currentTarget.style.background = '#f9fafb';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.boxShadow = DS.card.boxShadow;
+                    e.currentTarget.style.background = '#ffffff';
+                  }}
                 >
                   <div
                     style={{
@@ -984,7 +1172,7 @@ export default function DashboardScreen({ shop }) {
                   <div style={{ fontSize: 18, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
                     {notifLoading ? '—' : (kpi.value ?? 0)}
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           )}
@@ -1003,11 +1191,16 @@ export default function DashboardScreen({ shop }) {
                 }}
               >
                 {ACTIVITY_STATS.map(({ key, label }) => (
-                  <div
+                  <button
                     key={key}
-                    onClick={() => navigate(`/admin/activity?type=${key}`)}
-                    style={{ ...DS.card, marginBottom: 0, padding: '10px 14px',
-                             cursor: 'pointer', transition: 'box-shadow 0.15s, background 0.15s' }}
+                    type="button"
+                    onClick={() => navigate(`/admin/activity?type=${key}&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`)}
+                    aria-label={`${label} — view attributed activity`}
+                    style={{
+                      ...DS.card, marginBottom: 0, padding: '10px 14px',
+                      textAlign: 'left', width: '100%', display: 'block', fontFamily: 'inherit',
+                      cursor: 'pointer', transition: 'box-shadow 0.15s, background 0.15s',
+                    }}
                     onMouseEnter={e => {
                       e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
                       e.currentTarget.style.background = '#f9fafb';
@@ -1029,7 +1222,7 @@ export default function DashboardScreen({ shop }) {
                       {notifLoading ? '—' : (activity?.summary?.[key] ?? 0)}
                     </div>
                     <div style={{ fontSize: 11, color: '#6b7280' }}>{label}</div>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -1300,8 +1493,15 @@ export default function DashboardScreen({ shop }) {
 
           {/* SECTION 5 — new subscribers alert (compact, Part A item 5) */}
           {newSubscribers.length > 0 && (
-            <div style={{ ...DS.card, borderLeft: '3px solid #16a34a', marginBottom: 10,
-                          background: '#f0fdf4' }}>
+            <div
+              ref={newSubsRef}
+              style={{
+                ...DS.card, borderLeft: '3px solid #16a34a', marginBottom: 10,
+                background: '#f0fdf4', transition: 'box-shadow 0.3s, outline 0.3s',
+                outline: highlightNewSubs ? '2px solid #16a34a' : '2px solid transparent',
+                boxShadow: highlightNewSubs ? '0 0 0 4px rgba(22,163,74,0.15)' : DS.card.boxShadow,
+              }}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                 <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
                   {newSubscribers.length} new subscriber{newSubscribers.length > 1 ? 's' : ''} — send
@@ -2203,6 +2403,13 @@ export default function DashboardScreen({ shop }) {
         </div>
       )}
 
+      <PopupsShownPanel
+        shop={shop}
+        from={kpiFrom}
+        to={kpiTo}
+        open={popupsPanelOpen}
+        onClose={() => setPopupsPanelOpen(false)}
+      />
     </div>
   );
 }

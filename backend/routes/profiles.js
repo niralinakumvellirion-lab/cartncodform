@@ -68,8 +68,25 @@ router.get('/:shopDomain/messages', requireAuth, requireStoreOwner, async (req, 
 
     const filter = {
       shopDomain: shop,
-      status: { $in: ['sent', 'skipped', 'failed', 'cancelled'] },
+      // A specific ?status= narrows to exactly that value (the Dashboard
+      // drill-down asks for 'sent' only, matching the Push Sent/Emails
+      // Sent KPI's own count) — default stays the existing broad set so
+      // a plain visit to this screen is unchanged.
+      status: req.query.status || { $in: ['sent', 'skipped', 'failed', 'cancelled'] },
     };
+    if (req.query.channel === 'push' || req.query.channel === 'email') {
+      filter.channel = req.query.channel;
+    }
+    // sentAt range — only applied when actually requested. Doing this
+    // unconditionally would silently drop every skipped/failed/cancelled
+    // row from the DEFAULT (no date filter) view too, since those never
+    // get a sentAt at all; scoping it to "only when from/to given" keeps
+    // a plain visit to this screen exactly as it was.
+    if (req.query.from || req.query.to) {
+      filter.sentAt = {};
+      if (req.query.from) filter.sentAt.$gte = new Date(req.query.from);
+      if (req.query.to) filter.sentAt.$lte = new Date(req.query.to);
+    }
 
     const [messages, total] = await Promise.all([
       ScheduledJob.find(filter)
@@ -102,6 +119,11 @@ function escapeRegex(str) {
  *   limit  (default 50, max 200)
  *   page   (default 0)
  *   filter (optional) — has_cart | bought_once | repeat_buyer | going_quiet
+ *                       | email_captured | push_subscribed
+ *   from, to (optional, ISO) — only meaningful combined with filter=
+ *                       email_captured (channels.email.capturedAt) or
+ *                       filter=push_subscribed (channels.push.subscribedAt);
+ *                       a no-op for every other filter value
  *   search (optional) — case-insensitive substring match on email / phone
  * -> { profiles, total }  (most recently active first; total honours filter+search)
  */
@@ -118,6 +140,9 @@ router.get('/:shopDomain/profiles', requireAuth, requireStoreOwner, async (req, 
 
     const query = { shopDomain: shop };
 
+    const rangeFrom = req.query.from ? new Date(req.query.from) : null;
+    const rangeTo = req.query.to ? new Date(req.query.to) : null;
+
     const filter = req.query.filter;
     if (filter === 'has_cart') {
       query['identifiers.cartTokens.0'] = { $exists: true };
@@ -129,6 +154,17 @@ router.get('/:shopDomain/profiles', requireAuth, requireStoreOwner, async (req, 
     } else if (filter === 'going_quiet') {
       const twentyOneDaysAgo = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000);
       query['lastSeenAt'] = { $lt: twentyOneDaysAgo };
+    } else if (filter === 'email_captured') {
+      query['channels.email.capturedAt'] = (rangeFrom || rangeTo)
+        ? { $exists: true, ...(rangeFrom ? { $gte: rangeFrom } : {}), ...(rangeTo ? { $lte: rangeTo } : {}) }
+        : { $exists: true };
+    } else if (filter === 'push_subscribed') {
+      query['channels.push.subscribed'] = true;
+      if (rangeFrom || rangeTo) {
+        query['channels.push.subscribedAt'] = {};
+        if (rangeFrom) query['channels.push.subscribedAt'].$gte = rangeFrom;
+        if (rangeTo) query['channels.push.subscribedAt'].$lte = rangeTo;
+      }
     }
 
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
@@ -332,10 +368,18 @@ router.get('/:shopDomain/today-stats', requireAuth, requireStoreOwner, async (re
           shopDomain: shop,
           'channels.email.capturedAt': { $gte: from, $lte: to },
         }),
-        // Total push subscribers (all time)
+        // Push subscribers who opted in during the range — was previously
+        // an all-time count (channels.push.subscribed: true, no date
+        // bound at all), which meant this tile silently ignored the
+        // Today/Yesterday/7d/30d filter it sits in. channels.push.
+        // subscribedAt is set alongside .subscribed at opt-in time (see
+        // services/profileService.js's upsertProfile), so this now
+        // answers "subscribed within the selected range" like every
+        // other tile in this response, not "subscribed ever".
         Profile.countDocuments({
           shopDomain: shop,
           'channels.push.subscribed': true,
+          'channels.push.subscribedAt': { $gte: from, $lte: to },
         }),
       ]);
 
@@ -396,6 +440,56 @@ router.get('/:shopDomain/new-subscribers', requireAuth, requireStoreOwner, async
     });
   } catch (err) {
     console.error('[profiles] new-subscribers error:', err.message);
+    return res.status(500).json({ error: 'Failed to load' });
+  }
+});
+
+/**
+ * GET /api/profiles/:shopDomain/popups-shown?from=&to=&page=&limit=
+ * Powers the Dashboard's Popups Shown drill-down panel — paginated
+ * StorefrontEvent rows of type 'push_prompt_shown' in the given range.
+ * customerId is returned exactly as stored and ONLY when the event
+ * already carries one (a logged-in visit) — no Profile lookup/join is
+ * done to resolve an email for an anonymous one; most rows will have no
+ * identity at all, since this event fires before any opt-in.
+ * -> { events: [{ ts, path, customerId }], total, page, limit }
+ */
+router.get('/:shopDomain/popups-shown', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+
+    let limit = parseInt(req.query.limit, 10);
+    if (!Number.isFinite(limit) || limit < 1) limit = 50;
+    if (limit > 200) limit = 200;
+
+    let page = parseInt(req.query.page, 10);
+    if (!Number.isFinite(page) || page < 0) page = 0;
+
+    const query = { shopDomain: shop, type: 'push_prompt_shown' };
+    if (req.query.from || req.query.to) {
+      query.ts = {};
+      if (req.query.from) query.ts.$gte = new Date(req.query.from);
+      if (req.query.to) query.ts.$lte = new Date(req.query.to);
+    }
+
+    const [rows, total] = await Promise.all([
+      StorefrontEvent.find(query)
+        .sort({ ts: -1 })
+        .skip(page * limit)
+        .limit(limit)
+        .select('ts path customerId')
+        .lean(),
+      StorefrontEvent.countDocuments(query),
+    ]);
+
+    return res.json({
+      events: rows.map((r) => ({ ts: r.ts, path: r.path || null, customerId: r.customerId || null })),
+      total,
+      page,
+      limit,
+    });
+  } catch (err) {
+    console.error('[profiles] popups-shown error:', err.message);
     return res.status(500).json({ error: 'Failed to load' });
   }
 });

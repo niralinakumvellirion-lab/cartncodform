@@ -53,9 +53,11 @@ const FILTER_TABS = [
   { key: 'bought_once', label: 'Bought once' },
   { key: 'repeat_buyer', label: 'Repeat buyer' },
   { key: 'going_quiet', label: 'Going quiet' },
+  { key: 'push_subscribed', label: 'Push subscribers' },
+  { key: 'email_captured', label: 'Email captured' },
 ];
 
-export default function Customers({ shop }) {
+export default function Customers({ shop, initialFilter, initialFrom, initialTo }) {
   const router = useRouter();
   // Carries `shop` forward on client-side nav (every admin/*/page.js
   // wrapper reads it from searchParams.get('shop')).
@@ -69,7 +71,16 @@ export default function Customers({ shop }) {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState('everyone');
+  // Seeded from the Dashboard's Push Subscribers / Emails Captured
+  // tiles. from/to are only meaningful combined with those two filter
+  // values (see routes/profiles.js) — kept sticky for the visit, same
+  // as Messages.jsx's equivalent seeded params, not re-derived per tab
+  // click.
+  const [filter, setFilter] = useState(
+    FILTER_TABS.some((t) => t.key === initialFilter) ? initialFilter : 'everyone'
+  );
+  const [fromParam] = useState(initialFrom || '');
+  const [toParam] = useState(initialTo || '');
   const [search, setSearch] = useState('');
 
   const [isMobileView, setIsMobileView] = useState(false);
@@ -88,6 +99,8 @@ export default function Customers({ shop }) {
       try {
         const params = new URLSearchParams({ limit: '50' });
         if (filter && filter !== 'everyone') params.set('filter', filter);
+        if (fromParam) params.set('from', fromParam);
+        if (toParam) params.set('to', toParam);
         if (search.trim()) params.set('search', search.trim());
 
         const [profRes, sigRes] = await Promise.all([
@@ -124,7 +137,7 @@ export default function Customers({ shop }) {
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [shop, filter, search]
+    [shop, filter, fromParam, toParam, search]
   );
 
   useEffect(() => {

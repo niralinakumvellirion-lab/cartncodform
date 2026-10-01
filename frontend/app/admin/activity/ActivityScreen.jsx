@@ -96,7 +96,7 @@ function formatDateTime(ts) {
   return `${datePart}, ${timePart}`;
 }
 
-export default function ActivityScreen({ shop }) {
+export default function ActivityScreen({ shop, initialType, initialFrom, initialTo }) {
   const [isMobileView, setIsMobileView] = useState(false);
   useEffect(() => {
     const check = () => setIsMobileView(window.innerWidth <= 768);
@@ -105,10 +105,21 @@ export default function ActivityScreen({ shop }) {
     return () => window.removeEventListener('resize', check);
   }, []);
 
-  const [filter, setFilter] = useState('7d');
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
-  const [activeType, setActiveType] = useState(null); // null = show all
+  // Seeded from the Dashboard's tile click (activity/page.js reads
+  // type/from/to off the URL and passes them down) instead of always
+  // defaulting to "all types, last 7 days". customFrom/customTo are
+  // type="date" inputs — day granularity only, same as 'custom' mode
+  // already was for a merchant typing a range in by hand — so an
+  // incoming precise from/to (e.g. "Today" up to the exact current
+  // minute) is truncated to its calendar date here. That's a pre-
+  // existing limit of this input type, not something introduced by
+  // this wiring: the fetch below always reflects whatever the date
+  // inputs currently show, exactly as 'custom' mode already worked.
+  const hasInitialRange = !!(initialFrom && initialTo);
+  const [filter, setFilter] = useState(hasInitialRange ? 'custom' : '7d');
+  const [customFrom, setCustomFrom] = useState(initialFrom ? initialFrom.slice(0, 10) : '');
+  const [customTo, setCustomTo] = useState(initialTo ? initialTo.slice(0, 10) : '');
+  const [activeType, setActiveType] = useState(initialType || null); // null = show all
 
   const [activity, setActivity] = useState(null);
   const [loading, setLoading] = useState(true);

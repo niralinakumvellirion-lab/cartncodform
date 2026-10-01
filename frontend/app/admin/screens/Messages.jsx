@@ -195,12 +195,30 @@ const FILTER_TABS = [
   { key: 'converted', label: 'Led to a sale' },
 ];
 
-export default function Messages({ shop }) {
+export default function Messages({ shop, initialChannel, initialStatus, initialFrom, initialTo }) {
   const [messages, setMessages] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState('all');
+  // Seeded from the Dashboard's Push Sent / Emails Sent tiles. 'push'/
+  // 'email' now drive a SERVER-side channel filter (see load() below) —
+  // previously this whole tab set only ever filtered the single
+  // already-fetched page of up to 50 rows client-side, which meant the
+  // Push/Email tabs' counts and pagination were wrong whenever there
+  // were more than 50 messages total (e.g. 30 push + 30 email: clicking
+  // "Push" could show fewer than the true push count, since some push
+  // rows might have been pushed off the fetched page by newer email
+  // ones). 'converted' stays client-side — the backend has no outcome
+  // filter, out of scope here — filtering an already-fetched page for
+  // it is the same behaviour as before, just now applied on top of
+  // whatever the server-side channel/status/date filter already
+  // narrowed down to.
+  const [filter, setFilter] = useState(
+    initialChannel === 'push' || initialChannel === 'email' ? initialChannel : 'all'
+  );
+  const [statusParam] = useState(initialStatus || '');
+  const [fromParam] = useState(initialFrom || '');
+  const [toParam] = useState(initialTo || '');
 
   const [isMobileView, setIsMobileView] = useState(false);
   useEffect(() => {
@@ -215,8 +233,13 @@ export default function Messages({ shop }) {
     setLoading(true);
     setError('');
     try {
+      const params = new URLSearchParams({ limit: '50' });
+      if (filter === 'push' || filter === 'email') params.set('channel', filter);
+      if (statusParam) params.set('status', statusParam);
+      if (fromParam) params.set('from', fromParam);
+      if (toParam) params.set('to', toParam);
       const data = await apiGet(
-        `/api/profiles/${encodeURIComponent(shop)}/messages?limit=50`
+        `/api/profiles/${encodeURIComponent(shop)}/messages?${params.toString()}`
       );
       setMessages(Array.isArray(data?.messages) ? data.messages : []);
       setTotal(Number.isFinite(data?.total) ? data.total : 0);
@@ -225,18 +248,18 @@ export default function Messages({ shop }) {
     } finally {
       setLoading(false);
     }
-  }, [shop]);
+  }, [shop, filter, statusParam, fromParam, toParam]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const filteredMessages = messages.filter((m) => {
-    if (filter === 'push') return m.channel === 'push';
-    if (filter === 'email') return m.channel === 'email';
-    if (filter === 'converted') return m.outcome === 'converted';
-    return true;
-  });
+  // channel is already applied server-side (see load() above); only
+  // 'converted' still needs a client-side pass, on whatever page the
+  // channel/status/date-filtered fetch returned.
+  const filteredMessages = filter === 'converted'
+    ? messages.filter((m) => m.outcome === 'converted')
+    : messages;
 
   return (
     <div style={DS.page}>

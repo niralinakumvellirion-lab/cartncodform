@@ -9,6 +9,13 @@ import '@shopify/polaris/build/esm/styles.css';
 function CustomersContent() {
   const searchParams = useSearchParams();
   const shop = searchParams.get('shop') || '';
+  // Set by the Dashboard's Push Subscribers / Emails Captured tiles
+  // (navigate(`/admin/customers?filter=...&from=...&to=...`)) —
+  // Customers seeds its own filter tab and date range from these
+  // instead of always opening on "Everyone", unfiltered by date.
+  const filter = searchParams.get('filter') || '';
+  const from = searchParams.get('from') || '';
+  const to = searchParams.get('to') || '';
   return (
     <AppProvider i18n={{}}>
       <NavMenu>
@@ -23,7 +30,7 @@ function CustomersContent() {
         <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
       </NavMenu>
-      <CustomersScreen shop={shop} />
+      <CustomersScreen shop={shop} initialFilter={filter} initialFrom={from} initialTo={to} />
     </AppProvider>
   );
 }
