@@ -554,7 +554,7 @@ async function getJourneyData(shopDomain, { limit = 50, page = 0, profileId = nu
   // would never appear there no matter how high `limit` is set).
   if (profileId) {
     const profile = await Profile.findOne({ _id: profileId, shopDomain: shop })
-      .select('identifiers stage orders channels lastSeenAt');
+      .select('identifiers stage orders channels lastSeenAt createdAt');
     if (!profile) return { customers: [], total: 0 };
 
     const profileSignals = await Signal.find({ shopDomain: shop, profileId: profile._id })
