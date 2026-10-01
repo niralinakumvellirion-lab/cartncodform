@@ -1,0 +1,53 @@
+CUSTOMERS CARD GRID — PRE-AUDIT
+================================
+Date: 2026-10-01
+Files: frontend/app/admin/screens/Customers.jsx
+       frontend/app/admin/screens/CustomerDetail.jsx
+
+SCOPE
+- Replace Customers.jsx table/row layout with a responsive 4→3→2→1
+  card grid.
+- Restyle CustomerDetail.jsx header into the same card language.
+- Everything else (data fetching, filters, pagination, sections below
+  the header in detail) is unchanged.
+
+FIELDS USED
+- FIRST SEEN: p.createdAt (document creation date — no firstSeenAt
+  field on Profile documents; createdAt is the closest equivalent)
+- LAST SEEN:  p.lastSeenAt (existing field)
+- Contact email: p.identifiers?.emails?.[0] || p.channels?.email?.address
+- Phone:        p.identifiers?.phones?.[0]
+- Stage label:  derived same way as StageBadge (orders.count, hasCart,
+  stage === 'lapsed') — getStageLabel() helper, defined locally in
+  each file (cannot touch customerShared.jsx)
+
+FIELDS OMITTED (no equivalent in Profile documents)
+- Photos → initials avatar only (spec-compliant)
+- firstSeenAt → using createdAt as noted above
+
+CHANGES PLANNED
+
+Customers.jsx:
+1. Remove ShimmerTable import (unused after change)
+2. After getRelativeTime: add AVATAR_COLORS, getAvatarColor,
+   getStageLabel, formatShortDate helpers
+3. Add gridCols state; expand the isMobileView effect to set it:
+   w<600→1, w<800→2, w<1100→3, else→4
+4. Replace the table/row section (line 266 to ~559) with a card grid;
+   keep all JSX above it (DateRangeFilter, search, tabs) unchanged
+
+CustomerDetail.jsx:
+1. Before SUGGESTIONS const: add CD_AVATAR_COLORS, getCDAvatarColor,
+   getCDStageLabel, formatCDDate helpers
+2. After `const hasEmail = ...`: derive phone, cdInitial, cdAvatarColor,
+   cdStageLabel
+3. Replace the 8-line flat header div (avatar+name+badge row) with a
+   DS.card header containing avatar, name, badge, stage sub-line,
+   ReachIcons, FIRST SEEN / LAST SEEN detail fields, contact inset
+
+CONSTRAINTS VERIFIED
+- No backend changes, no new endpoints, no new fields
+- customerShared.jsx untouched — StageBadge still imported and used
+- Only the two named files change
+- Keyboard: View button has aria-label, focus ring via onFocus/onBlur
+- No localStorage in admin

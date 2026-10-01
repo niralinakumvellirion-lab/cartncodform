@@ -86,6 +86,32 @@ function getFriendlyPath(path) {
   return path.split('?')[0].replace(/-/g, ' ').replace(/\//g, ' › ').trim();
 }
 
+const CD_AVATAR_COLORS = [
+  { bg: '#eef2ff', text: '#4f46e5' },
+  { bg: '#dcfce7', text: '#16a34a' },
+  { bg: '#dbeafe', text: '#2563eb' },
+  { bg: '#fef3c7', text: '#d97706' },
+  { bg: '#fce7f3', text: '#be185d' },
+];
+function getCDAvatarColor(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) & 0xffffffff;
+  return CD_AVATAR_COLORS[Math.abs(h) % CD_AVATAR_COLORS.length];
+}
+function getCDStageLabel(customer) {
+  const orders = customer.orders?.count || 0;
+  if (orders > 1) return 'Repeat buyer';
+  if (orders === 1) return 'Bought once';
+  if (customer.identifiers?.cartTokens?.length > 0) return 'Has cart';
+  return customer.stage === 'lapsed' ? 'Going quiet' : 'Visitor';
+}
+function formatCDDate(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  if (isNaN(d)) return '—';
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 // Auto-fill suggestions keyed by signal type, shared by every composer
 // instance — kept at module scope since it doesn't depend on props/state.
 // NOTE: this constant (SUGGESTIONS) was not itself listed in the task's
@@ -932,6 +958,10 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
   const displayName = email || `Anonymous shopper · #${String(profile._id || profileId).slice(-5)}`;
   const hasPush = !!profile.channels?.push?.subscribed;
   const hasEmail = !!(profile.channels?.email?.address || email);
+  const phone = profile.identifiers?.phones?.[0];
+  const cdInitial = (email || displayName || '?').charAt(0).toUpperCase();
+  const cdAvatarColor = getCDAvatarColor(displayName);
+  const cdStageLabel = getCDStageLabel(profile);
 
   const events = (customer.recentEvents || []).filter((e) => EVENT_LABELS[e.type]);
 
@@ -1142,13 +1172,74 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
     <div style={{ ...DS.page, maxWidth: 1100, overflowX: 'hidden', width: '100%' }}>
       {backButton}
 
-      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap',
-                    gap: 12, marginBottom: 20 }}>
-        <h1 style={{ ...DS.pageTitle, fontSize: 20, wordBreak: 'break-word' }}>
-          {displayName}
-        </h1>
-        <StageBadge customer={profile} />
-        <ReachIcons customer={profile} />
+      {/* Customer header card */}
+      <div style={{ ...DS.card, marginBottom: 20 }}>
+        {/* Avatar + name + badge */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 14 }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: '50%', flexShrink: 0,
+            background: cdAvatarColor.bg, color: cdAvatarColor.text,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 20, fontWeight: 700,
+          }}>
+            {cdInitial}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+              <h1 style={{ ...DS.pageTitle, fontSize: 18, wordBreak: 'break-word', lineHeight: 1.3, margin: 0, flex: 1 }}>
+                {displayName}
+              </h1>
+              <div style={{ flexShrink: 0 }}><StageBadge customer={profile} /></div>
+            </div>
+            <div style={{ fontSize: 12, color: '#9ca3af', margin: '3px 0 6px' }}>{cdStageLabel}</div>
+            <ReachIcons customer={profile} />
+          </div>
+        </div>
+
+        {/* FIRST SEEN / LAST SEEN */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12, marginBottom: 14 }}>
+          {[
+            { label: 'First Seen', val: formatCDDate(profile.createdAt) },
+            { label: 'Last Seen',  val: formatCDDate(profile.lastSeenAt) },
+          ].map(({ label, val }) => (
+            <div key={label}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
+                            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>
+                {label}
+              </div>
+              <div style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>{val}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Contact inset */}
+        {(email || phone) && (
+          <div style={{
+            padding: '10px 12px', background: '#f9fafb',
+            border: '1px solid #f3f4f6', borderRadius: 10,
+            display: 'flex', flexDirection: 'column', gap: 6,
+          }}>
+            {email && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                  stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                  <polyline points="22,6 12,13 2,6"/>
+                </svg>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</span>
+              </div>
+            )}
+            {phone && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151' }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                  stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.6 1.18h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.77a16 16 0 0 0 6.29 6.29l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+                </svg>
+                <span>{phone}</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div style={{
