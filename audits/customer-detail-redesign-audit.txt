@@ -1,0 +1,101 @@
+CUSTOMER DETAIL REDESIGN — PRE + SELF-AUDIT
+===========================================
+Date: 2026-10-01
+File: frontend/app/admin/screens/CustomerDetail.jsx
+
+SCOPE
+- Full visual redesign of the customer detail page.
+- No backend changes, no new endpoints, no new fields.
+
+FIRSTSEEN FIELD REPORT
+- `profile.createdAt` is used as "First Seen" (mapped in formatCDDate).
+- The journey endpoint (`/api/events/:shop/journey?profileId=...`) does NOT
+  return a `firstSeen` or `firstSeenAt` field on profile documents.
+- The Profile model likely populates `createdAt` (Mongoose default) but
+  `firstSeenAt` is not set, so the field renders empty in production.
+  Using `profile.createdAt` is a best-available proxy; a backend field
+  fix is out of scope here.
+
+DATA AVAILABILITY FOR HEALTH STRIP
+- notifications array (already fetched): provides pushSentCount,
+  emailSentCount, deliveredCount, failedCount, heldCount/skippedCount.
+- customer.topProducts: provides distinctProducts count and per-product
+  view counts for total views.
+- All four tiles can be derived; no new endpoint needed.
+
+PRE-CHANGE SECTIONS
+1. Identity strip: large DS.card header, no max-width constraint.
+2. Health strip: does not exist yet.
+3. Warning bar: does not exist yet.
+4. Main grid: Row 1 (3-col: header/interested/send), Row 2 (2-col:
+   notifications/activity). Will be replaced with 1.75fr/1fr grid.
+
+CHANGES PLANNED
+1. Add `timelineFilter` and `showAllTimeline` states.
+2. Add module-level `StatusPill` component (after ProductThumbnail).
+3. Add HEADLINE / MESSAGE labels to NotificationComposer inputs.
+4. Add SUBJECT / MESSAGE labels to EmailComposer inputs.
+5. Replace entire render section (const profile → end of function):
+   a. Identity strip (full-width, ~80px, channel chips)
+   b. Health strip (4 tiles, 2-col on narrow)
+   c. Warning bar (conditional amber bar)
+   d. Main grid 1.75fr/1fr:
+      LEFT — merged timeline with day groups + filter chips + show-more
+      RIGHT — "What they want" (topProd[0], 64px thumb) + "Send a message"
+6. sendCard restyled (segmented buttons, quiet hours line).
+
+CONSTRAINTS VERIFIED
+- All existing effects/load functions/back-button logic untouched.
+- Composer behaviour (send paths, useEffect auto-fill, payloads) untouched.
+- Loading, error, notFound states untouched.
+- Only CustomerDetail.jsx changes.
+
+SELF-AUDIT
+----------
+All planned changes applied:
+
+States added: timelineFilter ('all'|'them'|'us'), showAllTimeline (bool).
+StatusPill: module-level component (not inside render) — avoids remount on every render.
+NotificationComposer: HEADLINE + MESSAGE labels added above inputs.
+EmailComposer: SUBJECT + MESSAGE labels added above inputs.
+  width:100%, boxSizing:border-box added to inputs so they fill the labelled wrapper.
+
+Section 1 — Identity strip:
+  Full-width flex row. 48px avatar. Name + StageBadge. Channel chips with
+  inline SVG icons + text ("Push on/off", "Email on/off"). Phone chip
+  conditional. FIRST SEEN / LAST SEEN columns on the right.
+
+Section 2 — Health strip:
+  4-tile grid (2-col on isNarrow). Derived entirely from already-fetched
+  notifications + topProducts:
+  - Messages Sent: notifications.length, sub: pushSentCount · emailSentCount
+  - Reached Them: deliveredCount (outcome==='delivered'), green
+  - Didn't Arrive: failedCount + heldCount (skipped+cancelled), amber
+  - Products Viewed: topProducts.length (distinct), totalProductViews sub-line
+
+Section 3 — Warning bar:
+  Computed via signalGroups loop. Condition: total>=5 && delivered < total/2.
+  Numbers interpolated from warningTotal/warningDelivered — never hardcoded.
+  Hidden when condition false or notifications still loading.
+
+Section 4 — 1.75fr / 1fr grid:
+  LEFT (merged timeline):
+  - ALL_TIMELINE = notifications.map + events.map, filtered + sorted newest-first
+  - Grouped by day (toLocaleDateString en-IN toUpperCase)
+  - Filter chips: Everything / They did / We sent via timelineFilter state
+  - THEIR rows: plain text + coloured dot (EVENT_DOT_COLORS)
+  - OUR rows: tinted inset card (#f7f7fb / #e8e8f2), "YOU SENT" eyebrow,
+    title, StatusPill, muted signal+channel line
+  - Show earlier button when filteredTimeline.length > TIMELINE_CAP (30)
+
+  RIGHT:
+  - "What they want": topProd[0] with 64px thumbnail (ProductThumbnail size=64),
+    title, "Viewed N times · date" (topProdLastEvent = most recent product_view event ts)
+  - sendCard: restyled segmented buttons (flex, bordered), Quiet hours line,
+    NotificationComposer / EmailComposer rendered as before
+
+Old notificationsCard, timelineCard, interestedCard vars removed.
+Old sendCard removed and replaced.
+cdStageLabel derivation removed from render (getCDStageLabel still at module level).
+
+Build: ✓ Compiled successfully (0 errors, 0 warnings). Bundle: 12.4 kB (+1.3 kB)

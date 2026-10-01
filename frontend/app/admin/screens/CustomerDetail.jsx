@@ -362,6 +362,29 @@ function ProductThumbnail({ imageUrl, title, size = 40, radius = 8 }) {
   );
 }
 
+function StatusPill({ outcome, status }) {
+  const val = outcome || status;
+  const PILL = {
+    delivered: { label: 'Delivered', bg: '#dcfce7', color: '#16a34a' },
+    clicked:   { label: 'Clicked',   bg: '#dbeafe', color: '#2563eb' },
+    converted: { label: 'Converted', bg: '#dcfce7', color: '#16a34a' },
+    failed:    { label: 'Failed',    bg: '#fee2e2', color: '#dc2626' },
+    sent:      { label: 'Sent',      bg: '#eef2ff', color: '#4f46e5' },
+    skipped:   { label: 'Skipped',   bg: '#f3f4f6', color: '#6b7280' },
+    cancelled: { label: 'Cancelled', bg: '#f3f4f6', color: '#6b7280' },
+  };
+  const s = PILL[val] || { label: val || '—', bg: '#f3f4f6', color: '#9ca3af' };
+  return (
+    <span style={{
+      display: 'inline-block', padding: '2px 8px', borderRadius: 99,
+      fontSize: 10, fontWeight: 700,
+      background: s.bg, color: s.color, flexShrink: 0,
+    }}>
+      {s.label}
+    </span>
+  );
+}
+
 function NotificationComposer({ customer, shop, onSent, onError }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
@@ -547,28 +570,42 @@ function NotificationComposer({ customer, shop, onSent, onError }) {
         </div>
       )}
 
-      <input
-        value={title}
-        onChange={(e) => setTitle(e.target.value)}
-        placeholder="Notification title"
-        style={{
-          padding: '9px 12px', fontSize: '13px',
-          border: '1px solid #e5e7eb', borderRadius: '8px',
-          outline: 'none', color: '#111827',
-        }}
-      />
-      <textarea
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        placeholder="Notification message"
-        rows={3}
-        style={{
-          padding: '9px 12px', fontSize: '13px',
-          border: '1px solid #e5e7eb', borderRadius: '8px',
-          outline: 'none', color: '#111827', resize: 'vertical',
-          fontFamily: 'inherit',
-        }}
-      />
+      <div>
+        <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280',
+                        textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+          Headline
+        </label>
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          placeholder="Notification title"
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            padding: '9px 12px', fontSize: '13px',
+            border: '1px solid #e5e7eb', borderRadius: '8px',
+            outline: 'none', color: '#111827',
+          }}
+        />
+      </div>
+      <div>
+        <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280',
+                        textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+          Message
+        </label>
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Notification message"
+          rows={3}
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            padding: '9px 12px', fontSize: '13px',
+            border: '1px solid #e5e7eb', borderRadius: '8px',
+            outline: 'none', color: '#111827', resize: 'vertical',
+            fontFamily: 'inherit',
+          }}
+        />
+      </div>
       <div style={{ fontSize: '11px', color: '#9ca3af' }}>
         Signal: {SIGNAL_LABELS[customer?.topSignal?.type] || '—'} ·
         Strength: {((customer?.topSignal?.strength || 0) * 100).toFixed(0)}%
@@ -732,29 +769,43 @@ function EmailComposer({ customer, shop, onSent, onError }) {
         </div>
       )}
 
-      <input
-        value={subject}
-        onChange={(e) => setSubject(e.target.value)}
-        placeholder="Email subject"
-        style={{
-          padding: '9px 12px', fontSize: '13px',
-          border: '1px solid #e5e7eb', borderRadius: '8px',
-          outline: 'none', color: '#111827',
-        }}
-      />
-      <textarea
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-        placeholder="Email message"
-        rows={6}
-        style={{
-          padding: '9px 12px', fontSize: '13px',
-          border: '1px solid #e5e7eb', borderRadius: '8px',
-          outline: 'none', color: '#111827',
-          resize: 'vertical', fontFamily: 'inherit',
-          lineHeight: '1.5',
-        }}
-      />
+      <div>
+        <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280',
+                        textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+          Subject
+        </label>
+        <input
+          value={subject}
+          onChange={(e) => setSubject(e.target.value)}
+          placeholder="Email subject"
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            padding: '9px 12px', fontSize: '13px',
+            border: '1px solid #e5e7eb', borderRadius: '8px',
+            outline: 'none', color: '#111827',
+          }}
+        />
+      </div>
+      <div>
+        <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280',
+                        textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+          Message
+        </label>
+        <textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Email message"
+          rows={6}
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            padding: '9px 12px', fontSize: '13px',
+            border: '1px solid #e5e7eb', borderRadius: '8px',
+            outline: 'none', color: '#111827',
+            resize: 'vertical', fontFamily: 'inherit',
+            lineHeight: '1.5',
+          }}
+        />
+      </div>
       <div style={{ fontSize: '11px', color: '#9ca3af' }}>
         Sent from: notifications@shopireachboost.com
       </div>
@@ -812,6 +863,8 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
   const [sendResult, setSendResult] = useState('');
   const [isNarrow, setIsNarrow] = useState(false);
   const [isMedium, setIsMedium] = useState(false);
+  const [timelineFilter, setTimelineFilter] = useState('all');
+  const [showAllTimeline, setShowAllTimeline] = useState(false);
 
   // "Notifications sent" section — every ScheduledJob for this customer
   // (brain/automation + festival/manual broadcasts), a separate fetch
@@ -965,207 +1018,113 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
   const phone = profile.identifiers?.phones?.[0];
   const cdInitial = (email || displayName || '?').charAt(0).toUpperCase();
   const cdAvatarColor = getCDAvatarColor(displayName);
-  const cdStageLabel = getCDStageLabel(profile);
 
   const events = (customer.recentEvents || []).filter((e) => EVENT_LABELS[e.type]);
 
-  const notificationsCard = (
-    <div style={{ ...DS.card, marginBottom: 0, maxHeight: 380, overflowY: 'auto' }}>
-      <div style={cardTitle}>Notifications sent</div>
-      {notifLoading ? (
-        <div style={{ fontSize: 12, color: '#9ca3af', padding: '4px 0' }}>
-          Loading…
-        </div>
-      ) : notifError ? (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          gap: 8, fontSize: 12, color: '#b91c1c', padding: '4px 0',
-        }}>
-          <span>{notifError}</span>
-          <button
-            onClick={() => loadNotifications({ aborted: false })}
-            style={{ ...DS.btnSecondary, padding: '4px 10px', fontSize: 11 }}
-          >
-            Retry
-          </button>
-        </div>
-      ) : notifications.length === 0 ? (
-        <div style={{ fontSize: 12, color: '#9ca3af', padding: '4px 0' }}>
-          No notifications sent yet
-        </div>
-      ) : (
-        notifications.map((n) => (
-          <div key={n._id} style={{
-            display: 'flex', gap: 8, alignItems: 'flex-start',
-            padding: '4px 0', borderBottom: '1px solid #f9fafb', fontSize: 12,
-          }}>
-            <span style={{
-              display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-              background: NOTIF_OUTCOME_COLORS[n.outcome] || '#d1d5db',
-              flexShrink: 0, marginTop: 6,
-            }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ color: '#374151' }}>
-                {n.channel === 'email' ? '✉️' : '🔔'} {SIGNAL_LABELS[n.signalType] || n.signalType || 'Notification'}
-              </div>
-              {n.title && (
-                <div style={{
-                  color: '#6b7280', fontSize: 11, overflow: 'hidden',
-                  textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  {n.title}
-                </div>
-              )}
-            </div>
-            <div style={{ flexShrink: 0, textAlign: 'right' }}>
-              <div style={{
-                fontSize: 10, fontWeight: 600, textTransform: 'capitalize',
-                color: NOTIF_OUTCOME_COLORS[n.outcome] || '#9ca3af',
-              }}>
-                {n.outcome || n.status}
-              </div>
-              {(n.sentAt || n.runAt) && (
-                <div style={{ color: '#9ca3af', fontSize: 11 }}>
-                  {new Date(n.sentAt || n.runAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-                </div>
-              )}
-            </div>
-          </div>
-        ))
-      )}
-    </div>
-  );
+  // Health strip stats — derived from already-fetched notifications + topProducts
+  const pushSentCount  = notifications.filter(n => n.channel === 'push').length;
+  const emailSentCount = notifications.filter(n => n.channel === 'email').length;
+  const deliveredCount = notifications.filter(n => n.outcome === 'delivered').length;
+  const failedCount    = notifications.filter(n => n.outcome === 'failed').length;
+  const heldCount      = notifications.filter(n => ['skipped', 'cancelled'].includes(n.outcome)).length;
+  const didntArriveCount  = failedCount + heldCount;
+  const distinctProducts  = customer.topProducts?.length || 0;
+  const totalProductViews = (customer.topProducts || []).reduce((s, p) => s + (p.count || 0), 0);
 
-  const timelineCard = (
-    <div style={{ ...DS.card, marginBottom: 0, maxHeight: 380, overflowY: 'auto' }}>
-      <div style={cardTitle}>Recent activity</div>
-      {events.length === 0 ? (
-        <div style={{ fontSize: 12, color: '#9ca3af', padding: '4px 0' }}>
-          No journey data yet
-        </div>
-      ) : (
-        events.map((e, i) => (
-          <div key={i} style={{
-            display: 'flex', gap: 8, alignItems: 'flex-start',
-            padding: '4px 0', borderBottom: '1px solid #f9fafb', fontSize: 12,
-          }}>
-            <span style={{
-              display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-              background: EVENT_DOT_COLORS[e.type], flexShrink: 0, marginTop: 6,
-            }} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ color: '#374151' }}>{EVENT_LABELS[e.type]}</div>
-              {e.type === 'product_view' && (e.meta?.productTitle || e.path) && (
-                <div style={{ color: '#6b7280', fontSize: 11 }}>
-                  {e.meta?.productTitle || getFriendlyPath(e.path)}
-                </div>
-              )}
-              {e.type === 'page_view' && e.path && (
-                <div style={{ color: '#6b7280', fontSize: 11 }}>
-                  {getFriendlyPath(e.path)}
-                </div>
-              )}
-            </div>
-            <span style={{ color: '#9ca3af', flexShrink: 0, fontSize: 11 }}>
-              {new Date(e.ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-            </span>
-          </div>
-        ))
-      )}
-    </div>
-  );
+  // Warning bar: same signalType sent 5+ times with fewer than half delivered
+  const signalGroups = {};
+  for (const n of notifications) {
+    if (!n.signalType) continue;
+    if (!signalGroups[n.signalType]) signalGroups[n.signalType] = { total: 0, delivered: 0 };
+    signalGroups[n.signalType].total++;
+    if (n.outcome === 'delivered') signalGroups[n.signalType].delivered++;
+  }
+  const warningEntry       = Object.entries(signalGroups).find(([, v]) => v.total >= 5 && v.delivered < v.total / 2) || null;
+  const warningSignalType  = warningEntry?.[0];
+  const warningTotal       = warningEntry?.[1]?.total;
+  const warningDelivered   = warningEntry?.[1]?.delivered;
 
-  const interestedCard = customer.topProducts?.length > 0 && (
-    <div style={{ ...DS.card, marginBottom: 0 }}>
-      <div style={cardTitle}>Most interested in</div>
-      {customer.topProducts.map((p, i) => (
-        <div key={i} style={{
-          display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0',
-          borderBottom: i < customer.topProducts.length - 1 ? '1px solid #f3f4f6' : 'none',
-        }}>
-          <ProductThumbnail imageUrl={p.imageUrl} title={p.title} size={36} radius={6} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#111827',
-                          overflow: 'hidden', textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap' }}>{p.title}</div>
-            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
-              {p.count} view{p.count !== 1 ? 's' : ''}
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
+  // Merged timeline: notifications + storefront events, newest-first
+  const ALL_TIMELINE = [
+    ...notifications.map(n => ({ _type: 'sent',  ts: n.sentAt || n.runAt, n })),
+    ...events.map(e =>          ({ _type: 'event', ts: e.ts, e })),
+  ].filter(x => x.ts).sort((a, b) => new Date(b.ts) - new Date(a.ts));
+
+  const filteredTimeline = ALL_TIMELINE.filter(x =>
+    timelineFilter === 'all'  ? true :
+    timelineFilter === 'them' ? x._type === 'event' :
+    x._type === 'sent'
   );
+  const TIMELINE_CAP    = 30;
+  const visibleTimeline = showAllTimeline ? filteredTimeline : filteredTimeline.slice(0, TIMELINE_CAP);
+
+  const groupedTimeline = [];
+  let lastDay = '';
+  for (const item of visibleTimeline) {
+    const day = new Date(item.ts).toLocaleDateString('en-IN', {
+      day: 'numeric', month: 'short', year: 'numeric',
+    }).toUpperCase();
+    if (day !== lastDay) { groupedTimeline.push({ day, items: [] }); lastDay = day; }
+    groupedTimeline[groupedTimeline.length - 1].items.push(item);
+  }
+
+  // Top product
+  const topProd = customer.topProducts?.[0];
+  const topProdLastEvent = topProd
+    ? events.filter(e => e.type === 'product_view').sort((a, b) => new Date(b.ts) - new Date(a.ts))[0]?.ts
+    : null;
 
   const sendCard = (!hasPush && !hasEmail) ? (
-    <div style={{ ...DS.card, background: DS.gray50, padding: 16,
-                  marginBottom: 0, textAlign: 'center' }}>
+    <div style={{ ...DS.card, padding: 16, marginBottom: 0, textAlign: 'center' }}>
       <div style={{ fontSize: 13, color: '#9ca3af' }}>
-        🔕 No push subscription or email on file — cannot send a notification
+        🔕 No push subscription or email on file
       </div>
     </div>
   ) : (
     <div style={{ ...DS.card, padding: 16, marginBottom: 0 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginBottom: 8 }}>
-        Send notification
+      <div style={{ fontSize: 12, fontWeight: 700, color: '#111827',
+                    textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
+        Send a message
       </div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
         {hasPush && (
-          <button
-            onClick={() => setNotifTab('push')}
-            style={{
-              borderRadius: 7, padding: '7px 16px', fontSize: 12, fontWeight: 600,
-              cursor: 'pointer', border: 'none',
-              background: notifTab === 'push' ? '#4f46e5' : '#f3f4f6',
-              color: notifTab === 'push' ? '#fff' : '#6b7280',
-            }}
-          >
-            🔔 Push
-          </button>
+          <button onClick={() => setNotifTab('push')} style={{
+            flex: 1, padding: '7px 0', fontSize: 12, fontWeight: 600,
+            cursor: 'pointer', border: '1px solid #e5e7eb', borderRadius: 8,
+            background: notifTab === 'push' ? '#4f46e5' : '#fff',
+            color: notifTab === 'push' ? '#fff' : '#6b7280',
+          }}>🔔 Push</button>
         )}
         {hasEmail && (
-          <button
-            onClick={() => setNotifTab('email')}
-            style={{
-              borderRadius: 7, padding: '7px 16px', fontSize: 12, fontWeight: 600,
-              cursor: 'pointer', border: 'none',
-              background: notifTab === 'email' ? '#4f46e5' : '#f3f4f6',
-              color: notifTab === 'email' ? '#fff' : '#6b7280',
-            }}
-          >
-            ✉️ Email
-          </button>
+          <button onClick={() => setNotifTab('email')} style={{
+            flex: 1, padding: '7px 0', fontSize: 12, fontWeight: 600,
+            cursor: 'pointer', border: '1px solid #e5e7eb', borderRadius: 8,
+            background: notifTab === 'email' ? '#4f46e5' : '#fff',
+            color: notifTab === 'email' ? '#fff' : '#6b7280',
+          }}>✉️ Email</button>
         )}
       </div>
-
       {notifTab === 'push' && hasPush && (
-        <NotificationComposer
-          customer={customer}
-          shop={shop}
-          onSent={() => {
-            setSendResult('Sent successfully!');
-            setTimeout(() => setSendResult(''), 3000);
-          }}
-          onError={(err) => setSendResult('Error: ' + err)}
-        />
+        <NotificationComposer customer={customer} shop={shop}
+          onSent={() => { setSendResult('Sent successfully!'); setTimeout(() => setSendResult(''), 3000); }}
+          onError={(err) => setSendResult('Error: ' + err)} />
       )}
       {notifTab === 'email' && hasEmail && (
-        <EmailComposer
-          customer={customer}
-          shop={shop}
-          onSent={() => {
-            setSendResult('Sent successfully!');
-            setTimeout(() => setSendResult(''), 3000);
-          }}
-          onError={(err) => setSendResult('Error: ' + err)}
-        />
+        <EmailComposer customer={customer} shop={shop}
+          onSent={() => { setSendResult('Sent successfully!'); setTimeout(() => setSendResult(''), 3000); }}
+          onError={(err) => setSendResult('Error: ' + err)} />
       )}
-
+      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8,
+                    display: 'flex', alignItems: 'center', gap: 4 }}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        </svg>
+        Quiet hours respected
+      </div>
       {sendResult && (
-        <div style={{
-          marginTop: 8, fontSize: 13, textAlign: 'center',
-          color: sendResult.startsWith('Error') ? '#dc2626' : '#16a34a',
-        }}>
+        <div style={{ marginTop: 8, fontSize: 13, textAlign: 'center',
+          color: sendResult.startsWith('Error') ? '#dc2626' : '#16a34a' }}>
           {sendResult}
         </div>
       )}
@@ -1173,99 +1132,332 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
   );
 
   return (
-    <div style={{ ...DS.page, maxWidth: 1100, overflowX: 'hidden', width: '100%' }}>
+    <div style={{ ...DS.page, maxWidth: 1200, overflowX: 'hidden', width: '100%' }}>
       {backButton}
 
-      {/* Row 1: customer header + most interested + send notification */}
+      {/* === 1. Identity strip === */}
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: isNarrow ? '1fr' : isMedium ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
-        gap: 16,
-        alignItems: 'start',
-        marginBottom: 16,
+        display: 'flex', alignItems: 'center', gap: 16,
+        padding: '16px 20px', background: '#fff',
+        border: '1px solid #e3e3e3', borderRadius: 12, marginBottom: 16,
+        flexWrap: 'wrap',
       }}>
-        {/* Customer header card — fills column */}
-        <div style={{ ...DS.card, padding: 16 }}>
-          {/* Avatar + name + badge */}
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 10 }}>
-            <div style={{
-              width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
-              background: cdAvatarColor.bg, color: cdAvatarColor.text,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 18, fontWeight: 700,
-            }}>
-              {cdInitial}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-                <h1 style={{ ...DS.pageTitle, fontSize: 16, wordBreak: 'break-word', lineHeight: 1.3, margin: 0, flex: 1 }}>
-                  {displayName}
-                </h1>
-                <div style={{ flexShrink: 0 }}><StageBadge customer={profile} /></div>
-              </div>
-              <div style={{ fontSize: 12, color: '#9ca3af', margin: '3px 0 6px' }}>{cdStageLabel}</div>
-              <ReachIcons customer={profile} />
-            </div>
-          </div>
-
-          {/* FIRST SEEN / LAST SEEN */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
-            {[
-              { label: 'First Seen', val: formatCDDate(profile.createdAt) },
-              { label: 'Last Seen',  val: formatCDDate(profile.lastSeenAt) },
-            ].map(({ label, val }) => (
-              <div key={label}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
-                              textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>
-                  {label}
-                </div>
-                <div style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>{val}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Contact inset */}
-          {(email || phone) && (
-            <div style={{
-              padding: '8px 10px', background: '#f9fafb',
-              border: '1px solid #f3f4f6', borderRadius: 10,
-              display: 'flex', flexDirection: 'column', gap: 4,
-            }}>
-              {email && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151' }}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                    stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                    <polyline points="22,6 12,13 2,6"/>
-                  </svg>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{email}</span>
-                </div>
-              )}
-              {phone && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#374151' }}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                    stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.6 1.18h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.77a16 16 0 0 0 6.29 6.29l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
-                  </svg>
-                  <span>{phone}</span>
-                </div>
-              )}
-            </div>
-          )}
+        <div style={{
+          width: 48, height: 48, borderRadius: '50%', flexShrink: 0,
+          background: cdAvatarColor.bg, color: cdAvatarColor.text,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 18, fontWeight: 700,
+        }}>
+          {cdInitial}
         </div>
-        {interestedCard}
-        {sendCard}
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 15, fontWeight: 600, color: '#111827', wordBreak: 'break-all' }}>
+              {displayName}
+            </span>
+            <StageBadge customer={profile} />
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '3px 9px', borderRadius: 99, fontSize: 11, fontWeight: 600,
+              background: hasPush ? '#dcfce7' : '#f3f4f6',
+              color: hasPush ? '#16a34a' : '#9ca3af',
+            }}>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+              Push {hasPush ? 'on' : 'off'}
+            </span>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '3px 9px', borderRadius: 99, fontSize: 11, fontWeight: 600,
+              background: hasEmail ? '#dcfce7' : '#f3f4f6',
+              color: hasEmail ? '#16a34a' : '#9ca3af',
+            }}>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                <polyline points="22,6 12,13 2,6"/>
+              </svg>
+              Email {hasEmail ? 'on' : 'off'}
+            </span>
+            {phone && (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '3px 9px', borderRadius: 99, fontSize: 11, fontWeight: 600,
+                background: '#f3f4f6', color: '#374151',
+              }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.6 1.18h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.77a16 16 0 0 0 6.29 6.29l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+                </svg>
+                {phone}
+              </span>
+            )}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 24, flexShrink: 0 }}>
+          {[
+            { label: 'First Seen', val: formatCDDate(profile.createdAt) },
+            { label: 'Last Seen',  val: formatCDDate(profile.lastSeenAt) },
+          ].map(({ label, val }) => (
+            <div key={label}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
+                            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>
+                {label}
+              </div>
+              <div style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>{val}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* Row 2: notifications sent + recent activity (max-height 380px, internal scroll) */}
+      {/* === 2. Health strip === */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: isNarrow ? '1fr' : 'repeat(2, 1fr)',
-        gap: 16,
-        alignItems: 'stretch',
+        gridTemplateColumns: isNarrow ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
+        gap: 12, marginBottom: 16,
       }}>
-        {notificationsCard}
-        {timelineCard}
+        {[
+          {
+            label: 'Messages Sent',
+            value: notifications.length,
+            sub: `${pushSentCount} push · ${emailSentCount} email`,
+            color: '#111827',
+          },
+          {
+            label: 'Reached Them',
+            value: deliveredCount,
+            sub: 'confirmed delivered',
+            color: '#16a34a',
+          },
+          {
+            label: "Didn't Arrive",
+            value: didntArriveCount,
+            sub: `${failedCount} failed · ${heldCount} held back`,
+            color: '#d97706',
+          },
+          {
+            label: 'Products Viewed',
+            value: distinctProducts,
+            sub: `${totalProductViews} total view${totalProductViews !== 1 ? 's' : ''}`,
+            color: '#111827',
+          },
+        ].map(({ label, value, sub, color }) => (
+          <div key={label} style={{ ...DS.card, padding: '12px 16px', marginBottom: 0 }}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
+                          textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+              {label}
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 700, color, lineHeight: 1, marginBottom: 3 }}>
+              {notifLoading ? '—' : value}
+            </div>
+            <div style={{ fontSize: 11, color: '#9ca3af' }}>{sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* === 3. Warning bar (conditional) === */}
+      {!notifLoading && warningEntry && (
+        <div style={{
+          padding: '10px 16px', background: '#fffbeb',
+          border: '1px solid #fcd34d', borderRadius: 10,
+          fontSize: 13, color: '#92400e', marginBottom: 16,
+          display: 'flex', alignItems: 'flex-start', gap: 8,
+        }}>
+          <span style={{ fontSize: 16, flexShrink: 0 }}>⚠️</span>
+          <span>
+            <strong>{warningTotal}</strong>{' '}
+            {SIGNAL_LABELS[warningSignalType] || warningSignalType} reminders have gone to this person.{' '}
+            Only <strong>{warningDelivered}</strong> were confirmed delivered.{' '}
+            Consider pausing them, or switching to email.
+          </span>
+        </div>
+      )}
+
+      {/* === 4. Main grid (1.75fr / 1fr) === */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: isNarrow ? '1fr' : 'minmax(0, 1.75fr) minmax(0, 1fr)',
+        gap: 16,
+        alignItems: 'start',
+      }}>
+
+        {/* LEFT: Merged timeline */}
+        <div style={{ ...DS.card, padding: 16, marginBottom: 0 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center',
+            justifyContent: 'space-between', marginBottom: 12,
+            flexWrap: 'wrap', gap: 8,
+          }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#111827',
+                          textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              What&apos;s happened
+            </div>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {[
+                { key: 'all',  label: 'Everything' },
+                { key: 'them', label: 'They did' },
+                { key: 'us',   label: 'We sent' },
+              ].map(({ key, label }) => (
+                <button key={key}
+                  onClick={() => setTimelineFilter(key)}
+                  style={{
+                    padding: '4px 10px', fontSize: 11, fontWeight: 600, borderRadius: 99,
+                    cursor: 'pointer', border: '1px solid',
+                    background: timelineFilter === key ? '#4f46e5' : '#fff',
+                    borderColor: timelineFilter === key ? '#4f46e5' : '#e5e7eb',
+                    color: timelineFilter === key ? '#fff' : '#6b7280',
+                  }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {(notifLoading && ALL_TIMELINE.length === 0) ? (
+            <div style={{ fontSize: 12, color: '#9ca3af', padding: '8px 0' }}>Loading…</div>
+          ) : groupedTimeline.length === 0 ? (
+            <div style={{ fontSize: 12, color: '#9ca3af', padding: '8px 0' }}>No activity yet</div>
+          ) : (
+            <>
+              {groupedTimeline.map(({ day, items }) => (
+                <div key={day}>
+                  <div style={{
+                    fontSize: 10, fontWeight: 700, color: '#9ca3af',
+                    letterSpacing: '0.08em', padding: '8px 0 4px',
+                    borderBottom: '1px solid #f3f4f6', marginBottom: 2,
+                  }}>
+                    {day}
+                  </div>
+                  {items.map((item, idx) => {
+                    const time = new Date(item.ts).toLocaleTimeString('en-IN', {
+                      hour: '2-digit', minute: '2-digit',
+                    });
+                    if (item._type === 'sent') {
+                      const n = item.n;
+                      return (
+                        <div key={n._id || idx} style={{
+                          display: 'flex', gap: 8, alignItems: 'flex-start', padding: '5px 0',
+                        }}>
+                          <span style={{ width: 58, flexShrink: 0, fontSize: 11,
+                                         color: '#9ca3af', paddingTop: 2 }}>
+                            {time}
+                          </span>
+                          <span style={{
+                            width: 8, height: 8, borderRadius: '50%',
+                            flexShrink: 0, marginTop: 4, background: '#818cf8',
+                          }} />
+                          <div style={{
+                            flex: 1, minWidth: 0,
+                            background: '#f7f7fb', border: '1px solid #e8e8f2',
+                            borderRadius: 8, padding: '7px 10px',
+                          }}>
+                            <div style={{
+                              display: 'flex', alignItems: 'flex-start',
+                              justifyContent: 'space-between', gap: 6, marginBottom: 3,
+                            }}>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: '#818cf8',
+                                            textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                                You sent
+                              </div>
+                              <StatusPill outcome={n.outcome} status={n.status} />
+                            </div>
+                            {n.title && (
+                              <div style={{ fontSize: 12, fontWeight: 600, color: '#111827',
+                                            marginBottom: 2, overflow: 'hidden',
+                                            textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {n.title}
+                              </div>
+                            )}
+                            <div style={{ fontSize: 11, color: '#9ca3af' }}>
+                              {SIGNAL_LABELS[n.signalType] || n.signalType || 'Notification'}
+                              {n.channel ? ` · ${n.channel}` : ''}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+                    const e = item.e;
+                    return (
+                      <div key={idx} style={{
+                        display: 'flex', gap: 8, alignItems: 'flex-start', padding: '5px 0',
+                      }}>
+                        <span style={{ width: 58, flexShrink: 0, fontSize: 11,
+                                       color: '#9ca3af', paddingTop: 4 }}>
+                          {time}
+                        </span>
+                        <span style={{
+                          width: 8, height: 8, borderRadius: '50%',
+                          flexShrink: 0, marginTop: 4,
+                          background: EVENT_DOT_COLORS[e.type] || '#d1d5db',
+                        }} />
+                        <div style={{ flex: 1, minWidth: 0, paddingTop: 1 }}>
+                          <div style={{ fontSize: 12, color: '#374151' }}>
+                            {EVENT_LABELS[e.type]}
+                          </div>
+                          {e.type === 'product_view' && (e.meta?.productTitle || e.path) && (
+                            <div style={{ fontSize: 11, color: '#9ca3af' }}>
+                              {e.meta?.productTitle || getFriendlyPath(e.path)}
+                            </div>
+                          )}
+                          {e.type === 'page_view' && e.path && (
+                            <div style={{ fontSize: 11, color: '#9ca3af' }}>
+                              {getFriendlyPath(e.path)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+              {!showAllTimeline && filteredTimeline.length > TIMELINE_CAP && (
+                <button
+                  onClick={() => setShowAllTimeline(true)}
+                  aria-label="Show earlier activity"
+                  style={{
+                    width: '100%', marginTop: 12, padding: '8px',
+                    fontSize: 12, fontWeight: 600, color: '#6b7280',
+                    background: '#f9fafb', border: '1px solid #e5e7eb',
+                    borderRadius: 8, cursor: 'pointer',
+                  }}>
+                  Show earlier activity ({filteredTimeline.length - TIMELINE_CAP} more)
+                </button>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* RIGHT: What they want + Send a message */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
+          {topProd && (
+            <div style={{ ...DS.card, padding: 16, marginBottom: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#111827',
+                            textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
+                What they want
+              </div>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <ProductThumbnail imageUrl={topProd.imageUrl} title={topProd.title} size={64} radius={10} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 4,
+                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {topProd.title}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#9ca3af' }}>
+                    Viewed {topProd.count} time{topProd.count !== 1 ? 's' : ''}
+                    {topProdLastEvent ? ` · ${formatCDDate(topProdLastEvent)}` : ''}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          {sendCard}
+        </div>
+
       </div>
     </div>
   );
