@@ -94,7 +94,7 @@ router.get('/:shopDomain/messages', requireAuth, requireStoreOwner, async (req, 
         .skip(page * limit)
         .limit(limit)
         .select(
-          'profileId signalType channel payload status runAt reason cartToken sentAt createdAt updatedAt'
+          'profileId signalType channel payload status outcome runAt reason cartToken sentAt createdAt updatedAt'
         )
         .populate('profileId', 'identifiers stage'),
       ScheduledJob.countDocuments(filter),

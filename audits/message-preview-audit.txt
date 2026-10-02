@@ -1,0 +1,181 @@
+AUDIT: Messages screen — row-detail preview
+Date: 2026-10-02
+Files read:
+  frontend/app/admin/screens/Messages.jsx       (full)
+  backend/routes/profiles.js                    (lines 51–108)
+  backend/models/ScheduledJob.js                (full)
+
+─────────────────────────────────────────────────────────────────────────────
+1. IS payload ALREADY RETURNED BY THE ENDPOINT?
+─────────────────────────────────────────────────────────────────────────────
+Yes. The endpoint at profiles.js:96–98 selects:
+
+  'profileId signalType channel payload status runAt reason
+   cartToken sentAt createdAt updatedAt'
+
+`payload` is the entire Mixed field — every sub-key comes through:
+  payload.title       ← push notification title
+  payload.body        ← push body OR email body
+  payload.subject     ← email subject (brain email jobs)
+  payload.imageUrl    ← push hero image (festival/manual; '' for brain)
+  payload.url         ← push click destination
+
+All of these are already in every `m` object in component state. No
+backend change is needed to add fields.
+
+SIDE FINDING (out of scope but worth noting): `outcome` is NOT in the
+.select() list. This means m.outcome is undefined for every row, so
+getStatusConfig() always falls through to the "delivered" / status-name
+default — "clicked" and "converted" badges on the Messages screen never
+actually render. This is a pre-existing bug separate from the preview task.
+
+─────────────────────────────────────────────────────────────────────────────
+2. AVAILABLE CONTENT BY SEND TYPE
+─────────────────────────────────────────────────────────────────────────────
+AUTOMATED / BRAIN — after the persist fix (Oct 2026+):
+  payload.title : non-empty string from generateCopy()
+  payload.body  : non-empty string from generateCopy()
+  payload.imageUrl: '' (brain.js schedules with imageUrl: '', persist fix
+                    only writes title+body, not imageUrl — confirmed)
+  payload.subject : non-empty string for email channel
+  Verdict → full title + body available. No hero image.
+
+AUTOMATED / BRAIN — historical (pre-persist fix):
+  payload.title : '' (empty string, never written back — confirmed)
+  payload.body  : '' (empty string)
+  payload.imageUrl: ''
+  payload.subject : '' (email)
+  The actual copy was resolved in memory then discarded. There is no
+  post-hoc way to recover it. Verdict → only signalType label available
+  (SIGNAL_LABELS[m.signalType] || m.reason). The content column already
+  shows this label as of the Oct 2026 fallback fix.
+
+FESTIVAL / MANUAL BROADCAST:
+  sendLogService.js inserts per-recipient ScheduledJob rows with:
+    payload: { title, body, imageUrl: imageUrl || '' }
+  where title and body come from the FestivalQueue (merchant-authored).
+  imageUrl is populated when the merchant added a hero image; '' otherwise.
+  Verdict → full title + body always present. Image when provided.
+
+─────────────────────────────────────────────────────────────────────────────
+3. REALISTIC PREVIEW PER TYPE
+─────────────────────────────────────────────────────────────────────────────
+PUSH (automated, post-fix) and PUSH (festival/manual):
+  Show as a phone-notification card:
+    [🔔 or app icon]  [title bold]
+    [body text, 2-line clamp]
+    [imageUrl rendered if non-empty]
+    [url shown as a muted click-destination label]
+  For festival rows imageUrl may be present; for brain rows it is always ''.
+
+EMAIL (automated, post-fix):
+  Show as an email envelope preview:
+    Subject: [payload.subject]  (bold)
+    [payload.body — plain text, preserve line breaks]
+  No image field for email.
+
+HISTORICAL automated rows (pre-fix, payload all ''):
+  Do NOT pretend content exists. Show instead:
+    [signal category label, e.g. "Cart left behind"]
+    Note: "Content wasn't recorded for this notification
+           (sent before Oct 2026)"
+  This is honest and matches the signalLabel fallback already in the
+  content column — the preview is just the expanded version of the same.
+
+─────────────────────────────────────────────────────────────────────────────
+4. INTERACTION: INLINE EXPAND vs MODAL vs SIDE PANEL
+─────────────────────────────────────────────────────────────────────────────
+Current row structure (desktop): display:grid with 5 fixed columns
+(line 527: '110px 180px 24px 1fr auto'). No existing expand/detail
+interaction anywhere in the component.
+
+Options:
+  A. Inline expand — row expands below grid row on click.
+     Pro: stays in-context. Con: `display:grid` makes this fiddly —
+     an expanded section can't span columns inside a flat grid children
+     list without resetting to block layout per-item. Requires wrapping
+     each row in a container, restructuring the current flat map().
+
+  B. Modal — click row → modal overlay with preview.
+     Pro: zero layout disruption, one new state variable (expandedId),
+     trivial to close. Standard Shopify/Polaris pattern for row details.
+     Con: slightly less "in context" than inline, but fine for a preview.
+
+  C. Side drawer/panel — slide in from right.
+     Pro: modern UX, doesn't lose list position. Con: most code of the
+     three; no existing drawer component in the codebase.
+
+RECOMMENDATION: Modal (B).
+  Rationale: the flat grid layout makes inline expand structurally
+  expensive (map() must emit a wrapper + two children instead of one
+  flat child; mobile branch would also need to change). A modal adds
+  ~30 lines: `const [preview, setPreview] = useState(null)` + a
+  single `onClick` prop on each row + a conditional modal div at the
+  bottom of the return. The grid rows are untouched. This matches how
+  Polaris admin apps handle detail views, and it fits the existing
+  screen structure with minimal change.
+  Implementation note: make the whole row `cursor: pointer` + on click
+  set `preview = m`. Modal renders as a fixed overlay with the
+  notification card inside, matching the push/email shape above.
+
+─────────────────────────────────────────────────────────────────────────────
+5. EMAIL vs PUSH PREVIEW SHAPE
+─────────────────────────────────────────────────────────────────────────────
+Push:  title (bold) + body (text) + imageUrl (optional image) + url
+       All four are in payload for every push row.
+       imageUrl is '' for brain jobs; may be set for festival/manual.
+
+Email: subject (bold "Subject:" line) + body (text, preserve \n)
+       Both in payload for email rows. No imageUrl field.
+       m.channel === 'email' distinguishes which shape to render.
+
+Both shapes are derivable from data already in state. No new endpoint
+field required.
+
+─────────────────────────────────────────────────────────────────────────────
+6. SMALLEST CHANGE — FRONTEND-ONLY
+─────────────────────────────────────────────────────────────────────────────
+Entirely frontend-only. The endpoint already returns the full payload
+Mixed field. No backend change needed.
+
+Minimum diff to Messages.jsx:
+  a. Add `const [preview, setPreview] = useState(null)` to component state.
+  b. Add `onClick={() => setPreview(m)}` + `cursor: 'pointer'` to the
+     outer div of each row (both the mobile card and the desktop grid row).
+  c. Render a conditional modal at the bottom of the return:
+     - Overlay: fixed, full-screen, semi-transparent background.
+     - Card: centered, max-width ~380px, white, rounded.
+     - Content: branch on m.channel ('push' vs 'email') and on whether
+       payload.title/body is non-empty vs empty (historical).
+     - Close: click overlay or an × button sets preview to null.
+
+No new API call. No backend change. No new component file needed (the
+modal is ~50 lines inline, small enough not to warrant extraction).
+
+─────────────────────────────────────────────────────────────────────────────
+SELF-AUDIT (post-implementation)
+─────────────────────────────────────────────────────────────────────────────
+Backend change (one line):
+  profiles.js .select() — added `outcome` to the field list so
+  m.outcome is now populated; clicked/converted badges now render.
+
+Frontend changes (Messages.jsx):
+  - State: const [preview, setPreview] = useState(null)
+  - Escape effect: window keydown → setPreview(null) when preview is set;
+    cleans up on preview close
+  - Mobile card div: role=button, tabIndex=0, onClick, onKeyDown (Enter/Space),
+    cursor:pointer — grid rows untouched, only handler added
+  - Desktop grid div: same additions — no grid restructure
+  - Modal JSX: rendered via IIFE at bottom of return, inside the page
+    wrapper. Branches:
+      hasCopy=false (historical, all payload fields '') → signal label +
+        "Content wasn't recorded" italic note
+      channel==='email' → Subject header + pre-wrap body
+      push with copy → 🔔 icon + bold title + pre-wrap body + optional
+        imageUrl img + optional url muted line
+    Meta shown in all branches: To, Signal (if present), Channel, Status
+    (colour from getStatusConfig), Sent time.
+    Close: × button (autoFocus for focus trapping, aria-label), overlay
+    click, Escape key.
+
+Tests: 362/362 passed. Frontend build: clean.

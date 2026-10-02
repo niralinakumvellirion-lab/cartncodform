@@ -237,6 +237,14 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
     return () => window.removeEventListener('resize', check);
   }, []);
 
+  const [preview, setPreview] = useState(null);
+  useEffect(() => {
+    if (!preview) return;
+    const onKey = (e) => { if (e.key === 'Escape') setPreview(null); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [preview]);
+
   const load = useCallback(async () => {
     if (!shop) return;
     setLoading(true);
@@ -443,12 +451,17 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
               return (
                 <div
                   key={m._id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setPreview(m)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPreview(m); } }}
                   style={{
                     padding: '14px 16px',
                     borderBottom:
                       i < filteredMessages.length - 1
                         ? '1px solid #f9fafb'
                         : 'none',
+                    cursor: 'pointer',
                   }}
                 >
                   {/* Row 1: time + status */}
@@ -522,6 +535,10 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
             return (
               <div
                 key={m._id}
+                role="button"
+                tabIndex={0}
+                onClick={() => setPreview(m)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPreview(m); } }}
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '110px 180px 24px 1fr auto',
@@ -532,6 +549,7 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
                     i < filteredMessages.length - 1
                       ? '1px solid #f9fafb'
                       : 'none',
+                  cursor: 'pointer',
                 }}
               >
                 {/* Time */}
@@ -602,6 +620,149 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
           })
         )}
       </div>
+
+      {/* Notification preview modal */}
+      {preview && (() => {
+        const p = preview.profileId;
+        const modalId = p?.identifiers?.emails?.[0]
+          || p?.identifiers?.phones?.[0]
+          || `Anonymous #${preview.cartToken?.slice(-4) || '????'}`;
+        const modalSignal = SIGNAL_LABELS[preview.signalType] || preview.reason || '';
+        const modalStatus = getStatusConfig(preview.status, preview.outcome, 0);
+        const modalTime = formatMessageTime(preview.sentAt || preview.createdAt || preview.updatedAt);
+        const hasCopy = Boolean(
+          preview.payload?.title || preview.payload?.body || preview.payload?.subject
+        );
+
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Notification preview"
+            style={{
+              position: 'fixed', inset: 0,
+              background: 'rgba(0,0,0,0.45)',
+              zIndex: 1000,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '20px',
+            }}
+            onClick={() => setPreview(null)}
+          >
+            <div
+              style={{
+                background: '#fff', borderRadius: 16, padding: '24px',
+                width: '100%', maxWidth: 400, position: 'relative',
+                maxHeight: '85vh', overflowY: 'auto',
+                boxShadow: '0 20px 60px rgba(0,0,0,0.25)',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Close button */}
+              <button
+                autoFocus
+                onClick={() => setPreview(null)}
+                aria-label="Close preview"
+                style={{
+                  position: 'absolute', top: 14, right: 14,
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: 22, color: '#9ca3af', lineHeight: 1, padding: '2px 6px',
+                  borderRadius: 6,
+                }}
+              >×</button>
+
+              {/* Title */}
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginBottom: 12, paddingRight: 28 }}>
+                Notification Preview
+              </div>
+
+              {/* Meta */}
+              <div style={{ fontSize: 12, color: '#6b7280', lineHeight: '1.9', marginBottom: 16 }}>
+                <div><span style={{ color: '#9ca3af' }}>To: </span>{modalId}</div>
+                {modalSignal && <div><span style={{ color: '#9ca3af' }}>Signal: </span>{modalSignal}</div>}
+                <div><span style={{ color: '#9ca3af' }}>Channel: </span>{preview.channel === 'email' ? 'Email' : 'Push'}</div>
+                <div>
+                  <span style={{ color: '#9ca3af' }}>Status: </span>
+                  <span style={{ color: modalStatus.color, fontWeight: modalStatus.bold ? 600 : 400 }}>
+                    {modalStatus.label}
+                  </span>
+                </div>
+                <div><span style={{ color: '#9ca3af' }}>Sent: </span>{modalTime}</div>
+              </div>
+
+              <div style={{ height: 1, background: '#f3f4f6', marginBottom: 16 }} />
+
+              {/* Preview content */}
+              {!hasCopy ? (
+                /* Historical automated row — content was never saved */
+                <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                  <div style={{ fontSize: 28, marginBottom: 10 }}>
+                    {preview.channel === 'email' ? '✉️' : '🔔'}
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+                    {modalSignal || '(no signal)'}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#9ca3af', fontStyle: 'italic' }}>
+                    Content wasn&apos;t recorded for this notification.
+                  </div>
+                </div>
+              ) : preview.channel === 'email' ? (
+                /* Email preview */
+                <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden', fontSize: 13 }}>
+                  <div style={{ background: '#f9fafb', padding: '10px 14px', borderBottom: '1px solid #e5e7eb' }}>
+                    <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 2 }}>Subject</div>
+                    <div style={{ fontWeight: 700, color: '#111827' }}>
+                      {preview.payload?.subject || '(no subject)'}
+                    </div>
+                  </div>
+                  <div style={{
+                    padding: '12px 14px', color: '#374151',
+                    lineHeight: '1.6', whiteSpace: 'pre-wrap', fontSize: 13,
+                  }}>
+                    {preview.payload?.body || '(no body)'}
+                  </div>
+                </div>
+              ) : (
+                /* Push notification preview */
+                <div>
+                  <div style={{
+                    border: '1px solid #e5e7eb', borderRadius: 12,
+                    padding: '12px 14px', background: '#f9fafb',
+                    display: 'flex', gap: 10, alignItems: 'flex-start',
+                  }}>
+                    <div style={{ fontSize: 20, flexShrink: 0 }}>🔔</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginBottom: 3 }}>
+                        {preview.payload?.title}
+                      </div>
+                      <div style={{ fontSize: 12, color: '#374151', lineHeight: '1.5', whiteSpace: 'pre-wrap' }}>
+                        {preview.payload?.body}
+                      </div>
+                    </div>
+                  </div>
+                  {preview.payload?.imageUrl ? (
+                    <img
+                      src={preview.payload.imageUrl}
+                      alt=""
+                      style={{
+                        width: '100%', borderRadius: 8, marginTop: 8,
+                        objectFit: 'cover', maxHeight: 180, display: 'block',
+                      }}
+                    />
+                  ) : null}
+                  {preview.payload?.url ? (
+                    <div style={{
+                      fontSize: 11, color: '#9ca3af', marginTop: 8,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {preview.payload.url}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
