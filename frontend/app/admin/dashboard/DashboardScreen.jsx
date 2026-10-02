@@ -1007,15 +1007,17 @@ export default function DashboardScreen({ shop }) {
     }
   }, [isRefreshing, notifLoading, insightsLoading]);
 
-  // Fetch last 4 sent jobs for the Recent Sends card.
+  // Fetch the last 6 distinct sends for the Recent Sends card.
+  // Uses the dedicated endpoint so festival sends appear as one row
+  // per broadcast (with recipientCount) rather than per recipient.
   useEffect(() => {
     if (!shop) return;
     let cancelled = false;
     setRecentSendsLoading(true);
-    apiGet(`/api/queue/${encodeURIComponent(shop)}?status=sent`)
+    apiGet(`/api/queue/${encodeURIComponent(shop)}/recent-sends`)
       .then(data => {
         if (cancelled) return;
-        setRecentSends((data.jobs || []).slice(0, 4));
+        setRecentSends(data.sends || []);
       })
       .catch(() => {})
       .finally(() => { if (!cancelled) setRecentSendsLoading(false); });
@@ -1541,7 +1543,10 @@ export default function DashboardScreen({ shop }) {
 
             {/* Recent Sends */}
             <div style={{ ...DS.card, marginBottom: 0 }}>
-              <div style={DS.sectionLabel}>Recent Sends</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <div style={{ ...DS.sectionLabel, marginBottom: 0 }}>Recent Sends</div>
+                <a href="/admin/messages" style={{ fontSize: 11, color: '#6b7280', textDecoration: 'none' }}>All →</a>
+              </div>
               {recentSendsLoading ? (
                 [1, 2, 3, 4].map(i => (
                   <div key={i} style={{ height: 36, background: '#f3f4f6', borderRadius: 6, marginBottom: 8 }} />
@@ -1549,28 +1554,45 @@ export default function DashboardScreen({ shop }) {
               ) : recentSends.length === 0 ? (
                 <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>No sends recorded yet.</p>
               ) : (
-                recentSends.map((job, idx, arr) => (
-                  <div key={String(job._id)} style={{ padding: '7px 0', borderBottom: idx < arr.length - 1 ? '1px solid #f9fafb' : 'none', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {SIGNAL_LABELS[job.signalType] || job.payload?.title || job.reason || '(no title)'}
+                recentSends.map((send, idx, arr) => {
+                  const dateStr = send.sentAt
+                    ? new Date(send.sentAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+                    : '—';
+                  const rowStyle = { padding: '7px 0', borderBottom: idx < arr.length - 1 ? '1px solid #f9fafb' : 'none', display: 'flex', gap: 10, alignItems: 'flex-start' };
+                  const titleStyle = { fontSize: 12, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+                  const subStyle = { fontSize: 10, color: '#9ca3af', marginTop: 2 };
+                  const rightStyle = { textAlign: 'right', flexShrink: 0 };
+
+                  if (send.kind === 'festival') {
+                    return (
+                      <div key={send._id} style={rowStyle}>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={titleStyle}>{send.title}</div>
+                          <div style={subStyle}>{send.recipientCount} customers · push</div>
+                        </div>
+                        <div style={rightStyle}>
+                          <div style={{ fontSize: 10, fontWeight: 600, color: '#16a34a' }}>sent</div>
+                          <div style={{ fontSize: 10, color: '#d1d5db', marginTop: 1 }}>{dateStr}</div>
+                        </div>
                       </div>
-                      <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>
-                        {job.channel || 'push'} · {SIGNAL_LABELS[job.signalType] || job.signalType || 'manual'}
+                    );
+                  }
+
+                  const outColor = (send.outcome === 'delivered' || send.outcome === 'clicked' || send.outcome === 'converted')
+                    ? '#16a34a' : send.outcome === 'failed' ? '#dc2626' : '#9ca3af';
+                  return (
+                    <div key={send._id} style={rowStyle}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={titleStyle}>{SIGNAL_LABELS[send.signalType] || send.signalType}</div>
+                        <div style={subStyle}>{send.channel || 'push'}</div>
+                      </div>
+                      <div style={rightStyle}>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: outColor }}>{send.outcome || 'sent'}</div>
+                        <div style={{ fontSize: 10, color: '#d1d5db', marginTop: 1 }}>{dateStr}</div>
                       </div>
                     </div>
-                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                      <div style={{ fontSize: 10, fontWeight: 600, color: (job.outcome === 'delivered' || job.outcome === 'clicked' || job.outcome === 'converted') ? '#16a34a' : job.outcome === 'failed' ? '#dc2626' : '#9ca3af' }}>
-                        {job.outcome || 'sent'}
-                      </div>
-                      <div style={{ fontSize: 10, color: '#d1d5db', marginTop: 1 }}>
-                        {(job.sentAt || job.updatedAt)
-                          ? new Date(job.sentAt || job.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
-                          : '—'}
-                      </div>
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
 

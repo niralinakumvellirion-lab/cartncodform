@@ -97,6 +97,67 @@ router.get('/:shopDomain', requireAuth, requireStoreOwner,
   }
 });
 
+// GET /api/queue/:shopDomain/recent-sends
+// Returns the most recent 6 distinct sends, merging two sources:
+//   1. FestivalQueue (status=sent) — ONE row per broadcast, recipientCount
+//      already stored, no ScheduledJob aggregation needed (not N+1).
+//   2. ScheduledJob (status=sent, festivalQueueId=null, signalType not
+//      'manual' or null) — brain/auto sends, each genuinely one customer.
+// Manual sends are excluded: no stored recipientCount (see
+// audits/recent-sends-count-audit.txt section 4).
+router.get('/:shopDomain/recent-sends', requireAuth, requireStoreOwner,
+  async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const LIMIT = 6;
+    const FestivalQueue = require('../models/FestivalQueue');
+
+    const [festivalItems, autoJobs] = await Promise.all([
+      FestivalQueue.find({ shopDomain: shop, status: 'sent' })
+        .sort({ sentAt: -1 })
+        .limit(LIMIT)
+        .select('title recipientCount sentAt')
+        .lean(),
+      ScheduledJob.find({
+        shopDomain: shop,
+        status: 'sent',
+        festivalQueueId: null,
+        signalType: { $nin: ['manual', null] },
+      })
+        .sort({ sentAt: -1 })
+        .limit(LIMIT)
+        .select('signalType channel outcome sentAt')
+        .lean(),
+    ]);
+
+    const sends = [
+      ...festivalItems.map(f => ({
+        kind: 'festival',
+        _id: String(f._id),
+        title: f.title,
+        recipientCount: f.recipientCount || 0,
+        channel: 'push',
+        sentAt: f.sentAt,
+      })),
+      ...autoJobs.map(j => ({
+        kind: 'auto',
+        _id: String(j._id),
+        signalType: j.signalType,
+        channel: j.channel || 'push',
+        outcome: j.outcome,
+        sentAt: j.sentAt,
+      })),
+    ]
+      .sort((a, b) => new Date(b.sentAt || 0) - new Date(a.sentAt || 0))
+      .slice(0, LIMIT);
+
+    return res.json({ sends });
+  } catch (err) {
+    console.error('[queue] recent-sends error:', err.message);
+    return res.status(500).json({ error: 'Failed to load recent sends' });
+  }
+});
+
 // POST /api/queue/:shopDomain/:jobId/send-now
 // Force a pending job to run immediately
 router.post('/:shopDomain/:jobId/send-now', requireAuth,
