@@ -722,8 +722,27 @@ export default function DashboardScreen({ shop }) {
   // the section that already renders this same list further down the
   // page, rather than navigating anywhere.
   const [popupsPanelOpen, setPopupsPanelOpen] = useState(false);
+  const [openInfoIdx, setOpenInfoIdx] = useState(null);
+  const [hoveredFunnelIdx, setHoveredFunnelIdx] = useState(null);
+  const funnelInfoRefs = useRef([]);
   const newSubsRef = useRef(null);
   const [highlightNewSubs, setHighlightNewSubs] = useState(false);
+
+  useEffect(() => {
+    if (openInfoIdx === null) return;
+    function onKey(e) { if (e.key === 'Escape') setOpenInfoIdx(null); }
+    function onOutside(e) {
+      const ref = funnelInfoRefs.current[openInfoIdx];
+      if (ref && !ref.contains(e.target)) setOpenInfoIdx(null);
+    }
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onOutside);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onOutside);
+    };
+  }, [openInfoIdx]);
+
   function scrollToNewSubscribers() {
     if (!newSubscribers.length || !newSubsRef.current) return;
     newSubsRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1370,24 +1389,63 @@ export default function DashboardScreen({ shop }) {
               {funnelSteps.map((step, i) => {
                 const prev = i > 0 ? funnelSteps[i - 1].value : null;
                 const rate = (prev && prev > 0) ? Math.min(100, Math.round((step.value / prev) * 100)) : null;
+                const isHovered = hoveredFunnelIdx === i;
+                const infoOpen = openInfoIdx === i;
                 return (
-                  <div key={step.label} style={{ padding: '10px 12px', background: '#fafafa', border: '1px solid #f3f4f6', borderRadius: 8 }}>
+                  <div
+                    key={step.label}
+                    role="button"
+                    tabIndex={0}
+                    onClick={step.onClick}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); step.onClick(); } }}
+                    onMouseEnter={() => setHoveredFunnelIdx(i)}
+                    onMouseLeave={() => setHoveredFunnelIdx(null)}
+                    style={{
+                      padding: '10px 12px',
+                      background: isHovered ? '#f0f0ff' : '#fafafa',
+                      border: isHovered ? '1px solid #c7d2fe' : '1px solid #f3f4f6',
+                      borderRadius: 8,
+                      cursor: 'pointer',
+                      position: 'relative',
+                      transition: 'background 0.15s, border-color 0.15s',
+                    }}
+                  >
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
                       <span style={{ fontSize: 9, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', flex: 1 }}>
                         {step.label}
                       </span>
-                      <button type="button" title={step.info}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', padding: 0, fontSize: 11, lineHeight: 1 }}>
-                        ⓘ
-                      </button>
+                      {/* Info button: stopPropagation prevents it from triggering the card's onClick */}
+                      <span ref={(el) => { funnelInfoRefs.current[i] = el; }} style={{ position: 'relative' }}>
+                        <button
+                          type="button"
+                          aria-label={`Info: ${step.label}`}
+                          aria-expanded={infoOpen}
+                          onClick={(e) => { e.stopPropagation(); setOpenInfoIdx(infoOpen ? null : i); }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: infoOpen ? '#6366f1' : '#d1d5db', padding: 0, fontSize: 11, lineHeight: 1 }}
+                        >
+                          ⓘ
+                        </button>
+                        {infoOpen && (
+                          <div
+                            role="tooltip"
+                            style={{
+                              position: 'absolute', top: 20, right: 0, zIndex: 50,
+                              background: '#1f2937', color: '#f9fafb',
+                              fontSize: 11, lineHeight: 1.5,
+                              padding: '7px 10px', borderRadius: 6,
+                              width: 170, whiteSpace: 'normal',
+                              boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+                              pointerEvents: 'none',
+                            }}
+                          >
+                            {step.info}
+                          </div>
+                        )}
+                      </span>
                     </div>
-                    <button
-                      type="button"
-                      onClick={step.onClick}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, fontWeight: 800, color: '#111827', lineHeight: 1, padding: 0, fontFamily: 'inherit' }}
-                    >
+                    <div style={{ fontSize: 22, fontWeight: 800, color: '#111827', lineHeight: 1 }}>
                       {(notifLoading || todayLoading) ? '—' : step.value.toLocaleString('en-IN')}
-                    </button>
+                    </div>
                     <div style={{ height: 3, background: '#e5e7eb', borderRadius: 2, margin: '8px 0 4px' }}>
                       <div style={{ height: '100%', background: step.color, borderRadius: 2, width: rate !== null ? `${rate}%` : '100%', transition: 'width 0.4s ease' }} />
                     </div>
