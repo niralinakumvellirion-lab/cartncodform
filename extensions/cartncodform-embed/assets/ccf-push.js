@@ -836,6 +836,21 @@
     return out;
   }
 
+  // TEMP DEBUG — fire-and-forget step markers visible in Render logs.
+  // Remove after mobile flow diagnosis is complete.
+  function ccfLog(step, extra) {
+    try {
+      fetch(window.location.origin + '/apps/cartncodform/ccf-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        keepalive: true,
+        body: JSON.stringify({ step: step, extra: extra || '',
+          ua: navigator.userAgent, ts: Date.now() })
+      }).catch(function(){});
+    } catch(e){}
+  }
+  // END TEMP DEBUG
+
   function showSoftPrompt(trigger, productId) {
     // discount-capture path: an already-subscribed customer, shown purely
     // to collect email/phone for a bigger discount — bypasses canPrompt()'s
@@ -2166,6 +2181,7 @@
           allow.parentNode.insertBefore(msgEl, allow.nextSibling);
         }
         if (allow) { allow.disabled = true; allow.style.opacity = '0.5'; }
+        ccfLog('popup_cleanup'); // TEMP DEBUG
         setTimeout(cleanup, 3000);
         return;
       }
@@ -2188,9 +2204,11 @@
     }
 
     allow.addEventListener('click', function () {
+      ccfLog('allow_clicked'); // TEMP DEBUG
       // Read the discount inputs BEFORE any teardown.
       var emailEl = document.getElementById('ccf-email-input');
       var email = emailEl && emailEl.value ? emailEl.value.trim() : '';
+      ccfLog('email_read', email ? 'yes' : 'no'); // TEMP DEBUG
       var originalButtonText = allow.textContent;
       var originalButtonBg = allow.style.background;
 
@@ -2218,14 +2236,20 @@
         ccfSetLabel(allow, 'check', 'Getting your discount...');
         allow.style.background = '#16a34a';
 
+        // TEMP DEBUG — _grantedStage tracks which step failed for the log
+        var _grantedStage = 'sw';
         registerSW()
-          .then(function (reg) { return getToken(reg); })
-          .then(function (t) { return saveToken(t); })
+          .then(function (reg) { ccfLog('sw_registered'); _grantedStage = 'token'; return getToken(reg); })
+          .then(function (t) { ccfLog('token_got'); _grantedStage = 'subscribe'; ccfLog('subscribe_posted'); return saveToken(t); })
+          .then(function () { ccfLog('subscribe_ok'); })
           .catch(function (err) {
+            ccfLog(_grantedStage + '_failed', (err && err.message) || ''); // TEMP DEBUG
             console.error('[ccf] granted-path subscribe failed:', err.message);
             // do not block the discount on a subscribe failure
           })
+          // END TEMP DEBUG
           .then(function () {
+            ccfLog('discount_posted', capAction); // TEMP DEBUG
             return fetch('/cart.js')
               .then(function (r) { return r.json(); })
               .catch(function () { return { token: '' }; })
@@ -2242,6 +2266,8 @@
               })
               .then(function (r) { return r.json(); })
               .then(function (d) {
+                ccfLog('discount_result', String(!!(d && d.code))); // TEMP DEBUG
+                if (!(d && d.code)) ccfLog('discount_none'); // TEMP DEBUG
                 if (d && d.code) ccfSetLabel(allow, 'gift', 'Redirecting...');
                 finishDiscount(d, capAction);
               });
@@ -2252,17 +2278,22 @@
 
       // Normal flow for new subscribers.
       Notification.requestPermission().then(function (permission) {
+        ccfLog('permission_result', permission); // TEMP DEBUG
         var granted = permission === 'granted';
         try { trackEvent('push_prompt_accepted', { trigger: trigger, granted: granted }); } catch (e) {}
         if (!granted) {
           try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+          ccfLog('popup_cleanup'); // TEMP DEBUG
           cleanup();
           return;
         }
+        // TEMP DEBUG — _stage tracks which step failed so the catch can name it
+        var _stage = 'sw';
         registerSW()
-          .then(function (reg) { return getToken(reg); })
-          .then(function (token) { return saveToken(token); })
-          .then(function () { setupForegroundMessages(); })
+          .then(function (reg) { ccfLog('sw_registered'); _stage = 'token'; return getToken(reg); })
+          .then(function (token) { ccfLog('token_got'); _stage = 'subscribe'; ccfLog('subscribe_posted'); return saveToken(token); })
+          .then(function () { ccfLog('subscribe_ok'); setupForegroundMessages(); })
+          // END TEMP DEBUG
           .then(function () {
             // Stage 2: subscribed.
             ccfSetLabel(allow, 'check', wantsDiscount
@@ -2271,11 +2302,13 @@
             allow.style.background = '#16a34a';
 
             if (!wantsDiscount) {
+              ccfLog('popup_cleanup'); // TEMP DEBUG
               setTimeout(cleanup, 900);
               return;
             }
             var action = 'push';
             if (email) action = 'email';
+            ccfLog('discount_posted', action); // TEMP DEBUG
             return fetch('/cart.js')
               .then(function (r) { return r.json(); })
               .then(function (cart) {
@@ -2291,6 +2324,8 @@
               })
               .then(function (r) { return r.json(); })
               .then(function (d) {
+                ccfLog('discount_result', String(!!(d && d.code))); // TEMP DEBUG
+                if (!(d && d.code)) ccfLog('discount_none'); // TEMP DEBUG
                 // Stage 3: discount generated — renderDiscountCode swaps the
                 // content section right after this, via finishDiscount().
                 if (d && d.code) ccfSetLabel(allow, 'gift', 'Redirecting...');
@@ -2303,6 +2338,7 @@
               });
           })
           .catch(function (err) {
+            ccfLog(_stage + '_failed', (err && err.message) || ''); // TEMP DEBUG
             console.error('[CCF] subscribe after prompt failed:', err.message);
             console.error('[ccf] Allow flow failed:', err.message);
             var ccfDebug = false;
