@@ -1,0 +1,179 @@
+AUDIT: Messages screen — "—" in the message-copy column
+Date: 2026-10-02
+Files read:
+  frontend/app/admin/screens/Messages.jsx  (lines 425–600)
+  backend/server.js                        (lines 308–570)
+  backend/services/brain.js                (lines 288–313)
+  backend/models/ScheduledJob.js           (full)
+  backend/services/sendLogService.js       (full)
+
+─────────────────────────────────────────────────────────────────────────────
+1. WHAT FIELD IS THE COLUMN SHOWING, AND WHY IS IT "—" FOR BRAIN JOBS?
+─────────────────────────────────────────────────────────────────────────────
+Desktop layout (line 580):  {m.payload?.body || m.payload?.title || '—'}
+Mobile layout  (line 515):  {m.payload?.body || m.payload?.title || '—'}
+
+Both hit '—' whenever payload.body AND payload.title are both falsy.
+
+For brain/automated jobs, brain.js creates the ScheduledJob with:
+  payload: { title: '', body: '', url: '...', imageUrl: '...' }
+
+Both fields are explicitly set to empty string at schedule time — the comment
+says "resolved at send time by AI (Phase E)". Empty string is falsy, so the
+|| chain falls through to '—' for every brain job.
+
+─────────────────────────────────────────────────────────────────────────────
+2. CONFIRMED: AI COPY IS NOT SAVED ANYWHERE AFTER THE SEND
+─────────────────────────────────────────────────────────────────────────────
+Poller (server.js lines 308–311): jobs are loaded with no .lean() — they are
+live Mongoose documents. But the copy-persistence path is absent:
+
+  line 340–344: findOneAndUpdate claims the job → { status: 'sent', sentAt }
+  line 372–382: generateCopy() resolves copy.title / copy.body
+  line 381–382: payload.title = copy.title || payload.title  ← in-memory only
+                payload.body  = copy.body  || payload.body   ← in-memory only
+  lines 397–406: sendPushToCustomers() uses the in-memory payload.title/body
+  → NO subsequent findByIdAndUpdate or job.save() writes payload back
+
+The only further findByIdAndUpdate calls are:
+  line 409:  { status: 'failed', error: ... }  — on send failure
+  line 570:  { status: 'failed', error: ... }  — on caught exception
+Neither includes payload.
+
+Same for the email branch (lines 529–566): generateCopy() resolves copy
+and passes it to sendAbandonedCartEmail, but payload is never written back.
+
+Result: ScheduledJob documents for all brain jobs permanently have
+payload.title: '' and payload.body: '' in MongoDB after they are sent.
+The content is lost — it exists only during the in-memory execution of
+the poller tick that called sendPushToCustomers().
+
+─────────────────────────────────────────────────────────────────────────────
+3. FESTIVAL / MANUAL SENDS: payload IS POPULATED
+─────────────────────────────────────────────────────────────────────────────
+sendLogService.js line 64 inserts each per-recipient row with:
+  payload: { title, body, imageUrl: imageUrl || '' }
+where title and body come from the FestivalQueue item (merchant-authored copy).
+These are never empty. payload.body || payload.title will always yield the
+merchant's notification text, so the Messages column shows real content for
+festival/manual rows. This is currently working correctly.
+
+─────────────────────────────────────────────────────────────────────────────
+4. THE FIX: PERSIST PAYLOAD BACK IN THE POLLER
+─────────────────────────────────────────────────────────────────────────────
+After lines 381–382, add a targeted $set update:
+
+  // push branch, after copy is resolved:
+  payload.title = copy.title || payload.title;
+  payload.body  = copy.body  || payload.body;
+  await ScheduledJob.findByIdAndUpdate(job._id, {
+    $set: { 'payload.title': payload.title, 'payload.body': payload.body },
+  });
+
+  // email branch — same, after copy is resolved:
+  await ScheduledJob.findByIdAndUpdate(job._id, {
+    $set: {
+      'payload.subject': copy.subject || payload.subject || '',
+      'payload.body':    copy.body    || payload.body    || '',
+    },
+  });
+
+Why $set with dot-notation field paths, NOT job.markModified + job.save():
+
+  Mongoose Mixed-type concern: since job is a live Mongoose document,
+  mutating job.payload in-place requires job.markModified('payload') before
+  job.save() for Mongoose to detect the change. But job.save() would also
+  re-emit ALL other fields (including status: 'pending', which is still the
+  in-memory value — the findOneAndUpdate at line 340 returned `claimed`, not
+  an update to `job`). Calling job.save() risks overwriting the 'sent' status
+  back to 'pending'.
+
+  The $set with explicit 'payload.title'/'payload.body' paths bypasses
+  Mongoose change-tracking entirely — it sends a surgical MongoDB update for
+  just those two sub-fields, leaving status/sentAt/all other fields untouched.
+  This is the safe, correct approach for a Mixed field when the parent
+  document has already been modified by a separate findOneAndUpdate.
+
+  The update should fire before sendPushToCustomers() so the payload is
+  persisted even if the FCM call fails (and the job ends up 'failed'). A
+  failed job still has a meaningful payload — the merchant can see what copy
+  was attempted.
+
+  Risk: negligible. One additional MongoDB write per brain job send. The
+  $set touches only two fields inside a Mixed object; no other fields change.
+
+─────────────────────────────────────────────────────────────────────────────
+5. FUTURE SENDS ONLY — WHAT PAST ROWS SHOULD SHOW
+─────────────────────────────────────────────────────────────────────────────
+The fix writes payload.title/body at send time going forward. Past brain job
+documents already have payload.title: '' and payload.body: '' permanently in
+MongoDB — there is no post-hoc way to recover the actual copy that was sent
+(it was never stored).
+
+The Messages screen can't retroactively show the real content for those rows.
+The correct fallback for past rows is the signal label, which the screen
+already computes (line 432):
+  const signalLabel = SIGNAL_LABELS[m.signalType] || m.reason || '—';
+
+This is currently shown in the purple "signal type" sub-line (columns 2
+and mobile row 1), but NOT in the content column (column 4). For past rows
+the content column should fall back to the signal label rather than '—':
+
+  {m.payload?.body || m.payload?.title || signalLabel || '—'}
+
+This is a frontend-only change (one token added to the fallback chain) and
+correctly shows "Cart left behind" / "Checkout left behind" etc. for every
+historical brain row where no copy was ever stored.
+
+SUMMARY OF CHANGES NEEDED:
+  1. server.js (backend): add findByIdAndUpdate({ $set: { 'payload.title',
+     'payload.body' } }) after copy resolution in the push branch, and
+     similarly for the email branch — persists resolved copy for future sends.
+  2. Messages.jsx (frontend): extend the fallback chain in the content column
+     from `m.payload?.body || m.payload?.title || '—'`
+     to   `m.payload?.body || m.payload?.title || signalLabel || '—'`
+     — covers historical rows that have no stored copy.
+
+─────────────────────────────────────────────────────────────────────────────
+SELF-AUDIT (post-implementation)
+─────────────────────────────────────────────────────────────────────────────
+Changes made:
+
+backend/server.js — push branch (after line 382):
+  Added inside if (job.profileId) { }, after payload.title/body are mutated,
+  BEFORE sendPushToCustomers():
+    await ScheduledJob.findByIdAndUpdate(job._id, {
+      $set: { 'payload.title': payload.title, 'payload.body': payload.body },
+    });
+  Confirmed: dot-notation $set only. No job.save(). Fires before send.
+
+backend/server.js — email branch (after generateCopy, inside if (job.profileId)):
+  Added BEFORE sendAbandonedCartEmail():
+    await ScheduledJob.findByIdAndUpdate(job._id, {
+      $set: {
+        'payload.subject': copy.subject || payload.subject || '',
+        'payload.body':    copy.body    || payload.body    || '',
+      },
+    });
+  Confirmed: same pattern. Fires before send.
+
+backend/server.js — testability:
+  start() call changed to if (require.main === module) { start(); }
+  Added: module.exports._processScheduledJobs = processScheduledJobs;
+  This lets the test import and call the function without triggering
+  connectDB / app.listen.
+
+frontend/app/admin/screens/Messages.jsx — both layouts:
+  Line 515 (mobile): changed fallback from '—' to signalLabel || '—'
+  Line 580 (desktop): same change
+  signalLabel is already computed at line 432 — no new variable needed.
+
+Test: backend/__tests__/pollerCopyPersist.test.js (4 tests):
+  - push: $set called with resolved title+body; persist comes before send
+  - push: keys are dot-notation ('payload.title'), not nested object
+  - push: legacy job (profileId=null) — no persist, no generateCopy
+  - email: $set called with resolved subject+body; persist comes before send
+
+Test results: 362/362 passed (backend). Frontend build: clean.
+Festival/manual send paths not touched (their payload is already populated
+at log time via sendLogService.js).

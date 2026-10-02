@@ -512,7 +512,7 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
                     <span
                       style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.4' }}
                     >
-                      {m.payload?.body || m.payload?.title || '—'}
+                      {m.payload?.body || m.payload?.title || signalLabel || '—'}
                     </span>
                   </div>
                 </div>
@@ -577,7 +577,7 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {m.payload?.body || m.payload?.title || '—'}
+                  {m.payload?.body || m.payload?.title || signalLabel || '—'}
                 </div>
 
                 {/* Status badge */}

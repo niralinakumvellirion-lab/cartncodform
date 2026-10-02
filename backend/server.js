@@ -380,6 +380,9 @@ async function processScheduledJobs() {
             }));
             payload.title = copy.title || payload.title;
             payload.body = copy.body || payload.body;
+            await ScheduledJob.findByIdAndUpdate(job._id, {
+              $set: { 'payload.title': payload.title, 'payload.body': payload.body },
+            });
           }
 
           // Phase 1 attribution — tag the click URL with ccf_src/ccf_job so
@@ -537,6 +540,12 @@ async function processScheduledJobs() {
                 subject: 'We saved your cart',
                 body: 'Hi,\n\nYou left items in your cart.\n\nThanks',
               }));
+              await ScheduledJob.findByIdAndUpdate(job._id, {
+                $set: {
+                  'payload.subject': copy.subject || payload.subject || '',
+                  'payload.body':    copy.body    || payload.body    || '',
+                },
+              });
             }
 
             const cartUrl = `https://${job.shopDomain}/cart`;
@@ -736,6 +745,7 @@ async function start() {
   });
 }
 
-start();
+if (require.main === module) { start(); }
 
 module.exports = app;
+module.exports._processScheduledJobs = processScheduledJobs;
