@@ -1,0 +1,39 @@
+SELF-AUDIT: three fixes on DashboardScreen.jsx
+2026-10-02
+
+=== 1. Date range persistence ===
+Added a mount-only useEffect (runs once, empty deps) that reads
+window.location.search for ?df, ?from, ?to and calls setDateFilter /
+setCustomRange. Added pushDateToUrl() that calls router.replace() with
+the updated params, preserving the existing ?shop param. Called it from
+all three filter-change sites: DateRangeFilter onChange, SidebarCalendar
+onRangeSelect, and SidebarCalendar onClear.
+No useSearchParams import — reads via window.location.search to avoid the
+SSR/Suspense requirement in the parent page.
+
+=== 2. Popover clipping ===
+What was clipping it: the left-column scroll container at line 1381 has
+overflowY:'auto', which creates a clipping region. Any position:absolute
+descendant that exceeds the container's rendered bounds is clipped there.
+Fix: removed the inline position:absolute popover from inside the step
+card. Added popoverPos state (top + left-or-right). A new useEffect fires
+whenever openInfoIdx changes, calls getBoundingClientRect() on the
+funnelInfoRefs span, and stores {top, left} (for step 0, left-anchor) or
+{top, right} (for steps 1-4, right-anchor). The popover is now rendered
+at the component root as position:fixed, z-index:500, width:240px —
+completely outside the scroll container.
+
+=== 3. Card layout ===
+Step card outer div now has display:'flex', flexDirection:'column'.
+Top row: justifyContent:'space-between', alignItems:'flex-start' — label
+on the left, info button on the top-right.
+Bottom group wrapped in a div with marginTop:'auto', paddingTop:8 —
+number, bar, rate line pinned to the card bottom regardless of label
+height. Equal heights are maintained by CSS grid's default
+align-items:stretch.
+
+=== Build ===
+npm run build: ✓ Compiled successfully — 17/17 pages, no type errors.
+
+=== Files changed ===
+frontend/app/admin/dashboard/DashboardScreen.jsx only.

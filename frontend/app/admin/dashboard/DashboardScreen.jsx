@@ -701,6 +701,18 @@ export default function DashboardScreen({ shop }) {
 
   const [dateFilter, setDateFilter] = useState('7d');
   const [customRange, setCustomRange] = useState({ from: null, to: null });
+
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search);
+    const df = p.get('df');
+    if (!df) return;
+    setDateFilter(df);
+    if (df === 'custom') {
+      const from = p.get('from');
+      const to = p.get('to');
+      if (from && to) setCustomRange({ from, to });
+    }
+  }, []);
   const [activity, setActivity] = useState(null);
   const [notifStats, setNotifStats] = useState(null);
   const [notifLoading, setNotifLoading] = useState(true);
@@ -723,6 +735,7 @@ export default function DashboardScreen({ shop }) {
   // page, rather than navigating anywhere.
   const [popupsPanelOpen, setPopupsPanelOpen] = useState(false);
   const [openInfoIdx, setOpenInfoIdx] = useState(null);
+  const [popoverPos, setPopoverPos] = useState(null);
   const [hoveredFunnelIdx, setHoveredFunnelIdx] = useState(null);
   const funnelInfoRefs = useRef([]);
   const newSubsRef = useRef(null);
@@ -741,6 +754,18 @@ export default function DashboardScreen({ shop }) {
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('mousedown', onOutside);
     };
+  }, [openInfoIdx]);
+
+  useEffect(() => {
+    if (openInfoIdx === null) { setPopoverPos(null); return; }
+    const ref = funnelInfoRefs.current[openInfoIdx];
+    if (!ref) return;
+    const rect = ref.getBoundingClientRect();
+    const isFirst = openInfoIdx === 0;
+    setPopoverPos(isFirst
+      ? { top: rect.bottom + 6, left: rect.left }
+      : { top: rect.bottom + 6, right: window.innerWidth - rect.right }
+    );
   }, [openInfoIdx]);
 
   function scrollToNewSubscribers() {
@@ -925,6 +950,19 @@ export default function DashboardScreen({ shop }) {
     const sep = path.includes('?') ? '&' : '?';
     router.push(`${path}${sep}shop=${encodeURIComponent(shop)}`);
   };
+
+  function pushDateToUrl(df, from, to) {
+    const p = new URLSearchParams(window.location.search);
+    p.set('df', df);
+    if (df === 'custom' && from && to) {
+      p.set('from', from);
+      p.set('to', to);
+    } else {
+      p.delete('from');
+      p.delete('to');
+    }
+    router.replace(`?${p.toString()}`, { scroll: false });
+  }
 
   useEffect(() => {
     const check = () => {
@@ -1286,6 +1324,7 @@ export default function DashboardScreen({ shop }) {
             onChange={(key) => {
               setCustomRange({ from: null, to: null });
               setDateFilter(key);
+              pushDateToUrl(key, null, null);
               setCalPopoverOpen(false);
             }}
             customLabel={customLabel}
@@ -1338,11 +1377,13 @@ export default function DashboardScreen({ shop }) {
                     setCustomRange({ from: f, to: t });
                     if (dateFilter !== 'custom') setDateFilter('custom');
                     else setRefreshKey(k => k + 1);
+                    pushDateToUrl('custom', f, t);
                     setCalPopoverOpen(false);
                   }}
                   onClear={() => {
                     setCustomRange({ from: null, to: null });
                     setDateFilter('7d');
+                    pushDateToUrl('7d', null, null);
                     setCalPopoverOpen(false);
                   }}
                 />
@@ -1408,14 +1449,15 @@ export default function DashboardScreen({ shop }) {
                       cursor: 'pointer',
                       position: 'relative',
                       transition: 'background 0.15s, border-color 0.15s',
+                      display: 'flex',
+                      flexDirection: 'column',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
-                      <span style={{ fontSize: 9, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', flex: 1, paddingRight: 4 }}>
                         {step.label}
                       </span>
-                      {/* Info button: stopPropagation prevents it from triggering the card's onClick */}
-                      <span ref={(el) => { funnelInfoRefs.current[i] = el; }} style={{ position: 'relative' }}>
+                      <span ref={(el) => { funnelInfoRefs.current[i] = el; }}>
                         <button
                           type="button"
                           aria-label={`Info: ${step.label}`}
@@ -1425,34 +1467,20 @@ export default function DashboardScreen({ shop }) {
                         >
                           ⓘ
                         </button>
-                        {infoOpen && (
-                          <div
-                            role="tooltip"
-                            style={{
-                              position: 'absolute', top: 20, right: 0, zIndex: 50,
-                              background: '#1f2937', color: '#f9fafb',
-                              fontSize: 11, lineHeight: 1.5,
-                              padding: '7px 10px', borderRadius: 6,
-                              width: 170, whiteSpace: 'normal',
-                              boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
-                              pointerEvents: 'none',
-                            }}
-                          >
-                            {step.info}
-                          </div>
-                        )}
                       </span>
                     </div>
-                    <div style={{ fontSize: 22, fontWeight: 800, color: '#111827', lineHeight: 1 }}>
-                      {(notifLoading || todayLoading) ? '—' : step.value.toLocaleString('en-IN')}
+                    <div style={{ marginTop: 'auto', paddingTop: 8 }}>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: '#111827', lineHeight: 1 }}>
+                        {(notifLoading || todayLoading) ? '—' : step.value.toLocaleString('en-IN')}
+                      </div>
+                      <div style={{ height: 3, background: '#e5e7eb', borderRadius: 2, margin: '8px 0 4px' }}>
+                        <div style={{ height: '100%', background: step.color, borderRadius: 2, width: rate !== null ? `${rate}%` : '100%', transition: 'width 0.4s ease' }} />
+                      </div>
+                      {rate !== null
+                        ? <div style={{ fontSize: 10, color: '#9ca3af' }}>{rate}% of {funnelSteps[i - 1].label.toLowerCase()}</div>
+                        : <div style={{ fontSize: 10, color: '#9ca3af' }}>Starting point</div>
+                      }
                     </div>
-                    <div style={{ height: 3, background: '#e5e7eb', borderRadius: 2, margin: '8px 0 4px' }}>
-                      <div style={{ height: '100%', background: step.color, borderRadius: 2, width: rate !== null ? `${rate}%` : '100%', transition: 'width 0.4s ease' }} />
-                    </div>
-                    {rate !== null
-                      ? <div style={{ fontSize: 10, color: '#9ca3af' }}>{rate}% of {funnelSteps[i - 1].label.toLowerCase()}</div>
-                      : <div style={{ fontSize: 10, color: '#9ca3af' }}>Starting point</div>
-                    }
                   </div>
                 );
               })}
@@ -2374,6 +2402,30 @@ export default function DashboardScreen({ shop }) {
         open={popupsPanelOpen}
         onClose={() => setPopupsPanelOpen(false)}
       />
+
+      {openInfoIdx !== null && popoverPos && funnelSteps[openInfoIdx] && (
+        <div
+          role="tooltip"
+          style={{
+            position: 'fixed',
+            top: popoverPos.top,
+            ...('left' in popoverPos ? { left: popoverPos.left } : { right: popoverPos.right }),
+            zIndex: 500,
+            background: '#1f2937',
+            color: '#f9fafb',
+            fontSize: 11,
+            lineHeight: 1.5,
+            padding: '8px 12px',
+            borderRadius: 6,
+            width: 240,
+            whiteSpace: 'normal',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+            pointerEvents: 'none',
+          }}
+        >
+          {funnelSteps[openInfoIdx].info}
+        </div>
+      )}
     </div>
   );
 }

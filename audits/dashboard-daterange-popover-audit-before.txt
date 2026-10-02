@@ -1,0 +1,43 @@
+PRE-AUDIT: three fixes on DashboardScreen.jsx
+2026-10-02
+
+=== 1. What drives the default date range ===
+Line 702: const [dateFilter, setDateFilter] = useState('7d');
+Plain useState with hardcoded '7d'. No URL read, no sessionStorage.
+When the user navigates away and comes back, React unmounts/remounts and
+the component re-initialises to '7d' regardless of what was selected.
+customRange at line 703 is also plain useState({ from: null, to: null }).
+
+=== 2. What clips the popover ===
+The popover is rendered as position:absolute inside the funnel step card,
+which is inside the left-column scroll container:
+  line 1381: <div style={{ flex:1, overflowY:'auto', ... }}>
+Any position:absolute descendant of an overflowY:auto container is clipped
+at that container's boundary. The popover escapes the step card (no
+overflow:hidden on the card itself) but is clipped at the scroll-container
+edge, making it invisible or half-visible when it extends downward.
+Secondary issue: z-index 50 is inside the step card's stacking context and
+may be painted over by later sibling cards in the grid.
+
+=== 3. Current card layout ===
+Top div: flex row, label + info span with marginBottom:6
+Then number div, then bar div, then rate text div — all in document order,
+no alignment to a shared baseline. Cards with longer labels push the
+number further down, so numbers don't line up across the five cards.
+
+=== Planned fixes ===
+1. Add a mount-only useEffect that reads ?df, ?from, ?to from
+   window.location.search and calls setDateFilter / setCustomRange.
+   Add pushDateToUrl() helper that calls router.replace() to write those
+   params back whenever the filter changes. No useSearchParams needed —
+   avoids the SSR/Suspense requirement in the parent page.
+2. Remove the inline popover from the step card. Add a popoverPos state
+   (top + left-or-right), compute it via getBoundingClientRect on
+   openInfoIdx change, render the popover as position:fixed at the root
+   of the component tree (outside the scroll container).
+   Width 240px, z-index 500, flip left-anchor for step 0, right-anchor
+   for steps 1-4.
+3. Make the step card a flex column. Label + info button on the top row
+   (justifyContent:space-between, alignItems:flex-start). Number + bar +
+   rate in a bottom group with marginTop:auto so it sticks to the bottom
+   regardless of label length.
