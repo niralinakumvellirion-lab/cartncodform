@@ -196,6 +196,28 @@ const FILTER_TABS = [
   { key: 'converted', label: 'Led to a sale' },
 ];
 
+function BellIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="#4f46e5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+      <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+    </svg>
+  );
+}
+
+function EnvelopeIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
+      <rect width="20" height="16" x="2" y="4" rx="2"/>
+      <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+    </svg>
+  );
+}
+
 export default function Messages({ shop, initialChannel, initialStatus, initialFrom, initialTo }) {
   const [messages, setMessages] = useState([]);
   const [total, setTotal] = useState(0);
@@ -517,10 +539,8 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
                   <div
                     style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}
                   >
-                    <span
-                      style={{ fontSize: '13px', color: '#9ca3af', flexShrink: 0 }}
-                    >
-                      {m.channel === 'email' ? '✉️' : '🔔'}
+                    <span style={{ lineHeight: 0, flexShrink: 0 }}>
+                      {m.channel === 'email' ? <EnvelopeIcon /> : <BellIcon />}
                     </span>
                     <span
                       style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.4' }}
@@ -581,8 +601,8 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
                 </div>
 
                 {/* Channel icon */}
-                <div style={{ fontSize: '14px', color: '#9ca3af' }}>
-                  {m.channel === 'email' ? '✉️' : '🔔'}
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  {m.channel === 'email' ? <EnvelopeIcon /> : <BellIcon />}
                 </div>
 
                 {/* Message copy */}
