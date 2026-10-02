@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
+import FilterDropdown from '../components/FilterDropdown';
 
 const DS = {
   page: {
@@ -932,36 +933,20 @@ export default function JourneyScreen({ shop }) {
         </div>
       )}
 
-      {/* Filter tabs */}
-      <div style={{
-        display: 'flex', gap: '8px', marginBottom: '16px',
-        overflowX: 'auto', paddingBottom: '4px',
-      }}>
-        {[
-          { key: 'all', label: 'All signals' },
-          { key: 'cart_abandon', label: '🛒 Cart abandon' },
-          { key: 'high_intent', label: '🔥 High intent' },
-          { key: 'price_hesitation', label: '💰 Price hesitation' },
-          { key: 'lapsing', label: '😴 Going quiet' },
-        ].map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setFilter(tab.key)}
-            style={{
-              padding: '6px 14px', fontSize: '13px',
-              fontWeight: filter === tab.key ? '600' : '400',
-              color: filter === tab.key ? '#111827' : '#6b7280',
-              background: filter === tab.key ? '#fff' : 'transparent',
-              border: '1px solid',
-              borderColor: filter === tab.key ? '#e5e7eb' : 'transparent',
-              borderRadius: '20px', cursor: 'pointer',
-              flexShrink: 0, whiteSpace: 'nowrap',
-              boxShadow: filter === tab.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
+      {/* Signal type filter */}
+      <div style={{ marginBottom: '16px' }}>
+        <FilterDropdown
+          options={[
+            { key: 'all', label: 'All signals' },
+            { key: 'cart_abandon', label: '🛒 Cart abandon' },
+            { key: 'high_intent', label: '🔥 High intent' },
+            { key: 'price_hesitation', label: '💰 Price hesitation' },
+            { key: 'lapsing', label: '😴 Going quiet' },
+          ]}
+          value={filter}
+          onChange={setFilter}
+          aria-label="Filter by signal type"
+        />
       </div>
 
       {/* Two-panel layout */}

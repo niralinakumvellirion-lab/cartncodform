@@ -6,6 +6,7 @@ import { apiGet } from '../../../lib/api';
 import { ShimmerTable } from '../components/Shimmer';
 import { DS, StageBadge, ReachIcons } from './customerShared';
 import DateRangeFilter, { getDateRange, matchDatePreset } from '../components/DateRangeFilter';
+import FilterDropdown from '../components/FilterDropdown';
 
 function PageHeader({ title, subtitle, action }) {
   return (
@@ -223,44 +224,12 @@ export default function Customers({ shop, initialFilter, initialFrom, initialTo 
           }}
         />
 
-        {/* Filter tabs — horizontal scroll on mobile */}
-        <div
-          style={{
-            display: 'flex',
-            gap: '8px',
-            alignItems: 'center',
-            width: isMobileView ? '100%' : 'auto',
-            overflowX: 'auto',
-            paddingBottom: '4px',
-            WebkitOverflowScrolling: 'touch',
-            msOverflowStyle: 'none',
-            scrollbarWidth: 'none',
-          }}
-        >
-          {FILTER_TABS.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setFilter(tab.key)}
-              style={{
-                padding: '7px 14px',
-                fontSize: '13px',
-                fontWeight: filter === tab.key ? '600' : '400',
-                color: filter === tab.key ? '#111827' : '#6b7280',
-                background: filter === tab.key ? '#fff' : 'transparent',
-                border:
-                  filter === tab.key
-                    ? '1px solid #d1d5db'
-                    : '1px solid transparent',
-                borderRadius: '8px',
-                cursor: 'pointer',
-                flexShrink: 0,
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        <FilterDropdown
+          options={FILTER_TABS}
+          value={filter}
+          onChange={setFilter}
+          aria-label="Filter customers by segment"
+        />
       </div>
 
         <div style={{ minWidth: 0, overflow: 'hidden' }}>
