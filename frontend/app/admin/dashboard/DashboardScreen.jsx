@@ -1553,7 +1553,7 @@ export default function DashboardScreen({ shop }) {
                   <div key={String(job._id)} style={{ padding: '7px 0', borderBottom: idx < arr.length - 1 ? '1px solid #f9fafb' : 'none', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {job.payload?.title || '(no title)'}
+                        {SIGNAL_LABELS[job.signalType] || job.payload?.title || job.reason || '(no title)'}
                       </div>
                       <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>
                         {job.channel || 'push'} · {SIGNAL_LABELS[job.signalType] || job.signalType || 'manual'}
