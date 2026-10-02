@@ -820,6 +820,13 @@ export default function DashboardScreen({ shop }) {
     };
   }, [shop]);
 
+  const [calPopoverOpen, setCalPopoverOpen] = useState(false);
+  const calPopoverRef = useRef(null);
+  const [recentSends, setRecentSends] = useState([]);
+  const [recentSendsLoading, setRecentSendsLoading] = useState(false);
+  const [isNarrow, setIsNarrow] = useState(false);
+  const [isMedium, setIsMedium] = useState(false);
+
   // --- Today.jsx: activity + notifStats fetch, keyed on date filter ---
   useEffect(() => {
     if (!shop) return;
@@ -901,7 +908,12 @@ export default function DashboardScreen({ shop }) {
   };
 
   useEffect(() => {
-    const check = () => setIsMobileView(window.innerWidth <= 768);
+    const check = () => {
+      const w = window.innerWidth;
+      setIsMobileView(w <= 768);
+      setIsNarrow(w < 900);
+      setIsMedium(w < 1100);
+    };
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
@@ -920,6 +932,41 @@ export default function DashboardScreen({ shop }) {
       setIsRefreshing(false);
     }
   }, [isRefreshing, notifLoading, insightsLoading]);
+
+  // Fetch last 4 sent jobs for the Recent Sends card.
+  useEffect(() => {
+    if (!shop) return;
+    let cancelled = false;
+    setRecentSendsLoading(true);
+    apiGet(`/api/queue/${encodeURIComponent(shop)}?status=sent`)
+      .then(data => {
+        if (cancelled) return;
+        setRecentSends((data.jobs || []).slice(0, 4));
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setRecentSendsLoading(false); });
+    return () => { cancelled = true; };
+  }, [shop]);
+
+  // Close the calendar popover when the user clicks outside it.
+  useEffect(() => {
+    if (!calPopoverOpen) return;
+    function handler(e) {
+      if (calPopoverRef.current && !calPopoverRef.current.contains(e.target)) {
+        setCalPopoverOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [calPopoverOpen]);
+
+  // Close the calendar popover on Escape.
+  useEffect(() => {
+    if (!calPopoverOpen) return;
+    function handler(e) { if (e.key === 'Escape') setCalPopoverOpen(false); }
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [calPopoverOpen]);
 
   // --- Today.jsx: push-stats / signals / orders ---
   useEffect(() => {
@@ -1065,6 +1112,50 @@ export default function DashboardScreen({ shop }) {
     revisit: '#3b82f6',
   };
 
+  const showingLabel = dateFilter === 'custom'
+    ? (customRange.from && customRange.to ? customLabel : 'Custom range')
+    : { '7d': 'Last 7 days', '30d': 'Last 30 days', '90d': 'Last 90 days' }[dateFilter] || dateFilter;
+
+  const funnelCols = isNarrow ? 'repeat(2, 1fr)' : isMedium ? 'repeat(3, 1fr)' : 'repeat(5, 1fr)';
+
+  const funnelSteps = [
+    {
+      label: 'SAW THE POPUP',
+      info: 'Visitors who were shown your push opt-in popup',
+      value: notifStats?.popupsShown ?? 0,
+      onClick: () => setPopupsPanelOpen(true),
+      color: '#6366f1',
+    },
+    {
+      label: 'SUBSCRIBED',
+      info: 'Visitors who accepted push notifications',
+      value: notifStats?.pushSubscribers ?? 0,
+      onClick: () => navigate(`/admin/customers?filter=push_subscribed&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
+      color: '#8b5cf6',
+    },
+    {
+      label: 'ADDED TO CART',
+      info: 'Subscribers who added a product to their cart',
+      value: activity?.summary?.add_to_cart ?? 0,
+      onClick: () => navigate(`/admin/activity?type=add_to_cart&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
+      color: '#f59e0b',
+    },
+    {
+      label: 'STARTED CHECKOUT',
+      info: 'Subscribers who started the checkout process',
+      value: activity?.summary?.checkout_start ?? 0,
+      onClick: () => navigate(`/admin/activity?type=checkout_start&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
+      color: '#0ea5e9',
+    },
+    {
+      label: 'PURCHASED',
+      info: 'Subscribers who completed a purchase',
+      value: activity?.summary?.purchase ?? 0,
+      onClick: () => navigate(`/admin/activity?type=purchase&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
+      color: '#16a34a',
+    },
+  ];
+
   // Festivals already queued (draft or approved — NOT sent/cancelled, so
   // a sent festival becomes suggestible again next year) should not be
   // re-suggested. Filter the source calendar before slicing to the top
@@ -1142,14 +1233,6 @@ export default function DashboardScreen({ shop }) {
     </button>
   );
 
-  // Phase 1: one-page layout — outer <Page> (Polaris) was removed here.
-  // See audits/dashboard-phase1-audit.txt: this screen was the only one
-  // in the app still wrapped in Polaris's <Page>; every other admin
-  // screen already renders a plain `<div style={DS.page}>` with no
-  // <Page> ancestor. Keeping <Page> around a fixed-viewport-height flex
-  // layout risked its own internal padding/scroll behavior fighting the
-  // "no page-level scroll" requirement, and it added nothing this
-  // hand-rolled layout doesn't already provide.
   return (
     <div style={{
       height: 'calc(100vh - 40px)',
@@ -1160,40 +1243,98 @@ export default function DashboardScreen({ shop }) {
       background: '#f9fafb',
     }}>
 
-      {/* SECTION 1 — sticky top bar (kept exactly as-is, per instruction) */}
-      <div
-        style={{
-          position: isMobileView ? 'relative' : 'sticky',
-          top: 0,
-          zIndex: 10,
-          background: '#fff',
-          borderBottom: '1px solid #e5e7eb',
-          padding: '14px 24px',
-          marginBottom: 24,
-          display: 'flex',
-          flexDirection: isMobileView ? 'column' : 'row',
-          justifyContent: 'space-between',
-          alignItems: isMobileView ? 'flex-start' : 'center',
-          gap: isMobileView ? 10 : 0,
-        }}
-      >
+      {/* HEADER */}
+      <div style={{
+        position: isMobileView ? 'relative' : 'sticky',
+        top: 0,
+        zIndex: 10,
+        background: '#fff',
+        borderBottom: '1px solid #e5e7eb',
+        padding: '12px 24px',
+        display: 'flex',
+        flexDirection: isMobileView ? 'column' : 'row',
+        justifyContent: 'space-between',
+        alignItems: isMobileView ? 'flex-start' : 'center',
+        gap: isMobileView ? 10 : 0,
+      }}>
         <div>
           <h1 style={{ ...DS.pageTitle, fontSize: 18, fontWeight: 700 }}>Dashboard</h1>
-          <p style={DS.pageSubtitle}>{todaySubtitle}</p>
+          <p style={{ ...DS.pageSubtitle, marginTop: 2 }}>Showing {showingLabel}</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
           <DateRangeFilter
             value={dateFilter}
-            onChange={(key) => { setCustomRange({ from: null, to: null }); setDateFilter(key); }}
+            onChange={(key) => {
+              setCustomRange({ from: null, to: null });
+              setDateFilter(key);
+              setCalPopoverOpen(false);
+            }}
             customLabel={customLabel}
             showAllTime={false}
           />
+          {/* Custom range popover */}
+          <div ref={calPopoverRef} style={{ position: 'relative' }}>
+            <button
+              type="button"
+              onClick={() => setCalPopoverOpen(o => !o)}
+              style={{
+                padding: '5px 12px',
+                fontSize: 12,
+                fontWeight: dateFilter === 'custom' ? 700 : 500,
+                color: dateFilter === 'custom' ? DS.primary : '#374151',
+                background: dateFilter === 'custom' ? DS.primaryLight : '#f3f4f6',
+                border: `1px solid ${dateFilter === 'custom' ? DS.primary : '#e5e7eb'}`,
+                borderRadius: 20,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              {dateFilter === 'custom' && customRange.from ? customLabel : 'Custom range'}
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ transform: calPopoverOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            {calPopoverOpen && (
+              <div style={{
+                position: 'absolute',
+                top: 'calc(100% + 8px)',
+                right: 0,
+                zIndex: 100,
+                background: '#fff',
+                border: '1px solid #e5e7eb',
+                borderRadius: 12,
+                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                padding: 12,
+                width: 300,
+              }}>
+                <SidebarCalendar
+                  from={customRange.from}
+                  to={customRange.to}
+                  onRangeSelect={(f, t) => {
+                    setCustomRange({ from: f, to: t });
+                    if (dateFilter !== 'custom') setDateFilter('custom');
+                    else setRefreshKey(k => k + 1);
+                    setCalPopoverOpen(false);
+                  }}
+                  onClear={() => {
+                    setCustomRange({ from: null, to: null });
+                    setDateFilter('7d');
+                    setCalPopoverOpen(false);
+                  }}
+                />
+              </div>
+            )}
+          </div>
           {refreshButton}
         </div>
       </div>
 
-      {/* Success toast — shown after Send Now completes. See
-          audits/sendnow-fixes-audit.txt. */}
+      {/* Success toast */}
       {successMsg && (
         <div style={{
           position: 'fixed', top: 20, right: 20, zIndex: 9999,
@@ -1207,454 +1348,281 @@ export default function DashboardScreen({ shop }) {
         </div>
       )}
 
-      {/* Content area below the top bar — two columns, per Part A/B */}
+      {/* CONTENT */}
       <div style={{
         flex: 1,
         overflow: 'hidden',
         display: 'flex',
+        flexDirection: isNarrow ? 'column' : 'row',
         gap: 16,
         padding: '16px 20px',
       }}>
 
-        {/* LEFT column — main content, scrolls internally */}
-        <div style={{ flex: 1, overflowY: 'auto' }}>
+        {/* LEFT — main content */}
+        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-          {/* Store Performance row (compact, Part A item 1) */}
-          <div style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
-                          textTransform: 'uppercase', letterSpacing: '0.06em',
-                          marginBottom: 10 }}>
-              Store Performance
+          {/* FUNNEL CARD */}
+          <div style={{ ...DS.card, marginBottom: 0 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>
+              Conversion Funnel
             </div>
-            {isRefreshing ? (
-              <ShimmerRow cols={4} />
-            ) : (
-              <div style={{ display: 'grid',
-                            gridTemplateColumns: isMobileView
-                              ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-                            gap: 12 }}>
-                {[
-                  { label: 'PRODUCT VIEWS THIS WEEK',
-                    value: insightsStats?.productViewsThisWeek ?? '—',
-                    sub: '↗ tracking active' },
-                  { label: 'ALLOWED NOTIFICATIONS',
-                    value: insightsStats?.allowedNotifications
-                      ? insightsStats.allowedNotifications + '%' : '—',
-                    sub: 'of visitors with the popup' },
-                  { label: 'ADD-TO-CART RATE',
-                    value: insightsStats?.addToCartRate
-                      ? insightsStats.addToCartRate + '%' : '—',
-                    sub: 'sessions that added something' },
-                  { label: 'SESSIONS TRACKED',
-                    value: insightsStats?.sessionCount ?? '—',
-                    sub: 'unique visitors this week' },
-                ].map(({ label, value, sub }) => (
-                  <div key={label} style={{
-                    background: '#fff',
-                    border: '1px solid #e5e7eb',
-                    borderRadius: 12,
-                    padding: '10px 14px',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                  }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af',
-                                  textTransform: 'uppercase', letterSpacing: '0.06em',
-                                  marginBottom: 6 }}>{label}</div>
-                    <div style={{ fontSize: 20, fontWeight: 800,
-                                  color: '#111827', lineHeight: 1 }}>{value}</div>
-                    <div style={{ fontSize: 10, color: '#9ca3af',
-                                  marginTop: 4 }}>{sub}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: funnelCols, gap: 12 }}>
+              {funnelSteps.map((step, i) => {
+                const prev = i > 0 ? funnelSteps[i - 1].value : null;
+                const rate = (prev && prev > 0) ? Math.min(100, Math.round((step.value / prev) * 100)) : null;
+                return (
+                  <div key={step.label} style={{ padding: '10px 12px', background: '#fafafa', border: '1px solid #f3f4f6', borderRadius: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
+                      <span style={{ fontSize: 9, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', flex: 1 }}>
+                        {step.label}
+                      </span>
+                      <button type="button" title={step.info}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#d1d5db', padding: 0, fontSize: 11, lineHeight: 1 }}>
+                        ⓘ
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={step.onClick}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 22, fontWeight: 800, color: '#111827', lineHeight: 1, padding: 0, fontFamily: 'inherit' }}
+                    >
+                      {(notifLoading || todayLoading) ? '—' : step.value.toLocaleString('en-IN')}
+                    </button>
+                    <div style={{ height: 3, background: '#e5e7eb', borderRadius: 2, margin: '8px 0 4px' }}>
+                      <div style={{ height: '100%', background: step.color, borderRadius: 2, width: rate !== null ? `${rate}%` : '100%', transition: 'width 0.4s ease' }} />
+                    </div>
+                    {rate !== null
+                      ? <div style={{ fontSize: 10, color: '#9ca3af' }}>{rate}% of {funnelSteps[i - 1].label.toLowerCase()}</div>
+                      : <div style={{ fontSize: 10, color: '#9ca3af' }}>Starting point</div>
+                    }
                   </div>
-                ))}
-              </div>
-            )}
+                );
+              })}
+            </div>
           </div>
 
-          {/* SECTION 2 — KPI row (compact, Part A item 2) */}
-          {isRefreshing ? (
-            <ShimmerRow cols={3} />
-          ) : (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(3, 1fr)',
-                gap: 12,
-                marginBottom: 10,
-              }}
-            >
-              {[...kpiRow1, ...kpiRow2].map((kpi) => (
-                <button
-                  key={kpi.label}
-                  type="button"
-                  onClick={kpi.onClick}
-                  aria-label={kpi.ariaLabel || kpi.label}
-                  style={{
-                    ...DS.card, padding: '10px 14px', marginBottom: 0,
-                    borderLeft: '3px solid #4f46e5', textAlign: 'left',
-                    width: '100%', display: 'block', fontFamily: 'inherit',
-                    cursor: 'pointer', transition: 'box-shadow 0.15s, background 0.15s',
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-                    e.currentTarget.style.background = '#f9fafb';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.boxShadow = DS.card.boxShadow;
-                    e.currentTarget.style.background = '#ffffff';
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: '#6b7280',
-                      fontWeight: 600,
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.05em',
-                      marginBottom: 6,
-                    }}
-                  >
-                    {kpi.label}
+          {/* Two-col: Do This Next | Recent Sends */}
+          <div style={{ display: 'grid', gridTemplateColumns: isNarrow ? '1fr' : '1fr 1fr', gap: 12 }}>
+
+            {/* Do This Next */}
+            <div style={{ ...DS.card, marginBottom: 0 }}>
+              <div style={DS.sectionLabel}>Do This Next</div>
+              {todayLoading ? (
+                [1, 2, 3].map(i => (
+                  <div key={i} style={{ height: 40, background: '#f3f4f6', borderRadius: 6, marginBottom: 8 }} />
+                ))
+              ) : groupedSignals.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>No signals right now — check back later.</p>
+              ) : (
+                groupedSignals.slice(0, 3).map((sig, idx, arr) => (
+                  <div key={sig.type} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: idx < arr.length - 1 ? '1px solid #f9fafb' : 'none' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+                        {SIGNAL_LABELS[sig.type] || sig.type.replace(/_/g, ' ')}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+                        {sig.count} customer{sig.count !== 1 ? 's' : ''} · {sig.channel || 'push'}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/admin/customers?signal=${sig.type}&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`)}
+                      style={{ flexShrink: 0, padding: '5px 12px', fontSize: 11, fontWeight: 700, color: DS.primary, background: DS.primaryLight, border: 'none', borderRadius: 8, cursor: 'pointer' }}
+                    >
+                      Reach them
+                    </button>
                   </div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
-                    {notifLoading ? '—' : (kpi.value ?? 0)}
+                ))
+              )}
+            </div>
+
+            {/* Recent Sends */}
+            <div style={{ ...DS.card, marginBottom: 0 }}>
+              <div style={DS.sectionLabel}>Recent Sends</div>
+              {recentSendsLoading ? (
+                [1, 2, 3, 4].map(i => (
+                  <div key={i} style={{ height: 36, background: '#f3f4f6', borderRadius: 6, marginBottom: 8 }} />
+                ))
+              ) : recentSends.length === 0 ? (
+                <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>No sends recorded yet.</p>
+              ) : (
+                recentSends.map((job, idx, arr) => (
+                  <div key={String(job._id)} style={{ padding: '7px 0', borderBottom: idx < arr.length - 1 ? '1px solid #f9fafb' : 'none', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {job.payload?.title || '(no title)'}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>
+                        {job.channel || 'push'} · {SIGNAL_LABELS[job.signalType] || job.signalType || 'manual'}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: (job.outcome === 'delivered' || job.outcome === 'clicked' || job.outcome === 'converted') ? '#16a34a' : job.outcome === 'failed' ? '#dc2626' : '#9ca3af' }}>
+                        {job.outcome || 'sent'}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#d1d5db', marginTop: 1 }}>
+                        {(job.sentAt || job.updatedAt)
+                          ? new Date(job.sentAt || job.updatedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+                          : '—'}
+                      </div>
+                    </div>
                   </div>
-                </button>
-              ))}
+                ))
+              )}
+            </div>
+
+          </div>
+
+          {insightsError && (
+            <div style={{ background: DS.dangerLight, border: '1px solid #fecaca', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: '#b91c1c' }}>
+              {insightsError}
             </div>
           )}
-
-          {/* SECTION 3 — Attributed Activity (compact, Part A item 3) */}
-          <div style={{ marginBottom: 10 }}>
-            <div style={DS.sectionLabel}>Attributed Activity</div>
-            {isRefreshing ? (
-              <ShimmerRow cols={4} />
-            ) : (
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: isMobileView ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-                  gap: 12,
-                }}
-              >
-                {ACTIVITY_STATS.map(({ key, label }) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => navigate(`/admin/activity?type=${key}&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`)}
-                    aria-label={`${label} — view attributed activity`}
-                    style={{
-                      ...DS.card, marginBottom: 0, padding: '10px 14px',
-                      textAlign: 'left', width: '100%', display: 'block', fontFamily: 'inherit',
-                      cursor: 'pointer', transition: 'box-shadow 0.15s, background 0.15s',
-                    }}
-                    onMouseEnter={e => {
-                      e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-                      e.currentTarget.style.background = '#f9fafb';
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.boxShadow = DS.card.boxShadow;
-                      e.currentTarget.style.background = '#ffffff';
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontSize: 18,
-                        fontWeight: 700,
-                        color: ACT_COLORS[key] || '#111827',
-                        lineHeight: 1,
-                        marginBottom: 4,
-                      }}
-                    >
-                      {notifLoading ? '—' : (activity?.summary?.[key] ?? 0)}
-                    </div>
-                    <div style={{ fontSize: 11, color: '#6b7280' }}>{label}</div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* SECTION 4 — two column layout: products+AI insight | planned+yesterday
-              (compact, Part A items 4 + 7) */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: isMobileView ? '1fr' : '3fr 2fr',
-              gap: 20,
-              marginBottom: 10,
-            }}
-          >
-            {/* LEFT column — products + AI insight */}
-            <div>
-              {insightsError && (
-                <div
-                  style={{
-                    background: DS.dangerLight,
-                    border: '1px solid #fecaca',
-                    borderRadius: 10,
-                    padding: '10px 14px',
-                    marginBottom: 10,
-                    fontSize: 12,
-                    color: '#b91c1c',
-                  }}
-                >
-                  {insightsError}
-                </div>
-              )}
-
-              {/* 4A — Most Viewed Products */}
-              <div style={{ ...DS.card, padding: 0, overflow: 'hidden', marginBottom: 10 }}>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '10px 16px',
-                    borderBottom: '1px solid #f3f4f6',
-                  }}
-                >
-                  <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
-                    Most Viewed Products
-                  </span>
-                  <div style={{ display: 'flex', gap: 6 }}>
-                    {SORT_TABS.map((tab) => (
-                      <button
-                        key={tab.key}
-                        onClick={() => setSortBy(tab.key)}
-                        style={{
-                          padding: '3px 10px',
-                          fontSize: 11,
-                          fontWeight: sortBy === tab.key ? 600 : 400,
-                          color: sortBy === tab.key ? '#111827' : '#9ca3af',
-                          background: sortBy === tab.key ? '#f3f4f6' : 'transparent',
-                          border: '1px solid',
-                          borderColor: sortBy === tab.key ? '#e5e7eb' : 'transparent',
-                          borderRadius: 6,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {tab.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '28px 2fr 50px 60px',
-                    padding: '5px 16px',
-                    background: '#f9fafb',
-                    borderBottom: '1px solid #f3f4f6',
-                  }}
-                >
-                  {['#', 'Product', 'Views', 'Avg time'].map((h) => (
-                    <div
-                      key={h}
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 600,
-                        color: '#9ca3af',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.5px',
-                      }}
-                    >
-                      {h}
-                    </div>
-                  ))}
-                </div>
-
-                {insightsLoading ? (
-                  [1, 2, 3].map((i) => (
-                    <div
-                      key={i}
-                      style={{
-                        height: 36,
-                        borderBottom: '1px solid #f9fafb',
-                        display: 'flex',
-                        alignItems: 'center',
-                        padding: '0 16px',
-                      }}
-                    >
-                      <div style={{ width: '40%', height: 10, background: '#f3f4f6', borderRadius: 4 }} />
-                    </div>
-                  ))
-                ) : sortedProducts.length === 0 ? (
-                  <div style={{ padding: 16, textAlign: 'center', color: '#9ca3af', fontSize: 12 }}>
-                    No product view data yet.
-                  </div>
-                ) : (
-                  sortedProducts.slice(0, 5).map((p, i, arr) => (
-                    <div
-                      key={p.productId}
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: '28px 2fr 50px 60px',
-                        padding: '6px 16px',
-                        alignItems: 'center',
-                        borderBottom: i < arr.length - 1 ? '1px solid #f3f4f6' : 'none',
-                      }}
-                    >
-                      <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600 }}>{i + 1}</div>
-                      <div style={{ fontSize: 12, fontWeight: 500, color: '#111827' }}>
-                        {p.productTitle || p.productId || 'Unknown'}
-                      </div>
-                      <div style={{ fontSize: 12, color: '#374151' }}>{p.views}</div>
-                      <div style={{ fontSize: 12, color: '#374151' }}>
-                        {p.avgDwell > 0 ? `${p.avgDwell}s` : '—'}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* 4B — AI insight */}
-              {aiInsights?.length > 0 && (
-                <div
-                  style={{
-                    ...DS.card,
-                    marginBottom: 0,
-                    padding: '12px 16px',
-                    borderLeft: '3px solid #4f46e5',
-                    background: '#ffffff',
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 700,
-                      color: '#4f46e5',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.06em',
-                      marginBottom: 6,
-                    }}
-                  >
-                    AI Weekly Insight
-                  </div>
-                  <p style={{ fontSize: 12, color: '#374151', lineHeight: 1.5, margin: 0 }}>
-                    {aiInsights[0]}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* RIGHT column — planned + yesterday */}
-            <div>
-              {/* 4C — Planned for today */}
-              <div style={{ ...DS.card, marginBottom: 10, padding: '12px 16px' }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', marginBottom: 8 }}>
-                  Planned for today
-                </div>
-                {todayLoading ? (
-                  [1, 2, 3].map((i) => (
-                    <div key={i} style={{ height: 18, background: '#f3f4f6', borderRadius: 4, marginBottom: 6 }} />
-                  ))
-                ) : groupedSignals.length ? (
-                  groupedSignals.slice(0, 5).map((sig) => (
-                    <div
-                      key={sig.type}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        padding: '6px 0',
-                        borderBottom: '1px solid #f9fafb',
-                      }}
-                    >
-                      <span style={{ fontSize: 12, color: '#374151' }}>
-                        {SIGNAL_LABELS[sig.type] || sig.type.replace(/_/g, ' ')}
-                      </span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span
-                          style={{
-                            fontSize: 10,
-                            color: '#9ca3af',
-                            background: '#f3f4f6',
-                            padding: '2px 7px',
-                            borderRadius: 20,
-                          }}
-                        >
-                          {sig.channel || 'push'}
-                        </span>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: '#111827', minWidth: 14, textAlign: 'right' }}>
-                          {sig.count}
-                        </span>
-                      </div>
-                    </div>
-                  ))
-                ) : (
-                  <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>No signals right now.</p>
-                )}
-              </div>
-
-              {/* 4D — Yesterday performance. NOTE: kept the hero numbers
-                  at 18px (matching the KPI/Activity rows above) rather
-                  than the literal "fontSize throughout: 12px" from Part A
-                  item 7 — shrinking a headline stat number down to the
-                  same size as its own label would have made it
-                  unreadable as a "hero" figure and inconsistent with
-                  every other stat number on this same compacted page
-                  (all reduced to 18px, not 12px). Labels themselves are
-                  12px/11px per the compacting spec. See
-                  audits/dashboard-phase1-audit.txt. */}
-              <div style={{ ...DS.card, marginBottom: 0, padding: '12px 16px' }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', marginBottom: 8 }}>
-                  Yesterday
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div>
-                    <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 3 }}>Sent</div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
-                      {todayStats?.messagesSent ?? '—'}
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 3 }}>
-                      Opened or clicked
-                    </div>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: '#111827', lineHeight: 1 }}>
-                      {pushStats?.deliveredLast7d ?? '—'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
           {todayError && (
-            <div
-              style={{
-                background: DS.dangerLight,
-                border: '1px solid #fecaca',
-                borderRadius: 10,
-                padding: '10px 14px',
-                marginBottom: 10,
-                fontSize: 12,
-                color: '#b91c1c',
-              }}
-            >
+            <div style={{ background: DS.dangerLight, border: '1px solid #fecaca', borderRadius: 10, padding: '10px 14px', fontSize: 12, color: '#b91c1c' }}>
               {todayError}
             </div>
           )}
 
-          {/* SECTION 5 — new subscribers alert (compact, Part A item 5) */}
-          {newSubscribers.length > 0 && (
-            <div
-              ref={newSubsRef}
-              style={{
-                ...DS.card, borderLeft: '3px solid #16a34a', marginBottom: 10,
-                background: '#f0fdf4', transition: 'box-shadow 0.3s, outline 0.3s',
-                outline: highlightNewSubs ? '2px solid #16a34a' : '2px solid transparent',
-                boxShadow: highlightNewSubs ? '0 0 0 4px rgba(22,163,74,0.15)' : DS.card.boxShadow,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
-                  {newSubscribers.length} new subscriber{newSubscribers.length > 1 ? 's' : ''} — send
-                  them a welcome notification
-                </span>
+
+
+
+
+
+        </div>
+
+        {/* RIGHT sidebar — Coming up + New subscribers */}
+        {!isNarrow && (
+          <div style={{
+            width: 280,
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+          }}>
+
+            {/* Coming up card */}
+            <div style={{ ...DS.card, padding: 0, overflow: 'hidden' }}>
+              <div style={{
+                padding: '12px 16px',
+                borderBottom: '1px solid #f3f4f6',
+                fontSize: 12,
+                fontWeight: 700,
+                color: '#111827',
+              }}>
+                Coming up
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {newSubscribers.map(sub => (
+              {upcomingFestivals.slice(0, 5).length === 0 ? (
+                <div style={{ padding: '24px 16px', textAlign: 'center', color: '#9ca3af', fontSize: 12 }}>
+                  No upcoming festivals.
+                </div>
+              ) : (
+                upcomingFestivals.slice(0, 5).map((f, idx, arr) => {
+                  const urgent = f.diffDays <= 7;
+                  const isLast = idx === arr.length - 1;
+                  return (
+                    <div
+                      key={f.name}
+                      onClick={() => openFestivalEditor(f)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: '10px 16px',
+                        borderBottom: isLast ? 'none' : '1px solid #f9fafb',
+                        cursor: 'pointer',
+                        transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+                      onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                    >
+                      {/* 44px thumbnail */}
+                      <div style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: 8,
+                        background: '#f3f4f6',
+                        flexShrink: 0,
+                        overflow: 'hidden',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 20,
+                      }}>
+                        {f.imageUrl ? (
+                          <>
+                            <img
+                              src={f.imageUrl}
+                              alt=""
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              onError={e => {
+                                e.target.style.display = 'none';
+                                if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex';
+                              }}
+                            />
+                            <span style={{ display: 'none', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                              {f.emoji}
+                            </span>
+                          </>
+                        ) : f.emoji}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{
+                          fontSize: 13,
+                          fontWeight: 600,
+                          color: '#111827',
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                        }}>
+                          {f.name}
+                        </div>
+                        <div style={{
+                          fontSize: 11,
+                          marginTop: 2,
+                          color: urgent ? DS.warning : '#9ca3af',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                        }}>
+                          {urgent && (
+                            <span style={{ width: 5, height: 5, borderRadius: '50%', background: DS.warning, display: 'inline-block', flexShrink: 0 }} />
+                          )}
+                          {formatRelativeDate(f.diffDays)}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* New subscribers card */}
+            {newSubscribers.length > 0 && (
+              <div style={{ ...DS.card, padding: 0, overflow: 'hidden' }}>
+                <div style={{
+                  padding: '12px 16px',
+                  borderBottom: '1px solid #f3f4f6',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  color: '#111827',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}>
+                  New subscribers
+                  <span style={{
+                    background: '#dcfce7',
+                    color: '#16a34a',
+                    borderRadius: 20,
+                    padding: '2px 8px',
+                    fontSize: 11,
+                    fontWeight: 700,
+                  }}>
+                    {newSubscribers.length}
+                  </span>
+                </div>
+                {newSubscribers.slice(0, 3).map((sub, idx, arr) => (
                   <div
                     key={sub.profileId}
                     style={{
@@ -1662,288 +1630,63 @@ export default function DashboardScreen({ shop }) {
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       padding: '10px 14px',
-                      border: '1px solid #f3f4f6',
-                      borderRadius: 10,
-                      gap: 12,
+                      borderBottom: idx < arr.length - 1 ? '1px solid #f9fafb' : 'none',
+                      gap: 10,
                     }}
                   >
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
-                        {sub.email || 'Anonymous subscriber'}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: '#111827',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}>
+                        {sub.email || 'Anonymous'}
                       </div>
-                      <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
-                        Subscribed {sub.subscribedAt
-                          ? new Date(sub.subscribedAt).toLocaleTimeString(
-                              [], {hour: '2-digit', minute: '2-digit'})
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>
+                        {sub.subscribedAt
+                          ? new Date(sub.subscribedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
                           : 'recently'}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {sendResults[sub.profileId] && (
+                    <div style={{ flexShrink: 0 }}>
+                      {sendResults[sub.profileId] ? (
                         <span style={{
-                          fontSize: 12, fontWeight: 600,
-                          color: sendResults[sub.profileId].success
-                            ? '#10b981' : '#ef4444'
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: sendResults[sub.profileId].success ? '#10b981' : '#ef4444',
                         }}>
                           {sendResults[sub.profileId].msg}
                         </span>
+                      ) : (
+                        <button
+                          onClick={() => sendNow(sub.profileId)}
+                          disabled={sendingTo === sub.profileId}
+                          style={{
+                            padding: '5px 12px',
+                            borderRadius: 6,
+                            border: 'none',
+                            cursor: sendingTo === sub.profileId ? 'not-allowed' : 'pointer',
+                            background: sendingTo === sub.profileId ? '#e5e7eb' : DS.primary,
+                            color: sendingTo === sub.profileId ? '#9ca3af' : '#fff',
+                            fontSize: 11,
+                            fontWeight: 600,
+                            opacity: sendingTo === sub.profileId ? 0.7 : 1,
+                          }}
+                        >
+                          {sendingTo === sub.profileId ? 'Sending…' : 'Send'}
+                        </button>
                       )}
-                      <button
-                        onClick={() => sendNow(sub.profileId)}
-                        disabled={sendingTo === sub.profileId}
-                        style={{
-                          padding: '7px 14px', borderRadius: 7,
-                          border: 'none', cursor: sendingTo === sub.profileId
-                            ? 'not-allowed' : 'pointer',
-                          background: sendingTo === sub.profileId
-                            ? '#e5e7eb' : '#4f46e5',
-                          color: sendingTo === sub.profileId
-                            ? '#9ca3af' : '#fff',
-                          fontSize: 12, fontWeight: 600,
-                          opacity: sendingTo === sub.profileId ? 0.7 : 1,
-                        }}
-                      >
-                        {sendingTo === sub.profileId
-                          ? 'Sending...' : 'Send now'}
-                      </button>
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-
-        </div>
-
-        {/* RIGHT sidebar — Notification Suggestions + Quick Stats (Part B) */}
-        <div style={{
-          width: 300,
-          flexShrink: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-          overflowY: 'auto',
-        }}>
-
-          {/* Custom date-range calendar */}
-          <SidebarCalendar
-            from={customRange.from}
-            to={customRange.to}
-            onRangeSelect={(f, t) => {
-              setCustomRange({ from: f, to: t });
-              if (dateFilter !== 'custom') {
-                setDateFilter('custom');
-              } else {
-                setRefreshKey(k => k + 1);
-              }
-            }}
-            onClear={() => {
-              setCustomRange({ from: null, to: null });
-              setDateFilter('7d');
-            }}
-          />
-
-          {/* Notification Suggestions card */}
-          <div style={{
-            background: '#fff',
-            border: '1px solid #e5e7eb',
-            borderRadius: 12,
-          }}>
-            {/* Header — whole area is the click target */}
-            <div
-              onClick={() => setSuggestionsOpen(o => !o)}
-              onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
-              onMouseLeave={e => e.currentTarget.style.background = '#fff'}
-              style={{
-                padding: '16px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                cursor: 'pointer',
-                borderBottom: suggestionsOpen ? '1px solid #f3f4f6' : 'none',
-                borderRadius: suggestionsOpen ? '12px 12px 0 0' : '12px',
-                transition: 'background 0.15s',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
-                  Notification Suggestions
-                </div>
-                <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
-                  {upcomingFestivals.length} upcoming festival{upcomingFestivals.length === 1 ? '' : 's'}
-                </div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{
-                  background: DS.primary,
-                  color: '#fff',
-                  borderRadius: 20,
-                  padding: '2px 8px',
-                  fontSize: 11,
-                  fontWeight: 700,
-                  minWidth: 18,
-                  textAlign: 'center',
-                }}>
-                  {upcomingFestivals.length}
-                </div>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="#9ca3af" strokeWidth="2" strokeLinecap="round"
-                  strokeLinejoin="round"
-                  style={{
-                    transform: suggestionsOpen ? 'rotate(90deg)' : 'rotate(0deg)',
-                    transition: 'transform 0.2s',
-                    flexShrink: 0,
-                  }}
-                >
-                  <polyline points="9 18 15 12 9 6"/>
-                </svg>
-              </div>
-            </div>
-
-            {/* Festival list — visible when open */}
-            {suggestionsOpen && (
-              upcomingFestivals.length === 0 ? (
-                <div style={{ padding: '32px 20px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 28, opacity: 0.4, marginBottom: 8 }}>📅</div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>
-                    No upcoming festivals
-                  </div>
-                  <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>
-                    Check back closer to the next festival season.
-                  </div>
-                </div>
-              ) : (
-                <div style={{ maxHeight: 400, overflowY: 'auto', overflowX: 'hidden', paddingBottom: '8px' }}>
-                  {upcomingFestivals.map((f, idx) => {
-                    const urgent = f.diffDays <= 7;
-                    const isLast = idx === upcomingFestivals.length - 1;
-                    return (
-                      <div
-                        key={f.name}
-                        onClick={() => openFestivalEditor(f)}
-                        style={{
-                          padding: '12px 14px',
-                          borderBottom: isLast ? 'none' : '1px solid #f9fafb',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 10,
-                          transition: 'background 0.15s',
-                        }}
-                        onMouseEnter={e => {
-                          e.currentTarget.style.background = '#f9fafb';
-                          const btn = e.currentTarget.querySelector('[data-create-btn]');
-                          if (btn) { btn.style.background = DS.primary; btn.style.color = '#fff'; }
-                        }}
-                        onMouseLeave={e => {
-                          e.currentTarget.style.background = '#fff';
-                          const btn = e.currentTarget.querySelector('[data-create-btn]');
-                          if (btn) { btn.style.background = DS.primaryLight; btn.style.color = DS.primary; }
-                        }}
-                      >
-                        <div style={{
-                          width: 36,
-                          height: 36,
-                          borderRadius: '50%',
-                          background: '#f3f4f6',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: 17,
-                          flexShrink: 0,
-                          overflow: 'hidden',
-                        }}>
-                          {f.imageUrl ? (
-                            <>
-                              <img
-                                src={f.imageUrl}
-                                alt=""
-                                style={{
-                                  width: '100%',
-                                  height: '100%',
-                                  borderRadius: '50%',
-                                  objectFit: 'cover',
-                                }}
-                                onError={e => {
-                                  e.target.style.display = 'none';
-                                  if (e.target.nextSibling) {
-                                    e.target.nextSibling.style.display = 'flex';
-                                  }
-                                }}
-                              />
-                              <span style={{
-                                display: 'none',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                width: '100%',
-                                height: '100%',
-                              }}>
-                                {f.emoji}
-                              </span>
-                            </>
-                          ) : (
-                            f.emoji
-                          )}
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{
-                            fontSize: 14,
-                            fontWeight: 600,
-                            color: '#111827',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                          }}>
-                            {f.name}
-                          </div>
-                          <div style={{
-                            fontSize: 12,
-                            marginTop: 2,
-                            color: urgent ? DS.warning : '#9ca3af',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 4,
-                          }}>
-                            {urgent && (
-                              <span style={{
-                                width: 5,
-                                height: 5,
-                                borderRadius: '50%',
-                                background: DS.warning,
-                                display: 'inline-block',
-                                flexShrink: 0,
-                              }} />
-                            )}
-                            {formatRelativeDate(f.diffDays)}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          data-create-btn=""
-                          onClick={e => { e.stopPropagation(); openFestivalEditor(f); }}
-                          style={{
-                            flexShrink: 0,
-                            border: 'none',
-                            borderRadius: 8,
-                            padding: '5px 12px',
-                            fontSize: 11.5,
-                            fontWeight: 700,
-                            background: DS.primaryLight,
-                            color: DS.primary,
-                            cursor: 'pointer',
-                            transition: 'background 0.15s, color 0.15s',
-                          }}
-                        >
-                          Create
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )
             )}
+
           </div>
-        </div>
+        )}
 
       </div>
 
