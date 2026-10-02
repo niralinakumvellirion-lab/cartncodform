@@ -101,11 +101,17 @@ async function generateDiscount(shopDomain, body = {}) {
     apiToken && apiToken.startsWith('shpua_') ? 'online' : 'offline'
   );
 
-  // action -> config sub-doc: push->pushDiscount, email->emailDiscount,
-  // phone->phoneDiscount, both->bothDiscount.
-  const cfg = config && config[action + 'Discount'];
-  if (!cfg || !cfg.enabled) {
-    // This action's discount is switched off — nothing to hand out.
+  // Resolution order: {action}Discount first; if that rule is disabled but
+  // bothDiscount is enabled, fall back to bothDiscount's settings so the
+  // customer still gets a code when the merchant only configured the combined
+  // rule (push+email together) rather than per-channel rules.
+  const primaryCfg = config && config[action + 'Discount'];
+  const bothCfg = config && config.bothDiscount;
+  const cfg = (primaryCfg && primaryCfg.enabled)
+    ? primaryCfg
+    : (bothCfg && bothCfg.enabled ? bothCfg : null);
+  if (!cfg) {
+    // Neither the direct rule nor the bothDiscount fallback is active.
     return { code: null, shop };
   }
 

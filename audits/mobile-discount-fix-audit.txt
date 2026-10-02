@@ -1,0 +1,77 @@
+AUDIT: Mobile discount fix — bothDiscount fallback + error message + redirect flag
+Date: 2026-10-02
+Files changed:
+  backend/routes/discounts.js        (generateDiscount — bothDiscount fallback)
+  backend/__tests__/discounts.test.js (2 new tests: f, g)
+  extensions/cartncodform-embed/assets/ccf-push.js
+    - finishDiscount: error message instead of silent cleanup
+    - renderDiscountCode: set ccf_disc_redirected before redirect
+    - showSoftPrompt: promptAlreadyShown guard for isDiscountCapture path
+
+─────────────────────────────────────────────────────────────────────────────
+BUG 1 FIX: bothDiscount fallback (discounts.js:104–115)
+─────────────────────────────────────────────────────────────────────────────
+OLD: cfg = config[action + 'Discount']; if (!cfg || !cfg.enabled) return null
+NEW: primaryCfg = config[action + 'Discount']
+     bothCfg    = config.bothDiscount
+     cfg        = primaryCfg.enabled ? primaryCfg : (bothCfg.enabled ? bothCfg : null)
+
+Resolution order: {action}Discount → bothDiscount → null (code: null).
+No new action strings added. proxy.js allow-list (push/email) unchanged.
+
+NOTE: In the current admin save handler, `bothDiscount.enabled` is always forced
+to false on every PATCH save (DISABLED_KEYS guard, line 294–296). The fallback
+is therefore defensive — it handles any existing documents with bothDiscount
+enabled from before the disable-on-save rule was added, and is ready if the
+admin ever exposes the bothDiscount toggle again.
+
+Tests added (discounts.test.js):
+  f. primary disabled, bothDiscount enabled → VIP_ code with bothDiscount settings
+  g. both primary and bothDiscount disabled → code null, no Shopify call
+
+─────────────────────────────────────────────────────────────────────────────
+BUG 2 FIX: error message in finishDiscount (ccf-push.js:2149–2168)
+─────────────────────────────────────────────────────────────────────────────
+When d.code is null:
+  - Creates a yellow warning div using textContent (no innerHTML, safe)
+  - Injects into #ccf-content-section if present; else after the allow button
+  - Disables allow button (opacity 0.5) — customer is already subscribed
+  - setTimeout(cleanup, 3000): popup auto-closes after 3 s
+  - Returns early without calling handleDiscount
+
+Message text: "You're subscribed! Discount couldn't be loaded."
+No markup in the string; textContent handles any characters safely.
+
+─────────────────────────────────────────────────────────────────────────────
+BUG 3 FIX: popup re-appears after successful discount
+─────────────────────────────────────────────────────────────────────────────
+Part A — renderDiscountCode() (line ~765):
+  Added sessionStorage.setItem('ccf_disc_redirected', '1') as the FIRST write
+  inside the existing try block (before ccf_active_discount + ccf_active_pct).
+  This mirrors what injectProductNudge() already does.
+  After the redirect, canPromptForDiscount() sees ccf_disc_redirected = '1'
+  and returns false, blocking the saveToken() re-prompt.
+
+Part B — showSoftPrompt() guard (line ~847):
+  Added: if (isDiscountCapture && promptAlreadyShown()) return;
+  Context: when permission === 'granted' and discount enabled, isDiscountCapture
+  = true, which bypasses canPrompt() (and its promptAlreadyShown check) entirely.
+  Without this extra guard, any intent trigger (dwell, scroll, add_to_cart) fired
+  after cleanup() would re-open the popup in the same session — cleanup() removes
+  the DOM element (getElementById check passes) but sessionStorage.ccf_prompt_shown
+  remains 'true'. The new guard short-circuits before the element check.
+
+Guard for SUBSCRIBED_KEY:
+  canPrompt() at line 90–93 already returns false when
+  localStorage.SUBSCRIBED_KEY === '1', blocking the non-discount-capture path.
+  The discount-capture path is now additionally guarded by promptAlreadyShown()
+  (Part B), which covers the same-session re-trigger. Cross-session re-trigger
+  (new tab, fresh sessionStorage) is intentional behaviour — the discount popup
+  re-shows for unrecognised sessions so the customer can still claim.
+
+─────────────────────────────────────────────────────────────────────────────
+VERIFICATION
+─────────────────────────────────────────────────────────────────────────────
+node --check ccf-push.js    → SYNTAX OK
+npm test (36 suites)        → 364/364 passed (2 new discount tests included)
+shopify app deploy          → shopireachboost-ai-140, version 1152378929153

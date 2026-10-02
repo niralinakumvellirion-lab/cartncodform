@@ -763,6 +763,7 @@
       // FIRST, immediately before navigating, so no earlier code path can
       // leave a stale ccf_active_discount that blocks a later attempt.
       try {
+        sessionStorage.setItem('ccf_disc_redirected', '1');
         sessionStorage.setItem('ccf_active_discount', d.code);
         sessionStorage.setItem('ccf_active_pct', String(d.percentage));
       } catch (e) {}
@@ -844,6 +845,10 @@
     var isDiscountCapture = ccfDiscountEnabled() &&
       ('Notification' in window) && Notification.permission === 'granted';
     if (!isDiscountCapture && !canPrompt()) return;
+    // Don't re-show for the discount-capture path once the customer has
+    // already seen the popup this session (e.g. after cleanup() on a failed
+    // discount fetch — without this check any intent trigger would re-open it).
+    if (isDiscountCapture && promptAlreadyShown()) return;
     if (document.getElementById('ccf-push-prompt')) return;
     markPromptShown();
     ccfInjectPopupStyles();
@@ -2144,9 +2149,26 @@
     // module-level handleDiscount (product button + in-popup code block).
     function finishDiscount(d, action) {
       // Guard: only render/inject the discount UI when Shopify actually
-      // created a code. On { code: null } just close the popup — the
-      // subscribe already succeeded, so nothing else is blocked.
-      if (!d || !d.code) { cleanup(); return; }
+      // created a code. On { code: null } tell the customer they're subscribed
+      // (they are) but the discount couldn't be loaded, then close after 3s.
+      if (!d || !d.code) {
+        var msgEl = document.createElement('div');
+        msgEl.setAttribute('style',
+          'margin-top:12px;padding:10px 14px;background:#fef9c3;' +
+          'border:1px solid #fde047;border-radius:8px;font-size:13px;' +
+          'color:#854d0e;text-align:center;');
+        // textContent is safe — no innerHTML, no escaping needed.
+        msgEl.textContent = "You're subscribed! Discount couldn't be loaded.";
+        var discSection = wrap.querySelector('#ccf-content-section');
+        if (discSection) {
+          discSection.appendChild(msgEl);
+        } else if (allow && allow.parentNode) {
+          allow.parentNode.insertBefore(msgEl, allow.nextSibling);
+        }
+        if (allow) { allow.disabled = true; allow.style.opacity = '0.5'; }
+        setTimeout(cleanup, 3000);
+        return;
+      }
 
       // NOTE: ccf_active_discount / ccf_active_pct are stashed by
       // renderDiscountCode() immediately before it redirects — NOT here —

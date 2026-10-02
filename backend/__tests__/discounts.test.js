@@ -126,3 +126,39 @@ test('e. action disabled in config -> code null, no Shopify call', async () => {
   expect(r.code).toBeNull();
   expect(global.fetch).not.toHaveBeenCalled();
 });
+
+test('f. primary disabled but bothDiscount enabled -> falls back and issues code', async () => {
+  global.fetch.mockReturnValue(
+    shopifyJson({
+      data: {
+        discountCodeBasicCreate: {
+          userErrors: [],
+          codeDiscountNode: { id: 'gid://shopify/DiscountCodeNode/99' },
+        },
+      },
+    })
+  );
+  DiscountConfig.findOne.mockResolvedValue({
+    pushDiscount: { enabled: false, percentage: 10, prefix: 'PUSH', maxUses: 100, expiryDays: 7 },
+    bothDiscount: { enabled: true, percentage: 20, prefix: 'VIP', maxUses: 50, expiryDays: 14 },
+  });
+
+  const r = await generateDiscount(SHOP, { action: 'push' });
+
+  expect(typeof r.code).toBe('string');
+  expect(r.code).toMatch(/^VIP_[A-Z0-9]{6}$/);
+  expect(r.percentage).toBe(20);
+  expect(r.expiryDays).toBe(14);
+});
+
+test('g. both primary and bothDiscount disabled -> code null, no Shopify call', async () => {
+  DiscountConfig.findOne.mockResolvedValue({
+    emailDiscount: { enabled: false, percentage: 15, prefix: 'EMAIL', maxUses: 100, expiryDays: 7 },
+    bothDiscount: { enabled: false, percentage: 20, prefix: 'VIP', maxUses: 50, expiryDays: 14 },
+  });
+
+  const r = await generateDiscount(SHOP, { action: 'email' });
+
+  expect(r.code).toBeNull();
+  expect(global.fetch).not.toHaveBeenCalled();
+});

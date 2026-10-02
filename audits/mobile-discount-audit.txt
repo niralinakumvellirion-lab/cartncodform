@@ -1,0 +1,185 @@
+AUDIT: Mobile storefront — no discount code + popup reappears after Allow
+Date: 2026-10-02
+Files read:
+  extensions/cartncodform-embed/assets/ccf-push.js   (lines 80–145, 700–810,
+                                                       838–850, 2120–2300,
+                                                       2343–2395, 2510–2540,
+                                                       3360–3390)
+  backend/routes/proxy.js                             (lines 156–181)
+  backend/routes/discounts.js                         (lines 67–110)
+
+─────────────────────────────────────────────────────────────────────────────
+1. EXACT SEQUENCE — email entered, Allow tapped (new subscriber, mobile)
+─────────────────────────────────────────────────────────────────────────────
+showSoftPrompt() entry (line 838–848):
+  markPromptShown()                ← sessionStorage.ccf_prompt_shown = 'true'
+  Build and inject popup DOM
+  isDiscountCapture = ccfDiscountEnabled() && Notification.permission === 'granted'
+                    = false (first visit, permission still 'default')
+  Guard passes (canPrompt() = true) → popup rendered
+
+Customer enters email in #ccf-email-input, taps Allow:
+
+  Line 2170:  email = emailEl.value.trim()           ← non-empty string
+  Line 2175:  allow.disabled = true
+  Notification.requestPermission() called
+  → permission = 'granted' (customer accepts native dialog)
+  → registerSW() → getToken() → saveToken(token)
+      saveToken POST /subscribe-customer
+        success → localStorage.SUBSCRIBED_KEY = '1'
+        throw on failure → outer .catch(resetButton) fires (see §3)
+  → setupForegroundMessages()
+  → Stage 2: wantsDiscount = ccfDiscountEnabled() = true (top_bar check false)
+  → action = 'push'; if (email) action = 'email'     ← line 2255–2256
+  → fetch('/cart.js') then POST /generate-discount { action:'email', email, ... }
+  → finishDiscount(d, 'email')
+
+─────────────────────────────────────────────────────────────────────────────
+2. WHY NO DISCOUNT CODE APPEARS — primary bug
+─────────────────────────────────────────────────────────────────────────────
+The email input is only rendered (line 141 + 324/579/989/etc.) when
+ccfShowEmailField() = true:
+
+  ccfShowEmailField() = ccfRuleOn('emailDiscount') || ccfRuleOn('bothDiscount')
+
+So the email field is visible when EITHER emailDiscount OR bothDiscount is
+enabled on the storefront config.
+
+The action sent to the backend is ALWAYS 'email' when email is non-empty
+(line 2255–2256). The backend maps this to the `emailDiscount` rule only:
+
+  discounts.js:106  const cfg = config && config[action + 'Discount'];
+                    // action='email' → config.emailDiscount
+
+  proxy.js:165  only 'push' and 'email' are accepted; 'both' is never sent.
+
+MISMATCH: If the merchant enabled bothDiscount (but NOT emailDiscount
+separately), the storefront shows the email field (ccfShowEmailField true),
+but the backend receives action='email' and checks config.emailDiscount.enabled
+which is false → returns { code: null, shop }.
+
+finishDiscount (line 2145–2166):
+  if (!d || !d.code) { cleanup(); return; }
+  ← popup is silently removed with NO user-facing error message.
+
+The customer sees the Allow button spin, then the popup just disappears.
+No "sorry" message, no fallback to push discount.
+
+NOTE: if only pushDiscount is enabled (not emailDiscount, not bothDiscount),
+ccfShowEmailField() = false → no email field → email = '' → action = 'push'
+→ backend checks pushDiscount.enabled = true → code generated correctly.
+The mismatch only occurs in the bothDiscount-enabled-but-not-emailDiscount path.
+
+─────────────────────────────────────────────────────────────────────────────
+3. WHY THE POPUP "REAPPEARS" — subscribe failure path
+─────────────────────────────────────────────────────────────────────────────
+If registerSW(), getToken(), or saveToken() throws (network error, FCM
+unavailable — common on mobile with weak connectivity or battery saver mode):
+
+  Line 2283–2286:  .catch(function (err) {
+                     console.error('[CCF] subscribe after prompt failed:', err.message);
+                     resetButton();
+                   })
+
+resetButton() at line 2175–2181:
+  - re-enables allow.disabled = false
+  - restores original button label + icon
+  - does NOT close the popup (no cleanup() call)
+
+The popup is still in the DOM. To the customer it looks like the popup
+"reset" or "reappeared" — they tapped Allow, saw a spinner, then the button
+came back as if nothing happened. This is the most likely mobile trigger:
+FCM token fetch involves a Service Worker registration + a network call to
+FCM; both are brittle on mobile networks.
+
+SECONDARY reappearance path (new tab / session storage cleared):
+  renderDiscountCode() (line 760–770) sets ccf_active_discount + ccf_active_pct
+  in sessionStorage BEFORE redirecting, but does NOT set ccf_disc_redirected.
+
+  injectProductNudge() at line 2524–2526 DOES set ccf_disc_redirected = '1'.
+  renderDiscountCode() (popup flow) does NOT.
+
+  canPromptForDiscount() at line 103–110 guards on ccf_disc_redirected.
+  saveToken() guards its re-prompt on canPromptForDiscount() + !promptAlreadyShown().
+
+  If sessionStorage is fresh (new tab, private window, or iOS Safari clearing
+  session on back-navigation in some PWA modes), promptAlreadyShown() = false
+  AND ccf_disc_redirected not set → canPromptForDiscount() = true → saveToken()
+  calls showSoftPrompt('page_load') again → popup reappears for a customer who
+  already claimed a discount.
+
+  This is the asymmetry: the product nudge sets ccf_disc_redirected before
+  redirect (correctly preventing reshow), but renderDiscountCode() does not.
+
+─────────────────────────────────────────────────────────────────────────────
+4. IS EMAIL REQUIRED FOR THE DISCOUNT, AND IS IT CORRECTLY SENT?
+─────────────────────────────────────────────────────────────────────────────
+Email is read from #ccf-email-input at line 2170, BEFORE any teardown or
+permission call. It is correctly sent in the generate-discount POST body
+(line 2264: email: email). The backend stores it with the discount record.
+
+The email field is only injected in the popup when ccfShowEmailField() = true
+(checked at each style's build block: lines 324, 579, 989, 1147, 1435, 1608,
+1881). When ccfShowEmailField() = false, the customer never sees an email field,
+email = '' is falsy, and action defaults to 'push' — so the non-email path is
+unaffected by this bug.
+
+─────────────────────────────────────────────────────────────────────────────
+5. WHY THE POPUP RE-TRIGGERS / UNLOCKED STATE NEVER SHOWN
+─────────────────────────────────────────────────────────────────────────────
+There are two "unlocked" states:
+  A. renderDiscountCode() — injects the code + redirect link into the popup.
+     Only reached if d.code is truthy. If d.code is null, cleanup() runs
+     instead — the unlocked state is NEVER rendered.
+
+  B. The page AFTER the redirect URL (/discount/<code>?redirect=<path>)
+     should show price badges via checkActiveDiscount() using ccf_active_discount.
+     This works correctly (ccf_active_discount IS set in renderDiscountCode).
+
+So the "unlocked state never shown" is entirely due to d.code being null
+(bug in §2), not a rendering bug in renderDiscountCode itself.
+
+For the popup reappearance after a successful discount, see the
+ccf_disc_redirected gap in §3 (secondary path).
+
+─────────────────────────────────────────────────────────────────────────────
+6. BACKEND RULE LOOKUP — does it match the storefront condition?
+─────────────────────────────────────────────────────────────────────────────
+Storefront (ccf-push.js lines 133–143):
+  ccfDiscountEnabled() checks ALL four keys: pushDiscount, emailDiscount,
+                        phoneDiscount, bothDiscount.
+  ccfShowEmailField()  checks only emailDiscount OR bothDiscount.
+
+Backend (discounts.js line 106):
+  cfg = config[action + 'Discount']
+  Accepts only action='push' (→ pushDiscount) or action='email' (→ emailDiscount).
+  bothDiscount and phoneDiscount are NEVER looked up by the generate-discount
+  handler — there is no action string that maps to them.
+
+INCONSISTENCY: bothDiscount enables the email field on the storefront
+  (ccfShowEmailField returns true) and ccfDiscountEnabled returns true
+  (wantsDiscount = true), but the generate-discount backend never resolves
+  a code for bothDiscount because 'both' is not a valid action (rejected at
+  proxy.js:165) and 'email' maps only to emailDiscount.
+
+  Fix candidate: when action='email' and emailDiscount.enabled=false, fall
+  back to bothDiscount in generateDiscount(), or treat bothDiscount.enabled
+  as implying emailDiscount.enabled for the email action path.
+
+─────────────────────────────────────────────────────────────────────────────
+SUMMARY OF ROOT CAUSES
+─────────────────────────────────────────────────────────────────────────────
+No discount code:
+  • action='email' but backend only checks emailDiscount; if merchant enabled
+    bothDiscount (not emailDiscount), cfg.enabled=false → { code:null } →
+    finishDiscount silently calls cleanup() — no error shown to customer.
+
+Popup reappears:
+  • (Primary) Subscribe chain fails on mobile → resetButton() → popup stays
+    open with button re-enabled; looks like a "reappear" to the customer.
+  • (Secondary) renderDiscountCode() never sets ccf_disc_redirected in
+    sessionStorage before redirecting; if session storage clears (new tab,
+    iOS Safari quirk), canPromptForDiscount()=true on next page → showSoftPrompt
+    fires again for an already-subscribed customer.
+
+>>> STOP. Audit only. No implementation.
