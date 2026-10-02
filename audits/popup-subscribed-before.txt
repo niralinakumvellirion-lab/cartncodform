@@ -1,0 +1,21 @@
+PRE-AUDIT — popup subscribed column
+Date: 2026-10-02
+
+FILES TO CHANGE
+  backend/routes/profiles.js          lines 463-511 (popups-shown endpoint)
+  backend/models/StorefrontEvent.js   add index
+  frontend/app/admin/dashboard/DashboardScreen.jsx  lines 636-645 (row card)
+  backend/__tests__/dashboardDrilldown.test.js       add cases + update mockEvents
+
+CURRENT STATE
+  /popups-shown returns { ts, path, customerId } per row. No subscription signal.
+  StorefrontEvent.find selects 'ts path customerId' — does not select sessionId.
+  No index on (shopDomain, type, sessionId).
+
+CHANGES PLANNED
+  backend: add sessionId to .select(); after page fetch run ONE find for
+    push_prompt_accepted matching sessionIds/$or/customerIds; build two Sets;
+    tag each row subscribed: true|false.
+  model: storefrontEventSchema.index({ shopDomain: 1, type: 1, sessionId: 1 })
+  frontend: wrap row card in flex row, push status badge to the right.
+  test: update mockEvents to accept acceptedEvents=[]; add two new cases.

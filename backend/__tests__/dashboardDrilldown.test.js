@@ -175,17 +175,25 @@ describe('GET /:shop/profiles — email_captured / push_subscribed filters', () 
 });
 
 describe('GET /:shop/popups-shown', () => {
-  function mockEvents(rows, total = rows.length) {
-    StorefrontEvent.find.mockReturnValue({
-      sort: () => ({ skip: () => ({ limit: () => ({ select: () => ({ lean: () => Promise.resolve(rows) }) }) }) }),
-    });
+  // acceptedEvents is the result for the second find (push_prompt_accepted).
+  function mockEvents(rows, total = rows.length, acceptedEvents = []) {
+    // Reset to clear any once-values left unconsumed by earlier tests (e.g. the
+    // paginate test has empty rows, so the second find is never called).
+    StorefrontEvent.find.mockReset();
+    StorefrontEvent.find
+      .mockReturnValueOnce({
+        sort: () => ({ skip: () => ({ limit: () => ({ select: () => ({ lean: () => Promise.resolve(rows) }) }) }) }),
+      })
+      .mockReturnValueOnce({
+        select: () => ({ lean: () => Promise.resolve(acceptedEvents) }),
+      });
     StorefrontEvent.countDocuments.mockResolvedValue(total);
   }
 
   test('returns ts/path/customerId, customerId null when the event has none (no resolution step)', async () => {
     mockEvents([
-      { ts: new Date('2026-09-15T10:00:00.000Z'), path: '/products/foo', customerId: null },
-      { ts: new Date('2026-09-16T10:00:00.000Z'), path: '/', customerId: '999' },
+      { ts: new Date('2026-09-15T10:00:00.000Z'), path: '/products/foo', sessionId: 'sess-a', customerId: null },
+      { ts: new Date('2026-09-16T10:00:00.000Z'), path: '/', sessionId: 'sess-b', customerId: '999' },
     ], 2);
 
     const res = await get(`/${SHOP}/popups-shown?from=2026-09-01T00:00:00.000Z&to=2026-09-30T23:59:59.999Z`);
@@ -209,6 +217,46 @@ describe('GET /:shop/popups-shown', () => {
     const res = await get(`/${SHOP}/popups-shown?page=2&limit=50`);
     const data = await res.json();
     expect(data).toMatchObject({ total: 130, page: 2, limit: 50 });
+  });
+
+  test('subscribed:true when accepted event matches sessionId; false otherwise — ONE extra query not N+1', async () => {
+    mockEvents(
+      [
+        { ts: new Date('2026-09-15T10:00:00.000Z'), path: '/products/foo', sessionId: 'sess-1', customerId: null },
+        { ts: new Date('2026-09-16T10:00:00.000Z'), path: '/', sessionId: 'sess-2', customerId: null },
+      ],
+      2,
+      [{ sessionId: 'sess-1', customerId: null }], // only sess-1 accepted
+    );
+
+    const res = await get(`/${SHOP}/popups-shown?from=2026-09-01T00:00:00.000Z&to=2026-09-30T23:59:59.999Z`);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.events[0].subscribed).toBe(true);   // sess-1 matched
+    expect(data.events[1].subscribed).toBe(false);  // sess-2 not matched
+    // Exactly two find calls total: shown events + accepted events (not per-row)
+    expect(StorefrontEvent.find).toHaveBeenCalledTimes(2);
+    const [acceptedQuery] = StorefrontEvent.find.mock.calls[1];
+    expect(acceptedQuery.type).toBe('push_prompt_accepted');
+    expect(acceptedQuery.shopDomain).toBe(SHOP);
+  });
+
+  test('subscribed:true when accepted event matches customerId on an identified row', async () => {
+    mockEvents(
+      [
+        { ts: new Date('2026-09-15T10:00:00.000Z'), path: '/', sessionId: 'sess-3', customerId: '42' },
+      ],
+      1,
+      [{ sessionId: null, customerId: '42' }],
+    );
+
+    const res = await get(`/${SHOP}/popups-shown`);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.events[0].subscribed).toBe(true);
+    expect(data.events[0].customerId).toBe('42');
   });
 });
 

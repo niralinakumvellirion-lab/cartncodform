@@ -14,5 +14,7 @@ const storefrontEventSchema = new mongoose.Schema({
 
 // Auto-delete events older than 90 days.
 storefrontEventSchema.index({ ts: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
+// Supports the popups-shown subscribed-tagging query (one extra find per page load).
+storefrontEventSchema.index({ shopDomain: 1, type: 1, sessionId: 1 });
 
 module.exports = mongoose.model('StorefrontEvent', storefrontEventSchema);

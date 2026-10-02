@@ -468,7 +468,9 @@ router.get('/:shopDomain/new-subscribers', requireAuth, requireStoreOwner, async
  * already carries one (a logged-in visit) — no Profile lookup/join is
  * done to resolve an email for an anonymous one; most rows will have no
  * identity at all, since this event fires before any opt-in.
- * -> { events: [{ ts, path, customerId }], total, page, limit }
+ * subscribed is tagged via ONE extra query for push_prompt_accepted events
+ * matching the page's sessionIds or customerIds — never per-row (no N+1).
+ * -> { events: [{ ts, path, customerId, subscribed }], total, page, limit }
  */
 router.get('/:shopDomain/popups-shown', requireAuth, requireStoreOwner, async (req, res) => {
   try {
@@ -493,13 +495,49 @@ router.get('/:shopDomain/popups-shown', requireAuth, requireStoreOwner, async (r
         .sort({ ts: -1 })
         .skip(page * limit)
         .limit(limit)
-        .select('ts path customerId')
+        .select('ts path customerId sessionId')
         .lean(),
       StorefrontEvent.countDocuments(query),
     ]);
 
+    // ONE extra query — never per-row — to find accepted events that match
+    // any sessionId or customerId on this page.
+    const sessionIds = rows.map((r) => r.sessionId).filter(Boolean);
+    const customerIds = rows.map((r) => r.customerId).filter(Boolean);
+    const subscribedSessions = new Set();
+    const subscribedCustomers = new Set();
+
+    if (sessionIds.length || customerIds.length) {
+      const acceptedFilter = { shopDomain: shop, type: 'push_prompt_accepted' };
+      if (sessionIds.length && customerIds.length) {
+        acceptedFilter.$or = [
+          { sessionId: { $in: sessionIds } },
+          { customerId: { $in: customerIds } },
+        ];
+      } else if (sessionIds.length) {
+        acceptedFilter.sessionId = { $in: sessionIds };
+      } else {
+        acceptedFilter.customerId = { $in: customerIds };
+      }
+      const accepted = await StorefrontEvent.find(acceptedFilter)
+        .select('sessionId customerId')
+        .lean();
+      for (const a of accepted) {
+        if (a.sessionId) subscribedSessions.add(a.sessionId);
+        if (a.customerId) subscribedCustomers.add(a.customerId);
+      }
+    }
+
     return res.json({
-      events: rows.map((r) => ({ ts: r.ts, path: r.path || null, customerId: r.customerId || null })),
+      events: rows.map((r) => ({
+        ts: r.ts,
+        path: r.path || null,
+        customerId: r.customerId || null,
+        subscribed: !!(
+          (r.sessionId && subscribedSessions.has(r.sessionId)) ||
+          (r.customerId && subscribedCustomers.has(r.customerId))
+        ),
+      })),
       total,
       page,
       limit,

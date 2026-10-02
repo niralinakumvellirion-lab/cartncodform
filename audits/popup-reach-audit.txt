@@ -1,0 +1,156 @@
+POPUP REACH AUDIT
+Date: 2026-10-02
+Task: Evaluate feasibility of a "Subscribed?" column in the Popups Shown panel.
+
+FILES READ
+  backend/models/StorefrontEvent.js
+  backend/models/Profile.js (channels block)
+  backend/routes/profiles.js (lines 460-511, GET /popups-shown)
+  frontend/app/admin/dashboard/DashboardScreen.jsx (lines 545-670, PopupsShownPanel)
+
+─────────────────────────────────────────────────────────────────
+1. EVENT TYPES RELEVANT TO THIS AUDIT
+─────────────────────────────────────────────────────────────────
+StorefrontEvent has no enum on `type`; any string is accepted.
+The types confirmed in the codebase:
+
+  push_prompt_shown    — popup was displayed (used by existing panel)
+  push_prompt_accepted — user clicked Allow (frontend labels it
+                         "Accepted notifications", seen in CustomerDetail.jsx
+                         and Journey.jsx EVENT_LABELS maps)
+
+No separate "push_prompt_dismissed" or "push_subscribed" event type was
+found. The FCM token field on StorefrontEvent is populated only on
+push_prompt_accepted rows (field: `token`).
+
+Profile model (channels.push):
+  subscribed   Boolean
+  subscribedAt Date
+  lastToken    String
+
+These represent the *current* subscription state of a Profile document,
+not an event in time.
+
+─────────────────────────────────────────────────────────────────
+2. MOST RELIABLE SIGNAL PER ROW
+─────────────────────────────────────────────────────────────────
+Option A — push_prompt_accepted event in same session, after shown event
+
+  This is the SOUND option. A push_prompt_accepted event carries:
+    - shopDomain, sessionId, customerId (if logged in), ts, token
+  Matching it to a push_prompt_shown row is straightforward:
+    same shopDomain AND (same customerId OR same sessionId) AND ts > shown.ts
+
+  It is a direct causal signal: the specific browser session that saw
+  the popup then clicked Allow. The `token` field even confirms FCM
+  registration succeeded, not just a button click.
+
+Option B — Profile.channels.push.subscribed / subscribedAt
+
+  This is MISLEADING for this use case.
+
+  Reasons:
+  a) ~70-80% of popup views have no customerId (anonymous sessions).
+     There is no Profile document for those visitors at all — no join
+     is possible.
+  b) Even for identified customers, a Profile's subscribed flag is
+     current state. A customer may have subscribed months ago (via a
+     different popup view not in the date range), so subscribedAt does
+     not confirm causation from *this particular shown event*.
+  c) Conversely, a customer might have subscribed after THIS shown
+     event but later unsubscribed — subscribed=false would make it
+     look like "Not subscribed" even though the popup worked.
+  d) The existing popups-shown endpoint deliberately does no Profile
+     join (see the comment at line 469: "most rows will have no
+     identity at all"). Adding one only for identified rows would give
+     inconsistent semantics: the same column would mean different
+     things for anonymous vs. identified rows.
+
+─────────────────────────────────────────────────────────────────
+3. ANONYMOUS ROWS — CAN WE TELL IF THEY SUBSCRIBED?
+─────────────────────────────────────────────────────────────────
+Honestly: only via sessionId correlation with a push_prompt_accepted event.
+
+A push_prompt_shown row for an anonymous visitor carries only sessionId
+(no customerId, no email). The push_prompt_accepted event for the same
+browser tab will carry the same sessionId. So:
+
+  IF a push_prompt_accepted event exists with the same sessionId
+  AND ts > the shown event's ts
+  THEN we can say "Subscribed" even for the anonymous row.
+
+  IF no such accepted event exists for that sessionId:
+    - It might mean they dismissed the popup, OR
+    - It might mean the accept event was emitted but sessionId
+      didn't match (cart token churn, tab reloaded).
+  In that case the column should read "Unknown" — not "No".
+
+  "No" is only defensible if both conditions are true:
+    (a) no accepted event for that sessionId AND
+    (b) the row has a customerId whose Profile.subscribed is false.
+  That combination is rare and narrows to identified visitors only.
+
+─────────────────────────────────────────────────────────────────
+4. SMALLEST BACKEND CHANGE — COST ESTIMATE
+─────────────────────────────────────────────────────────────────
+Approach: add a `subscribed` field to each event row in the existing
+  /popups-shown response. No new endpoint needed.
+
+Implementation:
+  After fetching the page of push_prompt_shown rows, collect:
+    - the distinct sessionIds from that page (always present)
+    - the distinct customerIds from that page (subset of rows)
+
+  Run ONE aggregation against StorefrontEvent:
+    { shopDomain, type: 'push_prompt_accepted',
+      $or: [
+        { sessionId: { $in: sessionIds } },
+        { customerId: { $in: customerIds, $ne: null } }
+      ]
+    }
+  Select only `sessionId`, `customerId`.
+
+  This is a SINGLE extra query per page load, not N+1. Page size is
+  capped at 200 rows, so the $in arrays are at most 200 elements each.
+
+  Build a Set of "subscribed sessionIds" and "subscribed customerIds"
+  from the result, then tag each row before returning:
+    subscribed: true  if sessionId in set OR customerId in set
+    subscribed: null  otherwise (no accepted event found)
+
+  The null / missing case maps to "Unknown" in the UI.
+
+  Index note: StorefrontEvent already has an index on (shopDomain, ts).
+  An index on (shopDomain, type, sessionId) or (shopDomain, type,
+  customerId) would make this secondary query fast. Neither exists today
+  per the model file — worth adding if this feature ships.
+
+─────────────────────────────────────────────────────────────────
+5. COLUMN VALUES — WHICH ROWS GET WHICH
+─────────────────────────────────────────────────────────────────
+  Subscribed     — a push_prompt_accepted event exists for the same
+                   sessionId (any row) OR the same customerId (identified
+                   rows), with ts > the shown event's ts.
+
+  Unknown        — no matching accepted event found. This is the
+                   expected value for the large majority of anonymous
+                   rows. Do NOT label these "Not subscribed" — the
+                   absence of an accepted event does not prove they
+                   didn't subscribe (session token churn, cross-device,
+                   browser permission granted outside the popup).
+
+  Not subscribed — ONLY when the row has a customerId AND
+                   Profile.channels.push.subscribed is false AND
+                   no accepted event exists for that session.
+                   This is a narrow, high-confidence negative.
+                   Implementing it requires an extra Profile lookup;
+                   it may not be worth the added complexity for a
+                   small fraction of rows.
+
+  Recommended simplified version (two values, not three):
+    Subscribed / Unknown
+  This is honest, avoids false negatives on anonymous rows, and
+  requires only the single extra StorefrontEvent query above.
+
+─────────────────────────────────────────────────────────────────
+END OF AUDIT

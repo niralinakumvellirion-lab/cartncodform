@@ -1,0 +1,55 @@
+SELF-AUDIT — popup subscribed column
+Date: 2026-10-02
+
+CHANGES MADE
+  backend/routes/profiles.js
+    - .select() now includes sessionId
+    - after page fetch: ONE extra StorefrontEvent.find for push_prompt_accepted
+      matching the page's sessionIds and/or customerIds via $or (or plain
+      field filter when only one set is non-empty); result builds two Sets
+    - each row tagged subscribed: true|false (boolean, not null)
+    - JSDoc updated to reflect new field
+
+  backend/models/StorefrontEvent.js
+    - added index { shopDomain: 1, type: 1, sessionId: 1 }
+
+  frontend/app/admin/dashboard/DashboardScreen.jsx
+    - row card wrapped in flex row (justify: space-between)
+    - subscribed=true: green pill "✓ Subscribed" (#059669, #ecfdf5 bg)
+    - subscribed=false: muted grey "Unknown"
+    - both badges have flexShrink:0 + whiteSpace:nowrap; text and time
+      wrapped in minWidth:0 div so they truncate rather than push the badge
+
+  backend/__tests__/dashboardDrilldown.test.js
+    - mockEvents updated: calls mockReset() first (prevents once-value
+      leakage from the paginate test, which never fires the second find
+      because rows=[]), uses mockReturnValueOnce x2
+    - existing rows updated to include sessionId
+    - 2 new cases:
+        subscribed:true via sessionId match; confirms find called exactly twice
+        subscribed:true via customerId match
+
+QUERY ANALYSIS — confirmed NOT N+1
+  The second find is issued ONCE per page load, against a $in of at most
+  200 sessionIds and 200 customerIds. Tagging is done in-process via Set
+  lookup. Total: 2 queries per request (unchanged from the original 2
+  for find+countDocuments, now 3 counting the accepted query).
+
+INDEX REPORT
+  Added: (shopDomain, type, sessionId)
+  Reasoning: the accepted query filters on all three fields; without this
+  index MongoDB would scan all events for the shop+type and then filter
+  by sessionId in memory.
+
+  (shopDomain, type, customerId) — NOT added.
+  Reason: ~70-80% of popup views are anonymous (no customerId). In the
+  $or path, MongoDB can do an index intersection with separate indexes per
+  branch, but the customerId branch is the minority. When sessionIds are
+  present, the existing index already narrows the scan significantly. The
+  marginal gain from a second index does not justify the write overhead on
+  every push_prompt_accepted insert. Revisit if the proportion of
+  identified visitors increases substantially.
+
+TEST RESULTS
+  351/351 backend tests pass.
+  Frontend build: compiled successfully, 0 errors.

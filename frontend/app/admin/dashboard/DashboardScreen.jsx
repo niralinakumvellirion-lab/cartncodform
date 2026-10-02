@@ -634,14 +634,20 @@ function PopupsShownPanel({ shop, from, to, open, onClose }) {
             <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>{total} total</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {events.map((e, i) => (
-                <div key={i} style={{ padding: '10px 12px', border: '1px solid #f3f4f6', borderRadius: 8, fontSize: 13 }}>
-                  <div style={{ color: '#111827', fontWeight: 500 }}>
-                    {e.customerId ? `Customer #${e.customerId}` : 'Anonymous visitor'}
+                <div key={i} style={{ padding: '10px 12px', border: '1px solid #f3f4f6', borderRadius: 8, fontSize: 13, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ color: '#111827', fontWeight: 500 }}>
+                      {e.customerId ? `Customer #${e.customerId}` : 'Anonymous visitor'}
+                    </div>
+                    <div style={{ color: '#9ca3af', fontSize: 11, marginTop: 2 }}>
+                      {new Date(e.ts).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      {e.path ? ` · ${e.path}` : ''}
+                    </div>
                   </div>
-                  <div style={{ color: '#9ca3af', fontSize: 11, marginTop: 2 }}>
-                    {new Date(e.ts).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                    {e.path ? ` · ${e.path}` : ''}
-                  </div>
+                  {e.subscribed
+                    ? <span style={{ flexShrink: 0, fontSize: 11, fontWeight: 600, color: '#059669', background: '#ecfdf5', borderRadius: 4, padding: '2px 7px', whiteSpace: 'nowrap' }}>✓ Subscribed</span>
+                    : <span style={{ flexShrink: 0, fontSize: 11, color: '#9ca3af', whiteSpace: 'nowrap' }}>Unknown</span>
+                  }
                 </div>
               ))}
             </div>
