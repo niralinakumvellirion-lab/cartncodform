@@ -1,0 +1,45 @@
+SELF-AUDIT — popup-subscribed-totals
+Date: 2026-10-02
+
+SCOPE ANSWER (reported before coding)
+The panel is paginated (limit=20). The backend computes `subscribed` per-row
+using only the current page's sessionIds — so frontend counts would be
+page-level only, not true totals. Added subscribedTotal / unknownTotal to the
+backend response, computed across ALL matching events.
+
+CHANGES
+backend/routes/profiles.js (popups-shown endpoint):
+  - After Promise.all([rows, total]), runs three extra operations:
+      1. aggregate($group) → distinct sessionIds + customerIds from all
+         push_prompt_shown events in the date range
+      2. aggregate($group) → distinct IDs from push_prompt_accepted events
+         matching those IDs (only called when step 1 returns non-empty)
+      3. countDocuments → shown events whose session/customer is in the
+         accepted set (only called when step 2 returns non-empty)
+  - Adds subscribedTotal and unknownTotal: total - subscribedTotal to response.
+  - No new route. Existing endpoint only.
+
+backend/__tests__/dashboardDrilldown.test.js:
+  - mockEvents updated: countDocuments and aggregate both mockReset() at start
+    (same reason find was already reset — unconsumed once-values pollute
+    later tests when the subscribedTotal path is skipped due to empty IDs).
+  - mockEvents accepts optional aggOpts param: shownIdAgg, acceptedIdAgg,
+    subscribedTotal (all default to empty/0 → existing tests unaffected).
+  - New test: subscribedTotal / unknownTotal are true totals across all pages.
+
+frontend/app/admin/dashboard/DashboardScreen.jsx (PopupsShownPanel):
+  - Added subscribedTotal / unknownTotal state (reset on panel open).
+  - Set from response on every fetch (page-independent — backend recomputes
+    across all events, not just the fetched page).
+  - Renders a small header row above the list:
+      "<N> subscribed · <M> unknown" in green (#059669) / muted grey (#9ca3af).
+  - Shown only in the events.length > 0 branch (not during loading/error/empty).
+
+VERIFICATION
+  backend: 352/352 tests pass (npm test, full suite)
+  frontend: build succeeds (npm run build, no errors)
+
+PER-PAGE vs TRUE TOTALS
+  True totals. The backend aggregates distinct IDs across the full matching
+  set for the date range, then counts events whose session/customer subscribed —
+  regardless of which page is currently loaded.

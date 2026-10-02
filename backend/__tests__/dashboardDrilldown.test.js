@@ -175,11 +175,21 @@ describe('GET /:shop/profiles — email_captured / push_subscribed filters', () 
 });
 
 describe('GET /:shop/popups-shown', () => {
-  // acceptedEvents is the result for the second find (push_prompt_accepted).
-  function mockEvents(rows, total = rows.length, acceptedEvents = []) {
-    // Reset to clear any once-values left unconsumed by earlier tests (e.g. the
-    // paginate test has empty rows, so the second find is never called).
+  // acceptedEvents: result for the second find (push_prompt_accepted, per-page).
+  // aggOpts.shownIdAgg: return value for the first aggregate (all session/customer
+  //   IDs from shown events in range). Defaults to [] → allSids/allCids empty →
+  //   subscribedTotal logic is skipped (no second aggregate, no second countDocuments).
+  // aggOpts.acceptedIdAgg: return value for the second aggregate (subscribed sets).
+  // aggOpts.subscribedTotal: return value for the second countDocuments call.
+  function mockEvents(rows, total = rows.length, acceptedEvents = [], aggOpts = {}) {
+    const { shownIdAgg = [], acceptedIdAgg = [], subscribedTotal = 0 } = aggOpts;
+    // Reset to clear any once-values left unconsumed by earlier tests.
+    // countDocuments and aggregate are reset here for the same reason find is:
+    // when shownIdAgg=[] the subscribedTotal path is skipped, leaving unconsumed
+    // once-values that would corrupt the next test's return order.
     StorefrontEvent.find.mockReset();
+    StorefrontEvent.countDocuments.mockReset();
+    StorefrontEvent.aggregate.mockReset();
     StorefrontEvent.find
       .mockReturnValueOnce({
         sort: () => ({ skip: () => ({ limit: () => ({ select: () => ({ lean: () => Promise.resolve(rows) }) }) }) }),
@@ -187,7 +197,16 @@ describe('GET /:shop/popups-shown', () => {
       .mockReturnValueOnce({
         select: () => ({ lean: () => Promise.resolve(acceptedEvents) }),
       });
-    StorefrontEvent.countDocuments.mockResolvedValue(total);
+    // First call: total events in range. Second call: subscribedTotal (only reached
+    // when shownIdAgg has IDs and some are in the accepted set).
+    StorefrontEvent.countDocuments
+      .mockResolvedValueOnce(total)
+      .mockResolvedValueOnce(subscribedTotal);
+    // First aggregate: distinct session/customer IDs from shown events.
+    // Second aggregate: distinct IDs from accepted events (only called when allSids/allCids non-empty).
+    StorefrontEvent.aggregate
+      .mockResolvedValueOnce(shownIdAgg)
+      .mockResolvedValueOnce(acceptedIdAgg);
   }
 
   test('returns ts/path/customerId, customerId null when the event has none (no resolution step)', async () => {
@@ -257,6 +276,32 @@ describe('GET /:shop/popups-shown', () => {
     expect(res.status).toBe(200);
     expect(data.events[0].subscribed).toBe(true);
     expect(data.events[0].customerId).toBe('42');
+  });
+
+  test('subscribedTotal / unknownTotal are true totals across all pages, not just the current page', async () => {
+    // total=5 events across all pages; current page returns 2 rows.
+    // 2 of the 5 sessions/customers are in the accepted set → subscribedTotal=2.
+    mockEvents(
+      [
+        { ts: new Date('2026-09-15T10:00:00.000Z'), path: '/', sessionId: 'sess-1', customerId: null },
+        { ts: new Date('2026-09-16T10:00:00.000Z'), path: '/', sessionId: 'sess-2', customerId: null },
+      ],
+      5,
+      [],
+      {
+        shownIdAgg: [{ sids: ['sess-1', 'sess-2', 'sess-3', 'sess-4', 'sess-5'], cids: [] }],
+        acceptedIdAgg: [{ sids: ['sess-1', 'sess-3'], cids: [] }],
+        subscribedTotal: 2,
+      },
+    );
+
+    const res = await get(`/${SHOP}/popups-shown`);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.subscribedTotal).toBe(2);
+    expect(data.unknownTotal).toBe(3); // 5 - 2
+    expect(data.total).toBe(5);
   });
 });
 

@@ -1,0 +1,32 @@
+PRE-AUDIT — popup-subscribed-totals
+Date: 2026-10-02
+
+SCOPE QUESTION ANSWER
+The panel is paginated (limit=20). The backend computes `subscribed` per-row
+using only the current page's sessionIds/customerIds. Summing from the
+frontend gives page-level counts, not true totals — MISLEADING.
+
+ACTION: add subscribedTotal / unknownTotal to the backend response,
+computed across all matching events (not just the current page).
+
+FILES CHANGING
+  backend/routes/profiles.js   — popups-shown endpoint: 3-step aggregate
+  frontend/app/admin/dashboard/DashboardScreen.jsx — PopupsShownPanel state + summary row
+
+BACKEND PLAN (popups-shown endpoint)
+After computing [rows, total]:
+  1. Aggregate distinct sessionIds + customerIds from ALL push_prompt_shown
+     events in range (one $group aggregation, O(n) with index).
+  2. Query push_prompt_accepted events matching those IDs → accepted sets.
+  3. countDocuments shown events whose sessionId/customerId is in accepted sets.
+  Result: subscribedTotal. unknownTotal = total - subscribedTotal.
+  Add both to response JSON alongside existing fields.
+
+FRONTEND PLAN (PopupsShownPanel)
+  Add subscribedTotal / unknownTotal state (0 default).
+  Set from data on every fetch (always correct, page-independent).
+  Render a small header row above the list:
+    "<N> subscribed · <M> unknown" in green/grey.
+  Only show when !loading && !error && events.length > 0.
+
+NO NEW ROUTES — existing GET .../popups-shown endpoint only.

@@ -528,6 +528,45 @@ router.get('/:shopDomain/popups-shown', requireAuth, requireStoreOwner, async (r
       }
     }
 
+    // Compute subscribedTotal / unknownTotal across ALL matching events (not
+    // just this page). Three steps: collect all session/customer IDs from
+    // every shown event in the range via aggregate; cross-reference with
+    // accepted events to get the subscribed set; then countDocuments shown
+    // events whose ID is in that set.
+    let subscribedTotal = 0;
+    const idAgg = await StorefrontEvent.aggregate([
+      { $match: query },
+      { $group: { _id: null, sids: { $addToSet: '$sessionId' }, cids: { $addToSet: '$customerId' } } },
+    ]);
+    const allSids = (idAgg[0]?.sids || []).filter(Boolean);
+    const allCids = (idAgg[0]?.cids || []).filter(Boolean);
+
+    if (allSids.length || allCids.length) {
+      const accFilter = { shopDomain: shop, type: 'push_prompt_accepted' };
+      if (allSids.length && allCids.length) {
+        accFilter.$or = [{ sessionId: { $in: allSids } }, { customerId: { $in: allCids } }];
+      } else if (allSids.length) {
+        accFilter.sessionId = { $in: allSids };
+      } else {
+        accFilter.customerId = { $in: allCids };
+      }
+      const accAgg = await StorefrontEvent.aggregate([
+        { $match: accFilter },
+        { $group: { _id: null, sids: { $addToSet: '$sessionId' }, cids: { $addToSet: '$customerId' } } },
+      ]);
+      const subSids = new Set((accAgg[0]?.sids || []).filter(Boolean));
+      const subCids = new Set((accAgg[0]?.cids || []).filter(Boolean));
+
+      if (subSids.size || subCids.size) {
+        const subFilter = { ...query };
+        const subOr = [];
+        if (subSids.size) subOr.push({ sessionId: { $in: [...subSids] } });
+        if (subCids.size) subOr.push({ customerId: { $in: [...subCids] } });
+        subFilter.$or = subOr;
+        subscribedTotal = await StorefrontEvent.countDocuments(subFilter);
+      }
+    }
+
     return res.json({
       events: rows.map((r) => ({
         ts: r.ts,
@@ -541,6 +580,8 @@ router.get('/:shopDomain/popups-shown', requireAuth, requireStoreOwner, async (r
       total,
       page,
       limit,
+      subscribedTotal,
+      unknownTotal: total - subscribedTotal,
     });
   } catch (err) {
     console.error('[profiles] popups-shown error:', err.message);

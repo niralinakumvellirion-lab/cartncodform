@@ -552,12 +552,14 @@ function formatFestivalDate(dateStr) {
 function PopupsShownPanel({ shop, from, to, open, onClose }) {
   const [events, setEvents] = useState([]);
   const [total, setTotal] = useState(0);
+  const [subscribedTotal, setSubscribedTotal] = useState(0);
+  const [unknownTotal, setUnknownTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const limit = 20;
 
-  useEffect(() => { if (open) setPage(0); }, [open, from, to]);
+  useEffect(() => { if (open) { setPage(0); setSubscribedTotal(0); setUnknownTotal(0); } }, [open, from, to]);
 
   useEffect(() => {
     if (!open || !shop) return;
@@ -571,6 +573,8 @@ function PopupsShownPanel({ shop, from, to, open, onClose }) {
         if (cancelled) return;
         setEvents(Array.isArray(data.events) ? data.events : []);
         setTotal(Number.isFinite(data.total) ? data.total : 0);
+        setSubscribedTotal(Number.isFinite(data.subscribedTotal) ? data.subscribedTotal : 0);
+        setUnknownTotal(Number.isFinite(data.unknownTotal) ? data.unknownTotal : 0);
       })
       .catch((e) => { if (!cancelled) setError(e.message || 'Failed to load'); })
       .finally(() => { if (!cancelled) setLoading(false); });
@@ -631,6 +635,11 @@ function PopupsShownPanel({ shop, from, to, open, onClose }) {
           </div>
         ) : (
           <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 4 }}>
+              <span style={{ color: '#059669', fontWeight: 600 }}>{subscribedTotal} subscribed</span>
+              <span style={{ color: '#d1d5db' }}>·</span>
+              <span style={{ color: '#9ca3af' }}>{unknownTotal} unknown</span>
+            </div>
             <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 12 }}>{total} total</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {events.map((e, i) => (
