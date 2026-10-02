@@ -39,6 +39,7 @@ const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3000';
 
 const allowedOrigins = [
   process.env.FRONTEND_URL,
+  process.env.STOREFRONT_URL,   // custom storefront domain, e.g. https://www.example.com
   'https://app.shopireachboost.com',
   'https://admin.shopify.com',
   'https://cartncod-form.myshopify.com',
@@ -50,11 +51,16 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error('Not allowed by CORS'));
-      }
+      // No origin = server-side request (App Proxy, curl, health checks) — always allow.
+      if (!origin) { callback(null, true); return; }
+      // Exact match against the explicit allow-list.
+      if (allowedOrigins.includes(origin)) { callback(null, true); return; }
+      // Allow any *.myshopify.com storefront so stores on the default subdomain
+      // work without listing each one — ccf-push.js makes direct backend calls
+      // from the storefront page (/api/events, /api/push/cart-activity, etc.).
+      if (/^https:\/\/[a-z0-9-]+\.myshopify\.com$/.test(origin)) { callback(null, true); return; }
+      console.warn('[cors] rejected origin:', origin);
+      callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
   })
