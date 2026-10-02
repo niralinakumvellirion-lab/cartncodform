@@ -1311,8 +1311,6 @@ export default function DashboardScreen({ shop }) {
 
   return (
     <div style={{
-      height: 'calc(100vh - 40px)',
-      overflow: 'hidden',
       display: 'flex',
       flexDirection: 'column',
       fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
@@ -1429,16 +1427,15 @@ export default function DashboardScreen({ shop }) {
 
       {/* CONTENT */}
       <div style={{
-        flex: 1,
-        overflow: 'hidden',
         display: 'flex',
         flexDirection: isNarrow ? 'column' : 'row',
+        alignItems: 'flex-start',
         gap: 16,
         padding: '16px 20px',
       }}>
 
         {/* LEFT — main content */}
-        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
 
           {/* FUNNEL CARD */}
           <div style={{ ...DS.card, marginBottom: 0 }}>
