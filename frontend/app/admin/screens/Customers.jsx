@@ -59,7 +59,22 @@ const FILTER_TABS = [
   { key: 'email_captured', label: 'Email captured' },
 ];
 
-export default function Customers({ shop, initialFilter, initialFrom, initialTo }) {
+const SIGNAL_LABELS = {
+  cart_abandon: 'Cart left behind',
+  checkout_abandon: 'Reached checkout',
+  browse_abandon: "Looked, didn't add",
+  high_intent: 'Keeps coming back',
+  price_hesitation: 'Stopped at the price',
+  price_drop: 'Price dropped on a saved item',
+  back_in_stock: 'Back in stock',
+  post_purchase_d3: 'Three days after buying',
+  lapsing: 'Going quiet',
+  email_capture: 'Ask for an email',
+  cod_to_prepaid: 'Offer prepaid on COD',
+  winback: 'Win back',
+};
+
+export default function Customers({ shop, initialFilter, initialSignal, initialFrom, initialTo }) {
   const router = useRouter();
   // Carries `shop` forward on client-side nav (every admin/*/page.js
   // wrapper reads it from searchParams.get('shop')).
@@ -87,6 +102,7 @@ export default function Customers({ shop, initialFilter, initialFrom, initialTo 
     initialPreset || (initialFrom ? 'custom' : '7d')
   );
   const [search, setSearch] = useState('');
+  const [activeSignalType, setActiveSignalType] = useState(initialSignal || '');
 
   const [isMobileView, setIsMobileView] = useState(false);
   useEffect(() => {
@@ -107,6 +123,7 @@ export default function Customers({ shop, initialFilter, initialFrom, initialTo 
           : getDateRange(dateFilter);
         const params = new URLSearchParams({ limit: '50' });
         if (filter && filter !== 'everyone') params.set('filter', filter);
+        if (activeSignalType) params.set('signal', activeSignalType);
         if (rangeFrom) params.set('from', rangeFrom);
         if (rangeTo) params.set('to', rangeTo);
         if (search.trim()) params.set('search', search.trim());
@@ -145,7 +162,7 @@ export default function Customers({ shop, initialFilter, initialFrom, initialTo 
         if (!signal?.aborted) setLoading(false);
       }
     },
-    [shop, filter, dateFilter, initialFrom, initialTo, search]
+    [shop, filter, activeSignalType, dateFilter, initialFrom, initialTo, search]
   );
 
   useEffect(() => {
@@ -194,6 +211,29 @@ export default function Customers({ shop, initialFilter, initialFrom, initialTo 
         />
       </div>
 
+      {/* Signal segment chip — shown when navigating from "Do This Next" */}
+      {activeSignalType && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            background: '#ede9fe', borderRadius: 20, padding: '4px 12px 4px 10px',
+            fontSize: 12, fontWeight: 600, color: '#4f46e5',
+          }}>
+            <span>Signal: {SIGNAL_LABELS[activeSignalType] || activeSignalType.replace(/_/g, ' ')}</span>
+            <button
+              type="button"
+              onClick={() => setActiveSignalType('')}
+              aria-label="Clear signal filter"
+              style={{
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: '#6d28d9', fontSize: 14, lineHeight: 1, padding: 0,
+              }}
+            >×</button>
+          </div>
+          <span style={{ fontSize: 12, color: '#9ca3af' }}>{total} customer{total !== 1 ? 's' : ''}</span>
+        </div>
+      )}
+
       {/* Search + Filter row — stacks on mobile */}
       <div
         style={{
@@ -224,12 +264,16 @@ export default function Customers({ shop, initialFilter, initialFrom, initialTo 
           }}
         />
 
-        <FilterDropdown
-          options={FILTER_TABS}
-          value={filter}
-          onChange={setFilter}
-          aria-label="Filter customers by segment"
-        />
+        {/* Disable the segment dropdown while a signal filter is active
+            so the two filtering modes don't silently combine. */}
+        {!activeSignalType && (
+          <FilterDropdown
+            options={FILTER_TABS}
+            value={filter}
+            onChange={setFilter}
+            aria-label="Filter customers by segment"
+          />
+        )}
       </div>
 
         <div style={{ minWidth: 0, overflow: 'hidden' }}>

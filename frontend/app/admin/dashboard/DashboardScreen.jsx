@@ -635,10 +635,12 @@ function PopupsShownPanel({ shop, from, to, open, onClose }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {events.map((e, i) => (
                 <div key={i} style={{ padding: '10px 12px', border: '1px solid #f3f4f6', borderRadius: 8, fontSize: 13 }}>
-                  <div style={{ color: '#111827', fontWeight: 500 }}>{e.path || '—'}</div>
+                  <div style={{ color: '#111827', fontWeight: 500 }}>
+                    {e.customerId ? `Customer #${e.customerId}` : 'Anonymous visitor'}
+                  </div>
                   <div style={{ color: '#9ca3af', fontSize: 11, marginTop: 2 }}>
                     {new Date(e.ts).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                    {e.customerId ? ` · Customer #${e.customerId}` : ''}
+                    {e.path ? ` · ${e.path}` : ''}
                   </div>
                 </div>
               ))}

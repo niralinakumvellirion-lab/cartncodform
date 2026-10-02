@@ -1,0 +1,143 @@
+AUDIT: Dashboard Drill-down Bugs
+Date: 2026-10-02
+Files read: backend/routes/profiles.js, frontend/app/admin/dashboard/DashboardScreen.jsx,
+            backend/models/StorefrontEvent.js, frontend/app/admin/customers/page.js,
+            frontend/app/admin/screens/Customers.jsx
+
+===========================================================================
+BUG 1: "Saw the popup" panel shows page paths, not customers
+===========================================================================
+
+1. WHAT THE ENDPOINT RETURNS PER ROW TODAY
+   GET /api/profiles/:shopDomain/popups-shown (profiles.js:457-494)
+   .select('ts path customerId') → response: { ts, path, customerId }
+   Three fields only. No email, no sessionId, no name.
+
+2. DOES StorefrontEvent FOR 'push_prompt_shown' CARRY A CUSTOMER IDENTITY?
+   StorefrontEvent schema (StorefrontEvent.js):
+     sessionId  — Shopify cart token; present if visitor had a cart
+     customerId — Shopify customer id; present ONLY on a logged-in visit
+     token      — FCM push token; present ONLY after push opt-in (irrelevant
+                  here, since 'push_prompt_shown' fires before any opt-in)
+
+   Realistic breakdown:
+   - ~0% of rows will have `token` (event fires before opt-in).
+   - ~20-30% estimated to have `customerId` (logged-in Shopify sessions).
+   - ~60-70% will have `sessionId` (cart token) but no resolvable email.
+   - Remainder: fully anonymous — no field links to a Profile.
+
+   The backend endpoint currently selects only `customerId`; it does not
+   select `sessionId` at all. Even if it did, a sessionId has no email
+   associated with it in the Profile model without a join.
+
+3. WHAT THE PANEL CURRENTLY RENDERS (DashboardScreen.jsx:636-644)
+   Each row renders:
+     - Primary text: e.path  (the page URL, e.g. "/", "/collections/all")
+     - Secondary text: formatted timestamp + "· Customer #<id>" if present
+
+   So `path` is the HEADLINE field. That is the bug — the page URL is
+   displayed as the primary line, and the customer identity (which exists
+   on only ~20-30% of rows) is buried in the secondary line. When
+   customerId is absent the secondary line only shows the timestamp.
+   The result looks like a list of page URLs, not a list of visitors.
+
+4. WHAT THE PANEL SHOULD SHOW AND WHETHER THE DATA EXISTS
+   Desired: timestamp + customer identity where it exists, else "Anonymous visitor".
+
+   Data available in the existing endpoint response:
+     ts:         ✓ already returned
+     customerId: ✓ already returned (present on ~20-30% of rows)
+     path:       ✓ already returned but should be secondary context, not headline
+
+   sessionId is NOT returned today. Adding it would resolve identity on
+   ~60-70% of rows IF we also did a Profile lookup by cartToken — but that
+   is a join the endpoint's own comment explicitly says it does not do.
+
+   Realistic best display WITHOUT a backend change:
+     Primary:   "Customer #<id>" if customerId present, else "Anonymous visitor"
+     Secondary: timestamp + page path (as context, not headline)
+
+   This is a frontend-only fix — no new backend fields needed. The 80% of
+   rows with no customerId will show "Anonymous visitor", which is honest.
+   A better fix would add sessionId to the select and display it as a
+   fallback token, but that still doesn't resolve to a name without a join.
+
+===========================================================================
+BUG 2: "Do This Next" rows drill into ALL customers, not the matched ones
+===========================================================================
+
+1. HOW EACH COUNT IS COMPUTED
+   Source: GET /api/profiles/:shopDomain/signals?limit=20 (profiles.js:35-41)
+   The signals endpoint returns Signal documents, each with a `type` and
+   `strength`. The frontend (DashboardScreen.jsx:1056-1070) then groups
+   these by `sig.type` and counts how many signals share that type:
+     groupedSignals = Object.values(signals.reduce((acc, sig) => {
+       if (!acc[sig.type]) acc[sig.type] = { ...sig, count: 1 };
+       else acc[sig.type].count += 1;
+       ...
+     }, {}))
+   So "5 customers — Ask for an email" means 5 Signal documents of type
+   'email_capture' exist. Each Signal document has a `profileId` pointing
+   to the matching Profile.
+
+2. WHERE EACH ROW'S BUTTON NAVIGATES AND WHY IT LANDS ON ALL CUSTOMERS
+   DashboardScreen.jsx:1515:
+     navigate(`/admin/customers?signal=${sig.type}&from=...&to=...`)
+
+   customers/page.js reads `filter`, `from`, `to` from searchParams —
+   but does NOT read `signal`. It passes `initialFilter={filter}` to
+   CustomersScreen, and `filter` is `''` (empty string) because the URL
+   param is named `signal`, not `filter`.
+
+   CustomersScreen (Customers.jsx:82):
+     const [filter, setFilter] = useState(
+       FILTER_TABS.some((t) => t.key === initialFilter) ? initialFilter : 'everyone'
+     );
+   Since `initialFilter` is '', it falls back to 'everyone' — no filter
+   applied. All customers are shown regardless of which signal was clicked.
+
+3. DOES A CUSTOMERS FILTER EXIST FOR EACH "DO THIS NEXT" SEGMENT?
+   FILTER_TABS in Customers.jsx (lines 51-60):
+     'everyone', 'has_cart', 'bought_once', 'repeat_buyer',
+     'going_quiet', 'push_subscribed', 'email_captured'
+
+   SIGNAL_LABELS in DashboardScreen.jsx (lines 305-319):
+     price_hesitation  → 'Stopped at the price'
+     lapsing           → 'Going quiet'
+     email_capture     → 'Ask for an email'
+     (plus others: checkout_abandon, browse_abandon, high_intent,
+      price_drop, back_in_stock, post_purchase_d3, cod_to_prepaid, winback)
+
+   Mapping:
+     lapsing         → filter 'going_quiet' EXISTS  ✓  (key mismatch: signal
+                        type is 'lapsing', filter key is 'going_quiet')
+     email_capture   → filter 'email_captured' EXISTS ✓  (key mismatch:
+                        signal 'email_capture' vs filter 'email_captured')
+     price_hesitation → NO matching filter  ✗
+     checkout_abandon → NO matching filter  ✗
+     browse_abandon   → NO matching filter  ✗
+     high_intent      → NO matching filter  ✗
+     price_drop       → NO matching filter  ✗
+     back_in_stock    → NO matching filter  ✗
+     post_purchase_d3 → NO matching filter  ✗
+     cod_to_prepaid   → NO matching filter  ✗
+     winback          → NO matching filter  ✗
+
+   Root causes (two independent problems):
+   A) The URL param is named `signal` but customers/page.js only reads
+      `filter`. So even for the two types that DO have a matching filter
+      key, the drill-down still opens on "everyone" because the param
+      name is wrong.
+   B) For 8 of 10 signal types, no filter exists in Customers at all.
+      Even with the correct param name, these would still fall back to
+      'everyone' because CustomersScreen only recognises known FILTER_TABS.
+
+   The cleanest fix requires both: renaming the URL param (or adding a
+   `signal` reader in customers/page.js that maps signal type → filter key),
+   AND adding signal-type-based filtering to the /profiles endpoint and
+   FILTER_TABS for the missing types. The two lapsing/email_capture cases
+   could work with only the param fix; all others need new filter support.
+
+===========================================================================
+END OF AUDIT
+===========================================================================

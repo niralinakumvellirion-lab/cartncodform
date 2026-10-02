@@ -13,7 +13,11 @@ function CustomersContent() {
   // (navigate(`/admin/customers?filter=...&from=...&to=...`)) —
   // Customers seeds its own filter tab and date range from these
   // instead of always opening on "Everyone", unfiltered by date.
+  // `signal` is set by the Dashboard's "Do This Next" rows
+  // (navigate(`/admin/customers?signal=<type>&from=...&to=...`)) and
+  // shows only profiles with an active Signal of that type.
   const filter = searchParams.get('filter') || '';
+  const signal = searchParams.get('signal') || '';
   const from = searchParams.get('from') || '';
   const to = searchParams.get('to') || '';
   return (
@@ -30,7 +34,7 @@ function CustomersContent() {
         <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
       </NavMenu>
-      <CustomersScreen shop={shop} initialFilter={filter} initialFrom={from} initialTo={to} />
+      <CustomersScreen shop={shop} initialFilter={filter} initialSignal={signal} initialFrom={from} initialTo={to} />
     </AppProvider>
   );
 }

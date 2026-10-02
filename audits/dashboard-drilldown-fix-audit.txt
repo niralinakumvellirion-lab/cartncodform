@@ -1,0 +1,90 @@
+SELF-AUDIT: Dashboard Drill-down Fix
+Date: 2026-10-02
+Branch: main
+Preceding audit: audits/dashboard-drilldown-bugs-audit.txt
+
+Files changed:
+  frontend/app/admin/dashboard/DashboardScreen.jsx  (Bug 1)
+  backend/routes/profiles.js                        (Bug 2 backend)
+  frontend/app/admin/customers/page.js              (Bug 2 frontend)
+  frontend/app/admin/screens/Customers.jsx          (Bug 2 frontend)
+  backend/__tests__/dashboardDrilldown.test.js       (tests)
+
+===========================================================================
+BUG 1: "Saw the popup" — primary/secondary lines flipped
+===========================================================================
+
+Change: DashboardScreen.jsx PopupsShownPanel, lines 636-644.
+  Before: primary = e.path, secondary = timestamp + optional Customer #id
+  After:  primary = "Customer #<id>" if customerId present else "Anonymous
+          visitor"; secondary = timestamp + path (as muted context)
+
+No backend change. The endpoint already returns { ts, path, customerId };
+only the rendering order changed.
+
+===========================================================================
+BUG 2: "Do This Next" drill-down — signal filter
+===========================================================================
+
+BACKEND (profiles.js)
+  Added optional `signal` query param to GET /profiles after the existing
+  `filter` block:
+    1. Validates against SIGNAL_TYPES (400 if unknown — prevents arbitrary
+       DB queries).
+    2. Signal.find({ shopDomain, type: signalType }).select('profileId').lean()
+       — fetches all active Signal docs of that type.
+    3. query._id = { $in: profileIds } — restricts Profile query to those
+       profiles only.
+  Additive with `filter`: both constraints are applied if both are sent.
+
+  "Active" signals: whatever Signal docs exist in Mongo at request time
+  (TTL-expired rows are auto-deleted by Mongo, same as the signals endpoint
+  the Dashboard count uses). No date filter is applied to Signal lookup —
+  consistent with how the Dashboard signals endpoint works.
+
+COUNT MATCHING ANALYSIS
+  Dashboard "Do This Next" count = number of Signal docs of type X in the
+  top-20 results of GET /signals?limit=20 (frontend sends limit=20).
+  Drill-down count = total Signal docs of type X with no limit.
+
+  For shops with ≤20 total active signals across ALL types, the counts
+  match exactly (most common case for small Indian D2C stores).
+  For shops with >20 total signals, the Dashboard may show a lower count
+  per type (only the strongest 20 overall are fetched); the drill-down
+  shows all of that type. This is accepted: the backend signal cap is 100,
+  and showing more customers in the drill-down than the headline count is
+  better than showing fewer.
+
+FRONTEND
+  customers/page.js: added `signal` searchParam read; passes `initialSignal`
+  to CustomersScreen.
+
+  Customers.jsx:
+  - Added SIGNAL_LABELS map (mirrors DashboardScreen.jsx).
+  - Added `activeSignalType` state (initialized from initialSignal prop).
+  - loadData: params.set('signal', activeSignalType) when active; added
+    activeSignalType to useCallback dependency array.
+  - UI: clearable purple chip appears above the search row when signal is
+    active, showing "Signal: <label>" + count. Clicking × clears it and
+    returns to the normal (everyone) view.
+  - Filter dropdown: hidden while signal is active (vs. disabled). Chosen
+    over disabling because the two modes are independent — hiding avoids
+    silent double-filtering and the confusion of a grayed-out control.
+    The dropdown reappears immediately on chip clear.
+
+TESTS (dashboardDrilldown.test.js)
+  Added 4 tests in new describe block:
+    ✓ signal=lapsing restricts Profile query to matching profileIds
+    ✓ signal= is additive with filter= — both constraints applied
+    ✓ unknown signal type returns 400
+    ✓ no signal param — Signal.find not called, no _id constraint added
+
+===========================================================================
+VERIFICATION
+===========================================================================
+  cd backend && npm test → 349 tests, 0 failures
+  cd frontend && npm run build → clean build, no type errors
+
+===========================================================================
+END OF AUDIT
+===========================================================================

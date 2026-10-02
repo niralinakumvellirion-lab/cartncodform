@@ -30,6 +30,7 @@ jest.mock('../models/ShopWeights');
 
 const express = require('express');
 const Profile = require('../models/Profile');
+const Signal = require('../models/Signal');
 const StorefrontEvent = require('../models/StorefrontEvent');
 const ScheduledJob = require('../models/ScheduledJob');
 const profilesRouter = require('../routes/profiles');
@@ -208,5 +209,64 @@ describe('GET /:shop/popups-shown', () => {
     const res = await get(`/${SHOP}/popups-shown?page=2&limit=50`);
     const data = await res.json();
     expect(data).toMatchObject({ total: 130, page: 2, limit: 50 });
+  });
+});
+
+describe('GET /:shop/profiles — signal filter (Do This Next drill-down)', () => {
+  const ID_A = '000000000000000000000001';
+  const ID_B = '000000000000000000000002';
+
+  function mockSignals(docs) {
+    Signal.find.mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve(docs) }),
+    });
+  }
+  function mockProfiles(rows, total = rows.length) {
+    Profile.find.mockReturnValue({
+      sort: () => ({ skip: () => ({ limit: () => ({ select: () => Promise.resolve(rows) }) }) }),
+    });
+    Profile.countDocuments.mockResolvedValue(total);
+  }
+
+  test('signal=lapsing restricts Profile query to matching profileIds', async () => {
+    mockSignals([
+      { profileId: ID_A },
+      { profileId: ID_B },
+    ]);
+    mockProfiles([]);
+
+    const res = await get(`/${SHOP}/profiles?signal=lapsing`);
+    expect(res.status).toBe(200);
+
+    const [signalQuery] = Signal.find.mock.calls[0];
+    expect(signalQuery).toEqual({ shopDomain: SHOP, type: 'lapsing' });
+
+    const [profileQuery] = Profile.find.mock.calls[0];
+    expect(profileQuery._id).toEqual({ $in: [ID_A, ID_B] });
+  });
+
+  test('signal= is additive with filter= — both constraints applied', async () => {
+    mockSignals([{ profileId: ID_A }]);
+    mockProfiles([]);
+
+    await get(`/${SHOP}/profiles?signal=email_capture&filter=push_subscribed`);
+    const [profileQuery] = Profile.find.mock.calls[0];
+    expect(profileQuery['channels.push.subscribed']).toBe(true);
+    expect(profileQuery._id).toEqual({ $in: [ID_A] });
+  });
+
+  test('unknown signal type returns 400', async () => {
+    const res = await get(`/${SHOP}/profiles?signal=not_a_real_type`);
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toMatch(/unknown signal type/i);
+  });
+
+  test('no signal param — Signal.find not called, no _id constraint added', async () => {
+    mockProfiles([]);
+    await get(`/${SHOP}/profiles`);
+    expect(Signal.find).not.toHaveBeenCalled();
+    const [profileQuery] = Profile.find.mock.calls[0];
+    expect(profileQuery._id).toBeUndefined();
   });
 });

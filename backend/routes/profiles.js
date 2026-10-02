@@ -120,6 +120,10 @@ function escapeRegex(str) {
  *   page   (default 0)
  *   filter (optional) — has_cart | bought_once | repeat_buyer | going_quiet
  *                       | email_captured | push_subscribed
+ *   signal (optional) — any value from SIGNAL_TYPES; when present, restricts
+ *                       results to profiles that have an active Signal of that
+ *                       type. Additive with filter. Powers the Dashboard's
+ *                       "Do This Next" drill-down.
  *   from, to (optional, ISO) — only meaningful combined with filter=
  *                       email_captured (channels.email.capturedAt) or
  *                       filter=push_subscribed (channels.push.subscribedAt);
@@ -165,6 +169,18 @@ router.get('/:shopDomain/profiles', requireAuth, requireStoreOwner, async (req, 
         if (rangeFrom) query['channels.push.subscribedAt'].$gte = rangeFrom;
         if (rangeTo) query['channels.push.subscribedAt'].$lte = rangeTo;
       }
+    }
+
+    const signalType = typeof req.query.signal === 'string' ? req.query.signal.trim() : '';
+    if (signalType) {
+      if (!SIGNAL_TYPES.includes(signalType)) {
+        return res.status(400).json({ error: 'Unknown signal type' });
+      }
+      const signalDocs = await Signal.find({ shopDomain: shop, type: signalType })
+        .select('profileId')
+        .lean();
+      const profileIds = signalDocs.map((s) => s.profileId).filter(Boolean);
+      query._id = { $in: profileIds };
     }
 
     const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
