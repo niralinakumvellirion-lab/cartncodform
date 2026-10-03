@@ -364,6 +364,16 @@ router.post('/send-email-test', requireAuth, async (req, res) => {
   }
 });
 
+// Shopify serves product images over both http and https on the same path.
+// FCM rejects http:// image URLs, and email clients may block mixed content.
+// Normalise before use so callers never need to check protocol themselves.
+function normalizeImageUrl(url) {
+  if (!url || typeof url !== 'string') return url;
+  if (url.startsWith('//')) return 'https:' + url;
+  if (url.startsWith('http://')) return 'https' + url.slice(4);
+  return url;
+}
+
 /**
  * POST /api/push/send-journey
  * Body: { profileId, title, body, url }
@@ -404,7 +414,7 @@ async function sendJourneyPush(shopDomain, { profileId, title, body, url, imageU
 router.post('/send-journey', requireAuth, async (req, res) => {
   try {
     const { profileId, title, body, url, imageUrl } = req.body;
-    const { status, payload } = await sendJourneyPush(req.shopDomain, { profileId, title, body, url, imageUrl });
+    const { status, payload } = await sendJourneyPush(req.shopDomain, { profileId, title, body, url, imageUrl: normalizeImageUrl(imageUrl) });
     return res.status(status).json(payload);
   } catch (err) {
     console.error('[push] POST /send-journey error:', err.message);
@@ -560,10 +570,7 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
 router.post('/send-journey-email', requireAuth, async (req, res) => {
   try {
     const { profileId, subject, body, imageUrl } = req.body;
-    // TEMP DEBUG
-    console.log('[email-img] received:', imageUrl,
-      '| renders:', !!(imageUrl && imageUrl.startsWith('https://')));
-    const { status, payload } = await sendJourneyEmail(req.shopDomain, { profileId, subject, body, imageUrl });
+    const { status, payload } = await sendJourneyEmail(req.shopDomain, { profileId, subject, body, imageUrl: normalizeImageUrl(imageUrl) });
     return res.status(status).json(payload);
   } catch (err) {
     console.error('[email] send-journey-email error:', err.message);
