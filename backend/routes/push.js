@@ -40,7 +40,11 @@ async function uploadToCloudinary(base64Data) {
       }
     );
     const data = await response.json();
-    return data.secure_url || null;
+    const result = data.secure_url || null;
+    // TEMP DEBUG
+    console.log('[img-debug] cloudinary in:', base64Data.slice(0, 30),
+      'out:', result || 'NULL');
+    return result;
   } catch (e) {
     console.error('[push] cloudinary upload error:', e.message);
     return null;
@@ -638,6 +642,9 @@ router.post('/send-store', requireAuth, async (req, res) => {
       mobileImage ? mobileImage.substring(0, 30) + '...' : 'none');
     console.log('[push] send-store desktopImage:',
       desktopImage ? desktopImage.substring(0, 30) + '...' : 'none');
+    // TEMP DEBUG
+    console.log('[img-debug] send-store mobileImage:', mobileImage,
+      'desktopImage:', desktopImage);
 
     // Send to mobile subscribers with the mobile image.
     const mobileResult = await sendPushToCustomers(

@@ -160,6 +160,9 @@ async function sendPushToCustomers(shopDomain, title, body, url, imageUrl, mobil
     // so a mixed-case caller still matches.
     const shop = String(shopDomain || '').trim().toLowerCase();
     console.log(`[push-customer] querying subscriptions for shopDomain: ${shop}`);
+    // TEMP DEBUG
+    console.log('[img-debug] fcm imageUrl:', imageUrl,
+      'webpush.image will be:', imageUrl || 'undefined');
 
     const query = buildCustomerSubscriptionQuery(shop, { mobileOnly, desktopOnly });
     if (cartToken) {
