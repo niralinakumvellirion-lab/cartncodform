@@ -147,24 +147,6 @@ router.get('/discount-config', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// TEMP DEBUG — client-side step logger. Remove after mobile flow diagnosis.
-// POST /apps/cartncodform/ccf-log
-// Body: { step, extra, ua, ts }  — App Proxy signed, no DB write.
-// ---------------------------------------------------------------------------
-router.post('/ccf-log', (req, res) => {
-  if (!verifyProxySignature(req.query)) {
-    return res.status(403).json({ ok: false });
-  }
-  const step  = String((req.body && req.body.step)  || '').slice(0, 64);
-  const extra = String((req.body && req.body.extra) || '').slice(0, 256);
-  const ua    = String((req.body && req.body.ua)    || '').slice(0, 300);
-  const dt    = /Mobile|Android|iPhone|iPad/i.test(ua) ? 'mobile' : 'desktop';
-  console.log('[ccf-client]', step, dt, extra ? '| ' + extra : '', '| ua:', ua.slice(0, 80));
-  return res.json({ ok: true });
-});
-// END TEMP DEBUG
-
-// ---------------------------------------------------------------------------
 // discount-feature: the popup's Allow handler POSTs here after a successful
 // subscribe to mint a Shopify discount code.
 //   https://{shop}/apps/cartncodform/generate-discount?shop={shop}

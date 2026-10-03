@@ -41,9 +41,6 @@ async function uploadToCloudinary(base64Data) {
     );
     const data = await response.json();
     const result = data.secure_url || null;
-    // TEMP DEBUG
-    console.log('[img-debug] cloudinary in:', base64Data.slice(0, 30),
-      'out:', result || 'NULL');
     return result;
   } catch (e) {
     console.error('[push] cloudinary upload error:', e.message);
@@ -379,7 +376,7 @@ router.post('/send-email-test', requireAuth, async (req, res) => {
  * which is what actually prevents one shop from pushing to another shop's
  * customer via a guessed/leaked profileId.
  */
-async function sendJourneyPush(shopDomain, { profileId, title, body, url }) {
+async function sendJourneyPush(shopDomain, { profileId, title, body, url, imageUrl }) {
   const Profile = require('../models/Profile');
 
   if (!profileId || !title || !body) {
@@ -395,7 +392,7 @@ async function sendJourneyPush(shopDomain, { profileId, title, body, url }) {
 
   const cartToken = profile.identifiers?.cartTokens?.slice(-1)[0] || null;
   const result = await sendPushToCustomers(
-    shop, title, body, url, null, false, cartToken
+    shop, title, body, url, imageUrl || null, false, cartToken
   );
 
   if (!result.success) {
@@ -406,8 +403,8 @@ async function sendJourneyPush(shopDomain, { profileId, title, body, url }) {
 
 router.post('/send-journey', requireAuth, async (req, res) => {
   try {
-    const { profileId, title, body, url } = req.body;
-    const { status, payload } = await sendJourneyPush(req.shopDomain, { profileId, title, body, url });
+    const { profileId, title, body, url, imageUrl } = req.body;
+    const { status, payload } = await sendJourneyPush(req.shopDomain, { profileId, title, body, url, imageUrl });
     return res.status(status).json(payload);
   } catch (err) {
     console.error('[push] POST /send-journey error:', err.message);
@@ -642,9 +639,6 @@ router.post('/send-store', requireAuth, async (req, res) => {
       mobileImage ? mobileImage.substring(0, 30) + '...' : 'none');
     console.log('[push] send-store desktopImage:',
       desktopImage ? desktopImage.substring(0, 30) + '...' : 'none');
-    // TEMP DEBUG
-    console.log('[img-debug] send-store mobileImage:', mobileImage,
-      'desktopImage:', desktopImage);
 
     // Send to mobile subscribers with the mobile image.
     const mobileResult = await sendPushToCustomers(

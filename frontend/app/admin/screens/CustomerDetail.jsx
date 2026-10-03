@@ -421,6 +421,7 @@ function NotificationComposer({ customer, shop, onSent, onError }) {
         url: customer.topProducts?.[0]
           ? `https://${shop}/products/${customer.topProducts[0].productId}`
           : `https://${shop}`,
+        imageUrl: productImage || undefined,
       });
       onSent();
       setTitle('');
