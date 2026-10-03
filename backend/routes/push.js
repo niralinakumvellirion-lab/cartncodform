@@ -560,6 +560,9 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
 router.post('/send-journey-email', requireAuth, async (req, res) => {
   try {
     const { profileId, subject, body, imageUrl } = req.body;
+    // TEMP DEBUG
+    console.log('[email-img] received:', imageUrl,
+      '| renders:', !!(imageUrl && imageUrl.startsWith('https://')));
     const { status, payload } = await sendJourneyEmail(req.shopDomain, { profileId, subject, body, imageUrl });
     return res.status(status).json(payload);
   } catch (err) {
