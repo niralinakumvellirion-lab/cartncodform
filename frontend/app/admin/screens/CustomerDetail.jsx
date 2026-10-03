@@ -674,6 +674,7 @@ function EmailComposer({ customer, shop, onSent, onError }) {
         profileId: customer.profile._id,
         subject,
         body,
+        imageUrl: productImage || undefined,
       });
       onSent();
     } catch (e) {

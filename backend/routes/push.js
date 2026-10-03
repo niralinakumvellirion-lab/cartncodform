@@ -500,7 +500,7 @@ router.post('/send-now', requireAuth, async (req, res) => {
  * verified req.shopDomain from the session token instead, same fix as
  * sendJourneyPush.
  */
-async function sendJourneyEmail(shopDomain, { profileId, subject, body }) {
+async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl }) {
   const Profile = require('../models/Profile');
 
   if (!profileId || !subject || !body) {
@@ -529,6 +529,13 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body }) {
         sans-serif;max-width:600px;margin:0 auto;padding:32px 24px">
         <div style="background:#fff;border-radius:12px;
           border:1px solid #e5e7eb;padding:32px">
+          ${imageUrl && imageUrl.startsWith('https://') ? `
+          <div style="margin-bottom:20px">
+            <img src="${imageUrl}"
+              alt="${subject.replace(/"/g, '&quot;')}"
+              style="display:block;width:100%;max-width:100%;
+                height:auto;border-radius:8px;border:0" />
+          </div>` : ''}
           ${body.replace(/\n/g, '<br>')}
           <hr style="margin:24px 0;border:none;
             border-top:1px solid #f3f4f6">
@@ -552,8 +559,8 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body }) {
 
 router.post('/send-journey-email', requireAuth, async (req, res) => {
   try {
-    const { profileId, subject, body } = req.body;
-    const { status, payload } = await sendJourneyEmail(req.shopDomain, { profileId, subject, body });
+    const { profileId, subject, body, imageUrl } = req.body;
+    const { status, payload } = await sendJourneyEmail(req.shopDomain, { profileId, subject, body, imageUrl });
     return res.status(status).json(payload);
   } catch (err) {
     console.error('[email] send-journey-email error:', err.message);
