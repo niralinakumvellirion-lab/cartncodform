@@ -532,7 +532,7 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
           ${imageUrl && imageUrl.startsWith('https://') ? `
           <div style="margin-bottom:20px">
             <img src="${imageUrl}"
-              alt="${subject.replace(/"/g, '&quot;')}"
+              alt="${subject.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}"
               style="display:block;width:100%;max-width:100%;
                 height:auto;border-radius:8px;border:0" />
           </div>` : ''}
