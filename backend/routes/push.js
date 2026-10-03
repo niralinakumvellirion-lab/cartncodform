@@ -530,6 +530,12 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
     return { status: 400, payload: { error: 'No email address' } };
   }
 
+  // TEMP DEBUG
+  const _imgTag = imageUrl && imageUrl.startsWith('https://')
+    ? `<img src="${imageUrl}" alt="${subject.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}" style="display:block;width:100%;max-width:100%;height:auto;border-radius:8px;border:0" />`
+    : null;
+  console.log('[email-img] img tag:', _imgTag || '(omitted — condition false)');
+  // END TEMP DEBUG
   const { data, error } = await resend.emails.send({
     from: 'ShopiReachBoost AI <notifications@shopireachboost.com>',
     to: email,
