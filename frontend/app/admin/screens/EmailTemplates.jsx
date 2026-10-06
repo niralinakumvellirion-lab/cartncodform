@@ -149,7 +149,33 @@ export default function EmailTemplatesScreen() {
   const [productTitle, setProductTitle]   = useState('');
   const [genConfirm, setGenConfirm]       = useState(false);
 
+  const [broadcastSegment, setBroadcastSegment]           = useState('everyone');
+  const [broadcastCount, setBroadcastCount]               = useState(null);
+  const [broadcastCountLoading, setBroadcastCountLoading] = useState(false);
+  const [broadcastConfirm, setBroadcastConfirm]           = useState(false);
+  const [broadcasting, setBroadcasting]                   = useState(false);
+  const [broadcastResult, setBroadcastResult]             = useState(null);
+
   useEffect(() => { loadTemplates(); }, []);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    let cancelled = false;
+    async function doFetch() {
+      setBroadcastCountLoading(true);
+      setBroadcastCount(null);
+      try {
+        const data = await apiGet(`/api/email-templates/count?segment=${encodeURIComponent(broadcastSegment)}`);
+        if (!cancelled) setBroadcastCount(data.count);
+      } catch {
+        if (!cancelled) setBroadcastCount(null);
+      } finally {
+        if (!cancelled) setBroadcastCountLoading(false);
+      }
+    }
+    doFetch();
+    return () => { cancelled = true; };
+  }, [selectedId, broadcastSegment]);
 
   async function loadTemplates() {
     setLoading(true);
@@ -186,6 +212,11 @@ export default function EmailTemplatesScreen() {
     setGenError('');
     setGenNotice('');
     setGenConfirm(false);
+    setBroadcastSegment('everyone');
+    setBroadcastCount(null);
+    setBroadcastCountLoading(false);
+    setBroadcastConfirm(false);
+    setBroadcastResult(null);
     // Auto-load preview for existing template
     fetchPreview(t._id);
   }
@@ -204,6 +235,11 @@ export default function EmailTemplatesScreen() {
     setGenError('');
     setGenNotice('');
     setGenConfirm(false);
+    setBroadcastSegment('everyone');
+    setBroadcastCount(null);
+    setBroadcastCountLoading(false);
+    setBroadcastConfirm(false);
+    setBroadcastResult(null);
   }
 
   function patch(field) {
@@ -305,6 +341,21 @@ export default function EmailTemplatesScreen() {
     }
   }
 
+  async function sendBroadcast() {
+    if (!selectedId || broadcasting) return;
+    setBroadcasting(true);
+    setBroadcastConfirm(false);
+    setBroadcastResult(null);
+    try {
+      const data = await apiSend(`/api/email-templates/${selectedId}/broadcast`, 'POST', { segment: broadcastSegment });
+      setBroadcastResult({ ok: true, sent: data.sent, failed: data.failed });
+    } catch (e) {
+      setBroadcastResult({ ok: false, error: e.message });
+    } finally {
+      setBroadcasting(false);
+    }
+  }
+
   async function sendEmail() {
     const recipient = sendRecipient.trim();
     if (!selectedId || !recipient || sending) return;
@@ -329,6 +380,14 @@ export default function EmailTemplatesScreen() {
     { key: 'special_offer', label: 'Special offer' },
     { key: 'festival', label: 'Festival' },
     { key: 'normal', label: 'Normal' },
+  ];
+
+  const SEGMENTS = [
+    { key: 'everyone',       label: 'All with email' },
+    { key: 'email_captured', label: 'Email subscribers' },
+    { key: 'has_cart',       label: 'Abandoned cart' },
+    { key: 'bought_once',    label: 'One-time buyers' },
+    { key: 'going_quiet',    label: 'Re-engage (quiet)' },
   ];
 
   const filtered = filter === 'all' ? templates : templates.filter(t => t.type === filter);
@@ -597,6 +656,86 @@ export default function EmailTemplatesScreen() {
                 {sendResult && !sendResult.ok && (
                   <p style={{ fontSize: 13, color: '#dc2626', margin: '10px 0 0' }}>
                     {sendResult.error}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Broadcast card — only for saved templates */}
+            {selectedId && (
+              <div style={{ ...DS.card, marginTop: 16 }}>
+                <p style={DS.sectionLabel}>Send to customers</p>
+                <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 14px' }}>
+                  Send this template to a segment of your customers.
+                </p>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label style={DS.label}>Segment</label>
+                  <select
+                    style={{ ...DS.input, cursor: 'pointer' }}
+                    value={broadcastSegment}
+                    onChange={e => {
+                      setBroadcastSegment(e.target.value);
+                      setBroadcastConfirm(false);
+                      setBroadcastResult(null);
+                    }}
+                  >
+                    {SEGMENTS.map(s => (
+                      <option key={s.key} value={s.key}>{s.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {broadcastCountLoading && (
+                  <p style={{ fontSize: 13, color: '#9ca3af', margin: '0 0 12px' }}>Counting…</p>
+                )}
+                {!broadcastCountLoading && broadcastCount === 0 && (
+                  <p style={{ fontSize: 13, color: '#9ca3af', margin: '0 0 12px' }}>No customers match this segment.</p>
+                )}
+                {!broadcastCountLoading && broadcastCount !== null && broadcastCount > 0 && broadcastCount <= 90 && (
+                  <p style={{ fontSize: 13, color: '#374151', margin: '0 0 12px' }}>{broadcastCount} customers will receive this.</p>
+                )}
+                {!broadcastCountLoading && broadcastCount !== null && broadcastCount > 90 && (
+                  <p style={{ fontSize: 12, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '6px 10px', margin: '0 0 12px' }}>
+                    Free plan sends up to ~90 at once. {broadcastCount} match — narrow the segment.
+                  </p>
+                )}
+
+                {!broadcastConfirm && (
+                  <button
+                    style={DS.btnPrimary}
+                    disabled={broadcasting || broadcastCountLoading || broadcastCount === null || broadcastCount === 0 || broadcastCount > 90}
+                    onClick={() => setBroadcastConfirm(true)}
+                  >
+                    Send to {broadcastCount ?? '…'} customers
+                  </button>
+                )}
+                {broadcastConfirm && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13, color: '#374151' }}>
+                      Send to {broadcastCount} customers? This can&apos;t be undone.
+                    </span>
+                    <button
+                      style={DS.btnPrimary}
+                      onClick={sendBroadcast}
+                      disabled={broadcasting}
+                    >
+                      {broadcasting ? `Sending to ${broadcastCount}…` : 'Confirm send'}
+                    </button>
+                    <button style={DS.btnSecondary} onClick={() => setBroadcastConfirm(false)}>
+                      Cancel
+                    </button>
+                  </div>
+                )}
+
+                {broadcastResult?.ok && (
+                  <p style={{ fontSize: 13, color: '#16a34a', margin: '12px 0 0' }}>
+                    Sent to {broadcastResult.sent}{broadcastResult.failed > 0 ? `, failed ${broadcastResult.failed}` : ''}.
+                  </p>
+                )}
+                {broadcastResult && !broadcastResult.ok && (
+                  <p style={{ fontSize: 13, color: '#dc2626', margin: '12px 0 0' }}>
+                    {broadcastResult.error}
                   </p>
                 )}
               </div>

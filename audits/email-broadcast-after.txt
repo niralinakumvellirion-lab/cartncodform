@@ -1,0 +1,106 @@
+SELF-AUDIT: email template broadcast implementation
+Date: 2026-10-06
+Changed files: backend/routes/emailTemplates.js, backend/__tests__/emailTemplates.test.js,
+               frontend/app/admin/screens/EmailTemplates.jsx
+
+─────────────────────────────────────────────────────────────────────────────
+BACKEND
+─────────────────────────────────────────────────────────────────────────────
+
+VALID_SEGMENTS / BROADCAST_CAP / buildEmailSegmentQuery
+  Added after VALID_TYPES/EDITABLE_FIELDS. Five segments: everyone, email_captured,
+  has_cart, bought_once, going_quiet. Mirror conditions from profiles.js exactly
+  (cartTokens.0 exists + orders.count=0 for has_cart; lastSeenAt < 21-day Date
+  computed at call time for going_quiet). Always adds shopDomain + suppressed guard
+  + $or email-presence guard. Cap = 90 (leaves ~10/day for automated sends).
+
+GET /count declared immediately before GET /:id/preview:
+  Position: after POST /generate, before GET /:id/preview and GET /:id.
+  Same ordering constraint as /generate — avoids "count" matching :id param.
+  Returns { count } from Profile.countDocuments (no profile docs fetched).
+
+POST /:id/broadcast declared immediately before module.exports:
+  - IDOR check: template.shopDomain === req.shopDomain
+  - Counts FIRST; 400 if 0 or > BROADCAST_CAP
+  - Fetches profiles with .select('identifiers channels').lean()
+  - Builds HTML once, reuses for all sends (no per-recipient rebuild)
+  - Sequential loop; each send in own try/catch; failure tallied, not thrown
+  - logBroadcastSend called once after loop with full recipients array
+    (channel='email', signalType='email_broadcast', token=email address)
+  - Returns { sent, failed, total: profiles.length }
+
+UNSUBSCRIBE_HEADERS: added to every broadcast send call (already in scope
+  from the deliverability-improvement import — no new import needed).
+
+Import added: logBroadcastSend from sendLogService.
+
+─────────────────────────────────────────────────────────────────────────────
+TESTS (emailTemplates.test.js)
+─────────────────────────────────────────────────────────────────────────────
+
+Profile mock expanded: added countDocuments and find (was findOne only).
+New mock: mockLogBroadcastSend for sendLogService.logBroadcastSend.
+mockLogBroadcastSend.mockResolvedValue(undefined) in broadcast describe's
+  beforeEach — does not interfere with outer beforeEach.
+
+GET /count (4 tests):
+  - Route ordering: /count index < /:id index in router.stack
+  - Happy path: returns { count: N }
+  - Defaults segment to 'everyone' when absent
+  - 400 for invalid segment (e.g. 'push_subscribed')
+
+POST /:id/broadcast (6 tests):
+  - Happy path: 2 profiles, both succeed → { sent:2, failed:0, total:2 }
+  - 0-match rejection: 400 "No customers match"
+  - Cap rejection: count=150 → 400 with recipientCount:150 in body
+  - One-failure-continues: mockSend returns error on second call →
+    { sent:1, failed:1 }, mockSend called twice
+  - Per-recipient logging: logBroadcastSend called once with channel='email',
+    signalType='email_broadcast', token matching the sent address
+  - IDOR: template.shopDomain mismatch → 404
+  - Invalid segment → 400
+
+Total: 43 tests in emailTemplates.test.js (was 31), 426 total across all
+  suites. All pass.
+
+─────────────────────────────────────────────────────────────────────────────
+FRONTEND (EmailTemplates.jsx)
+─────────────────────────────────────────────────────────────────────────────
+
+New state (6 vars): broadcastSegment, broadcastCount, broadcastCountLoading,
+  broadcastConfirm, broadcasting, broadcastResult.
+
+Reset in both selectTemplate and startNew: segment reset to 'everyone',
+  count/loading/confirm/result cleared.
+
+useEffect([selectedId, broadcastSegment]): auto-fetches count on template
+  selection and segment change. cancelled flag prevents stale setState after
+  cleanup (avoids race if user switches segment quickly).
+
+sendBroadcast(): POST /:id/broadcast, sets broadcastResult on success/error.
+
+SEGMENTS constant (inside component, near FILTER_TABS): 5 options with
+  friendly labels.
+
+Broadcast card (after Send test card, only when selectedId is set):
+  - Segment <select> — onChange clears confirm + result, triggers useEffect
+  - Count line: "N customers will receive this." or "No customers match." or
+    amber warning if N > 90 (free tier notice)
+  - "Send to N customers" primary button — disabled when count=null/0/> 90
+    or loading/sending
+  - Inline confirm: "Send to N customers? This can't be undone." + Confirm/Cancel
+  - Sending state: button label changes to "Sending to N…"
+  - Result: green success ("Sent to X, failed Y") or red error
+
+Apostrophe in "This can't be undone." used as &apos; (JSX best practice
+  to avoid React unescaped-entity warning).
+
+Build output: /admin/email-templates compiled at 6.1 kB, no errors.
+
+─────────────────────────────────────────────────────────────────────────────
+DEVIATIONS FROM SPEC
+─────────────────────────────────────────────────────────────────────────────
+
+None. All 6 spec items (SEGMENTS constant, GET /count, POST /:id/broadcast,
+  logBroadcastSend, sequential sends, broadcast card) implemented as
+  specified in the audit.

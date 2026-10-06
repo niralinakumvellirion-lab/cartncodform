@@ -1,0 +1,220 @@
+AUDIT: Email Template broadcast (send to segment)
+Date: 2026-10-06
+Files read:
+  backend/routes/emailTemplates.js   — current /:id/send (single profile)
+  backend/routes/push.js             — sendPushToCustomers + logBroadcastSend call pattern
+  backend/services/sendLogService.js — logBroadcastSend shape
+  backend/models/Profile.js          — Profile schema, available fields for segmentation
+  backend/routes/profiles.js         — existing filter → MongoDB query translations
+
+─────────────────────────────────────────────────────────────────────────────
+1. SMALLEST APPROACH: POST /:id/broadcast { segment }
+─────────────────────────────────────────────────────────────────────────────
+
+SHAPE:
+  POST /api/email-templates/:id/broadcast
+  Body: { segment: string }       — one of the values in §2
+  Response: { sent, failed, total, skipped }
+
+FLOW:
+  1. requireAuth (same as /:id/send; no requireStoreOwner — no path param)
+  2. Load template (with IDOR check: template.shopDomain === req.shopDomain)
+  3. Build MongoDB query from `segment` (see §2), always adding:
+       { shopDomain: req.shopDomain, suppressed: { $ne: true } }
+     plus the email presence guard:
+       $or: [{ 'channels.email.address': { $exists: true } },
+             { 'identifiers.emails.0': { $exists: true } }]
+  4. Count matching profiles BEFORE fetching — return 400 if 0 (nothing to send).
+  5. Enforce daily cap (see §3): return 400 { error, recipientCount } if count > 90.
+  6. Fetch profiles with .select('identifiers channels').lean() — no full docs needed.
+  7. Sequential loop: await resend.emails.send() for each profile.
+     Collect { profileId, email, success, error } per send.
+  8. logBroadcastSend (see §4) for the whole batch.
+  9. Return { sent, failed, total, skipped }.
+
+Why sequential not parallel: naturally throttles to Resend's 10 req/s rate
+limit since each send call takes 100-300ms round-trip; no explicit sleep needed.
+The broadcast is a background-style operation for the merchant — 10-15 s for
+90 sends is fine.
+
+PLACEMENT IN ROUTER: must be declared before /:id/send (otherwise Express
+  cannot differentiate). Current /:id/send is a POST at '/:id/send'; the new
+  route is POST '/:id/broadcast' — these are separate literal paths on an
+  Express router (the :id param absorbs the first segment; 'broadcast' vs.
+  'send' are the second segment literals). No ordering conflict.
+
+─────────────────────────────────────────────────────────────────────────────
+2. AVAILABLE SEGMENTS (from profiles.js filter values)
+─────────────────────────────────────────────────────────────────────────────
+
+Existing filters in GET /api/profiles, directly reusable:
+
+  Segment key         Query added (on top of has-email + not-suppressed)
+  ─────────────────────────────────────────────────────────────────────
+  everyone            — no extra filter; just has-email + not-suppressed
+  email_captured      — channels.email.capturedAt: { $exists: true }
+                        (tighter than "everyone": only profiles who gave
+                        their email voluntarily via form/COD/checkout/popup)
+  has_cart            — identifiers.cartTokens.0 exists + orders.count = 0
+                        (browsed but never bought; re-engagement target)
+  bought_once         — orders.count = 1 (one-time buyers)
+  repeat_buyer        — orders.count >= 2 (loyal customers)
+  going_quiet         — lastSeenAt < 21 days ago (re-engagement)
+
+  NOT useful for email broadcast (excluded from segment picker):
+  push_subscribed     — push opt-in has no relation to email availability;
+                        these profiles may or may not have email on file
+
+RECOMMENDED SUBSET for V1 (5 options in the UI dropdown):
+  "All with email"      → everyone
+  "Email subscribers"   → email_captured
+  "Abandoned cart"      → has_cart
+  "One-time buyers"     → bought_once
+  "Re-engage (quiet)"   → going_quiet
+
+The broadcast endpoint translates the segment string to a query object using
+the same logic as profiles.js — do not duplicate; extract into a shared
+helper or inline the same conditions.
+
+─────────────────────────────────────────────────────────────────────────────
+3. RESEND FREE TIER LIMITS + HANDLING
+─────────────────────────────────────────────────────────────────────────────
+
+Resend free tier: 100 emails/day, 3,000/month.
+API rate limit:   10 requests/second.
+
+REALITY CHECK:
+  A small Indian D2C store with 200 email subscribers exhausts the free tier
+  daily cap (100) in a single broadcast. The monthly cap (3,000) is exhausted
+  in 30 broadcasts. This means broadcast is a paid-tier feature in practice,
+  but the V1 implementation should work on the free tier for stores with small
+  lists and communicate the cap clearly.
+
+APPROACH — warn + cap, NOT queue:
+
+  a. Before sending, count matching profiles.
+  b. If count > 90 (leave 10/day buffer for automated sends), return:
+       400 { error: 'Segment has N recipients; free tier allows ~90/day. Upgrade your Resend plan.', recipientCount: N }
+     The frontend shows this as a blocking warning with a "Resend pricing"
+     link. The merchant can narrow the segment or upgrade.
+  c. If count <= 90, proceed.
+
+WHY NOT QUEUE (yet):
+  - A poller-backed queue adds significant complexity (new model, poller logic,
+    rate-limiting state across pollers) for a feature the free tier can't use
+    at scale anyway.
+  - If/when Resend is upgraded, the queue becomes worthwhile. Add it then.
+
+WHY NOT SILENT SEND-AS-MANY-AS-POSSIBLE:
+  - Resend rejects over-limit sends with a 429; the partial-send result
+    (some got email, some didn't) is worse UX than a clear upfront cap.
+
+─────────────────────────────────────────────────────────────────────────────
+4. PER-RECIPIENT LOGGING
+─────────────────────────────────────────────────────────────────────────────
+
+YES — reuse logBroadcastSend, same pattern as the festival push broadcast.
+
+Current signature:
+  logBroadcastSend({ shopDomain, festivalQueueId, signalType, channel,
+                     title, body, imageUrl, recipients })
+  where recipients: [{ token, customerId, cartToken, sessionId, success, errorCode }]
+
+For email broadcast:
+  channel:    'email'
+  signalType: 'email_broadcast'  (new string value; ScheduledJob.signalType is
+                                   a plain String, not an enum — no schema change)
+  token:      the recipient's email address (used as subscriptionToken in the
+              ScheduledJob row — a string identifier for the send leg, same
+              role as FCM token for push)
+  customerId: profile.identifiers.customerId if set, else null
+  success:    true when Resend returned data (not error)
+  festivalQueueId: null (no FestivalQueue for email broadcasts)
+
+Effect: each recipient gets a ScheduledJob row with status='sent',
+outcome='delivered'|'failed', channel='email'. These rows will appear in
+the queue.js listing and in a customer's detail screen (Messages) — exactly
+the same as festival push logs. No schema changes needed.
+
+The only ScheduledJob field concern: `subscriptionToken` is used for FCM
+tokens in the push path. Using an email address there is a type mismatch
+conceptually but not technically (it's a plain String in the schema). It's
+the best available field without a schema change; acceptable for V1. If the
+Messages/Queue UI ever renders subscriptionToken for email rows, it would
+show the email address, which is actually useful.
+
+─────────────────────────────────────────────────────────────────────────────
+5. RATE LIMITING / THROTTLING
+─────────────────────────────────────────────────────────────────────────────
+
+Resend rate limit: 10 req/s.
+Sequential loop with `await`: each send call takes 100-300ms round-trip →
+naturally 3-10 sends/s — WITHIN the rate limit without explicit throttling.
+
+At the 90-send cap, the loop takes at most ~27 seconds (90 × 300ms worst
+case). This is fine: the broadcast endpoint should return synchronously (the
+HTTP response waits for all sends to complete), and 27 s is within the
+Express default socket timeout (~2 min on Render).
+
+NO SLEEP needed between sends. Sequential await is sufficient. This is also
+consistent with how Resend's own docs handle small-batch loops.
+
+If the daily cap is raised (Resend paid tier, e.g. 10,000/day), explicit
+rate-limiting becomes necessary. At that point add a batch approach:
+  - groups of 10 sends → await Promise.all → await 1 s delay between groups
+Not needed for V1.
+
+─────────────────────────────────────────────────────────────────────────────
+6. UI — "Send to segment" control
+─────────────────────────────────────────────────────────────────────────────
+
+PLACEMENT: a new "Broadcast" card below the "Send test" card in the editor
+  right panel. Only shown for saved templates (selectedId is set).
+
+MINIMUM VIABLE FLOW (3 steps, all inline — no new page):
+
+  Step 1: Segment picker
+    - Dropdown: "All with email / Email subscribers / Abandoned cart /
+      One-time buyers / Re-engage (quiet)"
+    - "Preview recipients" button → GET /api/email-templates/count?segment=...
+      (a simple COUNT-only route, returns { count } instantly)
+    - Shows: "X customers match this segment"
+    - If count = 0: "No customers match. Choose a different segment."
+    - If count > 90: amber warning "N recipients — exceeds Resend free tier
+      (~90/day). Narrow your segment or upgrade Resend."
+
+  Step 2: Confirm
+    - "Send to X customers" primary button (disabled if count > 90 or 0)
+    - Clicking shows inline confirm: "Send '[template name]' to N customers?"
+      with [Send now] [Cancel]
+
+  Step 3: Feedback
+    - Replaces the confirm UI with a progress indicator while POSTing.
+    - On success: green "Sent to N customers (M failed)."
+    - On error (>90 cap or Resend error): red inline error.
+
+NEW BACKEND ROUTE NEEDED:
+  GET /api/email-templates/count?segment=...
+  → { count }
+  Must be declared BEFORE /:id routes (same ordering constraint as /generate).
+  requireAuth, translates segment to query, counts matching profiles with email.
+  Returns in <100ms (index-covered count query).
+
+STATE TO ADD TO EmailTemplates.jsx:
+  broadcastSegment, broadcastCount, broadcastLoading, broadcastConfirm,
+  broadcasting, broadcastResult.
+
+─────────────────────────────────────────────────────────────────────────────
+IMPLEMENTATION ORDER (if this is phased)
+─────────────────────────────────────────────────────────────────────────────
+
+1. GET /api/email-templates/count (count endpoint) + test
+2. POST /:id/broadcast (send endpoint + logBroadcastSend) + tests
+3. Frontend Broadcast card (segment picker, count preview, confirm, result)
+
+Files touched: emailTemplates.js, EmailTemplates.jsx, and one new test block
+in emailTemplates.test.js. No model changes. No new npm packages. Reuses
+existing: buildEmailHtml, UNSUBSCRIBE_HEADERS, FROM, logBroadcastSend,
+sendLogService, ScheduledJob.
+
+>>> STOP. Audit only. No implementation.

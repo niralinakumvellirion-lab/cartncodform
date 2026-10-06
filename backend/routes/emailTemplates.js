@@ -9,12 +9,40 @@ const { requireAuth } = require('../middleware/requireOwner');
 const { FROM, UNSUBSCRIBE_HEADERS, buildEmailHtml } = require('../utils/email');
 const { normalizeImageUrl } = require('../utils/productImage');
 const { generateTemplateCopy } = require('../services/aiService');
+const { logBroadcastSend } = require('../services/sendLogService');
 
 // Same safe-fallback pattern as email.js: avoid crashing on load when key absent.
 const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
 
 const VALID_TYPES = ['special_offer', 'festival', 'normal'];
 const EDITABLE_FIELDS = ['name', 'type', 'subject', 'body', 'imageUrl', 'ctaLabel', 'ctaUrl'];
+
+const VALID_SEGMENTS = ['everyone', 'email_captured', 'has_cart', 'bought_once', 'going_quiet'];
+const BROADCAST_CAP = 90;
+
+// Translate a segment key into a MongoDB query (mirrors profiles.js filter logic).
+// Always includes shopDomain, suppressed guard, and email-presence guard.
+function buildEmailSegmentQuery(shopDomain, segment) {
+  const query = {
+    shopDomain,
+    suppressed: { $ne: true },
+    $or: [
+      { 'channels.email.address': { $exists: true, $ne: null } },
+      { 'identifiers.emails.0': { $exists: true } },
+    ],
+  };
+  if (segment === 'email_captured') {
+    query['channels.email.capturedAt'] = { $exists: true };
+  } else if (segment === 'has_cart') {
+    query['identifiers.cartTokens.0'] = { $exists: true };
+    query['orders.count'] = 0;
+  } else if (segment === 'bought_once') {
+    query['orders.count'] = 1;
+  } else if (segment === 'going_quiet') {
+    query['lastSeenAt'] = { $lt: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000) };
+  }
+  return query;
+}
 
 // Load store brand data; never block a send on a miss.
 // voice is included so the generate route can pass it to generateTemplateCopy.
@@ -77,6 +105,22 @@ router.post('/generate', requireAuth, async (req, res) => {
     console.warn('[email-templates] generate error:', err.message);
     const fb = GENERATE_FALLBACKS[(req.body && req.body.type)] || GENERATE_FALLBACKS.normal;
     return res.json({ ...fb, fallback: true });
+  }
+});
+
+// GET /api/email-templates/count?segment=... — must be before /:id routes
+router.get('/count', requireAuth, async (req, res) => {
+  try {
+    const segment = req.query.segment || 'everyone';
+    if (!VALID_SEGMENTS.includes(segment)) {
+      return res.status(400).json({ error: `segment must be one of ${VALID_SEGMENTS.join(', ')}` });
+    }
+    const query = buildEmailSegmentQuery(req.shopDomain, segment);
+    const count = await Profile.countDocuments(query);
+    return res.json({ count });
+  } catch (err) {
+    console.error('[email-templates] count error:', err.message);
+    return res.status(500).json({ error: 'Failed to count recipients' });
   }
 });
 
@@ -283,6 +327,99 @@ router.post('/:id/send', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[email-templates] send error:', err.message);
     return res.status(500).json({ error: 'Failed to send email' });
+  }
+});
+
+// POST /api/email-templates/:id/broadcast { segment }
+router.post('/:id/broadcast', requireAuth, async (req, res) => {
+  try {
+    const { segment = 'everyone' } = req.body;
+    if (!VALID_SEGMENTS.includes(segment)) {
+      return res.status(400).json({ error: `segment must be one of ${VALID_SEGMENTS.join(', ')}` });
+    }
+
+    const template = await EmailTemplate.findById(req.params.id);
+    if (!template || template.shopDomain !== req.shopDomain) {
+      return res.status(404).json({ error: 'Template not found' });
+    }
+
+    const query = buildEmailSegmentQuery(req.shopDomain, segment);
+    const total = await Profile.countDocuments(query);
+
+    if (total === 0) {
+      return res.status(400).json({ error: 'No customers match this segment' });
+    }
+    if (total > BROADCAST_CAP) {
+      return res.status(400).json({
+        error: `Segment has ${total} recipients; Resend free tier allows ~${BROADCAST_CAP}/day. Narrow your segment or upgrade Resend.`,
+        recipientCount: total,
+      });
+    }
+
+    const profiles = await Profile.find(query).select('identifiers channels').lean();
+    const { storeName, logoUrl, primaryColor } = await loadBrandData(req.shopDomain);
+
+    const html = buildEmailHtml({
+      subject: template.subject,
+      bodyHtml: template.body.replace(/\n/g, '<br>'),
+      imageUrl: normalizeImageUrl(template.imageUrl),
+      ctaLabel: template.ctaLabel,
+      ctaUrl: template.ctaUrl,
+      storeName,
+      logoUrl,
+      primaryColor,
+    });
+
+    let sent = 0;
+    let failed = 0;
+    const logRecipients = [];
+
+    for (const profile of profiles) {
+      const email = profile.channels?.email?.address || profile.identifiers?.emails?.[0];
+      if (!email) {
+        failed++;
+        continue;
+      }
+      try {
+        const { data, error } = await resend.emails.send({
+          from: FROM,
+          to: email,
+          subject: template.subject,
+          html,
+          headers: UNSUBSCRIBE_HEADERS,
+        });
+        const success = !error;
+        if (!success) console.error('[email-templates] broadcast send error:', error.message);
+        logRecipients.push({
+          token: email,
+          customerId: profile.identifiers?.customerId || null,
+          success,
+          errorCode: success ? null : error.message,
+        });
+        if (success) sent++; else failed++;
+      } catch (err) {
+        console.error('[email-templates] broadcast send throw:', err.message);
+        logRecipients.push({ token: email, customerId: profile.identifiers?.customerId || null, success: false, errorCode: err.message });
+        failed++;
+      }
+    }
+
+    await logBroadcastSend({
+      shopDomain: req.shopDomain,
+      festivalQueueId: null,
+      signalType: 'email_broadcast',
+      channel: 'email',
+      title: template.subject,
+      body: template.body,
+      imageUrl: template.imageUrl || '',
+      recipients: logRecipients,
+    });
+
+    console.log(`[email-templates] broadcast ${String(template._id)}: sent=${sent} failed=${failed}`);
+    return res.json({ sent, failed, total: profiles.length });
+  } catch (err) {
+    console.error('[email-templates] broadcast error:', err.message);
+    return res.status(500).json({ error: 'Broadcast failed' });
   }
 });
 

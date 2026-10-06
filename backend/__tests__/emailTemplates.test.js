@@ -14,6 +14,8 @@ jest.mock('../models/EmailTemplate', () => ({
 
 jest.mock('../models/Profile', () => ({
   findOne: jest.fn(),
+  countDocuments: jest.fn(),
+  find: jest.fn(),
 }));
 
 jest.mock('../models/Store', () => ({
@@ -32,6 +34,11 @@ jest.mock('../utils/productImage', () => ({
 const mockGenerateTemplateCopy = jest.fn();
 jest.mock('../services/aiService', () => ({
   generateTemplateCopy: (...args) => mockGenerateTemplateCopy(...args),
+}));
+
+const mockLogBroadcastSend = jest.fn();
+jest.mock('../services/sendLogService', () => ({
+  logBroadcastSend: (...args) => mockLogBroadcastSend(...args),
 }));
 
 const mockBuildEmailHtml = jest.fn().mockReturnValue('<html>rendered</html>');
@@ -488,5 +495,189 @@ describe('POST /generate', () => {
     expect(mockGenerateTemplateCopy).toHaveBeenCalledWith(
       SHOP, 'Demo Store', 'normal', null, expect.anything()
     );
+  });
+});
+
+// ── GET /count ────────────────────────────────────────────────────────────────
+
+describe('GET /count', () => {
+  const Profile = require('../models/Profile');
+  const count = handlerFor(emailTemplatesRouter, '/count', 'get');
+
+  test('route ordering: /count is registered before /:id', () => {
+    const stack = emailTemplatesRouter.stack.filter(l => l.route);
+    const countIdx = stack.findIndex(l => l.route.path === '/count');
+    const idIdx = stack.findIndex(l => l.route.path === '/:id');
+    expect(countIdx).toBeGreaterThanOrEqual(0);
+    expect(idIdx).toBeGreaterThanOrEqual(0);
+    expect(countIdx).toBeLessThan(idIdx);
+  });
+
+  test('happy path: returns count for the authenticated shop', async () => {
+    Profile.countDocuments.mockResolvedValue(12);
+    const res = mockRes();
+    await count({ shopDomain: SHOP, query: { segment: 'email_captured' } }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ count: 12 });
+    expect(Profile.countDocuments).toHaveBeenCalledWith(
+      expect.objectContaining({ shopDomain: SHOP })
+    );
+  });
+
+  test('defaults segment to "everyone" when not provided', async () => {
+    Profile.countDocuments.mockResolvedValue(5);
+    const res = mockRes();
+    await count({ shopDomain: SHOP, query: {} }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.count).toBe(5);
+  });
+
+  test('400 for invalid segment', async () => {
+    const res = mockRes();
+    await count({ shopDomain: SHOP, query: { segment: 'push_subscribed' } }, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/segment must be one of/);
+    expect(Profile.countDocuments).not.toHaveBeenCalled();
+  });
+});
+
+// ── POST /:id/broadcast ───────────────────────────────────────────────────────
+
+describe('POST /:id/broadcast', () => {
+  const Profile = require('../models/Profile');
+  const broadcast = handlerFor(emailTemplatesRouter, '/:id/broadcast', 'post');
+
+  function makeProfileLean(email = 'customer@example.com') {
+    return {
+      _id: 'prof1',
+      identifiers: { emails: [email], customerId: null },
+      channels: {},
+    };
+  }
+
+  beforeEach(() => {
+    mockLogBroadcastSend.mockResolvedValue(undefined);
+    mockSend.mockResolvedValue({ data: { id: 'em1' }, error: null });
+  });
+
+  test('happy path: sends to all recipients, returns sent/failed/total', async () => {
+    EmailTemplate.findById.mockResolvedValue(makeTemplate({ subject: 'Sale', body: 'Buy now' }));
+    Profile.countDocuments.mockResolvedValue(2);
+    Profile.find.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([
+          makeProfileLean('a@ex.com'),
+          makeProfileLean('b@ex.com'),
+        ]),
+      }),
+    });
+
+    const res = mockRes();
+    await broadcast({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { segment: 'everyone' } }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ sent: 2, failed: 0, total: 2 });
+    expect(mockSend).toHaveBeenCalledTimes(2);
+    expect(mockSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: 'notifications@shopireachboost.com',
+        subject: 'Sale',
+        headers: expect.objectContaining({ 'List-Unsubscribe': expect.any(String) }),
+      })
+    );
+  });
+
+  test('400 when segment has 0 matches', async () => {
+    EmailTemplate.findById.mockResolvedValue(makeTemplate());
+    Profile.countDocuments.mockResolvedValue(0);
+
+    const res = mockRes();
+    await broadcast({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { segment: 'has_cart' } }, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/No customers match/);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  test('400 when segment exceeds BROADCAST_CAP (> 90)', async () => {
+    EmailTemplate.findById.mockResolvedValue(makeTemplate());
+    Profile.countDocuments.mockResolvedValue(150);
+
+    const res = mockRes();
+    await broadcast({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { segment: 'everyone' } }, res);
+
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/150 recipients/);
+    expect(res.body.recipientCount).toBe(150);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  test('one send failure does not abort — tallied in failed count', async () => {
+    EmailTemplate.findById.mockResolvedValue(makeTemplate());
+    Profile.countDocuments.mockResolvedValue(2);
+    Profile.find.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([
+          makeProfileLean('ok@ex.com'),
+          makeProfileLean('fail@ex.com'),
+        ]),
+      }),
+    });
+    // First send succeeds, second fails
+    mockSend
+      .mockResolvedValueOnce({ data: { id: 'em1' }, error: null })
+      .mockResolvedValueOnce({ data: null, error: { message: 'Rate limited' } });
+
+    const res = mockRes();
+    await broadcast({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { segment: 'everyone' } }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.sent).toBe(1);
+    expect(res.body.failed).toBe(1);
+    expect(mockSend).toHaveBeenCalledTimes(2);
+  });
+
+  test('per-recipient logging: logBroadcastSend called with channel=email and signalType=email_broadcast', async () => {
+    EmailTemplate.findById.mockResolvedValue(makeTemplate({ subject: 'Hi', body: 'Body' }));
+    Profile.countDocuments.mockResolvedValue(1);
+    Profile.find.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([makeProfileLean('log@ex.com')]),
+      }),
+    });
+
+    const res = mockRes();
+    await broadcast({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { segment: 'everyone' } }, res);
+
+    expect(mockLogBroadcastSend).toHaveBeenCalledTimes(1);
+    expect(mockLogBroadcastSend).toHaveBeenCalledWith(
+      expect.objectContaining({
+        shopDomain: SHOP,
+        channel: 'email',
+        signalType: 'email_broadcast',
+        title: 'Hi',
+        recipients: expect.arrayContaining([
+          expect.objectContaining({ token: 'log@ex.com', success: true }),
+        ]),
+      })
+    );
+  });
+
+  test('IDOR: 404 when template belongs to another shop', async () => {
+    EmailTemplate.findById.mockResolvedValue(makeTemplate({ shopDomain: OTHER_SHOP }));
+
+    const res = mockRes();
+    await broadcast({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { segment: 'everyone' } }, res);
+
+    expect(res.statusCode).toBe(404);
+    expect(res.body.error).toBe('Template not found');
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  test('400 for invalid segment', async () => {
+    const res = mockRes();
+    await broadcast({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { segment: 'bad_segment' } }, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/segment must be one of/);
   });
 });
