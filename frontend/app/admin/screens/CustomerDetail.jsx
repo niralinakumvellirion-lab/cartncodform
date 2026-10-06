@@ -1070,12 +1070,6 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
     groupedTimeline[groupedTimeline.length - 1].items.push(item);
   }
 
-  // Top product
-  const topProd = customer.topProducts?.[0];
-  const topProdLastEvent = topProd
-    ? events.filter(e => e.type === 'product_view').sort((a, b) => new Date(b.ts) - new Date(a.ts))[0]?.ts
-    : null;
-
   const sendCard = (!hasPush && !hasEmail) ? (
     <div style={{ ...DS.card, padding: 16, marginBottom: 0, textAlign: 'center' }}>
       <div style={{ fontSize: 13, color: '#9ca3af' }}>
@@ -1436,25 +1430,32 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
 
         {/* RIGHT: What they want + Send a message */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-          {topProd && (
+          {customer.topProducts?.length > 0 && (
             <div style={{ ...DS.card, padding: 16, marginBottom: 0 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#111827',
                             textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
                 What they want
               </div>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                <ProductThumbnail imageUrl={topProd.imageUrl} title={topProd.title} size={64} radius={10} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 4,
-                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {topProd.title}
-                  </div>
-                  <div style={{ fontSize: 11, color: '#9ca3af' }}>
-                    Viewed {topProd.count} time{topProd.count !== 1 ? 's' : ''}
-                    {topProdLastEvent ? ` · ${formatCDDate(topProdLastEvent)}` : ''}
+              {customer.topProducts.map((p, i) => (
+                <div key={p.productId}>
+                  {i > 0 && (
+                    <div style={{ borderTop: '1px solid #f3f4f6', margin: '10px 0' }} />
+                  )}
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                    <ProductThumbnail imageUrl={p.imageUrl} title={p.title} size={64} radius={10} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 4,
+                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {p.title}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#9ca3af' }}>
+                        Viewed {p.count} time{p.count !== 1 ? 's' : ''}
+                        {p.lastSeen ? ` · ${formatCDDate(p.lastSeen)}` : ''}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
+              ))}
             </div>
           )}
           {sendCard}
