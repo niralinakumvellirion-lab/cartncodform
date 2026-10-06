@@ -238,6 +238,11 @@ const storeSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+
+  // --- Phase T1: brand data from Shopify Admin API, fetched at install ---
+  shopName: { type: String },
+  logoUrl: { type: String },
+  primaryColor: { type: String },
 });
 
 module.exports = mongoose.model('Store', storeSchema);

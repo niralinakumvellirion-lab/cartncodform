@@ -1,0 +1,164 @@
+AUDIT: /send-journey and /send-journey-email — image dropped
+Date: 2026-10-03
+Files read:
+  backend/routes/push.js              (sendJourneyPush lines 370–415,
+                                       sendJourneyEmail lines 494–565)
+  frontend/app/admin/screens/CustomerDetail.jsx  (grep — send-journey,
+                                       topProduct, imageUrl, sendJourneyPush)
+
+─────────────────────────────────────────────────────────────────────────────
+1. DOES /send-journey ACCEPT OR PASS ANY IMAGE TODAY?
+─────────────────────────────────────────────────────────────────────────────
+No. Hardcoded null at two levels:
+
+BACKEND — sendJourneyPush (push.js:382–405):
+  async function sendJourneyPush(shopDomain, { profileId, title, body, url })
+  // ↑ no imageUrl in the destructured parameter
+
+  const result = await sendPushToCustomers(
+    shop, title, body, url, null, false, cartToken
+  //                         ^^^^
+  //                         imageUrl hardcoded null — 5th positional arg
+  );
+
+The route handler (push.js:409):
+  const { profileId, title, body, url } = req.body;
+  // imageUrl not extracted from the request body at all
+
+FRONTEND — NotificationComposer.send() (CustomerDetail.jsx:413–424):
+  await apiSend('/api/push/send-journey', 'POST', {
+    profileId: customer.profile._id,
+    title,
+    body,
+    url: customer.topProducts?.[0]
+      ? `https://${shop}/products/${customer.topProducts[0].productId}`
+      : `https://${shop}`,
+    // imageUrl not included — productImage variable exists but is never sent
+  });
+
+─────────────────────────────────────────────────────────────────────────────
+2. IS THE PRODUCT imageUrl AVAILABLE IN THE FRONTEND AT SEND TIME?
+─────────────────────────────────────────────────────────────────────────────
+Yes — it is already a component-level variable derived from the same customer
+prop the rest of the composer reads:
+
+  const productImage = customer?.topProducts?.[0]?.imageUrl || null;
+  // CustomerDetail.jsx:397 (NotificationComposer) and :640 (EmailComposer)
+
+`productImage` is used in the UI only — passed to <ProductThumbnail> to show
+the small preview alongside the suggestion cards (lines 541, 756). It is
+NOT included in either apiSend call.
+
+Source of topProducts[].imageUrl: the customer detail endpoint populates
+topProducts from Profile.topProducts, which is written by the storefront
+tracking webhook/event pipeline. Shopify product view events carry the
+product's Shopify CDN image URL.
+
+─────────────────────────────────────────────────────────────────────────────
+3. IS topProducts[].imageUrl AN ABSOLUTE HTTPS URL — NO CLOUDINARY NEEDED?
+─────────────────────────────────────────────────────────────────────────────
+Yes. Shopify product images are served from cdn.shopify.com:
+  https://cdn.shopify.com/s/files/1/0123/4567/products/my-product.jpg
+
+These are:
+  - Absolute HTTPS URLs — FCM can fetch them directly.
+  - NOT data: URIs — no Cloudinary upload step needed.
+  - Publicly accessible — no auth required.
+  - Well under typical image-size limits.
+
+The Cloudinary upload step in /send-store and processFestivalQueue exists
+only because the admin editor's ImageUploadPair component produces a base64
+data: URI (FileReader-based). Journey sends use product images, not editor
+uploads, so no conversion is needed — the URL can be passed straight through
+to sendPushToCustomers.
+
+─────────────────────────────────────────────────────────────────────────────
+4. SMALLEST CHANGE TO MAKE /send-journey INCLUDE THE PRODUCT IMAGE
+─────────────────────────────────────────────────────────────────────────────
+Two files, four lines total. No new helpers, no Cloudinary logic.
+
+FRONTEND — CustomerDetail.jsx, NotificationComposer.send():
+  Change:
+    await apiSend('/api/push/send-journey', 'POST', {
+      profileId: customer.profile._id,
+      title,
+      body,
+      url: ...,
+    });
+
+  To:
+    await apiSend('/api/push/send-journey', 'POST', {
+      profileId: customer.profile._id,
+      title,
+      body,
+      url: ...,
+      imageUrl: productImage || undefined,   // ADD — undefined omits the field
+    });
+
+BACKEND — push.js, sendJourneyPush():
+  Change:
+    async function sendJourneyPush(shopDomain, { profileId, title, body, url })
+  To:
+    async function sendJourneyPush(shopDomain, { profileId, title, body, url, imageUrl })
+
+  Change:
+    const result = await sendPushToCustomers(
+      shop, title, body, url, null, false, cartToken
+    );
+  To:
+    const result = await sendPushToCustomers(
+      shop, title, body, url, imageUrl || null, false, cartToken
+    );
+
+The route handler itself needs no change — req.body.imageUrl flows through
+the { ...args } spread into sendJourneyPush automatically once it's in the
+destructured parameter.
+
+Wait — the route calls:
+  const { profileId, title, body, url } = req.body;
+  sendJourneyPush(req.shopDomain, { profileId, title, body, url });
+
+req.body.imageUrl is NOT passed through this destructure. The route handler
+also needs to be updated:
+  const { profileId, title, body, url, imageUrl } = req.body;
+  sendJourneyPush(req.shopDomain, { profileId, title, body, url, imageUrl });
+
+So the full diff: 3 backend lines + 1 frontend line.
+
+sendPushToCustomers already handles the imageUrl for both webpush.notification.image
+and data.imageUrl — no changes needed in pushNotification.js.
+
+─────────────────────────────────────────────────────────────────────────────
+5. DOES /send-journey-email ALSO DROP THE IMAGE?
+─────────────────────────────────────────────────────────────────────────────
+Yes — same pattern, different dimension.
+
+FRONTEND — EmailComposer.send() (CustomerDetail.jsx:668–676):
+  await apiSend('/api/push/send-journey-email', 'POST', {
+    profileId: customer.profile._id,
+    subject,
+    body,
+    // no imageUrl
+  });
+
+BACKEND — sendJourneyEmail (push.js:506–554):
+  HTML template:
+    ${body.replace(/\n/g, '<br>')}
+  No <img> tag, no image variable.
+
+So the product image is also absent from the email notification. The email
+send-journey-email is structurally simpler to fix (just add an <img> block in
+the HTML template), but requires a design decision about placement and alt text
+that the push fix doesn't need. As stated, push first.
+
+─────────────────────────────────────────────────────────────────────────────
+ROOT CAUSE SUMMARY
+─────────────────────────────────────────────────────────────────────────────
+/send-journey was built without an imageUrl parameter. The variable
+`productImage` (= topProducts[0].imageUrl) is already computed in the
+NotificationComposer component and used for the card thumbnail, but was never
+wired into the API call. The backend function has the matching null slot in
+its sendPushToCustomers call. Because topProducts images are Shopify CDN
+HTTPS URLs, no Cloudinary step is needed — they can be forwarded directly.
+
+>>> STOP. Audit only. No implementation.

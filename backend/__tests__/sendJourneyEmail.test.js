@@ -11,6 +11,10 @@ jest.mock('../models/Profile', () => ({
   findOne: jest.fn(),
 }));
 
+jest.mock('../models/Store', () => ({
+  findOne: jest.fn(),
+}));
+
 const mockSend = jest.fn();
 jest.mock('resend', () => ({
   Resend: jest.fn().mockImplementation(() => ({
@@ -19,12 +23,17 @@ jest.mock('resend', () => ({
 }));
 
 const Profile = require('../models/Profile');
+const Store = require('../models/Store');
 const { sendJourneyEmail } = require('../routes/push');
 
 const SHOP = 'demo.myshopify.com';
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // Default store mock — sendJourneyEmail loads brand data from Store.
+  Store.findOne.mockReturnValue({
+    select: jest.fn().mockResolvedValue({ shopName: 'Test Store', logoUrl: null, primaryColor: null }),
+  });
 });
 
 test('a. missing profileId/subject/body -> 400, no DB/email call', async () => {

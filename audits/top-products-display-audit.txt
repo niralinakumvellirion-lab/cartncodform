@@ -1,0 +1,108 @@
+AUDIT: "What they want" shows only first product — top-products display
+Date: 2026-10-06
+Files read:
+  backend/routes/events.js  (buildJourneyEntry, lines 447–561)
+  backend/models/Profile.js (grep: topProducts — no match)
+  frontend/app/admin/screens/CustomerDetail.jsx (topProducts rendering)
+
+─────────────────────────────────────────────────────────────────────────────
+1. ARE BOTH PRODUCT_VIEW EVENTS ACTUALLY RECORDED?
+─────────────────────────────────────────────────────────────────────────────
+
+buildJourneyEntry fetches the 20 most-recent events for the profile's
+sessionIds (events.js:455–462), then reverses them to chronological order
+(line 471). Both product_view events are included in `recentEvents` (line 558)
+and returned to the frontend.
+
+VERDICT: Both product views reach the client in recentEvents. This is a
+display limit, not a tracking gap. The timeline on the left of the
+CustomerDetail screen should already show both "Viewed product" entries.
+
+─────────────────────────────────────────────────────────────────────────────
+2. BACKEND: HOW MANY PRODUCTS, HOW SORTED?
+─────────────────────────────────────────────────────────────────────────────
+
+events.js:494–496:
+  const topProducts = Object.values(productViews)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3);
+
+  - Sorted by VIEW COUNT descending (most-viewed product first).
+  - Hard-capped at 3 entries by .slice(0, 3).
+  - topProducts is NOT stored on the Profile model — it is computed fresh
+    on every journey-data request from the 20 most-recent events.
+    Profile has no topProducts field at all.
+
+So if a customer has viewed two distinct products once each, both appear in
+topProducts (up to the cap of 3). The backend returns up to 3 products.
+
+─────────────────────────────────────────────────────────────────────────────
+3. FRONTEND: IS ONLY topProducts[0] RENDERED?
+─────────────────────────────────────────────────────────────────────────────
+
+CustomerDetail.jsx:1074:
+  const topProd = customer.topProducts?.[0];
+
+CustomerDetail.jsx:1439–1458: the "What they want" card renders:
+  {topProd && (
+    <div>
+      <ProductThumbnail ... imageUrl={topProd.imageUrl} title={topProd.title} />
+      <div>{topProd.title}</div>
+      <div>Viewed {topProd.count} time(s) · last seen date</div>
+    </div>
+  )}
+
+Only `topProd` (= `topProducts[0]`) is rendered. There is no `.map()` over
+the array. Products at index 1 and 2 are silently discarded in the UI.
+
+THE LIMIT IS 100% FRONTEND.
+  - Backend returns up to 3 products (correctly).
+  - Frontend reads only index [0] and renders one card.
+
+─────────────────────────────────────────────────────────────────────────────
+4. WHAT SHOULD IT SHOW, AND WHICH IMAGE DOES THE COMPOSER USE?
+─────────────────────────────────────────────────────────────────────────────
+
+RECOMMENDATION: Show all returned topProducts (up to 3), not just [0].
+
+Rationale:
+  - A customer who viewed two products is more precisely understood when
+    both are visible — the merchant can choose which to send about.
+  - The backend already deduplicates, counts, and resolves images for all
+    three. Hiding them is a pure frontend omission.
+  - The card is already inside a flex column; adding a second/third entry
+    below the first requires no layout change.
+
+COMPOSER IMPACT (the "Send a message" card):
+  Lines 395–422 and 639–641 read topProducts[0] explicitly for:
+    - rawTopProductTitle  → pre-filled subject/body copy
+    - productImage        → hero image in the journey email
+    - ctaUrl              → `/products/<topProducts[0].productId>`
+
+  If we show multiple products in "What they want", the composer should
+  still default to topProducts[0] (the most-viewed product) — that is
+  already the correct heuristic for the notification. The visual list
+  change does NOT need to change which product the composer defaults to.
+  A future enhancement could let the merchant click a product in the list
+  to swap it into the composer, but that is out of scope for this fix.
+
+─────────────────────────────────────────────────────────────────────────────
+SUMMARY
+─────────────────────────────────────────────────────────────────────────────
+
+  Root cause:  CustomerDetail.jsx uses topProducts?.[0] for the render,
+               not a .map() over the array.
+
+  Backend:     Correct. Returns up to 3 products sorted by view count.
+               No fix needed here.
+
+  Fix needed:  CustomerDetail.jsx — replace the single `topProd` card with
+               a .map() over customer.topProducts (up to 3 items, the backend
+               already caps it). Keep topProducts[0] as the composer default.
+
+  Not a fix:  topProdLastEvent (line 1075–1077) currently uses
+               events.filter(product_view)[0].ts — the most recent view
+               across ALL products. After the map, each row's "last seen"
+               should use its own lastSeen field (already on each product
+               entry from events.js:482–484), not a shared filter across
+               all product views.

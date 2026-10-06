@@ -1,0 +1,141 @@
+AUDIT: Recent Sends — Missing Title
+Date: 2026-10-02
+Files read:
+  frontend/app/admin/dashboard/DashboardScreen.jsx  (lines 886–1575)
+  frontend/app/admin/screens/Messages.jsx           (lines 107–600)
+  backend/services/brain.js                         (lines 288–313)
+  backend/server.js                                 (lines 340–442)
+  backend/services/sendLogService.js                (full)
+  backend/routes/queue.js                           (lines 49–98)
+  backend/models/ScheduledJob.js                    (full)
+
+─────────────────────────────────────────────────────────────────────────────
+1. WHAT FIELD IS "RECENT SENDS" USING, AND WHY IS IT EMPTY?
+─────────────────────────────────────────────────────────────────────────────
+DashboardScreen.jsx line 1556:
+  {job.payload?.title || '(no title)'}
+
+It reads only payload.title. For brain/automated jobs that field is always
+an empty string in MongoDB.
+
+How it gets there:
+  brain.js (lines 295–297) creates the ScheduledJob with:
+    payload: { title: '', body: '', url: '...', imageUrl: '...' }
+  The empty string is intentional — the comment says "resolved at send time
+  by AI (Phase E)".
+
+  The poller (server.js lines 356–382) does resolve it:
+    payload.title = copy.title || payload.title;
+  …but `payload` here is a plain JS object read off the in-memory Mongoose
+  document. The poller then calls sendPushToCustomers() passing the resolved
+  title, but it NEVER writes the resolved copy back to MongoDB. The only
+  database write in that path is the earlier findOneAndUpdate that flips
+  status → 'sent' and sets sentAt (lines 340–344) — payload is not included.
+
+  Because ScheduledJob.payload is a Mixed type, Mongoose does not auto-detect
+  mutations to it; an explicit markModified + save (or a findByIdAndUpdate
+  with the payload field) would be required, and neither happens.
+
+  Result: every brain job document in MongoDB permanently has
+  payload.title === '' after it is sent. The dashboard's fetch
+  (GET /api/queue/:shop?status=sent) returns those documents as-is, so
+  job.payload?.title is '' (falsy) for every automated send, and the
+  fallback literal '(no title)' is shown instead.
+
+─────────────────────────────────────────────────────────────────────────────
+2. FOR AN AUTOMATED SEND (cart_abandon ETC.) — WHERE DOES THE HUMAN-READABLE
+   TITLE ACTUALLY LIVE?
+─────────────────────────────────────────────────────────────────────────────
+Two places:
+
+a) SIGNAL_LABELS map — defined identically in both DashboardScreen.jsx
+   (lines 306–320) and Messages.jsx (lines 107–120). Maps every brain
+   signalType to a merchant-facing label, e.g.:
+     cart_abandon → 'Cart left behind'
+     checkout_abandon → 'Reached checkout'
+   This is always available on any job that has a signalType, regardless of
+   whether the AI copy was resolved.
+
+b) job.payload.title — the AI-generated push notification title. Present
+   at send time in memory (poller resolves it), but never persisted to
+   MongoDB. Therefore always '' for brain jobs after the fact.
+
+The stable, always-queryable label is SIGNAL_LABELS[job.signalType].
+payload.title for brain jobs is only ever the empty string in the database.
+
+─────────────────────────────────────────────────────────────────────────────
+3. FOR A FESTIVAL / MANUAL SEND — WHERE DOES THE TITLE LIVE?
+─────────────────────────────────────────────────────────────────────────────
+payload.title IS set at write time for all non-brain paths:
+
+  sendLogService.js line 64  — festival queue broadcasts:
+    payload: { title, body, imageUrl }
+    signalType: 'festival' (or 'manual' — passed by the caller)
+
+  push.js line 475            — manual "Send Now" (Today screen):
+    payload: { title, body, subject, imageUrl: '' }
+
+  realtimeTrigger.js line 94  — realtime triggers:
+    payload: { title, body, imageUrl: '' }
+
+All three write the merchant-authored title directly into payload at insert
+time. So job.payload?.title is non-empty and correct for every festival/
+manual/realtime row.
+
+Note: 'festival' and 'manual' are not keys in SIGNAL_LABELS, so the
+title for these jobs is ONLY in payload.title.
+
+─────────────────────────────────────────────────────────────────────────────
+4. HOW DOES MESSAGES.JSX SHOW A NON-EMPTY LABEL FOR EVERY ROW?
+─────────────────────────────────────────────────────────────────────────────
+Messages.jsx does NOT use payload.title as the row label. Line 432:
+  const signalLabel = SIGNAL_LABELS[m.signalType] || m.reason || '—';
+
+For brain jobs: SIGNAL_LABELS[m.signalType] always hits (e.g. 'Cart left
+behind'), so signalLabel is non-empty regardless of payload.title.
+
+For festival/manual rows: SIGNAL_LABELS['festival'] and
+SIGNAL_LABELS['manual'] are both undefined, so it falls through to
+m.reason. The caller of logBroadcastSend sets reason (via the ScheduledJob's
+reason field) or it may be empty/undefined — in that case the final fallback
+is '—'. In practice the row still shows the signalLabel as the primary
+identifier (the recipient email/Anonymous # is the actual row label there).
+
+payload.body || payload.title (lines 515, 580) appears only as secondary
+body-preview text, not the bold row label. That secondary text IS empty for
+brain jobs too — same root cause — but it is less visible than the missing
+title in Recent Sends.
+
+─────────────────────────────────────────────────────────────────────────────
+5. THE FIX — TITLE RESOLUTION FOR "RECENT SENDS"
+─────────────────────────────────────────────────────────────────────────────
+Replace line 1556 in DashboardScreen.jsx:
+
+  BEFORE:
+    {job.payload?.title || '(no title)'}
+
+  AFTER:
+    {SIGNAL_LABELS[job.signalType] || job.payload?.title || job.reason || '(no title)'}
+
+Fallback chain, same logic Messages.jsx already uses for signalLabel:
+
+  1. SIGNAL_LABELS[job.signalType]
+       Hits for every brain job (cart_abandon, checkout_abandon, etc.)
+       → human-readable signal label. Always non-empty for these rows.
+
+  2. job.payload?.title
+       Hits for festival / manual / realtime rows, where payload.title was
+       written at creation time with the merchant's own notification title.
+
+  3. job.reason
+       Hits for anything else that slipped through with a human-readable
+       reason string but no signalType and no payload title.
+
+  4. '(no title)'
+       Last resort literal — should now only appear for truly degenerate rows
+       (legacy rule-based jobs with no signalType and no payload.title).
+
+No backend change needed. The signalType field is already returned by
+GET /api/queue/:shop and already present on all ScheduledJob documents.
+SIGNAL_LABELS is already defined in DashboardScreen.jsx — no import
+needed, just reuse the existing constant.

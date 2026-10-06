@@ -1,0 +1,255 @@
+AUDIT: Per-store branded email templates — existing state
+Date: 2026-10-06
+Files read:
+  backend/utils/shopify.js
+  backend/models/Store.js
+  backend/routes/auth.js         (grep only — install callback)
+  backend/routes/push.js         (sendJourneyEmail, lines 501–570)
+  backend/utils/email.js
+  shopify.app.toml
+
+─────────────────────────────────────────────────────────────────────────────
+1. STORE BRAND DATA
+─────────────────────────────────────────────────────────────────────────────
+
+WHAT IS FETCHED TODAY
+  fetchShopInfo (shopify.js:179–192) calls
+    GET /admin/api/2025-01/shop.json
+  and reads ONLY:
+    s.email       → ownerEmail stored on Store
+    s.iana_timezone → store.timezone
+
+WHAT IS STORED TODAY
+  Store model has NO brand fields:
+    - no shopName / storeName
+    - no logoUrl / faviconUrl
+    - no brand colors (primaryColor / accentColor / bgColor)
+  The only store-name-like field is popup.brandName — a merchant-typed
+  string for the push popup, NOT populated from Shopify. Not suitable as
+  an email sender name.
+
+SHOP.JSON REST (current call) — extra fields available without extra scopes:
+  name, domain, email, currency, money_format, shop_owner, phone, address1,
+  country, myshopify_domain. REST does NOT return logo or brand colors.
+
+BRAND API (logo + colors) — GraphQL only
+  shop { brand { logo { image { url } } colors { primary { background
+  foreground } secondary { ... } } slogan } }
+  Available from Admin API 2022-04 onward.
+  Required scope: NONE — the Shop object is always readable by an installed
+  app regardless of granted scopes. No scope addition needed.
+
+CURRENT SCOPES (shopify.app.toml line 32):
+  read_orders, read_customers, write_customers,
+  read_products, write_discounts, read_discounts
+
+VERDICT: No scope change is needed to read brand data. A second call in
+fetchShopInfo (or a separate fetchBrandData util) querying the GraphQL
+Admin API for shop.brand will return logo URL + colors. shop.name is
+already on the REST response and should be stored alongside email/timezone.
+
+─────────────────────────────────────────────────────────────────────────────
+2. CURRENT EMAIL SENDING
+─────────────────────────────────────────────────────────────────────────────
+
+SENDER SETUP (email.js:1–7)
+  - Resend SDK, single shared instance.
+  - FROM = process.env.FROM_EMAIL || 'notifications@shopireachboost.com'
+  - escapeHtml(), money(), button(), shell() helpers defined in email.js.
+
+HTML STRUCTURE — email.js (abandoned cart, COD, marketing)
+  shell() produces a single <div max-width:560px> wrapper. Div-based,
+  inline styles. NOT table-based. button() uses an <a> with inline style.
+  No <html>/<head>/<body> wrapper — these are HTML fragments, not full
+  documents.
+
+HTML STRUCTURE — sendJourneyEmail (push.js:535–561)
+  Also a <div max-width:600px> fragment. Built as an inline template
+  literal — no shared helper from email.js. Same div-based pattern.
+  The shell() / escapeHtml() / button() helpers from email.js are NOT
+  reused; push.js has its own subject.replace(…) escape chain instead.
+
+REUSABLE TEMPLATE: NONE
+  Both email.js and push.js use inline string concatenation. There is no
+  function that takes {subject, body, imageUrl, logo, colors} and returns
+  a complete HTML document. Every email path builds its own HTML from
+  scratch.
+
+─────────────────────────────────────────────────────────────────────────────
+3. TEMPLATE STORAGE
+─────────────────────────────────────────────────────────────────────────────
+
+NO EMAIL TEMPLATE MODEL EXISTS.
+  The 19 models are: AbandonedCustomer, AttributedEvent, AutomationConfig,
+  CodOrder, CopyCache, CustomerPushSubscription, DiscountConfig,
+  FestivalQueue, OAuthState, ProductImageCache, Profile, PushClick,
+  PushSubscription, ScheduledJob, ShopWeights, Signal, SignalConfig,
+  Store, StorefrontEvent. None is a template or campaign model.
+
+A minimal EmailTemplate model would need:
+  shopDomain  String (required — scope all reads/writes)
+  type        String enum ['special_offer', 'festival', 'normal']
+  name        String (merchant's label, e.g. "Diwali 2026")
+  subject     String
+  body        String (plain text; HTML is rendered at send time)
+  imageUrl    String (product or hero image)
+  ctaLabel    String
+  ctaUrl      String
+  createdAt / updatedAt Date
+
+Brand data (logoUrl, primaryColor, storeName) lives on Store — no need to
+copy it per-template. Templates reference it at render time.
+
+─────────────────────────────────────────────────────────────────────────────
+4. ADMIN UI
+─────────────────────────────────────────────────────────────────────────────
+
+CURRENT SCREENS (app/admin/page.js, split ongoing per Phase G):
+  Dashboard, Customers, Customer Detail (push + email composer),
+  Settings (popup, voice, caps), Push Analytics, Queue, Billing.
+
+NO EXISTING MESSAGES/CAMPAIGN SCREEN.
+  There is no screen that lists saved templates, no template picker, and
+  no rendered HTML email preview anywhere in the admin.
+
+WHERE THIS WOULD LIVE:
+  A new "Messages" screen (or "Email Campaigns" tab). The Customer Detail
+  EmailComposer shows a text preview of the composed copy — it does NOT
+  render an actual email preview (no iframe, no HTML rendering).
+
+PREVIEW REQUIREMENT:
+  A desktop + mobile email preview means rendering the final HTML in an
+  iframe (or a scaled-down div) inside the admin. This is a new UI
+  component — nothing reusable exists for it today.
+
+─────────────────────────────────────────────────────────────────────────────
+5. RESPONSIVE EMAIL REALITY
+─────────────────────────────────────────────────────────────────────────────
+
+CURRENT HTML — what works and what doesn't:
+
+  Gmail mobile (app):
+    Strips <head> styles. Keeps inline styles. Divs + inline styles mostly
+    work. max-width on a div IS respected. border-radius renders.
+    ✓ Acceptable with current approach.
+
+  Gmail desktop (web):
+    Same as mobile app — inline styles preserved. ✓
+
+  Apple Mail (macOS / iOS):
+    Full CSS support including media queries if in <head>. Divs + inline
+    styles render correctly. ✓
+
+  Outlook desktop (Windows):
+    Uses Microsoft Word's HTML renderer. Critical failures:
+    ✗ border-radius → silently ignored (square corners everywhere)
+    ✗ max-width on <div> → unreliable; uses a fixed-width <table> instead
+    ✗ background-color on <div> → not reliably applied
+    ✗ Padding on <div> → partially broken
+    ✗ Web fonts (-apple-system, BlinkMacSystemFont) → replaced by Times New Roman
+    Without a <table>-based layout + MSO conditional comments, Outlook
+    rendering is broken.
+
+  Outlook 365 (web): same as Gmail desktop — acceptable.
+
+WHAT'S MISSING FOR A REAL RESPONSIVE EMAIL:
+  1. Full document wrapper:
+       <!DOCTYPE html><html><head><meta charset="utf-8">
+       <meta name="viewport" content="width=device-width,initial-scale=1">
+       <style>/* media queries here */</style></head><body>
+     Currently all emails are bare <div> fragments — no doctype, no <html>.
+  2. Table-based layout for Outlook (1-column table, 600px wide).
+  3. MSO conditional comments:
+       <!--[if mso]><table width="600" cellpadding="0"><tr><td><![endif]-->
+       (content)
+       <!--[if mso]></td></tr></table><![endif]-->
+  4. bgcolor attribute on <td> (Outlook background color).
+  5. font-family fallback stack ending in Arial or sans-serif (not
+     -apple-system which Outlook doesn't recognise).
+  6. Explicit width/height attributes on <img> (not just CSS).
+  7. Media queries in <head> for true mobile/desktop split (only Apple
+     Mail uses them, but worth adding for completeness).
+  8. A proper unsubscribe footer with a real link (CAN-SPAM / GDPR).
+     The current "reply with unsubscribe" in sendMarketingEmail is not a
+     compliant one-click unsubscribe.
+
+─────────────────────────────────────────────────────────────────────────────
+6. DELIVERABILITY STATE
+─────────────────────────────────────────────────────────────────────────────
+
+FROM ADDRESS (code-confirmed):
+  email.js: process.env.FROM_EMAIL || 'notifications@shopireachboost.com'
+  push.js sendJourneyEmail: HARDCODED 'ShopiReachBoost AI <notifications@shopireachboost.com>'
+    (does NOT use FROM_EMAIL env var — a pre-existing inconsistency noted
+    in audits/journey-email-content-audit.txt)
+  email.js sendMarketingEmail: ALSO HARDCODED same address (does not use FROM)
+
+SENDING DOMAIN: shopireachboost.com (all current paths)
+
+SPF / DKIM / DMARC:
+  Not referenced anywhere in code or .env examples.
+  These are Resend dashboard + DNS configurations — cannot be confirmed
+  from code alone. Must be checked in Resend (Settings → Domains) and
+  DNS.
+
+WHAT IS UNKNOWN (requires external check):
+  - Whether shopireachboost.com is verified in Resend
+  - Whether SPF record (v=spf1 include:_spf.resend.com ~all) is set in DNS
+  - Whether DKIM CNAME (resend._domainkey.shopireachboost.com) is set in DNS
+  - Whether DMARC (v=DMARC1; p=none; ...) is set in DNS
+
+KNOWN INCONSISTENCY:
+  FROM_EMAIL env var is only respected by sendAbandonedCartEmail and
+  sendNewCodOrderEmail via the shared FROM constant. Journey email and
+  marketing email hardcode the address. All four currently resolve to the
+  same string with no env var set, but if FROM_EMAIL is ever changed,
+  two of the four paths will silently keep the old address.
+
+─────────────────────────────────────────────────────────────────────────────
+PROPOSED PHASE BREAKDOWN
+─────────────────────────────────────────────────────────────────────────────
+
+PHASE T1 — Foundation (backend only, no UI)
+  1. Extend fetchShopInfo: also read shop.name from shop.json REST response.
+  2. Add fetchBrandData(shop, token) in shopify.js: one GraphQL call for
+     shop.brand (logo URL, primary color). Returns { logoUrl, primaryColor }.
+  3. Add brand fields to Store model: shopName, logoUrl, primaryColor.
+  4. Populate at install (auth callback) and expose on GET /api/settings.
+  5. Build buildEmailHtml({ subject, body, imageUrl, ctaUrl, ctaLabel,
+     storeName, logoUrl, primaryColor, shopDomain }) in email.js:
+     returns a full DOCTYPE HTML document, table-based single-column
+     layout, Outlook-safe, with MSO conditionals.
+     Replaces the div-fragment approach in shell() and sendJourneyEmail.
+  6. Wire sendJourneyEmail to use buildEmailHtml.
+  7. Fix FROM_EMAIL inconsistency: all 4 send paths use the shared FROM const.
+  Tests for buildEmailHtml output (snapshot or structural assertion).
+
+PHASE T2 — Template model + API
+  1. EmailTemplate model (shopDomain, type, name, subject, body, imageUrl,
+     ctaLabel, ctaUrl, createdAt, updatedAt).
+  2. CRUD routes: GET/POST /api/email-templates, PATCH/DELETE /api/email-templates/:id.
+     All scoped by req.shopDomain.
+  3. POST /api/email-templates/:id/send: sends to a given profileId using
+     buildEmailHtml + the template's content + the store's brand data.
+  4. GET /api/email-templates/:id/preview: returns the rendered HTML
+     (safe to iframe in the admin).
+
+PHASE T3 — Admin UI
+  1. New "Email Templates" screen in the admin (Phase G split context).
+  2. Template list + type picker (special_offer / festival / normal).
+  3. Editor: subject, body, product image picker, CTA.
+  4. Preview pane: desktop + mobile (iframe the /preview endpoint output).
+  5. Send button: picks a customer or segment, calls /send.
+
+DEPENDENCIES / RISKS:
+  - Outlook MSO table layout is the highest-risk item: requires careful
+    HTML that must be tested in Litmus or Email on Acid, not just Gmail.
+  - Brand API GraphQL call adds one Admin API round-trip per install —
+    acceptable at install time, not at send time.
+  - shopireachboost.com deliverability (SPF/DKIM/DMARC) must be confirmed
+    before T2/T3 sends go to real customers; fix if needed in parallel.
+  - Resend supports a react: option (JSX) and a template_id: option — both
+    are out of scope (this build uses plain HTML, not React server components
+    or Resend's managed templates).
+
+>>> STOP. Audit only. No implementation.

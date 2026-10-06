@@ -1,0 +1,247 @@
+DASHBOARD KPI TILE DRILL-DOWN - AUDIT (READ ONLY, NOTHING IMPLEMENTED)
+=========================================================================
+
+1. EVERY KPI TILE
+---------------------
+DashboardScreen.jsx:127-140 defines two tile lists, rendered in two
+different places with two different fetch/render mechanisms:
+
+  NOTIF_STATS (kpiRow1 + kpiRow2, rendered :966-988) — a 3x2 grid of
+  plain, non-interactive <div> cards. Source: GET /api/profiles/:shop/
+  today-stats?from&to (backend/routes/profiles.js:295), called once
+  per dateFilter change (:528-549).
+    - Push Sent          <- data.pushSent
+    - Emails Sent        <- data.emailsSent
+    - Push Subscribers   <- data.pushSubscribers
+    - Popups Shown       <- data.popupsShown
+    - Emails Captured    <- data.emailsCaptured
+  New Subscribers Today is a SIXTH tile in this same grid
+  (kpiRow2[2]), but its number comes from a SEPARATE, un-date-filtered
+  source: GET /api/profiles/:shop/new-subscribers (:557), polled every
+  30s independent of dateFilter — value is newSubscribers.length, not
+  anything from today-stats.
+
+  ACTIVITY_STATS (rendered :1005-1030) — a 2x2 grid, ALREADY
+  CLICKABLE: onClick={() => navigate('/admin/activity?type=${key}')}
+  (:1008), with hover styling (box-shadow, background change) that
+  NOTIF_STATS's cards don't have. Source: GET /api/activity?from&to
+  (backend/routes/activity.js), same fetch as `activity` state
+  (:534), read via activity.summary[key].
+    - Added to Cart    (add_to_cart)
+    - Started Checkout (checkout_start)
+    - Purchased        (purchase)
+    - Revisited        (revisit)
+
+  So: 4 of 10 tiles are already clickable (the four attributed ones).
+  The other 6 (5 NOTIF_STATS + New Subscribers Today) are plain divs
+  with no onClick at all.
+
+2. WHAT'S BEHIND EACH NUMBER
+--------------------------------
+Push Sent — ScheduledJob.countDocuments({shopDomain, channel:'push',
+  status:'sent', sentAt:{$gte,$lte}}) (profiles.js:308-313).
+  DATA EXISTS AND IS QUERYABLE, but not quite as a ready list: GET
+  /api/profiles/:shop/messages (profiles.js:58) already lists
+  ScheduledJob rows sorted by sentAt, but its own status filter is
+  {$in:['sent','skipped','failed','cancelled']} — broader than the
+  KPI's status:'sent' alone — and it has NO channel or from/to query
+  params at all (channel filtering happens client-side in Messages.jsx
+  on whichever single page of up to 50 rows came back, not server-side
+  across the full result set). DATA EXISTS BUT NEEDS AN ENDPOINT
+  CHANGE (add channel + from/to params to the existing /messages
+  route, not a new one).
+
+Emails Sent — Profile.aggregate unwinding `messages`, matched on
+  channel:'email' + sentAt range (profiles.js:315-323). Same
+  /api/profiles/:shop/messages endpoint already includes email
+  messages (ScheduledJob rows with channel:'email' exist for email
+  sends too — confirmed from the model). DATA EXISTS BUT NEEDS AN
+  ENDPOINT CHANGE — same gap and same fix as Push Sent above; these
+  two tiles share one drill-down surface, split by a channel param.
+
+Popups Shown — StorefrontEvent.countDocuments({type:
+  'push_prompt_shown', ts:{range}}) (profiles.js:325-329). Checked
+  every route touching StorefrontEvent (routes/events.js,
+  routes/profiles.js, routes/webhooks.js): none expose a flat,
+  cross-customer, paginated list of StorefrontEvent rows by type — the
+  existing endpoints are /summary (aggregate counts, no per-row list),
+  /journey and /customer/:sessionId (single-customer, need a profileId/
+  sessionId up front, not "everyone who saw a popup this week").
+  DATA EXISTS BUT NEEDS A NEW ENDPOINT.
+
+Emails Captured — Profile.countDocuments({'channels.email.capturedAt':
+  {range}}) (profiles.js:331-334). GET /api/profiles/:shop/profiles
+  (profiles.js:108) already lists Profile rows and is exactly the
+  Customers screen's own data source, but its `filter` query param
+  only recognises has_cart / bought_once / repeat_buyer / going_quiet
+  — no "email captured" option — and the endpoint has NO from/to date
+  range support at all (only `filter`, `search`, `limit`, `page`).
+  DATA EXISTS BUT NEEDS AN ENDPOINT CHANGE (new filter value + add
+  from/to).
+
+Push Subscribers — Profile.countDocuments({'channels.push.subscribed':
+  true}) (profiles.js:336-339) — note this is Profile.channels.push.
+  subscribed, NOT the CustomerPushSubscription collection the task's
+  own framing guessed; CustomerPushSubscription is the per-token/
+  per-device table (one row can be replaced on token refresh),
+  Profile.channels.push is the per-customer opt-in flag the KPI
+  actually counts. Also note: this query has NO date bound at all —
+  it's an all-time total that happens to sit in the date-filtered
+  tile row; the number will NOT change when the merchant switches
+  Today/Yesterday/7d/30d, which is worth fixing/flagging on its own,
+  independent of the drill-down work. Same Customers-screen gap as
+  Emails Captured: DATA EXISTS BUT NEEDS AN ENDPOINT CHANGE (a
+  push_subscribed filter value; from/to is moot here since the count
+  itself isn't date-bound, but a "subscribed in range" variant would
+  need channels.push.subscribedAt instead if that's what's wanted).
+
+New Subscribers Today — GET /api/profiles/:shop/new-subscribers
+  already returns the full { profileId, email, subscribedAt,
+  lastSeenAt } list this tile's count is length-of (profiles.js:361-
+  401), and DashboardScreen.jsx ALREADY RENDERS that exact list, with
+  emails, further down the same page (Section 5, :1302-1338) whenever
+  newSubscribers.length > 0. DATA EXISTS AND IS QUERYABLE — no fetch
+  is missing, the "drill-down" for this one tile could be as small as
+  scrolling/highlighting an existing on-page section, not a navigation
+  at all.
+
+Added to Cart / Started Checkout / Purchased / Revisited — AttributedEvent,
+  filterable by eventType. DATA EXISTS AND IS QUERYABLE, and is
+  ALREADY WIRED END TO END on the backend (GET /api/activity accepts
+  eventType + from + to and returns both the summary AND a users list
+  in one response, routes/activity.js:12-99) — see section 3 for why
+  the click-through still doesn't work today despite this.
+
+3. WHERE SHOULD IT GO
+-------------------------
+Existing screens and what they already cover, checked directly rather
+than assumed:
+
+  Activity screen (frontend/app/admin/activity/ActivityScreen.jsx) —
+  ALREADY covers all four attributed tiles' drill-down, completely,
+  on the backend: fetches the exact same /api/activity endpoint with
+  eventType + from/to, gets back both counts and a per-event user list
+  (email, eventType, ts), and already renders type-filter tabs
+  (:280-ish) and its own date-range picker. BUT: the Dashboard's click
+  (navigate('/admin/activity?type=${key}')) does NOTHING useful today
+  — ActivityScreen.jsx's `activeType` is local component state
+  (useState(null), :111), never read from the URL, and its own page.js
+  (app/admin/activity/page.js) only ever passes `shop` down, dropping
+  `type` on the floor entirely. The merchant lands on Activity every
+  time with "All" selected and whatever date range Activity's own
+  `filter` state defaults to ('7d', :108) — NOT whatever the Dashboard
+  was showing. Recommendation for these four: (b) navigate to the
+  existing Activity screen with a filter applied — it's a genuinely
+  small fix (read `type`/`from`/`to` off searchParams in
+  activity/page.js, seed activeType/filter's initial state from them),
+  not new UI, since everything else is already built and correct.
+
+  Messages screen (frontend/app/admin/screens/Messages.jsx) — the
+  closest existing match for Push Sent / Emails Sent: already lists
+  ScheduledJob rows with a Push/Email filter tab (FILTER_TABS, :191-
+  196) and per-row customer identity. Gaps are on the backend, listed
+  in section 2 (channel + from/to not supported server-side yet, and
+  the status filter is broader than "sent" alone). Recommendation: (b)
+  navigate to Messages with a channel + date range applied, after
+  extending /api/profiles/:shop/messages to accept them — reuses an
+  existing, already-built list/table UI instead of a new page.
+
+  Customers screen (frontend/app/admin/screens/Customers.jsx) — the
+  closest existing match for Emails Captured / Push Subscribers: same
+  situation, already lists Profile rows with a `filter` tab mechanism,
+  just missing the two relevant filter values and any date-range
+  support server-side (section 2). Recommendation: (b), same reasoning
+  as Messages.
+
+  Popups Shown — no existing screen lists raw StorefrontEvent rows
+  across customers today (see section 2). Of the three options, (a) a
+  slide-out panel is the most proportionate for this one specifically:
+  it's the one tile whose underlying event type is unlikely to carry
+  much per-row detail worth a full dedicated screen (mostly anonymous
+  browsing sessions, see section 5) — a simple date-stamped list in a
+  panel answers "who/when" without standing up a new page.jsx +
+  Screen.jsx + nav-menu entry for a single low-detail list. (c) a new
+  detail page is the fallback if this needs to grow real filtering/
+  pagination UI later; not justified by what's asked here.
+
+  New Subscribers Today — needs neither (a), (b) nor (c) in the sense
+  the question is framed: the full list this tile counts is already
+  rendered on the Dashboard itself, unconditionally, whenever it's
+  non-empty (section 2). The "drill-down" is a no-op — at most, make
+  the tile scroll to/highlight the section that's already there.
+
+  No duplicate screens would be built under this plan — every
+  recommendation above extends or correctly wires an existing screen
+  except Popups Shown, which has nothing to extend.
+
+4. DATE RANGE
+-----------------
+Must the drill-down carry the Dashboard's Today/Yesterday/7d/30d
+  selection through? Yes — otherwise clicking "Push Sent: 12 (Last 7
+  days)" and landing on a screen silently showing a different window
+  (Messages/Customers currently have NO date range at all; Activity
+  defaults its own filter to '7d' regardless of what Dashboard was
+  set to) would show a number that doesn't match what was just
+  clicked, which is worse than not linking at all.
+
+How the range reaches the CURRENT endpoints: DashboardScreen.jsx's
+  getDateRange(dateFilter) (:142-153) produces ISO from/to strings,
+  passed as ?from=&to= query params on today-stats and /api/activity
+  directly in the fetch URL (:534-535) — there's no shared range
+  object or context, each fetch site builds/passes its own from/to the
+  same way. For a click-through to carry this, the Dashboard's
+  navigate() call needs to append the SAME from/to it already computed
+  for that render (e.g. navigate(`/admin/activity?type=${key}&from=
+  ${from}&to=${to}`)), and the RECEIVING screen needs to read from/to
+  (and type/filter) off searchParams as its OWN initial state instead
+  of defaulting independently — the exact same wiring gap named in
+  section 3 for Activity, and the same shape of fix needed for
+  Messages/Customers once their endpoints support from/to at all.
+
+Push Subscribers is the one tile where this question doesn't quite
+  apply — its own query is already un-date-bound (section 2), so
+  "carry the range through" would need to first decide whether the
+  drill-down should show a filtered (subscribedAt in range) or
+  unfiltered (everyone, matching today's tile number) list; flagging
+  as a decision for whoever implements it, not something this audit
+  can resolve on its own.
+
+5. PRIVACY
+-------------
+Every drill-down surfaces identifiers (email, at minimum) that are
+  ALREADY stored in Profile/ScheduledJob/StorefrontEvent today — this
+  audit found no case where a drill-down would introduce a genuinely
+  NEW category of personal data collection. What changes is exposure
+  SURFACE (more places in the admin where the merchant can see who a
+  number refers to), which is worth flagging per tile:
+
+  Push Sent / Emails Sent (-> Messages screen): NOT new exposure —
+  Messages.jsx already renders per-message customer identity today for
+  anyone who navigates there directly; a Dashboard link just adds
+  another path to the same existing view.
+
+  Emails Captured / Push Subscribers (-> Customers screen): same,
+  NOT new — Customers.jsx already lists every profile's email/phone
+  today; adding filter values doesn't add anyone to that list who
+  isn't already visible there via "everyone" + a scroll.
+
+  Popups Shown (-> new panel/endpoint): LOWER risk than the others,
+  structurally — push_prompt_shown fires on an anonymous storefront
+  visit, before any opt-in, so most rows would have only a token/
+  ccfSessionId and no resolved email at all; a drill-down here would
+  mostly show timestamps and device/session identifiers rather than
+  customer identity. Still worth NOT joining this to Profile/email
+  speculatively — only show identity where StorefrontEvent already
+  carries a resolved customerId, don't add a new resolution step just
+  for this panel.
+
+  New Subscribers Today: NOT new exposure in any sense — the exact
+  email list is already rendered, unconditionally, on the same page,
+  today.
+
+  General flag for whoever implements this: every one of these lists
+  is customer-identifying (email addresses at minimum) and none of
+  them are behind any additional confirmation/expansion step today
+  (Customers/Messages just render the list directly on load) — that's
+  an existing pattern this audit is not proposing to change, just
+  noting it's the pattern any new drill-down would inherit.

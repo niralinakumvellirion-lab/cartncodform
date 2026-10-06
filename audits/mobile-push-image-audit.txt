@@ -1,0 +1,222 @@
+AUDIT: Mobile push notification — no image displayed
+Date: 2026-10-03
+Files read:
+  backend/utils/pushNotification.js           (full)
+  backend/routes/push.js                      (full — /send-store, /send-customer)
+  backend/server.js                           (lines 590–700 — processFestivalQueue)
+  backend/public/cartncodform-sw.js           (full — storefront SW)
+  frontend/public/firebase-messaging-sw.js    (full — admin SW)
+
+─────────────────────────────────────────────────────────────────────────────
+1. WHAT FIELD CARRIES THE IMAGE IN THE FCM MESSAGE FOR MOBILE
+─────────────────────────────────────────────────────────────────────────────
+sendPushToCustomers() (pushNotification.js:268–292) sends this structure:
+
+  {
+    data: {
+      url:      '...',
+      imageUrl: imageUrl || '',       // data key, read by SW as fallback
+      title:    title,
+      body:     body,
+      icon:     imageUrl || '...',
+    },
+    webpush: {
+      headers: { Urgency: 'high' },
+      notification: {
+        title, body,
+        icon:   imageUrl || '...',
+        image:  imageUrl || undefined,   // ← webpush.notification.image
+        badge:  '...',
+      },
+      fcm_options: { link: url },
+    },
+  }
+
+There is NO top-level `notification` block in the message. That block is used
+for native FCM app push (Android/iOS native notification). This send uses ONLY
+`webpush.notification` (FCM web push spec) and `data`. The two image fields are:
+
+  a. webpush.notification.image — FCM maps this to payload.notification.image
+     in the SW's onBackgroundMessage callback. This is the standard web push
+     large-image banner field.
+  b. data.imageUrl — FCM data payload, accessible as payload.data.imageUrl in
+     the SW. The storefront SW reads this as a fallback if (a) is absent.
+
+FCM web push vs native push difference: web push uses the Urgency header and
+webpush.notification to target the browser SW. Native push would use the top-
+level notification block and android/apns sub-objects. A mobile BROWSER subscriber
+(subscribed via ccf-push.js) is always web push — (a)/(b) apply, not native.
+
+─────────────────────────────────────────────────────────────────────────────
+2. IS THE IMAGE AN ABSOLUTE HTTPS URL?
+─────────────────────────────────────────────────────────────────────────────
+The admin's image editor produces a base64 data: URI (ImageUploadPair uses a
+FileReader). FCM silently rejects data: URIs — it can only fetch images from
+real HTTPS URLs.
+
+/send-store (push.js:626–635) and processFestivalQueue (server.js:642–648)
+both run the image through uploadToCloudinary first:
+
+  let mobileImage = rawMobile.startsWith('data:')
+    ? (await uploadToCloudinary(rawMobile)) || ''
+    : rawMobile;
+
+uploadToCloudinary (push.js:25–48) requires two env vars:
+  CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET
+
+If EITHER is unset, it returns null immediately. The || '' fallback then makes
+mobileImage = '' — a completely empty string. With '' as imageUrl:
+  webpush.notification.image = '' || undefined = undefined  → field omitted
+  data.imageUrl               = '' || ''        = ''        → empty string (falsy)
+
+The storefront SW treats '' as falsy and doesn't set options.image. Result:
+the notification renders with NO image — not a broken image, just nothing.
+
+DIAGNOSIS: If Cloudinary env vars are not configured in Render, EVERY send
+that uses a data: URI image silently sends with no image, regardless of what
+the merchant uploaded in the editor.
+
+For images that are already absolute https:// URLs (e.g. festival's own pre-
+filled Shopify CDN photo, or a direct URL typed in the editor), rawMobile does
+NOT start with 'data:' so the URL passes through as-is. These WOULD display.
+
+/send-customer (push.js:197–263) does NOT upload to Cloudinary at all. It
+passes resolvedImageUrl straight to sendPushToCustomers. If a caller ever
+passes a data: URI here, FCM will reject it silently.
+
+─────────────────────────────────────────────────────────────────────────────
+3. DOES THE SERVICE WORKER SET options.image FROM THE PAYLOAD?
+─────────────────────────────────────────────────────────────────────────────
+There are TWO service workers — they handle different audiences:
+
+STOREFRONT SW — backend/public/cartncodform-sw.js (registered by ccf-push.js)
+  Handles background messages for STOREFRONT CUSTOMERS. Reads image correctly:
+
+    var image = payload.notification?.image ||   // from webpush.notification.image
+                payload.data?.imageUrl       ||   // from data.imageUrl (fallback)
+                payload.data?.image          ||   // alias fallback
+                null;
+
+    var options = { body, icon, badge, data, requireInteraction, vibrate };
+    if (image) { options.image = image; }
+    self.registration.showNotification(title, options);
+
+  The dual-read (notification.image + data.imageUrl fallback) is correct:
+  - Some Firebase Messaging compat SDK versions do not forward the `image`
+    field to payload.notification.image in onBackgroundMessage, even when it
+    was set in webpush.notification.image. The data.imageUrl fallback covers
+    this case since data fields are always forwarded.
+  - Both fields are set by sendPushToCustomers, so at least one should be
+    populated when imageUrl is non-empty.
+  - The SW CORRECTLY sets options.image. This side is not the bug.
+
+ADMIN SW — frontend/public/firebase-messaging-sw.js (registered by the admin
+dashboard at app.shopireachboost.com for the merchant's own device)
+  Handles background messages for the STORE OWNER (admin notifications).
+  Does NOT read or set image at all:
+
+    self.registration.showNotification(title, {
+      body, icon, badge: '/favicon.ico',
+      data: { url: DASHBOARD_URL },
+      // ← no image field
+    });
+
+  Admin-device notifications will NEVER show an image. This is separate from
+  customer notifications and is not the bug being reported (the customer is
+  on mobile, not the admin device). However it means a merchant testing their
+  own subscribed device via the admin will also see no image — which could
+  cause confusion.
+
+─────────────────────────────────────────────────────────────────────────────
+4. ANDROID CHROME WEB PUSH OR NATIVE FCM?
+─────────────────────────────────────────────────────────────────────────────
+A storefront customer who tapped Allow on the popup registered via:
+
+  navigator.serviceWorker.register(BACKEND_URL + '/cartncodform-sw.js', ...)
+
+and received an FCM web push token (from Firebase getToken()). This is a
+WEB PUSH subscription — the FCM token is a VAPID-based web push token, not
+a native app token. The send path is:
+
+  Firebase Admin SDK → FCM → Web Push Protocol → Chrome push service
+  → storefront SW's onBackgroundMessage → showNotification()
+
+This is NOT a native push. The `webpush` sub-object in the FCM message is the
+correct field to use. The absence of a top-level `notification` block means
+FCM will NOT attempt to auto-display the notification — it delegates entirely
+to onBackgroundMessage, which is where the storefront SW takes over.
+
+─────────────────────────────────────────────────────────────────────────────
+5. DESKTOP vs MOBILE COMPARISON
+─────────────────────────────────────────────────────────────────────────────
+/send-store makes two separate sendPushToCustomers calls:
+  mobileOnly=true  with mobileImage  → mobile subscribers
+  desktopOnly=true with desktopImage → desktop subscribers
+
+The FCM message structure for both is identical except for the image URL.
+The storefront SW renders image the same way on both platforms. If desktop
+shows the image but mobile doesn't, the difference is in the IMAGE URL ITSELF
+— mobileImage vs desktopImage. Both go through the same Cloudinary upload
+step, but a failed mobile upload (CLOUDINARY_CLOUD_NAME or UPLOAD_PRESET
+missing) gives mobileImage='' while desktopImage might be an https URL if
+it was pre-hosted (e.g. festival photo).
+
+Most likely: if the merchant only uploaded a mobile image from the editor
+(a data: URI), and Cloudinary is unconfigured, mobileImage='' → no mobile
+image. If the festival had a pre-filled Shopify CDN image, desktopImage is
+a real https URL → desktop shows it.
+
+If the merchant is testing with a SINGLE image URL (not data:URI), both
+would display the same way. If desktop shows nothing either, the issue is
+platform-agnostic (URL not absolute or Cloudinary missing).
+
+─────────────────────────────────────────────────────────────────────────────
+6. KNOWN CONSTRAINTS
+─────────────────────────────────────────────────────────────────────────────
+A. iOS web push: iOS Safari (even 16.4+ with web push support) does NOT
+   render the `image` option in showNotification. Only `title`, `body`, and
+   `icon` are shown on iOS. If the mobile tester is on an iPhone, this is a
+   hard platform limit — no code fix will show a large image on iOS web push.
+
+B. Android Chrome web push image: Supported on Android Chrome 56+. The image
+   renders as a large banner below the notification text. Supported in modern
+   versions. This is not a constraint.
+
+C. Image must be under ~1MB for reliable Android rendering. Large images may
+   be silently dropped by the push service.
+
+D. Image must be HTTPS and publicly accessible (CORS-open or no auth). A URL
+   behind auth, a private CDN path, or a URL that returns 404 will result in
+   a blank notification (no error in the SW, image just doesn't appear).
+
+E. Firebase Messaging compat SDK (v10.12.0 used here): there is a known gap
+   where `payload.notification.image` may be undefined in onBackgroundMessage
+   even when webpush.notification.image is set. The storefront SW's fallback
+   to `payload.data?.imageUrl` covers this — but only if data.imageUrl is
+   non-empty (i.e., imageUrl !== '').
+
+─────────────────────────────────────────────────────────────────────────────
+ROOT CAUSE SUMMARY
+─────────────────────────────────────────────────────────────────────────────
+PRIMARY: Cloudinary not configured → uploadToCloudinary returns null →
+  mobileImage = '' → webpush.notification.image omitted AND data.imageUrl
+  empty → storefront SW sees image=null → no image in notification.
+
+  Check: are CLOUDINARY_CLOUD_NAME and CLOUDINARY_UPLOAD_PRESET set in the
+  Render environment? If not, every merchant-uploaded image (data: URI) is
+  silently dropped at send time.
+
+SECONDARY: iOS limitation — if the customer is on iPhone/iOS, even a correct
+  HTTPS image URL will never render as a banner image in web push. iOS only
+  supports title/body/icon.
+
+TERTIARY: Admin SW gap — if the merchant tests by pushing to their OWN
+  subscribed admin device, the admin SW (firebase-messaging-sw.js) never
+  sets options.image regardless of what was sent.
+
+The storefront SW code itself (cartncodform-sw.js) is correct. The FCM
+message structure is correct. The failure point is upstream: the image URL
+arriving at sendPushToCustomers as '' because Cloudinary didn't convert the
+data: URI, or because no image URL was passed at all.
+
+>>> STOP. Audit only. No implementation.

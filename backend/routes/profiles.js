@@ -629,13 +629,19 @@ router.get('/:shopDomain/weekly-narrative', requireAuth, requireStoreOwner, asyn
 router.get('/:shopDomain/settings', requireAuth, requireStoreOwner, async (req, res) => {
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
-    const store = await Store.findOne({ shopDomain: shop }, 'voice caps quietHours timezone');
+    const store = await Store.findOne(
+      { shopDomain: shop },
+      'voice caps quietHours timezone shopName logoUrl primaryColor'
+    );
     if (!store) return res.status(404).json({ error: 'Store not found' });
     return res.json({
       voice: store.voice || {},
       caps: store.caps || {},
       quietHours: store.quietHours || {},
       timezone: store.timezone || 'Asia/Kolkata',
+      shopName: store.shopName || null,
+      logoUrl: store.logoUrl || null,
+      primaryColor: store.primaryColor || null,
     });
   } catch (err) {
     console.error('[profiles] GET settings error:', err.message);

@@ -1,0 +1,169 @@
+AUDIT: Recent Sends — Per-Recipient vs Per-Send, and Customer Count
+Date: 2026-10-02
+Files read:
+  frontend/app/admin/dashboard/DashboardScreen.jsx  (lines 1010–1565)
+  backend/routes/queue.js                           (lines 49–98)
+  backend/models/ScheduledJob.js                    (full)
+  backend/models/FestivalQueue.js                   (full)
+  backend/services/sendLogService.js                (full)
+  backend/routes/push.js                            (lines 602–693)
+  backend/server.js                                 (lines 655–679)
+
+─────────────────────────────────────────────────────────────────────────────
+0. THE DOUBLE-LABEL SYMPTOM (what triggered this audit)
+─────────────────────────────────────────────────────────────────────────────
+After the title fix in the previous session, both the bold title (line 1556)
+and the grey subtitle (line 1559) use SIGNAL_LABELS[job.signalType]:
+
+  line 1556: SIGNAL_LABELS[job.signalType] || ...   → "Ask for an email"
+  line 1559: {channel} · {SIGNAL_LABELS[job.signalType] || ...}
+                                                    → "push · Ask for an email"
+
+Result: "Ask for an email / push · Ask for an email". The fix surfaced this
+because before the fix the title showed '(no title)' and the redundancy was
+invisible.
+
+─────────────────────────────────────────────────────────────────────────────
+1. IS EACH "RECENT SENDS" ENTRY ONE SEND OR ONE RECIPIENT?
+─────────────────────────────────────────────────────────────────────────────
+The fetch (DashboardScreen.jsx line 1015):
+  GET /api/queue/:shop?status=sent
+
+The queue.js GET handler (lines 62–68) returns ScheduledJob documents
+sorted by updatedAt DESC, sliced to 4. ScheduledJob is per-recipient for
+broadcast paths and per-customer-job for brain paths:
+
+BRAIN / AUTOMATED SENDS
+  brain.js creates ONE ScheduledJob per (profile, signalType) — one job =
+  one customer. These are independent; there is no batch concept. A brain
+  "send" is a 1-person triggered notification, not a campaign. Each
+  ScheduledJob row in the Recent Sends list genuinely represents a single
+  customer's send. Answer: one recipient = one send (they're the same thing
+  for brain jobs).
+
+FESTIVAL SENDS (FestivalQueue → processFestivalQueue in server.js)
+  sendLogService.logBroadcastSend() creates ONE ScheduledJob row per FCM
+  token. A festival send to 500 subscribers produces 500 ScheduledJob rows,
+  all with the same festivalQueueId. The queue endpoint sorted by updatedAt
+  DESC returns the 4 most-recently-inserted rows — after a festival send,
+  all 4 slots show rows from that one broadcast. Answer: these entries are
+  individual recipients of a single send, not 4 separate sends.
+
+MANUAL "SEND NOW" SENDS (push.js POST /send-store)
+  Same mechanism as festival — logBroadcastSend() creates one ScheduledJob
+  per token, but with festivalQueueId: null and signalType: 'manual'.
+  Same fragmentation problem, no grouping key. Answer: same as festival —
+  per-recipient rows, not per-send.
+
+─────────────────────────────────────────────────────────────────────────────
+2. GROUPING KEYS AVAILABLE
+─────────────────────────────────────────────────────────────────────────────
+FESTIVAL SENDS
+  festivalQueueId — every per-recipient ScheduledJob row carries it.
+  FestivalQueue.recipientCount — written by server.js line 676 at send time,
+  holds the total tokens actually sent to (mobile + desktop combined).
+  FestivalQueue.title — the merchant-authored title.
+  FestivalQueue.sentAt — the broadcast timestamp.
+  This is the clean, full picture: group by festivalQueueId → look up the
+  FestivalQueue document → title + recipientCount + sentAt.
+
+MANUAL SENDS
+  No festivalQueueId. No recipientCount stored anywhere. No batch ID.
+  Grouping heuristic: all rows with signalType='manual' and
+  sentAt within the same ~60-second window are probably the same broadcast.
+  This is fragile and not reliable (two back-to-back manual sends would
+  merge; a slow batch could span the window). No clean grouping key exists.
+
+BRAIN / AUTOMATED SENDS
+  No grouping key. Each ScheduledJob is an independent per-customer job.
+  There is no batchId. All cart_abandon jobs for a shop share the same
+  signalType, but they run at different times for different customers —
+  grouping them by signalType would show "all cart_abandon jobs ever", not
+  "this send".
+
+─────────────────────────────────────────────────────────────────────────────
+3. BRAIN SENDS — NO BATCH CONCEPT
+─────────────────────────────────────────────────────────────────────────────
+A brain send is a personalized, triggered notification: the brain schedules
+it when a specific customer shows a signal (cart_abandon, price_hesitation,
+etc.) and the customer exceeds their threshold. There is no "campaign" that
+goes to N customers at once. Two customers receiving cart_abandon
+notifications on the same day are independent events, not the same send.
+
+"Sent to N customers" is not meaningful for brain sends. The correct
+framing is: this customer got this notification for this reason at this time.
+The count is always 1.
+
+─────────────────────────────────────────────────────────────────────────────
+4. REALISTIC ROW FORMAT BY SEND TYPE
+─────────────────────────────────────────────────────────────────────────────
+FESTIVAL SENDS — data supports "N customers"
+  Source: FestivalQueue (title, recipientCount, sentAt, channel='push').
+  Honest row: "{title} · {recipientCount} customers · {date}"
+  The data is already there; the fetch just needs to target FestivalQueue
+  (status=sent, sort sentAt DESC) instead of raw ScheduledJob rows.
+
+MANUAL SENDS — recipientCount NOT stored
+  There is no durable "total sent" for a manual /send-store broadcast.
+  The push.js handler returns totalSent in the HTTP response but never
+  persists it on a FestivalQueue document (manual sends don't create one).
+  Honest row: "Manual push · push · {outcome} · {date}"
+  Could show "sent" from the HTTP response at the time, but once the page
+  reloads that number is gone. The store would need to persist it (e.g.
+  a lightweight BroadcastLog model, or a FestivalQueue row with no
+  festival name).
+
+BRAIN / AUTOMATED SENDS — count is always 1; show context instead
+  The per-customer framing is the right one. The row should communicate:
+  signal type (why), channel, outcome, time.
+  Honest row: "{signal label} · {channel} · {outcome} · {time}"
+  This is already what the current subtitle + outcome columns carry,
+  minus the double-label problem. No count needed or meaningful.
+
+─────────────────────────────────────────────────────────────────────────────
+5. PROPOSAL
+─────────────────────────────────────────────────────────────────────────────
+The double-label fix and the count question are actually two separate issues.
+
+A. FIX THE DOUBLE LABEL (one-line change, no data model change)
+   The subtitle (line 1559) should NOT repeat the signal label.
+   For brain jobs: "push" or "email" alone is enough (the bold title
+   already gives the signal type). For festival/manual: show the channel.
+   Replace line 1559:
+     BEFORE: {job.channel || 'push'} · {SIGNAL_LABELS[job.signalType] || job.signalType || 'manual'}
+     AFTER:  {job.channel || 'push'}
+   This removes the redundant label from the subtitle entirely. The bold
+   title carries the "what", the subtitle carries the "channel", the right
+   column carries the "outcome + date".
+
+B. CUSTOMER COUNT — FESTIVAL SENDS ONLY (requires endpoint change)
+   To show "N customers" for festival sends, the Recent Sends card needs to
+   fetch FestivalQueue items (status=sent), not raw ScheduledJob rows.
+   FestivalQueue already has title + recipientCount + sentAt. This would
+   require either:
+     - a new dashboard-specific endpoint (e.g. GET /api/queue/:shop/recent-sends
+       that returns the 4 most recent sent FestivalQueue items), or
+     - the existing GET /api/queue/:shop/festival endpoint already returns
+       all FestivalQueue items including sent — the frontend could filter
+       client-side to status=sent, sort by sentAt DESC, slice to 4.
+
+   Brain sends would remain in a separate section or be excluded from this
+   card (they are not campaigns). Manual sends would show without a count
+   until a BroadcastLog or similar is added.
+
+C. SIMPLEST COMPLETE FIX given current data
+   Change the Recent Sends card to two groups:
+     1. Festival/broadcast row: fetch last 4 sent FestivalQueue items.
+        Display: title · recipientCount subscribers · date
+     2. Automated row: fetch last 4 brain ScheduledJobs (festivalQueueId=null,
+        signalType not in ('manual')).
+        Display: signal label · channel · outcome · date
+   Or: keep the card showing the last 4 unique sends by doing a brief
+   aggregation on the backend (group ScheduledJob by festivalQueueId where
+   not null, take distinct, then fill remainder with brain jobs).
+
+IMMEDIATE SAFE FIX (no backend change, correct data):
+   Fix line 1559 subtitle only — remove the repeated signal label.
+   The "N customers" question requires new backend work (see B/C above)
+   and is a separate task. The double-label is the only bug introduced by
+   the last commit; it can be fixed in one line today.

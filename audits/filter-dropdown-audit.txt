@@ -1,0 +1,160 @@
+FILTER DROPDOWN AUDIT
+Date: 2026-10-02
+Scope: horizontal pill/tab/button filter rows in frontend/app/admin
+Excluded: date-range pills (Today / Yesterday / 7d / 30d / All time)
+
+────────────────────────────────────────────────────────────────
+1. EVERY FILTER CONTROL FOUND
+────────────────────────────────────────────────────────────────
+
+A. Customers — segment filter
+   File:    frontend/app/admin/screens/Customers.jsx:51 (FILTER_TABS) / :226 (render)
+   Screen:  Customers list
+   Filters: customer segment
+   Options: 7
+     everyone / has_cart / bought_once / repeat_buyer /
+     going_quiet / push_subscribed / email_captured
+   Overflow: YES — container has `overflowX: 'auto'` with a code comment
+             "horizontal scroll on mobile" (line 226-237). At 7 options
+             the longest labels ("Push subscribers", "Email captured") push
+             the total pill row to ~720px minimum, which overflows in the
+             Shopify iframe on any viewport under ~780px and on desktop
+             when the sidebar is open.
+
+B. Messages — channel/outcome filter
+   File:    frontend/app/admin/screens/Messages.jsx:192 (FILTER_TABS) / :335 (render)
+   Screen:  Messages list
+   Filters: message channel / outcome
+   Options: 4
+     all / push / email / converted ("Led to a sale")
+   Overflow: PRECAUTIONARY — container has `overflowX: 'auto'` (line 341)
+             but with only 4 options the total width is ~350px, which fits
+             at any admin iframe width of 375px+. The scroll guard is there
+             as safety, not because it actually fires in practice.
+
+C. Journey — signal type filter
+   File:    frontend/app/admin/screens/Journey.jsx:935 (render inline)
+   Screen:  Journey (signals / "Act now" customer list)
+   Filters: customer signal type
+   Options: 5
+     all / cart_abandon / high_intent / price_hesitation / lapsing
+   Labels include emoji: "🛒 Cart abandon", "💰 Price hesitation", etc.
+   Overflow: YES — container has `overflowX: 'auto'` (line 938). With emoji
+             prefix the 5 labels sum to roughly 500–550px, which overflows
+             at anything below ~580px. Price hesitation alone is ~160px.
+
+D. Queue — job status filter
+   File:    frontend/app/admin/queue/QueueScreen.jsx:12 (STATUS_FILTERS) / :1176 (render)
+   Screen:  Queue (planning list tab)
+   Filters: scheduled job status
+   Options: 3
+     all / pending / sent
+   Overflow: CONTAINER ONLY — `overflowX: 'auto'` present (line 1179) but
+             3 short labels ("All", "Pending", "Sent") total ~180px.
+             Never actually overflows at any real admin width.
+
+E. CustomerDetail — timeline type filter
+   File:    frontend/app/admin/screens/CustomerDetail.jsx:1301 (render inline)
+   Screen:  Customer detail, "What's happened" section header
+   Filters: timeline event category
+   Options: 3
+     all ("Everything") / them ("They did") / us ("We sent")
+   Overflow: NO — no overflowX on container (line 1300: plain flex, gap 4).
+             3 short labels right-aligned in the section header, always fits.
+
+────────────────────────────────────────────────────────────────
+2. VERDICT PER CONTROL
+────────────────────────────────────────────────────────────────
+
+Rule: 5+ options OR confirmed horizontal scroll → dropdown.
+      2-4 short options that always fit in practice → stay as pills.
+
+A. Customers segment filter   → DROPDOWN
+   Reason: 7 options + confirmed overflow.
+
+B. Messages channel filter    → STAY AS PILLS
+   Reason: 4 options; actual scroll does not fire at typical admin widths.
+   Note: "Led to a sale" is the longest label (13 chars). If the admin is
+   ever rendered narrower than ~350px (rare), overflow kicks in, but that
+   is below the minimum Shopify iframe width.
+
+C. Journey signal type filter → DROPDOWN
+   Reason: 5 options + confirmed overflow (emoji labels widen each pill).
+
+D. Queue status filter        → STAY AS PILLS
+   Reason: 3 short options, no actual overflow.
+
+E. CustomerDetail timeline    → STAY AS PILLS
+   Reason: 3 short options, no overflow container, right-aligned header group.
+
+────────────────────────────────────────────────────────────────
+3. EXISTING <select> ELEMENTS
+────────────────────────────────────────────────────────────────
+
+None of the existing <select> elements are list-filter controls.
+All found selects are form inputs unrelated to filtering:
+
+  frontend/app/admin/automation/AutomationScreen.jsx:125
+    — time-unit selector (days / hours / weeks) for scheduling delay
+
+  frontend/app/admin/screens/Settings.jsx:658 (SelectRow component)
+    — popup style settings (layout, button style, etc.)
+
+  frontend/app/admin/screens/Settings.jsx:2434, :2444
+    — quiet-hours start/end time pickers (0–23)
+
+Style reference: the SelectRow component at Settings.jsx:656 uses
+  `border: '1px solid #e5e7eb'`, `borderRadius: 6`, `background: '#fff'`,
+  `padding: '5px 8px'`, `fontSize: 12`. Any new dropdown filter should
+  match this styling.
+
+────────────────────────────────────────────────────────────────
+4. URL PARAM SEEDING
+────────────────────────────────────────────────────────────────
+
+A. Customers segment filter (A above): YES — seeded
+   Param: ?filter=<key>   (e.g. ?filter=push_subscribed)
+   Set by: Dashboard "Push Subscribers" and "Emails Captured" tiles
+   Source: customers/page.js:16 → initialFilter → Customers.jsx:80
+   A dropdown here must pre-select the correct option on page load.
+
+B. Messages channel filter (B above): YES — seeded
+   Param: ?channel=push or ?channel=email
+   Set by: Dashboard "Push Sent" and "Emails Sent" tiles
+   Source: messages/page.js:16 → initialChannel → Messages.jsx:217
+   The dropdown (if ever converted) must also honour this.
+
+C. Journey signal filter (C above): NO — not URL-seeded. Filter state
+   initialises to 'all' unconditionally.
+
+D. Queue status filter (D): NO
+E. CustomerDetail timeline (E): NO
+
+────────────────────────────────────────────────────────────────
+5. SHARED COMPONENT? WHAT WOULD IT NEED?
+────────────────────────────────────────────────────────────────
+
+No shared filter component exists today. DateRangeFilter.jsx covers date
+pickers only. Every other filter is hand-rolled inline with its own
+.map() over a local FILTER_TABS or inline array.
+
+A shared <FilterDropdown> component would need:
+
+  props:
+    options     — array of { key, label }
+    value       — currently selected key
+    onChange    — (key) => void
+    label?      — accessible <label> for the <select> (e.g. "Filter by")
+    style?      — escape hatch for margin/width overrides
+
+  behaviour:
+    - Renders a native <select> matching the SelectRow styling in Settings.jsx
+      (border #e5e7eb, borderRadius 6, bg #fff, padding 5px 8px, fontSize 12)
+    - Reflects an incoming URL-seeded value on mount (callers already handle
+      this via their useState initialiser — component just needs a controlled
+      value prop)
+    - No multi-select needed (all three current use cases are single-select)
+    - No "All" injection needed — callers already include an "All/Everyone"
+      option in their arrays
+
+  file suggestion: frontend/app/admin/components/FilterDropdown.jsx

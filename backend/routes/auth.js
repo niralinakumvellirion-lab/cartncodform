@@ -9,6 +9,7 @@ const {
   exchangeCodeForToken,
   getOnlineToken,
   fetchShopInfo,
+  fetchBrandData,
   registerAllWebhooks,
   refreshAccessTokenIfNeeded,
 } = require('../utils/shopify');
@@ -116,18 +117,19 @@ router.get('/callback', async (req, res) => {
     // indistinguishable from a merchant who genuinely chose Kolkata.
     const isNewInstall = !(await Store.exists({ shopDomain }));
 
-    // Owner email + the shop's own timezone both come off the same Admin API
-    // call (GET /admin/api/<v>/shop.json) — no second request. Timezone is
-    // only ever read for a NEW install (see isNewInstall above); a merchant
-    // who has since picked their own timezone in Settings must never be
-    // overwritten by a later reconnect.
+    // Fetch shop info for ownerEmail, timezone, and shopName. Always called
+    // (shopName is a new field we want on every install/reconnect).
+    // Timezone is only applied on a new install — a merchant who changed
+    // it in Settings must never be overwritten by a reconnect.
     let ownerEmail = savedState.ownerEmail || null;
     let shopTimezone = null;
-    if (!ownerEmail || isNewInstall) {
-      const info = await fetchShopInfo(shopDomain, accessToken);
-      if (!ownerEmail) ownerEmail = info.email;
-      shopTimezone = info.ianaTimezone;
-    }
+    const info = await fetchShopInfo(shopDomain, accessToken);
+    if (!ownerEmail) ownerEmail = info.email;
+    if (isNewInstall) shopTimezone = info.ianaTimezone;
+
+    // Brand data: fire-and-save — fetchBrandData never throws, returns
+    // nulls on any error, so the install is never blocked by a brand API miss.
+    const brandData = await fetchBrandData(shopDomain, accessToken);
 
     const update = {
       shopDomain,
@@ -139,6 +141,9 @@ router.get('/callback', async (req, res) => {
       needsReauth: false,
     };
     if (ownerEmail) update.ownerEmail = ownerEmail;
+    if (info.shopName) update.shopName = info.shopName;
+    if (brandData.logoUrl) update.logoUrl = brandData.logoUrl;
+    if (brandData.primaryColor) update.primaryColor = brandData.primaryColor;
     if (isNewInstall) {
       // Same validation as the settings PATCH (routes/profiles.js): Intl
       // throws on an unrecognised zone. A missing or bad value falls back to

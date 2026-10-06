@@ -1,4 +1,4 @@
-DASHBOARD CALENDAR — PRE-AUDIT
+DASHBOARD CALENDAR — PRE + SELF-AUDIT
 ================================
 Date: 2026-10-01
 File: frontend/app/admin/dashboard/DashboardScreen.jsx
@@ -58,3 +58,29 @@ CONSTRAINTS VERIFIED
 - Day cells are <button> with aria-label (full date, long form).
 - 7-col grid at 300px sidebar fits without horizontal scroll (~38px/cell).
 - Only the listed files change.
+
+SELF-AUDIT
+----------
+All 6 planned changes applied exactly as described.
+
+Verified:
+- SidebarCalendar component defined at module level (not inside
+  DashboardScreen) — no remount on every parent render.
+- `pendingFrom` lives only in SidebarCalendar; parent only ever sees a
+  completed {from, to} pair via onRangeSelect — no partial-range
+  refetch possible.
+- Guard `if (dateFilter === 'custom' && (!customRange.from || !customRange.to)) return`
+  prevents a fetch when only the first calendar day has been clicked.
+- `customRange` added to data-fetch effect deps; ESLint exhaustive-deps
+  satisfied.
+- kpiFrom/kpiTo and customLabel both handle the 'custom' case so KPI
+  tile drill-downs carry the correct range.
+- DateRangeFilter onChange clears customRange before switching pills, so
+  the pill refetch doesn't accidentally carry stale custom dates.
+- Build: ✓ Compiled successfully (0 errors, 0 warnings).
+- Commit: 4e68a18 — only DashboardScreen.jsx + audit file.
+- No tests needed (pure render change, no business logic added).
+
+NOT DONE (intentional):
+- matchDatePreset not imported — not needed for this feature.
+- No backend changes — calendar is pure frontend state + existing APIs.

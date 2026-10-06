@@ -1,0 +1,276 @@
+QUEUE NOTIFICATION DETAIL - PHASE 1 AUDIT (READ ONLY, NOTHING IMPLEMENTED)
+============================================================================
+
+1. WHAT'S STORED TODAY
+-------------------------
+backend/models/FestivalQueue.js — every field: shopDomain, title, body,
+  imageUrl, mobileImageUrl, desktopImageUrl, scheduledAt, festival,
+  targetType (home|product), productId, productHandle, productTitle,
+  status (draft|approved|sent|cancelled), sentAt, recipientCount,
+  failedAttempts, + timestamps.
+  recipientCount = mobileResult.sent + desktopResult.sent
+  (server.js processFestivalQueue), where .sent is Firebase's
+  response.successCount from sendEachForMulticast — i.e. "FCM accepted
+  the message for this many device tokens," NOT "N customers" (one
+  customer can hold multiple tokens/devices) and NOT "opened/seen" (no
+  open tracking exists for push at all). Call it ATTEMPTED-AND-ACCEPTED,
+  not delivered-to-a-human and not delivered-and-confirmed.
+
+Per-model check — does anything record "customer X received notification
+Y at time Z"?
+  - ScheduledJob: YES, but only for BRAIN/automation-driven sends (the
+    ones with profileId set). One row per targeted recipient already:
+    shopDomain, profileId, signalType, subscriptionToken/sessionId/
+    cartToken/customerId, runAt, status (pending/sent/cancelled/failed/
+    skipped), channel (push/email), payload (resolved title/body at send
+    time), outcome (delivered/clicked/converted/failed/skipped),
+    clickedAt, sentAt. This is almost exactly the shape being asked for
+    — see section 2's reuse recommendation.
+  - Profile.messages: YES, but capped at the last 20 per profile, and
+    ALSO only populated for job.profileId-driven sends (both the push
+    and email branches in server.js's processScheduledJobs $push a
+    { channel, type, sentAt, outcome, jobId } entry, jobId referencing
+    the ScheduledJob row above). Read by brain.js (6h per-signal
+    cooldown) and routes/profiles.js. Not queried by any admin screen
+    today (see section 4 — CustomerDetail.jsx never reads it).
+  - AttributedEvent: NO (for the "who received it" question) — it
+    records what the CUSTOMER DID after clicking through
+    (revisit/add_to_cart/checkout_start/purchase), keyed by jobId. It is
+    attribution/outcome tracking downstream of a click, not a delivery
+    record, and only exists when ccf_job click-through attribution fired
+    — festival/broadcast sends carry no ccf_job today (see below), so
+    they generate no AttributedEvent rows either.
+  - StorefrontEvent: NO. Generic behavior tracking (page_view,
+    push_prompt_shown, product_view, etc.) with a `token` field, but
+    that's the subscribing device's token at event time, not a record of
+    a specific notification being sent to it.
+  - Profile: NO per-send record on the top-level doc itself (identity +
+    aggregates only); its `messages` sub-array is the actual per-send
+    record, covered above.
+  - CustomerPushSubscription: NO. One row per token/device (identity),
+    overwritten on resync — not an append-only send log.
+
+What processFestivalQueue writes when it sends (server.js): calls
+  sendPushToCustomers() TWICE (mobile-only pass, desktop-only pass, see
+  utils/pushNotification.js line 105). That function queries
+  CustomerPushSubscription for ALL matching tokens, builds ONE
+  sendEachForMulticast() FCM call with the full token list, and returns
+  only an aggregate { success, sent, tokensFound }. It writes NOTHING
+  per-recipient — no ScheduledJob row, no Profile.messages entry, no
+  jobId, no ccf_job attribution tag on the click URL. The only write
+  after a festival send is FestivalQueue.recipientCount (the aggregate
+  number) and status/sentAt on the ONE FestivalQueue doc. Individual FCM
+  send failures ARE inspected (to prune stale tokens via
+  handleStaleToken), but which specific tokens/customers succeeded is
+  discarded immediately after — never persisted.
+
+/send-store (routes/push.js, powers Dashboard "Send Now" / Suggestions)
+  calls the EXACT SAME sendPushToCustomers() helper, with the same
+  behavior: aggregate count only, nothing per-recipient. So this
+  question's answer for /send-store is identical to processFestivalQueue.
+
+Brain's ScheduledJob sends (processScheduledJobs, server.js): DIFFERENT
+  path, already per-recipient by construction — one ScheduledJob row was
+  created back when the Brain scheduled it (one profile/signal at a
+  time), and at send time that same row is updated in place
+  (status:'sent', sentAt, outcome) rather than a new row being created.
+  This is the one send path that already answers "who got what, when."
+
+2. WHAT'S MISSING
+--------------------
+To show "5 customers received a push for Diwali," festival/broadcast
+sends need a per-recipient row created AT SEND TIME (today they create
+none). Minimum new data: which token/customer, which FestivalQueue item,
+channel, per-token success/failure, and a timestamp.
+
+Proposed model: reuse ScheduledJob, do not add a new collection.
+  Why it fits: it already has exactly the right per-recipient shape
+  (subscriptionToken/customerId/cartToken, channel, status, outcome,
+  sentAt, payload) and the admin already has query/list plumbing for it
+  (routes/queue.js's planning-list endpoint, GET /api/queue/:shop already
+  paginates ScheduledJob by status). Reusing it means the per-festival
+  customer list and the per-customer history (section 4's #2 ask) can
+  share ONE query pattern instead of two.
+  What it's missing for this use case, and the smallest additive change:
+    - A way to link a row back to the FestivalQueue item it came from.
+      ScheduledJob.profileId is a Profile ref (brain-only); festival
+      sends target a raw token, not necessarily a resolved Profile.
+      Smallest fix: add one new nullable field, festivalQueueId (ObjectId
+      ref FestivalQueue), left null for brain-driven rows. signalType
+      needs NO schema change to hold a value like 'festival' — it's a
+      free-text String with no enum constraint today.
+    - Rows would be created already-'sent' (festival sends are
+      synchronous broadcasts, not scheduled-then-polled like brain jobs)
+      — status/runAt/sentAt all set at write time, one insert per
+      recipient instead of the current update-in-place pattern. This is
+      a genuinely different write shape from how ScheduledJob is used
+      today (create-pending-then-claim vs. create-already-sent), worth
+      flagging as a design wrinkle even though the schema itself doesn't
+      need to change for it.
+    - outcome per row should be set from the per-token FCM response
+      (response.responses[i].success is already inspected in
+      sendPushToCustomers for stale-token pruning — the same loop already
+      has the information needed, it's just discarded today).
+
+Per-customer history (section title's third screen) then falls out for
+free: "customer X's history" = ScheduledJob.find({ shopDomain,
+{profileId | customerId | cartToken match} }).sort({sentAt:-1}) — no new
+model needed there either, once festival sends write rows into the same
+collection. The harder part is IDENTITY: a festival send only knows the
+FCM token + whatever CustomerPushSubscription.customerId/cartToken/
+ccfSessionId was on file for it at send time (frequently no resolved
+customerId for an anonymous browser subscriber) — so "per-customer
+history" will sometimes only be "per-device/per-session history" for
+festival sends, same limitation StorefrontEvent already has today.
+
+Write volume estimate: a broadcast to N subscribers = N new ScheduledJob
+  rows (one insert per token, or two writes if mobile/desktop are queried
+  separately as they are today — should be de-duplicated per customer in
+  the design, not per query pass). At 5,000 subscribers: 5,000 document
+  inserts. As a single insertMany (or a few batches of ~1,000), this is
+  trivial for MongoDB — low hundreds of milliseconds, and this already
+  runs inside the async 30s poller tick / a POST handler that isn't
+  latency-sensitive to the merchant. NOT a concern at 5,000, and would
+  stay reasonable well past that (tens of thousands) with batched
+  inserts; a genuinely large list (six figures) would want chunked/
+  streamed inserts rather than one array in memory, but that's not this
+  app's current scale.
+
+  A SEPARATE, more urgent problem this surfaced: sendPushToCustomers()
+  passes the ENTIRE token array to a single
+  getMessaging().sendEachForMulticast(message) call with no chunking.
+  Firebase Admin SDK's sendEachForMulticast has a hard limit of 500
+  tokens per call. At "5,000 subscribers," TODAY'S CODE — independent of
+  anything proposed here — would already be past that limit and I would
+  expect it to throw or silently drop tokens beyond 500, not send to all
+  5,000. I did not find any chunking logic anywhere in
+  utils/pushNotification.js. This is a pre-existing bug, not something
+  introduced by this feature, but it directly bears on "is 5,000
+  acceptable" — sending to 5,000 isn't reliably happening today at all,
+  and any per-recipient logging built on top of the current single-call
+  send would just as reliably only log ~500 rows' worth of real attempts.
+  Flagging for you to decide whether to fix in this phase or separately.
+
+3. NOTIFICATION TYPE
+-----------------------
+Distinct types that exist in the code today, and where triggered:
+  - Automation/Brain signal types (ScheduledJob.signalType, from
+    Signal.type's enum): cart_abandon, checkout_abandon, browse_abandon,
+    high_intent, price_hesitation, price_drop, back_in_stock,
+    post_purchase_d3, lapsing, winback, email_capture, cod_to_prepaid —
+    computed by signalEngine.js, ranked and scheduled by brain.js,
+    resolved to copy and sent by processScheduledJobs (server.js).
+  - Channel, orthogonal to type: push vs email (ScheduledJob.channel;
+    brain's selectChannel() picks one per send).
+  - Festival/broadcast push — triggered from the Dashboard's
+    Notification Suggestions → Approve/Add to Queue (writes
+    FestivalQueue), sent by processFestivalQueue (server.js). Today
+    carries NO type field anywhere — see below.
+  - Manual "Send Now" push — routes/push.js POST /send-store, triggered
+    directly from a Dashboard button, same sendPushToCustomers() path as
+    festivals, also carries no type field.
+  - COD — a distinct storefront flow (order form), not a push/email
+    notification type at all; out of scope for this feature as described.
+  - Discount-capture email/push — the popup's own subscribe flow
+    (extensions/cartncodform-embed), tagged by discount rule (push/email/
+    both) rather than a "signal type"; not represented in ScheduledJob
+    (it's a direct subscribe+generate-discount call, not brain-scheduled).
+
+Is type recorded, or only implied by code path? Recorded ONLY for the
+  Brain/automation path (ScheduledJob.signalType, a real stored field).
+  Every other path — festival, manual send-store, discount-capture — has
+  no stored type at all; today you can only tell festival vs. manual
+  send-now apart by which FestivalQueue/ScheduledJob doc (if any) exists,
+  and you cannot distinguish "push" vs "email" for festival sends because
+  festival sends are ALWAYS push only (sendPushToCustomers, no email
+  branch in processFestivalQueue) — so channel is implied-constant there,
+  not stored either. If per-recipient rows get added per section 2, the
+  natural, minimal type value for festival rows is
+  signalType: 'festival' (reusing the same free-text field automation
+  already uses), which then makes "type" a real, queryable column across
+  EVERY send path, not just the Brain's.
+
+4. EXISTING SCREENS
+-----------------------
+QueueScreen's calendar (frontend/app/admin/queue/QueueScreen.jsx,
+  MonthCalendar function, ~line 358): builds 7-column day cells for the
+  displayed month (leading/trailing cells from adjacent months greyed
+  out), matches festivalItems (FestivalQueue docs, fetched once for the
+  shop) to each real day by comparing scheduledAt's Y/M/D, caps chips per
+  day at MAX_CHIPS_PER_DAY with a "+N more" overflow line. Current chip
+  content is q.title ONLY — no type, no recipient count, no status
+  beyond the chip's background color (green for approved, blue for
+  everything else, including already-sent items — sent items are NOT
+  visually distinguished from pending-approval ones by color today).
+  onClick opens the existing edit modal (openEditModal), which is a
+  create/edit form, not a read-only detail/send-report view — there is no
+  existing "click a festival, see who it went to" screen to extend; this
+  would be new.
+
+Per-customer detail screen: CustomerDetail.jsx (frontend/app/admin/
+  screens/, 1047 lines) exists and is fetched via
+  /api/events/:shop/journey?profileId=... into customer.recentEvents,
+  rendered as a timeline. I read it in full for message/history/sentAt/
+  outcome references: NONE found. Its EVENT_LABELS covers exactly
+  page_view, push_prompt_shown, push_prompt_accepted, product_view — pure
+  browsing-behavior events (StorefrontEvent-derived), not notification
+  deliveries. It does NOT show Profile.messages (the one place a per-send
+  record already exists, for brain-driven sends), so even TODAY's
+  automation sends have no visible history on this screen — this gap
+  predates and is broader than the festival/broadcast question asked
+  here. This screen is a reasonable place to ADD a delivery-history
+  section, not a screen that already has one.
+
+Activity screen (AttributedEvent): adjacent, not duplicate. It shows
+  post-click behavior (revisit/add_to_cart/checkout_start/purchase) tied
+  by jobId back to a ScheduledJob, filterable by eventType — i.e. "what
+  did people do after a notification," not "who got the notification."
+  The two are complementary: a per-recipient send log (section 2) answers
+  "who/what/when was sent," Activity answers "what happened after,
+  for the subset who clicked through." Building the former does not
+  replace or overlap the latter.
+
+5. PRIVACY
+-------------
+Would a per-customer send log hold personal data? Yes, but not NEW
+  categories of personal data — it would associate already-stored
+  identifiers (FCM token, and where resolvable: customerId, cartToken,
+  ccfSessionId — see CustomerPushSubscription, which already stores all
+  of these) with a timestamp and a notification's title/body. The
+  identifiers themselves are already "protected customer data" under
+  Shopify's policy today (this app already stores customerId, email,
+  phone in Profile and CustomerPushSubscription — that determination was
+  already made before this audit). Adding a send log extends an existing
+  data category rather than introducing a new one, but it DOES increase
+  the volume/surface of records tied to a given customer, which matters
+  for retention and deletion obligations below.
+
+App Store / compliance items to flag:
+  - shopify.app.toml already declares the three mandatory GDPR compliance
+    webhooks (customers/data_request, customers/redact, shop/redact) —
+    so the app is already in the regime this data change would need to
+    respect, not newly entering it.
+  - I read handleCustomersRedact (routes/webhooks.js) in full: on
+    customers/redact it deletes from AbandonedCustomer, StorefrontEvent,
+    and CustomerPushSubscription by customerId/email. It does NOT touch
+    Profile or ScheduledJob at all today — meaning Profile's stored
+    email/phone/messages history, and any ScheduledJob rows tied to that
+    customer, currently SURVIVE a redact request unredacted. This is a
+    pre-existing gap, not something introduced by this feature, but any
+    new per-recipient send-log rows (via the ScheduledJob-reuse design in
+    section 2) would inherit the same gap unless customers/redact is
+    updated to also sweep ScheduledJob (by customerId/cartToken) and
+    Profile (by identifiers) — worth deciding whether to fix as part of
+    implementing this feature, since it would be adding MORE rows to a
+    collection that already isn't covered by the existing redact handler.
+  - customers/data_request (the "here's everything you have on me"
+    request) is presumably handled by a similar or shared function —
+    not separately audited here in depth, but the same "does it cover
+    ScheduledJob/Profile" question applies to it too.
+  - TTL/retention: StorefrontEvent and AttributedEvent both already
+    auto-expire after 90 days (TTL index). ScheduledJob has NO TTL index
+    today — brain-driven send history accumulates indefinitely already,
+    and a festival-broadcast expansion (potentially thousands of rows per
+    send) would add to that same unbounded collection. Worth deciding a
+    retention policy for ScheduledJob generally, not just for the new
+    festival rows, while this is being designed.

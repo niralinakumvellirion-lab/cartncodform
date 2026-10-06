@@ -1,0 +1,169 @@
+AUDIT: Journey email — generic body, missing image, Gmail spam
+Date: 2026-10-03
+Files read:
+  backend/routes/push.js           (sendJourneyEmail lines 503–562)
+  backend/utils/email.js           (FROM address, sendAbandonedCartEmail)
+  frontend/app/admin/screens/CustomerDetail.jsx
+    (EmailComposer lines 632–684, useEffect lines 643–667)
+
+─────────────────────────────────────────────────────────────────────────────
+1. GENERIC BODY — WHERE "THANK YOU FOR BEING A VALUED CUSTOMER" COMES FROM
+─────────────────────────────────────────────────────────────────────────────
+sendJourneyEmail (push.js) has NO fallback template. It sends exactly
+req.body.body — whatever the frontend posted. The generic text is frontend
+auto-fill that the merchant sent without editing.
+
+EmailComposer's useEffect (CustomerDetail.jsx:643–667) runs on every
+[customer] change and auto-fills `body` state from a suggestions map:
+
+  const suggestions = {
+    cart_abandon: { ... product-specific ... },
+    high_intent:  { ... product-specific ... },
+    lapsing:      { ... "we miss you" ... },
+  };
+  const s = suggestions[signal] || {
+    subject: 'A message from our store',
+    body: 'Hi there,\n\nThank you for being a valued customer. We have
+           something special for you.\n\nWarm regards,\nThe Team',  // ← this
+  };
+  setSubject(s.subject);
+  setBody(s.body);
+
+"Thank you for being a valued customer... something special for you" is the
+fallback at CustomerDetail.jsx:663. It fires when customer.topSignal.type
+is not cart_abandon / high_intent / lapsing (e.g. email_capture,
+browse_abandon, new_subscriber, etc.).
+
+The merchant likely saw the auto-filled suggestion, didn't edit it, and
+clicked Send. The backend faithfully sent what it received.
+
+SECONDARY RISK: the useEffect is keyed on [customer]. If the parent
+re-fetches or swaps the customer prop AFTER the merchant starts editing
+(e.g. a polling refresh), the useEffect fires again and silently resets
+subject+body back to the auto-suggestion, discarding the merchant's edits.
+This is an existing UX bug unrelated to the current task but worth noting.
+
+─────────────────────────────────────────────────────────────────────────────
+2. IMAGE — DOES imageUrl REACH THE TEMPLATE?
+─────────────────────────────────────────────────────────────────────────────
+Frontend posts:
+  imageUrl: productImage || undefined
+  where productImage = customer?.topProducts?.[0]?.imageUrl || null
+
+If the customer has no topProducts or the first product has no imageUrl,
+productImage = null → productImage || undefined = undefined. JavaScript's
+JSON.stringify silently drops keys with undefined values, so the request
+body arrives at the backend with NO imageUrl key at all.
+
+Backend:
+  const { imageUrl } = req.body;   // → undefined
+  ...
+  ${imageUrl && imageUrl.startsWith('https://') ? `<div...><img...>` : ''}
+  // condition: undefined && ... = false → image block omitted
+
+CONCLUSION: if the customer's topProducts[0].imageUrl is null/undefined
+(no tracked product views, or Shopify product has no image), imageUrl
+never makes it into the email. The image block is silently skipped.
+
+This is correct behavior (don't show a broken <img>) but the merchant has
+no feedback that no image was included. The image was absent because the
+customer had no qualifying topProducts entry with an imageUrl, not because
+of a code bug.
+
+─────────────────────────────────────────────────────────────────────────────
+3. WHY THE COMPOSED BODY WAS REPLACED BY GENERIC TEXT
+─────────────────────────────────────────────────────────────────────────────
+The backend does not replace or override the body. sendJourneyEmail uses
+req.body.body verbatim:
+
+  html: `...${body.replace(/\n/g, '<br>')}...`
+
+The generic text arrived because the merchant sent the auto-suggested
+fallback without editing it. The customer's topSignal.type was not one of
+the three mapped signal types, so the generic default was pre-filled.
+
+No backend fallback exists. The flow is:
+  1. Customer loads → useEffect auto-fills body with suggestion/fallback
+  2. Merchant clicks Send without editing
+  3. Frontend posts body = fallback text
+  4. Backend sends that text as-is
+
+─────────────────────────────────────────────────────────────────────────────
+4. SPAM — FROM ADDRESS AND DOMAIN AUTHENTICATION
+─────────────────────────────────────────────────────────────────────────────
+sendJourneyEmail (push.js:524) hardcodes:
+  from: 'ShopiReachBoost AI <notifications@shopireachboost.com>'
+
+This does NOT use the FROM env var from backend/utils/email.js (which does
+`const FROM = process.env.FROM_EMAIL || 'notifications@shopireachboost.com'`).
+Both default to the same domain, but the journey email bypasses the env var.
+
+Sending domain: shopireachboost.com
+From address:   notifications@shopireachboost.com
+
+Gmail spam check — most common causes in order:
+
+A. DOMAIN NOT VERIFIED WITH RESEND
+   Resend requires DNS records to be added for any domain before it will
+   sign outgoing mail with DKIM. If shopireachboost.com is not verified in
+   the Resend dashboard (Settings → Domains), emails are sent without DKIM
+   signatures and Gmail treats them as spam.
+   Check: Resend dashboard → Domains → shopireachboost.com → status
+   Expected: "Verified" with SPF, DKIM, and (optionally) DMARC all green.
+
+B. MISSING SPF RECORD
+   shopireachboost.com's DNS must include Resend's SPF include:
+     v=spf1 include:sendgrid.net ... (Resend uses SendGrid infrastructure)
+   Actually Resend's SPF: include:_spf.resend.com
+   Without this, Gmail's SPF check fails → spam.
+
+C. MISSING DKIM
+   Resend adds a CNAME record for DKIM signing once the domain is verified.
+   Without it, the email has no DKIM signature → spam.
+
+D. NO DMARC POLICY
+   Without DMARC, Gmail may still accept but deprioritize. With a p=none
+   DMARC record pointing to a report address, deliverability improves.
+
+E. SENDER REPUTATION
+   A newly verified domain with no prior volume has zero reputation.
+   Gmail is cautious with cold senders. Reputation builds over time with
+   low bounce rates and positive engagement.
+
+F. CONTENT TRIGGERS
+   Generic subject lines ("A message from our store") and generic body
+   text can score high on spam filters. Product-specific copy is less
+   likely to be flagged.
+
+WHAT IS NOT CONFIGURED / UNKNOWN (from code alone):
+   - Cannot determine DNS records for shopireachboost.com without a DNS
+     lookup — only the Resend dashboard or DNS tools can confirm.
+   - Cannot confirm whether the domain was verified in Resend.
+   - The from address (notifications@shopireachboost.com) is consistent
+     across sendAbandonedCartEmail and sendJourneyEmail — no mismatch
+     there, but hardcoding in push.js means a FROM_EMAIL env var change
+     won't affect journey emails.
+
+RECOMMENDED VERIFICATION STEPS (not a fix — per audit scope):
+  1. Resend dashboard → Domains → check shopireachboost.com verification
+  2. DNS lookup: dig TXT shopireachboost.com (look for v=spf1 include:_spf.resend.com)
+  3. DNS lookup: dig CNAME resend._domainkey.shopireachboost.com
+  4. Send a test to mail-tester.com to score the deliverability
+
+─────────────────────────────────────────────────────────────────────────────
+ROOT CAUSE SUMMARY
+─────────────────────────────────────────────────────────────────────────────
+(a) Generic body: the customer's topSignal.type had no matching suggestion,
+    so the auto-filled fallback "Thank you for being a valued customer..."
+    was sent unedited. Backend is not at fault.
+
+(b) No image: customer had no topProducts[0].imageUrl — imageUrl was
+    undefined/null, JSON-dropped from the POST body, condition in the
+    template evaluated false. Correct behavior, no visible feedback to
+    merchant.
+
+(c) Gmail spam: most likely cause is shopireachboost.com not verified or
+    not fully authenticated (SPF/DKIM) in Resend. Secondary factor: generic
+    subject + body content, cold sender reputation.
+
+>>> STOP. Audit only. No implementation.

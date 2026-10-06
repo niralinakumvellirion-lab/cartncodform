@@ -183,11 +183,48 @@ async function fetchShopInfo(shop, accessToken) {
       headers: { 'X-Shopify-Access-Token': accessToken },
     });
     const s = data && data.shop;
-    return { email: (s && s.email) || null, ianaTimezone: (s && s.iana_timezone) || null };
+    return {
+      email: (s && s.email) || null,
+      ianaTimezone: (s && s.iana_timezone) || null,
+      shopName: (s && s.name) || null,
+    };
   } catch (err) {
     const detail = err.response ? JSON.stringify(err.response.data) : err.message;
     console.error(`[shopify] Failed to fetch shop info for ${shop}: ${detail}`);
-    return { email: null, ianaTimezone: null };
+    return { email: null, ianaTimezone: null, shopName: null };
+  }
+}
+
+/**
+ * Fetch brand logo + primary color via Admin GraphQL.
+ * No extra scope needed — Shop is always readable by an installed app.
+ * Hard-timeout at 3 s. Never throws; returns nulls on any error so
+ * the install callback can ignore failures.
+ */
+async function fetchBrandData(shop, accessToken) {
+  try {
+    const url = `https://${shop}/admin/api/${API_VERSION}/graphql.json`;
+    const query = `{ shop { brand { logo { image { url } } colors { primary { background } } } } }`;
+    const { data } = await axios.post(
+      url,
+      { query },
+      {
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json',
+        },
+        timeout: 3000,
+      }
+    );
+    const brand = data && data.data && data.data.shop && data.data.shop.brand;
+    return {
+      logoUrl: (brand && brand.logo && brand.logo.image && brand.logo.image.url) || null,
+      primaryColor:
+        (brand && brand.colors && brand.colors.primary && brand.colors.primary.background) || null,
+    };
+  } catch (err) {
+    console.error(`[shopify] fetchBrandData failed for ${shop}:`, err.message);
+    return { logoUrl: null, primaryColor: null };
   }
 }
 
@@ -302,6 +339,7 @@ module.exports = {
   exchangeSessionToken,
   getOnlineToken,
   fetchShopInfo,
+  fetchBrandData,
   registerWebhook,
   registerAllWebhooks,
   refreshAccessTokenIfNeeded,

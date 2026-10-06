@@ -1,0 +1,224 @@
+SHOPIFY BILLING API - PHASE 1 AUDIT (READ ONLY, NOTHING IMPLEMENTED)
+======================================================================
+
+CORRECTION TO THE TASK'S OWN PREMISE
+-------------------------------------
+The task describes this as "no billing" to map from scratch. That is not
+accurate. Substantial billing plumbing already exists in the codebase and
+is fully wired end-to-end — it is just never triggered, because nothing
+requires it. See section 2. This changes the shape of Phase 2 from "build
+billing" to "gate features with the billing that's already there, and
+build the missing frontend UI."
+
+1. AUTH & INSTALL
+-------------------
+backend/routes/auth.js, read end to end.
+
+GET /install (line 34): validates ?shop=, creates/reuses an OAuthState
+  nonce (60s dedupe window, scoped per shop), redirects to Shopify's OAuth
+  consent screen. No billing touched here.
+
+GET /callback (line 85): validates the OAuthState nonce (single-use,
+  findOneAndDelete) and HMAC (soft-fails with a warning if the secret is
+  unset). Exchanges the code for an offline access token. Determines
+  isNewInstall via Store.exists() BEFORE the upsert (added in the last
+  timezone-default task) — this is also the natural, already-present hook
+  for "is this shop new" that any first-run billing logic would reuse.
+  Upserts the Store doc (accessToken, timezone, ownerEmail, etc.),
+  registers webhooks (registerAllWebhooks — includes app_subscriptions/
+  update and app/uninstalled, see section 4), then:
+    - Calls getActiveSubscription(shop, accessToken) (utils/billing.js).
+    - If an active subscription exists: sets plan='pro', subscriptionId,
+      subscriptionStatus, planUpdatedAt, and redirects to the embedded
+      admin dashboard URL.
+    - If the billing check itself throws: logs it and falls through to
+      the SAME dashboard redirect on the free plan — a billing API hiccup
+      never blocks install.
+    - If no active subscription: logs it, redirects to the SAME dashboard
+      URL on the free plan.
+  So today, EVERY install (new or re-auth) lands on the dashboard
+  regardless of plan. There is no separate "choose a plan" step and no
+  redirect variation based on subscription state.
+
+GET /upgrade?shop=... (line 257): looks up the store, builds a returnUrl
+  to /api/auth/billing/callback, calls createSubscription() (7-day trial,
+  $9.99/mo, EVERY_30_DAYS), redirects the merchant to Shopify's hosted
+  confirmation page. Nothing links to this route today — no frontend
+  button, no redirect ever points here. It only works if hit directly.
+
+GET /billing/callback?shop=...&charge_id=... (line 292): re-checks
+  getActiveSubscription() after the merchant approves/declines on
+  Shopify's hosted page, syncs plan/subscriptionId/subscriptionStatus,
+  redirects to the dashboard either way.
+
+Where a billing check would naturally slot in: it is ALREADY slotted in,
+at exactly the right place (the OAuth callback, right after the store
+upsert and webhook registration). The gap is not "add a hook" — it is
+"the hook exists but nothing downstream branches on what it found," and
+"nothing anywhere links the merchant TO /upgrade."
+
+Post-install redirect: goes straight into the embedded admin
+(https://admin.shopify.com/store/<shop>/apps/cartncodform) in every case.
+No dedicated onboarding/plan-selection screen exists.
+
+2. CURRENT GATING
+-------------------
+grep across routes/services/middleware for `.plan` found exactly ONE
+reference outside billing.js/auth.js/webhooks.js/Store.js itself:
+  middleware/requireOwner.js:121 — requirePaidPlan(req, res, next),
+  which 402s with { error, upgradeRequired: true } when req.store.plan
+  !== 'pro'.
+
+That middleware is unit-tested (__tests__/requireOwner.test.js, 4 tests,
+all passing) but is applied to ZERO actual routes — grep for
+"requirePaidPlan" outside its own definition and its own test file
+returns nothing. Every one of the ~49 authenticated route handlers in
+backend/routes/ (push, automation, discounts, journey, signals, queue,
+COD, profiles/settings, insights, customers, activity, messages) is
+reachable on the free plan today. Nothing is gated. Everything currently
+built is free.
+
+What's actually built, for recommending a split (I am not guessing
+prices or naming a plan structure — just grouping by what exists):
+  - Storefront: web push (FCM) + email retention messaging, per-visitor
+    "Brain" decision engine (backend/services/brain.js) that ranks
+    signals, picks a channel/time, respects quiet hours and frequency
+    caps, and a nightly weights job (Phase H) that learns per-shop
+    send-time/channel performance.
+  - AI-written copy (backend/services/aiService.js) for notifications
+    and a weekly narrative/insights summary.
+  - COD (cash-on-delivery) order form + Discounts (auto-generated
+    Shopify discount codes tied to push/email opt-in).
+  - Admin: Dashboard, Insights, Journey (per-customer timeline), Queue
+    (scheduled + festival sends), Signals, Activity, Customers, Messages,
+    Automation config, Settings.
+  - Popup customizer: 12 popup styles (Classic split/card, Flash Sale,
+    Gift Reveal, Bottom Sheet, Top Bar, Story Card, Spotlight, Noir
+    Split, Colour Block) with per-device config.
+
+A defensible free-vs-paid split based on what exists (again, a grouping
+recommendation, not a pricing recommendation): the popup + basic push/
+email capture and a low daily/weekly send cap could reasonably stay free
+(this is the top-of-funnel growth loop — restricting it hurts adoption
+before a merchant has seen value). The Brain's learned optimization
+(Phase H weights, best-time/channel selection), AI-written copy, the
+Festival Queue, Journey/Insights analytics, and COD discount automation
+are the differentiated, ongoing-value features and are the more obvious
+candidates for the Pro gate — they are also the features requirePaidPlan
+was clearly built to protect (the trial-days constant and single "Pro"
+plan name in billing.js imply one paid tier, not a multi-tier ladder).
+
+3. WHAT SHOPIFY REQUIRES
+---------------------------
+Which API: GraphQL appSubscriptionCreate + currentAppInstallation.
+  activeSubscriptions, already implemented in utils/billing.js. This is
+  the correct, current choice — the REST RecurringApplicationCharge API
+  is legacy/deprecated for new integrations; Shopify's own guidance is
+  GraphQL Billing API for any app built after the GraphQL migration. No
+  reason to reconsider this.
+
+Scopes: none needed beyond what's already granted. The Billing API is
+  governed by the app's Partner Dashboard billing configuration (and the
+  access token's validity), not by an OAuth scope — there is no
+  "write_billing" or similar entry in Shopify's scope list. Current
+  scopes (shopify.app.toml): read_orders, read_customers, write_customers,
+  read_products, write_discounts, read_discounts — unrelated to billing,
+  no change needed.
+
+Test charges: yes. createSubscription() already passes test: !!isTest
+  (utils/billing.js line 66), and auth.js's /upgrade route sets
+  isTest = process.env.NODE_ENV !== 'production' (line 271). A test:true
+  subscription is never actually charged, on any store type — Shopify
+  fakes the approval; this is a property of the mutation call itself, not
+  a special store requirement. The existing wiring is correct for local/
+  staging testing; the only thing to verify in Phase 2 is that
+  NODE_ENV=production is actually set on the Render deployment (I did
+  not check Render's env config — flagging as a Phase 2 verification
+  step, not something I can confirm from the repo alone).
+
+4. INTEGRATION POINTS
+------------------------
+Shop identity: established once per request. frontend/lib/api.js's
+  getAuthToken() reads window.shopify.idToken() (App Bridge v4 session
+  token), sent as Authorization: Bearer <token> on every apiGet/apiSend
+  call. Backend: middleware/requireOwner.js's requireAuth() verifies the
+  JWT (HS256, app secret, iss/dest/aud/exp/nbf checks) and sets
+  req.shopDomain; requireStoreOwner() then loads the Store doc into
+  req.store (IDOR-checked against the :shopDomain route param). req.store
+  already carries .plan, .subscriptionStatus etc. — any route can gate on
+  it today by adding requirePaidPlan to its middleware chain; no new
+  plumbing is needed to know "who is this shop" at billing-check time.
+
+"No active subscription" UI: needed nowhere today, because nothing
+  checks it. If routes get gated, it would need to surface: (1) as a
+  blocking/degraded state on whichever of the 12 admin screens
+  (activity, automation, cod, customers, dashboard, discounts, insights,
+  journey, messages, queue, settings-page, signals) uses a gated feature,
+  and (2) as an actual "Upgrade" entry point somewhere persistent, since
+  none exists — no button, banner, or link to /api/auth/upgrade appears
+  anywhere in frontend/app/admin today (grep for plan/upgrade/subscription
+  across every .jsx there returned nothing relevant). There is also no
+  shared layout-level banner slot to reuse: app/admin/layout.js is a bare
+  shell (App Bridge script tag only); the one existing precedent for a
+  cross-cutting warning (needsReauth, Settings.jsx line ~1867) is fetched
+  and rendered per-screen, not globally, so a "some feature is Pro-only"
+  banner would need a new shared mechanism, not an extension of an
+  existing one.
+
+Uninstall: yes, handled, and correctly. webhooks.js's
+  handleAppUninstalled (app/uninstalled topic, HMAC-verified) sets
+  plan='free', subscriptionStatus='uninstalled' immediately. Separately,
+  handleAppSubscriptionUpdate (app_subscriptions/update topic) keeps
+  plan in sync any time the merchant cancels/the charge fails from
+  Shopify's side, independent of uninstall. Both topics are registered
+  dynamically at install via registerAllWebhooks() (utils/shopify.js) —
+  NOT declared in shopify.app.toml's [[webhooks.subscriptions]] list
+  (only compliance/carts/checkouts/orders are declarative there). This
+  split (some webhooks declarative, billing ones dynamic) already existed
+  before this audit and works, but is worth knowing: a fresh `shopify app
+  deploy` will not itself register the billing webhooks for a shop that
+  installed before this code existed — only a fresh OAuth (install or
+  reconnect) does, via registerAllWebhooks(). See section 5.
+
+5. RISKS
+-----------
+Two shops already installed. I cannot query Mongo directly to inspect
+their actual stored `plan`/`subscriptionStatus`/webhook-registration
+state — this is a real limitation of this audit; Phase 2 should start by
+reading (not writing) their Store docs to confirm the below rather than
+assuming it.
+
+What would break if gating is turned on now, reasoned from the code:
+  - Both shops almost certainly have plan: 'free' (the schema default,
+    and nothing has ever set it to 'pro' unless one of them manually hit
+    /upgrade, which nothing links to). Turning on requirePaidPlan on any
+    route they currently use would immediately 402 them on a feature they
+    have been using free, with no warning, no grace period, and no UI
+    that explains why (see section 4 — no upgrade UI exists yet). This is
+    the primary risk: silently breaking two real merchants' live
+    automation.
+  - Neither shop is guaranteed to have the app_subscriptions/update and
+    app/uninstalled webhooks registered, if they installed before that
+    code shipped (registerAllWebhooks only runs during OAuth). If gating
+    goes live and a shop then subscribes, but its webhook registration is
+    stale/missing, an approved charge might not flip plan to 'pro'
+    automatically — the /billing/callback redirect handler does its own
+    getActiveSubscription() re-check independent of the webhook, so the
+    approval flow itself is not at risk, but a LATER cancellation from
+    Shopify's side (outside the app) could fail to downgrade them without
+    a working app_subscriptions/update webhook. Phase 2 should verify
+    webhook registration for both existing shops, not assume it.
+  - Nothing in the current code assumes unlimited/free access in a way
+    that would be hard to change (no hardcoded "always allow" bypasses
+    found) — the risk is entirely about the GAP between "gate is flipped
+    on" and "merchants have been told/given a way to pay," not about
+    fighting bad existing assumptions in the code itself.
+
+Recommendation for Phase 2 sequencing (not asked for numerically, noting
+briefly since it falls out directly of the risks above): grandfather the
+two existing installed shops onto 'pro' (or an explicit 'grandfathered'
+plan value) before any gating ships, and ship the frontend
+Upgrade UI/banner in the SAME deploy as the first gated route, never
+before it and never after — turning on requirePaidPlan with no upgrade
+path visible anywhere is the one sequencing mistake this audit would
+flag as unacceptable.

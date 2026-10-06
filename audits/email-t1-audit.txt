@@ -1,0 +1,139 @@
+SELF-AUDIT: Phase T1 — Branded email foundation
+Date: 2026-10-06
+Files changed:
+  backend/utils/shopify.js
+  backend/models/Store.js
+  backend/routes/auth.js
+  backend/routes/profiles.js
+  backend/utils/email.js
+  backend/routes/push.js
+  backend/__tests__/buildEmailHtml.test.js   (new)
+  backend/__tests__/sendJourneyEmail.test.js (updated)
+
+─────────────────────────────────────────────────────────────────────────────
+1. STORE BRAND DATA
+─────────────────────────────────────────────────────────────────────────────
+
+fetchShopInfo (shopify.js:179–199)
+  ✓ Now returns shopName from s.name alongside email + ianaTimezone.
+  ✓ Error path returns { email:null, ianaTimezone:null, shopName:null }.
+
+fetchBrandData (shopify.js:207–235)
+  ✓ Single GraphQL POST to /admin/api/2025-01/graphql.json.
+  ✓ Reads shop.brand.logo.image.url + shop.brand.colors.primary.background.
+  ✓ axios timeout: 3000 ms.
+  ✓ try/catch — never throws; returns { logoUrl:null, primaryColor:null } on any error.
+  ✓ Exported from module.
+
+Store.js
+  ✓ Added shopName, logoUrl, primaryColor (String, optional, no default).
+
+auth.js install callback
+  ✓ fetchShopInfo now called unconditionally (was guarded by !ownerEmail||isNewInstall).
+    ownerEmail/timezone still applied conditionally; shopName applied always.
+  ✓ fetchBrandData called after fetchShopInfo; results written to update object
+    only when non-null (avoids overwriting a value with undefined on reconnect
+    if the brand API returns null).
+  ✓ Neither fetchShopInfo nor fetchBrandData failure blocks install (both
+    swallow errors and return nulls).
+
+GET /api/profiles/:shopDomain/settings
+  ✓ Projection extended to include shopName, logoUrl, primaryColor.
+  ✓ Response object now includes all three (null when unset).
+
+─────────────────────────────────────────────────────────────────────────────
+2. buildEmailHtml
+─────────────────────────────────────────────────────────────────────────────
+
+email.js buildEmailHtml (email.js:~45–120)
+  ✓ Returns <!DOCTYPE html> document (not a fragment).
+  ✓ <head> with charset + viewport meta + <style> block (mobile media queries).
+  ✓ Table-based single-column layout, 600 px max-width, centered.
+  ✓ Outer bgcolor on <table> and <td>, inline styles on every element.
+  ✓ Font stack ends in Arial, Helvetica, sans-serif (not -apple-system alone).
+  ✓ Header: <img> with logoUrl when present; storeName as text when absent.
+  ✓ Hero image: rendered only for https:// URLs (http, data: and relative skipped).
+    <img> has explicit width="600" + style="width:100%;max-width:600px;height:auto".
+  ✓ Body: bodyHtml inserted as-is (already formatted by caller).
+  ✓ CTA button: table-based bulletproof <a> (<td bgcolor=...> + nested <a>);
+    rendered only when ctaUrl is non-null.
+    Default label "Shop Now" when ctaLabel is null.
+  ✓ Footer: storeName + plain unsubscribe anchor (href="#" placeholder).
+  ✓ primaryColor drives button bg + td bgcolor; falls back to #4f46e5 (indigo).
+  ✓ escapeHtml() applied to all user-supplied values (storeName, logoUrl,
+    imageUrl, ctaUrl, ctaLabel, subject, primaryColor).
+
+  NOTE — deliberately NOT Outlook-optimised in this pass:
+    - No <!--[if mso]>…<![endif]--> conditional comments.
+    - No VML rounded-button workaround.
+    - No bgcolor on outer <body> (inline on <table> instead).
+    Outlook desktop renders: table layout readable, button a flat-bg link.
+    Full MSO polish deferred to a future pass.
+
+  ✓ Exported as buildEmailHtml from email.js.
+  ✓ DEFAULT_ACCENT = '#4f46e5' constant extracted (not buried in the function).
+
+─────────────────────────────────────────────────────────────────────────────
+3. WIRE + FIX FROM
+─────────────────────────────────────────────────────────────────────────────
+
+sendJourneyEmail (push.js:513–573)
+  ✓ Loads Store doc for shopName/logoUrl/primaryColor (try/catch — never blocks
+    send; falls back to shopDomain string as storeName on any error).
+  ✓ Builds HTML via buildEmailHtml (no more inline div template).
+  ✓ Passes body.replace(/\n/g,'<br>') as bodyHtml — preserves existing line
+    break behaviour.
+  ✓ Product-image normalisation (http→https, cdn.shopify.com) retained —
+    still applied by the route handler via normalizeImageUrl() before the
+    function is called.
+  ✓ from: now uses FROM constant from email.js (was hardcoded).
+  ✓ Temp debug log ([email-img-src]) removed.
+  ✓ Store model required inside function (consistent with Profile pattern,
+    avoids top-level import that would break Jest module isolation).
+
+sendMarketingEmail (email.js)
+  ✓ from: changed from hardcoded 'ShopiReachBoost AI <notifications@…>'
+    to the shared FROM constant.
+
+FROM constant exported from email.js
+  ✓ All four send paths now use the shared FROM:
+    sendAbandonedCartEmail  — already used FROM
+    sendNewCodOrderEmail    — already used FROM
+    sendMarketingEmail      — fixed here
+    sendJourneyEmail        — fixed here
+
+─────────────────────────────────────────────────────────────────────────────
+4. TESTS
+─────────────────────────────────────────────────────────────────────────────
+
+backend/__tests__/buildEmailHtml.test.js (new — 14 tests)
+  ✓ DOCTYPE present; html/head/body structure
+  ✓ Table layout (not divs)
+  ✓ Mobile media query in <style>
+  ✓ storeName as text when logoUrl absent
+  ✓ Logo img when logoUrl present
+  ✓ Hero image skipped when imageUrl null
+  ✓ Hero image skipped when imageUrl is http://
+  ✓ Hero image included when imageUrl is https://
+  ✓ CTA absent when ctaUrl null
+  ✓ CTA button (table-based anchor) when ctaUrl present
+  ✓ primaryColor used for button background
+  ✓ Default #4f46e5 when primaryColor null
+  ✓ Footer contains storeName + unsubscribe
+  ✓ bodyHtml present unchanged
+
+backend/__tests__/sendJourneyEmail.test.js (updated)
+  ✓ Added jest.mock('../models/Store') — default mock returns
+    { shopName:'Test Store', logoUrl:null, primaryColor:null }
+  ✓ All 6 existing tests still pass (happy path still contains
+    'Line one<br>Line two' since bodyHtml is inserted as-is).
+
+npm test: 378/378 passed.
+
+─────────────────────────────────────────────────────────────────────────────
+5. OUT OF SCOPE (not touched)
+─────────────────────────────────────────────────────────────────────────────
+  - EmailTemplate model, CRUD, UI — T2/T3
+  - sendAbandonedCartEmail, sendNewCodOrderEmail still use shell() (div-based)
+  - extensions/, frontend/ — not touched
+  - No new Shopify scopes added
