@@ -146,16 +146,19 @@ describe('generateTemplateCopy', () => {
     const [, opts] = global.fetch.mock.calls[0];
     // AbortController signal is attached
     expect(opts.signal).toBeDefined();
+    const promptContent = JSON.parse(opts.body).messages[0].content;
     // prompt forbids HTML
-    const body = JSON.parse(opts.body);
-    expect(body.messages[0].content).toContain('no HTML');
+    expect(promptContent).toContain('no HTML');
+    // prompt enforces anti-hype subject rules
+    expect(promptContent).toContain('NO hype words');
+    expect(promptContent).toContain('under 50 characters');
   });
 
   test('no key: returns fallback:true without calling API', async () => {
     delete process.env.LLM_API_KEY;
     const r = await generateTemplateCopy(SHOP, 'Demo Store', 'special_offer', null, VOICE);
     expect(r.fallback).toBe(true);
-    expect(r.subject).toBe('Special offer just for you');
+    expect(r.subject).toBe('A note from our store');
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
@@ -163,7 +166,7 @@ describe('generateTemplateCopy', () => {
     global.fetch.mockRejectedValue(new Error('timeout'));
     const r = await generateTemplateCopy(SHOP, 'Demo Store', 'normal', null, VOICE);
     expect(r.fallback).toBe(true);
-    expect(r.subject).toBe('A message from us');
+    expect(r.subject).toBe('An update from our store');
   });
 
   test('cache hit: returns cached copy with fallback:false, no API call', async () => {

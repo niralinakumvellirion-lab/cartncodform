@@ -37,6 +37,10 @@ jest.mock('../services/aiService', () => ({
 const mockBuildEmailHtml = jest.fn().mockReturnValue('<html>rendered</html>');
 jest.mock('../utils/email', () => ({
   FROM: 'notifications@shopireachboost.com',
+  UNSUBSCRIBE_HEADERS: {
+    'List-Unsubscribe': '<mailto:unsubscribe@shopireachboost.com>',
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+  },
   buildEmailHtml: mockBuildEmailHtml,
 }));
 
@@ -326,6 +330,7 @@ describe('POST /:id/send', () => {
         subject: 'Offer',
         from: 'notifications@shopireachboost.com',
         html: '<html>rendered</html>',
+        headers: expect.objectContaining({ 'List-Unsubscribe': expect.any(String) }),
       })
     );
   });
@@ -353,7 +358,10 @@ describe('POST /:id/send', () => {
     const callArg = Profile.findOne.mock.calls[0][0];
     expect(callArg.shopDomain).toBe(SHOP);
     expect(callArg.$or).toBeDefined();
-    expect(mockSend).toHaveBeenCalledWith(expect.objectContaining({ to: 'customer@example.com' }));
+    expect(mockSend).toHaveBeenCalledWith(expect.objectContaining({
+      to: 'customer@example.com',
+      headers: expect.objectContaining({ 'List-Unsubscribe': expect.any(String) }),
+    }));
   });
 
   test('email path: 404 when no profile matches email', async () => {

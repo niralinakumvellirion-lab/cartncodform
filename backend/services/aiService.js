@@ -353,16 +353,16 @@ async function generateInsights(shopDomain, rawInsights) {
 
 const FALLBACK_TEMPLATE = {
   special_offer: {
-    subject: 'Special offer just for you',
-    body: 'We have something special waiting for you.\n\nCheck out our latest deals before they expire.\n\nWe look forward to seeing you soon!',
+    subject: 'A note from our store',
+    body: 'We have something we think you might like.\n\nTake a look at our latest picks when you get a chance.\n\nWe appreciate your support.',
   },
   festival: {
-    subject: 'Celebrate with us!',
-    body: "It's a festive time and we want to celebrate with you.\n\nExplore our special collection and find something you'll love.\n\nWarm wishes from our team.",
+    subject: 'Greetings from our store',
+    body: 'We hope this season is treating you well.\n\nWe have put together a few things worth exploring.\n\nThank you for being part of our community.',
   },
   normal: {
-    subject: 'A message from us',
-    body: "We wanted to reach out and share something with you.\n\nTake a look at what's new in our store.\n\nThank you for being a valued customer.",
+    subject: 'An update from our store',
+    body: "We wanted to share a quick update with you.\n\nThere are a few new things in the store worth checking out.\n\nThank you for your continued support.",
   },
 };
 
@@ -402,12 +402,11 @@ async function generateTemplateCopy(shopDomain, shopName, type, productTitle, vo
     `Store voice: ${JSON.stringify(v)}\n` +
     productLine +
     `\nWrite ${typeFraming}.\n` +
-    `- subject: under 60 characters\n` +
-    `- body: 2–3 short paragraphs, PLAIN TEXT, absolutely no HTML tags, no markdown\n` +
-    `- Warm opening addressed to the customer\n` +
-    `- Clear call to action\n` +
+    `- subject: plain and specific, under 50 characters, NO hype words (exciting, amazing, don't miss, act now, buy now, free, guaranteed, limited time), NO ALL CAPS` +
+    (v.emoji ? `, at most one emoji\n` : `, no emoji\n`) +
+    `- body: conversational and specific to the store/product, 2–3 short paragraphs, PLAIN TEXT, absolutely no HTML tags, no markdown, avoid spam trigger phrases (free, guaranteed, limited time, click here, buy now in caps)\n` +
+    `- Natural opening, clear call to action\n` +
     (v.signOff ? `- End with this sign-off: ${v.signOff}\n` : '') +
-    (v.emoji ? `- You may use emoji sparingly\n` : `- No emoji\n`) +
     `\nRespond ONLY with JSON: {"subject":"...","body":"..."}`;
 
   let parsed;

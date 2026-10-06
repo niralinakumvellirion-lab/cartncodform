@@ -6,7 +6,7 @@ const EmailTemplate = require('../models/EmailTemplate');
 const Profile = require('../models/Profile');
 const Store = require('../models/Store');
 const { requireAuth } = require('../middleware/requireOwner');
-const { FROM, buildEmailHtml } = require('../utils/email');
+const { FROM, UNSUBSCRIBE_HEADERS, buildEmailHtml } = require('../utils/email');
 const { normalizeImageUrl } = require('../utils/productImage');
 const { generateTemplateCopy } = require('../services/aiService');
 
@@ -270,6 +270,7 @@ router.post('/:id/send', requireAuth, async (req, res) => {
       to: email,
       subject: template.subject,
       html,
+      headers: UNSUBSCRIBE_HEADERS,
     });
 
     if (error) {

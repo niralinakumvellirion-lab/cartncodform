@@ -6,6 +6,14 @@ const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
 const FROM = process.env.FROM_EMAIL || 'notifications@shopireachboost.com';
 
+// RFC 8058 one-click unsubscribe headers. Resend v6+ accepts these via the
+// `headers` option. No functional unsubscribe flow yet — the mailto gives
+// recipients a valid target and satisfies Gmail/Yahoo bulk-sender requirements.
+const UNSUBSCRIBE_HEADERS = {
+  'List-Unsubscribe': '<mailto:unsubscribe@shopireachboost.com>',
+  'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+};
+
 // Default accent used when store has no brand color set.
 const DEFAULT_ACCENT = '#4f46e5';
 
@@ -317,6 +325,7 @@ async function sendCodOrderConfirmationEmail(order) {
 
 module.exports = {
   FROM,
+  UNSUBSCRIBE_HEADERS,
   buildEmailHtml,
   sendAbandonedCartEmail,
   sendNewCodOrderEmail,

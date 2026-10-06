@@ -2,7 +2,7 @@ const express = require('express');
 const PushSubscription = require('../models/PushSubscription');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const { sendPushToStore, sendPushToCustomers, buildClickUrl } = require('../utils/pushNotification');
-const { sendAbandonedCartEmail, FROM, buildEmailHtml } = require('../utils/email');
+const { sendAbandonedCartEmail, FROM, UNSUBSCRIBE_HEADERS, buildEmailHtml } = require('../utils/email');
 const { logBroadcastSend } = require('../services/sendLogService');
 const { fetchProductImage } = require('./webhooks');
 const { requireAuth } = require('../middleware/requireOwner');
@@ -562,6 +562,7 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
     to: email,
     subject,
     html,
+    headers: UNSUBSCRIBE_HEADERS,
   });
 
   if (error) {

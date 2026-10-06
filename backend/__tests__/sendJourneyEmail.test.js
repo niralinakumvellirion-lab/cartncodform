@@ -90,6 +90,7 @@ test('d. happy path -> sends to the profile\'s email, returns 200 + id', async (
   expect(call.to).toBe('shopper@example.com');
   expect(call.subject).toBe('Hello');
   expect(call.html).toContain('Line one<br>Line two');
+  expect(call.headers).toMatchObject({ 'List-Unsubscribe': expect.any(String), 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' });
 });
 
 test('e. channels.email.address takes priority over identifiers.emails[0]', async () => {
