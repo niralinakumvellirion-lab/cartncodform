@@ -324,11 +324,40 @@ describe('POST /:id/send', () => {
     );
   });
 
-  test('400 when profileId is missing', async () => {
+  test('400 when neither email nor profileId is present', async () => {
     const res = mockRes();
     await send({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: {} }, res);
     expect(res.statusCode).toBe(400);
-    expect(res.body.error).toBe('profileId is required');
+    expect(res.body.error).toBe('email or profileId is required');
+  });
+
+  test('email path: happy path — looks up profile by email, sends', async () => {
+    EmailTemplate.findById.mockResolvedValue(makeTemplate({ subject: 'Sale' }));
+    Profile.findOne.mockReturnValue({
+      select: jest.fn().mockResolvedValue(makeProfile()),
+    });
+    mockSend.mockResolvedValue({ data: { id: 'email_xyz' }, error: null });
+
+    const res = mockRes();
+    await send({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { email: 'Customer@Example.com' } }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ ok: true, id: 'email_xyz' });
+    // Profile lookup uses $or with case-insensitive regex + lowercase match
+    const callArg = Profile.findOne.mock.calls[0][0];
+    expect(callArg.shopDomain).toBe(SHOP);
+    expect(callArg.$or).toBeDefined();
+    expect(mockSend).toHaveBeenCalledWith(expect.objectContaining({ to: 'customer@example.com' }));
+  });
+
+  test('email path: 404 when no profile matches email', async () => {
+    EmailTemplate.findById.mockResolvedValue(makeTemplate());
+    Profile.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(null) });
+    const res = mockRes();
+    await send({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { email: 'nobody@example.com' } }, res);
+    expect(res.statusCode).toBe(404);
+    expect(res.body.error).toBe('No customer found with that email');
+    expect(mockSend).not.toHaveBeenCalled();
   });
 
   test('IDOR: 404 when template belongs to another shop', async () => {

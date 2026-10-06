@@ -139,9 +139,9 @@ export default function EmailTemplatesScreen() {
   const [previewMode, setPreviewMode] = useState('desktop');
   const [previewLoading, setPreviewLoading] = useState(false);
 
-  const [sendProfileId, setSendProfileId] = useState('');
-  const [sending, setSending]         = useState(false);
-  const [sendResult, setSendResult]   = useState(null);
+  const [sendRecipient, setSendRecipient] = useState('');
+  const [sending, setSending]             = useState(false);
+  const [sendResult, setSendResult]       = useState(null);
 
   useEffect(() => { loadTemplates(); }, []);
 
@@ -174,6 +174,7 @@ export default function EmailTemplatesScreen() {
     setSaveOk(false);
     setConfirmDel(false);
     setSendResult(null);
+    setSendRecipient('');
     setPreviewHtml('');
     // Auto-load preview for existing template
     fetchPreview(t._id);
@@ -188,6 +189,7 @@ export default function EmailTemplatesScreen() {
     setConfirmDel(false);
     setPreviewHtml('');
     setSendResult(null);
+    setSendRecipient('');
   }
 
   function patch(field) {
@@ -258,13 +260,16 @@ export default function EmailTemplatesScreen() {
   }
 
   async function sendEmail() {
-    if (!selectedId || !sendProfileId.trim() || sending) return;
+    const recipient = sendRecipient.trim();
+    if (!selectedId || !recipient || sending) return;
     setSending(true);
     setSendResult(null);
     try {
-      const data = await apiSend(`/api/email-templates/${selectedId}/send`, 'POST', {
-        profileId: sendProfileId.trim(),
-      });
+      // Send email if it looks like one; fall back to profileId for raw IDs.
+      const isEmail = recipient.includes('@');
+      const data = await apiSend(`/api/email-templates/${selectedId}/send`, 'POST',
+        isEmail ? { email: recipient } : { profileId: recipient }
+      );
       setSendResult({ ok: true, id: data.id });
     } catch (e) {
       setSendResult({ ok: false, error: e.message });
@@ -481,19 +486,20 @@ export default function EmailTemplatesScreen() {
               <div style={DS.card}>
                 <p style={DS.sectionLabel}>Send test</p>
                 <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 12px' }}>
-                  Send this template to a customer by their Profile ID.
+                  Enter the customer's email address to send this template.
                 </p>
                 <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
                   <div style={{ flex: 1, minWidth: 200 }}>
-                    <label style={DS.label}>Profile ID</label>
+                    <label style={DS.label}>Customer email address</label>
                     <input
                       style={DS.input}
-                      value={sendProfileId}
-                      onChange={e => { setSendProfileId(e.target.value); setSendResult(null); }}
-                      placeholder="MongoDB ObjectId of the customer profile"
+                      type="email"
+                      value={sendRecipient}
+                      onChange={e => { setSendRecipient(e.target.value); setSendResult(null); }}
+                      placeholder="customer@example.com"
                     />
                   </div>
-                  <button style={DS.btnPrimary} onClick={sendEmail} disabled={sending || !sendProfileId.trim()}>
+                  <button style={DS.btnPrimary} onClick={sendEmail} disabled={sending || !sendRecipient.trim()}>
                     {sending ? 'Sending…' : 'Send'}
                   </button>
                 </div>

@@ -172,11 +172,13 @@ router.delete('/:id', requireAuth, async (req, res) => {
 });
 
 // POST /api/email-templates/:id/send
+// Body: { email } — looks up the profile by email address (preferred)
+//       { profileId } — looks up by MongoDB _id (backward-compat)
 router.post('/:id/send', requireAuth, async (req, res) => {
   try {
-    const { profileId } = req.body;
-    if (!profileId) {
-      return res.status(400).json({ error: 'profileId is required' });
+    const { profileId, email: rawEmail } = req.body;
+    if (!profileId && !rawEmail) {
+      return res.status(400).json({ error: 'email or profileId is required' });
     }
 
     const template = await EmailTemplate.findById(req.params.id);
@@ -184,10 +186,27 @@ router.post('/:id/send', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Template not found' });
     }
 
-    const profile = await Profile.findOne({ _id: profileId, shopDomain: req.shopDomain })
-      .select('identifiers channels');
-    if (!profile) {
-      return res.status(404).json({ error: 'Profile not found' });
+    let profile;
+    if (rawEmail) {
+      const emailLower = String(rawEmail).trim().toLowerCase();
+      // Escape special regex chars so a literal email address is matched exactly.
+      const safe = emailLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      profile = await Profile.findOne({
+        shopDomain: req.shopDomain,
+        $or: [
+          { 'channels.email.address': { $regex: `^${safe}$`, $options: 'i' } },
+          { 'identifiers.emails': emailLower },
+        ],
+      }).select('identifiers channels');
+      if (!profile) {
+        return res.status(404).json({ error: 'No customer found with that email' });
+      }
+    } else {
+      profile = await Profile.findOne({ _id: profileId, shopDomain: req.shopDomain })
+        .select('identifiers channels');
+      if (!profile) {
+        return res.status(404).json({ error: 'Profile not found' });
+      }
     }
 
     const email =
