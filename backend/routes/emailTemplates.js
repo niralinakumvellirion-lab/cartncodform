@@ -10,6 +10,7 @@ const { FROM, UNSUBSCRIBE_HEADERS, buildEmailHtml } = require('../utils/email');
 const { normalizeImageUrl } = require('../utils/productImage');
 const { generateTemplateCopy } = require('../services/aiService');
 const { logBroadcastSend } = require('../services/sendLogService');
+const FESTIVALS = require('../data/festivals.json');
 
 // Same safe-fallback pattern as email.js: avoid crashing on load when key absent.
 const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
@@ -42,6 +43,15 @@ function buildEmailSegmentQuery(shopDomain, segment) {
     query['lastSeenAt'] = { $lt: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000) };
   }
   return query;
+}
+
+// Returns the name of the next upcoming festival, or 'festive season' if the
+// calendar is exhausted. Compares ISO date strings lexicographically (safe
+// because festivals.json uses YYYY-MM-DD format).
+function nextFestivalName() {
+  const today = new Date().toISOString().slice(0, 10);
+  const next = FESTIVALS.find(f => f.date >= today);
+  return next ? next.name : 'festive season';
 }
 
 // Load store brand data; never block a send on a miss.
@@ -121,6 +131,67 @@ router.get('/count', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[email-templates] count error:', err.message);
     return res.status(500).json({ error: 'Failed to count recipients' });
+  }
+});
+
+// POST /api/email-templates/seed — declared before /:id routes.
+// Idempotent: if any templates already exist, returns them without touching the LLM.
+router.post('/seed', requireAuth, async (req, res) => {
+  try {
+    const existing = await EmailTemplate.countDocuments({ shopDomain: req.shopDomain });
+    if (existing > 0) {
+      const templates = await EmailTemplate.find({ shopDomain: req.shopDomain })
+        .sort({ createdAt: -1 });
+      return res.json({ templates, seeded: false });
+    }
+
+    const { storeName, voice } = await loadBrandData(req.shopDomain);
+    const festivalName = nextFestivalName();
+
+    const [specialResult, festivalResult, normalResult] = await Promise.all([
+      generateTemplateCopy(req.shopDomain, storeName, 'special_offer', null, voice),
+      generateTemplateCopy(req.shopDomain, storeName, 'festival', festivalName, voice),
+      generateTemplateCopy(req.shopDomain, storeName, 'normal', null, voice),
+    ]);
+
+    const templates = await EmailTemplate.insertMany([
+      {
+        shopDomain: req.shopDomain,
+        type: 'special_offer',
+        name: 'Starter: Special offer',
+        subject: specialResult.subject,
+        body: specialResult.body,
+        imageUrl: null,
+        ctaLabel: null,
+        ctaUrl: null,
+      },
+      {
+        shopDomain: req.shopDomain,
+        type: 'festival',
+        name: `Starter: ${festivalName}`,
+        subject: festivalResult.subject,
+        body: festivalResult.body,
+        imageUrl: null,
+        ctaLabel: null,
+        ctaUrl: null,
+      },
+      {
+        shopDomain: req.shopDomain,
+        type: 'normal',
+        name: 'Starter: Welcome message',
+        subject: normalResult.subject,
+        body: normalResult.body,
+        imageUrl: null,
+        ctaLabel: null,
+        ctaUrl: null,
+      },
+    ]);
+
+    console.log(`[email-templates] seeded ${templates.length} starter templates for ${req.shopDomain}`);
+    return res.status(201).json({ templates, seeded: true });
+  } catch (err) {
+    console.error('[email-templates] seed error:', err.message);
+    return res.status(500).json({ error: 'Failed to seed templates' });
   }
 });
 

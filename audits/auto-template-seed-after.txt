@@ -1,0 +1,111 @@
+SELF-AUDIT: auto-seed starter email templates
+Date: 2026-10-06
+Changed files: backend/routes/emailTemplates.js,
+               backend/__tests__/emailTemplates.test.js,
+               frontend/app/admin/screens/EmailTemplates.jsx
+
+─────────────────────────────────────────────────────────────────────────────
+BACKEND (emailTemplates.js)
+─────────────────────────────────────────────────────────────────────────────
+
+New require at top: const FESTIVALS = require('../data/festivals.json');
+  Static JSON — no DB call, no async, no failure mode.
+
+nextFestivalName():
+  Compares f.date >= today (ISO date strings, lexicographic comparison is
+  correct for YYYY-MM-DD). Returns f.name on first match, 'festive season'
+  if all dates are past. No mutation of the FESTIVALS array.
+
+POST /seed route:
+  Position: after GET /count, before GET /:id/preview — same ordering rule
+  as /generate and /count (literal paths before parameterized).
+
+  Idempotency path:
+    EmailTemplate.countDocuments({ shopDomain }) — if > 0, return existing
+    sorted newest-first, seeded:false. No LLM calls, no insertMany.
+
+  Happy path:
+    loadBrandData (already returns voice) → Promise.all 3 generateTemplateCopy
+    calls → EmailTemplate.insertMany([...3 docs...]) → res.status(201)
+    { templates, seeded: true }.
+
+  generateTemplateCopy never throws (by design, always returns fallback on
+  error). Seed endpoint therefore always reaches insertMany and always
+  returns 201 — no partial-create scenario.
+
+  imageUrl/ctaLabel/ctaUrl all set to null (merchant fills in later).
+
+  festival name used as productTitle: passed as positional arg index 3 to
+  generateTemplateCopy so the AI prompt contains the actual festival context.
+  For special_offer and normal, productTitle=null (prompt handles it).
+
+─────────────────────────────────────────────────────────────────────────────
+TESTS (emailTemplates.test.js)
+─────────────────────────────────────────────────────────────────────────────
+
+EmailTemplate mock expanded: added countDocuments and insertMany (was missing
+  both — used in seed and broadcast routes respectively).
+
+5 new tests in POST /seed describe:
+  1. Route ordering: /seed index < /:id index in router.stack.
+  2. Happy path: insertMany called once with 3 docs (one per type), seeded:true,
+     201 status, all docs have correct shopDomain.
+  3. Idempotent: countDocuments=2 → returns existing templates, seeded:false,
+     generateTemplateCopy NOT called, insertMany NOT called.
+  4. Festival productTitle: special_offer→null, festival→non-null string of
+     length > 0, normal→null. Does not hardcode the festival name — resilient
+     to date changes.
+  5. Fallback copy still creates templates: all 3 types inserted with the
+     fallback subject/body, seeded:true.
+
+Total: 48 tests in emailTemplates.test.js (was 43), 431 total. All pass.
+
+─────────────────────────────────────────────────────────────────────────────
+FRONTEND (EmailTemplates.jsx)
+─────────────────────────────────────────────────────────────────────────────
+
+3 new state vars: seeding, seedError, justSeeded.
+
+loadTemplates modified:
+  - Clears seedError on entry.
+  - After GET /email-templates: if list.length === 0, sets loading=false
+    and calls await runSeed() before the finally block sets loading=false
+    again (second no-op set is harmless).
+  - If list.length > 0, falls through to finally normally — no seeding.
+
+runSeed():
+  POST /api/email-templates/seed → setTemplates(data.templates) → if
+  data.seeded → setJustSeeded(true). Catches to setSeedError.
+
+justSeeded banner:
+  Green (#f0fdf4) full-width strip above the filter row. Text: "We drafted
+  3 starter templates for you. Edit them to fit your brand, or send them
+  as-is." × dismiss button. Session-only (not persisted).
+
+List panel empty-state updated:
+  Priority order when rendering inside the card:
+    loading → "Loading…"
+    !loading && seeding → "Setting up your starter templates…"
+    !loading && !seeding && seedError → error text + "Try again" button
+    !loading && !seeding && loadError → load error
+    !loading && !seeding && !errors && filtered.length=0 → "No templates yet"
+    otherwise → list rows (guarded by !seeding to prevent flicker)
+
+  "Try again" calls runSeed() directly (re-seeds without reloading).
+
+─────────────────────────────────────────────────────────────────────────────
+DEVIATIONS FROM SPEC
+─────────────────────────────────────────────────────────────────────────────
+
+None. All spec items implemented exactly:
+  - nextFestivalName inline helper ✓
+  - POST /seed before /:id routes ✓
+  - Idempotent count-first guard ✓
+  - Promise.all 3 generateTemplateCopy calls ✓
+  - Template names match spec ✓
+  - imageUrl/ctaUrl empty (null) ✓
+  - seeding/seedError/justSeeded states ✓
+  - Auto-seed only on empty list ✓
+  - "Setting up…" loading text ✓
+  - Dismissible green notice ✓
+  - Error + "Try again" button ✓

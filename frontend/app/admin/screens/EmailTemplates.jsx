@@ -156,6 +156,10 @@ export default function EmailTemplatesScreen() {
   const [broadcasting, setBroadcasting]                   = useState(false);
   const [broadcastResult, setBroadcastResult]             = useState(null);
 
+  const [seeding, setSeeding]       = useState(false);
+  const [seedError, setSeedError]   = useState('');
+  const [justSeeded, setJustSeeded] = useState(false);
+
   useEffect(() => { loadTemplates(); }, []);
 
   useEffect(() => {
@@ -180,13 +184,34 @@ export default function EmailTemplatesScreen() {
   async function loadTemplates() {
     setLoading(true);
     setLoadError('');
+    setSeedError('');
     try {
       const data = await apiGet('/api/email-templates');
-      setTemplates(data.templates || []);
+      const list = data.templates || [];
+      setTemplates(list);
+      if (list.length === 0) {
+        setLoading(false);
+        await runSeed();
+        return;
+      }
     } catch (e) {
       setLoadError(e.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function runSeed() {
+    setSeeding(true);
+    setSeedError('');
+    try {
+      const data = await apiSend('/api/email-templates/seed', 'POST', {});
+      setTemplates(data.templates || []);
+      if (data.seeded) setJustSeeded(true);
+    } catch (e) {
+      setSeedError(e.message || 'Could not generate starter templates.');
+    } finally {
+      setSeeding(false);
     }
   }
 
@@ -411,6 +436,24 @@ export default function EmailTemplatesScreen() {
         }
       />
 
+      {/* One-time notice after auto-seed */}
+      {justSeeded && (
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+          background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10,
+          padding: '12px 16px', marginBottom: 16, gap: 12,
+        }}>
+          <p style={{ fontSize: 13, color: '#166534', margin: 0 }}>
+            We drafted 3 starter templates for you. Edit them to fit your brand, or send them as-is.
+          </p>
+          <button
+            style={{ background: 'none', border: 'none', fontSize: 18, lineHeight: 1, cursor: 'pointer', color: '#166534', padding: '0 4px', flexShrink: 0 }}
+            onClick={() => setJustSeeded(false)}
+            aria-label="Dismiss"
+          >×</button>
+        </div>
+      )}
+
       {/* Filter row */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
         {FILTER_TABS.map(tab => (
@@ -436,15 +479,26 @@ export default function EmailTemplatesScreen() {
             {loading && (
               <p style={{ padding: '20px 20px', fontSize: 13, color: '#9ca3af' }}>Loading…</p>
             )}
-            {!loading && loadError && (
+            {!loading && seeding && (
+              <p style={{ padding: '20px 20px', fontSize: 13, color: '#9ca3af' }}>Setting up your starter templates…</p>
+            )}
+            {!loading && !seeding && seedError && (
+              <div style={{ padding: '20px 20px' }}>
+                <p style={{ fontSize: 13, color: '#dc2626', margin: '0 0 8px' }}>{seedError}</p>
+                <button style={{ ...DS.btnSecondary, fontSize: 12, padding: '5px 12px' }} onClick={runSeed}>
+                  Try again
+                </button>
+              </div>
+            )}
+            {!loading && !seeding && loadError && (
               <p style={{ padding: '20px 20px', fontSize: 13, color: '#dc2626' }}>{loadError}</p>
             )}
-            {!loading && !loadError && filtered.length === 0 && (
+            {!loading && !seeding && !loadError && !seedError && filtered.length === 0 && (
               <p style={{ padding: '20px 20px', fontSize: 13, color: '#9ca3af' }}>
                 {templates.length === 0 ? 'No templates yet. Create one →' : 'No templates match this filter.'}
               </p>
             )}
-            {!loading && filtered.map(t => (
+            {!loading && !seeding && filtered.map(t => (
               <button
                 key={t._id}
                 onClick={() => selectTemplate(t)}

@@ -1,0 +1,214 @@
+AUDIT: Auto-generate starter email templates per store
+Date: 2026-10-06
+Files read:
+  backend/services/aiService.js           — generateTemplateCopy (existing)
+  backend/models/EmailTemplate.js         — schema (type enum, fields)
+  backend/routes/emailTemplates.js        — GET /, POST /, GET /count, POST /:id/broadcast
+  frontend/app/admin/screens/EmailTemplates.jsx — list + empty state
+  backend/models/Store.js                 — brand data fields (shopName, logoUrl, voice)
+  backend/routes/auth.js                  — OAuth callback, what's fetched at install
+  backend/utils/shopify.js               — fetchBrandData, fetchShopInfo, scopes
+  backend/data/festivals.json            — upcoming festival calendar
+  backend/models/FestivalQueue.js        — per-shop festival queue
+
+─────────────────────────────────────────────────────────────────────────────
+1. WHEN to generate — RECOMMENDATION: option b (lazy on first visit)
+─────────────────────────────────────────────────────────────────────────────
+
+a) At install (OAuth callback):
+   PROBLEM: The callback already does fetchShopInfo + fetchBrandData + registerAllWebhooks.
+   Adding 3 LLM calls (or a Promise.all of 3) makes it slower and adds a new failure
+   mode to install. If the LLM key is unset at install, the merchant gets no templates
+   silently. Brand data IS available here (shopName, voice defaults), but voice has
+   not been customised yet (all defaults). This is also the wrong moment — the merchant
+   hasn't opened the email screen and doesn't know templates exist yet.
+   VERDICT: don't touch the install path.
+
+b) On first visit to the Email Templates screen, if no templates exist:
+   - Frontend calls GET /api/email-templates → empty list
+   - Frontend sees templates.length === 0 → triggers POST /api/email-templates/seed
+   - Screen shows "Setting up your starter templates…" during the single request
+   - 3 LLM calls in Promise.all ≈ 2-3 s total (each has 10s AbortController timeout)
+   - On success: list renders with 3 templates + a one-time green notice
+   - On failure: inline error with "Try again" button
+   TRADEOFFS:
+   + Zero install-path risk
+   + Brand data (voice, shopName) may have been customised by the time the merchant
+     reaches the email screen
+   + Idempotent: if count > 0, skip immediately
+   + Failure is recoverable and visible
+   - ~2-3 s loading state on first visit (one time only)
+   VERDICT: this is the right choice.
+
+c) Button "Generate starter templates" on empty state:
+   Explicit, but adds friction — the merchant has to discover and click it. Inferior
+   to automatic lazy generation for a setup flow that should feel zero-effort.
+
+RECOMMENDED: option b. Implement as a POST /api/email-templates/seed endpoint
+that is idempotent (count > 0 → return existing templates, no generation).
+
+─────────────────────────────────────────────────────────────────────────────
+2. HOW MANY and which types — 3 templates (one per schema type)
+─────────────────────────────────────────────────────────────────────────────
+
+The EmailTemplate schema's `type` enum is locked to:
+  ['special_offer', 'festival', 'normal']
+Generate exactly one of each = 3 starter templates.
+
+NAMES for the seeded templates (internal label, not subject line):
+  special_offer → "Starter: Special offer"
+  festival      → "Starter: <FestivalName> (upcoming)"   (see §6)
+  normal        → "Starter: Welcome message"
+
+PRODUCT TITLE — do NOT fetch a product:
+  generateTemplateCopy accepts productTitle=null and the prompt handles it gracefully
+  ("a note from our store" style). Adding a Shopify products API call here:
+    GET /admin/api/2025-01/products.json?limit=1&fields=title
+  is an extra dependency (auth token needed, store.accessToken), another failure mode,
+  and unnecessary for a starter template the merchant is expected to personalise.
+  For the festival type, use the festival NAME as productTitle instead (see §6) —
+  it gives the AI useful context without a product lookup.
+
+─────────────────────────────────────────────────────────────────────────────
+3. Reuses generateTemplateCopy — yes, loop in Promise.all
+─────────────────────────────────────────────────────────────────────────────
+
+Call signature already fits:
+  generateTemplateCopy(shopDomain, storeName, type, productTitle, voice)
+
+For the seed run:
+  const [specialResult, festivalResult, normalResult] = await Promise.all([
+    generateTemplateCopy(shopDomain, storeName, 'special_offer', null, voice),
+    generateTemplateCopy(shopDomain, storeName, 'festival', festivalName, voice),
+    generateTemplateCopy(shopDomain, storeName, 'normal', null, voice),
+  ]);
+
+RATE / COST:
+  3 concurrent requests to Anthropic at ~500 tokens each = ~$0.01 per store seeded.
+  Anthropic rate limit for claude-sonnet: 50 req/min (well within 3 concurrent calls).
+  The 10s AbortController timeout per call is already wired in generateTemplateCopy.
+  generateTemplateCopy never throws — fallback copies are returned on key-missing
+  or timeout. So the seed endpoint is always safe to await.
+
+COPY CACHE:
+  CopyCache key includes shopDomain + type + productId(null for special/normal,
+  festivalName for festival) + channel('email-template') + voiceHash.
+  On the FIRST seed run: 3 cache misses → 3 LLM calls → 3 cache saves.
+  On any accidental re-trigger (bug or direct API call): all 3 are cache hits →
+  0 LLM calls. This is the natural replay protection, no extra work needed.
+
+─────────────────────────────────────────────────────────────────────────────
+4. Idempotency — count-first, no new schema field needed
+─────────────────────────────────────────────────────────────────────────────
+
+At the start of POST /api/email-templates/seed:
+  const existing = await EmailTemplate.countDocuments({ shopDomain: req.shopDomain });
+  if (existing > 0) {
+    const templates = await EmailTemplate.find({ shopDomain: req.shopDomain }).sort({ createdAt: -1 });
+    return res.json({ templates, seeded: false });
+  }
+
+This covers all cases:
+  - Merchant has created their own templates manually → skip, return theirs
+  - Seed already ran → return the seeded templates
+  - Merchant deleted all templates → re-seed (intentional: empty = re-run)
+
+No "starterSeeded" flag on Store, no migration. The empty list is the trigger
+condition. If a merchant deliberately clears all templates, they get a re-seed
+on next visit — that is useful, not a bug.
+
+─────────────────────────────────────────────────────────────────────────────
+5. UI — minimal changes to the existing list screen
+─────────────────────────────────────────────────────────────────────────────
+
+CURRENT EMPTY STATE: "No templates yet. Create one →"
+
+CHANGES (frontend only):
+
+A. New state: `seeding` (bool), `seedError` (string), `justSeeded` (bool).
+
+B. In loadTemplates (or a new initScreen function):
+     If templates.length === 0 after load → call seed, set seeding=true,
+     then re-populate the list on success. justSeeded=true shows the banner.
+
+C. Loading state (replaces the "No templates" text while seeding):
+   "Setting up your starter templates…"
+
+D. After seed completes: standard list renders + one-time amber/green notice at top
+   of the list:
+   "We drafted 3 starter templates for you. Edit them to fit your brand, or use them right away."
+   Dismiss button sets justSeeded=false. Not persisted (localStorage) — the notice
+   only shows for the current session. That's fine: the templates themselves are the
+   persistent artifact.
+
+E. If seed fails (network error): show inline error + "Try again" button that re-calls seed.
+
+F. No changes to the template list rows, editor, preview, or broadcast card.
+
+SMALLEST VERSION: the list already renders all templates identically regardless of
+how they were created. The only diff is the loading text swap + the one-time notice.
+New JSX: ~30 lines.
+
+─────────────────────────────────────────────────────────────────────────────
+6. FESTIVAL TYPE — auto-pick next upcoming festival from festivals.json
+─────────────────────────────────────────────────────────────────────────────
+
+DATA AVAILABILITY:
+  festivals.json is at backend/data/festivals.json and is already require()-able
+  from any backend route (it's a static data file, no DB query).
+  It is the same file the festival queue feature uses for the admin "upcoming"
+  list. Today is 2026-10-06 → next entry is Navratri (2026-10-11).
+
+  Helper (inline in the seed route):
+    const festivals = require('../data/festivals.json');
+    function nextFestivalName() {
+      const today = new Date().toISOString().slice(0, 10);
+      const f = festivals.find(f => f.date >= today);
+      return f ? f.name : 'festive season'; // fallback if calendar exhausted
+    }
+
+  Pass the result as productTitle to generateTemplateCopy for the festival type.
+  Effect: the AI prompt receives context like "festival: Navratri" and writes
+  subject/body specific to that festival — far more useful than a generic
+  "festival message".
+
+FESTIVAL QUEUE (backend/models/FestivalQueue.js):
+  The FestivalQueue holds per-shop approved push campaigns. It's NOT the right
+  source here — new installs have an empty queue. festivals.json is correct.
+
+TIMELINES:
+  The festivals.json dates are yearly; the seed runs once per store and caches
+  in CopyCache (TTL 24h by default). The festival template name will say
+  "Navratri" for stores seeded this week, "Diwali" for stores seeded in 5 weeks,
+  etc. — which is exactly what we want.
+
+─────────────────────────────────────────────────────────────────────────────
+IMPLEMENTATION SUMMARY (for the next build step)
+─────────────────────────────────────────────────────────────────────────────
+
+Backend (emailTemplates.js):
+  1. Inline nextFestivalName() helper (reads festivals.json statically).
+  2. POST /api/email-templates/seed — declared BEFORE /:id routes.
+     - requireAuth
+     - Count check: count > 0 → return { templates, seeded: false }
+     - Load brand data (loadBrandData already exists, already used)
+     - Promise.all 3 generateTemplateCopy calls
+     - EmailTemplate.create × 3 (or insertMany)
+     - Return { templates: [...3...], seeded: true }
+
+Frontend (EmailTemplates.jsx):
+  3. State: seeding (bool), seedError (str), justSeeded (bool)
+  4. After loadTemplates: if empty → call seed → set justSeeded=true
+  5. Loading text swap + one-time "we drafted these for you" notice
+
+Tests needed:
+  - Seed happy path (3 docs created, seeded:true)
+  - Seed idempotent (count > 0 → returns existing, seeded:false, no LLM calls)
+  - Seed uses next festival name as productTitle for festival type
+  - Seed on generateTemplateCopy returning fallback:true still creates templates
+  - Route ordering: /seed before /:id
+
+Files: emailTemplates.js, EmailTemplates.jsx, emailTemplates.test.js
+No new models. No schema changes. No new npm packages.
+
+>>> STOP. Audit only. No implementation.

@@ -10,6 +10,8 @@ jest.mock('../models/EmailTemplate', () => ({
   find: jest.fn(),
   findById: jest.fn(),
   create: jest.fn(),
+  countDocuments: jest.fn(),
+  insertMany: jest.fn(),
 }));
 
 jest.mock('../models/Profile', () => ({
@@ -679,5 +681,97 @@ describe('POST /:id/broadcast', () => {
     await broadcast({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { segment: 'bad_segment' } }, res);
     expect(res.statusCode).toBe(400);
     expect(res.body.error).toMatch(/segment must be one of/);
+  });
+});
+
+// ── POST /seed ────────────────────────────────────────────────────────────────
+
+describe('POST /seed', () => {
+  const EmailTemplate = require('../models/EmailTemplate');
+  const seed = handlerFor(emailTemplatesRouter, '/seed', 'post');
+
+  function seedDoc(type, name) {
+    return { _id: `s_${type}`, shopDomain: SHOP, type, name, subject: `Sub ${type}`, body: `Body ${type}`, imageUrl: null, ctaLabel: null, ctaUrl: null };
+  }
+
+  beforeEach(() => {
+    EmailTemplate.insertMany.mockResolvedValue([
+      seedDoc('special_offer', 'Starter: Special offer'),
+      seedDoc('festival', 'Starter: Navratri'),
+      seedDoc('normal', 'Starter: Welcome message'),
+    ]);
+  });
+
+  test('route ordering: /seed is registered before /:id', () => {
+    const stack = emailTemplatesRouter.stack.filter(l => l.route);
+    const seedIdx = stack.findIndex(l => l.route.path === '/seed');
+    const idIdx = stack.findIndex(l => l.route.path === '/:id');
+    expect(seedIdx).toBeGreaterThanOrEqual(0);
+    expect(idIdx).toBeGreaterThanOrEqual(0);
+    expect(seedIdx).toBeLessThan(idIdx);
+  });
+
+  test('happy path: creates 3 templates (one per type) and returns seeded:true', async () => {
+    EmailTemplate.countDocuments.mockResolvedValue(0);
+    const res = mockRes();
+    await seed({ shopDomain: SHOP }, res);
+
+    expect(res.statusCode).toBe(201);
+    expect(res.body.seeded).toBe(true);
+    expect(res.body.templates).toHaveLength(3);
+    expect(EmailTemplate.insertMany).toHaveBeenCalledTimes(1);
+    const docs = EmailTemplate.insertMany.mock.calls[0][0];
+    expect(docs).toHaveLength(3);
+    expect(docs.find(d => d.type === 'special_offer')).toBeDefined();
+    expect(docs.find(d => d.type === 'festival')).toBeDefined();
+    expect(docs.find(d => d.type === 'normal')).toBeDefined();
+    expect(docs.every(d => d.shopDomain === SHOP)).toBe(true);
+  });
+
+  test('idempotent: count > 0 returns existing templates, seeded:false, no LLM calls', async () => {
+    EmailTemplate.countDocuments.mockResolvedValue(2);
+    const existing = [makeTemplate({ name: 'Old A' }), makeTemplate({ name: 'Old B' })];
+    EmailTemplate.find.mockReturnValue({ sort: jest.fn().mockResolvedValue(existing) });
+
+    const res = mockRes();
+    await seed({ shopDomain: SHOP }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.seeded).toBe(false);
+    expect(res.body.templates).toHaveLength(2);
+    expect(mockGenerateTemplateCopy).not.toHaveBeenCalled();
+    expect(EmailTemplate.insertMany).not.toHaveBeenCalled();
+  });
+
+  test('festival type passes nextFestivalName (non-null string) as productTitle; others pass null', async () => {
+    EmailTemplate.countDocuments.mockResolvedValue(0);
+    const res = mockRes();
+    await seed({ shopDomain: SHOP }, res);
+
+    const calls = mockGenerateTemplateCopy.mock.calls;
+    // Promise.all order: special_offer, festival, normal
+    const specialCall = calls.find(c => c[2] === 'special_offer');
+    const festivalCall = calls.find(c => c[2] === 'festival');
+    const normalCall  = calls.find(c => c[2] === 'normal');
+
+    expect(specialCall[3]).toBeNull();
+    expect(typeof festivalCall[3]).toBe('string');
+    expect(festivalCall[3].length).toBeGreaterThan(0);
+    expect(normalCall[3]).toBeNull();
+  });
+
+  test('fallback copy (fallback:true) still creates all 3 templates', async () => {
+    EmailTemplate.countDocuments.mockResolvedValue(0);
+    mockGenerateTemplateCopy.mockResolvedValue({ subject: 'A note from our store', body: 'Starter body.', fallback: true });
+
+    const res = mockRes();
+    await seed({ shopDomain: SHOP }, res);
+
+    expect(res.statusCode).toBe(201);
+    expect(res.body.seeded).toBe(true);
+    expect(EmailTemplate.insertMany).toHaveBeenCalledTimes(1);
+    const docs = EmailTemplate.insertMany.mock.calls[0][0];
+    expect(docs[0].subject).toBe('A note from our store');
+    expect(docs[0].body).toBe('Starter body.');
   });
 });
