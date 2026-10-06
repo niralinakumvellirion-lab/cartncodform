@@ -5,7 +5,6 @@ const { Resend } = require('resend');
 // still boots; sends then fail with an auth error that is caught and logged.
 const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
 const FROM = process.env.FROM_EMAIL || 'notifications@shopireachboost.com';
-console.log('[resend] key prefix:', (process.env.RESEND_API_KEY || '').slice(0, 8)); // TEMP DEBUG
 
 // Default accent used when store has no brand color set.
 const DEFAULT_ACCENT = '#4f46e5';
