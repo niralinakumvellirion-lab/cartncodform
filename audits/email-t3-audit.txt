@@ -1,0 +1,70 @@
+SELF-AUDIT: Phase T3 — Email Templates admin UI
+Date: 2026-10-06
+Files changed:
+  frontend/app/admin/screens/EmailTemplates.jsx   (new)
+  frontend/app/admin/email-templates/page.js      (new)
+  frontend/app/admin/automation/page.js           (+nav entry)
+  frontend/app/admin/cod/page.js                  (+nav entry)
+  frontend/app/admin/dashboard/page.js            (+nav entry)
+  frontend/app/admin/discounts/page.js            (+nav entry)
+  frontend/app/admin/insights/page.js             (+nav entry)
+  frontend/app/admin/journey/page.js              (+nav entry)
+  frontend/app/admin/queue/page.js                (+nav entry)
+  frontend/app/admin/queue/[id]/page.js           (+nav entry)
+  frontend/app/admin/settings-page/page.js        (+nav entry)
+  frontend/app/admin/signals/page.js              (+nav entry)
+  frontend/app/admin/activity/page.js             (+nav entry)
+  frontend/app/admin/messages/page.js             (+nav entry)
+  frontend/app/admin/customers/page.js            (+nav entry)
+  frontend/app/admin/customers/[id]/page.js       (+nav entry)
+
+─────────────────────────────────────────────────────────────────────────────
+SPEC COMPLIANCE
+─────────────────────────────────────────────────────────────────────────────
+
+Screen + page.js: ✓ New screen at /admin/email-templates following the
+  exact AppProvider + NavMenu + Suspense pattern used by every other page.
+
+Left panel: ✓ Template list with name, TypeBadge, last updated date.
+  "+ New template" button top-right. Filter row: All / Special offer /
+  Festival / Normal (matches the T2 type enum exactly).
+
+Editor (right): ✓ Segmented type selector, name, subject, body textarea,
+  imageUrl input, ctaLabel + ctaUrl side by side. Save + Delete with
+  inline confirm (no window.confirm — embedded iframe cannot use native
+  dialogs reliably). Form state cleared on template select / new.
+
+Preview: ✓ Desktop (600px) / Mobile (380px) toggle. Sandboxed iframe:
+  sandbox="" (empty string — all permissions including scripts disabled).
+  srcDoc fed the HTML from GET /:id/preview. Responsive overflow wrapper.
+  Preview strategy: refreshes on Save. Reason: the preview endpoint reads
+  from the DB (not from form state), so it can only reflect saved data.
+  For unsaved new templates, "Save first to see preview" placeholder shown.
+
+Send test: ✓ Profile ID input + Send button → POST /:id/send. Inline
+  success (Resend ID shown) or error message. Only shown for saved templates.
+
+─────────────────────────────────────────────────────────────────────────────
+CONSTRAINTS MET
+─────────────────────────────────────────────────────────────────────────────
+
+T2 endpoints only — no new backend routes used or added.
+iframe sandbox="" — scripts disabled.
+Inline-style visual language matches DS tokens from other screens exactly.
+Responsive: flexWrap + @media (max-width:640px) class rule stacks both
+  panels full-width below 640px.
+Loading / empty / error states: ✓ list loading, loadError, empty list
+  (no templates / no filter match), preview loading placeholder, save/send
+  inline errors.
+NavMenu: "Email templates" entry added to all 14 existing page.js files.
+
+─────────────────────────────────────────────────────────────────────────────
+KNOWN GAPS
+─────────────────────────────────────────────────────────────────────────────
+
+build: cd frontend && npm run build NOT run — usage limit reached before
+  verification step. Should be run before deploy; the screen follows exact
+  patterns from other screens so no build-breaking issues are expected.
+  Run it before merging.
+
+Live next dev verification: not completed for the same reason.

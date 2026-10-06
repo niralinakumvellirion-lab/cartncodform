@@ -2,13 +2,10 @@
 import { Suspense } from 'react';
 import { AppProvider } from '@shopify/polaris';
 import { NavMenu } from '@shopify/app-bridge-react';
-import { useSearchParams } from 'next/navigation';
-import QueueScreen from './QueueScreen';
+import EmailTemplatesScreen from '../screens/EmailTemplates';
 import '@shopify/polaris/build/esm/styles.css';
 
-function QueueContent() {
-  const searchParams = useSearchParams();
-  const shop = searchParams.get('shop') || '';
+function EmailTemplatesContent() {
   return (
     <AppProvider i18n={{}}>
       <NavMenu>
@@ -24,15 +21,15 @@ function QueueContent() {
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
         <a href="/admin/email-templates" rel="email-templates">Email templates</a>
       </NavMenu>
-      <QueueScreen shop={shop} />
+      <EmailTemplatesScreen />
     </AppProvider>
   );
 }
 
-export default function QueuePage() {
+export default function EmailTemplatesPage() {
   return (
     <Suspense fallback={null}>
-      <QueueContent />
+      <EmailTemplatesContent />
     </Suspense>
   );
 }

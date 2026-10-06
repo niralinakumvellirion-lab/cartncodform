@@ -31,6 +31,7 @@ function CustomerDetailContent() {
         <a href="/admin/cod" rel="cod">Cash on delivery</a>
         <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
+        <a href="/admin/email-templates" rel="email-templates">Email templates</a>
       </NavMenu>
       <CustomerDetailScreen shop={shop} profileId={id} from={from} fid={fid} />
     </AppProvider>
