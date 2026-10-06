@@ -546,7 +546,6 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
     // Non-fatal: fall through with defaults.
   }
 
-  console.log('[t1-img] imageUrl into buildEmailHtml:', imageUrl); // TEMP DEBUG
   const html = buildEmailHtml({
     subject,
     bodyHtml: body.replace(/\n/g, '<br>'),

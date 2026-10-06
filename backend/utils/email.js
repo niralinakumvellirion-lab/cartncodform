@@ -74,7 +74,6 @@ function buildEmailHtml({ subject, bodyHtml, imageUrl, ctaLabel, ctaUrl, storeNa
       `font-family:Arial,Helvetica,sans-serif;">${safe(storeName || '')}</span>`;
 
   // Hero image: https only — skip http, data: and relative URLs.
-  console.log('[t1-img] hero condition:', !!(imageUrl && imageUrl.startsWith('https://'))); // TEMP DEBUG
   const heroRow =
     imageUrl && imageUrl.startsWith('https://')
       ? `\n        <tr>\n          <td style="background:#ffffff;padding:0;" align="center">` +

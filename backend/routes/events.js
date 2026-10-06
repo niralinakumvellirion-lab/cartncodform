@@ -546,8 +546,6 @@ async function buildJourneyEntry(shop, profile, entrySignals) {
       } catch (e) { /* ignore */ }
     }
 
-    // TEMP DEBUG
-    console.log('[journey-img] product', p.productId, '→', imageUrl || null);
     return { ...entry, imageUrl: imageUrl || null };
   }));
 
