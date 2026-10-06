@@ -16,7 +16,7 @@ jest.mock('../models/CopyCache', () => {
 
 const crypto = require('crypto');
 const CopyCache = require('../models/CopyCache');
-const { generateCopy, generateWeeklyNarrative } = require('../services/aiService');
+const { generateCopy, generateWeeklyNarrative, generateTemplateCopy } = require('../services/aiService');
 
 const STORE = {
   shopDomain: 'demo.myshopify.com',
@@ -128,4 +128,57 @@ test('8. cache key differs for different store voices (voiceHash)', () => {
   const keyWarm = buildCacheKey('s', 'cart_abandon', '1', 'push', vh({ tone: 'warm' }));
   const keyPlayful = buildCacheKey('s', 'cart_abandon', '1', 'push', vh({ tone: 'playful' }));
   expect(keyWarm).not.toBe(keyPlayful);
+});
+
+// ── generateTemplateCopy ──────────────────────────────────────────────────────
+
+describe('generateTemplateCopy', () => {
+  const SHOP = 'demo.myshopify.com';
+  const VOICE = { tone: 'warm', emoji: false, lang: 'en', signOff: 'Team Demo' };
+
+  test('happy path: returns subject+body+fallback:false from LLM', async () => {
+    global.fetch.mockReturnValue(anthropicOk('{"subject":"Diwali Deal","body":"Big sale this festive season."}', 20));
+    const r = await generateTemplateCopy(SHOP, 'Demo Store', 'festival', 'Silk Saree', VOICE);
+    expect(r.subject).toBe('Diwali Deal');
+    expect(r.body).toBe('Big sale this festive season.');
+    expect(r.fallback).toBe(false);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    const [, opts] = global.fetch.mock.calls[0];
+    // AbortController signal is attached
+    expect(opts.signal).toBeDefined();
+    // prompt forbids HTML
+    const body = JSON.parse(opts.body);
+    expect(body.messages[0].content).toContain('no HTML');
+  });
+
+  test('no key: returns fallback:true without calling API', async () => {
+    delete process.env.LLM_API_KEY;
+    const r = await generateTemplateCopy(SHOP, 'Demo Store', 'special_offer', null, VOICE);
+    expect(r.fallback).toBe(true);
+    expect(r.subject).toBe('Special offer just for you');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('fetch throws: returns fallback:true, does not rethrow', async () => {
+    global.fetch.mockRejectedValue(new Error('timeout'));
+    const r = await generateTemplateCopy(SHOP, 'Demo Store', 'normal', null, VOICE);
+    expect(r.fallback).toBe(true);
+    expect(r.subject).toBe('A message from us');
+  });
+
+  test('cache hit: returns cached copy with fallback:false, no API call', async () => {
+    CopyCache.findOne.mockResolvedValue({ subject: 'Cached sub', body: 'Cached body' });
+    const r = await generateTemplateCopy(SHOP, 'Demo Store', 'normal', 'Kurti', VOICE);
+    expect(r.subject).toBe('Cached sub');
+    expect(r.fallback).toBe(false);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('uses channel email-template in CopyCache.create', async () => {
+    global.fetch.mockReturnValue(anthropicOk('{"subject":"S","body":"B"}', 5));
+    await generateTemplateCopy(SHOP, 'Demo Store', 'normal', null, VOICE);
+    expect(CopyCache.create).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'email-template', signalType: 'normal' })
+    );
+  });
 });

@@ -143,6 +143,12 @@ export default function EmailTemplatesScreen() {
   const [sending, setSending]             = useState(false);
   const [sendResult, setSendResult]       = useState(null);
 
+  const [generating, setGenerating]       = useState(false);
+  const [genError, setGenError]           = useState('');
+  const [genNotice, setGenNotice]         = useState('');
+  const [productTitle, setProductTitle]   = useState('');
+  const [genConfirm, setGenConfirm]       = useState(false);
+
   useEffect(() => { loadTemplates(); }, []);
 
   async function loadTemplates() {
@@ -176,6 +182,10 @@ export default function EmailTemplatesScreen() {
     setSendResult(null);
     setSendRecipient('');
     setPreviewHtml('');
+    setProductTitle('');
+    setGenError('');
+    setGenNotice('');
+    setGenConfirm(false);
     // Auto-load preview for existing template
     fetchPreview(t._id);
   }
@@ -190,6 +200,10 @@ export default function EmailTemplatesScreen() {
     setPreviewHtml('');
     setSendResult(null);
     setSendRecipient('');
+    setProductTitle('');
+    setGenError('');
+    setGenNotice('');
+    setGenConfirm(false);
   }
 
   function patch(field) {
@@ -256,6 +270,38 @@ export default function EmailTemplatesScreen() {
       setConfirmDel(false);
     } finally {
       setDeleting(false);
+    }
+  }
+
+  function handleGenerateClick() {
+    setGenError('');
+    setGenNotice('');
+    if (form.subject.trim() || form.body.trim()) {
+      setGenConfirm(true);
+    } else {
+      runGenerate();
+    }
+  }
+
+  async function runGenerate() {
+    setGenConfirm(false);
+    if (generating) return;
+    setGenerating(true);
+    setGenError('');
+    setGenNotice('');
+    try {
+      const payload = { type: form.type };
+      if (productTitle.trim()) payload.productTitle = productTitle.trim();
+      const data = await apiSend('/api/email-templates/generate', 'POST', payload);
+      setForm(f => ({ ...f, subject: data.subject || f.subject, body: data.body || f.body }));
+      setSaveOk(false);
+      if (data.fallback) {
+        setGenNotice('AI unavailable — starter draft filled in.');
+      }
+    } catch (e) {
+      setGenError(e.message || 'Generate failed. Please try again.');
+    } finally {
+      setGenerating(false);
     }
   }
 
@@ -372,6 +418,46 @@ export default function EmailTemplatesScreen() {
               <Field label="Type">
                 <SegmentedType value={form.type} onChange={v => setForm(f => ({ ...f, type: v }))} />
               </Field>
+
+              {/* AI Generate */}
+              <div style={{ marginBottom: 14, padding: '12px 14px', background: '#f5f3ff', borderRadius: 10, border: '1px solid #e0e7ff' }}>
+                <p style={{ fontSize: 11, fontWeight: 700, color: '#6d28d9', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  Generate with AI
+                </p>
+                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: 160 }}>
+                    <label style={DS.label}>Product (optional)</label>
+                    <input
+                      style={DS.input}
+                      value={productTitle}
+                      onChange={e => { setProductTitle(e.target.value); setGenError(''); setGenNotice(''); setGenConfirm(false); }}
+                      placeholder="e.g. Banarasi Silk Kurti"
+                    />
+                  </div>
+                  <button
+                    style={{ ...DS.btnSecondary, borderColor: '#c4b5fd', color: '#6d28d9', background: '#ede9fe', flexShrink: 0 }}
+                    onClick={handleGenerateClick}
+                    disabled={generating}
+                  >
+                    {generating ? 'Generating…' : 'Generate with AI'}
+                  </button>
+                </div>
+                {genConfirm && (
+                  <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13, color: '#374151' }}>This will replace your current subject and body.</span>
+                    <button style={{ ...DS.btnSecondary, padding: '5px 12px', fontSize: 12 }} onClick={runGenerate}>Replace</button>
+                    <button style={{ ...DS.btnSecondary, padding: '5px 12px', fontSize: 12 }} onClick={() => setGenConfirm(false)}>Cancel</button>
+                  </div>
+                )}
+                {genNotice && (
+                  <p style={{ fontSize: 12, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '6px 10px', margin: '10px 0 0' }}>
+                    {genNotice}
+                  </p>
+                )}
+                {genError && (
+                  <p style={{ fontSize: 12, color: '#dc2626', margin: '10px 0 0' }}>{genError}</p>
+                )}
+              </div>
 
               <Field label="Name (internal label)">
                 <input style={DS.input} value={form.name} onChange={patch('name')} placeholder="e.g. Diwali 2026 sale" />

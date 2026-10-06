@@ -8,6 +8,7 @@ const Store = require('../models/Store');
 const { requireAuth } = require('../middleware/requireOwner');
 const { FROM, buildEmailHtml } = require('../utils/email');
 const { normalizeImageUrl } = require('../utils/productImage');
+const { generateTemplateCopy } = require('../services/aiService');
 
 // Same safe-fallback pattern as email.js: avoid crashing on load when key absent.
 const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
@@ -16,17 +17,19 @@ const VALID_TYPES = ['special_offer', 'festival', 'normal'];
 const EDITABLE_FIELDS = ['name', 'type', 'subject', 'body', 'imageUrl', 'ctaLabel', 'ctaUrl'];
 
 // Load store brand data; never block a send on a miss.
+// voice is included so the generate route can pass it to generateTemplateCopy.
 async function loadBrandData(shopDomain) {
   try {
-    const store = await Store.findOne({ shopDomain }).select('shopName logoUrl primaryColor');
-    if (!store) return { storeName: shopDomain, logoUrl: null, primaryColor: null };
+    const store = await Store.findOne({ shopDomain }).select('shopName logoUrl primaryColor voice');
+    if (!store) return { storeName: shopDomain, logoUrl: null, primaryColor: null, voice: {} };
     return {
       storeName: store.shopName || shopDomain,
       logoUrl: store.logoUrl || null,
       primaryColor: store.primaryColor || null,
+      voice: store.voice || {},
     };
   } catch {
-    return { storeName: shopDomain, logoUrl: null, primaryColor: null };
+    return { storeName: shopDomain, logoUrl: null, primaryColor: null, voice: {} };
   }
 }
 
@@ -39,6 +42,41 @@ router.get('/', requireAuth, async (req, res) => {
   } catch (err) {
     console.error('[email-templates] list error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch templates' });
+  }
+});
+
+// POST /api/email-templates/generate — must be before /:id routes so Express
+// does not interpret the literal string "generate" as an :id param.
+const GENERATE_FALLBACKS = {
+  special_offer: {
+    subject: 'Special offer just for you',
+    body: 'We have something special waiting for you.\n\nCheck out our latest deals before they expire.\n\nWe look forward to seeing you soon!',
+  },
+  festival: {
+    subject: 'Celebrate with us!',
+    body: "It's a festive time and we want to celebrate with you.\n\nExplore our special collection and find something you'll love.\n\nWarm wishes from our team.",
+  },
+  normal: {
+    subject: 'A message from us',
+    body: "We wanted to reach out and share something with you.\n\nTake a look at what's new in our store.\n\nThank you for being a valued customer.",
+  },
+};
+
+router.post('/generate', requireAuth, async (req, res) => {
+  try {
+    const { type, productTitle } = req.body;
+    if (!type || !VALID_TYPES.includes(type)) {
+      return res.status(400).json({ error: 'type must be one of special_offer, festival, normal' });
+    }
+    const { storeName, voice } = await loadBrandData(req.shopDomain);
+    const result = await generateTemplateCopy(
+      req.shopDomain, storeName, type, productTitle || null, voice
+    );
+    return res.json(result);
+  } catch (err) {
+    console.warn('[email-templates] generate error:', err.message);
+    const fb = GENERATE_FALLBACKS[(req.body && req.body.type)] || GENERATE_FALLBACKS.normal;
+    return res.json({ ...fb, fallback: true });
   }
 });
 

@@ -29,6 +29,11 @@ jest.mock('../utils/productImage', () => ({
   normalizeImageUrl: jest.fn((url) => (typeof url === 'string' && url ? url : null)),
 }));
 
+const mockGenerateTemplateCopy = jest.fn();
+jest.mock('../services/aiService', () => ({
+  generateTemplateCopy: (...args) => mockGenerateTemplateCopy(...args),
+}));
+
 const mockBuildEmailHtml = jest.fn().mockReturnValue('<html>rendered</html>');
 jest.mock('../utils/email', () => ({
   FROM: 'notifications@shopireachboost.com',
@@ -98,8 +103,9 @@ function makeProfile(overrides = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   Store.findOne.mockReturnValue({
-    select: jest.fn().mockResolvedValue({ shopName: 'Demo Store', logoUrl: null, primaryColor: null }),
+    select: jest.fn().mockResolvedValue({ shopName: 'Demo Store', logoUrl: null, primaryColor: null, voice: {} }),
   });
+  mockGenerateTemplateCopy.mockResolvedValue({ subject: 'AI Subject', body: 'AI body', fallback: false });
 });
 
 // ---- GET / ------------------------------------------------------------------
@@ -417,5 +423,62 @@ describe('POST /:id/send', () => {
     await send({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { profileId: 'p1' } }, res);
     expect(res.statusCode).toBe(500);
     expect(res.body.error).toBe('Rate limited');
+  });
+});
+
+// ── POST /generate ────────────────────────────────────────────────────────────
+
+describe('POST /generate', () => {
+  const generate = handlerFor(emailTemplatesRouter, '/generate', 'post');
+
+  test('route ordering: /generate is registered before /:id', () => {
+    const stack = emailTemplatesRouter.stack.filter(l => l.route);
+    const generateIdx = stack.findIndex(l => l.route.path === '/generate');
+    const idIdx = stack.findIndex(l => l.route.path === '/:id');
+    expect(generateIdx).toBeGreaterThanOrEqual(0);
+    expect(idIdx).toBeGreaterThanOrEqual(0);
+    expect(generateIdx).toBeLessThan(idIdx);
+  });
+
+  test('happy path: returns subject+body+fallback from generateTemplateCopy', async () => {
+    const res = mockRes();
+    await generate({ shopDomain: SHOP, body: { type: 'festival', productTitle: 'Silk Saree' } }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ subject: 'AI Subject', body: 'AI body', fallback: false });
+    expect(mockGenerateTemplateCopy).toHaveBeenCalledWith(
+      SHOP, 'Demo Store', 'festival', 'Silk Saree', expect.anything()
+    );
+  });
+
+  test('fallback:true from service is passed through unchanged', async () => {
+    mockGenerateTemplateCopy.mockResolvedValue({
+      subject: 'Starter sub', body: 'Starter body', fallback: true,
+    });
+    const res = mockRes();
+    await generate({ shopDomain: SHOP, body: { type: 'normal' } }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.fallback).toBe(true);
+  });
+
+  test('400 when type is missing', async () => {
+    const res = mockRes();
+    await generate({ shopDomain: SHOP, body: {} }, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/type must be one of/);
+  });
+
+  test('400 when type is invalid', async () => {
+    const res = mockRes();
+    await generate({ shopDomain: SHOP, body: { type: 'campaign' } }, res);
+    expect(res.statusCode).toBe(400);
+  });
+
+  test('productTitle is optional — omitting it calls service with null', async () => {
+    const res = mockRes();
+    await generate({ shopDomain: SHOP, body: { type: 'normal' } }, res);
+    expect(res.statusCode).toBe(200);
+    expect(mockGenerateTemplateCopy).toHaveBeenCalledWith(
+      SHOP, 'Demo Store', 'normal', null, expect.anything()
+    );
   });
 });

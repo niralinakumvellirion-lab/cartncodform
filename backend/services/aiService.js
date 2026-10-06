@@ -35,7 +35,7 @@ function hasKey() {
   return Boolean(process.env.LLM_API_KEY);
 }
 
-async function anthropic(userPrompt, { maxTokens = 500, system = null } = {}) {
+async function anthropic(userPrompt, { maxTokens = 500, system = null, signal = null } = {}) {
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: {
@@ -43,6 +43,7 @@ async function anthropic(userPrompt, { maxTokens = 500, system = null } = {}) {
       'anthropic-version': '2023-06-01',
       'content-type': 'application/json',
     },
+    ...(signal ? { signal } : {}),
     body: JSON.stringify({
       model: MODEL,
       max_tokens: maxTokens,
@@ -343,4 +344,114 @@ async function generateInsights(shopDomain, rawInsights) {
   }
 }
 
-module.exports = { generateCopy, generateEmailCopy, generateWeeklyNarrative, generateInsights };
+// ---------------------------------------------------------------------------
+// generateTemplateCopy — merchant-triggered copy for EmailTemplate editor.
+// Unlike the poller functions, this is interactive: it wraps the fetch in a
+// 10 s AbortController so the UI never hangs. Returns { subject, body,
+// fallback: boolean } and NEVER throws.
+// ---------------------------------------------------------------------------
+
+const FALLBACK_TEMPLATE = {
+  special_offer: {
+    subject: 'Special offer just for you',
+    body: 'We have something special waiting for you.\n\nCheck out our latest deals before they expire.\n\nWe look forward to seeing you soon!',
+  },
+  festival: {
+    subject: 'Celebrate with us!',
+    body: "It's a festive time and we want to celebrate with you.\n\nExplore our special collection and find something you'll love.\n\nWarm wishes from our team.",
+  },
+  normal: {
+    subject: 'A message from us',
+    body: "We wanted to reach out and share something with you.\n\nTake a look at what's new in our store.\n\nThank you for being a valued customer.",
+  },
+};
+
+async function generateTemplateCopy(shopDomain, shopName, type, productTitle, voice) {
+  const fb = FALLBACK_TEMPLATE[type] || FALLBACK_TEMPLATE.normal;
+  const v = voice || {};
+  const voiceHash = crypto.createHash('md5').update(JSON.stringify(v)).digest('hex');
+  const productKey = productTitle ? String(productTitle).trim().toLowerCase().slice(0, 100) : null;
+  const cacheKey = buildCacheKey(shopDomain || '', type, productKey, 'email-template', voiceHash);
+
+  // 1. cache
+  try {
+    const hit = await CopyCache.findOne({ cacheKey });
+    if (hit) {
+      console.log(`[ai] template copy cache hit for ${cacheKey.slice(0, 8)}`);
+      return { subject: hit.subject || fb.subject, body: hit.body || fb.body, fallback: false };
+    }
+  } catch (err) {
+    console.warn('[ai] template copy cache lookup failed:', err.message);
+  }
+
+  // 2. no key → fallback
+  if (!hasKey()) {
+    return { ...fb, fallback: true };
+  }
+
+  // 3. build prompt + call with 10 s timeout
+  const typeFraming = {
+    special_offer: 'a promotional email highlighting a special offer or deal',
+    festival: 'a festive greeting email with a warm seasonal tone and a special offer',
+    normal: 'a general update or newsletter email',
+  }[type] || 'a general email';
+
+  const productLine = productTitle ? `Product featured: ${String(productTitle).trim()}\n` : '';
+  const userPrompt =
+    `Shop name: ${shopName || 'our store'}\n` +
+    `Store voice: ${JSON.stringify(v)}\n` +
+    productLine +
+    `\nWrite ${typeFraming}.\n` +
+    `- subject: under 60 characters\n` +
+    `- body: 2–3 short paragraphs, PLAIN TEXT, absolutely no HTML tags, no markdown\n` +
+    `- Warm opening addressed to the customer\n` +
+    `- Clear call to action\n` +
+    (v.signOff ? `- End with this sign-off: ${v.signOff}\n` : '') +
+    (v.emoji ? `- You may use emoji sparingly\n` : `- No emoji\n`) +
+    `\nRespond ONLY with JSON: {"subject":"...","body":"..."}`;
+
+  let parsed;
+  let promptTokens = 0;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    let out;
+    try {
+      out = await anthropic(userPrompt, { maxTokens: 500, system: SYSTEM_PROMPT, signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+    promptTokens = out.promptTokens;
+    parsed = parseJsonBlock(out.text);
+  } catch (err) {
+    console.warn('[ai] generateTemplateCopy failed:', err.message);
+    return { ...fb, fallback: true };
+  }
+
+  const result = {
+    subject: parsed.subject || fb.subject,
+    body: parsed.body || fb.body,
+    fallback: false,
+  };
+
+  // 4. cache it
+  try {
+    await CopyCache.create({
+      shopDomain: shopDomain || '',
+      cacheKey,
+      signalType: type,
+      channel: 'email-template',
+      body: result.body,
+      subject: result.subject,
+      promptTokens,
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    });
+  } catch (err) {
+    if (!err || err.code !== 11000) console.warn('[ai] template copy cache save failed:', err.message);
+  }
+
+  console.log(`[ai] generated template copy for type=${type}, tokens=${promptTokens}`);
+  return result;
+}
+
+module.exports = { generateCopy, generateEmailCopy, generateWeeklyNarrative, generateInsights, generateTemplateCopy };
