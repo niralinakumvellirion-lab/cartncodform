@@ -530,6 +530,8 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
     return { status: 400, payload: { error: 'No email address' } };
   }
 
+  // TEMP DEBUG
+  console.log('[email-img-src] final imageUrl:', imageUrl);
   const { data, error } = await resend.emails.send({
     from: 'ShopiReachBoost AI <notifications@shopireachboost.com>',
     to: email,
