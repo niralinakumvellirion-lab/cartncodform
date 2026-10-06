@@ -6,6 +6,9 @@ const { Resend } = require('resend');
 const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
 const FROM = process.env.FROM_EMAIL || 'notifications@shopireachboost.com';
 
+// Default accent used when store has no brand color set.
+const DEFAULT_ACCENT = '#4f46e5';
+
 // --- small HTML helpers -------------------------------------------------------
 
 function escapeHtml(value) {
@@ -38,6 +41,91 @@ function shell(innerHtml) {
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#111827;` +
     `max-width:560px;margin:0 auto;padding:24px;">${innerHtml}</div>`
   );
+}
+
+/**
+ * Build a complete, deliverable HTML email document.
+ *
+ * Table-based single-column layout (600 px max) so Outlook desktop
+ * degrades gracefully — square corners, no border-radius, readable text.
+ * MSO VML rounded buttons and <!--[if mso]--> conditional comments are
+ * deliberately omitted in this T1 pass; Outlook renders the button as
+ * a flat blue-background link, which is acceptable.
+ *
+ * @param {object} opts
+ * @param {string} opts.subject        - Email subject (used in <title> + hero alt)
+ * @param {string} opts.bodyHtml       - Already-formatted body (may contain <br>)
+ * @param {string|null} opts.imageUrl  - Hero image URL; skipped unless https://
+ * @param {string|null} opts.ctaLabel  - Button label; skipped when ctaUrl absent
+ * @param {string|null} opts.ctaUrl    - CTA href; omit to suppress button
+ * @param {string|null} opts.storeName - Display name in header/footer
+ * @param {string|null} opts.logoUrl   - Store logo; falls back to storeName text
+ * @param {string|null} opts.primaryColor - Hex brand color; falls back to DEFAULT_ACCENT
+ * @returns {string} Complete <!DOCTYPE html> document
+ */
+function buildEmailHtml({ subject, bodyHtml, imageUrl, ctaLabel, ctaUrl, storeName, logoUrl, primaryColor }) {
+  const accent = primaryColor || DEFAULT_ACCENT;
+  const safe = escapeHtml;
+
+  const headerContent = logoUrl
+    ? `<img src="${safe(logoUrl)}" alt="${safe(storeName || '')}" width="160" ` +
+      `style="display:block;max-width:160px;height:auto;border:0;margin:0 auto;">`
+    : `<span style="font-size:18px;font-weight:700;color:#111827;` +
+      `font-family:Arial,Helvetica,sans-serif;">${safe(storeName || '')}</span>`;
+
+  // Hero image: https only — skip http, data: and relative URLs.
+  console.log('[t1-img] hero condition:', !!(imageUrl && imageUrl.startsWith('https://'))); // TEMP DEBUG
+  const heroRow =
+    imageUrl && imageUrl.startsWith('https://')
+      ? `\n        <tr>\n          <td style="background:#ffffff;padding:0;" align="center">` +
+        `\n            <img src="${safe(imageUrl)}" alt="${safe(subject || '')}" width="600"` +
+        ` style="display:block;width:100%;max-width:600px;height:auto;border:0;">` +
+        `\n          </td>\n        </tr>`
+      : '';
+
+  // Bulletproof button: bgcolor on <td> works in Outlook even without MSO VML.
+  const ctaRow = ctaUrl
+    ? `\n        <tr>\n          <td style="background:#ffffff;padding:8px 32px 32px;" align="center">` +
+      `\n            <table cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">` +
+      `\n              <tr>\n                <td align="center" bgcolor="${safe(accent)}"` +
+      ` style="border-radius:6px;background:${safe(accent)};">` +
+      `\n                  <a href="${safe(ctaUrl)}"` +
+      ` style="display:inline-block;padding:14px 28px;font-family:Arial,Helvetica,sans-serif;` +
+      `font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;"` +
+      ` target="_blank">${safe(ctaLabel || 'Shop Now')}</a>` +
+      `\n                </td>\n              </tr>\n            </table>` +
+      `\n          </td>\n        </tr>`
+    : '';
+
+  return `<!DOCTYPE html>\n<html lang="en">\n<head>\n` +
+    `<meta charset="utf-8">\n` +
+    `<meta name="viewport" content="width=device-width,initial-scale=1">\n` +
+    `<title>${safe(subject || '')}</title>\n` +
+    `<style>\n` +
+    `@media (max-width:600px){\n` +
+    `  .email-wrapper{width:100%!important;}\n` +
+    `  .email-body{padding:16px!important;}\n` +
+    `}\n` +
+    `</style>\n` +
+    `</head>\n<body style="margin:0;padding:0;background:#f3f4f6;">\n` +
+    `<table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f3f4f6"` +
+    ` style="background:#f3f4f6;">\n  <tr>\n    <td align="center" valign="top" style="padding:32px 16px;">\n` +
+    `      <table class="email-wrapper" width="600" cellpadding="0" cellspacing="0" border="0"` +
+    ` style="max-width:600px;width:600px;">\n` +
+    `        <!-- header -->\n        <tr>\n          <td style="background:#ffffff;padding:24px 32px;` +
+    `text-align:center;border-bottom:1px solid #e5e7eb;">\n            ${headerContent}\n          </td>\n        </tr>` +
+    heroRow +
+    `\n        <!-- body -->\n        <tr>\n          <td class="email-body"` +
+    ` style="background:#ffffff;padding:32px;` +
+    `font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,Helvetica,sans-serif;` +
+    `font-size:15px;color:#111827;line-height:1.7;">\n            ${bodyHtml || ''}` +
+    `\n          </td>\n        </tr>` +
+    ctaRow +
+    `\n        <!-- footer -->\n        <tr>\n          <td style="background:#f9fafb;padding:20px 32px;` +
+    `text-align:center;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#6b7280;` +
+    `border-top:1px solid #e5e7eb;">\n            ${safe(storeName || '')} &middot; ` +
+    `<a href="#" style="color:#6b7280;">Unsubscribe</a>\n          </td>\n        </tr>\n      </table>` +
+    `\n    </td>\n  </tr>\n</table>\n</body>\n</html>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -177,7 +265,7 @@ async function sendMarketingEmail(to, subject, htmlBody, shopDomain) {
   // Reuse the shared client above (already guarded against a missing key)
   // rather than constructing a second Resend SDK instance per call.
   const { data, error } = await resend.emails.send({
-    from: 'ShopiReachBoost AI <notifications@shopireachboost.com>',
+    from: FROM,
     to,
     subject,
     html: `
@@ -229,6 +317,8 @@ async function sendCodOrderConfirmationEmail(order) {
 }
 
 module.exports = {
+  FROM,
+  buildEmailHtml,
   sendAbandonedCartEmail,
   sendNewCodOrderEmail,
   sendCodOrderConfirmationEmail,

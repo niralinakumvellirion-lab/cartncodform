@@ -2,7 +2,7 @@ const express = require('express');
 const PushSubscription = require('../models/PushSubscription');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const { sendPushToStore, sendPushToCustomers, buildClickUrl } = require('../utils/pushNotification');
-const { sendAbandonedCartEmail } = require('../utils/email');
+const { sendAbandonedCartEmail, FROM, buildEmailHtml } = require('../utils/email');
 const { logBroadcastSend } = require('../services/sendLogService');
 const { fetchProductImage } = require('./webhooks');
 const { requireAuth } = require('../middleware/requireOwner');
@@ -512,6 +512,7 @@ router.post('/send-now', requireAuth, async (req, res) => {
  */
 async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl }) {
   const Profile = require('../models/Profile');
+  const Store = require('../models/Store');
 
   if (!profileId || !subject || !body) {
     return { status: 400, payload: { error: 'Missing fields' } };
@@ -530,34 +531,38 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
     return { status: 400, payload: { error: 'No email address' } };
   }
 
-  // TEMP DEBUG
-  console.log('[email-img-src] final imageUrl:', imageUrl);
+  // Load brand data — best-effort; never block the send on a miss.
+  let storeName = shop;
+  let logoUrl = null;
+  let primaryColor = null;
+  try {
+    const store = await Store.findOne({ shopDomain: shop }).select('shopName logoUrl primaryColor');
+    if (store) {
+      storeName = store.shopName || shop;
+      logoUrl = store.logoUrl || null;
+      primaryColor = store.primaryColor || null;
+    }
+  } catch (e) {
+    // Non-fatal: fall through with defaults.
+  }
+
+  console.log('[t1-img] imageUrl into buildEmailHtml:', imageUrl); // TEMP DEBUG
+  const html = buildEmailHtml({
+    subject,
+    bodyHtml: body.replace(/\n/g, '<br>'),
+    imageUrl,
+    ctaLabel: null,
+    ctaUrl: null,
+    storeName,
+    logoUrl,
+    primaryColor,
+  });
+
   const { data, error } = await resend.emails.send({
-    from: 'ShopiReachBoost AI <notifications@shopireachboost.com>',
+    from: FROM,
     to: email,
-    subject: subject,
-    html: `
-      <div style="font-family:-apple-system,BlinkMacSystemFont,
-        sans-serif;max-width:600px;margin:0 auto;padding:32px 24px">
-        <div style="background:#fff;border-radius:12px;
-          border:1px solid #e5e7eb;padding:32px">
-          ${imageUrl && imageUrl.startsWith('https://') ? `
-          <div style="margin-bottom:20px">
-            <img src="${imageUrl}"
-              alt="${subject.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')}"
-              style="display:block;width:100%;max-width:100%;
-                height:auto;border-radius:8px;border:0" />
-          </div>` : ''}
-          ${body.replace(/\n/g, '<br>')}
-          <hr style="margin:24px 0;border:none;
-            border-top:1px solid #f3f4f6">
-          <p style="font-size:12px;color:#9ca3af;margin:0">
-            You received this email because you subscribed
-            to notifications from this store.
-          </p>
-        </div>
-      </div>
-    `,
+    subject,
+    html,
   });
 
   if (error) {
