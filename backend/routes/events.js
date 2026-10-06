@@ -3,6 +3,15 @@ const router = express.Router();
 const StorefrontEvent = require('../models/StorefrontEvent');
 const ProductImageCache = require('../models/ProductImageCache');
 const { normalizeImageUrl, fetchProductImageWithTimeout } = require('../utils/productImage');
+
+// Returns true for storefront-proxied Shopify image URLs of the form
+// https://<store>.myshopify.com/cdn/... — these are password-blocked on
+// dev stores and add a redirect hop on live ones. The direct CDN form
+// (cdn.shopify.com/s/files/...) is always publicly reachable.
+function isStorefrontUrl(url) {
+  return typeof url === 'string' &&
+    /^https?:\/\/[^/]+\.myshopify\.com\/cdn\//i.test(url);
+}
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
 
 // Phase 1 attribution — incoming storefront event `type` -> AttributedEvent
@@ -496,19 +505,28 @@ async function buildJourneyEntry(shop, profile, entrySignals) {
       }).select('productId imageUrl').lean()
     : [];
 
+  // Only accept direct cdn.shopify.com URLs from the cache — a myshopify.com/cdn/
+  // URL written by a previous cache-miss pass is treated as a miss here so the
+  // Admin API fetch below can replace it with the public CDN URL.
   const imageMap = {};
   cachedImages.forEach(c => {
-    imageMap[String(c.productId)] = normalizeImageUrl(c.imageUrl);
+    const normalized = normalizeImageUrl(c.imageUrl);
+    if (normalized && !isStorefrontUrl(normalized)) {
+      imageMap[String(c.productId)] = normalized;
+    }
   });
 
   const topProductsWithImages = await Promise.all(topProducts.map(async (p) => {
     const { eventImageUrl, ...entry } = p;
     const key = String(p.productId);
 
+    // Priority: (1) clean cache hit, (2) event image if already a direct CDN URL,
+    // (3) Admin API fetch (time-boxed, upserts cache on success — also overwrites
+    // any bad myshopify.com URL left in the cache from a previous pass).
     let imageUrl = imageMap[key] || null;
     let needsCacheWrite = false;
 
-    if (!imageUrl && eventImageUrl) {
+    if (!imageUrl && eventImageUrl && !isStorefrontUrl(eventImageUrl)) {
       imageUrl = eventImageUrl;
       needsCacheWrite = true;
     }
