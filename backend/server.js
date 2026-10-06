@@ -160,6 +160,8 @@ app.use('/api/queue', queueRouter);
 // rate limiter, same reasoning as /api/activity/queue above.
 const automationRouter = require('./routes/automation');
 app.use('/api/automation', automationRouter);
+const emailTemplatesRouter = require('./routes/emailTemplates');
+app.use('/api/email-templates', emailTemplatesRouter);
 app.use('/apps/cartncodform', proxyRouter);
 
 // --- 404 + error handlers ---------------------------------------------------

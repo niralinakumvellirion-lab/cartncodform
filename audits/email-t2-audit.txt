@@ -1,0 +1,80 @@
+SELF-AUDIT: Phase T2 — EmailTemplate model + API
+Date: 2026-10-06
+Files changed:
+  backend/models/EmailTemplate.js       (new)
+  backend/routes/emailTemplates.js      (new)
+  backend/server.js                     (mount added)
+  backend/__tests__/emailTemplates.test.js (new)
+
+─────────────────────────────────────────────────────────────────────────────
+SPEC COMPLIANCE
+─────────────────────────────────────────────────────────────────────────────
+
+Model (§1): ✓ All fields present. shopDomain indexed. timestamps: true.
+  enum: ['special_offer', 'festival', 'normal']. imageUrl/ctaLabel/ctaUrl
+  optional with null default.
+
+CRUD routes (§2): ✓ All 5 verbs: GET /, GET /:id, POST /, PATCH /:id,
+  DELETE /:id. All use requireAuth. All queries filter/assert by
+  req.shopDomain. shopDomain is not in EDITABLE_FIELDS so it cannot
+  change via PATCH. 400 returned on bad type or missing required fields.
+  201 on create; 200 on patch/delete.
+
+Mount (§2): ✓ app.use('/api/email-templates', emailTemplatesRouter) added
+  in server.js alongside the other auth-protected admin routes.
+
+Preview (§3): ✓ GET /:id/preview — registered BEFORE /:id so Express
+  matches it first. Loads brand data from Store. Calls buildEmailHtml.
+  Returns { html }. imageUrl normalized via normalizeImageUrl.
+
+Send (§4): ✓ POST /:id/send — requires profileId. Loads template (shop-
+  scoped), then Profile (scoped by { _id, shopDomain }). Extracts email
+  from channels.email.address || identifiers.emails[0]. Renders via
+  buildEmailHtml with brand data. Sends via shared Resend instance +
+  FROM constant from email.js. Returns { ok, id } or clear error.
+
+─────────────────────────────────────────────────────────────────────────────
+IDOR / SECURITY
+─────────────────────────────────────────────────────────────────────────────
+
+All /:id routes: findById result is rejected (404) when
+  template.shopDomain !== req.shopDomain. A shop can never read, preview,
+  patch, delete, or send via another shop's template.
+
+Send: Profile.findOne({ _id, shopDomain: req.shopDomain }) — a shop cannot
+  send to another shop's customer profile.
+
+shopDomain never written from request body — set once at create from
+  req.shopDomain, excluded from EDITABLE_FIELDS in PATCH.
+
+─────────────────────────────────────────────────────────────────────────────
+REUSE
+─────────────────────────────────────────────────────────────────────────────
+
+buildEmailHtml imported from utils/email.js — not duplicated.
+FROM constant imported from utils/email.js — not duplicated.
+normalizeImageUrl imported from utils/productImage.js.
+Resend instance follows the same safe-fallback pattern as push.js.
+
+─────────────────────────────────────────────────────────────────────────────
+TESTS
+─────────────────────────────────────────────────────────────────────────────
+
+24 tests in emailTemplates.test.js:
+  - list happy path
+  - get: happy path, IDOR (other shop → 404), missing → 404
+  - create: happy path, bad/missing type, missing name, missing body
+  - patch: happy path, IDOR, shopDomain in body ignored, clearing required → 400
+  - delete: happy path, IDOR
+  - preview: renders via buildEmailHtml, IDOR
+  - send: happy path (buildEmailHtml + Resend called), missing profileId,
+    template IDOR, profile IDOR, no email, channels priority, Resend error
+
+Full suite: 402/402 pass, 38 suites. No regressions.
+
+─────────────────────────────────────────────────────────────────────────────
+OUT OF SCOPE (not touched)
+─────────────────────────────────────────────────────────────────────────────
+
+No UI. No changes to existing email or push routes. No schema migrations
+needed (Mongoose creates the collection on first write).
