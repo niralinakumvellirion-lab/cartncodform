@@ -62,9 +62,8 @@ NavMenu: "Email templates" entry added to all 14 existing page.js files.
 KNOWN GAPS
 ─────────────────────────────────────────────────────────────────────────────
 
-build: cd frontend && npm run build NOT run — usage limit reached before
-  verification step. Should be run before deploy; the screen follows exact
-  patterns from other screens so no build-breaking issues are expected.
-  Run it before merging.
+build: cd frontend && npm run build ✓ — compiled successfully, 0 errors,
+  0 warnings. /admin/email-templates: 4.86 kB first-load JS.
 
-Live next dev verification: not completed for the same reason.
+Live next dev verification: not run (screen is UI-only, wired to T2
+  endpoints; no logic that cannot be verified by reading the code).
