@@ -1,0 +1,224 @@
+AUDIT: AI copy generation for Email Templates
+Date: 2026-10-06
+Files read:
+  backend/services/aiService.js
+  backend/routes/emailTemplates.js
+  frontend/app/admin/screens/EmailTemplates.jsx
+  backend/models/Store.js
+
+─────────────────────────────────────────────────────────────────────────────
+1. EXISTING LLM SERVICE
+─────────────────────────────────────────────────────────────────────────────
+
+FILE: backend/services/aiService.js
+
+CLIENT: raw fetch() to https://api.anthropic.com/v1/messages — the
+  `anthropic` npm SDK is explicitly NOT installed. This is intentional.
+  Authentication: process.env.LLM_API_KEY (x-api-key header).
+  Model: process.env.LLM_MODEL || 'claude-sonnet-4-6'.
+
+EXPORTS:
+  generateCopy(store, signalType, product, channel) → { title, body, subject }
+    Designed for automated signal-based push/email. Prompt takes a signal
+    type (cart_abandon, lapsing, etc.) and a product object.
+  generateEmailCopy(shopDomain, signal, voice, profileData) → { subject, body }
+    Same, wrapped for the poller's EMAIL_SIGNAL_TYPES gate.
+  generateWeeklyNarrative / generateInsights — plain text, no JSON parsing.
+
+INTERNAL anthropic() helper (not exported):
+  Posts to the API, returns { text, promptTokens }.
+  Parses with parseJsonBlock() which greps for the first {...} block in the
+  response — handles fenced code blocks and prose-wrapped JSON.
+
+KEY BEHAVIOUR (critical for the generate feature):
+  - If LLM_API_KEY is unset, every function returns a hardcoded fallback
+    immediately. NEVER throws.
+  - If the API call fails, every function catches, logs a warning, and
+    returns the fallback. NEVER throws.
+  - NO timeout on the raw fetch() — if the API hangs, the server request
+    hangs indefinitely. generateCopy/generateEmailCopy don't add one either.
+
+VERDICT: reuse the same LLM_API_KEY + LLM_MODEL env vars. Do NOT add a
+  second Anthropic client. Add a new exported function to aiService.js
+  (see §3 below) rather than calling the private anthropic() directly.
+
+─────────────────────────────────────────────────────────────────────────────
+2. INPUTS AVAILABLE FOR COPY GENERATION
+─────────────────────────────────────────────────────────────────────────────
+
+FROM THE REQUEST BODY (merchant-supplied, no extra fetch):
+  type          — 'special_offer' | 'festival' | 'normal' (required)
+  productTitle  — optional string ("Banarasi Silk Kurti")
+
+FROM THE STORE DOC (one DB read, no Shopify API call):
+  shopName      — already fetched by loadBrandData() in emailTemplates.js
+  primaryColor  — already fetched by loadBrandData()
+  voice         — Store.voice { tone, emoji, lang, signOff } — NOT currently
+                  selected by loadBrandData(). Needs `.select()` expansion.
+                  Voice is the most valuable input: it controls tone, emoji
+                  usage, and the sign-off the merchant has chosen for all
+                  other AI copy.
+
+NOT AVAILABLE WITHOUT EXTRA FETCHES:
+  - Real product data (price, image, category) requires a Shopify Admin API
+    call or ProductImageCache lookup.
+  - The productTitle field in the request body is sufficient for a V1 prompt;
+    it's optional and the merchant can type it directly.
+
+WHAT TO FEED THE PROMPT (no extra fetches):
+  shopName + voice (from Store) + type + productTitle (from body).
+  loadBrandData() in emailTemplates.js already has the Store findOne — just
+  expand the select to include 'voice shopName logoUrl primaryColor'.
+
+─────────────────────────────────────────────────────────────────────────────
+3. SMALLEST NEW ENDPOINT
+─────────────────────────────────────────────────────────────────────────────
+
+ROUTE: POST /api/email-templates/generate
+BODY:  { type: 'special_offer'|'festival'|'normal', productTitle?: string }
+RESPONSE: { subject: string, body: string }
+
+PLACEMENT IN ROUTER: MUST be declared before the /:id routes in
+  emailTemplates.js, otherwise Express matches 'generate' as the :id
+  param. Currently emailTemplates.js registers GET /:id/preview, GET /:id,
+  POST /:id (send), PATCH /:id, DELETE /:id — the generate route has no
+  id in the path, so `router.post('/generate', requireAuth, ...)` at the
+  top of the file (before /:id/preview) is safe.
+
+NEW FUNCTION: add generateTemplateCopy(shopName, type, productTitle, voice)
+  to aiService.js. Reasons to add rather than reuse generateCopy():
+  - generateCopy() takes a signal type (cart_abandon, lapsing, etc.) and a
+    product object — mapping template type to a signal would be a category
+    error (special_offer is not a retention signal).
+  - The prompt needs a different framing: "Write a promotional/festival/
+    general email" not "Write a re-engagement email for a lapsing customer".
+  - generateCopy() caches per (shopDomain, signalType, productId, channel,
+    voiceHash) — the same cache shape works here keyed as channel
+    'email-template' to avoid collisions with existing entries.
+
+STRUCTURED RESPONSE:
+  The existing parseJsonBlock() already extracts { subject, body } from the
+  LLM's JSON. No additional parsing layer needed. The response from the new
+  function will be { subject: string, body: string } — same shape as
+  generateEmailCopy(). The endpoint returns this directly.
+
+FALLBACK BEHAVIOUR:
+  Like the other functions, generateTemplateCopy should catch all errors
+  and return a rule-based fallback:
+    special_offer: { subject: 'Special offer just for you',
+                     body: 'We have an exclusive deal waiting for you...' }
+    festival:      { subject: 'Celebrate with us!',
+                     body: 'Wishing you a joyful celebration...' }
+    normal:        { subject: 'A message from us',
+                     body: 'We wanted to reach out...' }
+
+IMPORTANT: for the generate endpoint (merchant-triggered interactive UX),
+  returning a silent fallback is NOT acceptable — the merchant would paste
+  boilerplate copy without knowing the AI failed. The endpoint should
+  return { subject, body, fallback: true } when the fallback fires, so
+  the frontend can show "AI unavailable — here's a starter draft instead"
+  rather than presenting boilerplate as AI-generated.
+
+─────────────────────────────────────────────────────────────────────────────
+4. FAILURE HANDLING & TIMEOUT RISK
+─────────────────────────────────────────────────────────────────────────────
+
+CURRENT STATE:
+  anthropic() has no timeout. If Anthropic's API hangs, the Express request
+  hangs until the Node default socket timeout (~2 min on Render) closes it.
+  For the poller this is acceptable — jobs are background. For an interactive
+  "Generate" button, a 2-minute wait is a broken UI.
+
+REQUIRED FIX:
+  Wrap the fetch in the new generateTemplateCopy with an AbortController +
+  setTimeout (10 s recommended; Anthropic's median latency for a 500-token
+  completion is ~2-3 s):
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    try {
+      const res = await fetch(API_URL, { ..., signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+
+  On AbortError or any network error, return the fallback with
+  fallback: true so the UI shows the error state.
+
+ENDPOINT GUARANTEE: the generate endpoint must never return 5xx to the
+  UI — always 200 { subject, body, fallback: true|false } — so the
+  frontend can gracefully show "couldn't generate, here's a starter."
+  The try/catch wrapping in the route handler enforces this.
+
+─────────────────────────────────────────────────────────────────────────────
+5. COST / RATE LIMITING
+─────────────────────────────────────────────────────────────────────────────
+
+NO RATE LIMITER on the emailTemplates router today (server.js mounts it
+  plain, like activityRouter). No LLM-specific rate limiting anywhere.
+
+NATURAL RATE LIMIT: CopyCache (24h TTL, keyed by shopDomain + type +
+  productTitle + voiceHash). If the merchant hits Generate twice with the
+  same inputs the second call hits the cache — no LLM call. This is the
+  correct primary safeguard.
+
+ADDITIONAL RISK:
+  A merchant could generate different copy on every keypress of productTitle
+  (different cache key each time) and bypass the 24h cache. For V1 this
+  is acceptable — the button is merchant-triggered, not automated. If abuse
+  becomes a concern, add a per-shop in-memory or Redis counter (e.g.,
+  5 generates/hour per shop). Not needed for V1.
+
+─────────────────────────────────────────────────────────────────────────────
+6. ESCAPING / LENGTH LIMITS
+─────────────────────────────────────────────────────────────────────────────
+
+buildEmailHtml (email.js) applies escapeHtml() to all dynamic string fields
+  (subject in <title>, storeName, CTA label/url, image alt) and treats
+  bodyHtml as pre-formatted HTML — it is NOT escaped. In the send route,
+  body goes through body.replace(/\n/g, '<br>') before being passed as
+  bodyHtml. This is the same path for merchant-typed and AI-generated body.
+
+CONCERN: if the LLM returns HTML tags in the body (e.g., <b>text</b>),
+  they will be rendered as-is in the email, not escaped. The existing prompt
+  explicitly says "plain text, no HTML" and this is sufficient for V1.
+  The new generateTemplateCopy prompt must repeat this constraint.
+
+SCHEMA LIMITS:
+  EmailTemplate.body and .subject are plain String fields with no maxlength.
+  The prompt requests "max 60 chars" for subject and "2-3 short paragraphs"
+  for body — this is enforced only by the prompt. If the LLM returns an
+  overlong subject, it will be stored and sent. Truncation on the frontend
+  (after Generate fills the fields) is optional but not harmful.
+
+ESCAPING SUMMARY:
+  AI-generated copy requires NO special treatment beyond what merchant-typed
+  copy already gets. The plain-text body path (newlines → <br>, escapeHtml
+  on surrounding structure) is safe. No separate sanitisation step needed.
+
+─────────────────────────────────────────────────────────────────────────────
+IMPLEMENTATION PLAN (SUMMARY)
+─────────────────────────────────────────────────────────────────────────────
+
+1. aiService.js: add generateTemplateCopy(shopName, type, productTitle, voice)
+   - Uses anthropic() with 10 s AbortController timeout
+   - Prompt: type-specific framing, plain text body, voice/signOff, JSON out
+   - CopyCache keyed with channel = 'email-template'
+   - Returns { subject, body, fallback: false } on success,
+     { subject, body, fallback: true } on failure/no-key/timeout
+
+2. emailTemplates.js: add POST /generate before /:id routes
+   - requireAuth; read Store for shopName + voice
+   - Call generateTemplateCopy; always return 200 { subject, body, fallback }
+
+3. EmailTemplates.jsx: "Generate with AI" button in editor
+   - Sits below the Type segmented control, before Name/Subject/Body fields
+   - Optional productTitle input next to the button
+   - On click: setGenerating(true), call apiSend POST /generate
+   - On success (fallback: false): fill subject + body fields → merchant edits
+   - On success (fallback: true): fill fields + show yellow notice
+     "AI unavailable — starter draft filled in"
+   - On network error: show red error, leave fields untouched
+   - Loading state: button shows "Generating…", disabled during the call
+
+>>> STOP. Audit only. No implementation.

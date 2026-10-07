@@ -1,0 +1,97 @@
+SELF-AUDIT: AI copy generation for Email Templates
+Date: 2026-10-06
+Commit: e34f13e
+Files changed:
+  backend/services/aiService.js         (anthropic() + generateTemplateCopy)
+  backend/routes/emailTemplates.js      (POST /generate, loadBrandData voice)
+  frontend/app/admin/screens/EmailTemplates.jsx  (Generate panel)
+  backend/__tests__/aiService.test.js   (+5 tests)
+  backend/__tests__/emailTemplates.test.js (+6 tests)
+
+─────────────────────────────────────────────────────────────────────────────
+SPEC COMPLIANCE (against audits/email-ai-copy-audit.txt)
+─────────────────────────────────────────────────────────────────────────────
+
+§1 generateTemplateCopy — ✓
+  - Added as a new exported function to aiService.js. anthropic() was given
+    an optional `signal` param so the caller can attach an AbortController
+    without duplicating the entire fetch call.
+  - 10 s AbortController timeout wraps the anthropic() call inside
+    generateTemplateCopy; clearTimeout in a finally block prevents the timer
+    from leaking if the fetch resolves first.
+  - CopyCache keyed with channel = 'email-template' (no collision with
+    existing 'email' or 'email-marketing' entries).
+  - Returns { subject, body, fallback: boolean } in all code paths.
+  - If LLM_API_KEY is unset → fallback: true immediately, no API call.
+  - If fetch throws (including AbortError on timeout) → catch returns
+    fallback: true; never throws.
+  - Prompt: type-specific framing (promotional / festive / general).
+    Includes store voice (tone, emoji, lang, signOff). Explicitly says
+    "PLAIN TEXT, absolutely no HTML tags, no markdown" per audit §6.
+
+§2 POST /generate route — ✓
+  - Declared before all /:id routes in emailTemplates.js. A route ordering
+    test in emailTemplates.test.js verifies the index of '/generate' is
+    less than the index of '/:id' in router.stack.
+  - requireAuth (consistent with all other routes in this file; requireStore-
+    Owner is not used here because there is no :shopDomain path param —
+    scoping is done via req.shopDomain set by requireAuth, matching every
+    other route in the file).
+  - loadBrandData expanded to select 'voice' in addition to existing fields.
+    Return value gains a `voice` field; existing destructuring in the three
+    callers (preview, send, send) only takes { storeName, logoUrl, primaryColor }
+    so no existing code is affected.
+  - Always returns 200; the outer try/catch catches Store lookup failures and
+    any unexpected errors, returning a hardcoded fallback with fallback: true.
+  - Returns 400 for missing/invalid type (client error, not 5xx — correct).
+
+§3 Generate button — ✓
+  - Purple-tinted panel (background: #f5f3ff, border: #e0e7ff) below the
+    Type selector, above Name. Visually distinct from the editor fields.
+  - "Product (optional)" text input + "Generate with AI" button side by side.
+  - On click with empty subject+body: generates immediately.
+  - On click with non-empty subject or body: shows inline confirm
+    "This will replace your current subject and body." with Replace/Cancel.
+    This satisfies the spec's "confirm with the merchant first" requirement.
+  - fallback:false → fills subject + body, no notice.
+  - fallback:true → fills subject + body + shows amber notice
+    "AI unavailable — starter draft filled in."
+  - Network error → red inline error, fields untouched (the setForm call
+    inside the try block is not reached on throw).
+  - Does NOT auto-save (no saveTemplate() call after generate).
+  - Loading state: button shows "Generating…", disabled during the call.
+  - State reset (productTitle, genError, genNotice, genConfirm) in both
+    selectTemplate() and startNew().
+
+─────────────────────────────────────────────────────────────────────────────
+CONSTRAINTS MET
+─────────────────────────────────────────────────────────────────────────────
+
+One LLM client — ✓ No new Anthropic client added. generateTemplateCopy
+  calls the private anthropic() helper, which uses the same LLM_API_KEY /
+  LLM_MODEL env vars as all other AI functions.
+Prompt forbids HTML — ✓ "PLAIN TEXT, absolutely no HTML tags, no markdown".
+No 5xx to UI — ✓ Endpoint always returns 200 (or 400 for bad type).
+CopyCache reused — ✓ 24 h TTL, same collision-free key pattern.
+Tests: 415/415 backend, frontend build clean (5.39 kB).
+
+─────────────────────────────────────────────────────────────────────────────
+DECISIONS MADE
+─────────────────────────────────────────────────────────────────────────────
+
+"Confirm or only fill empty" — chose inline confirm before overwriting.
+  If either subject or body has content, a "Replace" / "Cancel" prompt
+  appears inline (no window.confirm — unreliable in Shopify iframe). This
+  is more transparent than silently ignoring filled fields.
+
+Adding signal to anthropic() vs. inlining a separate fetch — chose to
+  add an optional `signal` parameter to the shared anthropic() helper.
+  This avoids duplicating the full fetch+json+error-check logic and is
+  backward-compatible (all existing callers pass no signal and get the
+  same behavior as before).
+
+requireAuth only (not requireStoreOwner) — the generate route follows the
+  same pattern as all other routes in emailTemplates.js, none of which use
+  requireStoreOwner. requireStoreOwner expects a :shopDomain path param;
+  this route has none. Scope enforcement is through req.shopDomain (set by
+  requireAuth) passed to generateTemplateCopy and loadBrandData.

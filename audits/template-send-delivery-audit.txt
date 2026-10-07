@@ -1,0 +1,185 @@
+AUDIT: Email Template "Send test" delivery failure (not arriving in Gmail mobile)
+Date: 2026-10-06
+Files read:
+  backend/routes/emailTemplates.js   — POST /:id/send (the broken path)
+  backend/routes/push.js             — sendJourneyEmail (the working path)
+  backend/utils/email.js             — FROM constant, buildEmailHtml
+
+─────────────────────────────────────────────────────────────────────────────
+1. FROM ADDRESS
+─────────────────────────────────────────────────────────────────────────────
+
+FINDING: Both paths use the EXACT SAME FROM constant.
+
+emailTemplates.js line 9:
+  const { FROM, buildEmailHtml } = require('../utils/email');
+
+push.js line 5:
+  const { sendAbandonedCartEmail, FROM, buildEmailHtml } = require('../utils/email');
+
+email.js line 7:
+  const FROM = process.env.FROM_EMAIL || 'notifications@shopireachboost.com';
+
+Both routes import FROM from utils/email.js — it is the same variable. No
+hardcoding, no override, no different from. This is NOT the bug.
+
+─────────────────────────────────────────────────────────────────────────────
+2. ERROR CHECKING (fire-and-forget?)
+─────────────────────────────────────────────────────────────────────────────
+
+FINDING: Both paths check the Resend response identically. Neither is
+fire-and-forget.
+
+Template send (emailTemplates.js lines 268–278):
+  const { data, error } = await resend.emails.send({ from: FROM, to: email, subject, html });
+  if (error) {
+    console.error('[email-templates] Resend error:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+  return res.json({ ok: true, id: data?.id });
+
+Journey email (push.js lines 560–570):
+  const { data, error } = await resend.emails.send({ from: FROM, to: email, subject, html });
+  if (error) {
+    console.error('[email] Resend error:', error.message);
+    return { status: 500, payload: { error: error.message } };
+  }
+  return { status: 200, payload: { success: true, id: data?.id } };
+
+Both check `error` from the destructured Resend response and return 500 if
+set. The UI showed success (ok: true), which means Resend returned data (not
+error) — Resend ACCEPTED the send request. The delivery failure happened
+AFTER Resend accepted it. This is a delivery-side issue, not a code bug.
+
+─────────────────────────────────────────────────────────────────────────────
+3. TO ADDRESS — profile email resolution
+─────────────────────────────────────────────────────────────────────────────
+
+Template send (emailTemplates.js lines 250–254):
+  const email = profile.channels?.email?.address || profile.identifiers?.emails?.[0];
+  if (!email) return res.status(400).json({ error: 'No email address for this profile' });
+
+Journey email (push.js lines 528–532):
+  const email = profile.channels?.email?.address || profile.identifiers?.emails?.[0];
+  if (!email) return { status: 400, payload: { error: 'No email address' } };
+
+Identical resolution logic. Priority: channels.email.address (explicit opt-in
+channel) then identifiers.emails[0] (first tracked email).
+
+EDGE CASE: When the merchant types an email into Send test, the backend looks
+up the profile by that email (case-insensitive), then derives the TO address
+FROM THE PROFILE — not directly from what was typed. If the profile's stored
+email is different from the typed email (e.g., different capitalisation stored
+in channels.email.address vs. what the regex matched in identifiers.emails),
+the email goes to the profile's stored address, not the typed address. This
+is expected behaviour but worth checking if the merchant typed one address and
+the profile's stored address is another.
+
+─────────────────────────────────────────────────────────────────────────────
+4. LINE-BY-LINE COMPARISON: resend.emails.send() call
+─────────────────────────────────────────────────────────────────────────────
+
+Template send:
+  resend.emails.send({
+    from: FROM,
+    to: email,                      // derived from profile
+    subject: template.subject,
+    html,                           // built by buildEmailHtml
+  });
+
+Journey email:
+  resend.emails.send({
+    from: FROM,
+    to: email,                      // derived from profile
+    subject,                        // passed in from request body
+    html,                           // built by buildEmailHtml
+  });
+
+DIFF: NONE meaningful. Same four fields, same values. No headers, reply-to,
+  attachments, or tags differ between the two.
+
+buildEmailHtml call comparison:
+
+Template send:
+  buildEmailHtml({
+    subject: template.subject,
+    bodyHtml: template.body.replace(/\n/g, '<br>'),
+    imageUrl: normalizeImageUrl(template.imageUrl),
+    ctaLabel: template.ctaLabel,      ← may be non-null
+    ctaUrl: template.ctaUrl,          ← may be non-null
+    storeName, logoUrl, primaryColor,
+  });
+
+Journey email:
+  buildEmailHtml({
+    subject,
+    bodyHtml: body.replace(/\n/g, '<br>'),
+    imageUrl,                          ← already normalizeImageUrl'd at call site
+    ctaLabel: null,                    ← always null
+    ctaUrl: null,                      ← always null
+    storeName, logoUrl, primaryColor,
+  });
+
+DIFF: template send may pass ctaLabel/ctaUrl if the template has them set.
+  This renders a CTA button in the HTML. A non-null CTA URL containing a
+  raw query string or a non-https URL could theoretically affect spam
+  scoring, but would not change delivery to zero. This is NOT a code bug.
+
+─────────────────────────────────────────────────────────────────────────────
+5. OWN-EMAIL-ONLY CONSTRAINT (Resend test domain)
+─────────────────────────────────────────────────────────────────────────────
+
+Resend in test/sandbox mode only delivers to the account owner's email address.
+All sends to other recipients are ACCEPTED by the API (return 200, no error)
+but silently dropped — they never leave Resend's infrastructure.
+
+The UI showed "Email sent! Resend ID: ..." which means Resend returned 200.
+If the merchant is on the Resend free tier or the domain is unverified, this
+is the most likely cause: the recipient address is not the Resend account
+owner email, so Resend accepted the request but dropped the delivery.
+
+CHECK THIS FIRST: in the Resend dashboard → Emails, find the send by the
+Resend ID shown in the UI. The status will be one of:
+  - "Delivered" → the email left Resend; check Gmail spam/promotions tab
+  - "Bounced"   → the recipient address is invalid or doesn't exist
+  - "Dropped"   → Resend silently rejected it (unverified domain, or
+                   recipient is not the account owner in test mode)
+  - Not found   → the Resend ID in the UI was a placeholder (data?.id where
+                  data was null/undefined — if Resend returned a success
+                  envelope but no id, data?.id is undefined and the UI shows
+                  nothing useful)
+
+─────────────────────────────────────────────────────────────────────────────
+CONCLUSION
+─────────────────────────────────────────────────────────────────────────────
+
+The template send code is CORRECT and functionally IDENTICAL to the working
+journey email path. Same FROM, same error checking, same Resend call shape,
+same buildEmailHtml usage. There is no code bug to fix.
+
+The non-delivery is a delivery-side issue. Most likely cause in order:
+
+1. MOST LIKELY — Resend test mode / unverified domain: Resend accepted the
+   API call (that's why the UI shows success) but dropped delivery because
+   either (a) the domain notifications@shopireachboost.com is not verified,
+   or (b) the recipient is not the Resend account owner. The journey email
+   "working" may mean it was tested to the account owner's address while the
+   template send went to a customer address.
+
+2. GMAIL SPAM/PROMOTIONS: The email was delivered but landed in spam or the
+   Promotions tab on mobile. Gmail mobile collapses promotional senders
+   aggressively. Check those folders.
+
+3. PROFILE EMAIL MISMATCH: The merchant typed one address; the profile's
+   stored email is another (see §3). The email was delivered to the stored
+   address, not the typed one.
+
+ACTION REQUIRED (not a code change):
+  a. Open Resend dashboard → find the send by Resend ID from the UI.
+     Check its status (Delivered / Bounced / Dropped).
+  b. Verify the domain "shopireachboost.com" in Resend DNS settings.
+  c. Confirm whether the journey email was tested to the Resend account
+     owner's email vs. a third-party Gmail — if so, that's the difference,
+     not the code.
+
+>>> STOP. Audit only. No implementation.
