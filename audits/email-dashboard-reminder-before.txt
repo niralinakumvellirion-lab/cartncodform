@@ -1,0 +1,120 @@
+AUDIT — Email Dashboard Festival Reminder pre-audit (Phase E4)
+Date: 2026-10-07
+
+=== DashboardScreen.jsx — "Do This Next" rows ===
+
+Location: frontend/app/admin/screens/EmailTemplates.jsx
+File: frontend/app/admin/dashboard/DashboardScreen.jsx (2467 lines)
+
+The "Do This Next" section is a plain card at the bottom of the stats row:
+  <div style={{ ...DS.card, marginBottom: 0 }}>
+    <div style={DS.sectionLabel}>Do This Next</div>
+    {todayLoading ? (shimmer) : groupedSignals.length === 0 ? (empty) : (
+      groupedSignals.slice(0, 3).map(...)   // CAP IS 3
+    )}
+  </div>
+
+Row component: inline JSX, not a separate named component. Each row is a plain
+div with flex layout: icon → body (title + sub + button). No "hot" amber style
+currently — this will be the new festival reminder row pattern from the
+prototype.
+
+Data source: groupedSignals derived from apiGet('/api/push/signals') (todayLoading
+state). The festival reminder will be fetched separately and prepended first,
+displacing the third signal row when present.
+
+Row cap: groupedSignals.slice(0, 3) → at most 3 rows. After adding the reminder,
+the array will be: [reminderRow, ...signalRows].slice(0, 3).
+
+=== "Coming up" sidebar ===
+
+Location: DashboardScreen.jsx lines 1616–1719
+
+Data source: availableFestivalCalendar, a state var derived from:
+  1. festivalCalendar — fetched from GET /api/push/festivals or falls back to
+     FESTIVAL_CALENDAR_FALLBACK (hardcoded in DashboardScreen.jsx lines 321–505)
+  2. queuedFestivalNames — names of festivals already queued (excluded from sidebar)
+
+getUpcomingFestivals(list, 10): filters to diffDays 0-60, sorts by nearest,
+slices to 10.
+
+upcomingFestivals.slice(0, 5) shown in sidebar.
+
+Each item in the sidebar: name, date, emoji, imageUrl (from festivals.json via
+the /api/push/festivals endpoint). The thumbnail is a 44×44px img (objectFit:
+cover) or the emoji fallback.
+
+"days away" label: formatRelativeDate(diffDays):
+  0 → 'Today'
+  1 → 'Tomorrow'
+  2-13 → 'In N days'
+  14+ → 'In N week(s)'
+
+diffDays: computed as Math.ceil((festivalLocalMidnight - localToday) / msPerDay)
+
+The reminder chip will be added to the existing sidebar item IF one exists for
+the same festival (matched by name from reminder.festival.name). If no sidebar
+item exists for that festival, do NOT add one.
+
+=== backend/data/festivals.json structure ===
+
+Fields per entry:
+  name      string  — "Navratri", "Dussehra", etc.
+  date      string  — "YYYY-MM-DD" (ISO date, lexicographically sortable)
+  emoji     string  — single emoji character
+  suggestion string
+  message   string  — default push message body
+  searchTerm string
+  imageUrl  string  — Cloudinary URL for the festival photo
+
+=== nextFestivalName() in emailTemplates.js ===
+
+Location: backend/routes/emailTemplates.js line 68
+
+function nextFestivalName() {
+  const today = new Date().toISOString().slice(0, 10);
+  const next = FESTIVALS.find(f => f.date >= today);
+  return next ? next.name : 'festive season';
+}
+
+Uses UTC "today" (new Date().toISOString().slice(0, 10)), not store timezone.
+Will be refactored to use upcomingFestival() from the new festivals.js utility.
+
+=== backend/utils/timezone.js helpers ===
+
+Exports:
+  DEFAULT_TZ = 'Asia/Kolkata'
+  resolveTz(tz) — resolves IANA string or falls back to Asia/Kolkata
+  zonedParts(date, tz) — returns {y, mo, d, h, mi, s} in zone
+  hourInTz(date, tz) — integer hour 0-23 in zone
+  tzOffsetMs(date, tz) — offset ms of tz from UTC at an instant
+  zonedTimeToUtc(...) — wall clock → UTC instant
+
+storeTodayYmd(timezone) will use zonedParts(new Date(), resolveTz(timezone))
+and format as 'YYYY-MM-DD'.
+
+=== EmailTemplates.jsx — template selection on load ===
+
+searchParams.get('shop') gives the shop.
+Currently: no ?template= or ?focus= param handling.
+
+In Phase E4 we add:
+  searchParams.get('template') → auto-select that template after loadTemplates()
+  searchParams.get('focus') === 'photo' → scroll PhotoCard into view + pulse ring
+
+_doSelectTemplate(t): sets selectedId, draft, savedDraft. Used by selectTemplate(t)
+(which guards dirty state).
+
+After loadTemplates(), we can check for templateParam in a useEffect that watches
+[templates, templateParam] and calls _doSelectTemplate(matched) once.
+
+PhotoCard needs a ref exposed from EmailTemplates.jsx (via React.createRef or
+useRef in parent, passed as prop, or via a wrapper div ref).
+
+=== Navigation to email-templates ===
+
+navigate(path) in DashboardScreen:
+  const sep = path.includes('?') ? '&' : '?';
+  router.push(`${path}${sep}shop=${encodeURIComponent(shop)}`);
+
+So links to email-templates will use navigate('/admin/email-templates?template=X&focus=photo').

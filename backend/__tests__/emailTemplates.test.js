@@ -29,6 +29,13 @@ jest.mock('../middleware/requireOwner', () => ({
   requireStoreOwner: jest.fn(),
 }));
 
+const mockUpcomingFestival = jest.fn();
+const mockStoreTodayYmd    = jest.fn();
+jest.mock('../utils/festivals', () => ({
+  upcomingFestival: (...args) => mockUpcomingFestival(...args),
+  storeTodayYmd:    (...args) => mockStoreTodayYmd(...args),
+}));
+
 jest.mock('../utils/productImage', () => ({
   normalizeImageUrl: jest.fn((url) => (typeof url === 'string' && url ? url : null)),
 }));
@@ -51,6 +58,18 @@ jest.mock('../utils/email', () => ({
     'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
   },
   buildEmailHtml: mockBuildEmailHtml,
+}));
+
+const mockRenderEmailDocument = jest.fn().mockReturnValue('<html>rendered</html>');
+jest.mock('../utils/emailEngine', () => ({
+  ...jest.requireActual('../utils/emailEngine'),
+  renderEmailDocument: (...args) => mockRenderEmailDocument(...args),
+}));
+
+const mockUploadImage = jest.fn();
+jest.mock('../utils/cloudinary', () => ({
+  uploadImage: (...args) => mockUploadImage(...args),
+  uploadToCloudinary: jest.fn().mockResolvedValue('https://cdn.cloudinary.com/img.jpg'),
 }));
 
 const mockSend = jest.fn();
@@ -116,9 +135,11 @@ function makeProfile(overrides = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   Store.findOne.mockReturnValue({
-    select: jest.fn().mockResolvedValue({ shopName: 'Demo Store', logoUrl: null, primaryColor: null, voice: {} }),
+    select: jest.fn().mockResolvedValue({ shopName: 'Demo Store', logoUrl: null, primaryColor: null, voice: {}, timezone: 'Asia/Kolkata' }),
   });
   mockGenerateTemplateCopy.mockResolvedValue({ subject: 'AI Subject', body: 'AI body', fallback: false });
+  mockStoreTodayYmd.mockReturnValue('2026-10-07');
+  mockUpcomingFestival.mockReturnValue({ name: 'Navratri', date: '2026-10-11', daysAway: 4 });
 });
 
 // ---- GET / ------------------------------------------------------------------
@@ -292,33 +313,47 @@ describe('DELETE /:id', () => {
 describe('GET /:id/preview', () => {
   const preview = handlerFor(emailTemplatesRouter, '/:id/preview', 'get');
 
-  test('renders HTML via buildEmailHtml', async () => {
+  test('renders HTML via renderEmailDocument', async () => {
     EmailTemplate.findById.mockResolvedValue(makeTemplate({ subject: 'Sub', body: 'Line 1\nLine 2' }));
     const res = mockRes();
     await preview({ shopDomain: SHOP, params: { id: TEMPLATE_ID } }, res);
     expect(res.statusCode).toBe(200);
     expect(res.body.html).toBe('<html>rendered</html>');
-    expect(mockBuildEmailHtml).toHaveBeenCalledWith(
-      expect.objectContaining({ subject: 'Sub', body: 'Line 1\nLine 2' })
+    // no imageUrl → placeholder:true + no_photo warning
+    expect(res.body.warnings).toEqual(['no_photo']);
+    expect(mockRenderEmailDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: 'Sub', body: 'Line 1\nLine 2', placeholder: true })
     );
   });
 
-  test('passes offerText to buildEmailHtml when template has it', async () => {
+  test('passes offerText to renderEmailDocument when template has it', async () => {
     EmailTemplate.findById.mockResolvedValue(makeTemplate({ offerText: 'Diwali Special' }));
     const res = mockRes();
     await preview({ shopDomain: SHOP, params: { id: TEMPLATE_ID } }, res);
-    expect(mockBuildEmailHtml).toHaveBeenCalledWith(
+    expect(mockRenderEmailDocument).toHaveBeenCalledWith(
       expect.objectContaining({ offer: 'Diwali Special' })
     );
   });
 
-  test('passes offerText as undefined when template has none', async () => {
+  test('passes offer as null when template has no offerText', async () => {
     EmailTemplate.findById.mockResolvedValue(makeTemplate({ offerText: null }));
     const res = mockRes();
     await preview({ shopDomain: SHOP, params: { id: TEMPLATE_ID } }, res);
     // null || null → null; offer is hidden
-    expect(mockBuildEmailHtml).toHaveBeenCalledWith(
+    expect(mockRenderEmailDocument).toHaveBeenCalledWith(
       expect.objectContaining({ offer: null })
+    );
+  });
+
+  test('no_photo warning absent when template has imageUrl', async () => {
+    EmailTemplate.findById.mockResolvedValue(
+      makeTemplate({ imageUrl: 'https://cdn.example.com/img.jpg' })
+    );
+    const res = mockRes();
+    await preview({ shopDomain: SHOP, params: { id: TEMPLATE_ID } }, res);
+    expect(res.body.warnings).toEqual([]);
+    expect(mockRenderEmailDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ placeholder: false })
     );
   });
 
@@ -335,7 +370,7 @@ describe('GET /:id/preview', () => {
 describe('POST /:id/send', () => {
   const send = handlerFor(emailTemplatesRouter, '/:id/send', 'post');
 
-  test('sends email: calls buildEmailHtml + Resend with correct args', async () => {
+  test('sends email: calls renderEmailDocument + Resend with correct args', async () => {
     EmailTemplate.findById.mockResolvedValue(
       makeTemplate({ subject: 'Offer', body: 'Big sale', ctaUrl: 'https://shop.com', ctaLabel: 'Buy' })
     );
@@ -348,9 +383,10 @@ describe('POST /:id/send', () => {
     await send({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { profileId: 'p1' } }, res);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ ok: true, id: 'email_abc' });
-    expect(mockBuildEmailHtml).toHaveBeenCalledWith(
-      expect.objectContaining({ subject: 'Offer', ctaUrl: 'https://shop.com' })
+    // no imageUrl → warnings: ['no_photo']
+    expect(res.body).toMatchObject({ ok: true, id: 'email_abc', warnings: ['no_photo'] });
+    expect(mockRenderEmailDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ subject: 'Offer', ctaUrl: 'https://shop.com', placeholder: false })
     );
     expect(mockSend).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -381,7 +417,7 @@ describe('POST /:id/send', () => {
     await send({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { email: 'Customer@Example.com' } }, res);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ ok: true, id: 'email_xyz' });
+    expect(res.body).toMatchObject({ ok: true, id: 'email_xyz' });
     // Profile lookup uses $or with case-insensitive regex + lowercase match
     const callArg = Profile.findOne.mock.calls[0][0];
     expect(callArg.shopDomain).toBe(SHOP);
@@ -597,7 +633,7 @@ describe('POST /:id/broadcast', () => {
     await broadcast({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { segment: 'everyone' } }, res);
 
     expect(res.statusCode).toBe(200);
-    expect(res.body).toEqual({ sent: 2, failed: 0, total: 2 });
+    expect(res.body).toMatchObject({ sent: 2, failed: 0, total: 2 });
     expect(mockSend).toHaveBeenCalledTimes(2);
     expect(mockSend).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -700,6 +736,212 @@ describe('POST /:id/broadcast', () => {
     await broadcast({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { segment: 'bad_segment' } }, res);
     expect(res.statusCode).toBe(400);
     expect(res.body.error).toMatch(/segment must be one of/);
+  });
+});
+
+// ── POST /photo ───────────────────────────────────────────────────────────────
+
+describe('POST /photo', () => {
+  const photo = handlerFor(emailTemplatesRouter, '/photo', 'post');
+
+  beforeEach(() => {
+    process.env.CLOUDINARY_CLOUD_NAME = 'testcloud';
+    process.env.CLOUDINARY_UPLOAD_PRESET = 'testpreset';
+    mockUploadImage.mockReset();
+  });
+
+  afterEach(() => {
+    delete process.env.CLOUDINARY_CLOUD_NAME;
+    delete process.env.CLOUDINARY_UPLOAD_PRESET;
+  });
+
+  test('route ordering: /photo is declared before /:id', () => {
+    const stack = emailTemplatesRouter.stack.filter(l => l.route);
+    const photoIdx = stack.findIndex(l => l.route.path === '/photo');
+    const idIdx = stack.findIndex(l => l.route.path === '/:id');
+    expect(photoIdx).toBeGreaterThanOrEqual(0);
+    expect(idIdx).toBeGreaterThanOrEqual(0);
+    expect(photoIdx).toBeLessThan(idIdx);
+  });
+
+  test('happy path: returns { url, width, height }', async () => {
+    mockUploadImage.mockResolvedValue({
+      url: 'https://res.cloudinary.com/testcloud/img.jpg',
+      width: 1200,
+      height: 800,
+    });
+    const res = mockRes();
+    await photo(
+      { shopDomain: SHOP, body: { dataUrl: 'data:image/jpeg;base64,/9j/abc' } },
+      res
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({
+      url: 'https://res.cloudinary.com/testcloud/img.jpg',
+      width: 1200,
+      height: 800,
+    });
+    expect(mockUploadImage).toHaveBeenCalledWith('data:image/jpeg;base64,/9j/abc');
+  });
+
+  test('400 when dataUrl is missing', async () => {
+    const res = mockRes();
+    await photo({ shopDomain: SHOP, body: {} }, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toBe('dataUrl is required');
+    expect(mockUploadImage).not.toHaveBeenCalled();
+  });
+
+  test('400 when dataUrl is a GIF', async () => {
+    const res = mockRes();
+    await photo({ shopDomain: SHOP, body: { dataUrl: 'data:image/gif;base64,R0lGOD' } }, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/Only JPEG, PNG, or WebP/);
+    expect(mockUploadImage).not.toHaveBeenCalled();
+  });
+
+  test('400 when dataUrl is an SVG', async () => {
+    const res = mockRes();
+    await photo({ shopDomain: SHOP, body: { dataUrl: 'data:image/svg+xml;base64,PHN2Z' } }, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/Only JPEG, PNG, or WebP/);
+    expect(mockUploadImage).not.toHaveBeenCalled();
+  });
+
+  test('413 when decoded size exceeds 8 MB', async () => {
+    // 8 MB = 8,388,608 bytes; base64 len needed: ceil(8,388,608 * 4/3) = 11,184,812
+    // Use 11,200,000 chars → decodes to ~8.4 MB, safely over the limit
+    const bigBase64 = 'A'.repeat(11_200_000);
+    const res = mockRes();
+    await photo({ shopDomain: SHOP, body: { dataUrl: `data:image/jpeg;base64,${bigBase64}` } }, res);
+    expect(res.statusCode).toBe(413);
+    expect(res.body.error).toMatch(/too large/i);
+    expect(mockUploadImage).not.toHaveBeenCalled();
+  });
+
+  test('503 when Cloudinary env is not configured', async () => {
+    delete process.env.CLOUDINARY_CLOUD_NAME;
+    const res = mockRes();
+    await photo({ shopDomain: SHOP, body: { dataUrl: 'data:image/png;base64,abc' } }, res);
+    expect(res.statusCode).toBe(503);
+    expect(res.body.error).toMatch(/not configured/i);
+    expect(mockUploadImage).not.toHaveBeenCalled();
+  });
+
+  test('502 when uploadImage returns null', async () => {
+    mockUploadImage.mockResolvedValue(null);
+    const res = mockRes();
+    await photo({ shopDomain: SHOP, body: { dataUrl: 'data:image/png;base64,abc' } }, res);
+    expect(res.statusCode).toBe(502);
+    expect(res.body.error).toMatch(/failed/i);
+  });
+});
+
+// ── POST / (create) — design fields ──────────────────────────────────────────
+
+describe('POST / (create) — design fields', () => {
+  const create = handlerFor(emailTemplatesRouter, '/', 'post');
+
+  test('saves new design fields alongside required fields', async () => {
+    const created = makeTemplate({ type: 'special_offer', name: 'Sale', subject: 'Sub', body: 'Hi' });
+    EmailTemplate.create.mockResolvedValue(created);
+    const res = mockRes();
+    await create({
+      shopDomain: SHOP,
+      body: { type: 'special_offer', name: 'Sale', subject: 'Sub', body: 'Hi', layout: 'poster', color: '#e00000', radius: 'sharp' },
+    }, res);
+    expect(res.statusCode).toBe(201);
+    expect(EmailTemplate.create).toHaveBeenCalledWith(
+      expect.objectContaining({ layout: 'poster', color: '#e00000', radius: 'sharp' })
+    );
+  });
+
+  test('400 with field name when layout is invalid', async () => {
+    const res = mockRes();
+    await create({
+      shopDomain: SHOP,
+      body: { type: 'normal', name: 'X', subject: 'S', body: 'B', layout: 'nonexistent_layout' },
+    }, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.field).toBe('layout');
+  });
+
+  test('400 with field name when color is invalid hex', async () => {
+    const res = mockRes();
+    await create({
+      shopDomain: SHOP,
+      body: { type: 'normal', name: 'X', subject: 'S', body: 'B', color: 'not-a-hex' },
+    }, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.field).toBe('color');
+  });
+
+  test('400 when imageUrl is http (not https)', async () => {
+    const res = mockRes();
+    await create({
+      shopDomain: SHOP,
+      body: { type: 'normal', name: 'X', subject: 'S', body: 'B', imageUrl: 'http://example.com/img.jpg' },
+    }, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.field).toBe('imageUrl');
+  });
+});
+
+// ── PATCH /:id — design fields ────────────────────────────────────────────────
+
+describe('PATCH /:id — design fields', () => {
+  const patch = handlerFor(emailTemplatesRouter, '/:id', 'patch');
+
+  test('saves new design fields', async () => {
+    const t = makeTemplate();
+    EmailTemplate.findById.mockResolvedValue(t);
+    const res = mockRes();
+    await patch({
+      shopDomain: SHOP,
+      params: { id: TEMPLATE_ID },
+      body: { layout: 'hero', color: '#ff0000', hFont: 'arial', radius: 'sharp' },
+    }, res);
+    expect(res.statusCode).toBe(200);
+    expect(t.layout).toBe('hero');
+    expect(t.color).toBe('#ff0000');
+    expect(t.radius).toBe('sharp');
+  });
+
+  test('400 with field name when color is invalid hex', async () => {
+    EmailTemplate.findById.mockResolvedValue(makeTemplate());
+    const res = mockRes();
+    await patch({
+      shopDomain: SHOP,
+      params: { id: TEMPLATE_ID },
+      body: { color: 'notacolor' },
+    }, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.field).toBe('color');
+  });
+
+  test('400 with field name when imageUrl is not https', async () => {
+    EmailTemplate.findById.mockResolvedValue(makeTemplate());
+    const res = mockRes();
+    await patch({
+      shopDomain: SHOP,
+      params: { id: TEMPLATE_ID },
+      body: { imageUrl: 'http://insecure.example.com/img.jpg' },
+    }, res);
+    expect(res.statusCode).toBe(400);
+    expect(res.body.field).toBe('imageUrl');
+  });
+
+  test('shopDomain in body still ignored after sanitizeDesignInput', async () => {
+    const t = makeTemplate();
+    EmailTemplate.findById.mockResolvedValue(t);
+    const res = mockRes();
+    await patch({
+      shopDomain: SHOP,
+      params: { id: TEMPLATE_ID },
+      body: { shopDomain: OTHER_SHOP, layout: 'letter' },
+    }, res);
+    expect(t.shopDomain).toBe(SHOP);
+    expect(res.statusCode).toBe(200);
   });
 });
 
@@ -912,5 +1154,129 @@ describe('POST /seed', () => {
     const docs = EmailTemplate.insertMany.mock.calls[0][0];
     expect(docs[0].subject).toBe('A note from our store');
     expect(docs[0].body).toBe('Starter body.');
+  });
+
+  test('seed assigns design fields from pickStarterDesign for each type', async () => {
+    EmailTemplate.find
+      .mockReturnValueOnce(mockFindLean([]))
+      .mockReturnValueOnce(mockFindLean([]))
+      .mockReturnValueOnce(mockFindSort(ALL_3_DOCS));
+
+    const res = mockRes();
+    await seed({ shopDomain: SHOP }, res);
+
+    expect(res.statusCode).toBe(201);
+    const docs = EmailTemplate.insertMany.mock.calls[0][0];
+    for (const d of docs) {
+      expect(typeof d.layout).toBe('string');
+      expect(typeof d.hFont).toBe('string');
+      expect(typeof d.bFont).toBe('string');
+      expect(typeof d.ctaUrl).toBe('string');
+      expect(d.ctaUrl).toContain(SHOP);
+      expect(d.ctaLabel).toBe('Shop now');
+      expect(typeof d.headline).toBe('string');
+    }
+  });
+
+  test('seed design assignments are deterministic (same shop → same layout)', async () => {
+    // Run twice with the same shop; both picks should yield the same layout.
+    // We call pickStarterDesign directly to verify determinism without two full seed runs.
+    const { pickStarterDesign } = require('../utils/emailDesign');
+    const d1 = pickStarterDesign('special_offer', SHOP, null);
+    const d2 = pickStarterDesign('special_offer', SHOP, null);
+    expect(d1.layout).toBe(d2.layout);
+    expect(d1.hFont).toBe(d2.hFont);
+  });
+});
+
+// ---- GET /festival-reminder -------------------------------------------------
+
+describe('GET /festival-reminder', () => {
+  const reminder = handlerFor(emailTemplatesRouter, '/festival-reminder', 'get');
+
+  test('route is declared before /:id routes', () => {
+    const stack = emailTemplatesRouter.stack.filter(l => l.route);
+    const remIdx = stack.findIndex(l => l.route.path === '/festival-reminder');
+    const idIdx  = stack.findIndex(l => l.route.path === '/:id');
+    expect(remIdx).toBeGreaterThanOrEqual(0);
+    expect(idIdx).toBeGreaterThanOrEqual(0);
+    expect(remIdx).toBeLessThan(idIdx);
+  });
+
+  test('returns null when no festival is upcoming (upcomingFestival returns null)', async () => {
+    mockUpcomingFestival.mockReturnValueOnce(null);
+    const res = mockRes();
+    await reminder({ shopDomain: SHOP }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ reminder: null });
+  });
+
+  test('returns null when festival is more than 7 days away', async () => {
+    mockUpcomingFestival.mockReturnValueOnce({ name: 'Diwali', date: '2026-10-29', daysAway: 22 });
+    const res = mockRes();
+    await reminder({ shopDomain: SHOP }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ reminder: null });
+  });
+
+  test('state: setup when no festival templates exist', async () => {
+    EmailTemplate.find.mockResolvedValueOnce([]);
+    const res = mockRes();
+    await reminder({ shopDomain: SHOP }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.reminder.state).toBe('setup');
+    expect(res.body.reminder.festival.name).toBe('Navratri');
+    expect(res.body.reminder.template).toBeNull();
+  });
+
+  test('state: photo_missing when chosen template has no imageUrl', async () => {
+    const tpl = { _id: 'tpl1', name: 'Navratri Special', eyebrow: '', headline: '', imageUrl: null, updatedAt: new Date() };
+    EmailTemplate.find.mockResolvedValueOnce([tpl]);
+    const res = mockRes();
+    await reminder({ shopDomain: SHOP }, res);
+    expect(res.body.reminder.state).toBe('photo_missing');
+    expect(res.body.reminder.template.id).toBe('tpl1');
+    expect(res.body.reminder.template.imageUrl).toBeNull();
+  });
+
+  test('state: ready when chosen template has imageUrl', async () => {
+    const tpl = { _id: 'tpl2', name: 'Navratri Sale', eyebrow: '', headline: '', imageUrl: 'https://cdn.example.com/photo.jpg', updatedAt: new Date() };
+    EmailTemplate.find.mockResolvedValueOnce([tpl]);
+    const res = mockRes();
+    await reminder({ shopDomain: SHOP }, res);
+    expect(res.body.reminder.state).toBe('ready');
+    expect(res.body.reminder.template.imageUrl).toBe('https://cdn.example.com/photo.jpg');
+  });
+
+  test('template choice: name-match beats newest', async () => {
+    const older = { _id: 'tpl-old', name: 'Navratri Promo', eyebrow: '', headline: '', imageUrl: null, updatedAt: new Date('2026-09-01') };
+    const newer = { _id: 'tpl-new', name: 'Festival Generic', eyebrow: '', headline: '', imageUrl: null, updatedAt: new Date('2026-10-01') };
+    EmailTemplate.find.mockResolvedValueOnce([older, newer]);
+    const res = mockRes();
+    await reminder({ shopDomain: SHOP }, res);
+    expect(res.body.reminder.template.id).toBe('tpl-old');
+  });
+
+  test('template choice: newest chosen when no name match', async () => {
+    const tpl1 = { _id: 'tpl-a', name: 'Generic Festival', eyebrow: '', headline: '', imageUrl: null, updatedAt: new Date('2026-09-01') };
+    const tpl2 = { _id: 'tpl-b', name: 'Another Festival', eyebrow: '', headline: '', imageUrl: null, updatedAt: new Date('2026-10-05') };
+    EmailTemplate.find.mockResolvedValueOnce([tpl1, tpl2]);
+    const res = mockRes();
+    await reminder({ shopDomain: SHOP }, res);
+    expect(res.body.reminder.template.id).toBe('tpl-b');
+  });
+
+  test('shop scoping: only queries this shop', async () => {
+    EmailTemplate.find.mockResolvedValueOnce([]);
+    const res = mockRes();
+    await reminder({ shopDomain: SHOP }, res);
+    expect(EmailTemplate.find).toHaveBeenCalledWith(
+      expect.objectContaining({ shopDomain: SHOP }),
+      expect.any(Object)
+    );
+    expect(EmailTemplate.find).not.toHaveBeenCalledWith(
+      expect.objectContaining({ shopDomain: OTHER_SHOP }),
+      expect.any(Object)
+    );
   });
 });

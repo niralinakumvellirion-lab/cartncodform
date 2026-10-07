@@ -881,6 +881,31 @@ export default function DashboardScreen({ shop }) {
     };
   }, [shop]);
 
+  // Festival email reminder — silent on failure
+  const [festivalReminder, setFestivalReminder] = useState(null);
+  const [reminderSnoozed, setReminderSnoozed] = useState(false);
+  useEffect(() => {
+    if (!shop) return;
+    let cancelled = false;
+    apiGet('/api/email-templates/festival-reminder')
+      .then(data => {
+        if (cancelled || !data.reminder) return;
+        setFestivalReminder(data.reminder);
+        // Check snooze: stored in localStorage under ccf:emailReminder:{shop}:{date}
+        if (data.reminder.festival) {
+          try {
+            const key = `ccf:emailReminder:${shop}:${data.reminder.festival.date}`;
+            const snoozedUntil = localStorage.getItem(key);
+            if (snoozedUntil && Date.now() < Number(snoozedUntil)) {
+              setReminderSnoozed(true);
+            }
+          } catch (_) {}
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [shop]);
+
   const [calPopoverOpen, setCalPopoverOpen] = useState(false);
   const calPopoverRef = useRef(null);
   const [recentSends, setRecentSends] = useState([]);
@@ -1513,29 +1538,193 @@ export default function DashboardScreen({ shop }) {
                 [1, 2, 3].map(i => (
                   <div key={i} style={{ height: 40, background: '#f3f4f6', borderRadius: 6, marginBottom: 8 }} />
                 ))
-              ) : groupedSignals.length === 0 ? (
-                <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>No signals right now — check back later.</p>
-              ) : (
-                groupedSignals.slice(0, 3).map((sig, idx, arr) => (
-                  <div key={sig.type} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: idx < arr.length - 1 ? '1px solid #f9fafb' : 'none' }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
-                        {SIGNAL_LABELS[sig.type] || sig.type.replace(/_/g, ' ')}
+              ) : (() => {
+                // Build row list: reminder first (if visible), then signals; cap at 3.
+                const showReminder = festivalReminder && !(festivalReminder.state === 'photo_missing' && reminderSnoozed);
+                const reminderRows = showReminder ? [{ _type: 'festival_reminder', ...festivalReminder }] : [];
+                const signalRows = groupedSignals.map(s => ({ _type: 'signal', ...s }));
+                const allRows = [...reminderRows, ...signalRows].slice(0, 3);
+
+                if (allRows.length === 0) {
+                  return <p style={{ fontSize: 12, color: '#9ca3af', margin: 0 }}>No signals right now — check back later.</p>;
+                }
+
+                return allRows.map((row, idx, arr) => {
+                  const sep = { borderBottom: idx < arr.length - 1 ? '1px solid #f9fafb' : 'none' };
+                  if (row._type === 'festival_reminder') {
+                    const r = row;
+                    const f = r.festival;
+                    const daysAway = f.daysAway;
+                    const pillText = daysAway === 0 ? 'Starts today' : daysAway === 1 ? 'Starts tomorrow' : `Starts in ${daysAway} days`;
+
+                    if (r.state === 'photo_missing') {
+                      return (
+                        <div key="festival-reminder" style={{
+                          ...sep,
+                          position: 'relative',
+                          background: '#fffbeb',
+                          border: '1px solid #fde68a',
+                          borderRadius: 10,
+                          padding: '14px 14px 14px 18px',
+                          marginBottom: 8,
+                          boxShadow: '0 4px 14px rgba(245,158,11,.12)',
+                        }}>
+                          <div style={{ position: 'absolute', left: 0, top: 12, bottom: 12, width: 4, borderRadius: '0 3px 3px 0', background: '#f59e0b' }} />
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                            <div style={{ width: 36, height: 36, borderRadius: 9, background: '#fef3c7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#92400e" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                                <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+                                <line x1="17" y1="5" x2="17" y2="11"/><line x1="14" y1="8" x2="20" y2="8"/>
+                              </svg>
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>
+                                Add your {f.name} offer photo
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap' }}>
+                                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                                    <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+                                  </svg>
+                                  {pillText}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: 12.5, color: '#92400e', opacity: 0.92, marginBottom: 10 }}>
+                                {f.name} is coming up and your festival email has no offer photo yet. A clear photo makes the email much easier to notice in the inbox.
+                              </div>
+                              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => r.template
+                                    ? navigate(`/admin/email-templates?template=${r.template.id}&focus=photo`)
+                                    : navigate('/admin/email-templates')
+                                  }
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                                  </svg>
+                                  Upload offer photo
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    try {
+                                      const key = `ccf:emailReminder:${shop}:${f.date}`;
+                                      localStorage.setItem(key, String(Date.now() + 24 * 60 * 60 * 1000));
+                                    } catch (_) {}
+                                    setReminderSnoozed(true);
+                                  }}
+                                  style={{ background: 'transparent', border: '1px solid #d97706', color: '#92400e', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                                >
+                                  Remind me later
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    if (r.state === 'ready') {
+                      return (
+                        <div key="festival-reminder" style={{
+                          ...sep,
+                          background: '#f0fdf4',
+                          border: '1px solid #bbf7d0',
+                          borderRadius: 10,
+                          padding: '14px',
+                          marginBottom: 8,
+                        }}>
+                          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                            <div style={{ width: 36, height: 36, borderRadius: 9, background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="20 6 9 17 4 12"/>
+                              </svg>
+                            </div>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>
+                                Your {f.name} email is ready
+                                <span style={{ fontSize: 11, fontWeight: 700, background: '#dcfce7', color: '#166534', border: '1px solid #bbf7d0', borderRadius: 999, padding: '2px 8px', whiteSpace: 'nowrap' }}>
+                                  In {daysAway === 0 ? 'today' : daysAway === 1 ? '1 day' : `${daysAway} days`}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: 12.5, color: '#166534', marginBottom: 10 }}>
+                                The offer photo is added. Review it once, then send it to your customers.
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => r.template
+                                  ? navigate(`/admin/email-templates?template=${r.template.id}`)
+                                  : navigate('/admin/email-templates')
+                                }
+                                style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}
+                              >
+                                Review and send
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    // setup
+                    return (
+                      <div key="festival-reminder" style={{
+                        ...sep,
+                        background: '#fff',
+                        border: '1px solid #e5e7eb',
+                        borderRadius: 10,
+                        padding: '14px',
+                        marginBottom: 8,
+                      }}>
+                        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                          <div style={{ width: 36, height: 36, borderRadius: 9, background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6b7280" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                            </svg>
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>
+                              Set up your {f.name} email
+                            </div>
+                            <div style={{ fontSize: 12.5, color: '#6b7280', marginBottom: 10 }}>
+                              Create a ready-made festival email with your brand colours, then add an offer photo.
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => navigate('/admin/email-templates')}
+                              style={{ background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: 8, padding: '7px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                            >
+                              Open email templates
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
-                        {sig.count} customer{sig.count !== 1 ? 's' : ''} · {sig.channel || 'push'}
+                    );
+                  }
+
+                  // Signal row
+                  const sig = row;
+                  return (
+                    <div key={sig.type} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', ...sep }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>
+                          {SIGNAL_LABELS[sig.type] || sig.type.replace(/_/g, ' ')}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
+                          {sig.count} customer{sig.count !== 1 ? 's' : ''} · {sig.channel || 'push'}
+                        </div>
                       </div>
+                      <button
+                        type="button"
+                        onClick={() => navigate(`/admin/customers?signal=${sig.type}&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`)}
+                        style={{ flexShrink: 0, padding: '5px 12px', fontSize: 11, fontWeight: 700, color: DS.primary, background: DS.primaryLight, border: 'none', borderRadius: 8, cursor: 'pointer' }}
+                      >
+                        Reach them
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/admin/customers?signal=${sig.type}&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`)}
-                      style={{ flexShrink: 0, padding: '5px 12px', fontSize: 11, fontWeight: 700, color: DS.primary, background: DS.primaryLight, border: 'none', borderRadius: 8, cursor: 'pointer' }}
-                    >
-                      Reach them
-                    </button>
-                  </div>
-                ))
-              )}
+                  );
+                });
+              })()}
             </div>
 
             {/* Recent Sends */}
@@ -1658,36 +1847,45 @@ export default function DashboardScreen({ shop }) {
                       onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
                       onMouseLeave={e => e.currentTarget.style.background = '#fff'}
                     >
-                      {/* 44px thumbnail */}
-                      <div style={{
-                        width: 44,
-                        height: 44,
-                        borderRadius: 8,
-                        background: '#f3f4f6',
-                        flexShrink: 0,
-                        overflow: 'hidden',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 20,
-                      }}>
-                        {f.imageUrl ? (
-                          <>
-                            <img
-                              src={f.imageUrl}
-                              alt=""
-                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                              onError={e => {
-                                e.target.style.display = 'none';
-                                if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex';
-                              }}
-                            />
-                            <span style={{ display: 'none', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
-                              {f.emoji}
-                            </span>
-                          </>
-                        ) : f.emoji}
-                      </div>
+                      {/* 44px thumbnail — use template photo if ready, else festival image */}
+                      {(() => {
+                        const useTemplatePic = festivalReminder &&
+                          festivalReminder.state === 'ready' &&
+                          festivalReminder.festival && festivalReminder.festival.name === f.name &&
+                          festivalReminder.template && festivalReminder.template.imageUrl;
+                        const src = useTemplatePic ? festivalReminder.template.imageUrl : f.imageUrl;
+                        return (
+                          <div style={{
+                            width: 44,
+                            height: 44,
+                            borderRadius: 8,
+                            background: '#f3f4f6',
+                            flexShrink: 0,
+                            overflow: 'hidden',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 20,
+                          }}>
+                            {src ? (
+                              <>
+                                <img
+                                  src={src}
+                                  alt=""
+                                  style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                                  onError={e => {
+                                    e.target.style.display = 'none';
+                                    if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex';
+                                  }}
+                                />
+                                <span style={{ display: 'none', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%' }}>
+                                  {f.emoji}
+                                </span>
+                              </>
+                            ) : f.emoji}
+                          </div>
+                        );
+                      })()}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{
                           fontSize: 13,
@@ -1706,11 +1904,31 @@ export default function DashboardScreen({ shop }) {
                           display: 'flex',
                           alignItems: 'center',
                           gap: 4,
+                          flexWrap: 'wrap',
                         }}>
                           {urgent && (
                             <span style={{ width: 5, height: 5, borderRadius: '50%', background: DS.warning, display: 'inline-block', flexShrink: 0 }} />
                           )}
                           {formatRelativeDate(f.diffDays)}
+                          {festivalReminder && festivalReminder.festival && festivalReminder.festival.name === f.name && (() => {
+                            if (festivalReminder.state === 'photo_missing') {
+                              return (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 700, background: '#fef3c7', color: '#92400e', border: '1px solid #fde68a', borderRadius: 999, padding: '1px 6px', whiteSpace: 'nowrap' }}>
+                                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                                  Photo missing
+                                </span>
+                              );
+                            }
+                            if (festivalReminder.state === 'ready') {
+                              return (
+                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 700, background: '#dcfce7', color: '#166534', border: '1px solid #bbf7d0', borderRadius: 999, padding: '1px 6px', whiteSpace: 'nowrap' }}>
+                                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                                  Photo ready
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       </div>
                     </div>

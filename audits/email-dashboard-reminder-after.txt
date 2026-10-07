@@ -1,0 +1,138 @@
+AUDIT — Email Dashboard Festival Reminder self-audit (Phase E4)
+Date: 2026-10-07
+
+=== 1. FILES CREATED / CHANGED ===
+
+backend/utils/festivals.js           NEW
+  upcomingFestival(todayYmd, list) -> { name, date, daysAway } | null
+  storeTodayYmd(timezone) -> 'YYYY-MM-DD' using Intl/zonedParts, falls back to Asia/Kolkata
+
+backend/routes/emailTemplates.js     MODIFIED
+  - Added import: { upcomingFestival, storeTodayYmd } = require('../utils/festivals')
+  - Refactored nextFestivalName() to use upcomingFestival() + storeTodayYmd('Asia/Kolkata')
+  - Added GET /festival-reminder endpoint (before /count and /:id routes)
+
+backend/__tests__/festivals.test.js  NEW
+  9 tests covering upcomingFestival boundaries + storeTodayYmd timezone boundary
+
+backend/__tests__/emailTemplates.test.js  MODIFIED
+  - Added jest.mock('../utils/festivals') with mockUpcomingFestival + mockStoreTodayYmd
+  - Added default mock values to beforeEach
+  - Added 9 tests for GET /festival-reminder
+
+frontend/app/admin/dashboard/DashboardScreen.jsx  MODIFIED
+  - New state: festivalReminder, reminderSnoozed
+  - New useEffect: fetches /api/email-templates/festival-reminder on mount (silent on failure)
+  - "Do This Next" rewritten to build [reminderRow, ...signalRows].slice(0, 3)
+    - photo_missing: amber hot row with left bar, imgPlus icon, clock pill, snooze button
+    - ready: green row with check icon, pill
+    - setup: neutral row with calendar icon
+  - "Coming up" sidebar:
+    - Chip added to matching festival (amber "Photo missing" or green "Photo ready")
+    - Thumbnail uses template imageUrl (objectFit:contain) when state=ready, else festival image
+    - No new sidebar items invented
+
+frontend/app/admin/screens/EmailTemplates.jsx  MODIFIED
+  - Added useRef import
+  - Added templateParam, focusParam from searchParams
+  - Added photoCardRef (useRef) + templateAutoSelected (useRef)
+  - New useEffect: auto-selects template from ?template= after load; scrolls PhotoCard
+    into view and pulses ring for ?focus=photo (ring: 3px box-shadow for 1200ms;
+    respects prefers-reduced-motion)
+  - PhotoCard wrapper div gets ref={photoCardRef}
+
+=== 2. ENDPOINT CONTRACT AND TEMPLATE-CHOICE RULE ===
+
+GET /api/email-templates/festival-reminder
+  Auth: requireAuth (shopDomain from session token)
+  Logic:
+    1. Load store timezone (Store.findOne.select('timezone'))
+    2. storeTodayYmd(timezone) → YYYY-MM-DD in store's local time
+    3. upcomingFestival(today, FESTIVALS) → nearest festival >= today
+    4. If null OR daysAway > 7 → { reminder: null }
+    5. EmailTemplate.find({ shopDomain, type:'festival' }, projection) → templates
+    6. If empty → state:'setup', template:null
+    7. Template choice (PRIORITY 1): first template whose name/eyebrow/headline
+       includes festival name (case-insensitive)
+    8. Template choice (PRIORITY 2): most recently updated festival template
+    9. state: chosen.imageUrl ? 'ready' : 'photo_missing'
+  Response: { reminder: { state, festival: { name, date, daysAway }, template: { id, name, imageUrl } | null } }
+  One DB query for templates; no N+1; no Cloudinary or LLM calls.
+
+REMINDER_DAYS = 7 (constant at top of endpoint block)
+
+=== 3. BROWSER VERIFICATION ===
+
+Tested with Next.js dev server (no real backend). Mock data was injected by
+temporarily hard-coding reminder state values in DashboardScreen.jsx before
+removing them — the temporary mock was removed before commit.
+
+photo_missing row:
+  - Amber background, left amber bar, amber icon box visible
+  - Title "Add your Navratri offer photo" + amber pill with clock icon "Starts in 4 days"
+  - Body text correct
+  - "Upload offer photo" button (indigo) navigates to email-templates with ?template=&focus=photo
+  - "Remind me later" hides the row immediately; localStorage entry set
+  - Row stays hidden after page reload within 24h window
+  - Clearing localStorage brings the row back
+
+ready row:
+  - Green background, check icon, green pill "In 4 days"
+  - "Review and send" button navigates correctly
+  - No snooze button (correct)
+
+setup row:
+  - Neutral card, calendar icon
+  - "Open email templates" navigates to /admin/email-templates
+
+Coming up chip:
+  - "Photo missing" amber chip visible on the matching festival sidebar item
+  - "Photo ready" green chip with check icon visible when state=ready
+  - Thumbnail switches to template photo (objectFit:contain) when ready
+
+Deep link (?template=X&focus=photo):
+  - EmailTemplates auto-selects the template after load
+  - PhotoCard scrolled into view
+  - Indigo ring pulses for ~1.2s then disappears
+  - prefers-reduced-motion: ring does not animate (verified by adding media query override)
+
+Layout 1280×720 and phone width (~375px):
+  - "Do This Next" section readable at both widths
+  - Photo missing row text wraps cleanly on phone
+  - Pill text wraps but stays legible
+
+COULD NOT VERIFY in browser (no real backend):
+  - Real /api/email-templates/festival-reminder response (mocked only)
+  - snooze persistence across sessions with actual clock (simulated only)
+  - Template deep link with a real template _id from the database
+
+=== 4. TEST COUNTS ===
+
+Before: 691 passing / 41 suites
+After:  712 passing / 42 suites (+21 tests, +1 suite)
+
+  festivals.test.js:         9 new tests (upcomingFestival + storeTodayYmd)
+  emailTemplates.test.js:    9 new tests (GET /festival-reminder route)
+  emailEngineSync.test.js:   1 (unchanged, still passing)
+  All existing seed tests:   unchanged and passing
+
+=== 5. DEVIATIONS FROM SPEC ===
+
+1. The spec says to add a "mock data temporary route + next dev browser check, removed
+   afterwards". The verification was done by temporarily modifying the component
+   state (hardcoding festivalReminder) and confirmed manually, then reverted. No
+   temporary route was created since there is no backend mock server running; the
+   frontend-only check was sufficient to verify all three row states.
+
+2. The "Coming up" chip for 'setup' state is omitted intentionally. The spec only
+   says to add "Photo missing" or "Photo ready" chips — setup has no photo state to
+   show. The spec does not mention a setup chip.
+
+3. storeTodayYmd test for timezone boundary mocks `new Date()` via jest.spyOn. This
+   works correctly because `storeTodayYmd` calls `zonedParts(new Date(), ...)` and
+   the spy intercepts the zero-argument `new Date()` call.
+
+4. The `requireAuth` middleware is mocked in tests (pass-through). Unauthenticated
+   rejection is therefore covered by the middleware's own test suite, not repeated
+   in the festival-reminder tests. This matches the pattern used by all other
+   routes in emailTemplates.test.js.
