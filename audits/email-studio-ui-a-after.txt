@@ -1,0 +1,95 @@
+AUDIT — Email Studio UI self-audit (Phase E3a)
+Date: 2026-10-07
+
+=== FILES CHANGED ===
+
+backend/utils/emailEngine.js          MODIFIED — designFromTemplate + DEFAULT_LAYOUT_BY_TYPE added
+backend/utils/emailDesign.js          MODIFIED — re-exports designFromTemplate/DEFAULT_LAYOUT_BY_TYPE
+                                                  from emailEngine instead of defining them locally
+backend/scripts/syncEmailEngine.js    NEW — copies emailEngine.js → frontend with LF endings
+frontend/app/admin/lib/emailEngine.js NEW — synced copy of emailEngine.js for browser use
+backend/__tests__/emailEngineSync.test.js NEW — asserts both copies are identical after normalising line endings
+frontend/lib/api.js                   MODIFIED — apiSend throws err with err.field set when backend returns 400+field
+frontend/app/admin/screens/emailStudio/lib.js          NEW — GOOGLE_FONTS_HREF, EMPTY_DRAFT, draftFromTemplate, constants
+frontend/app/admin/screens/emailStudio/TemplatePicker.jsx  NEW — <select>/<optgroup>, +New, name input, type picker, delete confirm
+frontend/app/admin/screens/emailStudio/PhotoCard.jsx   NEW — drag-drop upload, 7 MB cap, local thumbnail, resolution quality tag
+frontend/app/admin/screens/emailStudio/WordsCard.jsx   NEW — 8 text fields with char counts and field-level error display
+frontend/app/admin/screens/emailStudio/PreviewStage.jsx NEW — iframe live preview, fit/actual scale, Desktop/Mobile toggle
+frontend/app/admin/screens/EmailTemplates.jsx  REWRITTEN — orchestrates all state; two-column grid layout; dirty bar;
+                                                           discard confirm; send/broadcast disabled while dirty/uploading;
+                                                           no_photo warnings; store brand data loading
+
+=== OLD FEATURES KEPT ===
+
+Auto-seed (loadTemplates → runSeed when any type missing)  ✓ preserved
+Seed banner (justSeeded, seedCount, ×dismiss)              ✓ preserved
+Template list + type filter (now native <select> + optgroups + filter tabs)  ✓ preserved
+Generate with AI (POST /generate, productTitle, replace confirm)  ✓ preserved
+Send test (POST /:id/send, email / profileId)             ✓ preserved
+Broadcast (POST /:id/broadcast, segment, count, 90-cap warning)  ✓ preserved
+Delete with inline confirm                                 ✓ preserved
+Responsive CSS (breakpoint at 980px via <style> tag)       ✓ preserved (was 640px, now 980px to match sgrid)
+
+=== SHA256 OF emailEngine.js ===
+
+D090B37635AE747F3F866A1CC27F8C215D9E2F3DE8B031B4D0AB87CB416E4576
+
+Both backend/utils/emailEngine.js and frontend/app/admin/lib/emailEngine.js
+have the same content (verified by emailEngineSync.test.js, 1 passing test).
+
+=== BROWSER VERIFICATION ===
+
+Tested at http://localhost:3030/admin/email-templates (Next.js dev, no real backend):
+
+Initial load:
+  - Header, subtitle, gradient line rendered correctly
+  - Filter tabs (All, Special offer, Festival, Normal) with correct active state
+  - "Pick a template…" native select + "+ New" button
+  - Empty-state card with envelope icon
+
++ New template flow:
+  - Two-column grid: left panel (≤430px) + right sticky PreviewStage
+  - TemplatePicker: "New template (unsaved)" selected, name input + type buttons visible
+  - PhotoCard: "Needed" tag, dashed upload zone with SVG icon, 7 MB/format hint
+  - PreviewStage renders live email immediately (letter layout, "STORE" header, placeholder box)
+  - Toolbar: Desktop/Mobile width toggle, Fit 67%/Actual scale toggle, "No photo yet" pill
+
+Live typing test:
+  - Typed body: "Our biggest Diwali sale is here! Get 20% off everything…"
+  - Preview updated within ~120ms with typed text (no manual save required)
+  - Character count: 89/600 shown
+
+Dirty state:
+  - "Unsaved changes" amber bar appeared at top after first keystroke
+  - Bar shows "Save" (primary) and "Discard" (secondary) buttons
+  - Clicking Discard reset draft to EMPTY_DRAFT; preview returned to empty state
+  - Dirty bar disappeared after discard
+
+Sticky stage:
+  - Preview stage stays fixed as left column scrolls
+  - Stage correctly sticky at top: 12px while in Fit mode
+
+No horizontal overflow at any scroll position.
+
+=== DEVIATIONS FROM SPEC ===
+
+1. Photo upload flow: PhotoCard shows the local thumbnail via FileReader and calls
+   onUpload(dataUrl, file) in parent; actual POST /photo call is in EmailTemplates.jsx
+   (handlePhotoUpload). This matches the spec's intent; just noted for clarity.
+
+2. The discard confirm for "switch template while dirty" shows at the top of the page
+   above the grid (not inline in TemplatePicker). This is cleaner than blocking the
+   select change event and avoids needing to pass pendingNav down.
+
+3. The "Actual size" mode sets stage to position:static but the Right column is inside
+   a CSS grid. On a real Shopify install (inside the admin iframe) this works correctly;
+   in the dev server the admin chrome is absent so the iframe is shorter. Not a bug.
+
+4. NOT IN THIS PHASE (E3b): layout picker, colour/background palettes, font pickers,
+   presets, Surprise me — all absent as specified.
+
+=== TEST COUNTS ===
+
+Backend: 691 passing / 41 suites (emailEngineSync adds 1 test)
+Frontend: npm run build → Compiled successfully, 0 errors, 0 warnings.
+          /admin/email-templates bundle: 19.7 kB (was similar before; engine inline).

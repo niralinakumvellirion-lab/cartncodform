@@ -1,0 +1,128 @@
+AUDIT — Email Studio UI pre-implementation (Phase E3a)
+Date: 2026-10-07
+
+=== frontend/app/admin/screens/EmailTemplates.jsx ===
+
+FILE SIZE: ~841 lines
+
+STATE (useState):
+  templates, loading, loadError
+  filter, selectedId, isNew
+  form (EMPTY_FORM = { type, name, subject, body, offerText, imageUrl, ctaLabel, ctaUrl })
+  saving, saveError, saveOk
+  confirmDel, deleting
+  previewHtml, previewMode ('desktop'|'mobile'), previewLoading
+  sendRecipient, sending, sendResult
+  generating, genError, genNotice, productTitle, genConfirm
+  broadcastSegment, broadcastCount, broadcastCountLoading, broadcastConfirm, broadcasting, broadcastResult
+  seeding, seedError, seedCount, justSeeded
+
+HELPERS (apiGet / apiSend):
+  loadTemplates()                — GET /api/email-templates
+  runSeed(prevCount)             — POST /api/email-templates/seed
+  selectTemplate(t)             — populates form, calls fetchPreview(t._id)
+  startNew()                    — resets form
+  fetchPreview(id)              — GET /api/email-templates/:id/preview
+  saveTemplate()                — POST /api/email-templates (create) or PATCH /api/email-templates/:id
+  deleteTemplate()              — DELETE /api/email-templates/:id
+  handleGenerateClick()         — gate for runGenerate
+  runGenerate()                 — POST /api/email-templates/generate
+  sendEmail()                   — POST /api/email-templates/:id/send
+  sendBroadcast()               — POST /api/email-templates/:id/broadcast
+  (broadcast count)             — useEffect → GET /api/email-templates/count?segment=...
+
+EXISTING FEATURES + LINE REFERENCES:
+  Template list + type filter    lines 472–535 (filter row + list card)
+  Auto-seed                      lines 186–225 (loadTemplates triggers runSeed when any type missing)
+  Seed banner                    lines 454–470 (justSeeded banner)
+  Editor (name/type/subject/body/offerText/imageUrl/ctaLabel/ctaUrl)
+                                 lines 544–651
+  Generate with AI               lines 551–588 (POST /generate)
+  Send test                      lines 702–735 (selectedId only)
+  Broadcast                      lines 737–815 (selectedId only)
+  Delete (inline confirm)        lines 635–651
+  Preview                        lines 653–700 (server-rendered GET /preview, srcdoc iframe, sandbox="")
+  Responsive CSS                 line 833–838: styled-jsx via <style>{...} tag inside JSX, breakpoint 640px
+
+FORM DOES NOT INCLUDE new design fields (layout, color, hFont, bFont, radius, pageBg, cardBg,
+eyebrow, headline, note, imgW, imgH, showLogo) — only the original 8 text fields.
+
+=== HOW THE SCREEN CAN READ shopName / primaryColor / logoUrl ===
+
+GET /api/profiles/:shopDomain/settings (backend/routes/profiles.js:629)
+returns: { voice, caps, quietHours, timezone, shopName, logoUrl, primaryColor }
+This is already used by Settings.jsx (apiGet(`/api/profiles/${shop}/settings`)).
+shopDomain can be read from window.shopify.config.shop (App Bridge) or from
+the server-rendered shop param on /admin routes; Settings.jsx reads it via
+the backend — a GET /api/settings or /api/profiles/:shop/settings call.
+
+Alternative: read it from the store returned in the emailTemplates response
+(the backend loadBrandData helper returns it internally but does not expose it
+in any list/GET /template response). The front-end must call /api/profiles/:shop/settings
+or extract the shopDomain from the auth token to read brand data directly.
+
+For E3a the simplest path is: on screen load, call
+  GET /api/profiles/${shopDomain}/settings
+and store { shopName, logoUrl, primaryColor }. The shopDomain can be taken from
+the App Bridge window.shopify.config.shop (available when App Bridge is loaded).
+
+=== RESPONSIVE CSS MECHANISM ON OTHER SCREENS ===
+
+All admin screens use INLINE STYLES (JS objects) for everything, with one
+exception: a <style>{`@media...`}</style> block inside JSX for media queries
+that cannot be expressed as inline styles. There is NO CSS module file, no
+styled-jsx package, no separate .css file, no Tailwind utility classes.
+EmailTemplates.jsx uses this at lines 833–838 for the 640px breakpoint.
+The prototype uses a plain <style> block in the <head> (class-based CSS).
+The admin screens use inline styles + the style-tag pattern for breakpoints.
+
+=== NEXT VERSION, ESLint, FRONTEND TEST RUNNER ===
+
+Next.js:      14.2.5  (App Router, 'use client' files)
+ESLint:       Next.js built-in: next lint, no .eslintrc file found (uses defaults)
+              Default config = next/core-web-vitals; no-unused-vars is a warning.
+              The engine file is ES5-style (var, function declarations, no arrow
+              functions, no template literals). ES5-style is valid under the default
+              Next.js config as long as it is imported as a module and has no JSX.
+              The only likely lint issue: the engine uses var declarations (no-var
+              rule is not enabled in next/core-web-vitals). Safe without /* eslint-disable */.
+Frontend test runner: NONE — no jest config, no vitest, no @testing-library in
+package.json. Frontend changes are verified only by npm run build.
+
+=== CSP / HEADERS (next.config.js) ===
+
+next.config.js sets one header for /admin/:path*:
+  Content-Security-Policy: frame-ancestors https://admin.shopify.com https://*.myshopify.com
+
+This header restricts who can embed the admin in an iframe.
+It does NOT set a restrictive CSP for script-src, font-src, img-src, etc.
+Therefore:
+  - fonts.googleapis.com  → NOT blocked (no font-src restriction)
+  - fonts.gstatic.com     → NOT blocked
+  - data: images          → NOT blocked (no img-src restriction)
+  - Google Fonts <link>   → safe to add in a useEffect or in the iframe's srcdoc
+No new CSP problems with E3a's requirements.
+
+=== POST /api/email-templates/photo CONTRACT ===
+
+Location: backend/routes/emailTemplates.js (declared BEFORE /:id routes)
+Auth: requireAuth (shopDomain scoped), photoRateLimiter (20/hour per shop)
+Body: express.json({ limit: '11mb' }) (route-scoped; note: global limit is 10mb
+      so effective max is ~10mb at the Express layer — safe ceiling is 7 MB binary)
+
+Request:  POST /api/email-templates/photo
+          { dataUrl: "data:image/jpeg;base64,..." }
+          Only image/jpeg, image/png, image/webp accepted.
+          Decoded size must be <= 8 MB (frontend should cap at 7 MB for safety).
+
+Responses:
+  200 { url: string, width: number, height: number }  — Cloudinary URL + dimensions
+  400 { error: "dataUrl is required" }
+  400 { error: "Only JPEG, PNG, or WebP images are accepted" }
+  413 { error: "Image is too large. Maximum size is 8 MB." }
+  503 { error: "Photo upload is not configured" }   — Cloudinary env missing
+  502 { error: "Photo upload failed. Try again." }  — Cloudinary upload failed
+
+=== BASELINE ===
+
+Backend tests: 690 passing (40 suites) — last confirmed end of Phase E2.

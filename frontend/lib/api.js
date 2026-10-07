@@ -133,7 +133,9 @@ export async function apiSend(path, method, body) {
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(data.error || `${method} ${path} failed (${res.status})`);
+    const err = new Error(data.error || `${method} ${path} failed (${res.status})`);
+    if (data.field) err.field = data.field;
+    throw err;
   }
   return data;
 }
