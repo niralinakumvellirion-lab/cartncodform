@@ -8,6 +8,7 @@ const { fetchProductImage } = require('./webhooks');
 const { requireAuth } = require('../middleware/requireOwner');
 const { upsertProfile } = require('../services/profileService');
 const { Resend } = require('resend');
+const { uploadToCloudinary } = require('../utils/cloudinary');
 
 // Same safe-fallback pattern as utils/email.js: the Resend constructor
 // throws if the key is falsy, which would otherwise take this whole route
@@ -16,37 +17,6 @@ const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key')
 
 const router = express.Router();
 
-// Uploads a base64 data: URI to Cloudinary's unsigned upload endpoint so
-// FCM (which only accepts a real, fetchable image URL — see the
-// /send-store handler below) has something it can actually use. Returns
-// null (never throws) if Cloudinary isn't configured or the upload
-// fails, so the caller can fall back to sending with no image rather
-// than failing the whole send. See audits/sendnow-fixes-audit.txt.
-async function uploadToCloudinary(base64Data) {
-  try {
-    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
-    const uploadPreset = process.env.CLOUDINARY_UPLOAD_PRESET;
-    if (!cloudName || !uploadPreset) return null;
-
-    const response = await fetch(
-      `https://api.cloudinary.com/v1_1/${cloudName}/image/upload`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          file: base64Data,
-          upload_preset: uploadPreset,
-        }),
-      }
-    );
-    const data = await response.json();
-    const result = data.secure_url || null;
-    return result;
-  } catch (e) {
-    console.error('[push] cloudinary upload error:', e.message);
-    return null;
-  }
-}
 
 /**
  * POST /api/push/subscribe
@@ -737,7 +707,5 @@ router.get('/festivals', requireAuth, function (req, res) {
 module.exports = router;
 module.exports.sendJourneyPush = sendJourneyPush;
 module.exports.sendJourneyEmail = sendJourneyEmail;
-// Exported so server.js's FestivalQueue poller can convert a queued
-// item's base64 image the exact same way /send-store already does
-// before it — see uploadToCloudinary's own comment above for why.
+// Re-exported so server.js's FestivalQueue poller can use the same helper.
 module.exports.uploadToCloudinary = uploadToCloudinary;

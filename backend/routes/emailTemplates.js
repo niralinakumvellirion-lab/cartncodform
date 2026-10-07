@@ -1,23 +1,40 @@
 const express = require('express');
 const router = express.Router();
 const { Resend } = require('resend');
+const rateLimit = require('express-rate-limit');
 
 const EmailTemplate = require('../models/EmailTemplate');
 const Profile = require('../models/Profile');
 const Store = require('../models/Store');
 const { requireAuth } = require('../middleware/requireOwner');
-const { FROM, UNSUBSCRIBE_HEADERS, buildEmailHtml } = require('../utils/email');
-const { normalizeImageUrl } = require('../utils/productImage');
+const { FROM, UNSUBSCRIBE_HEADERS } = require('../utils/email');
 const { generateTemplateCopy } = require('../services/aiService');
 const { logBroadcastSend } = require('../services/sendLogService');
 const FESTIVALS = require('../data/festivals.json');
+const { upcomingFestival, storeTodayYmd } = require('../utils/festivals');
+const { renderEmailDocument } = require('../utils/emailEngine');
+const { sanitizeDesignInput, designFromTemplate, pickStarterDesign } = require('../utils/emailDesign');
+const { uploadImage } = require('../utils/cloudinary');
 
 // Same safe-fallback pattern as email.js: avoid crashing on load when key absent.
 const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
 
 const VALID_TYPES = ['special_offer', 'festival', 'normal'];
-const EDITABLE_FIELDS = ['name', 'type', 'subject', 'body', 'offerText', 'imageUrl', 'ctaLabel', 'ctaUrl'];
-const LAYOUT_BY_TYPE = { special_offer: 'poster', festival: 'float', normal: 'letter' };
+const EDITABLE_FIELDS = [
+  'name', 'type', 'subject', 'body', 'offerText', 'imageUrl', 'ctaLabel', 'ctaUrl',
+  'layout', 'color', 'hFont', 'bFont', 'radius', 'pageBg', 'cardBg',
+  'eyebrow', 'headline', 'note', 'imgW', 'imgH', 'showLogo',
+];
+
+// Rate-limit photo uploads per shop (20/hour).
+const photoRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => req.shopDomain || req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many photo uploads. Try again in an hour.' },
+});
 
 const VALID_SEGMENTS = ['everyone', 'email_captured', 'has_cart', 'bought_once', 'going_quiet'];
 const BROADCAST_CAP = 90;
@@ -47,12 +64,11 @@ function buildEmailSegmentQuery(shopDomain, segment) {
 }
 
 // Returns the name of the next upcoming festival, or 'festive season' if the
-// calendar is exhausted. Compares ISO date strings lexicographically (safe
-// because festivals.json uses YYYY-MM-DD format).
+// calendar is exhausted.
 function nextFestivalName() {
-  const today = new Date().toISOString().slice(0, 10);
-  const next = FESTIVALS.find(f => f.date >= today);
-  return next ? next.name : 'festive season';
+  const today = storeTodayYmd('Asia/Kolkata');
+  const f = upcomingFestival(today, FESTIVALS);
+  return f ? f.name : 'festive season';
 }
 
 // Load store brand data; never block a send on a miss.
@@ -116,6 +132,62 @@ router.post('/generate', requireAuth, async (req, res) => {
     console.warn('[email-templates] generate error:', err.message);
     const fb = GENERATE_FALLBACKS[(req.body && req.body.type)] || GENERATE_FALLBACKS.normal;
     return res.json({ ...fb, fallback: true });
+  }
+});
+
+// GET /api/email-templates/festival-reminder — must be before /:id routes
+const REMINDER_DAYS = 7;
+router.get('/festival-reminder', requireAuth, async (req, res) => {
+  try {
+    const store = await require('../models/Store').findOne({ shopDomain: req.shopDomain }).select('timezone');
+    const timezone = store ? store.timezone : undefined;
+    const today = storeTodayYmd(timezone);
+    const festival = upcomingFestival(today, FESTIVALS);
+
+    if (!festival || festival.daysAway > REMINDER_DAYS) {
+      return res.json({ reminder: null });
+    }
+
+    const templates = await require('../models/EmailTemplate').find(
+      { shopDomain: req.shopDomain, type: 'festival' },
+      { _id: 1, name: 1, eyebrow: 1, headline: 1, imageUrl: 1, updatedAt: 1 }
+    );
+
+    if (templates.length === 0) {
+      return res.json({
+        reminder: {
+          state: 'setup',
+          festival: { name: festival.name, date: festival.date, daysAway: festival.daysAway },
+          template: null,
+        },
+      });
+    }
+
+    const fname = festival.name.toLowerCase();
+    let chosen = templates.find(t =>
+      (t.name     || '').toLowerCase().includes(fname) ||
+      (t.eyebrow  || '').toLowerCase().includes(fname) ||
+      (t.headline || '').toLowerCase().includes(fname)
+    );
+    if (!chosen) {
+      chosen = templates.slice().sort((a, b) => {
+        const ta = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+        const tb = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+        return tb - ta;
+      })[0];
+    }
+
+    const state = chosen.imageUrl ? 'ready' : 'photo_missing';
+    return res.json({
+      reminder: {
+        state,
+        festival: { name: festival.name, date: festival.date, daysAway: festival.daysAway },
+        template: { id: String(chosen._id), name: chosen.name, imageUrl: chosen.imageUrl || null },
+      },
+    });
+  } catch (err) {
+    console.error('[email-templates] festival-reminder error:', err.message);
+    return res.status(500).json({ error: 'Failed to load festival reminder' });
   }
 });
 
@@ -191,17 +263,28 @@ router.post('/seed', requireAuth, async (req, res) => {
 
     const docsToInsert = generated
       .filter(({ type }) => !recheckTypes.has(type))
-      .map(({ type, r }) => ({
-        shopDomain: req.shopDomain,
-        type,
-        name: STARTER_NAMES[type],
-        subject: r.subject,
-        body: r.body,
-        offerText: r.offerText || null,
-        imageUrl: null,
-        ctaLabel: null,
-        ctaUrl: null,
-      }));
+      .map(({ type, r }) => {
+        const d = pickStarterDesign(type, req.shopDomain, type === 'festival' ? festivalName : null);
+        return {
+          shopDomain: req.shopDomain,
+          type,
+          name: STARTER_NAMES[type],
+          subject: r.subject,
+          body: r.body,
+          offerText: r.offerText || null,
+          imageUrl: null,
+          ctaLabel: d.ctaLabel,
+          ctaUrl: d.ctaUrl,
+          layout: d.layout,
+          hFont: d.hFont,
+          bFont: d.bFont,
+          color: d.color,
+          radius: d.radius,
+          eyebrow: d.eyebrow,
+          headline: r.subject,
+          note: d.note,
+        };
+      });
 
     if (docsToInsert.length > 0) {
       await EmailTemplate.insertMany(docsToInsert);
@@ -223,6 +306,38 @@ router.post('/seed', requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/email-templates/photo — declared before /:id routes.
+// Accepts a base64 data URI, uploads to Cloudinary, returns { url, width, height }.
+// Route-scoped JSON limit of 11mb for large images (global limit is 10mb).
+router.post('/photo', requireAuth, photoRateLimiter, express.json({ limit: '11mb' }), async (req, res) => {
+  try {
+    if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_UPLOAD_PRESET) {
+      return res.status(503).json({ error: 'Photo upload is not configured' });
+    }
+    const { dataUrl } = req.body;
+    if (!dataUrl) return res.status(400).json({ error: 'dataUrl is required' });
+
+    if (!/^data:image\/(jpeg|png|webp);base64,/i.test(dataUrl)) {
+      return res.status(400).json({ error: 'Only JPEG, PNG, or WebP images are accepted' });
+    }
+
+    const base64Part = dataUrl.split(',')[1] || '';
+    const decodedBytes = Math.floor(base64Part.length * 3 / 4);
+    if (decodedBytes > 8 * 1024 * 1024) {
+      return res.status(413).json({ error: 'Image is too large. Maximum size is 8 MB.' });
+    }
+
+    const result = await uploadImage(dataUrl);
+    if (!result) {
+      return res.status(502).json({ error: 'Photo upload failed. Try again.' });
+    }
+    return res.json({ url: result.url, width: result.width, height: result.height });
+  } catch (err) {
+    console.error('[email-templates] photo error:', err.message);
+    return res.status(502).json({ error: 'Photo upload failed. Try again.' });
+  }
+});
+
 // GET /api/email-templates/:id/preview — must be before /:id
 router.get('/:id/preview', requireAuth, async (req, res) => {
   try {
@@ -232,21 +347,12 @@ router.get('/:id/preview', requireAuth, async (req, res) => {
     }
 
     const { storeName, logoUrl, primaryColor } = await loadBrandData(req.shopDomain);
-    const html = buildEmailHtml({
-      subject: template.subject,
-      body: template.body,
-      offer: template.offerText || null,
-      imageUrl: normalizeImageUrl(template.imageUrl),
-      ctaLabel: template.ctaLabel,
-      ctaUrl: template.ctaUrl,
-      storeName,
-      logoUrl,
-      primaryColor,
-      layout: LAYOUT_BY_TYPE[template.type] || 'letter',
-      headline: template.subject,
-    });
+    const store = { shopName: storeName, logoUrl, primaryColor, shopDomain: req.shopDomain };
+    const design = designFromTemplate(template, store, { placeholder: !template.imageUrl });
+    const html = renderEmailDocument(design);
+    const warnings = template.imageUrl ? [] : ['no_photo'];
 
-    return res.json({ html });
+    return res.json({ html, warnings });
   } catch (err) {
     console.error('[email-templates] preview error:', err.message);
     return res.status(500).json({ error: 'Failed to render preview' });
@@ -270,30 +376,46 @@ router.get('/:id', requireAuth, async (req, res) => {
 // POST /api/email-templates
 router.post('/', requireAuth, async (req, res) => {
   try {
-    const { type, name, subject, body, imageUrl, ctaLabel, ctaUrl } = req.body;
+    const sanity = sanitizeDesignInput(req.body);
+    if (!sanity.ok) return res.status(400).json({ error: sanity.error, field: sanity.field });
+    const vals = sanity.value;
 
-    if (!type || !VALID_TYPES.includes(type)) {
+    if (!vals.type || !VALID_TYPES.includes(vals.type)) {
       return res.status(400).json({ error: 'type must be one of special_offer, festival, normal' });
     }
-    if (!name || !name.trim()) {
+    if (!vals.name) {
       return res.status(400).json({ error: 'name is required' });
     }
-    if (!subject || !subject.trim()) {
+    if (!vals.subject) {
       return res.status(400).json({ error: 'subject is required' });
     }
-    if (!body) {
+    if (!vals.body) {
       return res.status(400).json({ error: 'body is required' });
     }
 
     const template = await EmailTemplate.create({
       shopDomain: req.shopDomain,
-      type,
-      name: name.trim(),
-      subject: subject.trim(),
-      body,
-      imageUrl: imageUrl || null,
-      ctaLabel: ctaLabel || null,
-      ctaUrl: ctaUrl || null,
+      type: vals.type,
+      name: vals.name,
+      subject: vals.subject,
+      body: vals.body,
+      imageUrl: vals.imageUrl || null,
+      ctaLabel: vals.ctaLabel || null,
+      ctaUrl: vals.ctaUrl || null,
+      offerText: vals.offerText || null,
+      layout: vals.layout || null,
+      color: vals.color || null,
+      hFont: vals.hFont || null,
+      bFont: vals.bFont || null,
+      radius: vals.radius || null,
+      pageBg: vals.pageBg || null,
+      cardBg: vals.cardBg || null,
+      eyebrow: vals.eyebrow || '',
+      headline: vals.headline || '',
+      note: vals.note || '',
+      imgW: vals.imgW != null ? vals.imgW : null,
+      imgH: vals.imgH != null ? vals.imgH : null,
+      showLogo: vals.showLogo || false,
     });
 
     return res.status(201).json({ template });
@@ -311,13 +433,16 @@ router.patch('/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Template not found' });
     }
 
+    const sanity = sanitizeDesignInput(req.body);
+    if (!sanity.ok) return res.status(400).json({ error: sanity.error, field: sanity.field });
+
     const update = {};
     for (const field of EDITABLE_FIELDS) {
-      if (field in req.body) {
-        if (field === 'type' && !VALID_TYPES.includes(req.body[field])) {
+      if (field in sanity.value) {
+        if (field === 'type' && !VALID_TYPES.includes(sanity.value[field])) {
           return res.status(400).json({ error: 'type must be one of special_offer, festival, normal' });
         }
-        update[field] = req.body[field];
+        update[field] = sanity.value[field];
       }
     }
 
@@ -400,19 +525,10 @@ router.post('/:id/send', requireAuth, async (req, res) => {
     }
 
     const { storeName, logoUrl, primaryColor } = await loadBrandData(req.shopDomain);
-    const html = buildEmailHtml({
-      subject: template.subject,
-      body: template.body,
-      offer: template.offerText || null,
-      imageUrl: normalizeImageUrl(template.imageUrl),
-      ctaLabel: template.ctaLabel,
-      ctaUrl: template.ctaUrl,
-      storeName,
-      logoUrl,
-      primaryColor,
-      layout: LAYOUT_BY_TYPE[template.type] || 'letter',
-      headline: template.subject,
-    });
+    const store = { shopName: storeName, logoUrl, primaryColor, shopDomain: req.shopDomain };
+    const design = designFromTemplate(template, store, { placeholder: false });
+    const html = renderEmailDocument(design);
+    const warnings = template.imageUrl ? [] : ['no_photo'];
 
     const { data, error } = await resend.emails.send({
       from: FROM,
@@ -428,7 +544,7 @@ router.post('/:id/send', requireAuth, async (req, res) => {
     }
 
     console.log('[email-templates] sent template', String(template._id), 'for shop', req.shopDomain);
-    return res.json({ ok: true, id: data?.id });
+    return res.json({ ok: true, id: data?.id, warnings });
   } catch (err) {
     console.error('[email-templates] send error:', err.message);
     return res.status(500).json({ error: 'Failed to send email' });
@@ -463,20 +579,10 @@ router.post('/:id/broadcast', requireAuth, async (req, res) => {
 
     const profiles = await Profile.find(query).select('identifiers channels').lean();
     const { storeName, logoUrl, primaryColor } = await loadBrandData(req.shopDomain);
-
-    const html = buildEmailHtml({
-      subject: template.subject,
-      body: template.body,
-      offer: template.offerText || null,
-      imageUrl: normalizeImageUrl(template.imageUrl),
-      ctaLabel: template.ctaLabel,
-      ctaUrl: template.ctaUrl,
-      storeName,
-      logoUrl,
-      primaryColor,
-      layout: LAYOUT_BY_TYPE[template.type] || 'letter',
-      headline: template.subject,
-    });
+    const store = { shopName: storeName, logoUrl, primaryColor, shopDomain: req.shopDomain };
+    const design = designFromTemplate(template, store, { placeholder: false });
+    const html = renderEmailDocument(design);
+    const warnings = template.imageUrl ? [] : ['no_photo'];
 
     let sent = 0;
     let failed = 0;
@@ -524,7 +630,7 @@ router.post('/:id/broadcast', requireAuth, async (req, res) => {
     });
 
     console.log(`[email-templates] broadcast ${String(template._id)}: sent=${sent} failed=${failed}`);
-    return res.json({ sent, failed, total: profiles.length });
+    return res.json({ sent, failed, total: profiles.length, warnings });
   } catch (err) {
     console.error('[email-templates] broadcast error:', err.message);
     return res.status(500).json({ error: 'Broadcast failed' });

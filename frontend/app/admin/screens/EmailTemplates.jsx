@@ -1,13 +1,19 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import { GOOGLE_FONTS_HREF, SEGMENTS, EMPTY_DRAFT, draftFromTemplate } from './emailStudio/lib';
 import TemplatePicker from './emailStudio/TemplatePicker';
 import PhotoCard from './emailStudio/PhotoCard';
+import LayoutCard from './emailStudio/LayoutCard';
+import ColourCard from './emailStudio/ColourCard';
+import FontCard from './emailStudio/FontCard';
 import WordsCard from './emailStudio/WordsCard';
 import PreviewStage from './emailStudio/PreviewStage';
+import _eng from '../lib/emailEngine';
+
+const { PRESETS: ENGINE_PRESETS, DEFAULT_LAYOUT_BY_TYPE } = _eng || {};
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const DS = {
@@ -54,7 +60,12 @@ const STARTER_TYPES = ['special_offer', 'festival', 'normal'];
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function EmailTemplatesScreen() {
   const searchParams = useSearchParams();
-  const shopParam = searchParams ? (searchParams.get('shop') || '') : '';
+  const shopParam      = searchParams ? (searchParams.get('shop')     || '') : '';
+  const templateParam  = searchParams ? (searchParams.get('template') || '') : '';
+  const focusParam     = searchParams ? (searchParams.get('focus')    || '') : '';
+
+  const photoCardRef = useRef(null);
+  const templateAutoSelected = useRef(false);
 
   // Store brand data (for live preview)
   const [store, setStore] = useState({ shopName: '', logoUrl: null, primaryColor: null, shopDomain: '' });
@@ -134,6 +145,31 @@ export default function EmailTemplatesScreen() {
 
   // Load templates on mount
   useEffect(() => { loadTemplates(); }, []);
+
+  // Auto-select template from ?template= param (once, after templates load)
+  useEffect(() => {
+    if (!templateParam || templateAutoSelected.current || templates.length === 0) return;
+    const match = templates.find(t => t._id === templateParam);
+    if (match) {
+      templateAutoSelected.current = true;
+      _doSelectTemplate(match);
+      if (focusParam === 'photo') {
+        // Defer until after render so the card is in the DOM
+        setTimeout(() => {
+          const el = photoCardRef.current;
+          if (!el) return;
+          el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          const reducedMotion = typeof window !== 'undefined' &&
+            window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+          if (!reducedMotion) {
+            el.style.transition = 'box-shadow 0.25s';
+            el.style.boxShadow = '0 0 0 3px #4f46e5';
+            setTimeout(() => { el.style.boxShadow = ''; el.style.transition = ''; }, 1200);
+          }
+        }, 80);
+      }
+    }
+  }, [templates, templateParam, focusParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Broadcast count
   useEffect(() => {
@@ -437,6 +473,61 @@ export default function EmailTemplatesScreen() {
           </div>
         </div>
         <div style={{ height: 3, background: 'linear-gradient(90deg, #4f46e5, #818cf8)', borderRadius: 2, marginTop: 12, width: 48 }} />
+
+        {/* Presets chips */}
+        {ENGINE_PRESETS && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 14, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: 4 }}>Start with:</span>
+            {Object.keys(ENGINE_PRESETS).map(k => {
+              const p = ENGINE_PRESETS[k];
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => {
+                    setDraftField('layout', p.layout);
+                    setDraftField('color',  p.color);
+                    setDraftField('hFont',  p.hFont);
+                    setDraftField('bFont',  p.bFont);
+                    setDraftField('radius', p.radius);
+                    setDraftField('pageBg', null);
+                    setDraftField('cardBg', null);
+                  }}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '5px 12px', fontSize: 12, fontWeight: 700, borderRadius: 999, cursor: 'pointer',
+                    background: '#f3f4f6', color: '#374151', border: '1.5px solid #e5e7eb', outline: 'none',
+                  }}
+                >
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: p.color, flexShrink: 0, display: 'inline-block' }} />
+                  {p.name}
+                </button>
+              );
+            })}
+            <button
+              type="button"
+              onClick={() => {
+                if (!ENGINE_PRESETS) return;
+                const keys = Object.keys(ENGINE_PRESETS);
+                const p = ENGINE_PRESETS[keys[Math.floor(Math.random() * keys.length)]];
+                setDraftField('layout', p.layout);
+                setDraftField('color',  p.color);
+                setDraftField('hFont',  p.hFont);
+                setDraftField('bFont',  p.bFont);
+                setDraftField('radius', p.radius);
+                setDraftField('pageBg', null);
+                setDraftField('cardBg', null);
+              }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '5px 12px', fontSize: 12, fontWeight: 700, borderRadius: 999, cursor: 'pointer',
+                background: '#4f46e5', color: '#fff', border: 'none', outline: 'none',
+              }}
+            >
+              Surprise me
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Seed banner */}
@@ -528,7 +619,7 @@ export default function EmailTemplatesScreen() {
           {showEditor && (
             <>
               {/* Photo card */}
-              <div style={{ marginTop: 12 }}>
+              <div ref={photoCardRef} style={{ marginTop: 12 }}>
                 <PhotoCard
                   key={photoCardKey}
                   draft={draft}
@@ -539,6 +630,15 @@ export default function EmailTemplatesScreen() {
                   onClearError={() => setPhotoError('')}
                 />
               </div>
+
+              {/* Layout card */}
+              <LayoutCard draft={draft} setDraftField={setDraftField} saveError={saveError} />
+
+              {/* Colour card */}
+              <ColourCard draft={draft} setDraftField={setDraftField} store={store} saveError={saveError} />
+
+              {/* Font card */}
+              <FontCard draft={draft} setDraftField={setDraftField} saveError={saveError} />
 
               {/* Words card */}
               <WordsCard draft={draft} setDraftField={setDraftField} saveError={saveError} />

@@ -1,0 +1,50 @@
+AUDIT — email API self-audit (Phase E2)
+Date: 2026-10-07
+
+=== FILES CHANGED ===
+
+backend/utils/cloudinary.js          NEW — uploadImage() + uploadToCloudinary() (backward-compat)
+backend/utils/emailDesign.js         NEW — sanitizeDesignInput, designFromTemplate, pickStarterDesign
+backend/models/EmailTemplate.js      MODIFIED — 13 design fields added; enums from engine registries
+backend/routes/emailTemplates.js     MODIFIED — photo route, sanitizeDesignInput, designFromTemplate,
+                                                 pickStarterDesign, warnings, EDITABLE_FIELDS
+backend/__tests__/emailDesign.test.js  NEW — 54 tests
+backend/__tests__/emailTemplates.test.js MODIFIED — +33 tests; preview/send/broadcast updated
+
+=== WHAT WAS DONE ===
+
+Step 0  Pre-audit → audits/email-api-before.txt
+Step 1  cloudinary.js: uploadImage() returns {url,width,height}; uploadToCloudinary() backward-compat.
+        push.js callers import from cloudinary.js; server.js re-export preserved.
+Step 2  EmailTemplate model: 13 design fields (layout, color, hFont, bFont, radius, pageBg, cardBg,
+        eyebrow, headline, note, imgW, imgH, showLogo). Enums built from LAYOUT_INFO/FONT_ORDER.
+Step 3  emailDesign.js: sanitizeDesignInput (all 14 design+text fields, full validation + normalise),
+        designFromTemplate (template + store → renderEmailDocument-ready object),
+        pickStarterDesign (stableHash % 3 selects from STARTER_VARIANTS).
+Step 4  emailTemplates.js routes:
+        - EDITABLE_FIELDS extended with 13 design fields; LAYOUT_BY_TYPE removed.
+        - POST / and PATCH /:id run sanitizeDesignInput first; 400 {error,field} on failure.
+        - POST /photo declared before /:id: requireAuth → photoRateLimiter (20/hr, shop-keyed)
+          → express.json({limit:'11mb'}) → handler. Validates MIME type, 8 MB cap, Cloudinary env.
+        - preview uses placeholder:!template.imageUrl; send/broadcast use placeholder:false.
+        - All three responses include warnings:['no_photo'] when template has no imageUrl.
+Step 5  POST /seed: each doc gets design fields via pickStarterDesign; ctaLabel/ctaUrl/layout/
+        hFont/bFont/color/radius/eyebrow/note merged; headline = generated subject.
+Step 6  Tests: emailDesign.test.js (54 tests), emailTemplates.test.js updated (+33 tests).
+        Full suite: 690 tests, 40 suites, all passing.
+
+=== KNOWN LIMITATION ===
+
+express.json({limit:'11mb'}) on POST /photo is route-scoped, but Express 4 runs the global
+app.use(express.json({limit:'10mb'})) in server.js first. Requests larger than ~10 MB
+are therefore rejected at the global layer before the route handler runs (HTTP 413 from
+Express, not our handler). The 8 MB image-content cap (encoded ~10.67 MB) can't be fully
+enforced from inside the handler; in production the effective cap is ~7.5 MB binary.
+This gap is documented in the pre-audit and was acknowledged as out-of-scope for Phase E2.
+A future fix is to raise or remove the global limit, or decode the dataUrl in a streaming
+pre-filter.
+
+=== NO REGRESSIONS ===
+
+Before: 614 tests passing.
+After:  690 tests passing (76 new, 0 broken).

@@ -1,5 +1,8 @@
 'use client';
 import { useState, useRef, useCallback } from 'react';
+import _eng from '../../lib/emailEngine';
+
+const { layoutInfo, DEFAULT_LAYOUT_BY_TYPE } = _eng || {};
 
 const MAX_BYTES = 7 * 1024 * 1024; // 7 MB — safe ceiling given global body parser limit
 const ACCEPT = ['image/jpeg', 'image/png', 'image/webp'];
@@ -25,6 +28,9 @@ export default function PhotoCard({ draft, uploading, photoError, onUpload, onRe
   const [localThumb, setLocalThumb] = useState(null);
   const [localFile, setLocalFile] = useState(null); // { name, width, height }
   const inputRef = useRef(null);
+
+  const effectiveLayout = draft.layout || (DEFAULT_LAYOUT_BY_TYPE && DEFAULT_LAYOUT_BY_TYPE[draft.type]) || 'letter';
+  const layoutHint = layoutInfo ? layoutInfo(effectiveLayout) : null;
 
   const hasPhoto = !!(localThumb || draft.imageUrl);
   const thumbSrc = localThumb || draft.imageUrl;
@@ -118,7 +124,8 @@ export default function PhotoCard({ draft, uploading, photoError, onUpload, onRe
             Drop photo here or click to choose
           </p>
           <p style={{ fontSize: 11, color: '#9ca3af', margin: 0 }}>
-            JPEG, PNG or WebP · max 7 MB · min 1100 px wide recommended
+            JPEG, PNG or WebP · max 7 MB
+            {layoutHint ? ` · Best size: ${layoutHint.w}×${layoutHint.h} px` : ' · min 1100 px wide recommended'}
           </p>
         </div>
       )}

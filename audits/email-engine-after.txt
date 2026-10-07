@@ -1,0 +1,67 @@
+AUDIT — email engine post-implementation (Phase E1)
+Date: 2026-10-07
+Commit: 60894d6
+
+=== WHAT WAS BUILT ===
+
+backend/utils/emailEngine.js  (~350 lines)
+  Exports: esc, hex2rgb, rgb2hex, mix, lum, cr, soften, onColour, rgba,
+           FONTS (24), FONT_ORDER, LAYOUT_INFO (11), layoutInfo, bgDefaults,
+           PRESETS (5), themeFor, renderEmail, renderEmailDocument
+  Guarded export: if(typeof module!=='undefined'&&module.exports){...}
+  ES5-style (var, function declarations, no arrow functions or template literals)
+
+=== PRODUCTION DIFFERENCES FROM PROTOTYPE ===
+
+1. Image URLs: http:// → https:// upgrade; data:/javascript:/relative → null.
+   PIC() always uses max-width (fluid), never fixed-width div.
+   Every <img> has width=, height=, style="...height:auto..." — no object-fit,
+   no border-radius on the img element.
+
+2. CTA: safeCtaUrl accepts https:// or mailto: only. If either URL or label is
+   absent → hasCta=false → BTN/BTNO return ''.
+   Coupon with no CTA: offer fills the whole ticket (no dashed second column).
+
+3. Placeholder: only when design.placeholder === true (strict). The test for
+   "appears here" confirms it never leaks into a sent email.
+
+4. Logo: LOGO(textInner) returns <img> only when showLogo===true AND logoUrl
+   starts with https://. Falls back to textInner otherwise.
+   Logo img: width=180 height=36 style="...height:auto;max-height:36px..."
+
+5. Escaping: esc() applied to every dynamic string.
+   body is plain text: escaped then \n → <br>. Callers must NOT pre-HTML.
+
+6. Unsubscribe: href = design.unsubscribeUrl or mailto: default.
+
+=== CALL SITE CHANGES ===
+
+backend/utils/email.js
+  buildEmailHtml() rewritten as thin wrapper over renderEmailDocument().
+  Accepts both legacy names (storeName, primaryColor, offerText, trustText,
+  ctaLabel, bodyHtml) and new design-object names. bodyHtml → strip <br>→\n,
+  strip tags → body. Defaults: layout:'hero', hFont/bFont:'arial', radius:'round'.
+
+backend/routes/emailTemplates.js (3 call sites)
+  Before: bodyHtml: template.body.replace(/\n/g,'<br>'), offerText: ...
+  After:  body: template.body, offer: template.offerText||null,
+          layout: LAYOUT_BY_TYPE[template.type]||'letter', headline: template.subject
+  LAYOUT_BY_TYPE = { special_offer:'poster', festival:'float', normal:'letter' }
+
+backend/routes/push.js (1 call site, line ~549)
+  Before: bodyHtml: body.replace(/\n/g,'<br>')
+  After:  body, layout:'hero', showLogo:true
+
+=== TEST COUNTS ===
+
+Before: 444 tests (38 suites)
+After:  614 tests (39 suites) — +170 tests in new emailEngine.test.js
+
+All 614 pass. One test required a second-pass fix:
+  buildEmailHtml.test.js test 'o': initial check was for 'bigH' text, but
+  that string also appears in the CSS block. Fixed to check /class="bigH"/.
+
+=== DEVIATIONS FROM SPEC ===
+
+None. All 11 layouts, all production guards, and all specified tests were
+implemented. themeFor() extracted as its own export for direct testing.

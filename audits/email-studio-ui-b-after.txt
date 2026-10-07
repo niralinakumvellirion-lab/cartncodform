@@ -1,0 +1,143 @@
+AUDIT — Email Studio Design Controls self-audit (Phase E3b)
+Date: 2026-10-07
+
+=== FILES CHANGED ===
+
+frontend/app/admin/screens/emailStudio/palette.js    NEW
+  - PALETTE: 4 groups × 8 named colour swatches
+  - COLORS: 9 brand-colour swatches
+  - brandShades(hex): returns 6 {name, value} shades using mix() from emailEngine
+  - Imports mix from ../../lib/emailEngine (the shared synced copy)
+
+frontend/app/admin/screens/emailStudio/layoutWires.js  NEW
+  - LAYOUT_INFO: re-exported from _eng.LAYOUT_INFO (11 layouts)
+  - WIRE: inline-SVG rect data for all 11 layouts (hero, poster, spotlight, split,
+          gallery, coupon, magazine, float, cards, pop, letter)
+  - viewBox "0 0 64 48"; uses JSX attr names (strokeWidth, strokeDasharray, etc.)
+
+frontend/app/admin/screens/emailStudio/LayoutCard.jsx  NEW
+  - 3-column grid of 11 layout buttons, each with an SVG wireframe
+  - aria-pressed on each button
+  - null draft.layout → auto-highlighted based on DEFAULT_LAYOUT_BY_TYPE[draft.type]
+  - Auto hint footnote when no layout is explicitly set
+  - Field-level saveError display under card
+
+frontend/app/admin/screens/emailStudio/ColourCard.jsx  NEW
+  - Brand colour row: 9 COLORS swatches + input[type=color] for custom + Auto pill
+  - brandShades row: 6 shade swatches computed from effective colour
+  - Page background and card background: PaletteGrid with Auto pill + expandable PALETTE
+  - Show logo toggle (role="switch", aria-checked)
+  - Auto = null; stores exact null in draft (designFromTemplate resolves at render time)
+  - Field-level saveError for color, pageBg, cardBg
+
+frontend/app/admin/screens/emailStudio/FontCard.jsx  NEW
+  - Heading font popover (role=listbox, aria-haspopup="listbox", aria-expanded)
+  - Body font popover: excludes fonts with head:true flag
+  - Keyboard: ArrowDown/Up/Home/End move focus, Enter/Space select, Escape closes
+  - Closes on outside click (mousedown listener)
+  - Corner style (radius) toggle: Rounded / Sharp + Auto pill
+  - Auto = null stored in draft; field-level saveError display
+
+frontend/app/admin/screens/EmailTemplates.jsx  MODIFIED
+  - Added imports: LayoutCard, ColourCard, FontCard, _eng (from ../lib/emailEngine)
+  - Added ENGINE_PRESETS and DEFAULT_LAYOUT_BY_TYPE from _eng
+  - Presets chips row added under page title (5 named presets + Surprise me)
+    - Each chip sets 7 design fields: layout, color, hFont, bFont, radius, pageBg=null, cardBg=null
+    - Does NOT touch subject/eyebrow/headline/offerText/body/ctaLabel/ctaUrl/note/imageUrl
+    - Surprise me picks a random preset key
+  - LayoutCard inserted after PhotoCard (card 2)
+  - ColourCard inserted after LayoutCard (card 3)
+  - FontCard inserted after ColourCard (card 4)
+  - WordsCard remains at card 5
+
+frontend/app/admin/screens/emailStudio/PhotoCard.jsx  MODIFIED
+  - Imports layoutInfo and DEFAULT_LAYOUT_BY_TYPE from ../../lib/emailEngine
+  - Computes effectiveLayout from draft.layout or DEFAULT_LAYOUT_BY_TYPE[draft.type]
+  - Upload zone hint now reads "Best size: {w}×{h} px" for the active layout
+    instead of the static "min 1100 px wide recommended"
+
+=== FILES NOT CHANGED ===
+
+backend/utils/emailEngine.js   — no engine changes (Phase E3b is frontend only)
+backend/utils/emailDesign.js   — unchanged
+backend/scripts/syncEmailEngine.js — unchanged
+backend/__tests__/emailEngineSync.test.js — unchanged
+frontend/app/admin/lib/emailEngine.js  — unchanged (sync test still passes)
+frontend/lib/api.js            — unchanged
+emailStudio/lib.js             — unchanged
+emailStudio/TemplatePicker.jsx — unchanged
+emailStudio/WordsCard.jsx      — unchanged
+emailStudio/PreviewStage.jsx   — unchanged
+
+=== IMPORT PATH FIX ===
+
+EmailTemplates.jsx is at frontend/app/admin/screens/ (one level above emailStudio/).
+The correct path to emailEngine from there is ../lib/emailEngine, not ../../lib/emailEngine.
+(The ../../lib path is correct for files inside emailStudio/.)
+Build failed on first attempt with that error; fixed immediately.
+
+=== PRESETS CHIPS NOTES ===
+
+The spec says chips set ONLY design fields, not words. Implemented as:
+  setDraftField('layout', p.layout);
+  setDraftField('color',  p.color);
+  setDraftField('hFont',  p.hFont);
+  setDraftField('bFont',  p.bFont);
+  setDraftField('radius', p.radius);
+  setDraftField('pageBg', null);
+  setDraftField('cardBg', null);
+All seven calls use React 18 functional updater (d => ({...d, [k]: v})) so they
+batch correctly in a single flush. Words and photo are untouched.
+
+=== BUILD VERIFICATION ===
+
+cd backend && npm test → 691 passing / 41 suites (no regressions)
+cd frontend && npm run build → Compiled successfully, 0 errors, 0 warnings
+  /admin/email-templates bundle: 24.3 kB (was 19.7 kB; +4.6 kB for new cards)
+
+=== BROWSER VERIFICATION ===
+
+Tested at http://localhost:3030/admin/email-templates (Next.js dev, no real backend):
+
+Presets chips:
+  - 5 named chips (Festive, Flash sale, Elegant, Fresh, Classic) + Surprise me visible
+  - Clicking Festive: LayoutCard highlights "Poster", colour swatch updates to #c2185b,
+    FontCard heading shows "Montserrat", corner style shows "Rounded"
+  - Preview updates within ~120ms to poster layout with magenta brand colour
+  - Words fields unchanged after preset apply
+  - Surprise me: picked a random preset on each click; preview updated accordingly
+
+LayoutCard (card 2):
+  - 3-column grid of 11 layout wireframe buttons rendered
+  - Active layout highlighted in indigo with border
+  - null layout → auto-highlighted per type (letter for "normal" type)
+  - "*" footnote visible when auto
+  - Clicking a layout updates preview immediately
+
+ColourCard (card 3):
+  - 9 brand colour swatches + color picker visible
+  - Clicking a swatch updates preview colour immediately
+  - Auto pill appears when draft.color is set; clicking resets to null
+  - "Pick colour" button opens PALETTE grid (4 groups, 8 swatches each)
+  - Page background and card background pickers show "Auto" pill
+  - Show logo toggle switches between on/off states
+
+FontCard (card 4):
+  - Heading font popover opens on click; shows 24 fonts with font preview
+  - Body font popover excludes heading-only fonts (bebas, abril, dancing, pacifico)
+  - Keyboard nav: ArrowDown/Up navigates options, Enter selects, Escape closes
+  - Rounded/Sharp corner buttons update preview radius
+  - Auto resets font to null; preview shows "(auto)" label
+
+PhotoCard "Best size" hint:
+  - Shows "Best size: 1200×800 px" for letter/hero/poster (default for normal type)
+  - Switches to "Best size: 1000×1250 px" when split layout selected in LayoutCard
+
+=== DEVIATIONS FROM SPEC ===
+
+1. ColourCard shade swatches are shown but not wired as direct pageBg/cardBg pickers;
+   they are displayed as reference swatches. User can pick them via the PaletteGrid
+   "Pick colour" which is the correct interaction pattern.
+
+2. NOT IN THIS PHASE (E4, E5): Dashboard reminder, journey/test/broadcast switch-over.
+   All absent as specified.

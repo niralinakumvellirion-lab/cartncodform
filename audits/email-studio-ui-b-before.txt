@@ -1,0 +1,122 @@
+AUDIT — Email Studio Design Controls pre-audit (Phase E3b)
+Date: 2026-10-07
+
+=== DRAFT STATE IN EmailTemplates.jsx ===
+
+Held as:
+  const [draft, setDraft]           = useState(EMPTY_DRAFT);
+  const [savedDraft, setSavedDraft] = useState(null);
+  const dirty = useMemo(
+    () => !!savedDraft && JSON.stringify(draft) !== JSON.stringify(savedDraft),
+    [draft, savedDraft]
+  );
+
+Updater function:
+  function setDraftField(field, value) {
+    setDraft(d => ({ ...d, [field]: value }));
+    setSaveOk(false);
+    setSaveError(null);
+  }
+
+Every card calls setDraftField(fieldName, newValue). The dirty flag is a
+pure string-compare — no per-field tracking needed.
+
+=== DESIGN FIELDS IN DRAFT (null = "automatic") ===
+
+Field       Default in EMPTY_DRAFT   Null means
+----------  -----------------------  ----------------------------------------
+layout      null                     DEFAULT_LAYOUT_BY_TYPE[draft.type]
+                                       special_offer→'poster', festival→'float',
+                                       normal→'letter'
+color       null                     store.primaryColor || '#4f46e5'
+hFont       null                     'arial'
+bFont       null                     'arial'
+radius      null                     'round'
+pageBg      null                     bgDefaults(layout, color).page (engine)
+cardBg      null                     bgDefaults(layout, color).card (engine)
+showLogo    false                    (boolean, not nullable)
+
+designFromTemplate() in emailEngine.js resolves all nulls at render time
+before calling renderEmail(). New cards MUST call setDraftField with null
+to mean "auto" — never with a computed value that would defeat the auto logic.
+
+=== CURRENT emailStudio/ FILE LIST ===
+
+frontend/app/admin/screens/emailStudio/
+  lib.js            — GOOGLE_FONTS_HREF, STICKY_TOP, TYPE_LABELS, VALID_TYPES,
+                      SEGMENTS, MAX_LEN, EMPTY_DRAFT, draftFromTemplate
+  TemplatePicker.jsx — card 0: template select, filter tabs, name input, type buttons, delete
+  PhotoCard.jsx      — card 1: drag-drop upload, local thumb, quality tag, 7 MB cap
+  WordsCard.jsx      — card 5 (becomes 5 after E3b inserts cards 2–4): 8 text fields
+  PreviewStage.jsx   — right column sticky preview, Desktop/Mobile, Fit/Actual
+
+Files to be added in this phase:
+  palette.js         — PALETTE 4×8, COLORS 9 swatches, brandShades(hex)
+  layoutWires.js     — WIRE 11 inline-SVG snippets, LAYOUT_INFO import
+  LayoutCard.jsx     — card 2 (new, 3-col grid of 11 layout buttons)
+  ColourCard.jsx     — card 3 (new, brand colour + pageBg/cardBg pickers)
+  FontCard.jsx       — card 4 (new, heading/body font popovers + radius toggle)
+
+=== STORE BRAND DATA FLOW ===
+
+Source: GET /api/profiles/:shopDomain/settings
+
+In EmailTemplates.jsx:
+  const [store, setStore] = useState({ shopName:'', logoUrl:null, primaryColor:null, shopDomain:'' });
+
+  useEffect(() => {
+    const shop = shopParam || window.shopify?.config?.shop || '';
+    if (!shop) return;
+    setStore(s => ({ ...s, shopDomain: shop }));
+    apiGet(`/api/profiles/${encodeURIComponent(shop)}/settings`)
+      .then(data => {
+        setStore({
+          shopName:     data.shopName     || '',
+          logoUrl:      data.logoUrl      || null,
+          primaryColor: data.primaryColor || null,
+          shopDomain:   shop,
+        });
+      })
+      .catch(() => {});
+  }, [shopParam]);
+
+  store.primaryColor is the fallback brand colour when draft.color is null.
+  store.logoUrl is passed to designFromTemplate → used when showLogo=true.
+  store is passed as the second arg to designFromTemplate(draft, store, opts)
+  and also passed as a prop to PreviewStage.
+
+In Phase E3b, store.primaryColor will also seed the COLORS swatches row
+and the brandShades helper to generate tinted background options.
+
+=== PRESETS IN emailEngine.js ===
+
+PRESETS exported from emailEngine.js:
+  festive  — layout:'poster',  color:'#c2185b', hFont:'montserrat', bFont:'arial',   radius:'round'
+  sale     — layout:'pop',     color:'#e11d48', hFont:'bebas',      bFont:'arial',   radius:'sharp'
+  elegant  — layout:'spotlight',color:'#0f766e',hFont:'playfair',   bFont:'lora',    radius:'round'
+  fresh    — layout:'split',   color:'#4f46e5', hFont:'poppins',    bFont:'nunito',  radius:'round'
+  classic  — layout:'gallery', color:'#9a3412', hFont:'cormorant',  bFont:'georgia', radius:'sharp'
+
+Each preset carries words + design fields. E3b spec says chips set ONLY design
+fields (layout, color, hFont, bFont, radius, pageBg=null, cardBg=null),
+not words/photo. So preset words are ignored when applying chips.
+
+=== LAYOUTS IN emailEngine.js ===
+
+11 layouts (LAYOUT_INFO):
+  hero, poster, spotlight, split, gallery, coupon, magazine, float, cards, pop, letter
+
+=== FONTS IN emailEngine.js ===
+
+24 fonts (FONT_ORDER). Some have head:true (heading only, excluded from body picker).
+Safe fonts: arial, georgia, trebuchet, verdana, tahoma, times, palatino, courier, impact,
+            arialblack
+Rich fonts: playfair, cormorant, dmserif, abril, lora, montserrat, poppins, raleway,
+            josefin, nunito, oswald, bebas, pacifico, dancing
+
+=== WHAT THIS PHASE DOES NOT CHANGE ===
+
+- No backend routes, models, or engine changes
+- No changes to TemplatePicker.jsx, PhotoCard.jsx, WordsCard.jsx, PreviewStage.jsx
+- No changes to emailEngine.js or its sync test
+- lib.js: exports may grow (PRESETS re-export) but existing exports are not changed

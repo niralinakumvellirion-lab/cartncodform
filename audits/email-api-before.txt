@@ -1,0 +1,92 @@
+AUDIT — email API pre-implementation (Phase E2)
+Date: 2026-10-07
+
+=== EmailTemplate MODEL FIELDS (backend/models/EmailTemplate.js) ===
+
+  shopDomain  String, required, index, lowercase, trim
+  type        String, enum ['special_offer','festival','normal'], required
+  name        String, required, trim
+  subject     String, required, trim
+  body        String, required
+  offerText   String, default null
+  imageUrl    String, default null
+  ctaLabel    String, default null
+  ctaUrl      String, default null
+  createdAt   Date (timestamps:true)
+  updatedAt   Date (timestamps:true)
+
+No layout, color, font, or design fields exist yet.
+
+=== EDITABLE_FIELDS (backend/routes/emailTemplates.js:19) ===
+
+  ['name', 'type', 'subject', 'body', 'offerText', 'imageUrl', 'ctaLabel', 'ctaUrl']
+
+=== uploadToCloudinary — DEFINITION ===
+
+  File: backend/routes/push.js:25-49
+  Signature: async function uploadToCloudinary(base64Data) -> string|null
+  Returns:   data.secure_url || null
+  Cloudinary response fields used: secure_url only.
+  Width and height are available in the response (data.width, data.height)
+  but not currently returned.
+  Env vars: CLOUDINARY_CLOUD_NAME, CLOUDINARY_UPLOAD_PRESET
+
+  Exported at push.js:743 as module.exports.uploadToCloudinary
+
+=== uploadToCloudinary — CALLERS ===
+
+  1. backend/routes/push.js:657,661 — POST /send-store, converts
+     desktopImageUrl/mobileImageUrl from data: to CDN URLs.
+  2. backend/server.js:647,650 — processFestivalQueue() poller, same
+     conversion for festival push jobs (imports via pushRouter.uploadToCloudinary).
+
+  No other callers; the script backend/scripts/fetch-festival-images.js has its
+  own local uploadToCloudinary (different function, not shared).
+
+=== express.json BODY-SIZE LIMIT (backend/server.js:71) ===
+
+  limit: '10mb'
+
+  An 8 MB binary image encoded as base64 → ~10.67 MB of JSON.
+  10 MB global limit is BELOW what the /photo route needs.
+  The global limit must be respected (spec says don't raise it).
+  A route-scoped express.json({ limit: '11mb' }) is required — but note:
+  with Express 4, the global app.use() body parser runs before route
+  middleware, so it will reject >10 MB requests before the route handler
+  runs. This gap is documented and must be noted in the self-audit.
+
+=== express-rate-limit ===
+
+  YES — installed. backend/package.json: "express-rate-limit": "^8.7.0"
+  server.js uses it for eventsLimiter (60/min), pushLimiter (10/min),
+  attributionLimiter (30/min). rateLimit is imported at server.js:6.
+  The POST /photo route can use it; import directly in emailTemplates.js.
+
+=== Store FIELDS AVAILABLE (used by loadBrandData) ===
+
+  loadBrandData(shopDomain) in emailTemplates.js:62 selects:
+    shopName, logoUrl, primaryColor, voice
+  (shopDomain is the query key, not selected)
+
+  Store model has: shopDomain, accessToken, ownerEmail, timezone, plan,
+  voice, caps, quietHours, onboarding, pushStats, lastSignalRunAt, popup,
+  shopName, logoUrl, primaryColor (inferred from use in loadBrandData).
+
+=== POST /seed CURRENT CODE PATH ===
+
+  1. Find all templates for shop, collect types in a Set.
+  2. Compute missingTypes = VALID_TYPES.filter(t => !existingTypes.has(t)).
+  3. If 0 missing → return { templates, seeded:false }.
+  4. loadBrandData → storeName, voice.
+  5. nextFestivalName().
+  6. generateTemplateCopy() for each missing type in parallel.
+  7. Re-check DB (concurrency guard).
+  8. insertMany only types not found in re-check.
+  9. Return 201 { templates, seeded:true } or 200 { seeded:false }.
+  Docs inserted: { shopDomain, type, name, subject, body,
+                   offerText, imageUrl:null, ctaLabel:null, ctaUrl:null }
+  No design fields in the inserted docs.
+
+=== BASELINE TEST COUNT ===
+
+  614 tests pass (39 suites) — cd backend && npm test
