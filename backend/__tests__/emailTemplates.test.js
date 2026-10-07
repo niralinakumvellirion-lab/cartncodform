@@ -713,12 +713,28 @@ describe('POST /seed', () => {
     return { _id: `s_${type}`, shopDomain: SHOP, type, name, subject: `Sub ${type}`, body: `Body ${type}`, imageUrl: null, ctaLabel: null, ctaUrl: null };
   }
 
+  // Helpers to build mock return values for the two find call shapes used
+  // by the seed route: lean type-check and full sort-for-return.
+  function mockFindLean(typeDocs) {
+    return { select: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue(typeDocs) }) };
+  }
+  function mockFindSort(docs) {
+    return { sort: jest.fn().mockResolvedValue(docs) };
+  }
+
+  const ALL_3_LEAN = [
+    { type: 'special_offer' },
+    { type: 'festival' },
+    { type: 'normal' },
+  ];
+  const ALL_3_DOCS = [
+    seedDoc('special_offer', 'Starter: Special offer'),
+    seedDoc('festival', 'Starter: Navratri'),
+    seedDoc('normal', 'Starter: Welcome message'),
+  ];
+
   beforeEach(() => {
-    EmailTemplate.insertMany.mockResolvedValue([
-      seedDoc('special_offer', 'Starter: Special offer'),
-      seedDoc('festival', 'Starter: Navratri'),
-      seedDoc('normal', 'Starter: Welcome message'),
-    ]);
+    EmailTemplate.insertMany.mockResolvedValue(ALL_3_DOCS);
   });
 
   test('route ordering: /seed is registered before /:id', () => {
@@ -730,8 +746,13 @@ describe('POST /seed', () => {
     expect(seedIdx).toBeLessThan(idIdx);
   });
 
-  test('happy path: creates 3 templates (one per type) and returns seeded:true', async () => {
-    EmailTemplate.countDocuments.mockResolvedValue(0);
+  test('happy path: 0 existing → creates all 3 types and returns seeded:true', async () => {
+    // find calls: initial lean, recheck lean, final sort
+    EmailTemplate.find
+      .mockReturnValueOnce(mockFindLean([]))
+      .mockReturnValueOnce(mockFindLean([]))
+      .mockReturnValueOnce(mockFindSort(ALL_3_DOCS));
+
     const res = mockRes();
     await seed({ shopDomain: SHOP }, res);
 
@@ -747,28 +768,123 @@ describe('POST /seed', () => {
     expect(docs.every(d => d.shopDomain === SHOP)).toBe(true);
   });
 
-  test('idempotent: count > 0 returns existing templates, seeded:false, no LLM calls', async () => {
-    EmailTemplate.countDocuments.mockResolvedValue(2);
-    const existing = [makeTemplate({ name: 'Old A' }), makeTemplate({ name: 'Old B' })];
-    EmailTemplate.find.mockReturnValue({ sort: jest.fn().mockResolvedValue(existing) });
+  test('all 3 types present → seeded:false, no LLM calls, no insertMany', async () => {
+    // find calls: initial lean (all 3 present), final sort
+    EmailTemplate.find
+      .mockReturnValueOnce(mockFindLean(ALL_3_LEAN))
+      .mockReturnValueOnce(mockFindSort(ALL_3_DOCS));
 
     const res = mockRes();
     await seed({ shopDomain: SHOP }, res);
 
     expect(res.statusCode).toBe(200);
     expect(res.body.seeded).toBe(false);
-    expect(res.body.templates).toHaveLength(2);
+    expect(res.body.templates).toHaveLength(3);
     expect(mockGenerateTemplateCopy).not.toHaveBeenCalled();
     expect(EmailTemplate.insertMany).not.toHaveBeenCalled();
   });
 
+  test('partial seed (only festival) → seeds special_offer + normal, keeps festival, ends with 3', async () => {
+    const newDocs = [
+      seedDoc('special_offer', 'Starter: Special offer'),
+      seedDoc('normal', 'Starter: Welcome message'),
+    ];
+    EmailTemplate.insertMany.mockResolvedValueOnce(newDocs);
+
+    // find calls: initial lean (festival only), recheck lean (same), final sort (all 3)
+    EmailTemplate.find
+      .mockReturnValueOnce(mockFindLean([{ type: 'festival' }]))
+      .mockReturnValueOnce(mockFindLean([{ type: 'festival' }]))
+      .mockReturnValueOnce(mockFindSort(ALL_3_DOCS));
+
+    const res = mockRes();
+    await seed({ shopDomain: SHOP }, res);
+
+    expect(res.statusCode).toBe(201);
+    expect(res.body.seeded).toBe(true);
+    expect(res.body.templates).toHaveLength(3);
+
+    // Only 2 types generated and inserted — festival was already present
+    expect(mockGenerateTemplateCopy).toHaveBeenCalledTimes(2);
+    const generatedTypes = mockGenerateTemplateCopy.mock.calls.map(c => c[2]);
+    expect(generatedTypes).toContain('special_offer');
+    expect(generatedTypes).toContain('normal');
+    expect(generatedTypes).not.toContain('festival');
+
+    expect(EmailTemplate.insertMany).toHaveBeenCalledTimes(1);
+    const inserted = EmailTemplate.insertMany.mock.calls[0][0];
+    expect(inserted).toHaveLength(2);
+    expect(inserted.find(d => d.type === 'special_offer')).toBeDefined();
+    expect(inserted.find(d => d.type === 'normal')).toBeDefined();
+    expect(inserted.find(d => d.type === 'festival')).toBeUndefined();
+  });
+
+  test('all 3 types + merchant extra templates → seeded:false, no insertMany', async () => {
+    // Shop has all 3 starters plus a merchant-created extra normal template
+    const extraLean = [
+      { type: 'special_offer' },
+      { type: 'festival' },
+      { type: 'normal' },
+      { type: 'normal' },  // merchant's own extra
+    ];
+    const allDocs = [...ALL_3_DOCS, seedDoc('normal', 'My own sale')];
+    EmailTemplate.find
+      .mockReturnValueOnce(mockFindLean(extraLean))
+      .mockReturnValueOnce(mockFindSort(allDocs));
+
+    const res = mockRes();
+    await seed({ shopDomain: SHOP }, res);
+
+    expect(res.statusCode).toBe(200);
+    expect(res.body.seeded).toBe(false);
+    expect(res.body.templates).toHaveLength(4);
+    expect(mockGenerateTemplateCopy).not.toHaveBeenCalled();
+    expect(EmailTemplate.insertMany).not.toHaveBeenCalled();
+  });
+
+  test('concurrent double-seed → second call skips insert (re-check sees types already present)', async () => {
+    // Simulates two near-concurrent calls. Both see 0 initially. The second
+    // call's re-check sees the types inserted by the first call → 0 docs to
+    // insert → seeded:false returned, no duplicate types created.
+    EmailTemplate.find
+      // First call: initial lean → empty
+      .mockReturnValueOnce(mockFindLean([]))
+      // First call: recheck lean → empty (inserts 3)
+      .mockReturnValueOnce(mockFindLean([]))
+      // First call: final sort
+      .mockReturnValueOnce(mockFindSort(ALL_3_DOCS))
+      // Second call: initial lean → empty (race: first call hasn't inserted yet)
+      .mockReturnValueOnce(mockFindLean([]))
+      // Second call: recheck lean → all 3 present (first call has now inserted)
+      .mockReturnValueOnce(mockFindLean(ALL_3_LEAN))
+      // Second call: final sort
+      .mockReturnValueOnce(mockFindSort(ALL_3_DOCS));
+
+    const res1 = mockRes();
+    const res2 = mockRes();
+    await seed({ shopDomain: SHOP }, res1);
+    await seed({ shopDomain: SHOP }, res2);
+
+    // insertMany called exactly once — second call had nothing to insert
+    expect(EmailTemplate.insertMany).toHaveBeenCalledTimes(1);
+    expect(res1.statusCode).toBe(201);
+    expect(res1.body.seeded).toBe(true);
+    // Second call: re-check filtered everything out → seeded:false, no insert
+    expect(res2.statusCode).toBe(200);
+    expect(res2.body.seeded).toBe(false);
+    expect(res2.body.templates).toHaveLength(3);
+  });
+
   test('festival type passes nextFestivalName (non-null string) as productTitle; others pass null', async () => {
-    EmailTemplate.countDocuments.mockResolvedValue(0);
+    EmailTemplate.find
+      .mockReturnValueOnce(mockFindLean([]))
+      .mockReturnValueOnce(mockFindLean([]))
+      .mockReturnValueOnce(mockFindSort(ALL_3_DOCS));
+
     const res = mockRes();
     await seed({ shopDomain: SHOP }, res);
 
     const calls = mockGenerateTemplateCopy.mock.calls;
-    // Promise.all order: special_offer, festival, normal
     const specialCall = calls.find(c => c[2] === 'special_offer');
     const festivalCall = calls.find(c => c[2] === 'festival');
     const normalCall  = calls.find(c => c[2] === 'normal');
@@ -780,8 +896,12 @@ describe('POST /seed', () => {
   });
 
   test('fallback copy (fallback:true) still creates all 3 templates', async () => {
-    EmailTemplate.countDocuments.mockResolvedValue(0);
     mockGenerateTemplateCopy.mockResolvedValue({ subject: 'A note from our store', body: 'Starter body.', fallback: true });
+
+    EmailTemplate.find
+      .mockReturnValueOnce(mockFindLean([]))
+      .mockReturnValueOnce(mockFindLean([]))
+      .mockReturnValueOnce(mockFindSort(ALL_3_DOCS));
 
     const res = mockRes();
     await seed({ shopDomain: SHOP }, res);

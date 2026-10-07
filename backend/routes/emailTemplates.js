@@ -135,63 +135,87 @@ router.get('/count', requireAuth, async (req, res) => {
 });
 
 // POST /api/email-templates/seed — declared before /:id routes.
-// Idempotent: if any templates already exist, returns them without touching the LLM.
+// Self-healing: checks which of the 3 required types are present, then
+// generates + inserts only the missing ones. Partial seeds from prior
+// failed runs are repaired on the next visit.
+// NOTE: if a merchant deliberately deleted a starter type, re-visiting
+// the admin will re-create it; that is acceptable for a starter set.
+//
+// Concurrency (React StrictMode double-call): a re-check of the DB
+// immediately before insertMany ensures that if a concurrent request
+// already inserted a type between our initial check and the insert, we
+// skip that type and do not create duplicates.
 router.post('/seed', requireAuth, async (req, res) => {
   try {
-    const existing = await EmailTemplate.countDocuments({ shopDomain: req.shopDomain });
-    if (existing > 0) {
+    // 1. Which of the 3 required types already exist for this shop?
+    const existingLean = await EmailTemplate.find({ shopDomain: req.shopDomain })
+      .select('type').lean();
+    const existingTypes = new Set(existingLean.map(t => t.type));
+    const missingTypes = VALID_TYPES.filter(t => !existingTypes.has(t));
+
+    // All 3 types are present — nothing to do (extra merchant templates
+    // beyond the 3 starter types are irrelevant to this check).
+    if (missingTypes.length === 0) {
       const templates = await EmailTemplate.find({ shopDomain: req.shopDomain })
         .sort({ createdAt: -1 });
       return res.json({ templates, seeded: false });
     }
 
+    // 2. Generate copy for each missing type in parallel.
     const { storeName, voice } = await loadBrandData(req.shopDomain);
     const festivalName = nextFestivalName();
 
-    const [specialResult, festivalResult, normalResult] = await Promise.all([
-      generateTemplateCopy(req.shopDomain, storeName, 'special_offer', null, voice),
-      generateTemplateCopy(req.shopDomain, storeName, 'festival', festivalName, voice),
-      generateTemplateCopy(req.shopDomain, storeName, 'normal', null, voice),
-    ]);
+    const generated = await Promise.all(
+      missingTypes.map(type =>
+        generateTemplateCopy(
+          req.shopDomain, storeName, type,
+          type === 'festival' ? festivalName : null,
+          voice
+        ).then(r => ({ type, r }))
+      )
+    );
 
-    const templates = await EmailTemplate.insertMany([
-      {
-        shopDomain: req.shopDomain,
-        type: 'special_offer',
-        name: 'Starter: Special offer',
-        subject: specialResult.subject,
-        body: specialResult.body,
-        offerText: specialResult.offerText || null,
-        imageUrl: null,
-        ctaLabel: null,
-        ctaUrl: null,
-      },
-      {
-        shopDomain: req.shopDomain,
-        type: 'festival',
-        name: `Starter: ${festivalName}`,
-        subject: festivalResult.subject,
-        body: festivalResult.body,
-        offerText: festivalResult.offerText || null,
-        imageUrl: null,
-        ctaLabel: null,
-        ctaUrl: null,
-      },
-      {
-        shopDomain: req.shopDomain,
-        type: 'normal',
-        name: 'Starter: Welcome message',
-        subject: normalResult.subject,
-        body: normalResult.body,
-        offerText: normalResult.offerText || null,
-        imageUrl: null,
-        ctaLabel: null,
-        ctaUrl: null,
-      },
-    ]);
+    const STARTER_NAMES = {
+      special_offer: 'Starter: Special offer',
+      festival: `Starter: ${festivalName}`,
+      normal: 'Starter: Welcome message',
+    };
 
-    console.log(`[email-templates] seeded ${templates.length} starter templates for ${req.shopDomain}`);
-    return res.status(201).json({ templates, seeded: true });
+    // 3. Re-check immediately before inserting to handle a concurrent
+    //    seed request that ran while we were awaiting generateTemplateCopy.
+    //    Any type already created by the concurrent call is filtered out.
+    const recheckLean = await EmailTemplate.find({ shopDomain: req.shopDomain })
+      .select('type').lean();
+    const recheckTypes = new Set(recheckLean.map(t => t.type));
+
+    const docsToInsert = generated
+      .filter(({ type }) => !recheckTypes.has(type))
+      .map(({ type, r }) => ({
+        shopDomain: req.shopDomain,
+        type,
+        name: STARTER_NAMES[type],
+        subject: r.subject,
+        body: r.body,
+        offerText: r.offerText || null,
+        imageUrl: null,
+        ctaLabel: null,
+        ctaUrl: null,
+      }));
+
+    if (docsToInsert.length > 0) {
+      await EmailTemplate.insertMany(docsToInsert);
+      console.log(`[email-templates] seeded ${docsToInsert.length} starter template(s) for ${req.shopDomain}`);
+    }
+
+    // 4. Return the full template list for this shop.
+    const allTemplates = await EmailTemplate.find({ shopDomain: req.shopDomain })
+      .sort({ createdAt: -1 });
+
+    // docsToInsert may be empty if a concurrent call beat us to the insert.
+    if (docsToInsert.length === 0) {
+      return res.json({ templates: allTemplates, seeded: false });
+    }
+    return res.status(201).json({ templates: allTemplates, seeded: true });
   } catch (err) {
     console.error('[email-templates] seed error:', err.message);
     return res.status(500).json({ error: 'Failed to seed templates' });

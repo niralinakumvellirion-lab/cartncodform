@@ -1,0 +1,178 @@
+AUDIT — seed creates only festival, special_offer + normal missing
+Date: 2026-10-07
+
+────────────────────────────────────────────────────────────────
+1. DOES /seed BUILD ALL 3 TEMPLATE OBJECTS, OR CAN ONE BE SKIPPED?
+────────────────────────────────────────────────────────────────
+
+The seed builds all 3 unconditionally:
+
+  const [specialResult, festivalResult, normalResult] = await Promise.all([...])
+  const templates = await EmailTemplate.insertMany([
+    { ... special_offer ... },   // index 0
+    { ... festival ... },        // index 1
+    { ... normalResult ... },    // index 2
+  ]);
+
+`generateTemplateCopy` NEVER throws and NEVER returns undefined/empty
+subject or body. Every code path falls back:
+
+  cache hit   → { subject: hit.subject || fb.subject, body: hit.body || fb.body, ... }
+  !hasKey()   → { ...fb, offerText: fallbackOfferText(), fallback: true }
+  LLM error   → { ...fb, offerText: fallbackOfferText(), fallback: true }
+  LLM success → { subject: parsed.subject || fb.subject, body: parsed.body || fb.body, ... }
+
+So subject and body are always populated from FALLBACK_TEMPLATE if the LLM
+produces nothing. The 3 result objects passed to insertMany will always have
+valid, non-empty subject and body. No doc is skipped in the Promise.all.
+
+────────────────────────────────────────────────────────────────
+2. SCHEMA REQUIRED FIELDS — CAN VALIDATION DROP A DOC?
+────────────────────────────────────────────────────────────────
+
+Required in EmailTemplate schema:
+  shopDomain (String, required)
+  type       (String, enum + required)
+  name       (String, required)
+  subject    (String, required, trim)
+  body       (String, required)
+
+NOT required: offerText, imageUrl, ctaLabel, ctaUrl
+
+All 3 seed docs always have all required fields populated (subject and body
+from FALLBACK_TEMPLATE at worst). No Mongoose validation failure is possible
+from the current return shape.
+
+Mongoose insertMany with ordered:true (default) validates ALL documents
+client-side before sending the batch. If ANY document fails Mongoose
+validation the entire call throws with no DB writes. If all 3 pass Mongoose
+validation, they are sent to MongoDB as an ordered batch.
+
+────────────────────────────────────────────────────────────────
+3. DID THE offerText CHANGE BREAK special_offer OR normal?
+────────────────────────────────────────────────────────────────
+
+The return shape changed from { subject, body, fallback } to
+{ subject, body, offerText, fallback }. The seed now reads
+`specialResult.offerText || null` etc.
+
+No breakage:
+  special_offer (no key): { ...fb, offerText: 'Special offer inside', fallback: true }
+    → subject = 'A note from our store'  ✓
+    → body    = 'We have something...'   ✓
+
+  festival (no key): { ...fb, offerText: '<festivalName> Special', fallback: true }
+    → subject = 'Greetings from our store'  ✓
+    → body    = 'We hope this season...'    ✓
+
+  normal (no key): { ...fb, offerText: null, fallback: true }
+    → subject = 'An update from our store'  ✓
+    → body    = 'We wanted to share...'     ✓
+
+All 3 types return valid objects regardless of LLM availability.
+
+────────────────────────────────────────────────────────────────
+4. DOES offerText: null FAIL VALIDATION?
+────────────────────────────────────────────────────────────────
+
+Schema: offerText: { type: String, default: null }
+No `required: true`. Mongoose accepts null. No validation error.
+
+For normal type: offerText is always null (LLM returns "" → falsy →
+fallbackOfferText() → null). This is valid.
+
+────────────────────────────────────────────────────────────────
+5. insertMany ORDER AND PARTIAL-COMMIT BEHAVIOR
+────────────────────────────────────────────────────────────────
+
+Insert order: [special_offer (0), festival (1), normal (2)]
+
+With ordered:true (MongoDB default):
+  If doc[0] fails at DB level → 0 docs committed → festival not present
+  If doc[1] fails at DB level → doc[0] committed → special_offer only
+  If doc[2] fails at DB level → docs[0,1] committed → special_offer + festival
+
+None of these patterns produce "only festival."
+
+For "only festival" to appear from a single insertMany run, festival would
+have to be at index 0 — but it is at index 1. This pattern cannot come from
+a single ordered insertMany execution on the current code.
+
+────────────────────────────────────────────────────────────────
+6. MENTAL RUN: LLM_API_KEY SET vs UNSET
+────────────────────────────────────────────────────────────────
+
+KEY ABSENT:
+  All 3 calls hit the !hasKey() branch simultaneously and immediately
+  return their fallback objects. Promise.all resolves with 3 valid objects.
+  insertMany gets 3 docs with populated required fields → should succeed.
+  Expected result: 3 templates created, seeded: true.
+
+KEY PRESENT:
+  All 3 calls make parallel LLM requests (3×~500 token calls).
+  Each has a 10 s AbortController timeout. Results are cached per cacheKey.
+  If any call exceeds 10 s, that type gets its fallback (valid subject/body).
+  insertMany gets 3 docs → should succeed.
+  Expected result: 3 templates created, seeded: true.
+
+In neither case should "only festival" result from a fresh seed on the
+current code.
+
+────────────────────────────────────────────────────────────────
+ROOT CAUSE: THE IDEMPOTENCY GUARD IS TOO COARSE
+────────────────────────────────────────────────────────────────
+
+The guard:
+
+  const existing = await EmailTemplate.countDocuments({ shopDomain });
+  if (existing > 0) { return existing templates, seeded: false }
+
+A PREVIOUS seed run created only 1 template (festival). This locked the
+store permanently at 1 template. Every subsequent seed call hits
+`existing > 0` and returns that 1 template without creating the other 2.
+
+How the prior run created only festival is the secondary question. Plausible
+causes:
+
+A. The very first seed commit (`30af302 feat: auto-seed...`) may have had
+   a different implementation. If that code had a bug (wrong order of ops,
+   one generate call throwing before it was caught, or a different insertMany
+   structure), it could have left 1 doc. The current code is correct but the
+   DB state from the old run persists.
+
+B. A transient MongoDB error during insertMany of the old code: with
+   ordered:true, if doc[0] (special_offer) failed at the MONGODB level (not
+   Mongoose), MongoDB committed 0 docs. If special_offer and normal failed
+   but festival somehow got in — that's impossible with ordered insertMany
+   in the [SO, festival, normal] order (festival is at index 1; doc[0] must
+   succeed for doc[1] to be attempted). So this scenario requires the insert
+   order to have been different at commit 30af302.
+
+C. React StrictMode / double-effect: the frontend's `loadTemplates → runSeed`
+   fires twice in development (StrictMode). Two concurrent seed requests
+   could both see `existing = 0` before either inserts. Both call insertMany.
+   The first insertMany creates 3 docs (existing = 3). The second insertMany
+   hits a duplicate-key conflict if there's a unique index, or inserts 3 more
+   if there isn't. EmailTemplate has no unique index on (shopDomain, type),
+   so both insertMany calls would succeed → 6 docs. The user would see
+   6 templates, not 1. So this doesn't explain "only festival."
+
+THE MOST LIKELY SCENARIO: The `feat: auto-seed` commit had a different
+insertMany structure or a different error-handling path that created only
+the festival template under some condition. The idempotency check then locked
+the store into that state. The current code is correct but cannot self-heal.
+
+────────────────────────────────────────────────────────────────
+FIX (not implemented — audit only)
+────────────────────────────────────────────────────────────────
+
+Change the guard from `existing > 0` to `existing >= VALID_TYPES.length` (3).
+Then stores with a partial seed (1 or 2 templates) will be re-seeded on the
+next visit. Existing complete installs (3 templates) won't be touched.
+
+Alternatively, add a per-type check: if any of the 3 types is missing,
+seed just the missing ones.
+
+Also: the idempotency early-return should do
+  EmailTemplate.find({ shopDomain }).sort({ createdAt: -1 })
+only AFTER confirming count >= 3, not on any count > 0.
