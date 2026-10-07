@@ -50,6 +50,7 @@ const DS = {
 };
 
 const TYPE_LABELS = { special_offer: 'Special offer', festival: 'Festival', normal: 'Normal' };
+const STARTER_TYPES = ['special_offer', 'festival', 'normal'];
 
 const TYPE_COLORS = {
   special_offer: { bg: '#fef3c7', text: '#b45309' },
@@ -158,6 +159,7 @@ export default function EmailTemplatesScreen() {
 
   const [seeding, setSeeding]       = useState(false);
   const [seedError, setSeedError]   = useState('');
+  const [seedCount, setSeedCount]   = useState(0);
   const [justSeeded, setJustSeeded] = useState(false);
 
   useEffect(() => { loadTemplates(); }, []);
@@ -189,9 +191,11 @@ export default function EmailTemplatesScreen() {
       const data = await apiGet('/api/email-templates');
       const list = data.templates || [];
       setTemplates(list);
-      if (list.length === 0) {
+      const presentTypes = new Set(list.map(t => t.type));
+      const needsSeed = STARTER_TYPES.some(type => !presentTypes.has(type));
+      if (needsSeed) {
         setLoading(false);
-        await runSeed();
+        await runSeed(list.length);
         return;
       }
     } catch (e) {
@@ -201,13 +205,18 @@ export default function EmailTemplatesScreen() {
     }
   }
 
-  async function runSeed() {
+  async function runSeed(prevCount = 0) {
     setSeeding(true);
     setSeedError('');
     try {
       const data = await apiSend('/api/email-templates/seed', 'POST', {});
-      setTemplates(data.templates || []);
-      if (data.seeded) setJustSeeded(true);
+      const newList = data.templates || [];
+      setTemplates(newList);
+      const added = newList.length - prevCount;
+      if (data.seeded && added > 0) {
+        setSeedCount(added);
+        setJustSeeded(true);
+      }
     } catch (e) {
       setSeedError(e.message || 'Could not generate starter templates.');
     } finally {
@@ -450,7 +459,7 @@ export default function EmailTemplatesScreen() {
           padding: '12px 16px', marginBottom: 16, gap: 12,
         }}>
           <p style={{ fontSize: 13, color: '#166534', margin: 0 }}>
-            We drafted 3 starter templates for you. Edit them to fit your brand, or send them as-is.
+            We drafted {seedCount} starter template{seedCount !== 1 ? 's' : ''} for you. Edit them to fit your brand, or send them as-is.
           </p>
           <button
             style={{ background: 'none', border: 'none', fontSize: 18, lineHeight: 1, cursor: 'pointer', color: '#166534', padding: '0 4px', flexShrink: 0 }}
@@ -491,7 +500,7 @@ export default function EmailTemplatesScreen() {
             {!loading && !seeding && seedError && (
               <div style={{ padding: '20px 20px' }}>
                 <p style={{ fontSize: 13, color: '#dc2626', margin: '0 0 8px' }}>{seedError}</p>
-                <button style={{ ...DS.btnSecondary, fontSize: 12, padding: '5px 12px' }} onClick={runSeed}>
+                <button style={{ ...DS.btnSecondary, fontSize: 12, padding: '5px 12px' }} onClick={() => runSeed(templates.length)}>
                   Try again
                 </button>
               </div>
