@@ -17,6 +17,7 @@ const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key')
 
 const VALID_TYPES = ['special_offer', 'festival', 'normal'];
 const EDITABLE_FIELDS = ['name', 'type', 'subject', 'body', 'offerText', 'imageUrl', 'ctaLabel', 'ctaUrl'];
+const LAYOUT_BY_TYPE = { special_offer: 'poster', festival: 'float', normal: 'letter' };
 
 const VALID_SEGMENTS = ['everyone', 'email_captured', 'has_cart', 'bought_once', 'going_quiet'];
 const BROADCAST_CAP = 90;
@@ -233,14 +234,16 @@ router.get('/:id/preview', requireAuth, async (req, res) => {
     const { storeName, logoUrl, primaryColor } = await loadBrandData(req.shopDomain);
     const html = buildEmailHtml({
       subject: template.subject,
-      bodyHtml: template.body.replace(/\n/g, '<br>'),
-      offerText: template.offerText || undefined,
+      body: template.body,
+      offer: template.offerText || null,
       imageUrl: normalizeImageUrl(template.imageUrl),
       ctaLabel: template.ctaLabel,
       ctaUrl: template.ctaUrl,
       storeName,
       logoUrl,
       primaryColor,
+      layout: LAYOUT_BY_TYPE[template.type] || 'letter',
+      headline: template.subject,
     });
 
     return res.json({ html });
@@ -399,14 +402,16 @@ router.post('/:id/send', requireAuth, async (req, res) => {
     const { storeName, logoUrl, primaryColor } = await loadBrandData(req.shopDomain);
     const html = buildEmailHtml({
       subject: template.subject,
-      bodyHtml: template.body.replace(/\n/g, '<br>'),
-      offerText: template.offerText || undefined,
+      body: template.body,
+      offer: template.offerText || null,
       imageUrl: normalizeImageUrl(template.imageUrl),
       ctaLabel: template.ctaLabel,
       ctaUrl: template.ctaUrl,
       storeName,
       logoUrl,
       primaryColor,
+      layout: LAYOUT_BY_TYPE[template.type] || 'letter',
+      headline: template.subject,
     });
 
     const { data, error } = await resend.emails.send({
@@ -461,14 +466,16 @@ router.post('/:id/broadcast', requireAuth, async (req, res) => {
 
     const html = buildEmailHtml({
       subject: template.subject,
-      bodyHtml: template.body.replace(/\n/g, '<br>'),
-      offerText: template.offerText || undefined,
+      body: template.body,
+      offer: template.offerText || null,
       imageUrl: normalizeImageUrl(template.imageUrl),
       ctaLabel: template.ctaLabel,
       ctaUrl: template.ctaUrl,
       storeName,
       logoUrl,
       primaryColor,
+      layout: LAYOUT_BY_TYPE[template.type] || 'letter',
+      headline: template.subject,
     });
 
     let sent = 0;

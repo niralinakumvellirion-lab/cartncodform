@@ -48,6 +48,7 @@ test('e. shows logo img when logoUrl is present', () => {
     ...BASE,
     logoUrl: 'https://cdn.example.com/logo.png',
     storeName: 'Acme',
+    showLogo: true,
   });
   expect(html).toContain('<img');
   expect(html).toContain('https://cdn.example.com/logo.png');
@@ -122,15 +123,16 @@ test('n. bodyHtml is present in output unchanged', () => {
   expect(html).toContain('Line one<br>Line two');
 });
 
-test('o. offer ribbon renders only when offerText is set', () => {
+test('o. offer renders only when offerText is set', () => {
   const with_ = buildEmailHtml({ ...BASE, offerText: 'Navratri · 15% Off' });
-  // text-transform:uppercase is CSS-only — the string appears as-is in the HTML.
   expect(with_).toContain('Navratri');
-  expect(with_).toContain('text-transform:uppercase');
-  expect(with_).toContain('#f5f3ff');
+  // bigH class is used for the offer div (also appears in CSS; check the attribute)
+  expect(with_).toMatch(/class="bigH"/);
 
   const without = buildEmailHtml({ ...BASE });
-  expect(without).not.toContain('#f5f3ff');
+  expect(without).not.toContain('Navratri');
+  // No bigH element rendered (class name still in CSS block is fine)
+  expect(without).not.toMatch(/class="bigH"/);
 });
 
 test('p. trust line renders only when trustText is set', () => {

@@ -548,13 +548,15 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
 
   const html = buildEmailHtml({
     subject,
-    bodyHtml: body.replace(/\n/g, '<br>'),
+    body,
     imageUrl,
     ctaLabel: null,
     ctaUrl: null,
     storeName,
     logoUrl,
     primaryColor,
+    layout: 'hero',
+    showLogo: true,
   });
 
   const { data, error } = await resend.emails.send({

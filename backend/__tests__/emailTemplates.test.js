@@ -299,7 +299,7 @@ describe('GET /:id/preview', () => {
     expect(res.statusCode).toBe(200);
     expect(res.body.html).toBe('<html>rendered</html>');
     expect(mockBuildEmailHtml).toHaveBeenCalledWith(
-      expect.objectContaining({ subject: 'Sub', bodyHtml: 'Line 1<br>Line 2' })
+      expect.objectContaining({ subject: 'Sub', body: 'Line 1\nLine 2' })
     );
   });
 
@@ -308,7 +308,7 @@ describe('GET /:id/preview', () => {
     const res = mockRes();
     await preview({ shopDomain: SHOP, params: { id: TEMPLATE_ID } }, res);
     expect(mockBuildEmailHtml).toHaveBeenCalledWith(
-      expect.objectContaining({ offerText: 'Diwali Special' })
+      expect.objectContaining({ offer: 'Diwali Special' })
     );
   });
 
@@ -316,9 +316,9 @@ describe('GET /:id/preview', () => {
     EmailTemplate.findById.mockResolvedValue(makeTemplate({ offerText: null }));
     const res = mockRes();
     await preview({ shopDomain: SHOP, params: { id: TEMPLATE_ID } }, res);
-    // null || undefined → undefined; ribbon is hidden
+    // null || null → null; offer is hidden
     expect(mockBuildEmailHtml).toHaveBeenCalledWith(
-      expect.objectContaining({ offerText: undefined })
+      expect.objectContaining({ offer: null })
     );
   });
 

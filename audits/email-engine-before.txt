@@ -1,0 +1,54 @@
+AUDIT — email engine pre-implementation (Phase E1)
+Date: 2026-10-07
+
+=== CALLERS OF buildEmailHtml ===
+
+1. backend/routes/push.js:549
+   sendJourneyEmail (inside utils/push.js helpers)
+   Args passed:
+     { subject, bodyHtml: body.replace(/\n/g,'<br>'), imageUrl,
+       ctaLabel: null, ctaUrl: null, storeName, logoUrl, primaryColor }
+
+2. backend/routes/emailTemplates.js:234  (GET /:id/preview)
+   Args passed:
+     { subject: template.subject, bodyHtml: template.body.replace(/\n/g,'<br>'),
+       offerText: template.offerText || undefined,
+       imageUrl: normalizeImageUrl(template.imageUrl),
+       ctaLabel: template.ctaLabel, ctaUrl: template.ctaUrl,
+       storeName, logoUrl, primaryColor }
+
+3. backend/routes/emailTemplates.js:400  (POST /:id/send)
+   Same args as #2
+
+4. backend/routes/emailTemplates.js:462  (POST /:id/broadcast)
+   Same args as #2 (html built once, then sent per-recipient)
+
+=== EXPORTS OF backend/utils/email.js ===
+
+  FROM
+  UNSUBSCRIBE_HEADERS
+  buildEmailHtml
+  sendAbandonedCartEmail
+  sendNewCodOrderEmail
+  sendCodOrderConfirmationEmail
+  sendMarketingEmail
+
+=== TEST FILES TOUCHING buildEmailHtml ===
+
+backend/__tests__/buildEmailHtml.test.js
+  18 tests (labelled a–r), all unit/string tests, no mocks.
+  Tests cover: DOCTYPE, table-based layout, mobile @media query, logo vs
+  storeName header, image presence/https check, CTA button, primary color,
+  footer/unsubscribe, bodyHtml passthrough, offer ribbon (#f5f3ff), trust
+  line (trustText), header bg color, XSS escaping.
+
+backend/__tests__/emailTemplates.test.js
+  4 tests reference buildEmailHtml (via mockBuildEmailHtml):
+  - "renders HTML via buildEmailHtml" — checks bodyHtml:'Line 1<br>Line 2'
+  - "passes offerText to buildEmailHtml when template has it" — checks offerText
+  - "passes offerText as undefined when template has none" — checks offerText:undefined
+  - "sends email: calls buildEmailHtml + Resend with correct args" — checks subject+ctaUrl
+
+=== BASELINE TEST COUNT ===
+
+444 tests pass (38 suites) — cd backend && npm test
