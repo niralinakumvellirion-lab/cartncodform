@@ -16,7 +16,7 @@ const FESTIVALS = require('../data/festivals.json');
 const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
 
 const VALID_TYPES = ['special_offer', 'festival', 'normal'];
-const EDITABLE_FIELDS = ['name', 'type', 'subject', 'body', 'imageUrl', 'ctaLabel', 'ctaUrl'];
+const EDITABLE_FIELDS = ['name', 'type', 'subject', 'body', 'offerText', 'imageUrl', 'ctaLabel', 'ctaUrl'];
 
 const VALID_SEGMENTS = ['everyone', 'email_captured', 'has_cart', 'bought_once', 'going_quiet'];
 const BROADCAST_CAP = 90;
@@ -161,6 +161,7 @@ router.post('/seed', requireAuth, async (req, res) => {
         name: 'Starter: Special offer',
         subject: specialResult.subject,
         body: specialResult.body,
+        offerText: specialResult.offerText || null,
         imageUrl: null,
         ctaLabel: null,
         ctaUrl: null,
@@ -171,6 +172,7 @@ router.post('/seed', requireAuth, async (req, res) => {
         name: `Starter: ${festivalName}`,
         subject: festivalResult.subject,
         body: festivalResult.body,
+        offerText: festivalResult.offerText || null,
         imageUrl: null,
         ctaLabel: null,
         ctaUrl: null,
@@ -181,6 +183,7 @@ router.post('/seed', requireAuth, async (req, res) => {
         name: 'Starter: Welcome message',
         subject: normalResult.subject,
         body: normalResult.body,
+        offerText: normalResult.offerText || null,
         imageUrl: null,
         ctaLabel: null,
         ctaUrl: null,
@@ -207,6 +210,7 @@ router.get('/:id/preview', requireAuth, async (req, res) => {
     const html = buildEmailHtml({
       subject: template.subject,
       bodyHtml: template.body.replace(/\n/g, '<br>'),
+      offerText: template.offerText || undefined,
       imageUrl: normalizeImageUrl(template.imageUrl),
       ctaLabel: template.ctaLabel,
       ctaUrl: template.ctaUrl,
@@ -372,6 +376,7 @@ router.post('/:id/send', requireAuth, async (req, res) => {
     const html = buildEmailHtml({
       subject: template.subject,
       bodyHtml: template.body.replace(/\n/g, '<br>'),
+      offerText: template.offerText || undefined,
       imageUrl: normalizeImageUrl(template.imageUrl),
       ctaLabel: template.ctaLabel,
       ctaUrl: template.ctaUrl,
@@ -433,6 +438,7 @@ router.post('/:id/broadcast', requireAuth, async (req, res) => {
     const html = buildEmailHtml({
       subject: template.subject,
       bodyHtml: template.body.replace(/\n/g, '<br>'),
+      offerText: template.offerText || undefined,
       imageUrl: normalizeImageUrl(template.imageUrl),
       ctaLabel: template.ctaLabel,
       ctaUrl: template.ctaUrl,

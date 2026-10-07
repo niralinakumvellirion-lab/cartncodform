@@ -57,7 +57,7 @@ const TYPE_COLORS = {
   normal:        { bg: '#f0fdf4', text: '#16a34a' },
 };
 
-const EMPTY_FORM = { type: 'normal', name: '', subject: '', body: '', imageUrl: '', ctaLabel: '', ctaUrl: '' };
+const EMPTY_FORM = { type: 'normal', name: '', subject: '', body: '', offerText: '', imageUrl: '', ctaLabel: '', ctaUrl: '' };
 
 function TypeBadge({ type }) {
   const c = TYPE_COLORS[type] || { bg: '#f3f4f6', text: '#374151' };
@@ -223,6 +223,7 @@ export default function EmailTemplatesScreen() {
       name: t.name,
       subject: t.subject,
       body: t.body,
+      offerText: t.offerText || '',
       imageUrl: t.imageUrl || '',
       ctaLabel: t.ctaLabel || '',
       ctaUrl: t.ctaUrl || '',
@@ -354,7 +355,12 @@ export default function EmailTemplatesScreen() {
       const payload = { type: form.type };
       if (productTitle.trim()) payload.productTitle = productTitle.trim();
       const data = await apiSend('/api/email-templates/generate', 'POST', payload);
-      setForm(f => ({ ...f, subject: data.subject || f.subject, body: data.body || f.body }));
+      setForm(f => ({
+        ...f,
+        subject: data.subject || f.subject,
+        body: data.body || f.body,
+        offerText: data.offerText != null ? (data.offerText || '') : f.offerText,
+      }));
       setSaveOk(false);
       if (data.fallback) {
         setGenNotice('AI unavailable — starter draft filled in.');
@@ -557,7 +563,7 @@ export default function EmailTemplatesScreen() {
                 </div>
                 {genConfirm && (
                   <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 13, color: '#374151' }}>This will replace your current subject and body.</span>
+                    <span style={{ fontSize: 13, color: '#374151' }}>This will replace your current subject, body, and offer line.</span>
                     <button style={{ ...DS.btnSecondary, padding: '5px 12px', fontSize: 12 }} onClick={runGenerate}>Replace</button>
                     <button style={{ ...DS.btnSecondary, padding: '5px 12px', fontSize: 12 }} onClick={() => setGenConfirm(false)}>Cancel</button>
                   </div>
@@ -582,6 +588,10 @@ export default function EmailTemplatesScreen() {
 
               <Field label="Body">
                 <textarea style={DS.textarea} value={form.body} onChange={patch('body')} placeholder="Write your email body. Plain text; line breaks become <br> in the final email." />
+              </Field>
+
+              <Field label="Offer line (optional)">
+                <input style={DS.input} value={form.offerText} onChange={patch('offerText')} placeholder="e.g. Navratri Special · 15% off" maxLength={60} />
               </Field>
 
               <Field label="Product image URL (optional)">

@@ -1,0 +1,25 @@
+PRE-AUDIT — offerText/trustText wiring
+Date: 2026-10-07
+
+PROBLEM: buildEmailHtml now accepts offerText and trustText but nothing populates them.
+Ribbon and trust line never render.
+
+trustText verdict: Store model has no COD/shipping/free-shipping fields.
+Nothing truthful to show. trustText will remain unset (undefined) for all paths.
+No invented claims.
+
+offerText plan:
+  special_offer → "Special offer inside" (fallback) or AI-generated line
+  festival      → "<FestivalName> Special" (derived from productTitle arg) or AI-generated
+  normal        → null (no ribbon)
+
+Cache strategy: CopyCache.title field is unused for email-template channel.
+Repurpose it to store offerText, avoiding a schema change.
+
+FILES TO CHANGE:
+  backend/models/EmailTemplate.js      add offerText field
+  backend/services/aiService.js        prompt + fallback + cache read/write + return
+  backend/routes/emailTemplates.js     EDITABLE_FIELDS + preview/send/broadcast/seed
+  frontend/app/admin/screens/EmailTemplates.jsx  form field + generate wiring
+  backend/__tests__/aiService.test.js  new offerText test
+  backend/__tests__/emailTemplates.test.js  offerText passthrough test

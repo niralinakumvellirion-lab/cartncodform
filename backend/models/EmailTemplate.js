@@ -8,6 +8,7 @@ const emailTemplateSchema = new Schema(
     name: { type: String, required: true, trim: true },
     subject: { type: String, required: true, trim: true },
     body: { type: String, required: true },
+    offerText: { type: String, default: null },
     imageUrl: { type: String, default: null },
     ctaLabel: { type: String, default: null },
     ctaUrl: { type: String, default: null },

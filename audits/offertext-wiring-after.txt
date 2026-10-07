@@ -1,0 +1,33 @@
+SELF-AUDIT — offerText/trustText wiring
+Date: 2026-10-07
+
+FILES CHANGED
+  backend/models/EmailTemplate.js           +offerText field
+  backend/services/aiService.js             prompt, fallbacks, cache, return
+  backend/routes/emailTemplates.js          EDITABLE_FIELDS, preview/send/broadcast/seed
+  frontend/app/admin/screens/EmailTemplates.jsx  form field, generate wiring, confirm text
+  backend/__tests__/aiService.test.js       +5 offerText tests
+  backend/__tests__/emailTemplates.test.js  +2 offerText passthrough tests
+
+offerText PER PATH
+  /preview          template.offerText || undefined
+  /send             template.offerText || undefined
+  /broadcast        template.offerText || undefined (one html built before the per-recipient loop)
+  /seed             specialResult.offerText / festivalResult.offerText / normalResult.offerText
+  /generate         returns offerText from LLM (or fallback per type)
+  AI generate rules:
+    special_offer → LLM-generated offer line, fallback "Special offer inside"
+    festival      → LLM-generated, fallback "<FestivalName> Special" (from productTitle arg)
+    normal        → empty string → null (no ribbon)
+
+  Cache strategy: CopyCache.title field (previously unused for email-template channel)
+  now stores offerText. No schema change needed.
+
+trustText decision:
+  Store model has no COD/shipping/free-shipping/returns fields.
+  No truthful claim to show. trustText left undefined for all paths.
+  No invented claims added.
+
+TESTS
+  441/441 pass (38 suites). 6 new tests added.
+  Frontend: `npm run build` compiles successfully.

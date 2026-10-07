@@ -74,10 +74,9 @@ test('h. includes hero image when imageUrl is https://', () => {
 
 test('i. skips CTA button when ctaUrl is absent', () => {
   const html = buildEmailHtml({ ...BASE, ctaUrl: null });
-  // No anchor tag with href that points to a ctaUrl.
-  // The only anchor is the unsubscribe link in the footer (href="#").
-  const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map(m => m[1]);
-  expect(hrefs.every(h => h === '#')).toBe(true);
+  // No ctaUrl in the output — only the unsubscribe mailto link is present.
+  expect(html).not.toContain('https://example.com');
+  expect(html).toContain('mailto:unsubscribe@shopireachboost.com');
 });
 
 test('j. includes CTA button (table-based anchor) when ctaUrl is present', () => {
@@ -121,4 +120,50 @@ test('m. footer contains storeName and unsubscribe link', () => {
 test('n. bodyHtml is present in output unchanged', () => {
   const html = buildEmailHtml({ ...BASE, bodyHtml: 'Line one<br>Line two' });
   expect(html).toContain('Line one<br>Line two');
+});
+
+test('o. offer ribbon renders only when offerText is set', () => {
+  const with_ = buildEmailHtml({ ...BASE, offerText: 'Navratri · 15% Off' });
+  // text-transform:uppercase is CSS-only — the string appears as-is in the HTML.
+  expect(with_).toContain('Navratri');
+  expect(with_).toContain('text-transform:uppercase');
+  expect(with_).toContain('#f5f3ff');
+
+  const without = buildEmailHtml({ ...BASE });
+  expect(without).not.toContain('#f5f3ff');
+});
+
+test('p. trust line renders only when trustText is set', () => {
+  const with_ = buildEmailHtml({ ...BASE, trustText: 'Free shipping on orders above ₹499' });
+  // ₹ is not an HTML special char — it passes through unchanged.
+  expect(with_).toContain('Free shipping on orders above ₹499');
+
+  const without = buildEmailHtml({ ...BASE });
+  // Spot-check: "Free shipping" should not appear in a baseline render
+  expect(without).not.toContain('Free shipping');
+});
+
+test('q. primaryColor is applied to brand header bar background', () => {
+  const html = buildEmailHtml({ ...BASE, primaryColor: '#e63946' });
+  // The header <td> bgcolor and inline style must carry the brand color.
+  expect(html).toMatch(/bgcolor="#e63946"/);
+  expect(html).toMatch(/background:#e63946/);
+});
+
+test('r. dynamic strings are HTML-escaped (XSS prevention)', () => {
+  const html = buildEmailHtml({
+    ...BASE,
+    subject: '<script>alert(1)</script>',
+    storeName: '&Acme" Co',
+    offerText: '<b>50% off</b>',
+    trustText: '<em>safe</em>',
+    ctaLabel: '<span>Buy</span>',
+    ctaUrl: 'https://example.com/',
+  });
+  expect(html).not.toContain('<script>');
+  expect(html).toContain('&lt;script&gt;');
+  expect(html).toContain('&amp;Acme&quot; Co');
+  expect(html).not.toContain('<b>50% off</b>');
+  expect(html).not.toContain('<em>safe</em>');
+  expect(html).not.toContain('<span>Buy</span>');
 });

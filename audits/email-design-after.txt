@@ -1,0 +1,40 @@
+SELF-AUDIT — buildEmailHtml "Bold Commerce" redesign
+Date: 2026-10-07
+
+FILES CHANGED
+  backend/utils/email.js               — buildEmailHtml rewritten
+  backend/__tests__/buildEmailHtml.test.js — tests updated + 4 new tests added
+
+SPEC CHECKLIST
+  [x] Same function signature (all existing params kept)
+  [x] New optional params: offerText, trustText
+  [x] DOCTYPE + charset + viewport + <style> + body bgcolor
+  [x] Outer table #f4f4f6, inner 600px #ffffff, border-radius 14
+  [x] Brand header bar: bgcolor=primaryColor (fallback #4f46e5), logo OR storeName in white
+  [x] Hero image: https-only, skipped otherwise
+  [x] Offer ribbon: #f5f3ff bg, accent text, uppercase, letter-spacing; skipped when offerText absent
+      (fixed pale lavender chosen over computed tint — avoids fragile hex math; documented in JSDoc)
+  [x] Content: 34px 40px padding, h1 headline from subject (26px/800/-0.02em/#1a1a1a), bodyHtml div
+  [x] CTA: bulletproof table <td> bgcolor, radius 10, padding 15x44, bold; skipped when ctaUrl absent
+  [x] Trust line: optional span below CTA; skipped when trustText absent
+  [x] Footer: #faf9fb, storeName bold, "opted in" copy, mailto:unsubscribe@shopireachboost.com
+  [x] Escaping: subject, storeName, offerText, trustText, ctaLabel all via escapeHtml; bodyHtml unchanged
+  [x] URL validation: logoUrl accepts https/http; imageUrl and ctaUrl require https (ctaUrl also mailto:)
+  [x] Font stack ends in Arial,sans-serif throughout
+  [x] Mobile media queries: .ew width 100%, .ep padding 16/20, .eh font-size 22px, .ecta full-width CTA
+
+CALLERS — offerText sourcing
+  emailTemplates.js:207  preview   — no template.offerText field; left undefined (ribbon hidden)
+  emailTemplates.js:372  send      — same; left undefined
+  emailTemplates.js:433  broadcast — same; left undefined
+  push.js:549            journey   — no field; left undefined
+  No caller breakage — all new params are optional; existing callers unchanged.
+
+TESTS
+  Updated: test i — was "all hrefs are #", changed to "ctaUrl absent → mailto: unsubscribe link present"
+  Added:   test o — ribbon renders with offerText, hidden without
+  Added:   test p — trust line renders with trustText, hidden without
+  Added:   test q — primaryColor applied to header bar (bgcolor + inline style)
+  Added:   test r — XSS: script/html tags in subject/storeName/offerText/trustText/ctaLabel are escaped
+
+RESULT: 435/435 tests passing, 38 suites green.

@@ -1,0 +1,37 @@
+PRE-AUDIT — buildEmailHtml redesign
+Date: 2026-10-07
+
+FILE: backend/utils/email.js  (function buildEmailHtml, lines 74-136)
+CURRENT PARAMS: { subject, bodyHtml, imageUrl, ctaLabel, ctaUrl, storeName, logoUrl, primaryColor }
+STRUCTURE:
+  - Outer bgcolor table → 600px inner table
+  - Header: white band, logo or storeName in dark text (no brand color bar)
+  - Hero: https-only img row
+  - Body: padding 32px, -apple-system font stack, no headline treatment
+  - CTA: bulletproof button, radius 6, padding 14x28
+  - Footer: #f9fafb, storeName · Unsubscribe (#)
+  - Mobile: .email-wrapper/.email-body classes, no headline shrink
+
+MISSING vs spec:
+  - No brand-color header bar (headerContent is plain white)
+  - No offer ribbon
+  - No trust line
+  - Headline is inside bodyHtml, no separate h1 from subject
+  - Button radius 6 (spec: 10), padding 14x28 (spec: 15x44)
+  - Footer unsubscribe is href="#" (spec: mailto:unsubscribe@shopireachboost.com)
+  - Font stack in body starts with -apple-system (spec: must end with Arial,sans-serif)
+  - No body bgcolor for outer table (#f3f4f6 vs spec #f4f4f6 — minor)
+
+CALLERS of buildEmailHtml:
+  1. backend/routes/emailTemplates.js:207  (preview)
+  2. backend/routes/emailTemplates.js:372  (send)
+  3. backend/routes/emailTemplates.js:433  (broadcast)
+  4. backend/routes/push.js:549            (sendJourneyEmail)
+
+offerText sourcing plan:
+  - Templates: no dedicated field exists → pass undefined (ribbon hidden)
+  - Journey emails (push.js): no field → pass undefined (ribbon hidden)
+
+TEST FILE: backend/__tests__/buildEmailHtml.test.js (14 tests, a–n)
+TEST i will FAIL after change (checks hrefs.every(h === '#') but unsubscribe will be mailto:)
+All other tests expected to pass with new implementation.

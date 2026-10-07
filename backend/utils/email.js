@@ -52,56 +52,74 @@ function shell(innerHtml) {
 }
 
 /**
- * Build a complete, deliverable HTML email document.
+ * Build a complete, deliverable HTML email document — "Bold Commerce" design.
  *
- * Table-based single-column layout (600 px max) so Outlook desktop
- * degrades gracefully — square corners, no border-radius, readable text.
- * MSO VML rounded buttons and <!--[if mso]--> conditional comments are
- * deliberately omitted in this T1 pass; Outlook renders the button as
- * a flat blue-background link, which is acceptable.
+ * Table-based, 600px, inline styles. Outlook degrades acceptably (no VML):
+ * brand-color header bar, optional hero, optional offer ribbon, subject
+ * headline, body copy, bulletproof CTA button, optional trust line, footer.
+ *
+ * Ribbon pale tint uses a fixed #f5f3ff (light lavender) regardless of
+ * primaryColor — avoids fragile hex math while still looking good with
+ * any accent color.
  *
  * @param {object} opts
- * @param {string} opts.subject        - Email subject (used in <title> + hero alt)
- * @param {string} opts.bodyHtml       - Already-formatted body (may contain <br>)
- * @param {string|null} opts.imageUrl  - Hero image URL; skipped unless https://
- * @param {string|null} opts.ctaLabel  - Button label; skipped when ctaUrl absent
- * @param {string|null} opts.ctaUrl    - CTA href; omit to suppress button
- * @param {string|null} opts.storeName - Display name in header/footer
- * @param {string|null} opts.logoUrl   - Store logo; falls back to storeName text
- * @param {string|null} opts.primaryColor - Hex brand color; falls back to DEFAULT_ACCENT
+ * @param {string}      opts.subject       - Subject line (used in <title> + headline)
+ * @param {string}      opts.bodyHtml      - Already-formatted body (may contain <br>)
+ * @param {string|null} opts.imageUrl      - Hero image; skipped unless https://
+ * @param {string|null} opts.ctaLabel      - Button label; defaults to "Shop Now"
+ * @param {string|null} opts.ctaUrl        - CTA href (https/mailto); omit to hide
+ * @param {string|null} opts.storeName     - Display name in header/footer
+ * @param {string|null} opts.logoUrl       - Logo URL; falls back to storeName text
+ * @param {string|null} opts.primaryColor  - Hex brand color; falls back to #4f46e5
+ * @param {string|null} opts.offerText     - Ribbon line (e.g. "Navratri · 15% Off")
+ * @param {string|null} opts.trustText     - Small trust note below CTA; omit to hide
  * @returns {string} Complete <!DOCTYPE html> document
  */
-function buildEmailHtml({ subject, bodyHtml, imageUrl, ctaLabel, ctaUrl, storeName, logoUrl, primaryColor }) {
+function buildEmailHtml({ subject, bodyHtml, imageUrl, ctaLabel, ctaUrl, storeName, logoUrl, primaryColor, offerText, trustText }) {
   const accent = primaryColor || DEFAULT_ACCENT;
   const safe = escapeHtml;
 
-  const headerContent = logoUrl
-    ? `<img src="${safe(logoUrl)}" alt="${safe(storeName || '')}" width="160" ` +
-      `style="display:block;max-width:160px;height:auto;border:0;margin:0 auto;">`
-    : `<span style="font-size:18px;font-weight:700;color:#111827;` +
-      `font-family:Arial,Helvetica,sans-serif;">${safe(storeName || '')}</span>`;
+  // Validate URLs: only https (and mailto for CTA) are rendered.
+  const safeLogoUrl = logoUrl && /^https?:\/\//i.test(logoUrl) ? logoUrl : null;
+  const safeImageUrl = imageUrl && imageUrl.startsWith('https://') ? imageUrl : null;
+  const safeCtaUrl = ctaUrl && /^(https:\/\/|mailto:)/i.test(ctaUrl) ? ctaUrl : null;
 
-  // Hero image: https only — skip http, data: and relative URLs.
-  const heroRow =
-    imageUrl && imageUrl.startsWith('https://')
-      ? `\n        <tr>\n          <td style="background:#ffffff;padding:0;" align="center">` +
-        `\n            <img src="${safe(imageUrl)}" alt="${safe(subject || '')}" width="600"` +
-        ` style="display:block;width:100%;max-width:600px;height:auto;border:0;">` +
-        `\n          </td>\n        </tr>`
-      : '';
+  // 2. Brand header bar — primaryColor bg, logo or storeName in white.
+  const headerInner = safeLogoUrl
+    ? `<img src="${safe(safeLogoUrl)}" alt="${safe(storeName || '')}" height="40"` +
+      ` style="display:block;max-height:40px;height:auto;border:0;margin:0 auto;">`
+    : `<span style="font-size:17px;font-weight:700;color:#ffffff;font-family:Arial,sans-serif;">${safe(storeName || '')}</span>`;
 
-  // Bulletproof button: bgcolor on <td> works in Outlook even without MSO VML.
-  const ctaRow = ctaUrl
-    ? `\n        <tr>\n          <td style="background:#ffffff;padding:8px 32px 32px;" align="center">` +
-      `\n            <table cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">` +
-      `\n              <tr>\n                <td align="center" bgcolor="${safe(accent)}"` +
-      ` style="border-radius:6px;background:${safe(accent)};">` +
-      `\n                  <a href="${safe(ctaUrl)}"` +
-      ` style="display:inline-block;padding:14px 28px;font-family:Arial,Helvetica,sans-serif;` +
-      `font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;"` +
-      ` target="_blank">${safe(ctaLabel || 'Shop Now')}</a>` +
-      `\n                </td>\n              </tr>\n            </table>` +
-      `\n          </td>\n        </tr>`
+  // 3. Hero image row.
+  const heroRow = safeImageUrl
+    ? `\n        <tr><td style="padding:0;" align="center">` +
+      `<img src="${safe(safeImageUrl)}" alt="${safe(subject || '')}" width="600"` +
+      ` style="display:block;width:100%;max-width:600px;height:auto;border:0;"></td></tr>`
+    : '';
+
+  // 4. Offer ribbon — fixed pale-lavender bg, accent text, uppercase.
+  const ribbonRow = offerText
+    ? `\n        <tr><td style="background:#f5f3ff;padding:10px 28px;text-align:center;">` +
+      `<span style="color:${safe(accent)};font-size:13px;font-weight:700;` +
+      `font-family:Arial,sans-serif;letter-spacing:0.06em;text-transform:uppercase;">${safe(offerText)}</span>` +
+      `</td></tr>`
+    : '';
+
+  // 6. CTA button — bulletproof table-based anchor, radius 10, padding 15×44.
+  const ctaRow = safeCtaUrl
+    ? `\n        <tr><td class="ecta" style="background:#ffffff;padding:8px 40px 28px;" align="center">` +
+      `<table cellpadding="0" cellspacing="0" border="0" style="margin:0 auto;">` +
+      `<tr><td align="center" bgcolor="${safe(accent)}" style="border-radius:10px;background:${safe(accent)};">` +
+      `<a href="${safe(safeCtaUrl)}" target="_blank"` +
+      ` style="display:inline-block;padding:15px 44px;font-family:Arial,sans-serif;` +
+      `font-size:15px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;">${safe(ctaLabel || 'Shop Now')}</a>` +
+      `</td></tr></table></td></tr>`
+    : '';
+
+  // 7. Trust line — small muted note, optional.
+  const trustRow = trustText
+    ? `\n        <tr><td style="background:#ffffff;padding:0 40px 24px;text-align:center;">` +
+      `<span style="font-size:13px;color:#6b7280;font-family:Arial,sans-serif;">${safe(trustText)}</span></td></tr>`
     : '';
 
   return `<!DOCTYPE html>\n<html lang="en">\n<head>\n` +
@@ -110,29 +128,36 @@ function buildEmailHtml({ subject, bodyHtml, imageUrl, ctaLabel, ctaUrl, storeNa
     `<title>${safe(subject || '')}</title>\n` +
     `<style>\n` +
     `@media (max-width:600px){\n` +
-    `  .email-wrapper{width:100%!important;}\n` +
-    `  .email-body{padding:16px!important;}\n` +
+    `  .ew{width:100%!important;}\n` +
+    `  .ep{padding:16px 20px!important;}\n` +
+    `  .eh{font-size:22px!important;}\n` +
+    `  .ecta a{display:block!important;padding:15px 20px!important;}\n` +
     `}\n` +
     `</style>\n` +
-    `</head>\n<body style="margin:0;padding:0;background:#f3f4f6;">\n` +
-    `<table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f3f4f6"` +
-    ` style="background:#f3f4f6;">\n  <tr>\n    <td align="center" valign="top" style="padding:32px 16px;">\n` +
-    `      <table class="email-wrapper" width="600" cellpadding="0" cellspacing="0" border="0"` +
-    ` style="max-width:600px;width:600px;">\n` +
-    `        <!-- header -->\n        <tr>\n          <td style="background:#ffffff;padding:24px 32px;` +
-    `text-align:center;border-bottom:1px solid #e5e7eb;">\n            ${headerContent}\n          </td>\n        </tr>` +
+    `</head>\n<body style="margin:0;padding:0;background:#f4f4f6;">\n` +
+    `<table width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#f4f4f6" style="background:#f4f4f6;">\n` +
+    `  <tr>\n    <td align="center" valign="top" style="padding:32px 16px;">\n` +
+    `      <table class="ew" width="600" cellpadding="0" cellspacing="0" border="0"` +
+    ` style="max-width:600px;width:600px;border-radius:14px;overflow:hidden;background:#ffffff;">\n` +
+    // 2. Brand header bar
+    `        <tr><td bgcolor="${safe(accent)}" style="background:${safe(accent)};padding:18px 28px;text-align:center;">${headerInner}</td></tr>` +
     heroRow +
-    `\n        <!-- body -->\n        <tr>\n          <td class="email-body"` +
-    ` style="background:#ffffff;padding:32px;` +
-    `font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,Helvetica,sans-serif;` +
-    `font-size:15px;color:#111827;line-height:1.7;">\n            ${bodyHtml || ''}` +
-    `\n          </td>\n        </tr>` +
+    ribbonRow +
+    // 5. Content: headline + bodyHtml
+    `\n        <tr><td class="ep" style="background:#ffffff;padding:34px 40px;">` +
+    `<h1 class="eh" style="margin:0 0 16px;font-size:26px;font-weight:800;letter-spacing:-0.02em;color:#1a1a1a;font-family:Arial,sans-serif;">${safe(subject || '')}</h1>` +
+    `<div style="font-size:15px;line-height:1.6;color:#4a4a4a;font-family:Arial,sans-serif;">${bodyHtml || ''}</div>` +
+    `</td></tr>` +
     ctaRow +
-    `\n        <!-- footer -->\n        <tr>\n          <td style="background:#f9fafb;padding:20px 32px;` +
-    `text-align:center;font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#6b7280;` +
-    `border-top:1px solid #e5e7eb;">\n            ${safe(storeName || '')} &middot; ` +
-    `<a href="#" style="color:#6b7280;">Unsubscribe</a>\n          </td>\n        </tr>\n      </table>` +
-    `\n    </td>\n  </tr>\n</table>\n</body>\n</html>`;
+    trustRow +
+    // 8. Footer
+    `\n        <tr><td style="background:#faf9fb;padding:20px 32px;text-align:center;` +
+    `font-family:Arial,sans-serif;font-size:12px;color:#6b7280;border-top:1px solid #ebebeb;">` +
+    `<strong>${safe(storeName || '')}</strong><br>` +
+    `You received this because you opted in to notifications from this store.<br>` +
+    `<a href="mailto:unsubscribe@shopireachboost.com" style="color:#6b7280;">Unsubscribe</a>` +
+    `</td></tr>` +
+    `\n      </table>\n    </td>\n  </tr>\n</table>\n</body>\n</html>`;
 }
 
 // ---------------------------------------------------------------------------

@@ -355,14 +355,17 @@ const FALLBACK_TEMPLATE = {
   special_offer: {
     subject: 'A note from our store',
     body: 'We have something we think you might like.\n\nTake a look at our latest picks when you get a chance.\n\nWe appreciate your support.',
+    offerText: 'Special offer inside',
   },
   festival: {
     subject: 'Greetings from our store',
     body: 'We hope this season is treating you well.\n\nWe have put together a few things worth exploring.\n\nThank you for being part of our community.',
+    offerText: null,  // derived from productTitle at call time
   },
   normal: {
     subject: 'An update from our store',
     body: "We wanted to share a quick update with you.\n\nThere are a few new things in the store worth checking out.\n\nThank you for your continued support.",
+    offerText: null,
   },
 };
 
@@ -373,12 +376,23 @@ async function generateTemplateCopy(shopDomain, shopName, type, productTitle, vo
   const productKey = productTitle ? String(productTitle).trim().toLowerCase().slice(0, 100) : null;
   const cacheKey = buildCacheKey(shopDomain || '', type, productKey, 'email-template', voiceHash);
 
-  // 1. cache
+  // helper: compute offerText for fallback/error cases
+  function fallbackOfferText() {
+    if (type === 'festival' && productTitle) return `${String(productTitle).trim()} Special`;
+    return fb.offerText || null;
+  }
+
+  // 1. cache — title field reused to store offerText
   try {
     const hit = await CopyCache.findOne({ cacheKey });
     if (hit) {
       console.log(`[ai] template copy cache hit for ${cacheKey.slice(0, 8)}`);
-      return { subject: hit.subject || fb.subject, body: hit.body || fb.body, fallback: false };
+      return {
+        subject: hit.subject || fb.subject,
+        body: hit.body || fb.body,
+        offerText: hit.title || null,
+        fallback: false,
+      };
     }
   } catch (err) {
     console.warn('[ai] template copy cache lookup failed:', err.message);
@@ -386,7 +400,7 @@ async function generateTemplateCopy(shopDomain, shopName, type, productTitle, vo
 
   // 2. no key → fallback
   if (!hasKey()) {
-    return { ...fb, fallback: true };
+    return { ...fb, offerText: fallbackOfferText(), fallback: true };
   }
 
   // 3. build prompt + call with 10 s timeout
@@ -407,7 +421,11 @@ async function generateTemplateCopy(shopDomain, shopName, type, productTitle, vo
     `- body: conversational and specific to the store/product, 2–3 short paragraphs, PLAIN TEXT, absolutely no HTML tags, no markdown, avoid spam trigger phrases (free, guaranteed, limited time, click here, buy now in caps)\n` +
     `- Natural opening, clear call to action\n` +
     (v.signOff ? `- End with this sign-off: ${v.signOff}\n` : '') +
-    `\nRespond ONLY with JSON: {"subject":"...","body":"..."}`;
+    `- offerText: a short ribbon line shown above the email body, max 40 chars.\n` +
+    `  special_offer → a short offer line, e.g. "15% Off Today" or "Limited Deal Inside"\n` +
+    `  festival → "<FestivalName> Special", e.g. "Diwali Special"\n` +
+    `  normal → empty string ""\n` +
+    `\nRespond ONLY with JSON: {"subject":"...","body":"...","offerText":"..."}`;
 
   let parsed;
   let promptTokens = 0;
@@ -424,16 +442,17 @@ async function generateTemplateCopy(shopDomain, shopName, type, productTitle, vo
     parsed = parseJsonBlock(out.text);
   } catch (err) {
     console.warn('[ai] generateTemplateCopy failed:', err.message);
-    return { ...fb, fallback: true };
+    return { ...fb, offerText: fallbackOfferText(), fallback: true };
   }
 
   const result = {
     subject: parsed.subject || fb.subject,
     body: parsed.body || fb.body,
+    offerText: parsed.offerText || fallbackOfferText() || null,
     fallback: false,
   };
 
-  // 4. cache it
+  // 4. cache it — title field stores offerText
   try {
     await CopyCache.create({
       shopDomain: shopDomain || '',
@@ -442,6 +461,7 @@ async function generateTemplateCopy(shopDomain, shopName, type, productTitle, vo
       channel: 'email-template',
       body: result.body,
       subject: result.subject,
+      title: result.offerText || '',
       promptTokens,
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     });

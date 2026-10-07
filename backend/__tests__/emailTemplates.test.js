@@ -303,6 +303,25 @@ describe('GET /:id/preview', () => {
     );
   });
 
+  test('passes offerText to buildEmailHtml when template has it', async () => {
+    EmailTemplate.findById.mockResolvedValue(makeTemplate({ offerText: 'Diwali Special' }));
+    const res = mockRes();
+    await preview({ shopDomain: SHOP, params: { id: TEMPLATE_ID } }, res);
+    expect(mockBuildEmailHtml).toHaveBeenCalledWith(
+      expect.objectContaining({ offerText: 'Diwali Special' })
+    );
+  });
+
+  test('passes offerText as undefined when template has none', async () => {
+    EmailTemplate.findById.mockResolvedValue(makeTemplate({ offerText: null }));
+    const res = mockRes();
+    await preview({ shopDomain: SHOP, params: { id: TEMPLATE_ID } }, res);
+    // null || undefined → undefined; ribbon is hidden
+    expect(mockBuildEmailHtml).toHaveBeenCalledWith(
+      expect.objectContaining({ offerText: undefined })
+    );
+  });
+
   test('IDOR: returns 404 when template belongs to another shop', async () => {
     EmailTemplate.findById.mockResolvedValue(makeTemplate({ shopDomain: OTHER_SHOP }));
     const res = mockRes();

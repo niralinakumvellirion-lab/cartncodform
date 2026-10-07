@@ -152,6 +152,34 @@ describe('generateTemplateCopy', () => {
     // prompt enforces anti-hype subject rules
     expect(promptContent).toContain('NO hype words');
     expect(promptContent).toContain('under 50 characters');
+    // prompt requests offerText
+    expect(promptContent).toContain('offerText');
+  });
+
+  test('offerText: LLM value is returned when present', async () => {
+    global.fetch.mockReturnValue(anthropicOk('{"subject":"S","body":"B","offerText":"Diwali Special"}', 5));
+    const r = await generateTemplateCopy(SHOP, 'Demo Store', 'festival', 'Diwali', VOICE);
+    expect(r.offerText).toBe('Diwali Special');
+  });
+
+  test('offerText: falls back to "<productTitle> Special" for festival when LLM omits it', async () => {
+    global.fetch.mockReturnValue(anthropicOk('{"subject":"S","body":"B"}', 5));
+    const r = await generateTemplateCopy(SHOP, 'Demo Store', 'festival', 'Navratri', VOICE);
+    expect(r.offerText).toBe('Navratri Special');
+  });
+
+  test('offerText: fallback for special_offer is "Special offer inside" when no key', async () => {
+    delete process.env.LLM_API_KEY;
+    const r = await generateTemplateCopy(SHOP, 'Demo Store', 'special_offer', null, VOICE);
+    expect(r.offerText).toBe('Special offer inside');
+    expect(r.fallback).toBe(true);
+  });
+
+  test('offerText: null for normal type (no ribbon)', async () => {
+    global.fetch.mockReturnValue(anthropicOk('{"subject":"S","body":"B","offerText":""}', 5));
+    const r = await generateTemplateCopy(SHOP, 'Demo Store', 'normal', null, VOICE);
+    // empty string → null (falsy coerces via `|| null`)
+    expect(r.offerText).toBeNull();
   });
 
   test('no key: returns fallback:true without calling API', async () => {
