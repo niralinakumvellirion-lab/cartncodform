@@ -849,6 +849,8 @@ export default function EmailTemplatesScreen() {
           max-height: calc(100vh - 24px);
           overflow: hidden;
           align-self: start;
+          display: flex;
+          flex-direction: column;
         }
         @media (max-width: 980px) {
           .es-root {
@@ -861,7 +863,6 @@ export default function EmailTemplatesScreen() {
           }
         }
         .etpl-words-grid { display: grid; grid-template-columns: 1fr; gap: 0; }
-        @media (min-width: 481px) { .etpl-words-grid { grid-template-columns: 1fr 1fr; column-gap: 16px; } }
       ` }} />
     </div>
   );

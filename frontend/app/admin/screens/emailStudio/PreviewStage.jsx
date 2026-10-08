@@ -75,14 +75,14 @@ export default function PreviewStage({
     }
     const c = containerRef.current;
     if (!c) return;
-    const cH = c.clientHeight;
     const cW = c.clientWidth;
-    if (!cH || !cW) return;
-    const BAR_H = 50;
-    const PAD   = 16;
+    if (!cW) return;
+    const BAR_H    = 50;
+    const PAD      = 16;
+    const STAGE_PAD = 28; // .es-stage padding: 14px top + 14px bottom
     const h = measureNatH(iframeRef.current);
     setNatH(h);
-    const usableH = Math.max(cH - BAR_H - PAD * 2, 1);
+    const usableH = Math.max(window.innerHeight - 24 - STAGE_PAD - BAR_H, 1);
     const usableW = Math.max(cW - PAD * 2, 1);
     const k = Math.min(1, usableH / h, usableW / iW);
     setScale(k);
@@ -154,7 +154,7 @@ export default function PreviewStage({
   });
 
   return (
-    <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
 
       {/* Controls bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 10, flexWrap: 'wrap', flexShrink: 0 }}>
@@ -206,6 +206,7 @@ export default function PreviewStage({
       {/* Mailbox area */}
       <div style={{
         flex: 1,
+        minHeight: 0,
         overflowY: viewMode === 'actual' ? 'auto'   : 'hidden',
         overflowX: viewMode === 'actual' ? 'auto'   : 'hidden',
         display: 'flex',

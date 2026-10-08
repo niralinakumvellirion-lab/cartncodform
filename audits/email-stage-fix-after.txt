@@ -1,0 +1,110 @@
+EMAIL STAGE FIX — SELF-AUDIT
+2026-10-08
+============================================================
+
+1. ISSUE 1 — Actual-size scroll: DONE
+
+CSS changes (EmailTemplates.jsx inline <style>):
+  .es-stage gained two lines at line 851-852 (relative to previous version):
+    display: flex;
+    flex-direction: column;
+  This makes .es-stage a flex column so its direct child (PreviewStage's
+  containerRef) can use flex:1 to fill the bounded space.
+
+JS changes (PreviewStage.jsx):
+  Line 157 — containerRef div:
+    BEFORE: style={{ display:'flex', flexDirection:'column', height:'100%' }}
+    AFTER:  style={{ display:'flex', flexDirection:'column', flex:1, minHeight:0 }}
+    height:'100%' removed (resolved to auto without a definite parent height).
+    flex:1 fills .es-stage's flex space. minHeight:0 enables shrinking past content.
+
+  Line 207-210 — mailbox area div:
+    Added minHeight:0 so the flex child can shrink below its content height,
+    enabling overflowY:auto to create a real scroll container.
+
+  Lines 68-89 — fit() function, usableH computation:
+    BEFORE: usableH = Math.max(cH - BAR_H - PAD * 2, 1)
+              where cH = containerRef.clientHeight (resolved to auto ≈ content height)
+    AFTER:  usableH = Math.max(window.innerHeight - 24 - STAGE_PAD - BAR_H, 1)
+              where STAGE_PAD = 28 (14px top + 14px bottom stage padding)
+    Uses viewport directly, not the container's own height, so no circularity.
+    Also removed the `!cH` bail-out (only `!cW` remains — width is still needed).
+
+  How fit() computes usableH now:
+    usableH = window.innerHeight - 24 - 28 - 50
+            = window.innerHeight - 102
+    For a 630px Shopify iframe: usableH = 528px.
+    For a 900px browser: usableH = 798px.
+    The 24 matches the calc(100vh - 24px) in .es-stage max-height.
+    The 28 is stage padding (14px × 2). The 50 is BAR_H (controls bar height).
+
+  Actual-size mode behavior:
+    .es-stage (flex column, max-height:100vh-24px, overflow:hidden)
+      → containerRef (flex:1, minHeight:0, flex column)
+         → controls bar (flexShrink:0, ~50px)
+         → mailbox div (flex:1, minHeight:0, overflowY:auto)
+            → clip div (700px × natH, e.g., 1200px)
+    The mailbox div is bounded to ~(100vh-102px), clip div overflows it,
+    overflowY:auto creates a scroll container. User scrolls inside the stage.
+
+  Fit mode: stage remains content-sized (controls + scaled clip div).
+    Scale is viewport-based so the email fills the available height.
+
+============================================================
+
+2. ISSUE 2 — Words grid: DONE
+
+Prototype (.shopify/design/email-studio-prototype.html) Words card (line 280-288):
+  All fields are individual .fld divs stacked inside .pc (a flex-column card).
+  No grid, no .two class inside the Words card. Always single-column.
+
+Changes made (EmailTemplates.jsx inline <style>):
+  REMOVED the entire line:
+    @media (min-width: 481px) { .etpl-words-grid { grid-template-columns: 1fr 1fr; column-gap: 16px; } }
+  Kept: .etpl-words-grid { display: grid; grid-template-columns: 1fr; gap: 0; }
+  Result: always single-column, matching the prototype.
+
+Why the media query was wrong:
+  The panel is ≤430px wide, but the media query triggered at viewport ≥481px.
+  The Shopify admin iframe is ~630–1366px wide, so the viewport is always ≥481px,
+  making the words grid two-column despite the panel never being wide enough.
+
+Other media queries in the same <style> block checked:
+  @media (max-width: 980px) on .es-root and .es-stage — correct.
+    This changes the grid layout for narrow viewports (single-column mode).
+    .es-root becomes single-column at ≤980px viewport. This is viewport-based
+    and intentional (the whole page layout shifts, not just one card).
+    Verdict: CORRECT, no change needed.
+  No other min-width media queries found that affect content inside the 430px panel.
+
+============================================================
+
+3. GIT DIFF --STAT
+
+  frontend/app/admin/screens/EmailTemplates.jsx            +2/-1
+  frontend/app/admin/screens/emailStudio/PreviewStage.jsx  +6/-5
+
+  Changes beyond what was listed: NONE.
+
+============================================================
+
+4. WHAT COULD NOT BE VERIFIED
+
+  Live browser check: no browser extension loaded. Could not verify:
+    - That the mailbox scrolls visually in actual-size mode (CSS flex behavior
+      with max-height in a real browser).
+    - That Fit mode still scales correctly (window.innerHeight is not available
+      during Next.js SSR but is fine at runtime in the Shopify iframe).
+    - That the words grid is single-column at runtime (only verified by CSS).
+    - Mobile vs desktop mode behavior in the stage.
+
+============================================================
+
+5. BUILD OUTPUT
+
+  cd frontend && npm run build:
+    ✓ Compiled successfully
+    ✓ Generating static pages (18/18)
+    /admin/email-templates: 25.7 kB — clean, no errors or warnings.
+
+============================================================
