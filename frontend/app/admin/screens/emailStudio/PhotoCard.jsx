@@ -23,7 +23,7 @@ function qualityLabel(w) {
   return { text: 'Good resolution', color: '#166534', bg: '#f0fdf4' };
 }
 
-export default function PhotoCard({ draft, uploading, photoError, onUpload, onRemove, onClearError }) {
+export default function PhotoCard({ draft, uploading, photoError, onUpload, onRemove, onClearError, bare }) {
   const [dragging, setDragging] = useState(false);
   const [localThumb, setLocalThumb] = useState(null);
   const [localFile, setLocalFile] = useState(null); // { name, width, height }
@@ -91,8 +91,8 @@ export default function PhotoCard({ draft, uploading, photoError, onUpload, onRe
     ? { background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0' }
     : { background: '#fef3c7', color: '#b45309', border: '1px solid #fde68a' };
 
-  return (
-    <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: '16px 20px', marginBottom: 12 }}>
+  const inner = (
+    <div style={bare ? {} : { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: '16px 20px', marginBottom: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Offer photo</span>
         <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 6, padding: '2px 8px', ...tagStyle }}>
@@ -209,4 +209,5 @@ export default function PhotoCard({ draft, uploading, photoError, onUpload, onRe
       />
     </div>
   );
+  return inner;
 }

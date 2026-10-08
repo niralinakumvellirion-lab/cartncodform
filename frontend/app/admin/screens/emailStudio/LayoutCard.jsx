@@ -7,18 +7,18 @@ const { DEFAULT_LAYOUT_BY_TYPE } = _eng || {};
 const CARD_STYLE = { background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, padding: '16px 20px', marginBottom: 12 };
 const LABEL_STYLE = { fontSize: 12, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 14px' };
 
-export default function LayoutCard({ draft, setDraftField, saveError }) {
+export default function LayoutCard({ draft, setDraftField, saveError, bare }) {
   const effectiveLayout = draft.layout || (DEFAULT_LAYOUT_BY_TYPE && DEFAULT_LAYOUT_BY_TYPE[draft.type]) || 'letter';
 
   const err = saveError && typeof saveError === 'object' && saveError.field === 'layout'
     ? saveError.error
     : null;
 
-  return (
-    <div style={CARD_STYLE}>
-      <p style={LABEL_STYLE}>Layout</p>
+  const inner = (
+    <>
+      {!bare && <p style={LABEL_STYLE}>Layout</p>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8 }}>
         {LAYOUT_INFO.map(({ k, n, d }) => {
           const isOn = effectiveLayout === k;
           const isAuto = !draft.layout && effectiveLayout === k;
@@ -62,6 +62,8 @@ export default function LayoutCard({ draft, setDraftField, saveError }) {
       )}
 
       {err && <p style={{ margin: '6px 0 0', fontSize: 11, color: '#dc2626' }}>{err}</p>}
-    </div>
+    </>
   );
+
+  return bare ? inner : <div style={CARD_STYLE}>{inner}</div>;
 }

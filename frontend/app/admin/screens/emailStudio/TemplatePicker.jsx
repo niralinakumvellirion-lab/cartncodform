@@ -22,6 +22,7 @@ export default function TemplatePicker({
   onFilterChange, onSelect, onNew,
   draft, setDraftField,
   confirmDel, setConfirmDel, onDelete, deleting,
+  compact,
 }) {
   const grouped = VALID_TYPES.reduce((acc, type) => {
     acc[type] = templates.filter(t => t.type === type);
@@ -47,23 +48,25 @@ export default function TemplatePicker({
   const showEditor = isNew || !!selectedId;
 
   return (
-    <div style={{ marginBottom: 16 }}>
-      {/* Filter row */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
-        {FILTER_TABS.map(tab => (
-          <button key={tab.key} onClick={() => onFilterChange(tab.key)} style={{
-            padding: '5px 12px', fontSize: 11, fontWeight: 600, borderRadius: 8, cursor: 'pointer',
-            background: filter === tab.key ? '#4f46e5' : '#f3f4f6',
-            color: filter === tab.key ? '#fff' : '#374151',
-            border: filter === tab.key ? 'none' : '1px solid #e5e7eb',
-          }}>
-            {tab.label}
-          </button>
-        ))}
-      </div>
+    <div style={compact ? {} : { marginBottom: 16 }}>
+      {/* Filter row — hidden in compact mode */}
+      {!compact && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+          {FILTER_TABS.map(tab => (
+            <button key={tab.key} onClick={() => onFilterChange(tab.key)} style={{
+              padding: '5px 12px', fontSize: 11, fontWeight: 600, borderRadius: 8, cursor: 'pointer',
+              background: filter === tab.key ? '#4f46e5' : '#f3f4f6',
+              color: filter === tab.key ? '#fff' : '#374151',
+              border: filter === tab.key ? 'none' : '1px solid #e5e7eb',
+            }}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Template select + New button */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: compact ? 0 : 14 }}>
         <select
           style={{ ...DS.input, flex: 1, cursor: 'pointer', minWidth: 0 }}
           value={selectValue}
@@ -86,10 +89,30 @@ export default function TemplatePicker({
         <button style={{ ...DS.btnSecondary, flexShrink: 0 }} onClick={onNew}>
           + New
         </button>
+
+        {/* In compact mode, show delete inline */}
+        {compact && showEditor && selectedId && !confirmDel && (
+          <button style={{ ...DS.btnDanger, flexShrink: 0, fontSize: 11, padding: '5px 10px' }} onClick={() => setConfirmDel(true)}>
+            Delete
+          </button>
+        )}
       </div>
 
-      {/* Name + type (only when editing) */}
-      {showEditor && (
+      {/* Delete confirm (both modes) */}
+      {showEditor && confirmDel && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 10px', background: '#fef2f2', borderRadius: 8, marginTop: compact ? 8 : 0 }}>
+          <span style={{ fontSize: 13, color: '#374151' }}>Delete this template?</span>
+          <button style={{ ...DS.btnDanger, padding: '5px 10px', fontSize: 11 }} onClick={onDelete} disabled={deleting}>
+            {deleting ? 'Deleting…' : 'Yes, delete'}
+          </button>
+          <button style={{ ...DS.btnSecondary, padding: '5px 10px', fontSize: 11 }} onClick={() => setConfirmDel(false)}>
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Name + type — hidden in compact mode (moved to Words tab) */}
+      {!compact && showEditor && (
         <>
           <div style={{ marginBottom: 12 }}>
             <label style={DS.label}>Template name</label>
@@ -124,22 +147,11 @@ export default function TemplatePicker({
             </div>
           )}
 
-          {/* Delete */}
+          {/* Delete in full mode */}
           {selectedId && !confirmDel && (
             <button style={{ ...DS.btnDanger, fontSize: 11, padding: '5px 10px' }} onClick={() => setConfirmDel(true)}>
               Delete template
             </button>
-          )}
-          {confirmDel && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 10px', background: '#fef2f2', borderRadius: 8 }}>
-              <span style={{ fontSize: 13, color: '#374151' }}>Delete this template?</span>
-              <button style={{ ...DS.btnDanger, padding: '5px 10px', fontSize: 11 }} onClick={onDelete} disabled={deleting}>
-                {deleting ? 'Deleting…' : 'Yes, delete'}
-              </button>
-              <button style={{ ...DS.btnSecondary, padding: '5px 10px', fontSize: 11 }} onClick={() => setConfirmDel(false)}>
-                Cancel
-              </button>
-            </div>
           )}
         </>
       )}

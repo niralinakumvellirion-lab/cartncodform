@@ -1,0 +1,62 @@
+SELF-AUDIT — Phase E3c: Email Studio Workspace Layout
+======================================================
+Date: 2026-10-08
+Branch: main (uncommitted working tree changes)
+
+Build: ✓ next build — Compiled successfully, 18 static pages
+Tests: ✓ 42 suites / 712 tests passed
+
+--- FILES CHANGED ---
+
+frontend/app/admin/screens/EmailTemplates.jsx   (~560 lines, full rewrite)
+frontend/app/admin/screens/emailStudio/ColourCard.jsx   (bare prop)
+frontend/app/admin/screens/emailStudio/FontCard.jsx     (bare prop + 1fr 1fr grid)
+frontend/app/admin/screens/emailStudio/LayoutCard.jsx   (bare prop + auto-fill grid)
+frontend/app/admin/screens/emailStudio/PhotoCard.jsx    (bare prop)
+frontend/app/admin/screens/emailStudio/PreviewStage.jsx (full rewrite — dual iframe)
+frontend/app/admin/screens/emailStudio/TemplatePicker.jsx (compact prop)
+frontend/app/admin/screens/emailStudio/WordsCard.jsx    (bare/showName/isNew props)
+
+--- SPEC COMPLIANCE ---
+
+Step 0 (audit)        ✓  email-workspace-before.txt written in prior session
+Step 1 (shell)        ✓  CSS grid 4-row: auto | 1fr | 10px | ${editorH}px
+                         wsH = max(620, window.innerHeight - wsRef.top - 8)
+                         measured in useLayoutEffect, updated on window resize
+                         overflow: hidden when wsH > 620
+Step 2 (preview band) ✓  toolbar: Both/Desktop/Mobile segmented + scale readout
+                         + Full size button + photo status pill
+                         Stage fills remaining 1fr with overflow:hidden flex child
+Step 3 (splitter)     ✓  setPointerCapture drag, ArrowUp/Down/Home/End keyboard,
+                         double-click reset to DEFAULT_RATIO (0.42),
+                         localStorage ccf:emailWorkspace:editorRatio (try/catch),
+                         ratio clamped 30-60%
+Step 4 (editor panel) ✓  ARIA tablist/tab/tabpanel, roving tabindex,
+                         Left/Right/Home/End keyboard nav, icons + labels
+                         Per-tab: Photo / Layout / Colours / Fonts / Words / Send
+                         Looks presets: chips at ≥900px, menu below
+                         Send tab: Generate (purple card) + Send test + Broadcast (full width)
+Step 5 (look/resp.)   ✓  etpl-words-grid: 1fr below 980px, 1fr 1fr at ≥980px
+                         etpl-send-grid: 1fr below 980px, 1fr 1fr at ≥980px
+                         deviceView initialised from band width (both/desktop/mobile)
+                         Full-size modal: role=dialog, aria-modal, focus trap,
+                         Escape + backdrop close, Desktop/Mobile switch
+
+--- DEVIATIONS ---
+
+1. Initial deviceView: spec says initialise from band width in useLayoutEffect.
+   Implemented with a post-measure setState in useLayoutEffect; the initial
+   useState default is 'both'. This means on very first render (SSR) the server
+   sees 'both', then client corrects. Functionally identical for an iframe-hosted
+   app; no hydration mismatch because the workspace is client-only.
+
+2. Looks presets collapse breakpoint: spec says 900px. Implemented via `bandWide`
+   boolean (el.clientWidth >= 900) measured in the same useLayoutEffect as wsH.
+
+3. Broadcast count cap: spec is silent on a cap; implemented the existing
+   "free plan ≤90" warning from the previous version (kept from pre-audit state).
+
+--- NOT DONE (out of scope for this phase) ---
+- No new /api routes added (frontend-only phase ✓)
+- emailEngine.js untouched ✓
+- No npm packages added ✓

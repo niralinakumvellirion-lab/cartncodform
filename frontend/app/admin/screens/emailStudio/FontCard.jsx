@@ -145,34 +145,38 @@ function FontPopover({ id, label, value, onChange, headingOnly }) {
   );
 }
 
-export default function FontCard({ draft, setDraftField, saveError }) {
+export default function FontCard({ draft, setDraftField, saveError, bare }) {
   const hFontErr = saveError && typeof saveError === 'object' && saveError.field === 'hFont' ? saveError.error : null;
   const bFontErr = saveError && typeof saveError === 'object' && saveError.field === 'bFont' ? saveError.error : null;
 
-  return (
-    <div style={CARD_STYLE}>
-      <p style={LABEL_STYLE}>Fonts</p>
-
-      <FontPopover
-        id="hfont"
-        label="Heading font"
-        value={draft.hFont}
-        onChange={v => setDraftField('hFont', v || null)}
-        headingOnly={true}
-      />
-      {hFontErr && <p style={{ fontSize: 11, color: '#dc2626', margin: '-4px 0 6px' }}>{hFontErr}</p>}
-
-      <FontPopover
-        id="bfont"
-        label="Body font"
-        value={draft.bFont}
-        onChange={v => setDraftField('bFont', v || null)}
-        headingOnly={false}
-      />
-      {bFontErr && <p style={{ fontSize: 11, color: '#dc2626', margin: '-4px 0 6px' }}>{bFontErr}</p>}
+  const inner = (
+    <>
+      {!bare && <p style={LABEL_STYLE}>Fonts</p>}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div>
+          <FontPopover
+            id="hfont"
+            label="Heading font"
+            value={draft.hFont}
+            onChange={v => setDraftField('hFont', v || null)}
+            headingOnly={true}
+          />
+          {hFontErr && <p style={{ fontSize: 11, color: '#dc2626', margin: '-4px 0 6px' }}>{hFontErr}</p>}
+        </div>
+        <div>
+          <FontPopover
+            id="bfont"
+            label="Body font"
+            value={draft.bFont}
+            onChange={v => setDraftField('bFont', v || null)}
+            headingOnly={false}
+          />
+          {bFontErr && <p style={{ fontSize: 11, color: '#dc2626', margin: '-4px 0 6px' }}>{bFontErr}</p>}
+        </div>
+      </div>
 
       {/* Radius toggle */}
-      <div style={{ marginTop: 4 }}>
+      <div style={{ marginTop: 12 }}>
         <p style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', margin: '0 0 6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Corner style</p>
         <div style={{ display: 'flex', gap: 8 }}>
           {[['round', 'Rounded'], ['sharp', 'Sharp']].map(([k, label]) => {
@@ -206,6 +210,8 @@ export default function FontCard({ draft, setDraftField, saveError }) {
           )}
         </div>
       </div>
-    </div>
+    </>
   );
+
+  return bare ? inner : <div style={CARD_STYLE}>{inner}</div>;
 }

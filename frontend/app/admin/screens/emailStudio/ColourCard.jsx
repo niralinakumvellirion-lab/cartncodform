@@ -89,7 +89,7 @@ function PaletteGrid({ label, value, onPick, allowAuto, autoLabel }) {
   );
 }
 
-export default function ColourCard({ draft, setDraftField, store, saveError }) {
+export default function ColourCard({ draft, setDraftField, store, saveError, bare }) {
   const effectiveColor = draft.color || (store && store.primaryColor) || '#4f46e5';
   const shades = brandShades(effectiveColor);
 
@@ -100,9 +100,9 @@ export default function ColourCard({ draft, setDraftField, store, saveError }) {
   const pageBgErr = saveError && typeof saveError === 'object' && saveError.field === 'pageBg' ? saveError.error : null;
   const cardBgErr = saveError && typeof saveError === 'object' && saveError.field === 'cardBg' ? saveError.error : null;
 
-  return (
-    <div style={CARD_STYLE}>
-      <p style={LABEL_STYLE}>Colour</p>
+  const inner = (
+    <>
+      {!bare && <p style={LABEL_STYLE}>Colour</p>}
 
       {/* Brand colour */}
       <p style={SUB_LABEL_STYLE}>Brand colour</p>
@@ -191,6 +191,8 @@ export default function ColourCard({ draft, setDraftField, store, saveError }) {
           <span style={{ fontSize: 11, color: '#b45309' }}>No logo set in store settings</span>
         )}
       </div>
-    </div>
+    </>
   );
+
+  return bare ? inner : <div style={CARD_STYLE}>{inner}</div>;
 }

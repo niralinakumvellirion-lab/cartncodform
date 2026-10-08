@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, useLayoutEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import { GOOGLE_FONTS_HREF, SEGMENTS, EMPTY_DRAFT, draftFromTemplate } from './emailStudio/lib';
@@ -10,96 +10,424 @@ import LayoutCard from './emailStudio/LayoutCard';
 import ColourCard from './emailStudio/ColourCard';
 import FontCard from './emailStudio/FontCard';
 import WordsCard from './emailStudio/WordsCard';
-import PreviewStage from './emailStudio/PreviewStage';
+import PreviewStage, { DESKTOP_W, MOBILE_W } from './emailStudio/PreviewStage';
 import _eng from '../lib/emailEngine';
 
-const { PRESETS: ENGINE_PRESETS, DEFAULT_LAYOUT_BY_TYPE } = _eng || {};
+const { PRESETS: ENGINE_PRESETS, DEFAULT_LAYOUT_BY_TYPE, renderEmail, designFromTemplate } = _eng || {};
+
+// ── Constants ──────────────────────────────────────────────────────────────────
+const STARTER_TYPES = ['special_offer', 'festival', 'normal'];
+const DEFAULT_RATIO = 0.42;
+const LS_RATIO_KEY = 'ccf:emailWorkspace:editorRatio';
+
+function clampRatio(r) { return Math.max(0.30, Math.min(0.60, r)); }
+function readRatio() {
+  try { const v = parseFloat(localStorage.getItem(LS_RATIO_KEY)); return isNaN(v) ? DEFAULT_RATIO : clampRatio(v); }
+  catch { return DEFAULT_RATIO; }
+}
+function writeRatio(r) { try { localStorage.setItem(LS_RATIO_KEY, r); } catch {} }
+
+const FIELD_TAB = {
+  imageUrl: 'photo',
+  layout: 'layout',
+  color: 'colours', pageBg: 'colours', cardBg: 'colours', showLogo: 'colours',
+  hFont: 'fonts', bFont: 'fonts', radius: 'fonts',
+  subject: 'words', eyebrow: 'words', headline: 'words', offerText: 'words',
+  body: 'words', ctaLabel: 'words', ctaUrl: 'words', note: 'words',
+  name: 'words', type: 'words',
+};
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const DS = {
-  page: {
-    maxWidth: 1200,
-    margin: '0 auto',
-    padding: '24px 20px',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-  },
-  card: {
-    background: '#ffffff',
-    border: '1px solid #e5e7eb',
-    borderRadius: 14,
-    padding: '20px 24px',
-    boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-  },
-  pageTitle: { fontSize: 22, fontWeight: 800, color: '#0f0f0f', margin: 0, letterSpacing: '-0.3px' },
-  pageSubtitle: { fontSize: 13, color: '#9ca3af', margin: '4px 0 0', fontWeight: 400 },
-  sectionLabel: {
-    fontSize: 11, fontWeight: 700, color: '#9ca3af',
-    textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8,
-  },
-  label: { fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, display: 'block' },
-  input: {
-    width: '100%', padding: '8px 10px', fontSize: 13, border: '1px solid #d1d5db',
-    borderRadius: 8, outline: 'none', boxSizing: 'border-box', color: '#111827',
-  },
+  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
   btnPrimary: {
     background: '#4f46e5', color: '#fff', border: 'none', borderRadius: 9,
-    padding: '9px 20px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+    padding: '7px 18px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
   },
   btnSecondary: {
-    background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb',
-    borderRadius: 9, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+    background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: 9,
+    padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
   },
   btnDanger: {
     background: '#fee2e2', color: '#dc2626', border: 'none', borderRadius: 9,
-    padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+    padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
   },
 };
 
-const STARTER_TYPES = ['special_offer', 'festival', 'normal'];
+// ── Tab icon SVGs ─────────────────────────────────────────────────────────────
+const ICON = {
+  photo: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+    </svg>
+  ),
+  layout: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+      <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+    </svg>
+  ),
+  colours: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10c0 2.21-1.343 4-3 4s-3-1.79-3-4a1 1 0 0 0-2 0c0 2.21-1.343 4-3 4s-3-1.79-3-4"/>
+    </svg>
+  ),
+  fonts: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/>
+    </svg>
+  ),
+  words: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="17" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/>
+      <line x1="21" y1="14" x2="3" y2="14"/><line x1="17" y1="18" x2="3" y2="18"/>
+    </svg>
+  ),
+  send: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+    </svg>
+  ),
+  lock: (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+    </svg>
+  ),
+};
+
+const TABS = [
+  { id: 'photo',   label: 'Photo' },
+  { id: 'layout',  label: 'Layout' },
+  { id: 'colours', label: 'Colours' },
+  { id: 'fonts',   label: 'Fonts' },
+  { id: 'words',   label: 'Words' },
+  { id: 'send',    label: 'Send' },
+];
+
+// ── Splitter ──────────────────────────────────────────────────────────────────
+function Splitter({ wsRef, wsH, editorRatio, onRatioChange }) {
+  function onPointerDown(e) {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function onPointerMove(e) {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    const r = wsRef.current && wsRef.current.getBoundingClientRect();
+    if (!r) return;
+    onRatioChange(clampRatio((r.bottom - e.clientY - 5) / wsH));
+  }
+  function onKeyDown(e) {
+    const step = 16 / wsH;
+    if (e.key === 'ArrowUp')   { e.preventDefault(); onRatioChange(clampRatio(editorRatio + step)); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); onRatioChange(clampRatio(editorRatio - step)); }
+    if (e.key === 'Home')      { e.preventDefault(); onRatioChange(0.60); }
+    if (e.key === 'End')       { e.preventDefault(); onRatioChange(0.30); }
+  }
+  return (
+    <div
+      role="separator" aria-orientation="horizontal"
+      aria-valuenow={Math.round(editorRatio * 100)} aria-valuemin={30} aria-valuemax={60}
+      aria-label="Resize preview and editor"
+      tabIndex={0}
+      onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={() => {}}
+      onKeyDown={onKeyDown}
+      onDoubleClick={() => onRatioChange(DEFAULT_RATIO)}
+      style={{
+        height: 10, cursor: 'row-resize', flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: '#f1f5f9', borderTop: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0',
+        touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', outline: 'none',
+      }}
+    >
+      <svg width="28" height="4" viewBox="0 0 28 4" fill="none" aria-hidden="true">
+        {[2, 6, 10, 14, 18, 22, 26].map(x => <circle key={x} cx={x} cy={2} r={1.5} fill="#9ca3af" />)}
+      </svg>
+    </div>
+  );
+}
+
+// ── Tab strip ─────────────────────────────────────────────────────────────────
+function TabStrip({ activeTab, onTabChange, hasPhoto, dirty, saveError, presets, onPreset, looksMenuOpen, setLooksMenuOpen, bandWide }) {
+  const tabRefs = useRef([]);
+  function handleTabKey(e, idx) {
+    const len = TABS.length;
+    let next = -1;
+    if (e.key === 'ArrowRight') next = (idx + 1) % len;
+    else if (e.key === 'ArrowLeft') next = (idx - 1 + len) % len;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = len - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    onTabChange(TABS[next].id);
+    tabRefs.current[next] && tabRefs.current[next].focus();
+  }
+  const wordsErr = saveError && typeof saveError === 'object' && FIELD_TAB[saveError.field] === 'words';
+  return (
+    <div
+      role="tablist"
+      aria-label="Email editor sections"
+      style={{
+        display: 'flex', alignItems: 'stretch', flexShrink: 0,
+        borderBottom: '1px solid #e5e7eb', background: '#fff',
+        overflowX: 'auto', scrollbarWidth: 'none', WebkitOverflowScrolling: 'touch',
+      }}
+    >
+      {TABS.map((tab, idx) => {
+        const isActive = activeTab === tab.id;
+        const photoBadge = tab.id === 'photo' && !hasPhoto;
+        const wordsBadge = tab.id === 'words' && !!wordsErr;
+        const sendLocked = tab.id === 'send' && dirty;
+        return (
+          <button
+            key={tab.id}
+            ref={el => { tabRefs.current[idx] = el; }}
+            role="tab"
+            aria-selected={isActive}
+            aria-controls={`tabpanel-${tab.id}`}
+            id={`tab-${tab.id}`}
+            tabIndex={isActive ? 0 : -1}
+            onClick={() => onTabChange(tab.id)}
+            onKeyDown={e => handleTabKey(e, idx)}
+            style={{
+              display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+              padding: '8px 12px', border: 'none', background: 'transparent', cursor: 'pointer',
+              fontSize: 10, fontWeight: isActive ? 700 : 600,
+              color: isActive ? '#4f46e5' : '#6b7280',
+              position: 'relative', flexShrink: 0, outline: 'none',
+            }}
+          >
+            {ICON[tab.id]}
+            <span style={{ whiteSpace: 'nowrap' }}>{tab.label}</span>
+            {sendLocked && <span style={{ position: 'absolute', top: 4, right: 4 }}>{ICON.lock}</span>}
+            {photoBadge && <span style={{ position: 'absolute', top: 4, right: 4, width: 6, height: 6, borderRadius: '50%', background: '#f59e0b' }} />}
+            {wordsBadge && <span style={{ position: 'absolute', top: 4, right: 4, width: 6, height: 6, borderRadius: '50%', background: '#dc2626' }} />}
+            <span style={{
+              position: 'absolute', bottom: 0, left: 0, right: 0, height: 2,
+              background: isActive ? '#4f46e5' : 'transparent',
+              borderRadius: '1px 1px 0 0',
+            }} />
+          </button>
+        );
+      })}
+      <div style={{ flex: 1, minWidth: 4 }} />
+      {/* Looks presets */}
+      {presets && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '0 8px', flexShrink: 0, position: 'relative' }}>
+          {bandWide ? (
+            <>
+              <span style={{ fontSize: 9, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Looks:</span>
+              {Object.keys(presets).map(k => {
+                const p = presets[k];
+                return (
+                  <button key={k} type="button" onClick={() => onPreset(k)} title={p.name} style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '3px 8px', fontSize: 10, fontWeight: 700, borderRadius: 999, cursor: 'pointer',
+                    background: '#f3f4f6', color: '#374151', border: '1.5px solid #e5e7eb', outline: 'none',
+                  }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: p.color, flexShrink: 0 }} />
+                    {p.name}
+                  </button>
+                );
+              })}
+              <button type="button" onClick={() => { const ks = Object.keys(presets); onPreset(ks[Math.floor(Math.random() * ks.length)]); }}
+                style={{ padding: '3px 8px', fontSize: 10, fontWeight: 700, borderRadius: 999, cursor: 'pointer', background: '#4f46e5', color: '#fff', border: 'none', outline: 'none' }}>
+                Surprise
+              </button>
+            </>
+          ) : (
+            <div style={{ position: 'relative' }}>
+              <button type="button" onClick={() => setLooksMenuOpen(o => !o)}
+                aria-haspopup="listbox" aria-expanded={looksMenuOpen}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 3,
+                  padding: '4px 10px', fontSize: 11, fontWeight: 700, borderRadius: 8, cursor: 'pointer',
+                  background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', outline: 'none',
+                }}>
+                Looks <span aria-hidden="true">▾</span>
+              </button>
+              {looksMenuOpen && (
+                <div style={{
+                  position: 'absolute', right: 0, top: '100%', zIndex: 300, marginTop: 4,
+                  background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10,
+                  boxShadow: '0 8px 24px rgba(0,0,0,.12)', padding: '4px 0', minWidth: 140,
+                }}>
+                  {Object.keys(presets).map(k => {
+                    const p = presets[k];
+                    return (
+                      <button key={k} type="button" onClick={() => { onPreset(k); setLooksMenuOpen(false); }} style={{
+                        display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                        padding: '8px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                        background: 'transparent', border: 'none', color: '#374151', outline: 'none',
+                      }}>
+                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: p.color, flexShrink: 0 }} />
+                        {p.name}
+                      </button>
+                    );
+                  })}
+                  <div style={{ borderTop: '1px solid #f3f4f6', marginTop: 4 }}>
+                    <button type="button" onClick={() => { const ks = Object.keys(presets); onPreset(ks[Math.floor(Math.random() * ks.length)]); setLooksMenuOpen(false); }} style={{
+                      display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+                      padding: '8px 14px', fontSize: 12, fontWeight: 700, cursor: 'pointer',
+                      background: '#4f46e5', border: 'none', color: '#fff', outline: 'none',
+                    }}>
+                      Surprise me
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Full size modal ────────────────────────────────────────────────────────────
+function FullSizeModal({ draft, store, initialDevice, onClose }) {
+  const [device, setDevice] = useState(initialDevice || 'desktop');
+  const overlayRef = useRef(null);
+  const closeBtnRef = useRef(null);
+
+  useEffect(() => {
+    closeBtnRef.current && closeBtnRef.current.focus();
+    function onKey(e) {
+      if (e.key === 'Escape') { onClose(); return; }
+      if (e.key !== 'Tab') return;
+      const modal = overlayRef.current;
+      if (!modal) return;
+      const focusable = Array.from(modal.querySelectorAll(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      ));
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last  = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      ref={overlayRef}
+      role="dialog" aria-modal="true" aria-label="Full size email preview"
+      onClick={e => { if (e.target === overlayRef.current) onClose(); }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(15,23,42,0.65)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start',
+        padding: 24, overflow: 'auto',
+      }}
+    >
+      <div style={{
+        background: '#fff', borderRadius: 16,
+        boxShadow: '0 24px 64px rgba(0,0,0,0.28)',
+        width: Math.min((device === 'desktop' ? DESKTOP_W : MOBILE_W) + 48, (typeof window !== 'undefined' ? window.innerWidth : 800) - 48),
+        maxWidth: '100%',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
+          <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid #e5e7eb' }}>
+            {[['desktop', 'Desktop'], ['mobile', 'Mobile']].map(([k, label]) => (
+              <button key={k} onClick={() => setDevice(k)} style={{
+                padding: '4px 12px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
+                background: device === k ? '#4f46e5' : '#f9fafb',
+                color: device === k ? '#fff' : '#374151',
+              }}>{label}</button>
+            ))}
+          </div>
+          <span style={{ flex: 1, fontSize: 12, color: '#9ca3af' }}>Full size · 100%</span>
+          <button ref={closeBtnRef} onClick={onClose} aria-label="Close full size preview"
+            style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#6b7280', lineHeight: 1, padding: '2px 6px', borderRadius: 6, outline: 'none' }}>
+            ×
+          </button>
+        </div>
+        <div style={{ padding: '16px', overflow: 'auto' }}>
+          <ModalIframe draft={draft} store={store} device={device} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ModalIframe({ draft, store, device }) {
+  const ref = useRef(null);
+  const w = device === 'desktop' ? DESKTOP_W : MOBILE_W;
+  useEffect(() => {
+    const f = ref.current;
+    if (!f || !renderEmail || !designFromTemplate) return;
+    function onLoad() {
+      const design = designFromTemplate(draft, store, { placeholder: !draft.imageUrl });
+      const out = renderEmail(design);
+      try {
+        const doc = f.contentDocument;
+        const s = doc && doc.getElementById('s');
+        if (s) {
+          s.textContent = out.css; doc.body.innerHTML = out.body;
+          f.style.height = '1px';
+          f.style.height = (doc.documentElement.scrollHeight || 600) + 'px';
+        }
+      } catch {}
+    }
+    f.addEventListener('load', onLoad);
+    const design = designFromTemplate(draft, store, { placeholder: !draft.imageUrl });
+    const out = renderEmail(design);
+    f.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="${GOOGLE_FONTS_HREF}"><style id="s">${out.css}</style></head><body style="margin:0;padding:0;background:#f3f4f6;">${out.body}</body></html>`;
+    return () => f.removeEventListener('load', onLoad);
+  }, [draft, store, device]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <iframe ref={ref} title="Full size email preview" sandbox="allow-same-origin"
+      style={{ display: 'block', width: w, maxWidth: '100%', border: 'none', minHeight: 400 }} />
+  );
+}
 
 // ── Main screen ───────────────────────────────────────────────────────────────
 export default function EmailTemplatesScreen() {
   const searchParams = useSearchParams();
-  const shopParam      = searchParams ? (searchParams.get('shop')     || '') : '';
-  const templateParam  = searchParams ? (searchParams.get('template') || '') : '';
-  const focusParam     = searchParams ? (searchParams.get('focus')    || '') : '';
+  const shopParam     = searchParams ? (searchParams.get('shop')     || '') : '';
+  const templateParam = searchParams ? (searchParams.get('template') || '') : '';
+  const focusParam    = searchParams ? (searchParams.get('focus')    || '') : '';
 
-  const photoCardRef = useRef(null);
+  const photoCardRef        = useRef(null);
   const templateAutoSelected = useRef(false);
+  const wsRef               = useRef(null);
+  const tabContentRef       = useRef(null);
+  const bandRef             = useRef(null);
 
-  // Store brand data (for live preview)
+  // Store brand data
   const [store, setStore] = useState({ shopName: '', logoUrl: null, primaryColor: null, shopDomain: '' });
 
   // Template list
-  const [templates, setTemplates]     = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [loadError, setLoadError]     = useState('');
-  const [seeding, setSeeding]         = useState(false);
-  const [seedError, setSeedError]     = useState('');
-  const [seedCount, setSeedCount]     = useState(0);
-  const [justSeeded, setJustSeeded]   = useState(false);
+  const [templates, setTemplates]   = useState([]);
+  const [loading, setLoading]       = useState(true);
+  const [loadError, setLoadError]   = useState('');
+  const [seeding, setSeeding]       = useState(false);
+  const [seedError, setSeedError]   = useState('');
+  const [seedCount, setSeedCount]   = useState(0);
+  const [justSeeded, setJustSeeded] = useState(false);
+  const [seedDismissed, setSeedDismissed] = useState(false);
 
   // Selection
-  const [selectedId, setSelectedId]   = useState(null);
-  const [isNew, setIsNew]             = useState(false);
-  const [filter, setFilter]           = useState('all');
-  const [confirmDel, setConfirmDel]   = useState(false);
-  const [deleting, setDeleting]       = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const [isNew, setIsNew]           = useState(false);
+  const [filter, setFilter]         = useState('all');
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [deleting, setDeleting]     = useState(false);
 
-  // Draft + dirty state
-  const [draft, setDraft]             = useState(EMPTY_DRAFT);
-  const [savedDraft, setSavedDraft]   = useState(null);
+  // Draft + dirty
+  const [draft, setDraft]         = useState(EMPTY_DRAFT);
+  const [savedDraft, setSavedDraft] = useState(null);
   const dirty = useMemo(() =>
     !!savedDraft && JSON.stringify(draft) !== JSON.stringify(savedDraft),
   [draft, savedDraft]);
 
-  // Discard confirm — pendingNav is a function to run after discard
-  const [pendingNav, setPendingNav]   = useState(null);
+  const [pendingNav, setPendingNav] = useState(null);
 
   // Save
-  const [saving, setSaving]           = useState(false);
-  const [saveError, setSaveError]     = useState(null);
-  const [saveOk, setSaveOk]           = useState(false);
+  const [saving, setSaving]     = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [saveOk, setSaveOk]     = useState(false);
 
   // Photo upload
   const [uploading, setUploading]     = useState(false);
@@ -119,34 +447,89 @@ export default function EmailTemplatesScreen() {
   const [sendResult, setSendResult]       = useState(null);
 
   // Broadcast
-  const [broadcastSegment, setBroadcastSegment]           = useState('everyone');
-  const [broadcastCount, setBroadcastCount]               = useState(null);
+  const [broadcastSegment, setBroadcastSegment]       = useState('everyone');
+  const [broadcastCount, setBroadcastCount]           = useState(null);
   const [broadcastCountLoading, setBroadcastCountLoading] = useState(false);
-  const [broadcastConfirm, setBroadcastConfirm]           = useState(false);
-  const [broadcasting, setBroadcasting]                   = useState(false);
-  const [broadcastResult, setBroadcastResult]             = useState(null);
+  const [broadcastConfirm, setBroadcastConfirm]       = useState(false);
+  const [broadcasting, setBroadcasting]               = useState(false);
+  const [broadcastResult, setBroadcastResult]         = useState(null);
 
-  // Load brand data for live preview
+  // ── Workspace layout state ────────────────────────────────────────────────
+  const [wsH, setWsH]             = useState(620);
+  const [editorRatio, setEditorRatio] = useState(DEFAULT_RATIO);
+  const [deviceView, setDeviceView]   = useState('both');
+  const [previewScale, setPreviewScale] = useState({ d: 1, m: 1 });
+  const [activeTab, setActiveTab]     = useState('photo');
+  const [fullSizeOpen, setFullSizeOpen] = useState(false);
+  const [fullSizeDev, setFullSizeDev]   = useState('desktop');
+  const [looksMenuOpen, setLooksMenuOpen] = useState(false);
+  const [bandWide, setBandWide]         = useState(true);
+
+  // ── Workspace height measurement ──────────────────────────────────────────
+  useLayoutEffect(() => {
+    const ratio = readRatio();
+    setEditorRatio(ratio);
+
+    function measure() {
+      const el = wsRef.current;
+      if (!el) return;
+      const top = el.getBoundingClientRect().top;
+      setWsH(Math.max(620, window.innerHeight - top - 8));
+      const bw = el.clientWidth;
+      setBandWide(bw >= 900);
+      // Set initial deviceView based on band width (only on first measure)
+      setDeviceView(dv => dv); // keep user's choice after first measure
+    }
+    measure();
+    // Set initial device based on band width
+    const el = wsRef.current;
+    if (el) {
+      const bw = el.clientWidth;
+      setDeviceView(bw >= 900 ? 'both' : bw >= 560 ? 'desktop' : 'mobile');
+      setBandWide(bw >= 900);
+    }
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-switch to tab that owns a save error field
+  useEffect(() => {
+    if (!saveError || typeof saveError !== 'object' || !saveError.field) return;
+    const tab = FIELD_TAB[saveError.field];
+    if (tab) setActiveTab(tab);
+  }, [saveError]);
+
+  // Scroll tab content to top on tab switch
+  useEffect(() => {
+    if (tabContentRef.current) tabContentRef.current.scrollTop = 0;
+  }, [activeTab]);
+
+  // Load Google Fonts once
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (document.querySelector(`link[href*="fonts.googleapis.com"][data-etpl]`)) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = GOOGLE_FONTS_HREF;
+    link.setAttribute('data-etpl', '1');
+    document.head.appendChild(link);
+  }, []);
+
+  // Load brand data
   useEffect(() => {
     const shop = shopParam || (typeof window !== 'undefined' && window.shopify?.config?.shop) || '';
     if (!shop) return;
     setStore(s => ({ ...s, shopDomain: shop }));
     apiGet(`/api/profiles/${encodeURIComponent(shop)}/settings`)
       .then(data => {
-        setStore({
-          shopName: data.shopName || '',
-          logoUrl: data.logoUrl || null,
-          primaryColor: data.primaryColor || null,
-          shopDomain: shop,
-        });
+        setStore({ shopName: data.shopName || '', logoUrl: data.logoUrl || null, primaryColor: data.primaryColor || null, shopDomain: shop });
       })
       .catch(() => {});
   }, [shopParam]);
 
-  // Load templates on mount
   useEffect(() => { loadTemplates(); }, []);
 
-  // Auto-select template from ?template= param (once, after templates load)
+  // Auto-select from URL param
   useEffect(() => {
     if (!templateParam || templateAutoSelected.current || templates.length === 0) return;
     const match = templates.find(t => t._id === templateParam);
@@ -154,18 +537,11 @@ export default function EmailTemplatesScreen() {
       templateAutoSelected.current = true;
       _doSelectTemplate(match);
       if (focusParam === 'photo') {
-        // Defer until after render so the card is in the DOM
         setTimeout(() => {
+          setActiveTab('photo');
           const el = photoCardRef.current;
           if (!el) return;
           el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          const reducedMotion = typeof window !== 'undefined' &&
-            window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-          if (!reducedMotion) {
-            el.style.transition = 'box-shadow 0.25s';
-            el.style.boxShadow = '0 0 0 3px #4f46e5';
-            setTimeout(() => { el.style.boxShadow = ''; el.style.transition = ''; }, 1200);
-          }
         }, 80);
       }
     }
@@ -191,18 +567,7 @@ export default function EmailTemplatesScreen() {
     return () => { cancelled = true; };
   }, [selectedId, broadcastSegment]);
 
-  // Load Google Fonts once for the parent page (so later font pickers can show preview)
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    if (document.querySelector(`link[href*="fonts.googleapis.com"][data-etpl]`)) return;
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = GOOGLE_FONTS_HREF;
-    link.setAttribute('data-etpl', '1');
-    document.head.appendChild(link);
-  }, []);
-
-  // ── Data helpers ─────────────────────────────────────────────────────────────
+  // ── Data helpers ──────────────────────────────────────────────────────────
 
   async function loadTemplates() {
     setLoading(true);
@@ -233,10 +598,7 @@ export default function EmailTemplatesScreen() {
       const newList = data.templates || [];
       setTemplates(newList);
       const added = newList.length - prevCount;
-      if (data.seeded && added > 0) {
-        setSeedCount(added);
-        setJustSeeded(true);
-      }
+      if (data.seeded && added > 0) { setSeedCount(added); setJustSeeded(true); }
     } catch (e) {
       setSeedError(e.message || 'Could not generate starter templates.');
     } finally {
@@ -251,65 +613,35 @@ export default function EmailTemplatesScreen() {
   }
 
   function tryNavigate(action) {
-    if (dirty || uploading) {
-      setPendingNav(() => action);
-    } else {
-      action();
-    }
+    if (dirty || uploading) { setPendingNav(() => action); }
+    else { action(); }
   }
 
   function executeNav() {
-    if (pendingNav) {
-      pendingNav();
-      setPendingNav(null);
-    }
+    if (pendingNav) { pendingNav(); setPendingNav(null); }
   }
 
   function _doSelectTemplate(t) {
     const d = draftFromTemplate(t);
-    setSelectedId(t._id);
-    setIsNew(false);
-    setDraft(d);
-    setSavedDraft(d);
-    setSaveError(null);
-    setSaveOk(false);
-    setConfirmDel(false);
-    setSendResult(null);
-    setSendRecipient('');
-    setProductTitle('');
-    setGenError('');
-    setGenNotice('');
-    setGenConfirm(false);
-    setBroadcastSegment('everyone');
-    setBroadcastCount(null);
-    setBroadcastCountLoading(false);
-    setBroadcastConfirm(false);
-    setBroadcastResult(null);
-    setPhotoError('');
-    setPhotoCardKey(k => k + 1);
+    setSelectedId(t._id); setIsNew(false);
+    setDraft(d); setSavedDraft(d);
+    setSaveError(null); setSaveOk(false); setConfirmDel(false);
+    setSendResult(null); setSendRecipient(''); setProductTitle('');
+    setGenError(''); setGenNotice(''); setGenConfirm(false);
+    setBroadcastSegment('everyone'); setBroadcastCount(null);
+    setBroadcastCountLoading(false); setBroadcastConfirm(false); setBroadcastResult(null);
+    setPhotoError(''); setPhotoCardKey(k => k + 1);
   }
 
   function _doStartNew() {
-    setSelectedId(null);
-    setIsNew(true);
-    setDraft(EMPTY_DRAFT);
-    setSavedDraft(EMPTY_DRAFT);
-    setSaveError(null);
-    setSaveOk(false);
-    setConfirmDel(false);
-    setSendResult(null);
-    setSendRecipient('');
-    setProductTitle('');
-    setGenError('');
-    setGenNotice('');
-    setGenConfirm(false);
-    setBroadcastSegment('everyone');
-    setBroadcastCount(null);
-    setBroadcastCountLoading(false);
-    setBroadcastConfirm(false);
-    setBroadcastResult(null);
-    setPhotoError('');
-    setPhotoCardKey(k => k + 1);
+    setSelectedId(null); setIsNew(true);
+    setDraft(EMPTY_DRAFT); setSavedDraft(EMPTY_DRAFT);
+    setSaveError(null); setSaveOk(false); setConfirmDel(false);
+    setSendResult(null); setSendRecipient(''); setProductTitle('');
+    setGenError(''); setGenNotice(''); setGenConfirm(false);
+    setBroadcastSegment('everyone'); setBroadcastCount(null);
+    setBroadcastCountLoading(false); setBroadcastConfirm(false); setBroadcastResult(null);
+    setPhotoError(''); setPhotoCardKey(k => k + 1);
   }
 
   function selectTemplate(t) { tryNavigate(() => _doSelectTemplate(t)); }
@@ -317,9 +649,7 @@ export default function EmailTemplatesScreen() {
 
   async function saveTemplate() {
     if (saving || uploading) return;
-    setSaving(true);
-    setSaveError(null);
-    setSaveOk(false);
+    setSaving(true); setSaveError(null); setSaveOk(false);
     try {
       let saved;
       if (selectedId) {
@@ -330,13 +660,10 @@ export default function EmailTemplatesScreen() {
         const res = await apiSend('/api/email-templates', 'POST', draft);
         saved = res.template;
         setTemplates(ts => [saved, ...ts]);
-        setSelectedId(saved._id);
-        setIsNew(false);
+        setSelectedId(saved._id); setIsNew(false);
       }
       const d = draftFromTemplate(saved);
-      setDraft(d);
-      setSavedDraft(d);
-      setSaveOk(true);
+      setDraft(d); setSavedDraft(d); setSaveOk(true);
     } catch (e) {
       setSaveError(e.field ? { error: e.message, field: e.field } : e.message);
     } finally {
@@ -350,15 +677,11 @@ export default function EmailTemplatesScreen() {
     try {
       await apiSend(`/api/email-templates/${selectedId}`, 'DELETE', {});
       setTemplates(ts => ts.filter(t => t._id !== selectedId));
-      setSelectedId(null);
-      setIsNew(false);
-      setDraft(EMPTY_DRAFT);
-      setSavedDraft(null);
-      setConfirmDel(false);
+      setSelectedId(null); setIsNew(false);
+      setDraft(EMPTY_DRAFT); setSavedDraft(null); setConfirmDel(false);
       setPhotoCardKey(k => k + 1);
     } catch (e) {
-      setSaveError(e.message);
-      setConfirmDel(false);
+      setSaveError(e.message); setConfirmDel(false);
     } finally {
       setDeleting(false);
     }
@@ -367,8 +690,7 @@ export default function EmailTemplatesScreen() {
   async function handlePhotoUpload(dataUrl, _file, clientErr) {
     if (clientErr) { setPhotoError(clientErr); return; }
     if (!dataUrl) return;
-    setUploading(true);
-    setPhotoError('');
+    setUploading(true); setPhotoError('');
     try {
       const data = await apiSend('/api/email-templates/photo', 'POST', { dataUrl });
       setDraft(d => ({ ...d, imageUrl: data.url, imgW: data.width, imgH: data.height }));
@@ -386,21 +708,15 @@ export default function EmailTemplatesScreen() {
   }
 
   function handleGenerateClick() {
-    setGenError('');
-    setGenNotice('');
-    if (draft.subject.trim() || draft.body.trim()) {
-      setGenConfirm(true);
-    } else {
-      runGenerate();
-    }
+    setGenError(''); setGenNotice('');
+    if (draft.subject.trim() || draft.body.trim()) { setGenConfirm(true); }
+    else { runGenerate(); }
   }
 
   async function runGenerate() {
     setGenConfirm(false);
     if (generating) return;
-    setGenerating(true);
-    setGenError('');
-    setGenNotice('');
+    setGenerating(true); setGenError(''); setGenNotice('');
     try {
       const payload = { type: draft.type };
       if (productTitle.trim()) payload.productTitle = productTitle.trim();
@@ -423,15 +739,13 @@ export default function EmailTemplatesScreen() {
   async function sendEmail() {
     const recipient = sendRecipient.trim();
     if (!selectedId || !recipient || sending) return;
-    setSending(true);
-    setSendResult(null);
+    setSending(true); setSendResult(null);
     try {
       const isEmail = recipient.includes('@');
       const data = await apiSend(`/api/email-templates/${selectedId}/send`, 'POST',
         isEmail ? { email: recipient } : { profileId: recipient }
       );
-      const tip = data.warnings && data.warnings.includes('no_photo')
-        ? ' Tip: this email has no offer photo.' : '';
+      const tip = data.warnings && data.warnings.includes('no_photo') ? ' Tip: this email has no offer photo.' : '';
       setSendResult({ ok: true, id: data.id, tip });
     } catch (e) {
       setSendResult({ ok: false, error: e.message });
@@ -442,13 +756,10 @@ export default function EmailTemplatesScreen() {
 
   async function sendBroadcast() {
     if (!selectedId || broadcasting) return;
-    setBroadcasting(true);
-    setBroadcastConfirm(false);
-    setBroadcastResult(null);
+    setBroadcasting(true); setBroadcastConfirm(false); setBroadcastResult(null);
     try {
       const data = await apiSend(`/api/email-templates/${selectedId}/broadcast`, 'POST', { segment: broadcastSegment });
-      const tip = data.warnings && data.warnings.includes('no_photo')
-        ? ' Tip: this email has no offer photo.' : '';
+      const tip = data.warnings && data.warnings.includes('no_photo') ? ' Tip: this email has no offer photo.' : '';
       setBroadcastResult({ ok: true, sent: data.sent, failed: data.failed, tip });
     } catch (e) {
       setBroadcastResult({ ok: false, error: e.message });
@@ -457,148 +768,45 @@ export default function EmailTemplatesScreen() {
     }
   }
 
+  function applyPreset(k) {
+    if (!ENGINE_PRESETS || !ENGINE_PRESETS[k]) return;
+    const p = ENGINE_PRESETS[k];
+    setDraftField('layout', p.layout);
+    setDraftField('color',  p.color);
+    setDraftField('hFont',  p.hFont);
+    setDraftField('bFont',  p.bFont);
+    setDraftField('radius', p.radius);
+    setDraftField('pageBg', null);
+    setDraftField('cardBg', null);
+  }
+
   const showEditor = isNew || !!selectedId;
   const sendDisabled = dirty || uploading;
   const sendDisabledHint = sendDisabled ? 'Save your changes first' : '';
+  const noPhoto = showEditor && !draft.imageUrl;
+  const editorH = Math.round(clampRatio(editorRatio) * wsH);
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
-    <div style={DS.page}>
-      {/* Header */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <h1 style={DS.pageTitle}>Email templates</h1>
-            <p style={DS.pageSubtitle}>Design, preview, and send branded email templates.</p>
-          </div>
-        </div>
-        <div style={{ height: 3, background: 'linear-gradient(90deg, #4f46e5, #818cf8)', borderRadius: 2, marginTop: 12, width: 48 }} />
-
-        {/* Presets chips */}
-        {ENGINE_PRESETS && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 14, alignItems: 'center' }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginRight: 4 }}>Start with:</span>
-            {Object.keys(ENGINE_PRESETS).map(k => {
-              const p = ENGINE_PRESETS[k];
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => {
-                    setDraftField('layout', p.layout);
-                    setDraftField('color',  p.color);
-                    setDraftField('hFont',  p.hFont);
-                    setDraftField('bFont',  p.bFont);
-                    setDraftField('radius', p.radius);
-                    setDraftField('pageBg', null);
-                    setDraftField('cardBg', null);
-                  }}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    padding: '5px 12px', fontSize: 12, fontWeight: 700, borderRadius: 999, cursor: 'pointer',
-                    background: '#f3f4f6', color: '#374151', border: '1.5px solid #e5e7eb', outline: 'none',
-                  }}
-                >
-                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: p.color, flexShrink: 0, display: 'inline-block' }} />
-                  {p.name}
-                </button>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() => {
-                if (!ENGINE_PRESETS) return;
-                const keys = Object.keys(ENGINE_PRESETS);
-                const p = ENGINE_PRESETS[keys[Math.floor(Math.random() * keys.length)]];
-                setDraftField('layout', p.layout);
-                setDraftField('color',  p.color);
-                setDraftField('hFont',  p.hFont);
-                setDraftField('bFont',  p.bFont);
-                setDraftField('radius', p.radius);
-                setDraftField('pageBg', null);
-                setDraftField('cardBg', null);
-              }}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '5px 12px', fontSize: 12, fontWeight: 700, borderRadius: 999, cursor: 'pointer',
-                background: '#4f46e5', color: '#fff', border: 'none', outline: 'none',
-              }}
-            >
-              Surprise me
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Seed banner */}
-      {justSeeded && (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, padding: '12px 16px', marginBottom: 16, gap: 12 }}>
-          <p style={{ fontSize: 13, color: '#166534', margin: 0 }}>
-            We drafted {seedCount} starter template{seedCount !== 1 ? 's' : ''} for you. Edit them to fit your brand, or send them as-is.
-          </p>
-          <button style={{ background: 'none', border: 'none', fontSize: 18, lineHeight: 1, cursor: 'pointer', color: '#166534', padding: '0 4px', flexShrink: 0 }} onClick={() => setJustSeeded(false)} aria-label="Dismiss">
-            &times;
-          </button>
-        </div>
-      )}
-
-      {/* Loading / seed / error states */}
-      {(loading || seeding) && (
-        <p style={{ fontSize: 13, color: '#9ca3af', marginBottom: 16 }}>
-          {seeding ? 'Setting up your starter templates…' : 'Loading…'}
-        </p>
-      )}
-      {!loading && !seeding && seedError && (
-        <div style={{ marginBottom: 16 }}>
-          <p style={{ fontSize: 13, color: '#dc2626', margin: '0 0 8px' }}>{seedError}</p>
-          <button style={{ ...DS.btnSecondary, fontSize: 12, padding: '5px 12px' }} onClick={() => runSeed(templates.length)}>
-            Try again
-          </button>
-        </div>
-      )}
-      {!loading && loadError && (
-        <p style={{ fontSize: 13, color: '#dc2626', marginBottom: 16 }}>{loadError}</p>
-      )}
-
-      {/* Discard confirm */}
-      {pendingNav && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 13, color: '#92400e', flex: 1 }}>You have unsaved changes. Discard and continue?</span>
-          <button style={{ ...DS.btnDanger, fontSize: 12, padding: '5px 12px' }} onClick={executeNav}>Discard</button>
-          <button style={{ ...DS.btnSecondary, fontSize: 12, padding: '5px 12px' }} onClick={() => setPendingNav(null)}>Keep editing</button>
-        </div>
-      )}
-
-      {/* Dirty bar */}
-      {dirty && !pendingNav && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, color: '#92400e', flex: 1 }}>Unsaved changes</span>
-          <button
-            style={{ ...DS.btnPrimary, fontSize: 12, padding: '5px 14px' }}
-            onClick={saveTemplate}
-            disabled={saving || uploading}
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-          <button
-            style={{ ...DS.btnSecondary, fontSize: 12, padding: '5px 12px' }}
-            onClick={() => {
-              if (savedDraft) { setDraft(savedDraft); setSaveError(null); setSaveOk(false); }
-              else _doStartNew();
-            }}
-          >
-            Discard
-          </button>
-        </div>
-      )}
-
-      {/* Two-column studio layout */}
-      <div className="etpl-sgrid" style={{ display: 'grid', gap: 20, alignItems: 'start' }}>
-
-        {/* LEFT: picker + cards */}
-        <div style={{ minWidth: 0 }}>
-          {/* Template picker card */}
-          <div style={{ ...DS.card, padding: '16px 20px', marginBottom: 0 }}>
+    <div
+      ref={wsRef}
+      style={{
+        height: wsH, minHeight: 620,
+        overflow: wsH <= 620 ? 'visible' : 'hidden',
+        display: 'grid',
+        gridTemplateRows: `auto 1fr 10px ${editorH}px`,
+        fontFamily: DS.fontFamily,
+        background: '#f8fafc',
+        boxSizing: 'border-box',
+      }}
+    >
+      {/* ── Row 0: header ──────────────────────────────────────────────────── */}
+      <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 0, flexShrink: 0 }}>
+        {/* Main header row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', rowGap: 6 }}>
+          {/* Template picker (compact) */}
+          <div style={{ flex: 1, minWidth: 220 }}>
             <TemplatePicker
               templates={templates}
               selectedId={selectedId}
@@ -613,206 +821,446 @@ export default function EmailTemplatesScreen() {
               setConfirmDel={setConfirmDel}
               onDelete={deleteTemplate}
               deleting={deleting}
+              compact={true}
             />
           </div>
 
+          {/* Dirty pill */}
+          {dirty && (
+            <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: '#fffbeb', color: '#b45309', border: '1.5px solid #fde68a', flexShrink: 0 }}>
+              Unsaved changes
+            </span>
+          )}
+          {saveOk && (
+            <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: '#f0fdf4', color: '#166534', border: '1.5px solid #bbf7d0', flexShrink: 0 }}>
+              Saved
+            </span>
+          )}
+
+          {/* Save */}
           {showEditor && (
+            <button
+              style={{ ...DS.btnPrimary, opacity: saving || uploading ? 0.7 : 1, flexShrink: 0 }}
+              onClick={saveTemplate}
+              disabled={saving || uploading}
+            >
+              {saving ? 'Saving…' : isNew ? 'Create' : 'Save'}
+            </button>
+          )}
+
+          {/* Discard */}
+          {dirty && (
+            <button
+              style={{ ...DS.btnSecondary, flexShrink: 0 }}
+              onClick={() => {
+                if (savedDraft) { setDraft(savedDraft); setSaveError(null); setSaveOk(false); }
+                else _doStartNew();
+              }}
+            >
+              Discard
+            </button>
+          )}
+        </div>
+
+        {/* Discard-nav confirm */}
+        {pendingNav && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: '#92400e', flex: 1 }}>Unsaved changes — discard and continue?</span>
+            <button style={{ ...DS.btnDanger, fontSize: 12, padding: '4px 10px' }} onClick={executeNav}>Discard</button>
+            <button style={{ ...DS.btnSecondary, fontSize: 12, padding: '4px 10px' }} onClick={() => setPendingNav(null)}>Keep editing</button>
+          </div>
+        )}
+
+        {/* Save error */}
+        {saveError && (
+          <p style={{ fontSize: 12, color: '#dc2626', margin: '4px 0 0' }}>
+            {typeof saveError === 'string' ? saveError : saveError.error}
+          </p>
+        )}
+
+        {/* Seed banner (slim strip) */}
+        {(loading || seeding) && (
+          <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 0 0' }}>
+            {seeding ? 'Setting up starter templates…' : 'Loading…'}
+          </p>
+        )}
+        {!loading && !seeding && seedError && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 0' }}>
+            <p style={{ fontSize: 12, color: '#dc2626', margin: 0, flex: 1 }}>{seedError}</p>
+            <button style={{ ...DS.btnSecondary, fontSize: 11, padding: '3px 8px' }} onClick={() => runSeed(templates.length)}>Try again</button>
+          </div>
+        )}
+        {!loading && loadError && <p style={{ fontSize: 12, color: '#dc2626', margin: '4px 0 0' }}>{loadError}</p>}
+        {justSeeded && !seedDismissed && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '5px 10px', margin: '6px 0 0' }}>
+            <p style={{ fontSize: 12, color: '#166534', margin: 0, flex: 1 }}>
+              {seedCount} starter template{seedCount !== 1 ? 's' : ''} ready. Edit them or send as-is.
+            </p>
+            <button style={{ background: 'none', border: 'none', fontSize: 16, cursor: 'pointer', color: '#166534', padding: 0 }} onClick={() => setSeedDismissed(true)} aria-label="Dismiss">×</button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Row 1: preview band (1fr) ───────────────────────────────────────── */}
+      <div ref={bandRef} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 240 }}>
+        {/* Preview toolbar */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px',
+          background: '#fff', borderBottom: '1px solid #e5e7eb', flexShrink: 0, flexWrap: 'wrap',
+        }}>
+          {/* Device segmented */}
+          <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid #e5e7eb', flexShrink: 0 }}>
+            {[['both', 'Both'], ['desktop', 'Desktop'], ['mobile', 'Mobile']].map(([k, label]) => (
+              <button key={k} onClick={() => setDeviceView(k)} style={{
+                padding: '4px 10px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
+                background: deviceView === k ? '#4f46e5' : '#f9fafb',
+                color: deviceView === k ? '#fff' : '#374151',
+              }}>{label}</button>
+            ))}
+          </div>
+
+          {/* Scale readout */}
+          <span style={{ fontSize: 10, color: '#9ca3af', fontWeight: 600, flexShrink: 0 }}>
+            {deviceView === 'both'
+              ? `D ${Math.round(previewScale.d * 100)}% · M ${Math.round(previewScale.m * 100)}%`
+              : deviceView === 'desktop'
+              ? `${Math.round(previewScale.d * 100)}%`
+              : `${Math.round(previewScale.m * 100)}%`}
+          </span>
+
+          {/* Full size button */}
+          {showEditor && (
+            <button
+              onClick={() => { setFullSizeDev(deviceView === 'mobile' ? 'mobile' : 'desktop'); setFullSizeOpen(true); }}
+              style={{ ...DS.btnSecondary, padding: '3px 10px', fontSize: 11, flexShrink: 0 }}
+            >
+              Full size
+            </button>
+          )}
+
+          {/* Photo status pill */}
+          {showEditor && (
+            <span style={{
+              fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, flexShrink: 0,
+              background: noPhoto ? '#fef3c7' : '#f0fdf4',
+              color: noPhoto ? '#b45309' : '#166534',
+              border: `1px solid ${noPhoto ? '#fde68a' : '#bbf7d0'}`,
+            }}>
+              {noPhoto ? 'No photo yet' : 'Photo added'}
+            </span>
+          )}
+
+          <div style={{ flex: 1 }} />
+        </div>
+
+        {/* Stage */}
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <PreviewStage
+            draft={showEditor ? draft : null}
+            store={store}
+            deviceView={deviceView}
+            onScale={(d, m) => setPreviewScale({ d, m })}
+          />
+        </div>
+      </div>
+
+      {/* ── Row 2: splitter ────────────────────────────────────────────────── */}
+      <Splitter
+        wsRef={wsRef}
+        wsH={wsH}
+        editorRatio={editorRatio}
+        onRatioChange={r => { setEditorRatio(r); writeRatio(r); }}
+      />
+
+      {/* ── Row 3: editor panel ─────────────────────────────────────────────── */}
+      <div style={{
+        height: editorH, overflow: 'hidden',
+        display: 'flex', flexDirection: 'column',
+        background: '#fff',
+        borderTop: 'none',
+        borderRadius: '0 0 8px 8px',
+        boxShadow: '0 -1px 0 #e5e7eb',
+      }}>
+        {/* Tab strip */}
+        <TabStrip
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          hasPhoto={!!draft.imageUrl}
+          dirty={dirty}
+          saveError={saveError}
+          presets={ENGINE_PRESETS}
+          onPreset={applyPreset}
+          looksMenuOpen={looksMenuOpen}
+          setLooksMenuOpen={setLooksMenuOpen}
+          bandWide={bandWide}
+        />
+
+        {/* Tab content (the only scroll area) */}
+        <div
+          ref={tabContentRef}
+          id={`tabpanel-${activeTab}`}
+          role="tabpanel"
+          aria-labelledby={`tab-${activeTab}`}
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            overscrollBehavior: 'contain',
+            scrollbarGutter: 'stable',
+            padding: '16px',
+            boxSizing: 'border-box',
+          }}
+        >
+          {!showEditor ? (
+            <div style={{ textAlign: 'center', padding: '32px 16px', color: '#9ca3af' }}>
+              <p style={{ fontSize: 22, margin: '0 0 10px', lineHeight: 1 }}>✉</p>
+              <p style={{ fontSize: 14, fontWeight: 600, color: '#374151', margin: '0 0 4px' }}>Select a template or create a new one</p>
+              <p style={{ fontSize: 12, margin: 0 }}>The preview updates as you type.</p>
+            </div>
+          ) : (
             <>
-              {/* Photo card */}
-              <div ref={photoCardRef} style={{ marginTop: 12 }}>
-                <PhotoCard
-                  key={photoCardKey}
-                  draft={draft}
-                  uploading={uploading}
-                  photoError={photoError}
-                  onUpload={handlePhotoUpload}
-                  onRemove={handlePhotoRemove}
-                  onClearError={() => setPhotoError('')}
-                />
-              </div>
-
-              {/* Layout card */}
-              <LayoutCard draft={draft} setDraftField={setDraftField} saveError={saveError} />
-
-              {/* Colour card */}
-              <ColourCard draft={draft} setDraftField={setDraftField} store={store} saveError={saveError} />
-
-              {/* Font card */}
-              <FontCard draft={draft} setDraftField={setDraftField} saveError={saveError} />
-
-              {/* Words card */}
-              <WordsCard draft={draft} setDraftField={setDraftField} saveError={saveError} />
-
-              {/* Save / error row */}
-              <div style={{ marginBottom: 12 }}>
-                {saveError && typeof saveError === 'string' && (
-                  <p style={{ fontSize: 13, color: '#dc2626', margin: '0 0 8px' }}>{saveError}</p>
-                )}
-                {saveError && typeof saveError === 'object' && (
-                  <p style={{ fontSize: 13, color: '#dc2626', margin: '0 0 8px' }}>{saveError.error}</p>
-                )}
-                {saveOk && (
-                  <p style={{ fontSize: 13, color: '#16a34a', margin: '0 0 8px' }}>Saved.</p>
-                )}
-                <button
-                  style={{ ...DS.btnPrimary, opacity: saving || uploading ? 0.7 : 1 }}
-                  onClick={saveTemplate}
-                  disabled={saving || uploading}
-                >
-                  {saving ? 'Saving…' : isNew ? 'Create template' : 'Save changes'}
-                </button>
-              </div>
-
-              {/* Generate with AI */}
-              <div style={{ ...DS.card, padding: '16px 20px', marginBottom: 12 }}>
-                <p style={{ ...DS.sectionLabel, color: '#6d28d9' }}>Generate with AI</p>
-                <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                  <div style={{ flex: 1, minWidth: 140 }}>
-                    <label style={DS.label}>Product (optional)</label>
-                    <input
-                      style={DS.input}
-                      value={productTitle}
-                      onChange={e => { setProductTitle(e.target.value); setGenError(''); setGenNotice(''); setGenConfirm(false); }}
-                      placeholder="e.g. Banarasi Silk Kurti"
-                    />
-                  </div>
-                  <button
-                    style={{ ...DS.btnSecondary, borderColor: '#c4b5fd', color: '#6d28d9', background: '#ede9fe', flexShrink: 0 }}
-                    onClick={handleGenerateClick}
-                    disabled={generating}
-                  >
-                    {generating ? 'Generating…' : 'Generate'}
-                  </button>
-                </div>
-                {genConfirm && (
-                  <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 13, color: '#374151' }}>This will replace your current subject, body, and offer line.</span>
-                    <button style={{ ...DS.btnSecondary, padding: '5px 12px', fontSize: 12 }} onClick={runGenerate}>Replace</button>
-                    <button style={{ ...DS.btnSecondary, padding: '5px 12px', fontSize: 12 }} onClick={() => setGenConfirm(false)}>Cancel</button>
-                  </div>
-                )}
-                {genNotice && <p style={{ fontSize: 12, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '6px 10px', margin: '10px 0 0' }}>{genNotice}</p>}
-                {genError  && <p style={{ fontSize: 12, color: '#dc2626', margin: '10px 0 0' }}>{genError}</p>}
-              </div>
-
-              {/* Send test */}
-              {selectedId && (
-                <div style={{ ...DS.card, padding: '16px 20px', marginBottom: 12 }}>
-                  <p style={DS.sectionLabel}>Send test</p>
-                  {sendDisabledHint && (
-                    <p style={{ fontSize: 12, color: '#b45309', background: '#fef3c7', borderRadius: 6, padding: '5px 10px', margin: '0 0 10px' }}>{sendDisabledHint}</p>
-                  )}
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                    <div style={{ flex: 1, minWidth: 180 }}>
-                      <label style={DS.label}>Customer email</label>
-                      <input
-                        style={DS.input}
-                        type="email"
-                        value={sendRecipient}
-                        onChange={e => { setSendRecipient(e.target.value); setSendResult(null); }}
-                        placeholder="customer@example.com"
-                        disabled={sendDisabled}
-                      />
-                    </div>
-                    <button style={{ ...DS.btnPrimary, opacity: sendDisabled ? 0.5 : 1 }} onClick={sendEmail} disabled={sendDisabled || sending || !sendRecipient.trim()}>
-                      {sending ? 'Sending…' : 'Send'}
-                    </button>
-                  </div>
-                  {sendResult?.ok && (
-                    <p style={{ fontSize: 13, color: '#16a34a', margin: '10px 0 0' }}>
-                      Sent! Resend ID: {sendResult.id}{sendResult.tip}
-                    </p>
-                  )}
-                  {sendResult && !sendResult.ok && (
-                    <p style={{ fontSize: 13, color: '#dc2626', margin: '10px 0 0' }}>{sendResult.error}</p>
-                  )}
+              {/* Photo tab */}
+              {activeTab === 'photo' && (
+                <div ref={photoCardRef}>
+                  <PhotoCard
+                    key={photoCardKey}
+                    draft={draft}
+                    uploading={uploading}
+                    photoError={photoError}
+                    onUpload={handlePhotoUpload}
+                    onRemove={handlePhotoRemove}
+                    onClearError={() => setPhotoError('')}
+                    bare
+                  />
                 </div>
               )}
 
-              {/* Broadcast */}
-              {selectedId && (
-                <div style={{ ...DS.card, padding: '16px 20px', marginBottom: 12 }}>
-                  <p style={DS.sectionLabel}>Send to customers</p>
-                  {sendDisabledHint && (
-                    <p style={{ fontSize: 12, color: '#b45309', background: '#fef3c7', borderRadius: 6, padding: '5px 10px', margin: '0 0 10px' }}>{sendDisabledHint}</p>
-                  )}
-                  <div style={{ marginBottom: 12 }}>
-                    <label style={DS.label}>Segment</label>
-                    <select
-                      style={{ ...DS.input, cursor: 'pointer' }}
-                      value={broadcastSegment}
-                      disabled={sendDisabled}
-                      onChange={e => { setBroadcastSegment(e.target.value); setBroadcastConfirm(false); setBroadcastResult(null); }}
-                    >
-                      {SEGMENTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-                    </select>
-                  </div>
-                  {broadcastCountLoading && <p style={{ fontSize: 13, color: '#9ca3af', margin: '0 0 12px' }}>Counting…</p>}
-                  {!broadcastCountLoading && broadcastCount === 0 && <p style={{ fontSize: 13, color: '#9ca3af', margin: '0 0 12px' }}>No customers match this segment.</p>}
-                  {!broadcastCountLoading && broadcastCount !== null && broadcastCount > 0 && broadcastCount <= 90 && (
-                    <p style={{ fontSize: 13, color: '#374151', margin: '0 0 12px' }}>{broadcastCount} customers will receive this.</p>
-                  )}
-                  {!broadcastCountLoading && broadcastCount !== null && broadcastCount > 90 && (
-                    <p style={{ fontSize: 12, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '6px 10px', margin: '0 0 12px' }}>
-                      Free plan sends up to ~90 at once. {broadcastCount} match — narrow the segment.
-                    </p>
-                  )}
-                  {!broadcastConfirm && (
-                    <button
-                      style={{ ...DS.btnPrimary, opacity: sendDisabled ? 0.5 : 1 }}
-                      disabled={sendDisabled || broadcasting || broadcastCountLoading || broadcastCount === null || broadcastCount === 0 || broadcastCount > 90}
-                      onClick={() => setBroadcastConfirm(true)}
-                    >
-                      Send to {broadcastCount ?? '…'} customers
-                    </button>
-                  )}
-                  {broadcastConfirm && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 13, color: '#374151' }}>Send to {broadcastCount} customers? This can&apos;t be undone.</span>
-                      <button style={DS.btnPrimary} onClick={sendBroadcast} disabled={broadcasting}>{broadcasting ? `Sending…` : 'Confirm send'}</button>
-                      <button style={DS.btnSecondary} onClick={() => setBroadcastConfirm(false)}>Cancel</button>
+              {/* Layout tab */}
+              {activeTab === 'layout' && (
+                <LayoutCard
+                  draft={draft}
+                  setDraftField={setDraftField}
+                  saveError={saveError}
+                  bare
+                />
+              )}
+
+              {/* Colours tab */}
+              {activeTab === 'colours' && (
+                <ColourCard
+                  draft={draft}
+                  setDraftField={setDraftField}
+                  store={store}
+                  saveError={saveError}
+                  bare
+                />
+              )}
+
+              {/* Fonts tab */}
+              {activeTab === 'fonts' && (
+                <FontCard
+                  draft={draft}
+                  setDraftField={setDraftField}
+                  saveError={saveError}
+                  bare
+                />
+              )}
+
+              {/* Words tab */}
+              {activeTab === 'words' && (
+                <>
+                  {/* Type selector for new templates */}
+                  {isNew && (
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, display: 'block' }}>Type</label>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {['special_offer', 'festival', 'normal'].map(key => (
+                          <button key={key} onClick={() => setDraftField('type', key)} style={{
+                            padding: '5px 12px', fontSize: 12, fontWeight: 700, borderRadius: 8, cursor: 'pointer',
+                            background: draft.type === key ? '#4f46e5' : '#f3f4f6',
+                            color: draft.type === key ? '#fff' : '#374151',
+                            border: draft.type === key ? 'none' : '1px solid #e5e7eb',
+                          }}>
+                            {{ special_offer: 'Special offer', festival: 'Festival', normal: 'Normal' }[key]}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
-                  {broadcastResult?.ok && (
-                    <p style={{ fontSize: 13, color: '#16a34a', margin: '12px 0 0' }}>
-                      Sent to {broadcastResult.sent}{broadcastResult.failed > 0 ? `, failed ${broadcastResult.failed}` : ''}.{broadcastResult.tip}
-                    </p>
+                  <WordsCard
+                    draft={draft}
+                    setDraftField={setDraftField}
+                    saveError={saveError}
+                    bare
+                    showName
+                    isNew={isNew}
+                  />
+                </>
+              )}
+
+              {/* Send tab */}
+              {activeTab === 'send' && (
+                <div className="etpl-send-grid">
+                  {/* Generate with AI */}
+                  <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 12, padding: '14px 16px' }}>
+                    <p style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 10px' }}>Generate with AI</p>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                      <div style={{ flex: 1, minWidth: 120 }}>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, display: 'block' }}>Product (optional)</label>
+                        <input
+                          style={{ width: '100%', padding: '7px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 8, outline: 'none', boxSizing: 'border-box', color: '#111827' }}
+                          value={productTitle}
+                          onChange={e => { setProductTitle(e.target.value); setGenError(''); setGenNotice(''); setGenConfirm(false); }}
+                          placeholder="e.g. Banarasi Silk Kurti"
+                        />
+                      </div>
+                      <button
+                        style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 9, padding: '7px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: generating ? 0.7 : 1, flexShrink: 0 }}
+                        onClick={handleGenerateClick}
+                        disabled={generating}
+                      >
+                        {generating ? 'Generating…' : 'Generate'}
+                      </button>
+                    </div>
+                    {genConfirm && (
+                      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 12, color: '#374151', flex: 1 }}>Replace subject, body, and offer line?</span>
+                        <button style={{ ...DS.btnSecondary, padding: '4px 10px', fontSize: 11 }} onClick={runGenerate}>Replace</button>
+                        <button style={{ ...DS.btnSecondary, padding: '4px 10px', fontSize: 11 }} onClick={() => setGenConfirm(false)}>Cancel</button>
+                      </div>
+                    )}
+                    {genNotice && <p style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '5px 8px', margin: '8px 0 0' }}>{genNotice}</p>}
+                    {genError  && <p style={{ fontSize: 11, color: '#dc2626', margin: '8px 0 0' }}>{genError}</p>}
+                  </div>
+
+                  {/* Send test */}
+                  {selectedId && (
+                    <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
+                      <p style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 10px' }}>Send test</p>
+                      {sendDisabledHint && <p style={{ fontSize: 11, color: '#b45309', background: '#fef3c7', borderRadius: 6, padding: '4px 8px', margin: '0 0 8px' }}>{sendDisabledHint}</p>}
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 120 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, display: 'block' }}>Customer email</label>
+                          <input
+                            style={{ width: '100%', padding: '7px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 8, outline: 'none', boxSizing: 'border-box', color: '#111827' }}
+                            type="email"
+                            value={sendRecipient}
+                            onChange={e => { setSendRecipient(e.target.value); setSendResult(null); }}
+                            placeholder="customer@example.com"
+                            disabled={sendDisabled}
+                          />
+                        </div>
+                        <button
+                          style={{ ...DS.btnPrimary, opacity: sendDisabled ? 0.5 : 1, flexShrink: 0 }}
+                          onClick={sendEmail}
+                          disabled={sendDisabled || sending || !sendRecipient.trim()}
+                        >
+                          {sending ? 'Sending…' : 'Send'}
+                        </button>
+                      </div>
+                      {sendResult?.ok && <p style={{ fontSize: 12, color: '#16a34a', margin: '8px 0 0' }}>Sent! ID: {sendResult.id}{sendResult.tip}</p>}
+                      {sendResult && !sendResult.ok && <p style={{ fontSize: 12, color: '#dc2626', margin: '8px 0 0' }}>{sendResult.error}</p>}
+                    </div>
                   )}
-                  {broadcastResult && !broadcastResult.ok && (
-                    <p style={{ fontSize: 13, color: '#dc2626', margin: '12px 0 0' }}>{broadcastResult.error}</p>
+
+                  {/* Broadcast — full width */}
+                  {selectedId && (
+                    <div style={{ gridColumn: '1 / -1', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
+                      <p style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 10px' }}>Send to customers</p>
+                      {sendDisabledHint && <p style={{ fontSize: 11, color: '#b45309', background: '#fef3c7', borderRadius: 6, padding: '4px 8px', margin: '0 0 8px' }}>{sendDisabledHint}</p>}
+                      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10 }}>
+                        <div style={{ flex: 1, minWidth: 160 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, display: 'block' }}>Segment</label>
+                          <select
+                            style={{ width: '100%', padding: '7px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 8, outline: 'none', boxSizing: 'border-box', color: '#111827', cursor: 'pointer' }}
+                            value={broadcastSegment}
+                            disabled={sendDisabled}
+                            onChange={e => { setBroadcastSegment(e.target.value); setBroadcastConfirm(false); setBroadcastResult(null); }}
+                          >
+                            {SEGMENTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      {broadcastCountLoading && <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 8px' }}>Counting…</p>}
+                      {!broadcastCountLoading && broadcastCount === 0 && <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 8px' }}>No customers match this segment.</p>}
+                      {!broadcastCountLoading && broadcastCount !== null && broadcastCount > 0 && broadcastCount <= 90 && (
+                        <p style={{ fontSize: 12, color: '#374151', margin: '0 0 8px' }}>{broadcastCount} customers will receive this.</p>
+                      )}
+                      {!broadcastCountLoading && broadcastCount !== null && broadcastCount > 90 && (
+                        <p style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '5px 8px', margin: '0 0 8px' }}>
+                          Free plan sends up to ~90 at once. {broadcastCount} match — narrow the segment.
+                        </p>
+                      )}
+                      {!broadcastConfirm ? (
+                        <button
+                          style={{ ...DS.btnPrimary, opacity: sendDisabled ? 0.5 : 1 }}
+                          disabled={sendDisabled || broadcasting || broadcastCountLoading || broadcastCount === null || broadcastCount === 0 || broadcastCount > 90}
+                          onClick={() => setBroadcastConfirm(true)}
+                        >
+                          Send to {broadcastCount ?? '…'} customers
+                        </button>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 12, color: '#374151' }}>Send to {broadcastCount} customers? This can&apos;t be undone.</span>
+                          <button style={DS.btnPrimary} onClick={sendBroadcast} disabled={broadcasting}>{broadcasting ? 'Sending…' : 'Confirm send'}</button>
+                          <button style={DS.btnSecondary} onClick={() => setBroadcastConfirm(false)}>Cancel</button>
+                        </div>
+                      )}
+                      {broadcastResult?.ok && (
+                        <p style={{ fontSize: 12, color: '#16a34a', margin: '8px 0 0' }}>
+                          Sent to {broadcastResult.sent}{broadcastResult.failed > 0 ? `, failed ${broadcastResult.failed}` : ''}.{broadcastResult.tip}
+                        </p>
+                      )}
+                      {broadcastResult && !broadcastResult.ok && (
+                        <p style={{ fontSize: 12, color: '#dc2626', margin: '8px 0 0' }}>{broadcastResult.error}</p>
+                      )}
+                    </div>
                   )}
                 </div>
               )}
             </>
           )}
-
-          {!showEditor && (
-            <div style={{ ...DS.card, textAlign: 'center', padding: '48px 24px', color: '#9ca3af', marginTop: 12 }}>
-              <p style={{ fontSize: 24, margin: '0 0 12px', lineHeight: 1 }}>&#9993;</p>
-              <p style={{ fontSize: 15, fontWeight: 600, color: '#374151', margin: '0 0 6px' }}>Select a template or create a new one</p>
-              <p style={{ fontSize: 13, margin: 0 }}>Templates are saved and reusable. The preview updates as you type.</p>
-            </div>
-          )}
         </div>
-
-        {/* RIGHT: live preview */}
-        {showEditor && (
-          <PreviewStage
-            draft={draft}
-            store={store}
-          />
-        )}
       </div>
 
-      {/* Responsive CSS */}
+      {/* Full size modal (portal-like: rendered at workspace root) */}
+      {fullSizeOpen && showEditor && (
+        <FullSizeModal
+          draft={draft}
+          store={store}
+          initialDevice={fullSizeDev}
+          onClose={() => setFullSizeOpen(false)}
+        />
+      )}
+
+      {/* Global styles */}
       <style>{`
-        .etpl-sgrid {
-          grid-template-columns: minmax(0, 430px) minmax(0, 1fr);
+        .etpl-words-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 0;
         }
-        @media (max-width: 980px) {
-          .etpl-sgrid {
-            grid-template-columns: minmax(0, 1fr);
+        @media (min-width: 980px) {
+          .etpl-words-grid {
+            grid-template-columns: 1fr 1fr;
+            column-gap: 16px;
           }
+        }
+        .etpl-send-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 12px;
+        }
+        @media (min-width: 980px) {
+          .etpl-send-grid {
+            grid-template-columns: 1fr 1fr;
+          }
+        }
+        [role="tablist"]::-webkit-scrollbar { display: none; }
+        [role="tabpanel"]::-webkit-scrollbar { width: 6px; }
+        [role="tabpanel"]::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+        [role="separator"]:focus-visible {
+          outline: 2px solid #4f46e5;
+          outline-offset: 0;
         }
       `}</style>
     </div>
