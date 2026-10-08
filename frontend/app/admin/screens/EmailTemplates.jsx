@@ -394,6 +394,7 @@ export default function EmailTemplatesScreen() {
   const wsRef               = useRef(null);
   const tabContentRef       = useRef(null);
   const bandRef             = useRef(null);
+  const fullSizeBtnRef      = useRef(null);
 
   // Store brand data
   const [store, setStore] = useState({ shopName: '', logoUrl: null, primaryColor: null, shopDomain: '' });
@@ -931,6 +932,7 @@ export default function EmailTemplatesScreen() {
           {/* Full size button */}
           {showEditor && (
             <button
+              ref={fullSizeBtnRef}
               onClick={() => { setFullSizeDev(deviceView === 'mobile' ? 'mobile' : 'desktop'); setFullSizeOpen(true); }}
               style={{ ...DS.btnSecondary, padding: '3px 10px', fontSize: 11, flexShrink: 0 }}
             >
@@ -1228,41 +1230,21 @@ export default function EmailTemplatesScreen() {
           draft={draft}
           store={store}
           initialDevice={fullSizeDev}
-          onClose={() => setFullSizeOpen(false)}
+          onClose={() => { setFullSizeOpen(false); fullSizeBtnRef.current && fullSizeBtnRef.current.focus(); }}
         />
       )}
 
-      {/* Global styles */}
-      <style>{`
-        .etpl-words-grid {
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 0;
-        }
-        @media (min-width: 980px) {
-          .etpl-words-grid {
-            grid-template-columns: 1fr 1fr;
-            column-gap: 16px;
-          }
-        }
-        .etpl-send-grid {
-          display: grid;
-          grid-template-columns: 1fr;
-          gap: 12px;
-        }
-        @media (min-width: 980px) {
-          .etpl-send-grid {
-            grid-template-columns: 1fr 1fr;
-          }
-        }
-        [role="tablist"]::-webkit-scrollbar { display: none; }
-        [role="tabpanel"]::-webkit-scrollbar { width: 6px; }
-        [role="tabpanel"]::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
-        [role="separator"]:focus-visible {
-          outline: 2px solid #4f46e5;
-          outline-offset: 0;
-        }
-      `}</style>
+      {/* Global styles — dangerouslySetInnerHTML avoids hydration mismatch from attribute-selector quotes */}
+      <style dangerouslySetInnerHTML={{__html:`
+        .etpl-words-grid{display:grid;grid-template-columns:1fr;gap:0}
+        @media(min-width:980px){.etpl-words-grid{grid-template-columns:1fr 1fr;column-gap:16px}}
+        .etpl-send-grid{display:grid;grid-template-columns:1fr;gap:12px}
+        @media(min-width:980px){.etpl-send-grid{grid-template-columns:1fr 1fr}}
+        [role=tablist]::-webkit-scrollbar{display:none}
+        [role=tabpanel]::-webkit-scrollbar{width:6px}
+        [role=tabpanel]::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px}
+        [role=separator]:focus-visible{outline:2px solid #4f46e5;outline-offset:0}
+      `}} />
     </div>
   );
 }

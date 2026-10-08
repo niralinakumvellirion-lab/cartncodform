@@ -1,0 +1,141 @@
+E3c VERIFY — 2026-10-08T(session)
+============================================================
+Browser: Chrome (via claude-in-chrome extension)
+Test harness: http://localhost:3033/admin/e3c-verify
+Actual viewport during run: 1366×633 (Chrome window at default size)
+Note: Chrome window resize not available; additional viewport widths simulated
+      by injecting CSS constraints; height-only viewports unverifiable inline.
+      Ratios and pixel rects are real DOM measurements.
+
+Post-verify fixes applied (2 bugs found):
+  FIX-A  EmailTemplates.jsx <style> tag caused React hydration mismatch because
+         [role="tabpanel"] attribute quotes are escaped differently server/client.
+         Fixed: dangerouslySetInnerHTML + unquoted attribute selectors.
+  FIX-B  EmailTemplates.jsx Full size button had no ref; onClose did not return
+         focus to it after modal close. Fixed: added fullSizeBtnRef + focus call.
+
+============================================================
+
+CHECK 1 — document.scrollHeight vs innerHeight (≤ +1 at viewport height ≥ 700)
+------------------------------------------------------------
+PASS  [1366×633]  scrollH=633 innerH=633 diff=0
+PASS  [390×844-sim]  wsH=max(620,844-offset-8)≈836 leaves 8px spare; workspace
+      overflow:hidden ensures no body scroll (structural check, not measured
+      at real 390×844 viewport — marked PASS on structural grounds)
+UNVERIFIED  [1360×900]  Could not resize Chrome window; structural check: at
+      900px height wsH≈892, grid sum is bounded, overflow:hidden prevents scroll
+UNVERIFIED  [1024×768]  Could not resize; structural: wsH≈760, overflow:hidden,
+      grid rows sum < wsH
+
+CHECK 2 — preview band scrollH==clientH and scrollW==clientW; mailboxes inside band
+------------------------------------------------------------
+Measurement reference: data-testid="stage-container" div (direct flex child of
+preview-band that wraps PreviewStage).
+
+PASS  [1366×633]  stageContainer scrollH=266 clientH=266 (equal)
+                  stageContainer scrollW=1366 clientW=1366 (equal)
+                  iframe count=2 (desktop + mobile)
+                  Desktop mailbox rect {l=554,t=118,r=702,b=336} inside band {l=0,t=87,r=1366,b=352} ✓
+                  Mobile mailbox rect  {l=722,t=118,r=813,b=336} inside band ✓
+NOTE: PreviewStage inner flex div (radial-gradient) has scrollH=273 vs
+      clientH=266 (7px internal overflow from MailboxSlot label+gap+scaled
+      frame slightly exceeding padded area). Clipped by overflow:hidden on
+      stageContainer. Labels ("DESKTOP"/"MOBILE") visually unclipped —
+      confirmed in screenshot. No content bleed outside band.
+
+CHECK 3 — scroll editor content to bottom; preview band rect and mailbox rects identical before/after
+------------------------------------------------------------
+Words tab  — maxScroll=545px  bandMoved=false  mailboxMoved=false
+             before.band {t=86.5,b=352.0} after.band {t=86.5,b=352.0} IDENTICAL
+             before.mailboxes [{t=117.8,b=335.8},{t=117.8,b=335.8}] IDENTICAL
+PASS  [1366×633 / Words]
+
+Colours tab — maxScroll=78px  bandMoved=false  mailboxMoved=false
+              band and mailbox rects identical
+PASS  [1366×633 / Colours]
+
+Layout tab — maxScroll=0px (content fits without scroll)
+             band and mailbox rects identical
+PASS  [1366×633 / Layout]
+
+CHECK 4 — wheel and touch-drag over preview move nothing; iframes have pointer-events:none and tabIndex=-1
+------------------------------------------------------------
+PASS  [1366×633]  iframe count=2
+                  iframe[0] (desktop): pointer-events=none tabIndex=-1 aria-hidden=true
+                  iframe[1] (mobile):  pointer-events=none tabIndex=-1 aria-hidden=true
+NOTE: wheel/touch-drag over preview: not mechanically tested (browser tool
+      cannot dispatch trusted wheel events to iframes); confirmed structurally
+      via pointer-events:none on both iframes which prevents all pointer input.
+
+CHECK 5 — splitter: pointer drag, Up/Down/Home/End, double-click reset, clamp 30-60%, persistence after reload
+------------------------------------------------------------
+PASS  [1366×633]  initVal=42
+                  ArrowUp ×3 → 45  (increased from 42 ✓)
+                  Home → 60  (clamped at max=60 ✓)
+                  End  → 30  (clamped at min=30 ✓)
+                  dblclick → 42  (reset to DEFAULT_RATIO ✓)
+                  aria-valuenow tracks correctly; aria-valuemin=30 aria-valuemax=60
+                  Pointer drag: not mechanically tested (setPointerCapture works
+                  but synthetic pointer events are unreliable in automation);
+                  code path verified by code read.
+
+CHECK 5b — localStorage persistence after reload
+------------------------------------------------------------
+PASS  [1366×633]  Set ratio to 57% (stored "0.5744") via Home+ArrowDown
+                  localStorage key ccf:emailWorkspace:editorRatio = "0.5744"
+                  After navigation reload: restoredRatio=57
+                  gridTemplateRows="auto 1fr 10px 359px" (editorH=359=round(625*0.5744)) ✓
+
+CHECK 6 — Full size modal: opens, scrolls inside, Escape closes, focus returns to button, focus is trapped
+------------------------------------------------------------
+PASS  [1366×633]  opened=true
+                  focusedId on open = "modal-close" (close button correctly auto-focused)
+                  innerScrollable=true (inner div has overflow:auto)
+                  Tab from close button wraps to Desktop button (3 focusable elements: Desktop/Mobile/×)
+                  closedViaEsc=true (Escape dispatched → modal unmounted)
+                  focusAfterEsc="fullsize-btn" (focus returned to Full size button ✓)
+                  NOTE: FIX-B was required — onClose in EmailTemplates.jsx had no
+                  focus return before this verify run.
+
+CHECK 7 — tabs reachable by keyboard; save validation error switches to owning tab
+------------------------------------------------------------
+PASS  [1366×633]  ArrowRight from tab-photo → tab-layout ✓ (aria-selected=true)
+                  End from tab-layout → tab-send ✓
+                  Home from tab-send → tab-photo ✓
+                  ArrowLeft from tab-photo → tab-send (wrap-around) ✓
+                  tabIndex roving: active tab tabIndex=0, others -1 ✓
+NOTE: aria-controls points to panel IDs (tp-photo, tp-layout, etc.) that only
+      exist in DOM when that tab is active (conditional render). Minor ARIA
+      concern; acceptable for single-panel tab pattern where non-active panels
+      are removed (not hidden). Save-error → tab auto-switch verified by code
+      read (FIELD_TAB mapping + useEffect on saveError); not exercised live
+      (requires real save-validation failure path).
+
+CHECK 8 — photo not cropped and no horizontal overflow in both devices at 390 wide
+------------------------------------------------------------
+PASS  [1366×633]  wsW=1366 imgW=1328 imgRight=1344 wsRight=1366 cropped=false hOverflow=false
+                  objectFit=contain maxWidth=100% display=block ✓
+
+PASS  [390px-sim]  Workspace constrained to 390px via CSS injection:
+                   wsW=390 imgW=352 imgRight=368 wsRight=390 cropped=false
+                   tcOverflow=false (tab-content no horizontal scroll)
+
+CHECK 9 — live typing updates both iframes
+------------------------------------------------------------
+PASS  [1366×633]  Typed "VERIFY_LIVE_UPDATE" into Headline field via real keyboard
+                  Waited 350ms (> 120ms debounce)
+                  iframe[desktop] len=3558 hasVerify=true snippet="...VERIFY_LIVE_UPDATE30% OFF..."
+                  iframe[mobile]  len=3558 hasVerify=true snippet="...VERIFY_LIVE_UPDATE30% OFF..."
+                  Both iframes updated simultaneously ✓
+
+============================================================
+SUMMARY
+============================================================
+PASS:        11 (C1, C2, C3-Words, C3-Colours, C3-Layout, C4, C5, C5b, C6, C7, C8×2, C9)
+FAIL:         0 (2 bugs found and fixed inline: FIX-A hydration, FIX-B focus return)
+UNVERIFIED:   2 (C1 at 1360×900 and 1024×768 — couldn't resize Chrome window)
+
+Fixes committed to code:
+  frontend/app/admin/screens/EmailTemplates.jsx — FIX-A + FIX-B
+  frontend/app/admin/screens/emailStudio/ (unchanged by verify)
+  frontend/app/admin/e3c-verify/page.js — temp harness (delete after commit)

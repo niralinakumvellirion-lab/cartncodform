@@ -1,0 +1,145 @@
+PHASE E3c PRE-AUDIT — email workspace layout
+Date: 2026-10-08
+
+═══ POPUP CUSTOMISER (Settings.jsx) — pattern to reuse ═══
+
+Container (when showPopupCustomizer=true): maxWidth 960px, margin 0 auto.
+Editor view layout: device toggle at top → preview card → settings form.
+  Preview card: bg #f9fafb, border 1px solid #f3f4f6, borderRadius 12px, padding 16px, marginBottom 20px.
+  Settings form uses .ccf-settings-grid (2-col at ≥900px, 1-col below).
+
+Device toggle (segmented control):
+  Container: bg #f3f4f6, borderRadius 8px, overflow hidden, border 1px solid #e5e7eb.
+  Individual tab: padding 4px 12px, fontSize 11, fontWeight 600, border none, cursor pointer.
+  Active: bg #fff, color #4f46e5, boxShadow '0 1px 3px rgba(0,0,0,0.1)'.
+  Inactive: bg transparent, color #6b7280.
+  Source: Lines 2587-2594 of Settings.jsx.
+
+Section headings: fontSize 11, fontWeight 700, textTransform uppercase,
+  letterSpacing 0.06em, color #9ca3af.
+
+Compact setting rows (.ccf-text-row): borderRadius 6px, transition background 0.12s,
+  hover: bg #f9fafb, value text turns #4f46e5.
+
+Save button in preview card: full-width (flex: 1), padding 12px 24px, fontSize 14px,
+  bg #4f46e5, color #fff, borderRadius (DS.btnPrimary). Source: Lines 2803-2818.
+
+Outer card: bg #fff, border 1px solid #e5e7eb, borderRadius 12px, padding 20px.
+
+Radii reuse: 12px for section containers, 8px for toggles/pills, 6px for rows, 9px for buttons.
+Shadows: inner card '0 1px 4px rgba(0,0,0,0.06)'.
+
+═══ EmailTemplates.jsx — current layout ═══
+
+File: frontend/app/admin/screens/EmailTemplates.jsx (820 lines).
+
+Top-level wrapper: DS.page = { maxWidth 1200, margin '0 auto', padding '24px 20px',
+  fontFamily system stack }.
+
+Layout: <div className="etpl-sgrid"> — CSS grid:
+  grid-template-columns: minmax(0, 430px) minmax(0, 1fr) at ≥980px.
+  Collapses to single column at ≤980px.
+  alignItems: 'start' (each column scrolls independently with the page).
+
+Left column: stacked cards — TemplatePicker card, PhotoCard (ref photoCardRef),
+  LayoutCard, ColourCard, FontCard, WordsCard, Save/Error row,
+  Generate-AI card, Send-test card, Broadcast card.
+
+Right column: <PreviewStage draft={draft} store={store} />.
+  PreviewStage uses position:sticky, top:12px when viewMode='fit'.
+
+Above the grid (full-width):
+  Header: title "Email templates", subtitle, gradient accent bar (h:3, w:48, indigo).
+  Presets chips row: "Start with:" label + 6 chip buttons (Festive, Flash sale, etc.)
+    + "Surprise me" pill. Chip: borderRadius 999, padding 5px 12px, bg #f3f4f6,
+    border 1.5px solid #e5e7eb. "Surprise me": bg #4f46e5, white text.
+  Seed banner: bg #f0fdf4, border #bbf7d0, borderRadius 10, padding 12px 16px.
+  Dirty bar: bg #fffbeb, border #fde68a, borderRadius 10.
+  Discard confirm: bg #fff7ed, border #fed7aa, borderRadius 10.
+
+No scroll container on the editor or preview — the page scrolls.
+No min-height on the workspace container.
+
+═══ PreviewStage.jsx — current behaviour ═══
+
+File: frontend/app/admin/screens/emailStudio/PreviewStage.jsx (221 lines).
+
+State: previewWidth ('desktop'|'mobile'), viewMode ('fit'|'actual'), scale.
+One iframe, one width (DESKTOP_W=600, MOBILE_W=380).
+
+Sticky: stageStyle.position = 'sticky', top = STICKY_TOP (12px from lib.js).
+Toolbar: Desktop/Mobile segmented toggle + Fit/Actual size toggle + photo status pill.
+
+Scale: fitFrame() called on resize, viewMode change, after doPut.
+  naturalH = iframe.contentDocument.documentElement.scrollHeight.
+  avail = window.innerHeight - STICKY_TOP - 14 - barH - 12 - 14.
+  k = min(1, avail / mbH). Applied via mailboxRef.style.transform = scale(k).
+  scalerRef height is set to Math.ceil(mbH * k).
+  If viewMode='actual': no transform, scaler height is unset.
+
+iframe: title "Email preview", sandbox="allow-same-origin", NO pointer-events override.
+  Gets wheel/touch events and can steal scroll focus.
+
+Content rendered: renderEmail + designFromTemplate from emailEngine. Debounced 120ms.
+  Same engine as sent email.
+
+Scaling limitations:
+  Window resize event only — no ResizeObserver.
+  Single device at a time.
+  "Actual size" toggle shows iframe at native size with page scroll.
+
+saveError.field: not consumed by PreviewStage (only the parent page routes errors).
+
+═══ Card wrappers ═══
+
+LayoutCard: const CARD_STYLE = { background:'#fff', border:'1px solid #e5e7eb',
+  borderRadius:14, padding:'16px 20px', marginBottom:12 }.
+  Section label: LABEL_STYLE = fontSize 12, fontWeight 700, color #9ca3af, uppercase.
+  Renders <div style={CARD_STYLE}><p style={LABEL_STYLE}>Layout</p>…</div>.
+
+ColourCard: same CARD_STYLE and LABEL_STYLE.
+
+FontCard: same CARD_STYLE and LABEL_STYLE.
+
+WordsCard: same pattern but inline (no extracted const).
+  Border/radius/padding identical to CARD_STYLE.
+
+PhotoCard: inline card wrapper — background:'#fff', border:'1px solid #e5e7eb',
+  borderRadius:14, padding:'16px 20px', marginBottom:12.
+  No numbered header, just a flex row with "Offer photo" label and status badge.
+
+All five cards: no `bare` prop, no way to strip the wrapper without editing them.
+
+═══ Admin page wrapper ═══
+
+frontend/app/admin/layout.js: no padding or margin — just AppProvider script tags.
+frontend/app/admin/email-templates/page.js: wraps EmailTemplatesScreen in
+  AppProvider + NavMenu + Suspense. No extra padding.
+Polaris AppProvider may add its own font/reset styles but no layout padding.
+The iframe runs inside Shopify admin which may have its own chrome (nav bar, header).
+
+═══ saveError.field routing ═══
+
+saveError is either null, a string, or { error, field }.
+Fields: 'subject', 'eyebrow', 'headline', 'offerText', 'body', 'ctaLabel', 'ctaUrl',
+  'layout', 'color', 'hFont', 'bFont', 'radius', 'pageBg', 'cardBg', 'name', 'type'.
+Each card consumes saveError and shows its own field error.
+No tab switching on error currently — the user must scroll to find the error.
+
+═══ Changes required (E3c) ═══
+
+1. EmailTemplates.jsx: replace DS.page wrapper + 2-col grid with fixed-height
+   workspace (useLayoutEffect height, CSS grid 4 rows, min-height 620px).
+2. Header: move TemplatePicker, dirty pill, Save, Discard into header row.
+   Seed banner becomes slim dismissible strip. Move name field to Words tab.
+3. PreviewStage.jsx: replace sticky + single-iframe with two-iframe
+   ResizeObserver-scaled stage, pointer-events:none on iframes.
+4. Splitter: new draggable separator, persisted in localStorage.
+5. Editor: tab strip + scrollable content pane; tabs Photo/Layout/Colours/
+   Fonts/Words/Send; Looks chips at right end (collapse to menu at <900px).
+6. Cards: add `bare` prop to strip card wrapper when rendered inside tabs.
+7. Wide-screen grids per tab: Photo 2-col, Layout auto-fill, Colours 3-col
+   at ≥1100px, Fonts 2-col, Words 2-col, Send 2-col (Generate+SendTest) +
+   full-width Broadcast.
+8. Full size modal for preview at 100%.
+9. Tab auto-focus on save error.
