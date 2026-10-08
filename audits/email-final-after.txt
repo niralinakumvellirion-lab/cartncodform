@@ -1,0 +1,149 @@
+E5 SELF-AUDIT — email-final-after.txt
+Date: 2026-10-08
+Branch: phase-e5-final-consistency
+
+=== 1. FILES CREATED / CHANGED ===
+
+backend/__tests__/emailParity.test.js       NEW
+  70 new tests (66 parity + 4 journey hygiene)
+  11 layouts × 3 photo cases × 2 stores = 66 parity tests
+  4 journey tests (with image, without image, no CTA, all-11-layouts loop)
+
+backend/scripts/sendEmailSamples.js         NEW
+  Dev tool: renders 11 layouts via designFromTemplate→renderEmailDocument
+  --to, --image, --store, --color, --dry-run flags
+  Refuses without --to, refuses multi-address, refuses without RESEND_API_KEY (unless --dry-run)
+  1-second gap between sends; no DB access; no secrets in file
+
+backend/.gitignore                          MODIFIED
+  Added: tmp/email-samples/
+
+docs/email-studio.md                        NEW
+  64 lines. Covers: engine+sync, design fields, adding layout/font,
+  photo rules, dashboard reminder rule, sample-send usage, known limits.
+
+audits/email-final-before.txt               NEW (pre-audit)
+audits/email-final-verify.txt               NEW (verification results)
+audits/email-final-after.txt                THIS FILE
+
+No changes to:
+  backend/utils/emailEngine.js  (constraint: do not edit)
+  frontend/app/admin/lib/emailEngine.js  (synced copy — same constraint)
+  Any route, middleware, or model file
+
+=== 2. STEP 1 CLEANUP — WHAT WAS REMOVED ===
+
+Nothing removed. Grep for TEMP DEBUG, img-debug, email-img, t1-img,
+journey-img, ccf-client, ccfLog, console.log of API keys, temp routes
+— all returned zero matches. The e3c-verify temp harness was already
+deleted in the previous commit. No action required.
+
+Legacy bodyHtml comment at email.js:72 already present ("legacy bodyHtml").
+No production callers pass bodyHtml; test coverage in buildEmailHtml.test.js.
+
+=== 3. TEST COUNTS ===
+
+Before E5:  712 passing / 42 suites
+After  E5:  782 passing / 43 suites  (+70 tests, +1 suite)
+
+  emailParity.test.js:  70 new tests
+    66 parity: 11 layouts × 3 photo × 2 stores
+    4  journey hygiene: with image, without, no CTA, all-11-layouts loop
+  All 712 previous tests: unchanged and passing
+
+=== 4. PARITY TEST RESULTS ===
+
+All 66 parity tests PASSED.
+
+With photo (with_dimensions and without_dimensions):
+  previewHtml === sendHtml === broadcastHtml  ✓  (placeholder:false for all three)
+  Frontend renderEmail().body contained in preview document  ✓
+  No "undefined" or "NaN" in sent HTML  ✓
+  Sent HTML contains Unsubscribe link  ✓
+  All 11 layouts under 60KB  ✓  (largest measured: ~5.2KB — well within limit)
+
+Without photo:
+  preview HTML contains "appears here"  ✓
+  send HTML does NOT contain "appears here"  ✓
+  broadcast HTML does NOT contain "appears here"  ✓
+
+Journey email path (buildEmailHtml):
+  DOCTYPE present  ✓
+  Unsubscribe link present  ✓
+  No undefined/NaN  ✓
+  Under 60KB  ✓
+  All 11 layouts valid  ✓
+
+=== 5. SAMPLE-SEND SCRIPT — DRY-RUN OUTPUT ===
+
+Command: node scripts/sendEmailSamples.js --to test@example.com --image https://cdn.example.com/offer.jpg --dry-run
+
+Output:
+  Dry-run mode — writing 11 HTML files to backend/tmp/email-samples
+  Wrote backend/tmp/email-samples/sample-01-hero.html
+  Wrote backend/tmp/email-samples/sample-02-poster.html
+  Wrote backend/tmp/email-samples/sample-03-spotlight.html
+  Wrote backend/tmp/email-samples/sample-04-split.html
+  Wrote backend/tmp/email-samples/sample-05-gallery.html
+  Wrote backend/tmp/email-samples/sample-06-coupon.html
+  Wrote backend/tmp/email-samples/sample-07-magazine.html
+  Wrote backend/tmp/email-samples/sample-08-float.html
+  Wrote backend/tmp/email-samples/sample-09-cards.html
+  Wrote backend/tmp/email-samples/sample-10-pop.html
+  Wrote backend/tmp/email-samples/sample-11-letter.html
+  Done.
+
+All 11 files written. Script refused correctly when --to omitted.
+tmp/email-samples/ added to backend/.gitignore.
+
+=== 6. VERIFICATION NUMBERS (from email-final-verify.txt) ===
+
+Check 1 (document scroll): PASS structural+simulation
+  Actual viewport 1366×633: ws.scrollH==ws.clientH==618 (no internal overflow)
+  Simulated 1360×900: wsH=844, bandH=480, deskScale=0.480, mobScale=0.393
+  Simulated 1280×720: wsH=664, bandH=375, deskScale=0.363, mobScale=0.297
+  UNVERIFIED at live 1360×900 / 1280×720 (Chrome window could not be resized)
+
+Check 2 (preview rects stable while editor scrolls):
+  All 6 tabs PASS — bandTop=154.5 before AND after scroll (moved=false)
+
+Check 3 (11 layouts × 3 photo cases):
+  33 combos × all 11 layouts: ok=true (no undefined/NaN), hasMaxWidth=true
+  no_photo: hasPlaceholder=true on all 11 ✓
+  PASS (structural — engine output verified in browser)
+
+Check 4 (dashboard reminder states):
+  All 3 states rendered correctly (photo_missing, ready, setup)
+  Snooze: row hidden immediately after click ✓
+  Chips: photo_missing amber chip, ready green chip ✓
+  Deep link contains ?focus=photo ✓
+  PASS
+
+Check 5 (save/reload/reselect persistence):
+  UNVERIFIED — requires live backend; covered by route tests
+
+=== 7. OPEN ITEMS ===
+
+1. Check 1 live viewport — the resize_window browser tool reported success but
+   the Chrome window was maximized and couldn't be resized. This is a tooling
+   limitation, not a code defect. The workspace formulas are verified correct
+   by both the E3c verify audit and the JS simulation here.
+
+2. Check 5 persistence — needs a live staging run with real MongoDB Atlas.
+   The PATCH route and field persistence are covered by emailTemplates.test.js.
+
+3. sendAbandonedCartEmail, sendNewCodOrderEmail, sendMarketingEmail still use
+   shell() / inline HTML, not the design engine. Out of scope for E5 per spec
+   ("REPORT ONLY. Do not migrate them in this phase.").
+
+=== 8. DEVIATIONS FROM SPEC ===
+
+None. All spec items were implemented as described. Two items were marked
+UNVERIFIED per spec instruction ("Anything you cannot verify: say UNVERIFIED
+and why. Do not guess.").
+
+The sample-send script uses PRESET copy cycled across layouts (5 presets × 11
+layouts — cycling with index mod 5). This matches the spec's intent
+("Sample copy per layout comes from PRESETS") since there are 5 presets and
+11 layouts; no layout is mapped 1:1 to a preset for the 6 layouts without
+a matching preset key.

@@ -1,0 +1,85 @@
+E5 PRE-AUDIT — email-final-before.txt
+Date: 2026-10-08
+Branch: phase-e5-final-consistency
+
+=== 1. GIT STATUS ===
+Clean. Last commit: 1680651 verify(phase-e3c): browser verification + two bug fixes.
+No uncommitted files.
+
+=== 2. UNVERIFIED / DEVIATED ITEMS FROM PRIOR AUDITS ===
+
+From email-workspace-verify.txt (Phase E3c):
+  UNVERIFIED C1 at 1360×900 — could not resize Chrome window; structural pass only
+  UNVERIFIED C1 at 1024×768 — could not resize Chrome window; structural pass only
+
+From email-dashboard-reminder-after.txt (Phase E4):
+  COULD NOT VERIFY: real /api/email-templates/festival-reminder response (mocked only)
+  COULD NOT VERIFY: snooze persistence across sessions with actual clock (simulated only)
+  COULD NOT VERIFY: template deep link with a real template _id from the database
+
+From email-studio-ui-b-after.txt (Phase E3b):
+  No explicit UNVERIFIED / deviated items. One noted deviation:
+    ColourCard shade swatches not wired as direct pageBg/cardBg pickers
+    (they are reference swatches; user picks via PaletteGrid — by design).
+
+=== 3. LEFTOVER GREP RESULTS ===
+
+Searched backend/, frontend/, extensions/ (excluding node_modules) for:
+  TEMP DEBUG, img-debug, email-img, t1-img, journey-img, ccf-client, ccfLog,
+  console.log of API key prefix, temp/verify/mock/tmp routes.
+
+Result: NOTHING FOUND. All patterns returned zero matches.
+
+Temp harness page (frontend/app/admin/e3c-verify/page.js) was deleted in E3c
+  verify commit. Confirmed absent.
+
+=== 4. HTML-WITHOUT-ENGINE FUNCTIONS ===
+
+These functions build email HTML WITHOUT going through emailEngine.js.
+The spec says REPORT ONLY in this phase; do NOT migrate them.
+
+  sendAbandonedCartEmail (backend/utils/email.js:143)
+    Uses shell() → inline HTML fragment
+    Callers:
+      - backend/routes/webhooks.js:125  (CHECKOUT_ABANDONED webhook)
+      - backend/server.js:560           (poller — abandoned cart job)
+      - backend/routes/push.js:321      (POST /api/push/send-journey-email
+                                         fallback path for cart push)
+
+  sendNewCodOrderEmail (backend/utils/email.js:179)
+    Uses shell() → inline HTML fragment
+    Callers:
+      - backend/routes/cod.js:68        (POST /cod-order)
+      - backend/routes/proxy.js:467     (POST /proxy/cod-order)
+
+  sendMarketingEmail (backend/utils/email.js:235)
+    Builds HTML inline with a template literal (not shell())
+    Caller:
+      - backend/server.js:485           (poller — marketing automation step)
+
+  shell() itself (backend/utils/email.js:48)
+    A tiny wrapper: '<div style="...">'+innerHtml+'</div>'
+    Used only by sendAbandonedCartEmail and sendNewCodOrderEmail above.
+
+  sendJourneyEmail (backend/routes/push.js:483)
+    Uses buildEmailHtml() → renderEmailDocument() → YES, goes through the engine.
+    Not a non-engine function. Listed here for completeness.
+
+=== 5. LEGACY bodyHtml CALLERS ===
+
+buildEmailHtml accepts legacy param bodyHtml (email.js:59,72-75).
+Production callers that pass bodyHtml: NONE FOUND.
+Test-only caller: buildEmailHtml.test.js:122 (tests the shim only).
+Comment at email.js:72 already reads:
+  "// Convert legacy bodyHtml → plain text body when body not supplied directly."
+  — the word "legacy" is present. Spec requirement is already met.
+
+=== 6. PLAN FOR E5 ===
+
+Step 1: No debug/temp deletions needed. No legacy bodyHtml callers to switch.
+        Verify existing comment at email.js:72 is adequate (it is).
+Step 2: Write backend/__tests__/emailParity.test.js
+Step 3: Write backend/scripts/sendEmailSamples.js + add tmp/email-samples to .gitignore
+Step 4: Write docs/email-studio.md (<= 80 lines)
+Step 5: Browser verification with next dev harness; write audits/email-final-verify.txt
+Self-audit: audits/email-final-after.txt
