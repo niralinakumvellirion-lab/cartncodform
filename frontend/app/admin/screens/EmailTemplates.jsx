@@ -19,8 +19,6 @@ const { PRESETS: ENGINE_PRESETS, DEFAULT_LAYOUT_BY_TYPE, renderEmail, designFrom
 const STARTER_TYPES = ['special_offer', 'festival', 'normal'];
 const DEFAULT_RATIO = 0.42;
 const LS_RATIO_KEY = 'ccf:emailWorkspace:editorRatio';
-const DEFAULT_WIDTH_RATIO = 0.42;
-const LS_WIDTH_RATIO_KEY = 'ccf:emailWorkspace:editorWidthRatio';
 
 function clampRatio(r) { return Math.max(0.30, Math.min(0.60, r)); }
 function readRatio() {
@@ -28,13 +26,6 @@ function readRatio() {
   catch { return DEFAULT_RATIO; }
 }
 function writeRatio(r) { try { localStorage.setItem(LS_RATIO_KEY, r); } catch {} }
-
-function clampWidthRatio(r) { return Math.max(0.34, Math.min(0.55, r)); }
-function readWidthRatio() {
-  try { const v = parseFloat(localStorage.getItem(LS_WIDTH_RATIO_KEY)); return isNaN(v) ? DEFAULT_WIDTH_RATIO : clampWidthRatio(v); }
-  catch { return DEFAULT_WIDTH_RATIO; }
-}
-function writeWidthRatio(r) { try { localStorage.setItem(LS_WIDTH_RATIO_KEY, r); } catch {} }
 
 const FIELD_TAB = {
   imageUrl: 'photo',
@@ -113,8 +104,8 @@ const TABS = [
   { id: 'send',    label: 'Send' },
 ];
 
-// ── Splitter (horizontal = row resize, vertical = column resize) ──────────────
-function Splitter({ orientation = 'horizontal', wsRef, wsDim, ratio, onRatioChange, clampFn, minVal, maxVal, defaultRatio }) {
+// ── Splitter ──────────────────────────────────────────────────────────────────
+function Splitter({ wsRef, wsH, editorRatio, onRatioChange }) {
   function onPointerDown(e) {
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -123,60 +114,34 @@ function Splitter({ orientation = 'horizontal', wsRef, wsDim, ratio, onRatioChan
     if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
     const r = wsRef.current && wsRef.current.getBoundingClientRect();
     if (!r) return;
-    if (orientation === 'vertical') {
-      onRatioChange(clampFn((e.clientX - r.left) / r.width));
-    } else {
-      onRatioChange(clampFn((r.bottom - e.clientY - 5) / wsDim));
-    }
+    onRatioChange(clampRatio((r.bottom - e.clientY - 5) / wsH));
   }
   function onKeyDown(e) {
-    const step = 16 / Math.max(1, wsDim);
-    if (orientation === 'vertical') {
-      if (e.key === 'ArrowRight') { e.preventDefault(); onRatioChange(clampFn(ratio + step)); }
-      if (e.key === 'ArrowLeft')  { e.preventDefault(); onRatioChange(clampFn(ratio - step)); }
-      if (e.key === 'Home')       { e.preventDefault(); onRatioChange(minVal); }
-      if (e.key === 'End')        { e.preventDefault(); onRatioChange(maxVal); }
-    } else {
-      if (e.key === 'ArrowUp')   { e.preventDefault(); onRatioChange(clampFn(ratio + step)); }
-      if (e.key === 'ArrowDown') { e.preventDefault(); onRatioChange(clampFn(ratio - step)); }
-      if (e.key === 'Home')      { e.preventDefault(); onRatioChange(maxVal); }
-      if (e.key === 'End')       { e.preventDefault(); onRatioChange(minVal); }
-    }
+    const step = 16 / wsH;
+    if (e.key === 'ArrowUp')   { e.preventDefault(); onRatioChange(clampRatio(editorRatio + step)); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); onRatioChange(clampRatio(editorRatio - step)); }
+    if (e.key === 'Home')      { e.preventDefault(); onRatioChange(0.60); }
+    if (e.key === 'End')       { e.preventDefault(); onRatioChange(0.30); }
   }
-  const isV = orientation === 'vertical';
   return (
     <div
-      role="separator" aria-orientation={orientation}
-      aria-valuenow={Math.round(ratio * 100)}
-      aria-valuemin={Math.round(minVal * 100)}
-      aria-valuemax={Math.round(maxVal * 100)}
-      aria-label={isV ? 'Resize editor and preview' : 'Resize preview and editor'}
+      role="separator" aria-orientation="horizontal"
+      aria-valuenow={Math.round(editorRatio * 100)} aria-valuemin={30} aria-valuemax={60}
+      aria-label="Resize preview and editor"
       tabIndex={0}
       onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={() => {}}
       onKeyDown={onKeyDown}
-      onDoubleClick={() => onRatioChange(defaultRatio)}
-      style={isV ? {
-        width: 10, cursor: 'col-resize', flexShrink: 0,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: '#f1f5f9', borderLeft: '1px solid #e2e8f0', borderRight: '1px solid #e2e8f0',
-        touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', outline: 'none',
-        alignSelf: 'stretch',
-      } : {
+      onDoubleClick={() => onRatioChange(DEFAULT_RATIO)}
+      style={{
         height: 10, cursor: 'row-resize', flexShrink: 0,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: '#f1f5f9', borderTop: '1px solid #e2e8f0', borderBottom: '1px solid #e2e8f0',
         touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none', outline: 'none',
       }}
     >
-      {isV ? (
-        <svg width="4" height="28" viewBox="0 0 4 28" fill="none" aria-hidden="true">
-          {[2, 6, 10, 14, 18, 22, 26].map(y => <circle key={y} cx={2} cy={y} r={1.5} fill="#9ca3af" />)}
-        </svg>
-      ) : (
-        <svg width="28" height="4" viewBox="0 0 28 4" fill="none" aria-hidden="true">
-          {[2, 6, 10, 14, 18, 22, 26].map(x => <circle key={x} cx={x} cy={2} r={1.5} fill="#9ca3af" />)}
-        </svg>
-      )}
+      <svg width="28" height="4" viewBox="0 0 28 4" fill="none" aria-hidden="true">
+        {[2, 6, 10, 14, 18, 22, 26].map(x => <circle key={x} cx={x} cy={2} r={1.5} fill="#9ca3af" />)}
+      </svg>
     </div>
   );
 }
@@ -491,55 +456,42 @@ export default function EmailTemplatesScreen() {
   const [broadcastResult, setBroadcastResult]         = useState(null);
 
   // ── Workspace layout state ────────────────────────────────────────────────
-  const [wsH, setWsH]                       = useState(620);
-  const [wsW, setWsW]                       = useState(1200);
-  const [editorRatio, setEditorRatio]       = useState(DEFAULT_RATIO);
-  const [editorWidthRatio, setEditorWidthRatio] = useState(DEFAULT_WIDTH_RATIO);
-  const [deviceView, setDeviceView]         = useState('desktop');
-  const [previewScale, setPreviewScale]     = useState({ d: 1, m: 1 });
-  const [activeTab, setActiveTab]           = useState('photo');
-  const [fullSizeOpen, setFullSizeOpen]     = useState(false);
-  const [fullSizeDev, setFullSizeDev]       = useState('desktop');
-  const [looksMenuOpen, setLooksMenuOpen]   = useState(false);
+  const [wsH, setWsH]             = useState(620);
+  const [editorRatio, setEditorRatio] = useState(DEFAULT_RATIO);
+  const [deviceView, setDeviceView]   = useState('both');
+  const [previewScale, setPreviewScale] = useState({ d: 1, m: 1 });
+  const [activeTab, setActiveTab]     = useState('photo');
+  const [fullSizeOpen, setFullSizeOpen] = useState(false);
+  const [fullSizeDev, setFullSizeDev]   = useState('desktop');
+  const [looksMenuOpen, setLooksMenuOpen] = useState(false);
+  const [bandWide, setBandWide]         = useState(true);
 
-  // ── Derived layout values ─────────────────────────────────────────────────
-  const isSideBySide = wsW >= 640;
-  const editorW  = isSideBySide ? Math.round(clampWidthRatio(editorWidthRatio) * wsW) : 0;
-  const rightColW = isSideBySide ? wsW - editorW - 10 : 0;
-  const hideBoth  = isSideBySide && rightColW < 500;
-  // bandWide: controls Looks inline vs dropdown — uses editor column width in side-by-side
-  const bandWide  = isSideBySide ? editorW >= 560 : wsW >= 900;
-  // editorH only used in stacked mode
-  const editorH = isSideBySide ? 0 : Math.round(clampRatio(editorRatio) * wsH);
-
-  // ── Workspace measurement ─────────────────────────────────────────────────
+  // ── Workspace height measurement ──────────────────────────────────────────
   useLayoutEffect(() => {
-    setEditorRatio(readRatio());
-    setEditorWidthRatio(readWidthRatio());
+    const ratio = readRatio();
+    setEditorRatio(ratio);
 
     function measure() {
       const el = wsRef.current;
       if (!el) return;
       const top = el.getBoundingClientRect().top;
       setWsH(Math.max(620, window.innerHeight - top - 8));
-      setWsW(el.clientWidth);
+      const bw = el.clientWidth;
+      setBandWide(bw >= 900);
+      // Set initial deviceView based on band width (only on first measure)
+      setDeviceView(dv => dv); // keep user's choice after first measure
     }
     measure();
-    // Set initial deviceView after first measure
+    // Set initial device based on band width
     const el = wsRef.current;
     if (el) {
       const bw = el.clientWidth;
-      const sideBySide = bw >= 640;
-      setDeviceView(sideBySide ? 'desktop' : bw >= 560 ? 'desktop' : 'mobile');
+      setDeviceView(bw >= 900 ? 'both' : bw >= 560 ? 'desktop' : 'mobile');
+      setBandWide(bw >= 900);
     }
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Switch away from 'both' when right column becomes too narrow
-  useEffect(() => {
-    if (hideBoth && deviceView === 'both') setDeviceView('desktop');
-  }, [hideBoth, deviceView]);
 
   // Auto-switch to tab that owns a save error field
   useEffect(() => {
@@ -833,346 +785,7 @@ export default function EmailTemplatesScreen() {
   const sendDisabled = dirty || uploading;
   const sendDisabledHint = sendDisabled ? 'Save your changes first' : '';
   const noPhoto = showEditor && !draft.imageUrl;
-
-  // ── Shared sub-JSX ────────────────────────────────────────────────────────
-
-  const headerJSX = (
-    <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 0, flexShrink: 0, ...(isSideBySide ? { gridColumn: '1 / -1' } : {}) }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', rowGap: 6 }}>
-        <div style={{ flex: 1, minWidth: 220 }}>
-          <TemplatePicker
-            templates={templates}
-            selectedId={selectedId}
-            isNew={isNew}
-            filter={filter}
-            onFilterChange={setFilter}
-            onSelect={selectTemplate}
-            onNew={startNew}
-            draft={draft}
-            setDraftField={setDraftField}
-            confirmDel={confirmDel}
-            setConfirmDel={setConfirmDel}
-            onDelete={deleteTemplate}
-            deleting={deleting}
-            compact={true}
-          />
-        </div>
-        {dirty && (
-          <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: '#fffbeb', color: '#b45309', border: '1.5px solid #fde68a', flexShrink: 0 }}>
-            Unsaved changes
-          </span>
-        )}
-        {saveOk && (
-          <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: '#f0fdf4', color: '#166534', border: '1.5px solid #bbf7d0', flexShrink: 0 }}>
-            Saved
-          </span>
-        )}
-        {showEditor && (
-          <button
-            style={{ ...DS.btnPrimary, opacity: saving || uploading ? 0.7 : 1, flexShrink: 0 }}
-            onClick={saveTemplate}
-            disabled={saving || uploading}
-          >
-            {saving ? 'Saving…' : isNew ? 'Create' : 'Save'}
-          </button>
-        )}
-        {dirty && (
-          <button
-            style={{ ...DS.btnSecondary, flexShrink: 0 }}
-            onClick={() => {
-              if (savedDraft) { setDraft(savedDraft); setSaveError(null); setSaveOk(false); }
-              else _doStartNew();
-            }}
-          >
-            Discard
-          </button>
-        )}
-      </div>
-      {pendingNav && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, color: '#92400e', flex: 1 }}>Unsaved changes — discard and continue?</span>
-          <button style={{ ...DS.btnDanger, fontSize: 12, padding: '4px 10px' }} onClick={executeNav}>Discard</button>
-          <button style={{ ...DS.btnSecondary, fontSize: 12, padding: '4px 10px' }} onClick={() => setPendingNav(null)}>Keep editing</button>
-        </div>
-      )}
-      {saveError && (
-        <p style={{ fontSize: 12, color: '#dc2626', margin: '4px 0 0' }}>
-          {typeof saveError === 'string' ? saveError : saveError.error}
-        </p>
-      )}
-      {(loading || seeding) && (
-        <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 0 0' }}>
-          {seeding ? 'Setting up starter templates…' : 'Loading…'}
-        </p>
-      )}
-      {!loading && !seeding && seedError && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 0' }}>
-          <p style={{ fontSize: 12, color: '#dc2626', margin: 0, flex: 1 }}>{seedError}</p>
-          <button style={{ ...DS.btnSecondary, fontSize: 11, padding: '3px 8px' }} onClick={() => runSeed(templates.length)}>Try again</button>
-        </div>
-      )}
-      {!loading && loadError && <p style={{ fontSize: 12, color: '#dc2626', margin: '4px 0 0' }}>{loadError}</p>}
-      {justSeeded && !seedDismissed && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '5px 10px', margin: '6px 0 0' }}>
-          <p style={{ fontSize: 12, color: '#166534', margin: 0, flex: 1 }}>
-            {seedCount} starter template{seedCount !== 1 ? 's' : ''} ready. Edit them or send as-is.
-          </p>
-          <button style={{ background: 'none', border: 'none', fontSize: 16, cursor: 'pointer', color: '#166534', padding: 0 }} onClick={() => setSeedDismissed(true)} aria-label="Dismiss">×</button>
-        </div>
-      )}
-    </div>
-  );
-
-  const deviceOptions = [['both', 'Both'], ['desktop', 'Desktop'], ['mobile', 'Mobile']]
-    .filter(([k]) => !(k === 'both' && hideBoth));
-
-  const previewToolbarJSX = (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
-      background: '#fff', borderBottom: '1px solid #e5e7eb', flexShrink: 0, flexWrap: 'wrap',
-    }}>
-      <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid #e5e7eb', flexShrink: 0 }}>
-        {deviceOptions.map(([k, label]) => (
-          <button key={k} onClick={() => setDeviceView(k)} style={{
-            padding: '4px 10px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
-            background: deviceView === k ? '#4f46e5' : '#f9fafb',
-            color: deviceView === k ? '#fff' : '#374151',
-          }}>{label}</button>
-        ))}
-      </div>
-      <span style={{ fontSize: 10, color: '#9ca3af', fontWeight: 600, flexShrink: 0 }}>
-        {deviceView === 'both'
-          ? `D ${Math.round(previewScale.d * 100)}% · M ${Math.round(previewScale.m * 100)}%`
-          : deviceView === 'desktop'
-          ? `${Math.round(previewScale.d * 100)}%`
-          : `${Math.round(previewScale.m * 100)}%`}
-      </span>
-      {showEditor && (
-        <button
-          ref={fullSizeBtnRef}
-          onClick={() => { setFullSizeDev(deviceView === 'mobile' ? 'mobile' : 'desktop'); setFullSizeOpen(true); }}
-          style={{ ...DS.btnSecondary, padding: '3px 10px', fontSize: 11, flexShrink: 0 }}
-        >
-          Full size
-        </button>
-      )}
-      {showEditor && (
-        <span style={{
-          fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, flexShrink: 0,
-          background: noPhoto ? '#fef3c7' : '#f0fdf4',
-          color: noPhoto ? '#b45309' : '#166534',
-          border: `1px solid ${noPhoto ? '#fde68a' : '#bbf7d0'}`,
-        }}>
-          {noPhoto ? 'No photo yet' : 'Photo added'}
-        </span>
-      )}
-      <div style={{ flex: 1 }} />
-    </div>
-  );
-
-  const tabContentJSX = !showEditor ? (
-    <div style={{ textAlign: 'center', padding: '32px 16px', color: '#9ca3af' }}>
-      <p style={{ fontSize: 22, margin: '0 0 10px', lineHeight: 1 }}>✉</p>
-      <p style={{ fontSize: 14, fontWeight: 600, color: '#374151', margin: '0 0 4px' }}>Select a template or create a new one</p>
-      <p style={{ fontSize: 12, margin: 0 }}>The preview updates as you type.</p>
-    </div>
-  ) : (
-    <>
-      {activeTab === 'photo' && (
-        <div ref={photoCardRef}>
-          <PhotoCard
-            key={photoCardKey}
-            draft={draft}
-            uploading={uploading}
-            photoError={photoError}
-            onUpload={handlePhotoUpload}
-            onRemove={handlePhotoRemove}
-            onClearError={() => setPhotoError('')}
-            bare
-          />
-        </div>
-      )}
-      {activeTab === 'layout' && (
-        <LayoutCard draft={draft} setDraftField={setDraftField} saveError={saveError} bare />
-      )}
-      {activeTab === 'colours' && (
-        <ColourCard draft={draft} setDraftField={setDraftField} store={store} saveError={saveError} bare />
-      )}
-      {activeTab === 'fonts' && (
-        <FontCard draft={draft} setDraftField={setDraftField} saveError={saveError} bare />
-      )}
-      {activeTab === 'words' && (
-        <>
-          {isNew && (
-            <div style={{ marginBottom: 14 }}>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, display: 'block' }}>Type</label>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {['special_offer', 'festival', 'normal'].map(key => (
-                  <button key={key} onClick={() => setDraftField('type', key)} style={{
-                    padding: '5px 12px', fontSize: 12, fontWeight: 700, borderRadius: 8, cursor: 'pointer',
-                    background: draft.type === key ? '#4f46e5' : '#f3f4f6',
-                    color: draft.type === key ? '#fff' : '#374151',
-                    border: draft.type === key ? 'none' : '1px solid #e5e7eb',
-                  }}>
-                    {{ special_offer: 'Special offer', festival: 'Festival', normal: 'Normal' }[key]}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          <WordsCard draft={draft} setDraftField={setDraftField} saveError={saveError} bare showName isNew={isNew} />
-        </>
-      )}
-      {activeTab === 'send' && (
-        <div className="etpl-send-grid">
-          <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 12, padding: '14px 16px' }}>
-            <p style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 10px' }}>Generate with AI</p>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-              <div style={{ flex: 1, minWidth: 120 }}>
-                <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, display: 'block' }}>Product (optional)</label>
-                <input
-                  style={{ width: '100%', padding: '7px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 8, outline: 'none', boxSizing: 'border-box', color: '#111827' }}
-                  value={productTitle}
-                  onChange={e => { setProductTitle(e.target.value); setGenError(''); setGenNotice(''); setGenConfirm(false); }}
-                  placeholder="e.g. Banarasi Silk Kurti"
-                />
-              </div>
-              <button
-                style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 9, padding: '7px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: generating ? 0.7 : 1, flexShrink: 0 }}
-                onClick={handleGenerateClick}
-                disabled={generating}
-              >
-                {generating ? 'Generating…' : 'Generate'}
-              </button>
-            </div>
-            {genConfirm && (
-              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 12, color: '#374151', flex: 1 }}>Replace subject, body, and offer line?</span>
-                <button style={{ ...DS.btnSecondary, padding: '4px 10px', fontSize: 11 }} onClick={runGenerate}>Replace</button>
-                <button style={{ ...DS.btnSecondary, padding: '4px 10px', fontSize: 11 }} onClick={() => setGenConfirm(false)}>Cancel</button>
-              </div>
-            )}
-            {genNotice && <p style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '5px 8px', margin: '8px 0 0' }}>{genNotice}</p>}
-            {genError  && <p style={{ fontSize: 11, color: '#dc2626', margin: '8px 0 0' }}>{genError}</p>}
-          </div>
-          {selectedId && (
-            <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 10px' }}>Send test</p>
-              {sendDisabledHint && <p style={{ fontSize: 11, color: '#b45309', background: '#fef3c7', borderRadius: 6, padding: '4px 8px', margin: '0 0 8px' }}>{sendDisabledHint}</p>}
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <div style={{ flex: 1, minWidth: 120 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, display: 'block' }}>Customer email</label>
-                  <input
-                    style={{ width: '100%', padding: '7px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 8, outline: 'none', boxSizing: 'border-box', color: '#111827' }}
-                    type="email"
-                    value={sendRecipient}
-                    onChange={e => { setSendRecipient(e.target.value); setSendResult(null); }}
-                    placeholder="customer@example.com"
-                    disabled={sendDisabled}
-                  />
-                </div>
-                <button
-                  style={{ ...DS.btnPrimary, opacity: sendDisabled ? 0.5 : 1, flexShrink: 0 }}
-                  onClick={sendEmail}
-                  disabled={sendDisabled || sending || !sendRecipient.trim()}
-                >
-                  {sending ? 'Sending…' : 'Send'}
-                </button>
-              </div>
-              {sendResult?.ok && <p style={{ fontSize: 12, color: '#16a34a', margin: '8px 0 0' }}>Sent! ID: {sendResult.id}{sendResult.tip}</p>}
-              {sendResult && !sendResult.ok && <p style={{ fontSize: 12, color: '#dc2626', margin: '8px 0 0' }}>{sendResult.error}</p>}
-            </div>
-          )}
-          {selectedId && (
-            <div style={{ gridColumn: '1 / -1', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 10px' }}>Send to customers</p>
-              {sendDisabledHint && <p style={{ fontSize: 11, color: '#b45309', background: '#fef3c7', borderRadius: 6, padding: '4px 8px', margin: '0 0 8px' }}>{sendDisabledHint}</p>}
-              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10 }}>
-                <div style={{ flex: 1, minWidth: 160 }}>
-                  <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, display: 'block' }}>Segment</label>
-                  <select
-                    style={{ width: '100%', padding: '7px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 8, outline: 'none', boxSizing: 'border-box', color: '#111827', cursor: 'pointer' }}
-                    value={broadcastSegment}
-                    disabled={sendDisabled}
-                    onChange={e => { setBroadcastSegment(e.target.value); setBroadcastConfirm(false); setBroadcastResult(null); }}
-                  >
-                    {SEGMENTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
-                  </select>
-                </div>
-              </div>
-              {broadcastCountLoading && <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 8px' }}>Counting…</p>}
-              {!broadcastCountLoading && broadcastCount === 0 && <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 8px' }}>No customers match this segment.</p>}
-              {!broadcastCountLoading && broadcastCount !== null && broadcastCount > 0 && broadcastCount <= 90 && (
-                <p style={{ fontSize: 12, color: '#374151', margin: '0 0 8px' }}>{broadcastCount} customers will receive this.</p>
-              )}
-              {!broadcastCountLoading && broadcastCount !== null && broadcastCount > 90 && (
-                <p style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '5px 8px', margin: '0 0 8px' }}>
-                  Free plan sends up to ~90 at once. {broadcastCount} match — narrow the segment.
-                </p>
-              )}
-              {!broadcastConfirm ? (
-                <button
-                  style={{ ...DS.btnPrimary, opacity: sendDisabled ? 0.5 : 1 }}
-                  disabled={sendDisabled || broadcasting || broadcastCountLoading || broadcastCount === null || broadcastCount === 0 || broadcastCount > 90}
-                  onClick={() => setBroadcastConfirm(true)}
-                >
-                  Send to {broadcastCount ?? '…'} customers
-                </button>
-              ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 12, color: '#374151' }}>Send to {broadcastCount} customers? This can&apos;t be undone.</span>
-                  <button style={DS.btnPrimary} onClick={sendBroadcast} disabled={broadcasting}>{broadcasting ? 'Sending…' : 'Confirm send'}</button>
-                  <button style={DS.btnSecondary} onClick={() => setBroadcastConfirm(false)}>Cancel</button>
-                </div>
-              )}
-              {broadcastResult?.ok && (
-                <p style={{ fontSize: 12, color: '#16a34a', margin: '8px 0 0' }}>
-                  Sent to {broadcastResult.sent}{broadcastResult.failed > 0 ? `, failed ${broadcastResult.failed}` : ''}.{broadcastResult.tip}
-                </p>
-              )}
-              {broadcastResult && !broadcastResult.ok && (
-                <p style={{ fontSize: 12, color: '#dc2626', margin: '8px 0 0' }}>{broadcastResult.error}</p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </>
-  );
-
-  const tabStripJSX = (
-    <TabStrip
-      activeTab={activeTab}
-      onTabChange={setActiveTab}
-      hasPhoto={!!draft.imageUrl}
-      dirty={dirty}
-      saveError={saveError}
-      presets={ENGINE_PRESETS}
-      onPreset={applyPreset}
-      looksMenuOpen={looksMenuOpen}
-      setLooksMenuOpen={setLooksMenuOpen}
-      bandWide={bandWide}
-    />
-  );
-
-  const tabPanelJSX = (
-    <div
-      ref={tabContentRef}
-      id={`tabpanel-${activeTab}`}
-      role="tabpanel"
-      aria-labelledby={`tab-${activeTab}`}
-      style={{
-        flex: 1,
-        overflowY: 'auto',
-        overscrollBehavior: 'contain',
-        scrollbarGutter: 'stable',
-        padding: '16px',
-        boxSizing: 'border-box',
-      }}
-    >
-      {tabContentJSX}
-    </div>
-  );
+  const editorH = Math.round(clampRatio(editorRatio) * wsH);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1183,118 +796,435 @@ export default function EmailTemplatesScreen() {
         height: wsH, minHeight: 620,
         overflow: wsH <= 620 ? 'visible' : 'hidden',
         display: 'grid',
-        ...(isSideBySide
-          ? { gridTemplateRows: 'auto 1fr', gridTemplateColumns: `${editorW}px 10px 1fr` }
-          : { gridTemplateRows: `auto 1fr 10px ${editorH}px` }
-        ),
+        gridTemplateRows: `auto 1fr 10px ${editorH}px`,
         fontFamily: DS.fontFamily,
         background: '#f8fafc',
         boxSizing: 'border-box',
       }}
     >
-      {/* ── Header (all cols in side-by-side, Row 0 in stacked) ── */}
-      {headerJSX}
-
-      {isSideBySide ? (
-        <>
-          {/* ── Col 1: editor pane ── */}
-          <div
-            className="etpl-editor-col"
-            style={{
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-              background: '#fff',
-              border: '1px solid #e5e7eb',
-              borderRadius: 12,
-              boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-            }}
-          >
-            {tabStripJSX}
-            {tabPanelJSX}
+      {/* ── Row 0: header ──────────────────────────────────────────────────── */}
+      <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 0, flexShrink: 0 }}>
+        {/* Main header row */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', rowGap: 6 }}>
+          {/* Template picker (compact) */}
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <TemplatePicker
+              templates={templates}
+              selectedId={selectedId}
+              isNew={isNew}
+              filter={filter}
+              onFilterChange={setFilter}
+              onSelect={selectTemplate}
+              onNew={startNew}
+              draft={draft}
+              setDraftField={setDraftField}
+              confirmDel={confirmDel}
+              setConfirmDel={setConfirmDel}
+              onDelete={deleteTemplate}
+              deleting={deleting}
+              compact={true}
+            />
           </div>
 
-          {/* ── Col 2: vertical splitter ── */}
-          <Splitter
-            orientation="vertical"
-            wsRef={wsRef}
-            wsDim={wsW}
-            ratio={editorWidthRatio}
-            onRatioChange={r => { setEditorWidthRatio(r); writeWidthRatio(r); }}
-            clampFn={clampWidthRatio}
-            minVal={0.34}
-            maxVal={0.55}
-            defaultRatio={DEFAULT_WIDTH_RATIO}
+          {/* Dirty pill */}
+          {dirty && (
+            <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: '#fffbeb', color: '#b45309', border: '1.5px solid #fde68a', flexShrink: 0 }}>
+              Unsaved changes
+            </span>
+          )}
+          {saveOk && (
+            <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 999, background: '#f0fdf4', color: '#166534', border: '1.5px solid #bbf7d0', flexShrink: 0 }}>
+              Saved
+            </span>
+          )}
+
+          {/* Save */}
+          {showEditor && (
+            <button
+              style={{ ...DS.btnPrimary, opacity: saving || uploading ? 0.7 : 1, flexShrink: 0 }}
+              onClick={saveTemplate}
+              disabled={saving || uploading}
+            >
+              {saving ? 'Saving…' : isNew ? 'Create' : 'Save'}
+            </button>
+          )}
+
+          {/* Discard */}
+          {dirty && (
+            <button
+              style={{ ...DS.btnSecondary, flexShrink: 0 }}
+              onClick={() => {
+                if (savedDraft) { setDraft(savedDraft); setSaveError(null); setSaveOk(false); }
+                else _doStartNew();
+              }}
+            >
+              Discard
+            </button>
+          )}
+        </div>
+
+        {/* Discard-nav confirm */}
+        {pendingNav && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: '#92400e', flex: 1 }}>Unsaved changes — discard and continue?</span>
+            <button style={{ ...DS.btnDanger, fontSize: 12, padding: '4px 10px' }} onClick={executeNav}>Discard</button>
+            <button style={{ ...DS.btnSecondary, fontSize: 12, padding: '4px 10px' }} onClick={() => setPendingNav(null)}>Keep editing</button>
+          </div>
+        )}
+
+        {/* Save error */}
+        {saveError && (
+          <p style={{ fontSize: 12, color: '#dc2626', margin: '4px 0 0' }}>
+            {typeof saveError === 'string' ? saveError : saveError.error}
+          </p>
+        )}
+
+        {/* Seed banner (slim strip) */}
+        {(loading || seeding) && (
+          <p style={{ fontSize: 12, color: '#9ca3af', margin: '4px 0 0' }}>
+            {seeding ? 'Setting up starter templates…' : 'Loading…'}
+          </p>
+        )}
+        {!loading && !seeding && seedError && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '4px 0 0' }}>
+            <p style={{ fontSize: 12, color: '#dc2626', margin: 0, flex: 1 }}>{seedError}</p>
+            <button style={{ ...DS.btnSecondary, fontSize: 11, padding: '3px 8px' }} onClick={() => runSeed(templates.length)}>Try again</button>
+          </div>
+        )}
+        {!loading && loadError && <p style={{ fontSize: 12, color: '#dc2626', margin: '4px 0 0' }}>{loadError}</p>}
+        {justSeeded && !seedDismissed && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '5px 10px', margin: '6px 0 0' }}>
+            <p style={{ fontSize: 12, color: '#166534', margin: 0, flex: 1 }}>
+              {seedCount} starter template{seedCount !== 1 ? 's' : ''} ready. Edit them or send as-is.
+            </p>
+            <button style={{ background: 'none', border: 'none', fontSize: 16, cursor: 'pointer', color: '#166534', padding: 0 }} onClick={() => setSeedDismissed(true)} aria-label="Dismiss">×</button>
+          </div>
+        )}
+      </div>
+
+      {/* ── Row 1: preview band (1fr) ───────────────────────────────────────── */}
+      <div ref={bandRef} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 240 }}>
+        {/* Preview toolbar */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px',
+          background: '#fff', borderBottom: '1px solid #e5e7eb', flexShrink: 0, flexWrap: 'wrap',
+        }}>
+          {/* Device segmented */}
+          <div style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', border: '1px solid #e5e7eb', flexShrink: 0 }}>
+            {[['both', 'Both'], ['desktop', 'Desktop'], ['mobile', 'Mobile']].map(([k, label]) => (
+              <button key={k} onClick={() => setDeviceView(k)} style={{
+                padding: '4px 10px', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer',
+                background: deviceView === k ? '#4f46e5' : '#f9fafb',
+                color: deviceView === k ? '#fff' : '#374151',
+              }}>{label}</button>
+            ))}
+          </div>
+
+          {/* Scale readout */}
+          <span style={{ fontSize: 10, color: '#9ca3af', fontWeight: 600, flexShrink: 0 }}>
+            {deviceView === 'both'
+              ? `D ${Math.round(previewScale.d * 100)}% · M ${Math.round(previewScale.m * 100)}%`
+              : deviceView === 'desktop'
+              ? `${Math.round(previewScale.d * 100)}%`
+              : `${Math.round(previewScale.m * 100)}%`}
+          </span>
+
+          {/* Full size button */}
+          {showEditor && (
+            <button
+              ref={fullSizeBtnRef}
+              onClick={() => { setFullSizeDev(deviceView === 'mobile' ? 'mobile' : 'desktop'); setFullSizeOpen(true); }}
+              style={{ ...DS.btnSecondary, padding: '3px 10px', fontSize: 11, flexShrink: 0 }}
+            >
+              Full size
+            </button>
+          )}
+
+          {/* Photo status pill */}
+          {showEditor && (
+            <span style={{
+              fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, flexShrink: 0,
+              background: noPhoto ? '#fef3c7' : '#f0fdf4',
+              color: noPhoto ? '#b45309' : '#166534',
+              border: `1px solid ${noPhoto ? '#fde68a' : '#bbf7d0'}`,
+            }}>
+              {noPhoto ? 'No photo yet' : 'Photo added'}
+            </span>
+          )}
+
+          <div style={{ flex: 1 }} />
+        </div>
+
+        {/* Stage */}
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <PreviewStage
+            draft={showEditor ? draft : null}
+            store={store}
+            deviceView={deviceView}
+            onScale={(d, m) => setPreviewScale({ d, m })}
           />
+        </div>
+      </div>
 
-          {/* ── Col 3: preview pane ── */}
-          <div style={{
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            background: '#f1f5f9',
-            border: '1px solid #e5e7eb',
-            borderRadius: 12,
-            boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-          }}>
-            {previewToolbarJSX}
-            <div style={{ flex: 1, overflow: 'hidden' }}>
-              <PreviewStage
-                draft={showEditor ? draft : null}
-                store={store}
-                deviceView={deviceView}
-                onScale={(d, m) => setPreviewScale({ d, m })}
-              />
+      {/* ── Row 2: splitter ────────────────────────────────────────────────── */}
+      <Splitter
+        wsRef={wsRef}
+        wsH={wsH}
+        editorRatio={editorRatio}
+        onRatioChange={r => { setEditorRatio(r); writeRatio(r); }}
+      />
+
+      {/* ── Row 3: editor panel ─────────────────────────────────────────────── */}
+      <div style={{
+        height: editorH, overflow: 'hidden',
+        display: 'flex', flexDirection: 'column',
+        background: '#fff',
+        borderTop: 'none',
+        borderRadius: '0 0 8px 8px',
+        boxShadow: '0 -1px 0 #e5e7eb',
+      }}>
+        {/* Tab strip */}
+        <TabStrip
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          hasPhoto={!!draft.imageUrl}
+          dirty={dirty}
+          saveError={saveError}
+          presets={ENGINE_PRESETS}
+          onPreset={applyPreset}
+          looksMenuOpen={looksMenuOpen}
+          setLooksMenuOpen={setLooksMenuOpen}
+          bandWide={bandWide}
+        />
+
+        {/* Tab content (the only scroll area) */}
+        <div
+          ref={tabContentRef}
+          id={`tabpanel-${activeTab}`}
+          role="tabpanel"
+          aria-labelledby={`tab-${activeTab}`}
+          style={{
+            flex: 1,
+            overflowY: 'auto',
+            overscrollBehavior: 'contain',
+            scrollbarGutter: 'stable',
+            padding: '16px',
+            boxSizing: 'border-box',
+          }}
+        >
+          {!showEditor ? (
+            <div style={{ textAlign: 'center', padding: '32px 16px', color: '#9ca3af' }}>
+              <p style={{ fontSize: 22, margin: '0 0 10px', lineHeight: 1 }}>✉</p>
+              <p style={{ fontSize: 14, fontWeight: 600, color: '#374151', margin: '0 0 4px' }}>Select a template or create a new one</p>
+              <p style={{ fontSize: 12, margin: 0 }}>The preview updates as you type.</p>
             </div>
-          </div>
-        </>
-      ) : (
-        <>
-          {/* ── Row 1: preview band ── */}
-          <div ref={bandRef} style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 240 }}>
-            {previewToolbarJSX}
-            <div style={{ flex: 1, overflow: 'hidden' }}>
-              <PreviewStage
-                draft={showEditor ? draft : null}
-                store={store}
-                deviceView={deviceView}
-                onScale={(d, m) => setPreviewScale({ d, m })}
-              />
-            </div>
-          </div>
+          ) : (
+            <>
+              {/* Photo tab */}
+              {activeTab === 'photo' && (
+                <div ref={photoCardRef}>
+                  <PhotoCard
+                    key={photoCardKey}
+                    draft={draft}
+                    uploading={uploading}
+                    photoError={photoError}
+                    onUpload={handlePhotoUpload}
+                    onRemove={handlePhotoRemove}
+                    onClearError={() => setPhotoError('')}
+                    bare
+                  />
+                </div>
+              )}
 
-          {/* ── Row 2: horizontal splitter ── */}
-          <Splitter
-            orientation="horizontal"
-            wsRef={wsRef}
-            wsDim={wsH}
-            ratio={editorRatio}
-            onRatioChange={r => { setEditorRatio(r); writeRatio(r); }}
-            clampFn={clampRatio}
-            minVal={0.30}
-            maxVal={0.60}
-            defaultRatio={DEFAULT_RATIO}
-          />
+              {/* Layout tab */}
+              {activeTab === 'layout' && (
+                <LayoutCard
+                  draft={draft}
+                  setDraftField={setDraftField}
+                  saveError={saveError}
+                  bare
+                />
+              )}
 
-          {/* ── Row 3: editor panel ── */}
-          <div
-            className="etpl-editor-col"
-            style={{
-              height: editorH, overflow: 'hidden',
-              display: 'flex', flexDirection: 'column',
-              background: '#fff',
-              borderTop: 'none',
-              borderRadius: '0 0 8px 8px',
-              boxShadow: '0 -1px 0 #e5e7eb',
-            }}
-          >
-            {tabStripJSX}
-            {tabPanelJSX}
-          </div>
-        </>
-      )}
+              {/* Colours tab */}
+              {activeTab === 'colours' && (
+                <ColourCard
+                  draft={draft}
+                  setDraftField={setDraftField}
+                  store={store}
+                  saveError={saveError}
+                  bare
+                />
+              )}
 
-      {/* Full size modal */}
+              {/* Fonts tab */}
+              {activeTab === 'fonts' && (
+                <FontCard
+                  draft={draft}
+                  setDraftField={setDraftField}
+                  saveError={saveError}
+                  bare
+                />
+              )}
+
+              {/* Words tab */}
+              {activeTab === 'words' && (
+                <>
+                  {/* Type selector for new templates */}
+                  {isNew && (
+                    <div style={{ marginBottom: 14 }}>
+                      <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, display: 'block' }}>Type</label>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {['special_offer', 'festival', 'normal'].map(key => (
+                          <button key={key} onClick={() => setDraftField('type', key)} style={{
+                            padding: '5px 12px', fontSize: 12, fontWeight: 700, borderRadius: 8, cursor: 'pointer',
+                            background: draft.type === key ? '#4f46e5' : '#f3f4f6',
+                            color: draft.type === key ? '#fff' : '#374151',
+                            border: draft.type === key ? 'none' : '1px solid #e5e7eb',
+                          }}>
+                            {{ special_offer: 'Special offer', festival: 'Festival', normal: 'Normal' }[key]}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <WordsCard
+                    draft={draft}
+                    setDraftField={setDraftField}
+                    saveError={saveError}
+                    bare
+                    showName
+                    isNew={isNew}
+                  />
+                </>
+              )}
+
+              {/* Send tab */}
+              {activeTab === 'send' && (
+                <div className="etpl-send-grid">
+                  {/* Generate with AI */}
+                  <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 12, padding: '14px 16px' }}>
+                    <p style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 10px' }}>Generate with AI</p>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                      <div style={{ flex: 1, minWidth: 120 }}>
+                        <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, display: 'block' }}>Product (optional)</label>
+                        <input
+                          style={{ width: '100%', padding: '7px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 8, outline: 'none', boxSizing: 'border-box', color: '#111827' }}
+                          value={productTitle}
+                          onChange={e => { setProductTitle(e.target.value); setGenError(''); setGenNotice(''); setGenConfirm(false); }}
+                          placeholder="e.g. Banarasi Silk Kurti"
+                        />
+                      </div>
+                      <button
+                        style={{ background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 9, padding: '7px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer', opacity: generating ? 0.7 : 1, flexShrink: 0 }}
+                        onClick={handleGenerateClick}
+                        disabled={generating}
+                      >
+                        {generating ? 'Generating…' : 'Generate'}
+                      </button>
+                    </div>
+                    {genConfirm && (
+                      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 12, color: '#374151', flex: 1 }}>Replace subject, body, and offer line?</span>
+                        <button style={{ ...DS.btnSecondary, padding: '4px 10px', fontSize: 11 }} onClick={runGenerate}>Replace</button>
+                        <button style={{ ...DS.btnSecondary, padding: '4px 10px', fontSize: 11 }} onClick={() => setGenConfirm(false)}>Cancel</button>
+                      </div>
+                    )}
+                    {genNotice && <p style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '5px 8px', margin: '8px 0 0' }}>{genNotice}</p>}
+                    {genError  && <p style={{ fontSize: 11, color: '#dc2626', margin: '8px 0 0' }}>{genError}</p>}
+                  </div>
+
+                  {/* Send test */}
+                  {selectedId && (
+                    <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
+                      <p style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 10px' }}>Send test</p>
+                      {sendDisabledHint && <p style={{ fontSize: 11, color: '#b45309', background: '#fef3c7', borderRadius: 6, padding: '4px 8px', margin: '0 0 8px' }}>{sendDisabledHint}</p>}
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 120 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, display: 'block' }}>Customer email</label>
+                          <input
+                            style={{ width: '100%', padding: '7px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 8, outline: 'none', boxSizing: 'border-box', color: '#111827' }}
+                            type="email"
+                            value={sendRecipient}
+                            onChange={e => { setSendRecipient(e.target.value); setSendResult(null); }}
+                            placeholder="customer@example.com"
+                            disabled={sendDisabled}
+                          />
+                        </div>
+                        <button
+                          style={{ ...DS.btnPrimary, opacity: sendDisabled ? 0.5 : 1, flexShrink: 0 }}
+                          onClick={sendEmail}
+                          disabled={sendDisabled || sending || !sendRecipient.trim()}
+                        >
+                          {sending ? 'Sending…' : 'Send'}
+                        </button>
+                      </div>
+                      {sendResult?.ok && <p style={{ fontSize: 12, color: '#16a34a', margin: '8px 0 0' }}>Sent! ID: {sendResult.id}{sendResult.tip}</p>}
+                      {sendResult && !sendResult.ok && <p style={{ fontSize: 12, color: '#dc2626', margin: '8px 0 0' }}>{sendResult.error}</p>}
+                    </div>
+                  )}
+
+                  {/* Broadcast — full width */}
+                  {selectedId && (
+                    <div style={{ gridColumn: '1 / -1', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
+                      <p style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 10px' }}>Send to customers</p>
+                      {sendDisabledHint && <p style={{ fontSize: 11, color: '#b45309', background: '#fef3c7', borderRadius: 6, padding: '4px 8px', margin: '0 0 8px' }}>{sendDisabledHint}</p>}
+                      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 10 }}>
+                        <div style={{ flex: 1, minWidth: 160 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4, display: 'block' }}>Segment</label>
+                          <select
+                            style={{ width: '100%', padding: '7px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 8, outline: 'none', boxSizing: 'border-box', color: '#111827', cursor: 'pointer' }}
+                            value={broadcastSegment}
+                            disabled={sendDisabled}
+                            onChange={e => { setBroadcastSegment(e.target.value); setBroadcastConfirm(false); setBroadcastResult(null); }}
+                          >
+                            {SEGMENTS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                          </select>
+                        </div>
+                      </div>
+                      {broadcastCountLoading && <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 8px' }}>Counting…</p>}
+                      {!broadcastCountLoading && broadcastCount === 0 && <p style={{ fontSize: 12, color: '#9ca3af', margin: '0 0 8px' }}>No customers match this segment.</p>}
+                      {!broadcastCountLoading && broadcastCount !== null && broadcastCount > 0 && broadcastCount <= 90 && (
+                        <p style={{ fontSize: 12, color: '#374151', margin: '0 0 8px' }}>{broadcastCount} customers will receive this.</p>
+                      )}
+                      {!broadcastCountLoading && broadcastCount !== null && broadcastCount > 90 && (
+                        <p style={{ fontSize: 11, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '5px 8px', margin: '0 0 8px' }}>
+                          Free plan sends up to ~90 at once. {broadcastCount} match — narrow the segment.
+                        </p>
+                      )}
+                      {!broadcastConfirm ? (
+                        <button
+                          style={{ ...DS.btnPrimary, opacity: sendDisabled ? 0.5 : 1 }}
+                          disabled={sendDisabled || broadcasting || broadcastCountLoading || broadcastCount === null || broadcastCount === 0 || broadcastCount > 90}
+                          onClick={() => setBroadcastConfirm(true)}
+                        >
+                          Send to {broadcastCount ?? '…'} customers
+                        </button>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: 12, color: '#374151' }}>Send to {broadcastCount} customers? This can&apos;t be undone.</span>
+                          <button style={DS.btnPrimary} onClick={sendBroadcast} disabled={broadcasting}>{broadcasting ? 'Sending…' : 'Confirm send'}</button>
+                          <button style={DS.btnSecondary} onClick={() => setBroadcastConfirm(false)}>Cancel</button>
+                        </div>
+                      )}
+                      {broadcastResult?.ok && (
+                        <p style={{ fontSize: 12, color: '#16a34a', margin: '8px 0 0' }}>
+                          Sent to {broadcastResult.sent}{broadcastResult.failed > 0 ? `, failed ${broadcastResult.failed}` : ''}.{broadcastResult.tip}
+                        </p>
+                      )}
+                      {broadcastResult && !broadcastResult.ok && (
+                        <p style={{ fontSize: 12, color: '#dc2626', margin: '8px 0 0' }}>{broadcastResult.error}</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Full size modal (portal-like: rendered at workspace root) */}
       {fullSizeOpen && showEditor && (
         <FullSizeModal
           draft={draft}
@@ -1304,13 +1234,12 @@ export default function EmailTemplatesScreen() {
         />
       )}
 
-      {/* Global styles */}
+      {/* Global styles — dangerouslySetInnerHTML avoids hydration mismatch from attribute-selector quotes */}
       <style dangerouslySetInnerHTML={{__html:`
-        .etpl-editor-col{container-type:inline-size}
         .etpl-words-grid{display:grid;grid-template-columns:1fr;gap:0}
-        @container(min-width:600px){.etpl-words-grid{grid-template-columns:1fr 1fr;column-gap:16px}}
+        @media(min-width:980px){.etpl-words-grid{grid-template-columns:1fr 1fr;column-gap:16px}}
         .etpl-send-grid{display:grid;grid-template-columns:1fr;gap:12px}
-        @container(min-width:600px){.etpl-send-grid{grid-template-columns:1fr 1fr}}
+        @media(min-width:980px){.etpl-send-grid{grid-template-columns:1fr 1fr}}
         [role=tablist]::-webkit-scrollbar{display:none}
         [role=tabpanel]::-webkit-scrollbar{width:6px}
         [role=tabpanel]::-webkit-scrollbar-thumb{background:#d1d5db;border-radius:3px}
