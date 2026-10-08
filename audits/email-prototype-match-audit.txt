@@ -1,0 +1,451 @@
+EMAIL STUDIO — PROTOTYPE MATCH AUDIT
+2026-10-08
+============================================================
+Files read (not modified):
+  .shopify/design/email-studio-prototype.html        (873 lines, full)
+  frontend/app/admin/screens/EmailTemplates.jsx      (lines 1–960, key sections)
+  frontend/app/admin/screens/emailStudio/PreviewStage.jsx  (244 lines, full)
+  frontend/app/admin/screens/emailStudio/TemplatePicker.jsx (327 lines, full)
+  frontend/app/admin/screens/emailStudio/LayoutCard.jsx    (70 lines, full)
+  frontend/app/admin/screens/emailStudio/ColourCard.jsx    (199 lines, full)
+  frontend/app/admin/screens/emailStudio/FontCard.jsx      (218 lines, full)
+  frontend/app/admin/screens/emailStudio/WordsCard.jsx     (154 lines, full)
+  frontend/app/admin/screens/emailStudio/lib.js            (79 lines, full)
+  backend/utils/emailEngine.js                       (lines 80–475)
+============================================================
+
+
+1. PROTOTYPE STRUCTURE
+------------------------------------------------------------
+
+LAYOUT GRID
+  .sgrid {
+    display: grid;
+    grid-template-columns: minmax(0,430px) minmax(0,1fr);
+    grid-template-areas: "head stage" "panel stage";
+    grid-template-rows: auto 1fr;
+    gap: 16px 22px;
+    align-items: start;
+  }
+  Left column: head (row 1) + panel (row 2), max 430px.
+  Right column: stage, spans both rows.
+
+STICKY PREVIEW STAGE
+  .stage {
+    position: sticky;
+    top: calc(70px + env(safe-area-inset-top, 0px));
+    align-self: start;
+    background: var(--stage);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 14px;
+  }
+  70px = assumed desktop app-bar height. At 980px breakpoint:
+    .stage { position: static; }
+
+DEVICE / VIEW CONTROLS (inside #bar)
+  #dev: segmented button [Desktop | Mobile]  (data-dev="desk" / "mob")
+  #vw:  segmented button [Fit to screen% | Actual size]  (data-view="fit" / "act")
+  #stat: amber/green pill "No photo yet" / "Photo added"
+  Controls sit in a flex bar above the mailbox inside .stage.
+
+BREAKPOINT
+  @media (max-width: 980px) {
+    .sgrid { grid-template-columns: minmax(0,1fr);
+             grid-template-areas: "head" "stage" "panel"; }
+    .stage { position: static; }
+  }
+  Single column, stage above panel at narrow widths.
+
+CSS TOKENS (light mode only — ignoring dark blocks per spec)
+  --bg:      #f3f3f6
+  --card:    #fff
+  --line:    #e5e5ea
+  --ink:     #16161a
+  --mut:     #6a6a76
+  --acc:     #4f46e5
+  --accsoft: #eef0ff
+  --field:   #fff
+  --stage:   #e8e8ee
+
+PANEL CARDS — 5 numbered .pc cards, stacked vertically in .panel
+  (display:flex; flex-direction:column; gap:14px)
+  Card 1 — Offer photo    (#photoCard)
+    Drop zone or filled photo + quality label + "Added"/"Needed" pill.
+  Card 2 — Layout         (#layoutCard)
+    #layouts grid: repeat(3,1fr); SVG wireframes height:50px.
+    #layCount pill "11 styles".
+  Card 3 — Colours
+    Brand colour swatch row (9 colours + hex input + color picker).
+    Page and card background swatch grids (PALETTE + brand shades).
+    Radius toggle: round / sharp.
+  Card 4 — Fonts          (#fontCount pill "N families")
+    Heading font: .fbtn toggle → .fpop popover (grouped: safe / rich).
+    Body font: same popover pattern.
+  Card 5 — Words
+    Fields: Subject, Eyebrow, Headline, Offer line, Body (textarea),
+    CTA label, CTA URL, Footer note.
+    "Write with AI" link (labelled "Generate copy" in prototype script).
+    Send test email row: recipient input + Send button.
+
+PRESET CHIPS (#presets div, below heading row)
+  5 chips: Festive, Flash sale, Elegant, Fresh, Classic.
+  "Surprise me" chip (randomises layout + colour + fonts + radius).
+  Each chip has a colour dot (the preset's brand colour) + label.
+
+MAILBOX
+  #device wrapper (data-mode="desk"/"mob").
+  Desktop: #mailbox max-width 700px, border-radius 8px.
+  Mobile:  phone-border decoration, #mailbox max-width 391px.
+  #scaler / scale() wrapper for fit mode.
+  #mail iframe. fitFrame() re-measures scrollHeight after each render.
+
+
+2. CURRENT SCREEN STRUCTURE
+------------------------------------------------------------
+
+OVERALL GRID — side-by-side (wsW ≥ 640)
+  Left column: editorWidthRatio × wsW (default 42%), via inline CSS.
+  10px vertical splitter (drag-to-resize, pointer events on a divider div).
+  Right column: wsW − editorW − 10.
+  No named CSS grid areas.
+  hideBoth: rightColW < 500 → removes "Both" device option; sets deviceView
+    to 'desktop'.
+
+OVERALL GRID — stacked (wsW < 640)
+  4-row flex column (actually CSS grid rows):
+    Row 1: preview band (flex:1)
+    Row 2: horizontal drag splitter
+    Row 3: editor panel (editorH = editorRatio × wsH, default 42%)
+  editorH and editorRatio only used in stacked mode.
+
+LOCALSTORAGE KEYS (VIOLATION — no localStorage in admin iframe per CLAUDE.md)
+  ccf:emailWorkspace:editorRatio       (float, vertical split ratio)
+  ccf:emailWorkspace:editorWidthRatio  (float, horizontal split ratio)
+  readRatio() / writeRatio() / readWidthRatio() / writeWidthRatio()
+  — EmailTemplates.jsx lines 27–37.
+
+DEVICE TOGGLE
+  Options: [Both | Desktop | Mobile]; "Both" hidden when hideBoth.
+  Current buttons rendered at EmailTemplates.jsx:926–942.
+  "Both" shows two iframes side-by-side inside PreviewStage.
+
+SCALE / VIEW
+  Scale badge: `${Math.round(previewScale.d * 100)}%` text (no segment).
+  Full size button → opens FullSizeModal (position:fixed, z-index:1000).
+  No "Fit to screen / Actual size" toggle (always fit mode).
+
+PHOTO STATUS
+  "Photo added"/"No photo yet" pill in the preview toolbar row
+  (EmailTemplates.jsx:959+), same amber/green colouring as prototype.
+
+TAB STRIP — 6 tabs in editor column
+  Photo | Layout | Colours | Fonts | Words | Send
+  Icon SVGs per tab. One card visible at a time; tab panel has
+  overflow-y:auto for scroll.
+
+PRESET CHIPS ("Looks")
+  A button labelled "Looks" above the tab strip opens a dropdown/menu
+  showing 5 preset chips. Not always visible — requires click to expand.
+  looksMenuOpen state (EmailTemplates.jsx:503).
+  applyPreset(k) sets 6 draft fields: layout, color, hFont, bFont,
+  radius, pageBg/cardBg (EmailTemplates.jsx:820–830).
+
+CARD CONTENTS (current)
+  PhotoCard:   bare prop; drop zone, file picker, quality label, pill.
+  LayoutCard:  grid repeat(auto-fill, minmax(150px,1fr)), SVG 48×48,
+               no count pill, no numbered header.
+  ColourCard:  expandable "Pick colour" palette, brand-shade section,
+               showLogo toggle — in Colours tab.
+  FontCard:    heading+body FontPopover side-by-side, corner style toggle
+               — in Fonts tab.
+  WordsCard:   showName=true when compact; all text fields. No send test.
+  Send tab:    "Generate with AI" accordion, send-test form, segment
+               picker, broadcast button.
+
+CONTAINER QUERY
+  etpl-editor-col class: container-type: inline-size (style tag in JSX,
+  EmailTemplates.jsx ~1309). Used by LayoutCard / ColourCard responsive
+  layout. CSS containment does NOT create a stacking context.
+
+STICKY_TOP CONSTANT
+  lib.js:12  export const STICKY_TOP = 12;
+  PreviewStage receives stickyTop prop. Current PreviewStage does NOT
+  use a sticky wrapper — the stage div is inside the right column of
+  the flexbox splitter layout and scrolls with the page.
+
+
+3. GAP TABLE
+------------------------------------------------------------
+
+Element                  | Prototype                     | Current                         | Change needed                           | Risk
+-------------------------|-------------------------------|---------------------------------|-----------------------------------------|-------
+Overall grid             | CSS named-area grid 430px+1fr | Inline-flex splitter, ratio-based| Replace splitter with .sgrid CSS grid   | Medium
+Stage sticky             | position:sticky top:calc(70px+safe-area) | Not sticky (scrolls) | Add sticky positioning; use top:12px    | Medium
+Breakpoint               | 980px single-col              | 640px single-col                | Widen to 980px                          | Low
+Tab strip                | None — all 5 cards visible    | 6 tabs (one card at a time)     | Remove tabs; show all cards vertically  | High
+Vertical splitter        | None                          | Drag-to-resize + localStorage   | Remove splitter + localStorage          | Medium
+localStorage ratio keys  | Not present                   | 2 keys (rule violation)         | Delete readRatio/writeWidthRatio        | Medium
+"Both" device option     | Not present (Desktop/Mobile)  | Both/Desktop/Mobile             | Remove "Both" option                    | Low
+Scale view               | Fit to screen/Actual size seg | Scale% badge + Full size button | Replace with fit/actual segment         | Low
+hideBoth logic           | Not applicable                | rightColW < 500 triggers        | Remove (no splitter to cause it)        | Low
+Preset chips             | Always-visible row below head | Hidden behind "Looks" button    | Promote to visible strip                | Low
+"Surprise me" chip       | Present in prototype          | Not present in current          | Add                                     | Low
+Numbered card headers    | .n badge circles 1–5          | No numbering                    | Add n-badge to each card header         | Low
+Layout grid columns      | repeat(3,1fr) fixed           | repeat(auto-fill,minmax(150px,1fr)) | Switch to 3-column fixed             | Low
+Layout SVG height        | height:50px                   | 48px                            | Minor; adjust to 50px                   | Low
+Layout count pill        | "11 styles" pill              | None                            | Add count label                         | Low
+Font count pill          | "N families" pill in header   | None                            | Add count label                         | Low
+"Write with AI"          | In Words card (card 5)        | In Send tab                     | Move to Words card                      | Low
+Send test               | Inside card 5 (Words)          | In Send tab, separate           | Move send test into Words or new card 6 | Low
+Broadcast send           | Not in prototype              | In Send tab                     | Keep as new card 6 (see §4)            | Low
+ColourCard expandable    | Always-visible swatch grid    | Expandable "Pick colour" section| Prototype prefers visible; medium touch | Medium
+ColourCard logo toggle   | Not in prototype              | showLogo toggle present         | Keep (real feature, §4)                 | Low
+FontCard popover         | .fbtn/.fpop custom design     | React FontPopover (equivalent)  | Functionally equivalent; keep           | None
+Corner style             | In Fonts card (round/sharp)   | In FontCard (identical)         | Already matches                         | None
+CSS tokens on :root      | CSS custom properties         | Inline DS object in JS          | Add :root vars to admin <style>         | Low
+Photo status pill loc    | Inside .stage bar             | In preview toolbar row          | Move inside stage card                  | Low
+Preset names             | Festive/Flash sale/Elegant/Fresh/Classic | Same 5 keys in ENGINE_PRESETS | Already match                    | None
+
+
+4. REAL FEATURES THAT MUST SURVIVE (not in prototype)
+------------------------------------------------------------
+
+TEMPLATE PICKER + FILTER CHIPS
+  What: TemplatePicker compact card strip — filter chips (All/Special
+  offer/Festival/Normal) + scrollable template cards.
+  Where in prototype layout: header area ("head" grid area).
+  Current location: headerJSX, compact={true}. Already in the right
+  place — keep there.
+
+NEW UNSAVED TEMPLATE
+  What: "New template (unsaved)" card in the strip; isNew state.
+  Where: header, same TemplatePicker strip.
+
+SAVE + STATUS
+  What: Save/Create button, "Saved" green pill, "Unsaved changes" amber
+  pill, Discard button.
+  Where in prototype layout: right side of header row.
+  Current: headerJSX flex row. Keep in header.
+
+DELETE WITH CONFIRM
+  What: Delete button + confirmation row in TemplatePicker compact.
+  Where in prototype layout: header row (beside picker).
+  Current: compact branch of TemplatePicker. Keep there.
+
+AI "WRITE WITH AI"
+  What: Generate copy using LLM (productTitle prompt → fills headline,
+  body, subject). Currently in Send tab as accordion.
+  Where in prototype layout: inside card 5 (Words) — prototype's Words
+  card has a "Generate copy" link at the bottom.
+  Action: move the genConfirm/generating/genError block from Send tab
+  case to the Words tab case in EmailTemplates.jsx.
+
+SEND TEST / BROADCAST SEND
+  What: send-test email input + button; segment picker + broadcast button
+  + result display.
+  Where in prototype layout: new card 6 labelled "Send" (not in
+  prototype's 5 cards but fits the numbered pattern as card 6).
+  Broadcast is not in the prototype at all — add it as card 6.
+  The send test originally sat in the prototype Words card; keeping it
+  in a dedicated Send card is cleaner given broadcast complexity.
+
+
+5. WHAT TO REMOVE
+------------------------------------------------------------
+
+TAB STRIP (6 tabs Photo/Layout/Colours/Fonts/Words/Send)
+  Replace with a single vertically stacked panel showing all 5 cards
+  (+ card 6 Send). Remove: activeTab state, setActiveTab, FIELD_TAB map,
+  tab icons, tab-content div with overflowY:auto gated by activeTab.
+
+DRAG-TO-RESIZE VERTICAL SPLITTER
+  Remove: splitterRef, isDragging state, editorW/rightColW/editorWidthRatio
+  state, mousedown/mousemove/mouseup splitter handlers,
+  writeWidthRatio() calls. Replace with named CSS grid columns.
+
+LOCALSTORAGE RATIO KEYS
+  Remove: LS_RATIO_KEY, LS_WIDTH_RATIO_KEY, DEFAULT_RATIO,
+  DEFAULT_WIDTH_RATIO, readRatio(), writeRatio(), readWidthRatio(),
+  writeWidthRatio(), the useLayoutEffect that calls them. These are a
+  rule violation (no localStorage in admin iframe).
+
+4-ROW STACKED GRID RATIO
+  editorH / editorRatio used only in stacked mode. Once the grid becomes
+  CSS-native, stacked layout is handled by the 980px media query.
+  Remove editorH, editorRatio, DEFAULT_RATIO (vertical), clampRatio.
+
+hideBoth LOGIC
+  hideBoth = rightColW < 500. No splitter means no dynamic rightColW.
+  Remove: hideBoth derived value, the useEffect that resets deviceView
+  when hideBoth changes, the filter on deviceOptions.
+
+"BOTH" DEVICE OPTION
+  Prototype has Desktop/Mobile only. "Both" is a development convenience
+  that adds iframe complexity. Remove both option and its rendering in
+  PreviewStage.
+
+"LOOKS" DROPDOWN LABEL
+  Replace the hidden "Looks" button+menu with a visible preset chip row
+  below the header, matching prototype's #presets placement.
+  Remove: looksMenuOpen state, the Looks button, the dropdown overlay.
+
+ANYTHING MADE REDUNDANT BY CSS GRID
+  editorW, rightColW derived calculations, the splitter divider <div>,
+  the container-type:inline-size style override (may keep if LayoutCard
+  uses it for responsive grid — evaluate; if LayoutCard switches to
+  repeat(3,1fr) it is no longer needed).
+
+
+6. STICKY OFFSET
+------------------------------------------------------------
+
+PROTOTYPE VALUE
+  top: calc(70px + env(safe-area-inset-top, 0px))
+  70px was chosen assuming a standard desktop app-bar height.
+
+SHOPIFY IFRAME REALITY
+  The admin screen runs inside the Shopify App Bridge iframe.
+  There is NO 58px Shopify app bar inside the iframe.
+  The iframe viewport starts at the top of the content area.
+  The correct sticky offset is just the grid gap above the stage:
+    top: 12px   (matches prototype's 16px gap − 4px rounding, or simply
+                 the --gap value)
+  lib.js already exports STICKY_TOP = 12 (lib.js:12). This is correct.
+
+AVAILABLE HEIGHT
+  Shopify admin iframe is approximately 630px tall.
+  With top:12px sticky, the stage has ≈618px of usable vertical space.
+  The stage padding (14px×2) leaves ≈590px for the mailbox + bar.
+
+ACTION
+  Change the prototype's sticky calc to top:12px (or var(--gap)) for
+  the production build. No change to lib.js needed (already 12).
+
+
+7. PREVIEW — COLLAPSE FIX STATUS
+------------------------------------------------------------
+
+CONFIRMED: the PreviewStage collapse fix is NOT yet in the code.
+
+Three bugs compound (full analysis in audits/email-preview-ux-audit.txt):
+
+BUG A1 — measureNatH returns 8 on blank srcdoc.
+  PreviewStage.jsx lines 34–46:
+    function measureNatH(iframe) {
+      if (!iframe) return 600;
+      try {
+        const doc = iframe.contentDocument;
+        if (!doc || !doc.documentElement) return 600;
+        iframe.style.height = '1px';
+        const h = doc.documentElement.scrollHeight || 600;
+        //          blank doc → h ≈ 8 (truthy) → || 600 never fires
+        iframe.style.height = h + 'px';
+        return h;
+      } catch { return 600; }
+    }
+  No threshold guard (h < 100) is present. blank doc gives h=8.
+
+BUG A2 — fit() not called after pushToIframe direct DOM update.
+  PreviewStage.jsx lines 21–32 (pushToIframe):
+    // When readyRef.current === true (normal path):
+    s.textContent = out.css;
+    doc.body.innerHTML = out.body;
+    // ← no fit() call here
+  Lines 193–205 (draft/store debounce effect):
+    pushToIframe(df, out);
+    pushToIframe(mf, out);
+    // ← no setTimeout(() => fit(), 50) follows
+
+BUG A3 — Mobile scale = 100% when mH=8.
+  PreviewStage.jsx (inside fit()):
+    kM = Math.min(1, usableH/mH, usableW/MOBILE_W)
+    // mH=8 → usableH/8 >> 1; usableW/391 ≥ 1 when pane ≥ 391px
+    // → kM = 1 → scale badge "100%" → visH = 8px
+
+FIX DIRECTION (audit only — do not implement here):
+  After each pushToIframe call in the draft/store effect:
+    setTimeout(() => fit(), 50);
+  Also add a threshold guard in measureNatH:
+    if (h < 100) return 600;   // blank doc or not-yet-rendered
+  And push lastOut when mobile iframe first mounts (deviceView change).
+
+
+8. RISKS AND FILES TOUCHED
+------------------------------------------------------------
+
+RISK: Tab removal — vertical scroll UX
+  Removing 6 tabs and showing all 5 cards at once means the editor
+  panel becomes 5× taller. On the 980px narrow layout, the user would
+  need to scroll through all cards to reach Words/Send. Mitigations:
+  anchor links at the top, or collapsible card headers (low effort).
+  Risk: MEDIUM.
+
+RISK: Splitter removal — fixed column widths
+  The prototype's 430px left column is a maximum (minmax(0,430px)).
+  At 1280px viewport: left=430px, right≈820px — plenty of space.
+  At 1024px: left=430px, right≈572px — still sufficient.
+  At 980px: single column. No content loss.
+  Risk: LOW.
+
+RISK: localStorage removal — user preference lost
+  Users who had saved a custom split ratio will get the default on
+  next load. One-time mild surprise; no data loss.
+  Risk: LOW.
+
+RISK: PreviewStage collapse fix — iframe timing
+  setTimeout(fit, 50) is a heuristic. Slow machines may need 100ms.
+  Consider using a MutationObserver or the iframe's onload instead.
+  Risk: LOW-MEDIUM (test thoroughly on real device).
+
+RISK: ColourCard always-visible palette
+  Current expandable "Pick colour" section hides the 32-colour swatch
+  grid behind a click. Prototype shows it always. Expanding it adds
+  ~180px of height to the Colours card. Acceptable in a scrollable
+  panel; may feel long in a tab. Lower risk once tabs are removed.
+  Risk: LOW (with tabs removed).
+
+FILES THAT WOULD BE TOUCHED
+  High churn:
+    frontend/app/admin/screens/EmailTemplates.jsx  (grid, tabs, splitter,
+      localStorage, deviceOptions, preset chips, AI placement)
+    frontend/app/admin/screens/emailStudio/PreviewStage.jsx  (collapse fix,
+      "Both" device removal)
+  Medium churn:
+    frontend/app/admin/screens/emailStudio/LayoutCard.jsx  (3-col grid,
+      count pill)
+    frontend/app/admin/screens/emailStudio/ColourCard.jsx  (expand/collapse
+      behaviour if made always-visible)
+  Low / no churn:
+    frontend/app/admin/screens/emailStudio/FontCard.jsx    (add count pill)
+    frontend/app/admin/screens/emailStudio/WordsCard.jsx   (move send-test in)
+    frontend/app/admin/screens/emailStudio/TemplatePicker.jsx  (no change)
+    frontend/app/admin/screens/emailStudio/lib.js          (no change)
+
+============================================================
+
+SUMMARY (≤12 lines)
+------------------------------------------------------------
+1. Grid: prototype uses named CSS grid (430px + 1fr); current uses an
+   inline flex splitter with two banned localStorage keys.
+2. Sticky stage: prototype top=70px (app-bar assumed); inside iframe
+   the correct value is 12px — lib.js STICKY_TOP=12 is already right.
+3. Tabs: prototype has NO tab strip — all 5 cards are one scrollable
+   panel; removing the 6-tab structure is the single largest change.
+4. Splitter + localStorage: both must be removed (rule violation).
+5. Preset chips: currently hidden behind a "Looks" button; prototype
+   shows them in a permanent row below the header.
+6. Device toggle: prototype has Desktop/Mobile only; drop "Both".
+7. Scale: prototype shows Fit/Actual-size segment; current shows %;
+   replace with a two-button segment.
+8. Preview collapse (Bugs A1/A2/A3): NOT fixed — measureNatH returns 8
+   on blank doc; fit() is never called after pushToIframe.
+9. "Write with AI" belongs in card 5 (Words), not the Send tab.
+10. Broadcast send is not in the prototype; treat as new card 6 (Send).
+11. Highest risk: tab removal → scrollable panel UX on narrow viewports.
+12. Files: EmailTemplates.jsx + PreviewStage.jsx are the core; four
+    card files need minor updates.
+
+============================================================
+NO CODE WAS CHANGED. NO COMMITS.
+============================================================

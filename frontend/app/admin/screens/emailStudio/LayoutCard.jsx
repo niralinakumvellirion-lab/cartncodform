@@ -18,7 +18,7 @@ export default function LayoutCard({ draft, setDraftField, saveError, bare }) {
     <>
       {!bare && <p style={LABEL_STYLE}>Layout</p>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
         {LAYOUT_INFO.map(({ k, n, d }) => {
           const isOn = effectiveLayout === k;
           const isAuto = !draft.layout && effectiveLayout === k;
@@ -43,7 +43,7 @@ export default function LayoutCard({ draft, setDraftField, saveError, bare }) {
               }}
             >
               <svg
-                width="64" height="48" viewBox="0 0 64 48"
+                width="64" height="50" viewBox="0 0 64 48"
                 style={{ display: 'block', color: isOn ? '#4f46e5' : '#9ca3af' }}
                 dangerouslySetInnerHTML={{ __html: WIRE[k] || '' }}
               />

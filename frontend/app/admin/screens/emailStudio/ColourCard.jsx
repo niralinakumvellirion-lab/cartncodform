@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+
 import { PALETTE, COLORS, brandShades } from './palette';
 import _eng from '../../lib/emailEngine';
 
@@ -32,14 +32,12 @@ function Swatch({ color, name, active, onClick }) {
 }
 
 function PaletteGrid({ label, value, onPick, allowAuto, autoLabel }) {
-  const [open, setOpen] = useState(false);
-
   return (
     <div style={{ marginBottom: 10 }}>
       <p style={SUB_LABEL_STYLE}>{label}</p>
 
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 }}>
-        {allowAuto && (
+      {allowAuto && (
+        <div style={{ marginBottom: 6 }}>
           <button
             type="button"
             aria-pressed={value === null}
@@ -54,37 +52,21 @@ function PaletteGrid({ label, value, onPick, allowAuto, autoLabel }) {
           >
             {autoLabel || 'Auto'}
           </button>
-        )}
-        {value && (
-          <Swatch color={value} active={true} onClick={() => {}} name="Current" />
-        )}
-        <button
-          type="button"
-          onClick={() => setOpen(o => !o)}
-          aria-expanded={open}
-          style={{
-            padding: '4px 10px', fontSize: 11, fontWeight: 600, borderRadius: 20, cursor: 'pointer',
-            background: '#f3f4f6', color: '#374151', border: '1.5px solid #e5e7eb', outline: 'none',
-          }}
-        >
-          {open ? 'Close palette' : 'Pick colour'}
-        </button>
-      </div>
-
-      {open && (
-        <div style={{ border: '1.5px solid #e5e7eb', borderRadius: 10, padding: '10px 12px' }}>
-          {PALETTE.map(group => (
-            <div key={group.g} style={{ marginBottom: 8 }}>
-              <p style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px' }}>{group.g}</p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {group.c.map(([name, hex]) => (
-                  <Swatch key={hex} color={hex} name={name} active={value === hex} onClick={() => { onPick(hex); setOpen(false); }} />
-                ))}
-              </div>
-            </div>
-          ))}
         </div>
       )}
+
+      <div style={{ border: '1.5px solid #e5e7eb', borderRadius: 10, padding: '10px 12px' }}>
+        {PALETTE.map(group => (
+          <div key={group.g} style={{ marginBottom: 8 }}>
+            <p style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 4px' }}>{group.g}</p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {group.c.map(([name, hex]) => (
+                <Swatch key={hex} color={hex} name={name} active={value === hex} onClick={() => onPick(hex)} />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

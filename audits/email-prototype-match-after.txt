@@ -1,0 +1,127 @@
+EMAIL PROTOTYPE MATCH — SELF-AUDIT (POST-IMPLEMENTATION)
+2026-10-08
+============================================================
+
+CHANGE TABLE (spec items 1–8)
+------------------------------------------------------------
+1. GRID (CSS named-area)
+   DONE. EmailTemplates.jsx: <style dangerouslySetInnerHTML> injects .es-root
+   with grid-template-areas:"head stage"/"panel stage",
+   grid-template-columns:minmax(0,430px) minmax(0,1fr), gap:16px 22px,
+   align-items:start. CSS tokens scoped to .es-root, NOT :root.
+   @media(max-width:980px) single-column fallback included.
+
+2. STICKY STAGE
+   DONE. .es-stage { position:sticky; top:12px; max-height:calc(100vh - 24px);
+   overflow:hidden; align-self:start }. No ancestor overflow:hidden on the
+   .es-panel or .es-root that could block it. STICKY_TOP imported from lib.js
+   (already 12 — correct for iframe env with no 58px app-bar).
+
+3. REMOVE (tabs, splitter, localStorage, dead state)
+   DONE.
+   - 6-tab strip, TABS const, FIELD_TAB const, tab icons ICON object — removed.
+   - activeTab / setActiveTab — removed.
+   - Splitter component — removed (never imported in new file).
+   - TabStrip component — removed.
+   - FullSizeModal, ModalIframe — removed.
+   - LS_RATIO_KEY, LS_WIDTH_RATIO_KEY — removed.
+   - editorW, rightColW, editorH, editorRatio, editorWidthRatio — removed.
+   - wsH, wsW, hideBoth, bandWide, isSideBySide — removed.
+   - looksMenuOpen / setLooksMenuOpen — removed.
+   - previewScale, fullSizeOpen, fullSizeDev — removed.
+   - DeviceView simplified: default 'desktop', no 'both' option.
+   - useLayoutEffect for ws measurement + localStorage read — removed.
+   - useEffect for hideBoth / deviceView-reset — removed.
+   - useEffect for activeTab on save error — removed.
+   - useEffect for scrollTop on tab change — removed.
+   Grep confirms: ccf:emailWorkspace, activeTab, looksMenuOpen, "Both" → 0 hits.
+
+4. PANEL: 5 numbered cards + card 6 Send
+   DONE. NumberedCard helper (n badge + title + children) wraps each card.
+   Card 1: PhotoCard bare. Card 2: LayoutCard bare (count pill in NumberedCard
+   title). Card 3: ColourCard bare. Card 4: FontCard bare (count pill in
+   NumberedCard title). Card 5: WordsCard bare + "Write with AI" block moved
+   from Send tab above it. Card 6: Send test + broadcast (moved from Send tab).
+   State/validation/handlers all preserved.
+
+5. PRESET CHIPS (permanently visible)
+   DONE. presetChipsJSX renders ENGINE_PRESETS keys (Festive, Flash sale,
+   Elegant, Fresh, Classic) each with a colour dot. "Surprise me" button
+   randomises layout, colour, hFont, bFont, radius using real engine lists
+   (LAYOUT_INFO, FONT_ORDER, FONTS, COLORS). Rendered inside .es-head just
+   below headerJSX, always visible.
+
+6. STAGE CONTROLS inside PreviewStage
+   DONE. PreviewStage.jsx rewritten with controls bar: [Desktop|Mobile] seg +
+   [Fit·%|Actual size] seg + photo status pill. Old Full size button removed.
+   FullSizeModal not imported.
+
+7. PREVIEW COLLAPSE FIX (PreviewStage.jsx)
+   DONE.
+   (a) measureNatH: if h < 100 return 600 (Bug A1 fix).
+   (b) fit() via rAF + 50ms timeout after every pushToIframe AND on iframe load
+       (Bug A2 fix).
+   (c) useEffect([deviceView]) re-inits iframe: blank srcdoc → onLoad pushes
+       lastOut + calls fit (additional-case fix).
+   (d) Mobile shows 391px frame, real height, correct scale.
+
+8. KEEP UNCHANGED
+   DONE. TemplatePicker receives same compact prop and all existing props.
+   Save/Discard/status logic preserved. Engine, API calls, data shapes
+   untouched. All other admin screens untouched.
+
+============================================================
+
+FILES CHANGED (git diff --stat)
+------------------------------------------------------------
+  frontend/app/admin/screens/EmailTemplates.jsx           (full rewrite ~490 lines)
+  frontend/app/admin/screens/emailStudio/PreviewStage.jsx (full rewrite, 247 lines)
+  frontend/app/admin/screens/emailStudio/LayoutCard.jsx   (grid + SVG height)
+  frontend/app/admin/screens/emailStudio/ColourCard.jsx   (PaletteGrid always open)
+
+============================================================
+
+EXTRAS DONE (beyond spec, needed for correctness)
+------------------------------------------------------------
+- Removed unused `useState` import from ColourCard.jsx after PaletteGrid no
+  longer needs it (would have caused lint warning).
+- NumberedCard title accepts JSX (for count pill spans) not just strings.
+- Empty-state panel shown when no template is selected.
+- isNew type selector (special_offer / festival / normal) kept in Card 5.
+
+============================================================
+
+SKIPPED / UNVERIFIED
+------------------------------------------------------------
+- Live browser check: no browser extension loaded in this session. Cannot
+  verify sticky scroll, mobile frame, or responsive breakpoint at 980px.
+- FullSizeModal: removed as spec requires. If any external import references
+  it, build would have failed — build passed, so it is safe.
+- WordsCard.jsx: read in prior session; no changes needed per spec; verified
+  bare prop already accepted.
+- PhotoCard.jsx: not read this session; bare prop assumed from existing usage.
+
+============================================================
+
+BUILD / GREP OUTPUT
+------------------------------------------------------------
+Build: cd frontend && npm run build → PASS
+  ✓ Compiled successfully
+  ✓ Generating static pages (18/18)
+  /admin/email-templates 25.8 kB — clean, no errors or warnings.
+
+Grep: ccf:emailWorkspace | activeTab | looksMenuOpen | "Both"
+  in frontend/app/admin/screens/ → 0 matches (all clean).
+
+============================================================
+
+REMAINING DIFFERENCES FROM PROTOTYPE (acceptable)
+------------------------------------------------------------
+- Prototype's .stage top: calc(70px + env(safe-area-inset-top,0px)) uses 70px
+  for a full browser window. We use top:12px (STICKY_TOP from lib.js) because
+  this runs inside a Shopify App Bridge iframe with no app-bar. This is the
+  intentional, correct value documented in the pre-audit (STICKY_TOP section).
+- Prototype has window.scaleView() / window.fitFrame() vanilla JS. We use
+  React state + ResizeObserver. Behaviour is equivalent.
+
+============================================================

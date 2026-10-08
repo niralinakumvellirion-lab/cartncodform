@@ -1,0 +1,213 @@
+EMAIL PREVIEW UX AUDIT — 2026-10-08
+============================================================
+Scope:  frontend/app/admin/screens/EmailTemplates.jsx (lines 505–554, 1178–1247)
+        frontend/app/admin/screens/emailStudio/PreviewStage.jsx (244 lines, full)
+        frontend/app/admin/screens/emailStudio/LayoutCard.jsx (70 lines, full)
+        frontend/app/admin/screens/emailStudio/layoutWires.js (21 lines, full)
+        backend/utils/emailEngine.js (lines 1–475)
+============================================================
+
+A. MOBILE PREVIEW COLLAPSES TO ~8px — scale badge shows 100%
+------------------------------------------------------------
+SYMPTOM: after selecting a template, the preview pane shows a thin
+horizontal line (~8 px) under the "MOBILE" label; the scale badge
+reads "100%".
+
+ROOT CAUSE — three compounding issues in PreviewStage.jsx.
+
+A1. measureNatH fires on blank document, not email content.
+  The init useEffect (dep=[]) sets `df.srcdoc = blank` and
+  `mf.srcdoc = blank` for both iframes, then registers onDeskLoad /
+  onMobLoad listeners.  When the blank doc loads, onXLoad calls fit().
+  Inside fit(), measureNatH(iframe) does:
+      iframe.style.height = '1px';
+      h = doc.documentElement.scrollHeight || 600;   // blank → h ≈ 8
+  makeDoc('', '') produces an empty body and no styles.  Chrome /
+  Firefox return scrollHeight ≈ 8 for the bare <html> element; 8 is
+  truthy so `|| 600` does NOT activate.
+  Result: deskNatH = 8, mobNatH = 8 after blank load.
+
+A2. fit() is never called after the pushToIframe DOM update.
+  120 ms after draft/store change, pushToIframe runs.  When
+  readyRef.current = true (normal case — blank doc loaded in < 1 ms),
+  it does a direct DOM update: s.textContent = css; body.innerHTML =
+  html.  No fit() call follows.  The ResizeObserver observes the
+  outer container div, not iframe content, so it does not fire on an
+  innerHTML change.
+  Result: deskNatH and mobNatH remain 8 indefinitely.
+
+A3. Scale computes to 100% specifically for mobile width.
+  fit() computes:  kM = Math.min(1, usableH/mH, usableW/MOBILE_W)
+  With mH = 8:  usableH/8 >> 1.  If the preview pane usableW ≥ 391
+  (MOBILE_W), all three min() terms are ≥ 1 → kM = 1 → badge "100%".
+  visH = Math.max(1, round(8 × 1)) = 8 px.  The outer clip div is 8 px.
+  Desktop: usableW/DESKTOP_W (700) is typically < 1 (≈ 0.7), so
+  desktop scale is already < 100% for a different reason and the
+  8 px collapse is less salient there.
+
+ADDITIONAL CASE — mobile iframe never initialized when deviceView = 'desktop':
+  When deviceView starts as 'desktop', showM = false → mobile iframe
+  is not in the DOM at mount.  The init useEffect runs with mf = null →
+  no blank srcdoc for mobile, no onMobLoad listener registered.  When
+  the user later switches to 'mobile' or 'both', the mobile iframe is
+  freshly created with no content and readyRef = false.  The draft/store
+  effect does not re-fire (draft unchanged) so pushToIframe is never
+  called for it.  measureNatH on an unloaded about:blank iframe returns
+  0||600 = 600 → 600 px tall blank white frame (different symptom).
+
+MODES AFFECTED: all deviceView values ('desktop', 'mobile', 'both').
+  In every mode natH stays at 8 after the first email push.
+
+FIX DIRECTION (not implemented — audit only):
+  In the debounced draft/store useEffect, after both pushToIframe calls,
+  schedule re-measurement:
+      setTimeout(() => fit(), 50)   // 50 ms ≈ one paint for iframe reflow
+  Also fix the init gap: if lastOut.current is set and mobile was not
+  rendered at mount, push content in a useEffect([deviceView]) that
+  checks mobIframeRef.current before calling pushToIframe.
+
+============================================================
+
+B. LAYOUT CLICK DOES NOT VISIBLY CHANGE THE TEMPLATE
+------------------------------------------------------------
+SYMPTOM: clicking a layout wireframe in the Layout tab has no visible
+effect on the preview.  User reports "other layouts are not visible"
+(only the highlighted one appears to do anything).
+
+ROOT CAUSE — Bug A masks a working feature; no state logic bug.
+
+B1. The layout click is correctly wired end-to-end.
+  LayoutCard onClick: setDraftField('layout', k)
+    → setDraft (React state)
+    → EmailTemplates re-renders, PreviewStage receives new draft prop
+    → draft/store useEffect fires (120 ms debounce)
+    → designFromTemplate: line 454 layout: template.layout || DEFAULT_...
+       An explicit draft.layout value is used as-is; no sanitisation
+       overrides it; no Save is required.
+    → renderEmail(design) produces new HTML with new layout
+    → pushToIframe updates both iframe bodies.
+  The email IS re-rendered with the new layout.
+
+B2. Preview stays at 8 px — the change is invisible.
+  pushToIframe updates the DOM but fit() is not called (Bug A2).
+  natH stays 8.  8 px of the newly-rendered email is shown; the rest
+  is clipped by the outer overflow:hidden div.  Every layout click
+  produces new email HTML that is never fully visible.
+
+B3. "Other layouts not visible" is a perception effect.
+  LayoutCard renders all 11 buttons in:
+    grid: repeat(auto-fill, minmax(150px, 1fr))
+  With a ~542 px editor column: 3 columns → 4 rows.  All 11 buttons
+  are present and require ~310 px of vertical space.  The tab panel
+  has flex:1 + overflowY:auto so they are scrollable.  The SELECTED
+  button has a strong indigo border and background (effectiveLayout===k);
+  others are grey.  Because no layout change is ever visible in the
+  preview (Bug B2), a user testing each button concludes the grey
+  buttons do nothing.
+
+NO BUG in data flow: layout state, design build, and email render are
+  all correct.  Fixing Bug A resolves Bug B automatically.
+
+============================================================
+
+C. UX CONFUSION — MERCHANT PERSPECTIVE
+------------------------------------------------------------
+CURRENT STRUCTURE:
+  Header: [template card strip]  [Save/Discard]
+  Editor: tabs — Photo | Layout | Colours | Fonts | Words | Send
+          Looks presets row (collapsible, above tab strip)
+  Preview: [Both/Desktop/Mobile]  [scale%]  [Full size]  [photo chip]
+
+CONFUSION POINTS (ranked by merchant impact):
+
+C1. No workflow ordering.  Six equal-looking tabs give no cue about
+  sequence.  A first-time merchant does not know to go:
+  Photo → Layout → Colours → Fonts → Words → Send.
+
+C2. "Generate with AI" is in the Send tab.  Merchants looking for AI
+  copy help open "Words" first.  The Send tab contains generation,
+  subject line, send-test, and broadcast — unrelated functions grouped
+  by being "last" rather than by purpose.
+
+C3. "Looks" label is opaque.  The button opens five styled presets
+  (Festive, Flash sale, Elegant, Fresh, Classic).  "Looks" is not a
+  recognised email-marketing term; merchants may read it as colours/
+  fonts rather than as complete starter templates.
+
+C4. "Colours" and "Fonts" are two separate tabs for one decision.
+  Brand colour and font are chosen together.  Splitting them adds a
+  tab to navigate without adding capability.
+
+C5. Scale percentage is meaningless to merchants.  "79%" has no
+  actionable interpretation for someone who is not a developer.
+  Replacing with "Fits screen" or hiding it entirely removes confusion
+  without removing the useful Full size button.
+
+C6. "Photo added" / "No photo yet" chip in the preview toolbar is
+  redundant with the Photo tab state indicator and adds visual noise.
+
+C7. "Words" is colloquial and vague; "Message" or "Copy" is the
+  standard term in email marketing platforms.
+
+PROPOSED STRUCTURE — rename + reorder only; no layout rebuild:
+
+  Tabs:   Photo | Design | Style | Message | Send
+
+    Photo    → same content as current Photo tab
+    Design   → same content as current Layout tab
+    Style    → merge Colours + Fonts into two sections in one tab
+    Message  → current Words tab content + "Generate with AI"
+                 moved here from Send tab
+    Send     → subject/preview text + Send test + Broadcast (AI gone)
+
+  Add a subtle step label inside each tab content pane:
+    "Step 1 of 5 — Offer photo"  …  "Step 5 of 5 — Send"
+
+  Rename "Looks" → "Quick styles" (label only).
+
+WIREFRAME (ASCII — proposed):
+  ┌────────────────────────────────────────────────────────────────────┐
+  │ [All][Special offer][Festival][Normal]  [+ New]  [Delete]          │
+  │ [Diwali Sale★][Summer Promo][Newsletter]  >>>              [Save]  │
+  ├──────────────────────────────────┬─────────────────────────────────┤
+  │ [Photo][Design][Style][Msg][Send]│  [Desktop][Both][Mobile]        │
+  │  ··· Quick styles ▾              │  [Full size]                    │
+  │ ─────────────────────────────────│                                 │
+  │ Step 1 of 5 — Offer photo        │  ┌───────────────────────────┐  │
+  │                                  │  │                           │  │
+  │  Drag & drop or [Choose photo]   │  │    live email preview     │  │
+  │  Recommended: 1200 × 800 px      │  │                           │  │
+  │                                  │  └───────────────────────────┘  │
+  │  → Next: Design →                │                                 │
+  └──────────────────────────────────┴─────────────────────────────────┘
+
+EFFORT RANKING:
+
+  Effort 1 — string/copy only (< 1 h, zero logic risk):
+    · Rename tab label "Words" → "Message"
+    · Rename "Looks" → "Quick styles"
+    · Remove or relabel scale % badge ("Fits screen" / hide)
+    · Remove "Photo added"/"No photo yet" chip from preview toolbar
+
+  Effort 2 — JSX restructure within EmailTemplates.jsx (½ day):
+    · Move "Generate with AI" block from Send case to Message/Words case
+    · Merge Colours + Fonts into single Style tab (two <div> sections,
+      no prop or state changes needed)
+    · Add "Step N of 5 — Title" subtitle at top of each tab content div
+
+  Effort 3 — new progress component (1–2 days):
+    · Replace flat tab strip with a 5-step horizontal stepper
+      (Polaris ProgressBar or custom component)
+    · Redesign preview toolbar: device toggle + Full size only
+    · Add "→ Next: Step N+1" nudge at the bottom of each tab pane
+
+============================================================
+
+FILES READ (not modified):
+  frontend/app/admin/screens/EmailTemplates.jsx         (lines 505–554, 1178–1247)
+  frontend/app/admin/screens/emailStudio/PreviewStage.jsx   (244 lines, full)
+  frontend/app/admin/screens/emailStudio/LayoutCard.jsx     (70 lines, full)
+  frontend/app/admin/screens/emailStudio/layoutWires.js     (21 lines, full)
+  backend/utils/emailEngine.js                          (lines 1–475)
+NO CODE WAS CHANGED.
+============================================================

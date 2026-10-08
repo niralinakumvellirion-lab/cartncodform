@@ -31,155 +31,90 @@ function pushToIframe(iframe, readyRef, out) {
   iframe.srcdoc = makeDoc(out.css, out.body);
 }
 
+// Bug A1 fix: blank doc returns scrollHeight≈8 (truthy), never reaching || 600.
+// Threshold guard ensures we return 600 for any not-yet-rendered document.
 function measureNatH(iframe) {
   if (!iframe) return 600;
   try {
     const doc = iframe.contentDocument;
     if (!doc || !doc.documentElement) return 600;
     iframe.style.height = '1px';
-    const h = doc.documentElement.scrollHeight || 600;
+    const h = doc.documentElement.scrollHeight;
     iframe.style.height = h + 'px';
+    if (h < 100) return 600;
     return h;
   } catch {
     return 600;
   }
 }
 
-function MailboxSlot({ iframeRef, label, natH, scale, width, rounded }) {
-  const visW = Math.max(1, Math.round(width * scale));
-  const visH = Math.max(1, Math.round(natH * scale));
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-      <span style={{
-        fontSize: 9, fontWeight: 700, color: '#94a3b8',
-        textTransform: 'uppercase', letterSpacing: '0.08em', lineHeight: 1,
-      }}>
-        {label}
-      </span>
-      <div style={{
-        width: visW, height: visH,
-        overflow: 'hidden',
-        borderRadius: rounded ? 20 : 6,
-        boxShadow: '0 8px 32px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.08)',
-        position: 'relative',
-        background: '#f3f4f6',
-      }}>
-        <div style={{
-          position: 'absolute', top: 0, left: 0,
-          width: width, height: natH,
-          transform: `scale(${scale})`,
-          transformOrigin: 'top left',
-        }}>
-          <iframe
-            ref={iframeRef}
-            title={`${label} email preview`}
-            sandbox="allow-same-origin"
-            tabIndex={-1}
-            aria-hidden="true"
-            style={{
-              display: 'block', width: '100%', height: natH,
-              border: 'none', background: '#f3f4f6',
-              pointerEvents: 'none',
-            }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
+export default function PreviewStage({
+  draft,
+  store,
+  deviceView = 'desktop',   // 'desktop' | 'mobile'
+  onDeviceViewChange,
+  viewMode = 'fit',          // 'fit' | 'actual'
+  onViewModeChange,
+  noPhoto = false,
+}) {
+  const containerRef = useRef(null);
+  const iframeRef    = useRef(null);
+  const readyRef     = useRef(false);
+  const lastOut      = useRef(null);
 
-export default function PreviewStage({ draft, store, deviceView = 'both', onScale }) {
-  const containerRef  = useRef(null);
-  const deskIframeRef = useRef(null);
-  const mobIframeRef  = useRef(null);
-  const deskReadyRef  = useRef(false);
-  const mobReadyRef   = useRef(false);
-  const lastOut       = useRef(null);
-
-  const [deskNatH, setDeskNatH] = useState(600);
-  const [mobNatH,  setMobNatH]  = useState(600);
-  const [deskScale, setDeskScale] = useState(1);
-  const [mobScale,  setMobScale]  = useState(1);
+  const [natH, setNatH]   = useState(600);
+  const [scale, setScale] = useState(1);
 
   const fit = useCallback(() => {
+    const iW = deviceView === 'desktop' ? DESKTOP_W : MOBILE_W;
+    if (viewMode === 'actual') {
+      const h = measureNatH(iframeRef.current);
+      setNatH(h);
+      setScale(1);
+      return;
+    }
     const c = containerRef.current;
     if (!c) return;
     const cH = c.clientHeight;
     const cW = c.clientWidth;
     if (!cH || !cW) return;
-
-    const PAD = 24;
-    const GAP = 20;
-    const dH = measureNatH(deskIframeRef.current);
-    const mH = measureNatH(mobIframeRef.current);
-    setDeskNatH(dH);
-    setMobNatH(mH);
-
-    const usableH = Math.max(cH - PAD * 2, 1);
+    const BAR_H = 50;
+    const PAD   = 16;
+    const h = measureNatH(iframeRef.current);
+    setNatH(h);
+    const usableH = Math.max(cH - BAR_H - PAD * 2, 1);
     const usableW = Math.max(cW - PAD * 2, 1);
+    const k = Math.min(1, usableH / h, usableW / iW);
+    setScale(k);
+  }, [deviceView, viewMode]);
 
-    let kD = 1, kM = 1;
-
-    if (deviceView === 'both') {
-      kD = Math.min(1, usableH / dH);
-      kM = Math.min(1, usableH / mH);
-      const combined = DESKTOP_W * kD + MOBILE_W * kM + GAP;
-      if (combined > usableW) {
-        const f = usableW / combined;
-        kD = Math.max(0.05, kD * f);
-        kM = Math.max(0.05, kM * f);
-      }
-    } else if (deviceView === 'desktop') {
-      kD = Math.min(1, usableH / dH, usableW / DESKTOP_W);
-      kM = kD;
-    } else {
-      kM = Math.min(1, usableH / mH, usableW / MOBILE_W);
-      kD = kM;
-    }
-
-    setDeskScale(kD);
-    setMobScale(kM);
-    if (onScale) onScale(kD, kM, deviceView);
-  }, [deviceView, onScale]);
-
-  // Init iframes on mount
+  // Re-init iframe on mount and when deviceView changes.
+  // Bug A (additional case): mobile iframe was never initialized when deviceView starts
+  // as 'desktop'. Re-init on each deviceView change pushes lastOut and calls fit().
   useEffect(() => {
-    const blank = makeDoc('', '');
-    const df = deskIframeRef.current;
-    const mf = mobIframeRef.current;
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    readyRef.current = false;
 
-    function onDeskLoad() {
-      deskReadyRef.current = true;
+    function onLoad() {
+      readyRef.current = true;
       if (lastOut.current) {
         try {
-          const doc = df.contentDocument;
+          const doc = iframe.contentDocument;
           const s = doc && doc.getElementById('s');
           if (s) { s.textContent = lastOut.current.css; doc.body.innerHTML = lastOut.current.body; }
         } catch {}
       }
-      fit();
-    }
-    function onMobLoad() {
-      mobReadyRef.current = true;
-      if (lastOut.current) {
-        try {
-          const doc = mf.contentDocument;
-          const s = doc && doc.getElementById('s');
-          if (s) { s.textContent = lastOut.current.css; doc.body.innerHTML = lastOut.current.body; }
-        } catch {}
-      }
-      fit();
+      // Bug A2 fix: fit() after iframe load
+      requestAnimationFrame(() => { setTimeout(fit, 50); });
     }
 
-    if (df) { df.addEventListener('load', onDeskLoad); df.srcdoc = blank; }
-    if (mf) { mf.addEventListener('load', onMobLoad); mf.srcdoc = blank; }
-    return () => {
-      if (df) df.removeEventListener('load', onDeskLoad);
-      if (mf) mf.removeEventListener('load', onMobLoad);
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    iframe.addEventListener('load', onLoad);
+    iframe.srcdoc = makeDoc('', '');
+    return () => iframe.removeEventListener('load', onLoad);
+  }, [deviceView]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ResizeObserver
+  // ResizeObserver on the container
   useEffect(() => {
     const el = containerRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
@@ -188,7 +123,8 @@ export default function PreviewStage({ draft, store, deviceView = 'both', onScal
     return () => ro.disconnect();
   }, [fit]);
 
-  useEffect(() => { fit(); }, [deviceView, fit]);
+  // Re-fit when viewMode changes
+  useEffect(() => { fit(); }, [viewMode, fit]);
 
   // Debounced render on draft/store change
   useEffect(() => {
@@ -198,46 +134,114 @@ export default function PreviewStage({ draft, store, deviceView = 'both', onScal
       const design = designFromTemplate(draft, store, { placeholder: !draft.imageUrl });
       const out = renderEmail(design);
       lastOut.current = out;
-      pushToIframe(deskIframeRef.current, deskReadyRef, out);
-      pushToIframe(mobIframeRef.current, mobReadyRef, out);
+      pushToIframe(iframeRef.current, readyRef, out);
+      // Bug A2 fix: fit() after every pushToIframe
+      requestAnimationFrame(() => { setTimeout(fit, 50); });
     }, 120);
     return () => clearTimeout(t);
-  }, [draft, store]);
+  }, [draft, store]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const showD = deviceView === 'both' || deviceView === 'desktop';
-  const showM = deviceView === 'both' || deviceView === 'mobile';
+  const iW   = deviceView === 'desktop' ? DESKTOP_W : MOBILE_W;
+  const pct  = Math.round(scale * 100);
+  const visW = viewMode === 'actual' ? iW : Math.max(1, Math.round(iW * scale));
+  const visH = viewMode === 'actual' ? Math.max(60, natH) : Math.max(1, Math.round(natH * scale));
+
+  const SEG_BTN = (active) => ({
+    padding: '5px 14px', fontSize: 11, fontWeight: 700, border: 'none', cursor: 'pointer',
+    background: active ? '#16161a' : 'transparent',
+    color: active ? '#fff' : '#6a6a76',
+    outline: 'none',
+  });
 
   return (
-    <div
-      ref={containerRef}
-      style={{
-        width: '100%', height: '100%', overflow: 'hidden',
-        background: 'radial-gradient(circle, #cbd5e1 1px, transparent 1px) 0 0 / 18px 18px, #f1f5f9',
-        boxShadow: 'inset 0 6px 16px -8px rgba(0,0,0,0.12)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        gap: 20, padding: 24, boxSizing: 'border-box',
-      }}
-    >
-      {showD && (
-        <MailboxSlot
-          iframeRef={deskIframeRef}
-          label="Desktop"
-          natH={deskNatH}
-          scale={deskScale}
-          width={DESKTOP_W}
-          rounded={false}
-        />
-      )}
-      {showM && (
-        <MailboxSlot
-          iframeRef={mobIframeRef}
-          label="Mobile"
-          natH={mobNatH}
-          scale={mobScale}
-          width={MOBILE_W}
-          rounded={true}
-        />
-      )}
+    <div ref={containerRef} style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+
+      {/* Controls bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 10, flexWrap: 'wrap', flexShrink: 0 }}>
+
+        {/* Device segment */}
+        <div style={{ display: 'flex', border: '1.5px solid #e5e5ea', borderRadius: 8, overflow: 'hidden' }}>
+          {[['desktop', 'Desktop'], ['mobile', 'Mobile']].map(([k, label]) => (
+            <button
+              key={k} type="button"
+              onClick={() => onDeviceViewChange && onDeviceViewChange(k)}
+              style={SEG_BTN(deviceView === k)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* View-mode segment */}
+        <div style={{ display: 'flex', border: '1.5px solid #e5e5ea', borderRadius: 8, overflow: 'hidden' }}>
+          <button
+            type="button"
+            onClick={() => onViewModeChange && onViewModeChange('fit')}
+            style={SEG_BTN(viewMode === 'fit')}
+          >
+            {viewMode === 'fit' ? `Fit · ${pct}%` : 'Fit to screen'}
+          </button>
+          <button
+            type="button"
+            onClick={() => onViewModeChange && onViewModeChange('actual')}
+            style={SEG_BTN(viewMode === 'actual')}
+          >
+            Actual size
+          </button>
+        </div>
+
+        {/* Photo status pill */}
+        {draft && (
+          <span style={{
+            fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, flexShrink: 0,
+            background: noPhoto ? '#fef3c7' : '#f0fdf4',
+            color:      noPhoto ? '#b45309' : '#166534',
+            border:     `1px solid ${noPhoto ? '#fde68a' : '#bbf7d0'}`,
+          }}>
+            {noPhoto ? 'No photo yet' : 'Photo added'}
+          </span>
+        )}
+      </div>
+
+      {/* Mailbox area */}
+      <div style={{
+        flex: 1,
+        overflowY: viewMode === 'actual' ? 'auto'   : 'hidden',
+        overflowX: viewMode === 'actual' ? 'auto'   : 'hidden',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: viewMode === 'actual' ? 'flex-start' : 'center',
+        padding: 8,
+      }}>
+        <div style={{
+          width: visW, height: visH,
+          overflow: 'hidden',
+          borderRadius: deviceView === 'mobile' ? 20 : 6,
+          boxShadow: '0 8px 32px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.08)',
+          position: 'relative',
+          background: '#f3f4f6',
+          flexShrink: 0,
+        }}>
+          <div style={{
+            position: 'absolute', top: 0, left: 0,
+            width: iW, height: natH,
+            transform: viewMode === 'actual' ? 'none' : `scale(${scale})`,
+            transformOrigin: 'top left',
+          }}>
+            <iframe
+              ref={iframeRef}
+              title="Email preview"
+              sandbox="allow-same-origin"
+              tabIndex={-1}
+              aria-hidden="true"
+              style={{
+                display: 'block', width: '100%', height: natH,
+                border: 'none', background: '#f3f4f6', pointerEvents: 'none',
+              }}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
