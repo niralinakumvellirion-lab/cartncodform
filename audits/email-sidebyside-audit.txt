@@ -1,0 +1,197 @@
+AUDIT: email-sidebyside-layout
+Date: 2026-10-08
+Target: EmailTemplates.jsx, PreviewStage.jsx
+Goal: convert stacked (preview-top / editor-bottom) layout to side-by-side (editor-left / preview-right-fixed)
+===========================================================================================================
+
+1. CURRENT LAYOUT STRUCTURE
+----------------------------
+The root <div> (wsRef) is a CSS grid with 4 ROW tracks:
+  gridTemplateRows: `auto 1fr 10px ${editorH}px`
+  Row 0: header (auto)         — template picker, save/discard buttons, seed banner
+  Row 1: preview band (1fr)    — grows to fill whatever rows 0+2+3 leave behind
+  Row 2: splitter (10px)       — draggable horizontal bar
+  Row 3: editor panel (editorH) — fixed-px height driven by editorRatio * wsH
+
+Height source:
+  wsH is measured in a useLayoutEffect / resize handler as:
+    Math.max(620, window.innerHeight - wsRef.top - 8)
+  The admin runs inside the Shopify iframe; the outer iframe is typically ~630px.
+  The workspace sets itself to wsH on its root div (height: wsH) with overflow:hidden
+  when wsH > 620, or overflow:visible when clamped to 620.
+
+Scroll:
+  ONLY Row 3's inner <div ref=tabContentRef> (the tab-panel area) has overflowY:auto.
+  Row 1 (preview band) has overflow:hidden — it never scrolls.
+  PreviewStage containerRef has width/height 100%, overflow:hidden; it uses a ResizeObserver
+  to scale the iframe content to fit the available height/width via CSS transform:scale().
+
+editorH:
+  editorH = Math.round(clampRatio(editorRatio) * wsH)  (range: 30%–60% of wsH)
+  editorRatio is read from localStorage on mount (key: ccf:emailWorkspace:editorRatio).
+
+
+2. DEPENDENCIES ON THE STACKED LAYOUT
+---------------------------------------
+a) Splitter component (EmailTemplates.jsx:108-147)
+   - Horizontal bar (height:10, cursor:row-resize).
+   - Drag logic: onPointerMove tracks (r.bottom - e.clientY - 5) / wsH to compute new ratio.
+     This is top-to-bottom arithmetic — does not translate to a column splitter at all.
+   - Keyboard: ArrowUp/Down steps editorRatio by 16/wsH; Home=0.60, End=0.30.
+     These are all row-ratio semantics.
+   - aria-orientation="horizontal", aria-label="Resize preview and editor".
+
+b) localStorage key ccf:emailWorkspace:editorRatio (line 21)
+   - Stores the fraction of wsH that the editor occupies (30%–60%).
+   - readRatio() / writeRatio() read/write it.
+   - The clampRatio() helper range [0.30, 0.60] is row-height semantics.
+   - In a column layout this would need to become a column-width ratio, or be removed entirely.
+
+c) editorH computed value (line 788)
+   - editorH = Math.round(clampRatio(editorRatio) * wsH)
+   - Used as gridTemplateRows Row 3 height.
+   - Row 1 height is the inverse: wsH - headerH - 10 - editorH.
+   - In a column layout, heights are no longer ratio-driven; widths would be instead.
+
+d) wsH measurement (lines 459, 474-494)
+   - Measures window.innerHeight - element.top - 8 for the full workspace height.
+   - Used to compute editorH and splitter step size.
+   - In a column layout, wsH still governs the total height, but the grid becomes 2 columns,
+     so the measurement stays valid; the editorRatio / editorH arithmetic all goes away.
+
+e) bandWide check (lines 479, 488)
+   - bandWide = wsRef.clientWidth >= 900, used only to toggle Looks presets between
+     inline buttons vs a dropdown menu.
+   - Unrelated to row/column layout. Survives unchanged.
+
+f) PreviewStage fit() function (PreviewStage.jsx:104-143)
+   - Reads c.clientHeight and c.clientWidth from containerRef.
+   - Scales email iframes so they fill the available area in both dimensions.
+   - Currently the container is Row 1 (1fr height, full width).
+   - In a column layout, containerRef would be the right column; clientWidth narrows
+     (roughly 55-60% of workspace) while clientHeight grows (full wsH minus header).
+   - fit() math is generic (it works with any container size), so the logic is correct.
+   - BUT: the "both" view calculation needs enough width for D(700*kD) + M(391*kM) + 20.
+     In a ~400px right column at 630px height, "both" will be very cramped at ~30% scale.
+     "Desktop" alone fits at ~0.57x scale — still readable but small.
+
+g) deviceView initial assignment (line 489)
+   - setDeviceView(bw >= 900 ? 'both' : bw >= 560 ? 'desktop' : 'mobile')
+   - In a column layout the right column will be ~350-450px, so this will auto-select
+     'desktop' (or 'mobile' for small screens) rather than 'both'. That is correct
+     behaviour, but 'both' may need to be hidden or discouraged for the right column.
+
+
+3. WHAT MUST CHANGE FOR A 2-COLUMN LAYOUT
+-------------------------------------------
+a) Root grid
+   Current:  gridTemplateRows: `auto 1fr 10px ${editorH}px`
+   New:      gridTemplateRows: `auto 1fr` (header + single workspace row)
+             gridTemplateColumns: `${editorW}px 1fr`  (or a %/fr split, e.g. `360px 1fr`)
+   Row 0 / header: span full width (grid-column: 1 / -1).
+   Row 1 left cell: the editor column (scrolls independently).
+   Row 1 right cell: the preview column (never scrolls).
+
+b) Editor column (left)
+   - Remove the fixed editorH height. Instead, the column is height: 100% of the workspace row.
+   - The tab-strip stays at the top; the tab-panel area (tabContentRef) gets overflowY:auto
+     and flex:1, same as now. The column itself gets overflowY:hidden so only the panel scrolls.
+   - No change needed to the tabContentRef scroll reset on tab switch.
+
+c) Preview column (right)
+   - Right cell: position:sticky top:0 (or just height:100% with overflow:hidden) to keep it
+     in view while the editor scrolls. Because the grid row already has a fixed height
+     (the workspace fills wsH), the right column naturally doesn't scroll if overflow:hidden.
+   - PreviewStage containerRef fills the right cell with height:100%, width:100%.
+     No structural change to PreviewStage needed; fit() adapts automatically.
+
+d) Horizontal splitter → remove or replace with a vertical column splitter
+   - The Splitter component calculates ratio from (r.bottom - e.clientY) / wsH.
+     This must become (e.clientX - r.left) / wsW for a vertical splitter, or be removed.
+   - If kept: rename editorRatio → editorWidthRatio, change cursor to col-resize,
+     aria-orientation to "vertical", flip Arrow keys to ArrowLeft/Right,
+     rewrite onPointerMove arithmetic, and store a different localStorage key
+     (or reuse ccf:emailWorkspace:editorRatio after remapping its semantics).
+   - If removed: use a fixed left-column width (e.g. 340px or 360px).
+
+e) wsH measurement
+   - Still needed for the workspace row height.
+   - editorH computed value and its use in gridTemplateRows disappears.
+   - wsW (workspace width) would be needed if a column splitter is kept.
+
+f) Looks presets dropdown (TabStrip bandWide)
+   - bandWide compares wsRef.clientWidth to 900px.
+   - In a 2-column layout the workspace can still be ≥900px wide. The check still works.
+   - But the tab strip is now inside the narrower left column, so bandWide should compare
+     the left column's clientWidth (or a fixed threshold like 400px) instead.
+
+g) etpl-send-grid and etpl-words-grid (lines 1239-1242)
+   - These CSS classes use @media(min-width:980px) to switch from 1 to 2 columns.
+   - The tab panel is inside the left editor column, which will be ~340-400px wide.
+     980px media query will never fire inside the column. These 2-column layouts
+     will not activate unless the breakpoint is changed to a container query
+     (container-type:inline-size + @container(min-width:600px)) or reduced to ~320px.
+
+
+4. RESPONSIVE FALLBACK
+-----------------------
+Suggested breakpoint: total workspace width < 640px → fall back to stacked layout.
+Reasoning: left column needs ~320px minimum for the tab cards; right column needs ~280px
+for a usable single-device preview; 640px combined is a safe minimum.
+
+At the fallback breakpoint:
+  - Switch gridTemplateColumns back to a single column.
+  - Re-introduce the preview band (Row 1, 1fr) and editor row (Row 3, editorH).
+  - Restore the horizontal Splitter for the stacked case.
+  - The bandWide / deviceView logic already handles narrow widths (falls to 'mobile').
+
+"Both / Desktop / Mobile" toggle in the right column:
+  - "Both" shows two previews side-by-side; in a ~350px right column at 30% scale they
+    are legible but small. Consider hiding the "Both" button when the right column is
+    narrower than ~500px (use a ResizeObserver or a derived state from wsW minus editorW).
+  - "Desktop" and "Mobile" modes work fine; fit() will scale to the available width.
+
+
+5. EXISTING TESTS / BROWSER CHECKS THAT WOULD BREAK
+-----------------------------------------------------
+a) No Jest tests exist for EmailTemplates.jsx or PreviewStage.jsx
+   (the test suite covers backend only: `backend/__tests__/`).
+   No frontend unit tests to update.
+
+b) The most recent browser verification commit (1680651 "verify(phase-e3c)") confirmed
+   the stacked layout as working. That verification is rendered stale by this change.
+   A new browser verification pass is required after the column layout ships.
+
+c) PreviewStage.fit() is implicitly tested by the browser: any regression in scale
+   calculation (e.g. containerRef being 0×0 on mount) would show a blank or overflow.
+   No automated test covers it.
+
+
+6. RISKS AND FILES TO TOUCH
+-----------------------------
+Risks:
+  - Shopify iframe is ~630px tall. A side-by-side layout at this height means each column
+    is only ~630px tall, vs the current stacked layout where preview + editor combined = 630px.
+    The editor column will be taller (full ~590px usable) — this is actually better.
+    The preview column will also be ~590px. PreviewStage fit() will calculate a good scale.
+  - "Both" device view becomes very wide (700*kD + 391*kM + 20) relative to a ~350-400px
+    right column. Both devices will render at ~26% scale — legible but tiny. Default to
+    'desktop' in the right column.
+  - The etpl-send-grid / etpl-words-grid CSS media queries at 980px will stop firing.
+    Those grids will be permanently single-column. Not a blocker but noticeably narrower.
+  - localStorage key ccf:emailWorkspace:editorRatio: existing values in user browsers
+    represent a row ratio (0.30–0.60). If reused as a column-width ratio it will apply
+    correctly by coincidence (same range). If the splitter is dropped the key becomes
+    irrelevant; old values orphaned in localStorage are harmless.
+
+Smallest set of files to touch:
+  1. frontend/app/admin/screens/EmailTemplates.jsx  — all layout changes live here
+       (grid definition, Splitter component, wsH/editorH logic, bandWide threshold,
+        CSS class breakpoints for send/words grids)
+  2. frontend/app/admin/screens/emailStudio/PreviewStage.jsx  — likely no changes needed;
+       fit() is container-agnostic. Only change: possibly hide 'Both' option when column
+       is narrow (could be done via a prop from EmailTemplates.jsx instead).
+
+No other files need to change.
+===========================================================================================================
+END OF AUDIT
