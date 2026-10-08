@@ -1,5 +1,12 @@
 'use client';
+import { useRef, useEffect } from 'react';
 import { TYPE_LABELS, VALID_TYPES, MAX_LEN } from './lib';
+
+const TYPE_COLORS = {
+  special_offer: { bg: '#fef3c7', color: '#92400e' },
+  festival:      { bg: '#ede9fe', color: '#5b21b6' },
+  normal:        { bg: '#f3f4f6', color: '#374151' },
+};
 
 const DS = {
   input: {
@@ -24,6 +31,15 @@ export default function TemplatePicker({
   confirmDel, setConfirmDel, onDelete, deleting,
   compact,
 }) {
+  const selectedCardRef = useRef(null);
+
+  useEffect(() => {
+    if (selectedCardRef.current) {
+      selectedCardRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+  }, [selectedId, isNew]);
+
+  // eslint-disable-next-line no-unused-vars
   const grouped = VALID_TYPES.reduce((acc, type) => {
     acc[type] = templates.filter(t => t.type === type);
     return acc;
@@ -47,26 +63,183 @@ export default function TemplatePicker({
 
   const showEditor = isNew || !!selectedId;
 
-  return (
-    <div style={compact ? {} : { marginBottom: 16 }}>
-      {/* Filter row — hidden in compact mode */}
-      {!compact && (
-        <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
-          {FILTER_TABS.map(tab => (
-            <button key={tab.key} onClick={() => onFilterChange(tab.key)} style={{
-              padding: '5px 12px', fontSize: 11, fontWeight: 600, borderRadius: 8, cursor: 'pointer',
-              background: filter === tab.key ? '#4f46e5' : '#f3f4f6',
-              color: filter === tab.key ? '#fff' : '#374151',
-              border: filter === tab.key ? 'none' : '1px solid #e5e7eb',
-            }}>
-              {tab.label}
+  // ── COMPACT: visible card strip ────────────────────────────────────────────
+  if (compact) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+
+        {/* Row 1: filter chips (left) · + New · Delete (right) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', gap: 5, flex: 1, overflow: 'hidden', minWidth: 0 }}>
+            {FILTER_TABS.map(tab => (
+              <button
+                key={tab.key}
+                type="button"
+                onClick={() => onFilterChange(tab.key)}
+                style={{
+                  flexShrink: 0,
+                  padding: '4px 10px', fontSize: 11, fontWeight: 600,
+                  borderRadius: 6, cursor: 'pointer',
+                  background: filter === tab.key ? '#4f46e5' : '#f3f4f6',
+                  color:      filter === tab.key ? '#fff'    : '#374151',
+                  border:     filter === tab.key ? 'none'    : '1px solid #e5e7eb',
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            style={{ ...DS.btnSecondary, flexShrink: 0, fontSize: 11, padding: '4px 10px' }}
+            onClick={onNew}
+          >
+            + New
+          </button>
+          {showEditor && selectedId && !confirmDel && (
+            <button
+              type="button"
+              style={{ ...DS.btnDanger, flexShrink: 0, fontSize: 11, padding: '4px 10px' }}
+              onClick={() => setConfirmDel(true)}
+            >
+              Delete
             </button>
-          ))}
+          )}
         </div>
-      )}
+
+        {/* Delete confirmation */}
+        {showEditor && confirmDel && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+            padding: '5px 10px', background: '#fef2f2', borderRadius: 8,
+          }}>
+            <span style={{ fontSize: 12, color: '#374151' }}>Delete this template?</span>
+            <button
+              type="button"
+              style={{ ...DS.btnDanger, padding: '4px 8px', fontSize: 11 }}
+              onClick={onDelete}
+              disabled={deleting}
+            >
+              {deleting ? 'Deleting…' : 'Yes, delete'}
+            </button>
+            <button
+              type="button"
+              style={{ ...DS.btnSecondary, padding: '4px 8px', fontSize: 11 }}
+              onClick={() => setConfirmDel(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {/* Row 2: horizontally scrollable template card strip */}
+        <div style={{
+          display: 'flex', gap: 6,
+          overflowX: 'auto', overflowY: 'hidden',
+          paddingBottom: 4,
+          scrollbarWidth: 'thin',
+          WebkitOverflowScrolling: 'touch',
+        }}>
+          {/* "New template (unsaved)" card — shown when isNew */}
+          {isNew && (
+            <button
+              ref={selectedCardRef}
+              type="button"
+              aria-pressed={true}
+              onClick={onNew}
+              style={{
+                flexShrink: 0, minWidth: 140,
+                padding: '5px 10px', borderRadius: 8, cursor: 'pointer',
+                border: '2px solid #4f46e5', background: '#eff0fe',
+                textAlign: 'left',
+              }}
+            >
+              <div style={{
+                fontSize: 12, fontWeight: 700, color: '#4f46e5',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                marginBottom: 2,
+              }}>
+                New template
+              </div>
+              <span style={{
+                fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
+                background: '#e0e7ff', color: '#3730a3',
+                textTransform: 'uppercase', letterSpacing: '0.04em',
+              }}>
+                unsaved
+              </span>
+            </button>
+          )}
+
+          {/* Empty state */}
+          {filtered.length === 0 && !isNew ? (
+            <span style={{
+              fontSize: 12, color: '#9ca3af',
+              padding: '6px 2px', alignSelf: 'center', flexShrink: 0,
+            }}>
+              No templates match this filter.
+            </span>
+          ) : filtered.map(t => {
+            const isSelected = !isNew && t._id === selectedId;
+            const tc = TYPE_COLORS[t.type] || TYPE_COLORS.normal;
+            return (
+              <button
+                key={t._id}
+                ref={isSelected ? selectedCardRef : null}
+                type="button"
+                aria-pressed={isSelected}
+                onClick={() => onSelect(t)}
+                style={{
+                  flexShrink: 0, minWidth: 160,
+                  padding: '5px 10px', borderRadius: 8, cursor: 'pointer',
+                  border:      isSelected ? '2px solid #4f46e5' : '1.5px solid #e5e7eb',
+                  background:  isSelected ? '#eff0fe'           : '#fff',
+                  textAlign: 'left',
+                }}
+              >
+                <div style={{
+                  fontSize: 12, fontWeight: 600,
+                  color: isSelected ? '#4f46e5' : '#111827',
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  marginBottom: 2,
+                }}>
+                  {t.name}
+                </div>
+                <span style={{
+                  fontSize: 9, fontWeight: 700, padding: '1px 5px', borderRadius: 4,
+                  background: tc.bg, color: tc.color,
+                  textTransform: 'uppercase', letterSpacing: '0.04em',
+                }}>
+                  {TYPE_LABELS[t.type] || t.type}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // ── NON-COMPACT: original <select> behaviour (unchanged) ──────────────────
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      {/* Filter row */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+        {FILTER_TABS.map(tab => (
+          <button key={tab.key} onClick={() => onFilterChange(tab.key)} style={{
+            padding: '5px 12px', fontSize: 11, fontWeight: 600, borderRadius: 8, cursor: 'pointer',
+            background: filter === tab.key ? '#4f46e5' : '#f3f4f6',
+            color: filter === tab.key ? '#fff' : '#374151',
+            border: filter === tab.key ? 'none' : '1px solid #e5e7eb',
+          }}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
       {/* Template select + New button */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: compact ? 0 : 14 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
         <select
           style={{ ...DS.input, flex: 1, cursor: 'pointer', minWidth: 0 }}
           value={selectValue}
@@ -89,18 +262,11 @@ export default function TemplatePicker({
         <button style={{ ...DS.btnSecondary, flexShrink: 0 }} onClick={onNew}>
           + New
         </button>
-
-        {/* In compact mode, show delete inline */}
-        {compact && showEditor && selectedId && !confirmDel && (
-          <button style={{ ...DS.btnDanger, flexShrink: 0, fontSize: 11, padding: '5px 10px' }} onClick={() => setConfirmDel(true)}>
-            Delete
-          </button>
-        )}
       </div>
 
-      {/* Delete confirm (both modes) */}
+      {/* Delete confirm */}
       {showEditor && confirmDel && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 10px', background: '#fef2f2', borderRadius: 8, marginTop: compact ? 8 : 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 10px', background: '#fef2f2', borderRadius: 8 }}>
           <span style={{ fontSize: 13, color: '#374151' }}>Delete this template?</span>
           <button style={{ ...DS.btnDanger, padding: '5px 10px', fontSize: 11 }} onClick={onDelete} disabled={deleting}>
             {deleting ? 'Deleting…' : 'Yes, delete'}
@@ -111,8 +277,8 @@ export default function TemplatePicker({
         </div>
       )}
 
-      {/* Name + type — hidden in compact mode (moved to Words tab) */}
-      {!compact && showEditor && (
+      {/* Name + type (non-compact only, moved to Words tab when compact) */}
+      {showEditor && (
         <>
           <div style={{ marginBottom: 12 }}>
             <label style={DS.label}>Template name</label>

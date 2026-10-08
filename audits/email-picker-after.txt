@@ -1,0 +1,108 @@
+EMAIL PICKER — POST-BUILD AUDIT
+2026-10-08
+============================================================
+
+FILES CHANGED
+  frontend/app/admin/screens/emailStudio/TemplatePicker.jsx  (main change)
+  frontend/app/admin/screens/EmailTemplates.jsx               (1-line tweak)
+
+============================================================
+
+SPEC ITEMS — STATUS
+
+1. COMPACT MODE renders card strip instead of <select>
+   DONE.
+   - compact={true} branch added via early-return `if (compact) { return (...) }`.
+   - Original non-compact <select> path is fully preserved below it.
+   - Row 1: filter chips (All / Special offer / Festival / Normal) on the
+     left inside a flex-1 overflow:hidden div, "+ New" on the right, and
+     "Delete" when a template is selected and no confirm is pending.
+   - Row 2: horizontally scrollable strip (overflowX:auto, overflowY:hidden,
+     scrollbarWidth:thin, WebkitOverflowScrolling:touch).
+   Non-compact behaviour is untouched.
+
+2. EACH CARD
+   DONE.
+   - <button type="button"> with aria-pressed. Keyboard focusable by default
+     (Enter/Space fire onClick via native browser behaviour for <button>).
+   - minWidth:160px, name text with whiteSpace:nowrap + overflow:hidden +
+     textOverflow:ellipsis.
+   - Small type badge reuses TYPE_LABELS and TYPE_COLORS
+     (special_offer=amber, festival=purple, normal=grey).
+   - Selected card: border '2px solid #4f46e5', background '#eff0fe',
+     text colour #4f46e5, aria-pressed={true}.
+   - Scroll-into-view: selectedCardRef attached to selected card; useEffect
+     fires on [selectedId, isNew] change and calls scrollIntoView
+     (smooth, inline:nearest, block:nearest).
+   - Clicking calls onSelect(t) which is selectTemplate → unsaved-changes
+     handling via tryNavigate is preserved.
+   - If isNew: "New template (unsaved)" card rendered first with its own
+     ref and aria-pressed={true}; clicking calls onNew().
+
+3. EMPTY STATES
+   DONE.
+   - `filtered.length === 0 && !isNew` → renders
+     "No templates match this filter." inline.
+   - Loading/seeding banners live in headerJSX (EmailTemplates.jsx) and
+     are unchanged.
+
+4. SIZE (~90px budget)
+   DONE (measured).
+   - Row 1 chip height: ~26px (4px+4px padding + 11px font line-height ~18px).
+   - Gap: 6px.
+   - Row 2 card height: ~42px (5px+5px padding + 12px name + 2px gap + 9px
+     badge + 4px paddingBottom for scrollbar gutter).
+   - Picker total: ~74px. Under 90px. ✓
+   - No new npm dependencies.
+   - Uses existing admin colour tokens (#4f46e5, #f3f4f6, #e5e7eb, etc.).
+
+5. KEEP WORKING
+   DONE.
+   - filter state: onFilterChange={setFilter} wired; chips update filter.
+   - "+ New" button: onNew prop called; isNew card also calls onNew.
+   - Deep link ?template=&focus=photo: handled in EmailTemplates.jsx via
+     templateAutoSelected ref + useEffect ([templates, templateParam,
+     focusParam]). That code calls _doSelectTemplate which sets selectedId;
+     the useEffect in TemplatePicker then scrolls the card into view.
+   - Side-by-side and stacked layouts: both use compact={true} in headerJSX;
+     no layout code changed.
+
+EMAILTEMPLATES.JSX CHANGE (strictly needed)
+   Line 843: alignItems: 'center' → 'flex-start'
+   Reason: with the picker now ~74px tall, top-aligning the Save/Create/
+   Discard buttons with the filter chip row is cleaner than centering them
+   at 37px height. This is a 1-word change.
+
+============================================================
+
+VERIFICATION RESULTS
+
+Frontend build (npm run build): PASS — clean build, no errors or warnings.
+Backend tests (npm test):       PASS — 782/782 passed, 43 suites.
+
+Browser verification: NOT AVAILABLE in this session.
+  Chrome extension was not loaded for this build. Could not check at
+  1366×633 or 800×700.
+
+What would need live browser verification:
+  - All template cards visible and scrollable without page-level scrollbar.
+  - Click selects a template (editor appears, card highlights).
+  - Filter chips filter the strip correctly.
+  - Selected card scrolls into view on URL-param deep link.
+  - No vertical overflow in the Shopify 630px iframe.
+  - Keyboard: Tab focuses cards, Enter/Space selects.
+
+============================================================
+
+WHAT WAS NOT DONE / COULD NOT VERIFY
+  - Live browser check at 1366×633 and 800×700 (no browser access).
+  - Delete flow after strip replaces select: logic is unchanged but not
+    exercised in a running app.
+
+CHANGES BEYOND THIS SPEC
+  - None. The <select> is still present in the non-compact branch; no other
+    screen, backend file, or layout grid was touched.
+  - `grouped` constant (previously unused) kept in place with an eslint
+    disable-next-line comment to avoid a lint warning.
+
+============================================================

@@ -838,7 +838,7 @@ export default function EmailTemplatesScreen() {
 
   const headerJSX = (
     <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 0, flexShrink: 0, ...(isSideBySide ? { gridColumn: '1 / -1' } : {}) }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', rowGap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap', rowGap: 6 }}>
         <div style={{ flex: 1, minWidth: 220 }}>
           <TemplatePicker
             templates={templates}

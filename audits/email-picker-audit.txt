@@ -1,0 +1,151 @@
+EMAIL PICKER AUDIT — 2026-10-08
+============================================================
+Scope:  frontend/app/admin/screens/EmailTemplates.jsx
+        frontend/app/admin/screens/emailStudio/TemplatePicker.jsx
+        frontend/app/admin/screens/emailStudio/lib.js (VALID_TYPES check)
+Commits checked: a97066b (HEAD), 97cdefa (revert), c442704 (original feature)
+============================================================
+
+1. CURRENT LAYOUT AT HEAD
+------------------------------------------------------------
+HEAD is a97066b "Reapply feat: email studio side-by-side layout".
+c442704 introduced the side-by-side workspace; 97cdefa reverted it;
+a97066b reapplied it. The code in EmailTemplates.jsx at HEAD is
+identical to c442704.
+
+isSideBySide = wsW >= 640 (EmailTemplates.jsx:506).
+  - Desktop (≥ 640 px): editor is left column (editorWidthRatio * wsW,
+    default 42%), vertical splitter, preview right column.
+  - Narrow (< 640 px): stacked — preview band row 1 (1fr), horizontal
+    splitter row 2, editor panel row 3 (editorRatio * wsH, default 42%).
+
+ANSWER: the deployed build renders SIDE-BY-SIDE on any viewport ≥ 640 px.
+
+2. HOW TEMPLATES ARE LISTED AND SELECTED
+------------------------------------------------------------
+TemplatePicker is rendered in headerJSX at EmailTemplates.jsx:843–858
+with compact={true}.
+
+Picker markup (compact mode):
+  - Native <select> (TemplatePicker.jsx:70–88), controlled by
+    value={selectValue} where selectValue = isNew ? '__new__' : (selectedId || '').
+  - "New" button beside it.
+  - No other visible interactive elements for template selection.
+
+onChange chain:
+  handleSelectChange (TemplatePicker.jsx:40–46)
+    → finds template by _id in the templates prop
+    → calls onSelect(t)
+  onSelect = selectTemplate (EmailTemplates.jsx:696)
+  selectTemplate(t) → tryNavigate(() => _doSelectTemplate(t))
+  tryNavigate: if dirty || uploading, defers; otherwise calls immediately.
+  _doSelectTemplate: sets selectedId, draft, savedDraft, clears other state.
+
+No pointer-events:none, no overlay, and no modal covers the picker at rest.
+The FullSizeModal (position:fixed, z-index:1000) only renders when fullSizeOpen
+= true (EmailTemplates.jsx:1297–1305), which starts false.
+
+3. CONTAINER CLIPPING / Z-INDEX
+------------------------------------------------------------
+The workspace grid (EmailTemplates.jsx:1180–1319) has:
+  overflow: wsH <= 620 ? 'visible' : 'hidden'
+
+When wsH > 620 (the normal case), overflow:hidden is set. On desktop
+Chrome/Firefox, native <select> popups render in a dedicated browser
+layer outside the overflow context and are NOT clipped. On iOS/WebKit
+inside an iframe, overflow:hidden on a parent CAN clip native select
+popups — this is a known WebKit behaviour. If the Shopify admin iframe
+runs on iOS or older Android WebViews, the dropdown may not appear.
+
+No splitter, no editor column, and no preview pane overlaps the header
+row in either the side-by-side or stacked layout — different grid rows/
+columns with no negative margins.
+
+The etpl-editor-col class has container-type:inline-size (style tag,
+EmailTemplates.jsx:1309). CSS containment does NOT create a stacking
+context; no z-index interference.
+
+4. WHY ONLY ONE TEMPLATE SHOWS "BY DEFAULT"
+------------------------------------------------------------
+Root cause: compact={true} is always passed (EmailTemplates.jsx:857).
+In compact mode the filter tabs row is suppressed:
+  TemplatePicker.jsx:53  {!compact && (  <-- filter row gate
+The filter row contains the "All / Special offer / Festival / Normal"
+clickable tab buttons. These buttons DO NOT RENDER in the deployed build.
+
+A native <select> without a size attribute is a single-row dropdown
+widget — the browser shows exactly ONE item at a time (the placeholder
+"Pick a template…" or the selected template name). With 3 seeded
+templates (one per VALID_TYPES = ['special_offer','festival','normal'],
+lib.js:15) all 3 appear in optgroups when the dropdown is opened, but
+users who are not familiar with dropdown widgets will see only one line
+and assume only one template exists.
+
+There is no auto-selection: selectedId starts null and no first-item
+auto-select logic exists. The seed creates only MISSING types
+(EmailTemplates.jsx:630). A store that already has all 3 types is not
+re-seeded; existing templates are shown as-is.
+
+5. BUG SUMMARY
+------------------------------------------------------------
+BUG A — Filter tabs not rendered (not clickable)
+  File:  TemplatePicker.jsx:53
+  Cause: compact={true} is always passed from EmailTemplates.jsx:857.
+         The guard {!compact && (...)} hides the "All / Special offer /
+         Festival / Normal" filter row entirely. Users click on empty
+         space where the buttons used to be; nothing responds.
+
+BUG B — Only one template visible in native <select>
+  File:  EmailTemplates.jsx:857 (compact={true}), TemplatePicker.jsx:70
+  Cause: A native <select> without size renders as a single-line widget.
+         In the compact header, there is no alternative template listing.
+         Users see "Pick a template…" and do not realise they must open
+         the dropdown.
+
+RISK C — iOS/WebKit overflow:hidden may clip select popup
+  File:  EmailTemplates.jsx:1184
+  Cause: overflow:hidden when wsH > 620 can block native select popups
+         in iOS Safari / WKWebView contexts.
+
+6. SMALLEST FIX
+------------------------------------------------------------
+Two-line change in TemplatePicker.jsx:
+
+  BEFORE (line 53):
+    {!compact && (
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+
+  AFTER:
+    {(
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+
+This removes the !compact gate so the filter tabs render in both compact
+and non-compact modes. The name/type editor and delete button remain
+gated by !compact (lines 115, 150) — those are still hidden in the
+header, keeping it compact. The filter tab row itself is small (~32 px
+tall) and fits in the header flex column.
+
+To fix Risk C: move the header outside the overflow:hidden workspace
+grid (place it above the grid div), OR set overflow:visible on the
+workspace when the select is open (impractical). Minimum safe fix for
+the iOS case: change the workspace overflow to
+  overflow: wsH <= 620 ? 'visible' : 'clip'
+CSS overflow:clip is clipped like hidden but does NOT create a new
+stacking/overflow context, so native popups escape it. Browser support
+is good (Chrome 90+, Safari 16+, Firefox 81+).
+
+7. TYPE FILTER STATUS
+------------------------------------------------------------
+Filter tabs EXIST in the code (TemplatePicker.jsx:32–35, 53–66).
+VALID_TYPES = ['special_offer','festival','normal'] (lib.js:15).
+TYPE_LABELS maps these to 'Special offer', 'Festival', 'Normal' (lib.js:14).
+The filter state (default 'all') lives in EmailTemplates.jsx:450 and is
+passed via onFilterChange={setFilter}. Everything is wired; the only
+reason the tabs don't appear is the !compact gate at TemplatePicker.jsx:53.
+
+============================================================
+FILES READ (not modified):
+  frontend/app/admin/screens/EmailTemplates.jsx        (lines 1–1322)
+  frontend/app/admin/screens/emailStudio/TemplatePicker.jsx (lines 1–161)
+  frontend/app/admin/screens/emailStudio/lib.js        (lines 1–79)
+============================================================
