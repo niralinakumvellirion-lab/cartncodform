@@ -1,0 +1,154 @@
+POPUP PREVIEW — SELF-AUDIT
+2026-10-09
+============================================================
+Scope: frontend/app/admin/screens/Settings.jsx only.
+No changes to gallery thumbnails, top_bar, backend, extensions,
+or any other file.
+============================================================
+
+1. DATA — whatsappCapture.enabled
+------------------------------------------------------------
+discountRules default state (line ~1884):
+  Added: whatsappCapture: { enabled: false }
+
+setDiscountRules in useEffect (line ~1928):
+  Added: whatsappCapture: { enabled: !!(dc.whatsappCapture?.enabled) }
+  Source: the same GET /api/discounts/:shop/config response already in use.
+  No new API calls.
+
+Derived value (after previewShowEmailField):
+  const previewShowWaField = !!(discountRules.whatsappCapture?.enabled);
+
+GOLDEN RULE check: when email.enabled=false AND whatsappCapture.enabled=false,
+  previewShowEmailField=false and previewShowWaField=false. Every WA row is
+  guarded by {waFieldEnabled && ...} and every offer button by
+  {(emailFieldEnabled || waFieldEnabled) && ...} — both false → zero new
+  markup rendered. Preview is pixel-identical to the pre-change state. ✓
+
+============================================================
+
+2. PROP THREADING
+------------------------------------------------------------
+FramedStyleThumb:  added waFieldEnabled = false prop; passes to
+  StyleCardPreview and ClassicPreview as waFieldEnabled.
+
+Gallery call site (~line 2671): NOT passed — gallery thumbnails unchanged.
+  FramedStyleThumb default (false) applies.
+
+Editor preview (popupPreviewCard): both desktop and mobile FramedStyleThumb
+  calls pass waFieldEnabled={previewShowWaField}.
+
+============================================================
+
+3. WaRow and OfferButton components
+------------------------------------------------------------
+WaRow (new, ~line 1102):
+  Props: interactive, font, compact, inputBg, inputFg, inputBorder, borderRadius.
+  Renders: flex row (country <select> 68/82px + <input type="tel">),
+  then consent checkbox + label.
+  interactive=false: select disabled + pointerEvents:none, input readOnly+disabled,
+  checkbox pointerEvents:none. Safe inside gallery <button> (no nested button).
+  CCF_PREVIEW_DIAL_CODES constant defined at top of file (12 entries matching
+  ccf-push.js CCF_DIAL_CODES).
+  Consent label verbatim from ccf-push.js:
+    "Message me on WhatsApp about offers and order updates. Reply STOP anytime."
+
+OfferButton (new, ~line 1159):
+  Props: interactive, accent, fg, font, compact.
+  Uses PreviewButton (div when !interactive, button otherwise).
+  Style matches ccf-push.js buildOfferBtn():
+    border: 2px solid accent, background: transparent, color: fg,
+    borderRadius: 12, fontWeight: 700.
+
+============================================================
+
+4. PER-STYLE CHANGES
+------------------------------------------------------------
+bottom_sheet:  WaRow after email block; OfferButton between Allow and Deny.
+               inputBorder="#e5e7eb", no inputBg (inherits transparent/white).
+
+story_card:    WaRow after email block; OfferButton between Allow and Deny.
+               inputBg="rgba(255,255,255,0.15)", inputFg="#ffffff",
+               inputBorder="rgba(255,255,255,0.3)".
+
+spotlight / noir / color_block (shared proForm):
+               WaRow after email block; OfferButton between Allow and Deny.
+               Reuses proForm's inputBg, inputBorder, proFg.
+               borderRadius: spotlight=8 (avoids 999 pill on WA select),
+               noir/color_block=12.
+
+flash_sale:    WaRow after email block (before countdown display).
+               OfferButton between Allow and Deny.
+               inputBg="#ffffff", inputFg="#111827", inputBorder="#d4d4d8".
+
+gift_reveal:   WaRow after email block; OfferButton between Allow and Deny.
+               inputBg=bg (cfg.bgColor), inputFg=fg, inputBorder="#e5e7eb".
+
+top_bar:       UNCHANGED — no email field, no WA row, no offer button. ✓
+
+classic-card:  WaRow after email block; OfferButton between allowBtnEl and denyEl.
+               inputBg="#f9fafb", inputFg="#111827", inputBorder="#e5e7eb",
+               borderRadius=12.
+
+classic-split: WaRow INSIDE discountFieldsEl (after email input), gated by
+               wantsDiscount (same gate as email — matches ccf-push.js
+               ccfBuildDiscountFields() behaviour).
+               OfferButton INSIDE contentInner between allowBtnEl and denyEl.
+               inputBg="#f9fafb", inputFg="#111827", inputBorder="#e5e7eb",
+               borderRadius=12.
+               NOTE: email position stays unchanged (before Allow, inside
+               discountFieldsEl) — existing drift from ccf-push.js preserved
+               per task constraint. ✓
+
+============================================================
+
+5. previewResetKey
+------------------------------------------------------------
+Added waField: previewShowWaField to the key. Toggling WA capture now
+resets the preview step to 'prompt'. ✓
+
+============================================================
+
+6. DUAL DESKTOP + MOBILE PREVIEW
+------------------------------------------------------------
+popupPreviewCard now renders both frames side-by-side using an IIFE.
+Both frames share one previewStep state machine (one shared Allow click
+advances both — simpler, consistent with audit's risk-iii note).
+
+Desktop frame: device="desktop", cfg=popup, layout=popup.layout||'split'.
+Mobile frame:  device="mobile", cfg=mergeConfig(popup,mobilePopup), layout="card".
+Both: maxH=560, same styleFields/discountOfferText/discountOfferHeadline.
+
+Mobile-only styles (MOBILE_ONLY_STYLE_IDS: bottom_sheet, top_bar, story_card):
+  Only the mobile frame is shown (desktop has no spec for these styles).
+
+Active-frame indicator: outline: 2px solid #4f46e5 + "✏️ Editing" label.
+Inactive frame: outline: 2px solid transparent + plain icon+name label.
+
+Layout: flex wrap, gap 24px, justifyContent center. Stacks vertically on
+narrow viewports (no horizontal overflow in Shopify iframe). ✓
+
+deviceToggle: active tab now shows "Editing: 🖥 Desktop" / "Editing: 📱 Mobile"
+to make clear which config is being edited. Inactive tab stays "🖥 Desktop" /
+"📱 Mobile".
+
+============================================================
+
+7. BUILD
+------------------------------------------------------------
+cd frontend && npm run build — compiled successfully, 0 errors, 0 warnings.
+Settings page bundle: 31.6 kB (+~3kB from prior baseline, expected for
+WaRow/OfferButton/CCF_PREVIEW_DIAL_CODES + dual preview IIFE).
+
+============================================================
+
+8. WHAT WAS NOT CHANGED
+------------------------------------------------------------
+- Gallery thumbnails: no waFieldEnabled passed to gallery FramedStyleThumb.
+- top_bar style: no WA row, no offer button.
+- Any API call (no new fetches, no new routes).
+- classic-split email position (inside discountFieldsEl before Allow).
+- Step machine states, timing, auto-advance effects.
+- Any file other than Settings.jsx.
+
+============================================================

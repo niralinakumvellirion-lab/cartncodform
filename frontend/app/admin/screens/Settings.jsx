@@ -244,6 +244,13 @@ function Icon({ name, size = 16, color, style }) {
   return null;
 }
 
+// Mirrors ccf-push.js's CCF_DIAL_CODES (same 12 entries, same order).
+const CCF_PREVIEW_DIAL_CODES = [
+  ['IN', '+91'], ['US', '+1'], ['GB', '+44'], ['AE', '+971'],
+  ['CA', '+1'], ['AU', '+61'], ['SG', '+65'], ['SA', '+966'],
+  ['PK', '+92'], ['BD', '+880'], ['LK', '+94'], ['NP', '+977'],
+];
+
 // --- Popup preview step machine ------------------------------------------
 // Mirrors ccf-push.js's showSoftPrompt() Allow-button flow (the "new
 // subscriber" path — Notification.permission !== 'granted' — since that's
@@ -967,6 +974,7 @@ function DeviceFrameThumb({ device, spec, children, maxH = 210 }) {
 // editor renders the same component larger with live handlers. Geometry comes
 // only from frameSpec() above.
 function FramedStyleThumb({ device, styleId, layout, cfg, styleFields, emailFieldEnabled,
+  waFieldEnabled = false,
   discountOfferText, discountOfferHeadline, maxH, dismissedReason, previewProps }) {
   const key = styleId === 'classic' ? `classic-${layout}` : styleId;
   const spec = frameSpec(key, device, cfg, styleFields || {});
@@ -980,10 +988,12 @@ function FramedStyleThumb({ device, styleId, layout, cfg, styleFields, emailFiel
   }
   const popupEl = styleId !== 'classic' ? (
     <StyleCardPreview styleId={styleId} cfg={cfg} styleFields={styleFields}
-      emailFieldEnabled={emailFieldEnabled} compact={!!spec.compact} {...previewProps} />
+      emailFieldEnabled={emailFieldEnabled} waFieldEnabled={waFieldEnabled}
+      compact={!!spec.compact} {...previewProps} />
   ) : (
     <ClassicPreview layout={layout} device={device} popup={cfg}
-      showEmailField={emailFieldEnabled} discountOfferText={discountOfferText}
+      showEmailField={emailFieldEnabled} waFieldEnabled={waFieldEnabled}
+      discountOfferText={discountOfferText}
       discountOfferHeadline={discountOfferHeadline} {...previewProps} />
   );
   return <DeviceFrameThumb device={device} spec={spec} maxH={maxH}>{popupEl}</DeviceFrameThumb>;
@@ -1091,8 +1101,88 @@ function PreviewInput({ interactive = true, value, placeholder, style, onChange,
   return <input value={value} placeholder={placeholder} onChange={onChange} style={style} {...rest} />;
 }
 
+// Mirrors ccf-push.js ccfBuildWhatsappFields layout.
+// interactive=false renders inputs disabled/read-only to match gallery cards.
+function WaRow({ interactive, font, compact, inputBg, inputFg, inputBorder, borderRadius }) {
+  const fs = compact ? 11 : 12;
+  const br = (borderRadius || 8) + 'px';
+  const p = compact ? '6px 8px' : '8px 10px';
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+        <select
+          aria-label="Country dial code"
+          defaultValue="IN"
+          disabled={!interactive}
+          tabIndex={interactive ? 0 : -1}
+          style={{
+            flexShrink: 0, width: compact ? 68 : 82, padding: p, fontSize: fs,
+            borderRadius: br, border: `1px solid ${inputBorder || '#e5e7eb'}`,
+            background: inputBg || '#ffffff', color: inputFg || '#111827',
+            fontFamily: font, boxSizing: 'border-box', lineHeight: 1.2,
+            WebkitAppearance: 'none', appearance: 'none',
+            pointerEvents: interactive ? 'auto' : 'none',
+          }}
+          onChange={() => {}}
+        >
+          {CCF_PREVIEW_DIAL_CODES.map(([code, dial]) => (
+            <option key={code} value={code}>{code} {dial}</option>
+          ))}
+        </select>
+        <input
+          type="tel"
+          placeholder="WhatsApp number"
+          readOnly={!interactive}
+          disabled={!interactive}
+          aria-label="WhatsApp number"
+          style={{
+            flex: 1, minWidth: 0, padding: p, fontSize: fs,
+            borderRadius: br, border: `1px solid ${inputBorder || '#e5e7eb'}`,
+            background: inputBg || '#ffffff', color: inputFg || '#111827',
+            fontFamily: font, boxSizing: 'border-box', lineHeight: 1.2, outline: 'none',
+          }}
+        />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 8 }}>
+        <input type="checkbox" readOnly checked={false}
+          tabIndex={interactive ? 0 : -1}
+          aria-label="WhatsApp consent"
+          style={{ flexShrink: 0, marginTop: 2, width: 14, height: 14,
+            accentColor: '#16a34a', cursor: interactive ? 'pointer' : 'default',
+            pointerEvents: interactive ? 'auto' : 'none' }}
+          onChange={() => {}} />
+        <span style={{ fontSize: compact ? 10 : 11, lineHeight: 1.4,
+          color: inputFg || '#111827', opacity: 0.7 }}>
+          Message me on WhatsApp about offers and order updates. Reply STOP anytime.
+        </span>
+      </div>
+    </>
+  );
+}
+
+// Mirrors ccf-push.js buildOfferBtn(): outlined secondary CTA shown when
+// ccfCaptureMode() = emailField || waField.
+function OfferButton({ interactive, accent, fg, font, compact }) {
+  return (
+    <PreviewButton type="button" interactive={interactive}
+      style={{
+        display: 'block', width: '100%',
+        padding: compact ? 10 : 13, marginBottom: 8,
+        border: `2px solid ${accent || '#4f46e5'}`,
+        borderRadius: 12, background: 'transparent',
+        color: fg || '#111827',
+        fontSize: compact ? 13 : 15, fontWeight: 700,
+        cursor: interactive ? 'pointer' : 'default',
+        fontFamily: font || 'inherit',
+        textAlign: 'center', boxSizing: 'border-box', lineHeight: 1.2,
+      }}>
+      Get my offer
+    </PreviewButton>
+  );
+}
+
 function StyleCardPreview({
-  styleId, cfg, styleFields, emailFieldEnabled, compact,
+  styleId, cfg, styleFields, emailFieldEnabled, waFieldEnabled, compact,
   step = 'prompt', email = '', onEmailChange, onAllow, onDismiss, wantsDiscount, unlockedInfo,
   emailHint = '', offerPct = 0,
   interactive = true,
@@ -1194,9 +1284,16 @@ function StyleCardPreview({
                     border: '1px solid #e5e7eb', marginBottom: 8, boxSizing: 'border-box',
                     fontFamily: font, lineHeight: 1.2 }} />
               )}
+              {waFieldEnabled && (
+                <WaRow interactive={interactive} font={font} compact={compact}
+                  inputBorder="#e5e7eb" borderRadius={8} />
+              )}
               <PreviewButton {...allowBtnCommon} interactive={interactive}>
                 <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
               </PreviewButton>
+              {(emailFieldEnabled || waFieldEnabled) && (
+                <OfferButton interactive={interactive} accent={accent} fg={fg} font={font} compact={compact} />
+              )}
               {/* mobile-popup-polish: padded to a ~44px tap target, mirroring
                   ccf-push.js's per-style Deny override (not a change to
                   denyLinkStyle() itself, which Classic/Flash Sale/Gift Reveal
@@ -1288,9 +1385,17 @@ function StyleCardPreview({
                     background: 'rgba(255,255,255,0.15)', color: fg, boxSizing: 'border-box',
                     fontFamily: font, lineHeight: 1.2 }} />
               )}
+              {waFieldEnabled && (
+                <WaRow interactive={interactive} font={font} compact={compact}
+                  inputBg="rgba(255,255,255,0.15)" inputFg="#ffffff"
+                  inputBorder="rgba(255,255,255,0.3)" borderRadius={8} />
+              )}
               <PreviewButton {...allowBtnCommon} interactive={interactive}>
                 <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
               </PreviewButton>
+              {(emailFieldEnabled || waFieldEnabled) && (
+                <OfferButton interactive={interactive} accent={accent} fg={fg} font={font} compact={compact} />
+              )}
               <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
                 style={{ ...denyLinkStyle('rgba(255,255,255,0.7)'), padding: '15px 0' }} interactive={interactive}>
                 {denyText}
@@ -1349,11 +1454,19 @@ function StyleCardPreview({
             )}
           </div>
         )}
+        {waFieldEnabled && (
+          <WaRow interactive={interactive} font={font} compact={compact}
+            inputBg={inputBg} inputFg={proFg} inputBorder={inputBorder}
+            borderRadius={styleId === 'spotlight' ? 8 : 12} />
+        )}
         <PreviewButton {...allowBtnCommon} interactive={interactive}
           style={{ ...allowBtnCommon.style, fontSize: 15, padding: 14,
             ...(ctaLight ? { background: '#ffffff', color: '#0f1115', boxShadow: 'none', border: 'none' } : {}) }}>
           <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
         </PreviewButton>
+        {(emailFieldEnabled || waFieldEnabled) && (
+          <OfferButton interactive={interactive} accent={accent} fg={proFg} font={font} compact={compact} />
+        )}
         <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus" interactive={interactive}
           style={{ ...denyLinkStyle(proFg), opacity: 0.65, fontSize: 13, textDecoration: 'underline',
             ...(styleId === 'color_block' ? { textDecorationStyle: 'dotted' } : {}) }}>
@@ -1541,6 +1654,10 @@ function StyleCardPreview({
                   background: '#ffffff', color: '#111827', boxSizing: 'border-box',
                   fontFamily: font, lineHeight: 1.2 }} />
               )}
+              {waFieldEnabled && (
+                <WaRow interactive={interactive} font={font} compact={compact}
+                  inputBg="#ffffff" inputFg="#111827" inputBorder="#d4d4d8" borderRadius={8} />
+              )}
               {countdownDisplay ? (
                 <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '0.08em', marginBottom: 10,
                   fontVariantNumeric: 'tabular-nums' }}>
@@ -1554,6 +1671,9 @@ function StyleCardPreview({
               <PreviewButton {...allowBtnCommon} interactive={interactive}>
                 <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
               </PreviewButton>
+              {(emailFieldEnabled || waFieldEnabled) && (
+                <OfferButton interactive={interactive} accent={accent} fg={fg} font={font} compact={compact} />
+              )}
               <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
                 style={denyLinkStyle('#a1a1aa')} interactive={interactive}>
                 {denyText}
@@ -1606,9 +1726,16 @@ function StyleCardPreview({
                 fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 8,
                 boxSizing: 'border-box', fontFamily: font, lineHeight: 1.2 }} />
             )}
+            {waFieldEnabled && (
+              <WaRow interactive={interactive} font={font} compact={compact}
+                inputBg={bg} inputFg={fg} inputBorder="#e5e7eb" borderRadius={8} />
+            )}
             <PreviewButton {...allowBtnCommon} interactive={interactive}>
               <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
             </PreviewButton>
+            {(emailFieldEnabled || waFieldEnabled) && (
+              <OfferButton interactive={interactive} accent={accent} fg={fg} font={font} compact={compact} />
+            )}
             {secondaryButtonStyle === 'pill' ? (
               <PreviewButton type="button" onClick={onDismiss} className="ccf-style-focus"
                 style={{ ...pillDenyStyle, color: fg }} interactive={interactive}>
@@ -1637,7 +1764,8 @@ function StyleCardPreview({
 // audits/popup-preview-flow-audit.txt.
 function ClassicPreview({
   layout, device, popup: cfg, step, email, onEmailChange, onAllow, onDismiss,
-  showEmailField, wantsDiscount, unlockedInfo, discountOfferText, discountOfferHeadline,
+  showEmailField, waFieldEnabled = false, wantsDiscount, unlockedInfo,
+  discountOfferText, discountOfferHeadline,
   emailHint = '',
   interactive = true,
 }) {
@@ -1751,7 +1879,14 @@ function ClassicPreview({
                     border: '1.5px solid #e5e7eb', marginBottom: 8, boxSizing: 'border-box',
                     background: '#f9fafb', color: '#111827', fontFamily: font, lineHeight: 1.2 }} />
               )}
+              {waFieldEnabled && (
+                <WaRow interactive={interactive} font={font}
+                  inputBg="#f9fafb" inputFg="#111827" inputBorder="#e5e7eb" borderRadius={12} />
+              )}
               {allowBtnEl}
+              {(showEmailField || waFieldEnabled) && (
+                <OfferButton interactive={interactive} accent={accent} fg={fg} font={font} />
+              )}
               {denyEl}
               {brandingEl}
             </>
@@ -1774,6 +1909,10 @@ function ClassicPreview({
             border: '1.5px solid #e5e7eb', boxSizing: 'border-box', background: '#f9fafb',
             color: '#111827', fontFamily: font, lineHeight: 1.2 }} />
       )}
+      {waFieldEnabled && (
+        <WaRow interactive={interactive} font={font}
+          inputBg="#f9fafb" inputFg="#111827" inputBorder="#e5e7eb" borderRadius={12} />
+      )}
     </div>
   );
 
@@ -1788,6 +1927,9 @@ function ClassicPreview({
                     marginBottom: 10, color: fg }}>{headline}</div>
       {subtext && <div style={{ fontSize: 14, color: '#6b7280', marginBottom: 16 }}>{subtext}</div>}
       {allowBtnEl}
+      {(showEmailField || waFieldEnabled) && (
+        <OfferButton interactive={interactive} accent={accent} fg={fg} font={font} />
+      )}
       {denyEl}
       {discountFieldsEl}
       {brandingEl}
@@ -1881,6 +2023,7 @@ export default function Settings({ shop }) {
     // via ccfBuildDiscountFields()) — a different field from either rule's
     // own offerText, and different again from popup.headline.
     offerHeadline: '',
+    whatsappCapture: { enabled: false },
     loaded: false,
   });
 
@@ -1924,6 +2067,7 @@ export default function Settings({ shop }) {
             offerText: dc.emailDiscount?.offerText || '',
           },
           offerHeadline: dc.offerHeadline || '',
+          whatsappCapture: { enabled: !!(dc.whatsappCapture?.enabled) },
           loaded: true,
         });
       }
@@ -2050,8 +2194,9 @@ export default function Settings({ shop }) {
   const [previewStep, setPreviewStep] = useState('prompt');
   const [previewEmail, setPreviewEmail] = useState('');
 
-  // ccfDiscountEnabled()/ccfShowEmailField() equivalents.
+  // ccfDiscountEnabled()/ccfShowEmailField()/ccfShowWhatsappField() equivalents.
   const previewShowEmailField = discountRules.email.enabled;
+  const previewShowWaField = !!(discountRules.whatsappCapture?.enabled);
   // ccf-push.js: Top Bar never shows a discount (no room for the unlocked
   // state). Computed here (not just inside the preview's button-label logic)
   // because the STEP MACHINE itself (auto-advance + the step bar's
@@ -2093,6 +2238,7 @@ export default function Settings({ shop }) {
   // "Changing style, device, or any field resets to Prompt and re-renders."
   const previewResetKey = JSON.stringify({
     device: popupDevice, styleId: activeStyleId, styleFields: activeStyleFields, cfg: previewCfg,
+    waField: previewShowWaField,
   });
   const previewResetKeyRef = useRef(previewResetKey);
   useEffect(() => {
@@ -2595,7 +2741,7 @@ export default function Settings({ shop }) {
             transition: 'all 0.15s',
           }}
         >
-          {tab.label}
+          {popupDevice === tab.key ? `Editing: ${tab.key === 'desktop' ? '🖥 Desktop' : '📱 Mobile'}` : tab.label}
         </button>
       ))}
     </div>
@@ -2760,22 +2906,12 @@ export default function Settings({ shop }) {
                 the previewResetKey effect above (fires on style/device/
                 setting changes) — there is no other way back to Prompt. */}
 
-            {/* Same frame, page mock, anchor and overlay as the gallery card
-                (one geometry source: frameSpec/FramedStyleThumb), rendered
-                larger and interactive. */}
-            <FramedStyleThumb
-              device={popupDevice}
-              styleId={activeStyleId}
-              layout={popupDevice === 'mobile' ? 'card' : (popup.layout || 'split')}
-              cfg={popupDevice === 'mobile' ? mergeConfig(popup, mobilePopup) : popup}
-              styleFields={activeStyleFields}
-              emailFieldEnabled={previewShowEmailField}
-              discountOfferText={previewDiscountOfferText}
-              discountOfferHeadline={discountRules.offerHeadline}
-              maxH={640}
-              dismissedReason={previewStep === 'dismissed' || previewStep === 'closed'
-                ? (previewStep === 'closed' ? 'closed' : 'dismissed') : null}
-              previewProps={{
+            {/* Dual desktop + mobile preview — both live.
+                Device toggle above controls which config is being EDITED.
+                For mobile-only styles (bottom_sheet, top_bar, story_card),
+                only the mobile frame is shown. */}
+            {(() => {
+              const sharedPreviewProps = {
                 step: previewStep,
                 email: previewEmail,
                 onEmailChange: setPreviewEmail,
@@ -2785,8 +2921,69 @@ export default function Settings({ shop }) {
                 unlockedInfo: previewUnlockedInfo,
                 emailHint: previewEmailHint,
                 offerPct: previewOfferPct,
-              }}
-            />
+              };
+              const dismissedReason = previewStep === 'dismissed' || previewStep === 'closed'
+                ? (previewStep === 'closed' ? 'closed' : 'dismissed') : null;
+              const isMobileOnly = MOBILE_ONLY_STYLE_IDS.includes(activeStyleId);
+              const desktopFrame = !isMobileOnly && (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
+                              flex: '1 1 auto', minWidth: 0 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6,
+                                color: popupDevice === 'desktop' ? '#4f46e5' : '#9ca3af' }}>
+                    {popupDevice === 'desktop' ? '✏️ Editing' : '🖥 Desktop'}
+                  </div>
+                  <div style={{ outline: popupDevice === 'desktop' ? '2px solid #4f46e5' : '2px solid transparent',
+                                outlineOffset: 3, borderRadius: 14 }}>
+                    <FramedStyleThumb
+                      device="desktop"
+                      styleId={activeStyleId}
+                      layout={popup.layout || 'split'}
+                      cfg={popup}
+                      styleFields={activeStyleFields}
+                      emailFieldEnabled={previewShowEmailField}
+                      waFieldEnabled={previewShowWaField}
+                      discountOfferText={previewDiscountOfferText}
+                      discountOfferHeadline={discountRules.offerHeadline}
+                      maxH={560}
+                      dismissedReason={dismissedReason}
+                      previewProps={sharedPreviewProps}
+                    />
+                  </div>
+                </div>
+              );
+              const mobileFrame = (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
+                              flex: '0 0 auto' }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6,
+                                color: popupDevice === 'mobile' ? '#4f46e5' : '#9ca3af' }}>
+                    {popupDevice === 'mobile' ? '✏️ Editing' : '📱 Mobile'}
+                  </div>
+                  <div style={{ outline: popupDevice === 'mobile' ? '2px solid #4f46e5' : '2px solid transparent',
+                                outlineOffset: 3, borderRadius: 14 }}>
+                    <FramedStyleThumb
+                      device="mobile"
+                      styleId={activeStyleId}
+                      layout="card"
+                      cfg={mergeConfig(popup, mobilePopup)}
+                      styleFields={activeStyleFields}
+                      emailFieldEnabled={previewShowEmailField}
+                      waFieldEnabled={previewShowWaField}
+                      discountOfferText={previewDiscountOfferText}
+                      discountOfferHeadline={discountRules.offerHeadline}
+                      maxH={560}
+                      dismissedReason={dismissedReason}
+                      previewProps={sharedPreviewProps}
+                    />
+                  </div>
+                </div>
+              );
+              return (
+                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap',
+                              justifyContent: 'center', alignItems: 'flex-start' }}>
+                  {isMobileOnly ? mobileFrame : <>{desktopFrame}{mobileFrame}</>}
+                </div>
+              );
+            })()}
 
             {/* The one Save button while the customizer is open — pinned to
                 the bottom of the sticky right column. Same save-status-
