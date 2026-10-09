@@ -13,6 +13,7 @@ import {
   Banner,
 } from '@shopify/polaris';
 import { apiGet } from '../../../lib/api';
+import { getCustomerEmail } from './customerShared';
 
 const DS = {
   page: {
@@ -140,7 +141,7 @@ export default function Profile({ shop, profileId, onBack }) {
   }, [shop, profileId]);
 
   const title =
-    profile?.identifiers?.emails?.[0] ||
+    getCustomerEmail(profile) ||
     profile?.identifiers?.phones?.[0] ||
     `Anonymous ${String(profileId || '').slice(-6)}`;
 

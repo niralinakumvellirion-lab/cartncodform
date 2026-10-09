@@ -184,6 +184,15 @@ export function ReachIcons({ customer }) {
 }
 
 /**
+ * Returns the most recently captured email for a profile.
+ * channels.email.address is $set on every popup submit (latest),
+ * identifiers.emails[0] is the oldest ever added via $addToSet.
+ */
+export function getCustomerEmail(profile) {
+  return profile?.channels?.email?.address || profile?.identifiers?.emails?.[0] || null;
+}
+
+/**
  * useWhatsapp — manages the WhatsApp send flow for a single component.
  * Opens a blank tab synchronously (pop-up blocker compliance) then sets
  * its location once the API returns the wa.me URL.

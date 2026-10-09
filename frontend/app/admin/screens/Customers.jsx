@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet } from '../../../lib/api';
 import { ShimmerTable } from '../components/Shimmer';
-import { DS, StageBadge, ReachIcons, useWhatsapp } from './customerShared';
+import { DS, StageBadge, ReachIcons, useWhatsapp, getCustomerEmail } from './customerShared';
 import DateRangeFilter, { getDateRange, matchDatePreset } from '../components/DateRangeFilter';
 import FilterDropdown from '../components/FilterDropdown';
 
@@ -350,7 +350,7 @@ export default function Customers({ shop, initialFilter, initialSignal, initialF
                   : null;
 
                 const name =
-                  p.identifiers?.emails?.[0] || p.channels?.whatsapp?.phone || p.identifiers?.phones?.[0] || null;
+                  getCustomerEmail(p) || p.channels?.whatsapp?.phone || p.identifiers?.phones?.[0] || null;
                 const displayName = name
                   ? name
                   : `Anonymous shopper · #${p._id?.toString().slice(-5)}`;
@@ -398,7 +398,7 @@ export default function Customers({ shop, initialFilter, initialSignal, initialF
                             color: '#111827',
                           }}
                         >
-                          {p.identifiers?.emails?.[0] ||
+                          {getCustomerEmail(p) ||
                             p.channels?.whatsapp?.phone ||
                             p.identifiers?.phones?.[0] ||
                             `Anonymous #${p._id?.toString().slice(-5)}`}

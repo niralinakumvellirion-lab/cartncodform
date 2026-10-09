@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
 import FilterDropdown from '../components/FilterDropdown';
+import { getCustomerEmail } from './customerShared';
 
 const DS = {
   page: {
@@ -999,7 +1000,7 @@ export default function JourneyScreen({ shop }) {
               : filteredCustomers.map((c, i) => {
                   const profile = c.profile;
                   const identifier =
-                    profile?.identifiers?.emails?.[0] ||
+                    getCustomerEmail(profile) ||
                     profile?.identifiers?.phones?.[0] ||
                     `Anonymous ${profile?._id?.toString().slice(-6)}`;
                   const isSelected = selectedCustomer?.profile?._id === profile?._id;

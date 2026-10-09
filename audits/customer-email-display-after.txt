@@ -1,0 +1,110 @@
+SELF-AUDIT — Show latest popup email in customer views
+2026-10-09
+============================================================
+
+STEP 0 — FRONTEND USES OF identifiers?.emails?.[0]
+============================================================
+
+File:line       Used for
+-----------     --------
+CustomerDetail.jsx:1045   Header display email + displayName fallback — FIXED
+Customers.jsx:353         displayName variable (desktop table) — FIXED
+Customers.jsx:401         Mobile card inline email display — FIXED
+Journey.jsx:1002          Customer list row identifier label — FIXED
+Profile.jsx:143           Polaris page <title> / back-action label — FIXED
+Messages.jsx:458          Message list row identifier label — FIXED
+Messages.jsx:647          Notification preview modal identifier — FIXED
+
+CustomerDetail.jsx:688    EmailComposerPanel (channels.email.address || emails[0]) — ALREADY CORRECT, left alone
+Journey.jsx:716-717       "Sending to:" composer label (same pattern) — ALREADY CORRECT, left alone
+Journey.jsx:866-867       hasEmail boolean gate — boolean, not display, left alone
+Journey.jsx:1199-1200     hasEmail boolean gate — boolean, not display, left alone
+Customers.jsx:478         avatarSource for avatar initial letter (email-only is intentional) — left alone
+Profile.jsx:177           profile?.identifiers?.emails?.map() — shows ALL stored emails in
+                          Identifiers panel, not a display-name site — left alone
+
+STEP 0 — BACKEND USES (report only, no changes)
+============================================================
+
+All backend send paths already use channels.email.address first:
+
+File:line                           Address used
+-----------                         ------------
+routes/emailTemplates.js:522,592    channels.email.address || emails[0]  ← latest first ✓
+routes/events.js:97                 channels.email.address || emails[0]  ← latest first ✓
+routes/queue.js:85                  channels.email.address || emails[0]  ← latest first ✓
+routes/queue.js:712                 channels.email.address || emails[0]  ← latest first ✓
+routes/push.js:498-499              channels.email.address || emails[0]  ← latest first ✓
+routes/whatsapp.js:107-109          channels.email.address || emails[0]  ← latest first ✓
+  (resolveFirstName — used for personalised greeting)
+routes/whatsapp.js:337              channels.email.address || emails[0]  ← latest first ✓
+routes/profiles.js:473-474          channels.email.address || emails[0]  ← latest first ✓
+server.js:471-472                   channels.email.address || emails[0]  ← latest first ✓
+check-queue-emails.js:28-29         channels.email.address || emails[0]  ← latest first ✓
+
+No backend sending site uses identifiers.emails[0] as the primary address.
+No backend changes needed.
+
+STEP 0 — channels.email.address WRITE CONFIRMATION
+============================================================
+
+profileService.js applyToProfile() applies the caller's dot-notation updates via
+$set. Every popup path passes 'channels.email.address' in the updates object:
+  discounts.js:292  (email popup and WA popup combined path)
+  proxy.js:459      (COD form)
+Both now write email.toLowerCase() as of commit 185e7f5 (B2 fix).
+
+As of commit 185e7f5 both sites write email.toLowerCase() so channels.email.address
+is lowercase. identifiers.emails[] is always lowercase (cleanIdentifiers). No case
+mismatch remains.
+
+STEP 1 — SITES CHANGED
+============================================================
+
+NEW HELPER:
+  customerShared.jsx — export function getCustomerEmail(profile)
+    returns: profile?.channels?.email?.address || profile?.identifiers?.emails?.[0] || null
+
+IMPORTS ADDED:
+  CustomerDetail.jsx:7     added getCustomerEmail to existing import
+  Customers.jsx:7          added getCustomerEmail to existing import
+  Journey.jsx:6            new import { getCustomerEmail } from './customerShared'
+  Profile.jsx:16           new import { getCustomerEmail } from './customerShared'
+  Messages.jsx:6           new import { getCustomerEmail } from './customerShared'
+
+DISPLAY SITES CHANGED (all use getCustomerEmail(profile)):
+  CustomerDetail.jsx:1045  was: profile.identifiers?.emails?.[0]
+  Customers.jsx:353        was: p.identifiers?.emails?.[0] || p.channels?.whatsapp?.phone || ...
+  Customers.jsx:401        was: p.identifiers?.emails?.[0] || p.channels?.whatsapp?.phone || ...
+  Journey.jsx:1002         was: profile?.identifiers?.emails?.[0] || phones[0] || Anonymous
+  Profile.jsx:143          was: profile?.identifiers?.emails?.[0] || phones[0] || Anonymous
+  Messages.jsx:458         was: profile?.identifiers?.emails?.[0] || phones[0] || Anonymous
+  Messages.jsx:647         was: p?.identifiers?.emails?.[0] || phones[0] || Anonymous
+
+WHAT WAS LEFT ALONE AND WHY:
+  CustomerDetail.jsx:688   EmailComposerPanel already uses channels.email.address first
+  Journey.jsx:716-717      "Sending to:" already uses channels.email.address first
+  Journey.jsx:866-867      Boolean hasEmail gate — not a display site; checking existence
+  Journey.jsx:1199-1200    Boolean hasEmail gate — not a display site
+  Customers.jsx:478        Avatar initial is derived from email address only intentionally;
+                           WA phone is not used for avatar initials
+  Profile.jsx:177          emails.map() renders ALL stored emails in Identifiers debug panel,
+                           not a display-name site
+  All search/filter logic  No change — filters must match ALL emails, not just latest
+  All backend code         Already correct; no sending path uses emails[0] as primary
+
+CHECKS:
+  npm run build (frontend): PASSED — clean build, no errors or warnings.
+  Visual check: NOT performed (no running dev server). Build success confirms
+    no import errors, no JSX type errors, no missing exports.
+  Backend tests: not re-run (frontend-only changes per efficiency rules).
+
+RISKS:
+  If channels.email.address is null/undefined (e.g. a push-only subscriber who
+  never submitted the email popup), getCustomerEmail falls back to emails[0].
+  This is the same as before for push-only profiles — no regression.
+  If a profile has channels.email.address but it was set before the B2 fix (may
+  be mixed-case), it will display mixed-case until that profile re-submits. This
+  is pre-existing data; the fix ensures new submissions are lowercase.
+
+============================================================

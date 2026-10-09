@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiGet } from '../../../lib/api';
 import DateRangeFilter, { getDateRange, matchDatePreset, DATE_FILTERS } from '../components/DateRangeFilter';
+import { getCustomerEmail } from './customerShared';
 
 const DS = {
   page: {
@@ -455,7 +456,7 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
           filteredMessages.map((m, i) => {
             const profile = m.profileId;
             const identifier =
-              profile?.identifiers?.emails?.[0] ||
+              getCustomerEmail(profile) ||
               profile?.identifiers?.phones?.[0] ||
               `Anonymous #${m.cartToken?.slice(-4) || '????'}`;
             const signalLabel =
@@ -644,7 +645,7 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
       {/* Notification preview modal */}
       {preview && (() => {
         const p = preview.profileId;
-        const modalId = p?.identifiers?.emails?.[0]
+        const modalId = getCustomerEmail(p)
           || p?.identifiers?.phones?.[0]
           || `Anonymous #${preview.cartToken?.slice(-4) || '????'}`;
         const modalSignal = SIGNAL_LABELS[preview.signalType] || preview.reason || '';

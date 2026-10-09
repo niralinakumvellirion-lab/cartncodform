@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import { ShimmerBox, ShimmerCard } from '../components/Shimmer';
-import { DS, StageBadge, ReachIcons, useWhatsapp } from './customerShared';
+import { DS, StageBadge, ReachIcons, useWhatsapp, getCustomerEmail } from './customerShared';
 
 const SIGNAL_LABELS = {
   cart_abandon: 'Cart left behind',
@@ -1042,7 +1042,7 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
   }
 
   const profile = customer.profile || {};
-  const email = profile.identifiers?.emails?.[0];
+  const email = getCustomerEmail(profile);
   const displayName = email || `Anonymous shopper · #${String(profile._id || profileId).slice(-5)}`;
   const hasPush = !!profile.channels?.push?.subscribed;
   const hasEmail = !!(profile.channels?.email?.address || email);
