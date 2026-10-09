@@ -20,6 +20,9 @@ jest.mock('../utils/shopify', () => ({
   verifyProxySignature: jest.fn(() => true),
   API_VERSION: '2025-01',
 }));
+jest.mock('../services/profileService', () => ({
+  upsertProfile: jest.fn().mockResolvedValue(null),
+}));
 
 const DiscountConfig = require('../models/DiscountConfig');
 const discountsRouter = require('../routes/discounts');
@@ -182,13 +185,14 @@ describe('POST /generate-discount (App Proxy)', () => {
     expect(res.body.error).toBe('Invalid phone number');
   });
 
-  test("action 'whatsapp' returns 429 when rate limit exceeded", async () => {
+  test("action 'whatsapp' returns 429 when rate limit exceeded (30/min per IP+session)", async () => {
     DiscountConfig.findOne.mockResolvedValue({ whatsappCapture: { enabled: true } });
-    // Exhaust the 10-per-minute limit for a unique IP
+    // Exhaust the 30-per-minute limit for a unique IP+sessionId key
     const ip = '1.2.3.' + Math.floor(Math.random() * 200);
-    const req = { query: { shop: SHOP }, body: { action: 'whatsapp', whatsappPhone: '9999999999', whatsappConsent: true }, headers: { 'x-forwarded-for': ip }, socket: {} };
+    const sessionId = 'sess_ratelimit_' + Math.random().toString(36).slice(2);
+    const req = { query: { shop: SHOP }, body: { action: 'whatsapp', whatsappPhone: '9999999999', whatsappConsent: true, sessionId }, headers: { 'x-forwarded-for': ip }, socket: {} };
     let lastRes;
-    for (let i = 0; i < 11; i++) {
+    for (let i = 0; i < 31; i++) {
       lastRes = mockRes();
       await post(req, lastRes);
     }
@@ -205,6 +209,25 @@ describe('POST /generate-discount (App Proxy)', () => {
     expect(res.body.whatsapp).toBe(true);
     // No discount code issued
     expect(res.body.code).toBeUndefined();
+  });
+
+  test.each([
+    ['9876543210',  'IN', true,  'national digits only — IN'],
+    ['09876543210', 'IN', true,  'trunk-prefix 0 — IN'],
+    ['+919876543210', 'IN', true, 'E.164 with + — passes through unchanged'],
+    ['4155552671',  'US', true,  'US national number'],
+    ['12345',       'IN', false, 'too short — invalid'],
+  ])("action 'whatsapp' phone normalisation: '%s' (%s) → valid=%s (%s)", async (phone, country, shouldSucceed) => {
+    DiscountConfig.findOne.mockResolvedValue({ whatsappCapture: { enabled: true } });
+    const res = mockRes();
+    await post({ query: { shop: SHOP }, body: { action: 'whatsapp', whatsappPhone: phone, whatsappCountry: country, whatsappConsent: true }, headers: {}, socket: {} }, res);
+    expect(res.statusCode).toBe(200);
+    if (shouldSucceed) {
+      expect(res.body.success).toBe(true);
+      expect(res.body.error).toBeUndefined();
+    } else {
+      expect(res.body.error).toBe('Invalid phone number');
+    }
   });
 
   test("action 'email' does not save whatsapp channel when flag is off", async () => {

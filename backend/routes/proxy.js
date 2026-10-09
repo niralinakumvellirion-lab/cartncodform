@@ -172,7 +172,8 @@ router.post('/generate-discount', async (req, res) => {
     const ip = (req.headers && req.headers['x-forwarded-for'])
       ? String(req.headers['x-forwarded-for']).split(',')[0].trim()
       : (req.socket && req.socket.remoteAddress) || '';
-    const result = await generateDiscount(shop, req.body || {}, { ip });
+    const sessionId = (req.body && req.body.sessionId) ? String(req.body.sessionId).trim() : '';
+    const result = await generateDiscount(shop, req.body || {}, { ip, sessionId });
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'no-store');
     // Always echo the shop domain so the storefront can build /discount/<code>

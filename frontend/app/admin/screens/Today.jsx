@@ -193,6 +193,7 @@ export default function Today({ shop }) {
   const [waStats, setWaStats] = useState(null);
   const [waPending, setWaPending] = useState(null);
   const [waLoading, setWaLoading] = useState(false);
+  const [waConfigEnabled, setWaConfigEnabled] = useState(null); // null=unknown, true/false=loaded
   const { sendWhatsapp, waError: waSendError, waFallbackUrl, clearWaError } = useWhatsapp();
 
   // Phase 1 — real-time new subscriber alerts.
@@ -232,10 +233,16 @@ export default function Today({ shop }) {
     Promise.allSettled([
       apiGet(`/api/whatsapp/${encodeURIComponent(shop)}/stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
       apiGet(`/api/whatsapp/${encodeURIComponent(shop)}/pending?limit=8`),
-    ]).then(([statsRes, pendingRes]) => {
+      apiGet(`/api/discounts/${encodeURIComponent(shop)}/config`),
+    ]).then(([statsRes, pendingRes, cfgRes]) => {
       if (cancelled) return;
       if (statsRes.status === 'fulfilled') setWaStats(statsRes.value);
       if (pendingRes.status === 'fulfilled') setWaPending(pendingRes.value);
+      if (cfgRes.status === 'fulfilled') {
+        setWaConfigEnabled(!!(cfgRes.value?.config?.whatsappCapture?.enabled));
+      } else {
+        setWaConfigEnabled(null);
+      }
     }).finally(() => {
       if (!cancelled) setWaLoading(false);
     });
@@ -631,8 +638,7 @@ export default function Today({ shop }) {
           )}
 
           {/* Pending list */}
-          {waPending?.items?.length > 0 ? (
-            waPending.items.map((item, i) => (
+          {waPending?.items?.length > 0 ? waPending.items.map((item, i) => (
               <div key={item.profileId} style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                 padding: '10px 20px',
@@ -667,36 +673,43 @@ export default function Today({ shop }) {
                 </button>
               </div>
             ))
-          ) : (
+          ) : waStats?.sent > 0 ? (
             <div style={{ padding: '16px 20px', fontSize: 13, color: '#9ca3af' }}>
               Everyone with WhatsApp consent has been contacted.
             </div>
-          )}
+          ) : null}
         </div>
       )}
 
-      {/* Upsell when WA flag is off and there is no data */}
-      {!waLoading && waStats && waStats.pending === 0 && waStats.sent === 0 && (
-        <div style={{ ...DS.card, padding: '16px 20px', marginBottom: 20,
-                      display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-          <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-                        background: '#f0fdf4', display: 'flex', alignItems: 'center',
-                        justifyContent: 'center' }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-              stroke="#128C7E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              aria-hidden="true">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-          </div>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 3 }}>
-              Reach customers on WhatsApp
+      {/* Config-aware empty state / upsell when no WA data yet */}
+      {!waLoading && waStats && waStats.pending === 0 && waStats.sent === 0 && waConfigEnabled !== null && (
+        waConfigEnabled === false ? (
+          <div style={{ ...DS.card, padding: '16px 20px', marginBottom: 20,
+                        display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                          background: '#f0fdf4', display: 'flex', alignItems: 'center',
+                          justifyContent: 'center' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                stroke="#128C7E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
             </div>
-            <div style={{ fontSize: 12, color: '#6b7280' }}>
-              Enable WhatsApp capture in popup settings to start collecting consent.
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 3 }}>
+                Reach customers on WhatsApp
+              </div>
+              <div style={{ fontSize: 12, color: '#6b7280' }}>
+                Enable WhatsApp capture in popup settings to start collecting consent.
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div style={{ ...DS.card, padding: '14px 20px', marginBottom: 20,
+                        fontSize: 13, color: '#6b7280' }}>
+            WhatsApp capture is on. New leads will appear here.
+          </div>
+        )
       )}
 
       {error && (

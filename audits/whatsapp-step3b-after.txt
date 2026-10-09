@@ -1,0 +1,157 @@
+WHATSAPP STEP 3B — SELF-AUDIT
+2026-10-09
+============================================================
+
+SCOPE: Fix-and-verify pass on WhatsApp Steps 2b and 3.
+Backend: phone normalization bug, rate-limiter key.
+Frontend: Today.jsx upsell condition, Customers.jsx unused state.
+No changes to ccf-push.js, extensions, email templates, popup code,
+models, or webhooks.
+
+============================================================
+A. ITEM 1 — Phone normalization bug (backend/routes/discounts.js)
+------------------------------------------------------------
+
+BUG (before):
+  waDigits = waPhone.replace(/\D/g, '')  // strips "+" from "+919876543210"
+  normalizePhone(waDigits, waCountry)    // "919876543210" → libphonenumber
+                                         // can't reliably parse without "+"
+  ...
+  return { success: true, whatsapp: true } // always returned even if null!
+
+FIX:
+  Removed digit-stripping and 6-15 length check.
+  Direct: normalized = normalizePhone(waPhone, waCountry)
+  If null → return { code: null, error: 'Invalid phone number' }
+  Removed outer try/catch (was hiding the issue as "optional normalizer").
+  upsertProfile still fire-and-forget with .catch(() => {}).
+
+VERIFIED: email/push path (lines ~307-338) was already correct — no change.
+
+NORMALIZATION TESTS ADDED (discountConfigRoutes.test.js):
+  test.each — 5 cases:
+  • '9876543210'    + IN → success (national digits)
+  • '09876543210'   + IN → success (trunk prefix)
+  • '+919876543210' + IN → success (E.164 passthrough)
+  • '4155552671'    + US → success (US national)
+  • '12345'         + IN → error   (too short / invalid)
+
+============================================================
+B. ITEM 2 — Rate-limiter key (backend/routes/discounts.js)
+------------------------------------------------------------
+
+BEFORE:
+  key = ip|shop
+  _WA_RATE_LIMIT = 10
+
+AFTER:
+  key = ip|shop|sessionId
+  _WA_RATE_LIMIT = 30
+
+WHY: Shopify App Proxy forwards the visitor's real IP as the first
+x-forwarded-for entry (confirmed in proxy.js lines 172-174). However,
+visitors behind CGNAT or mobile carrier NAT can share a public IP.
+Adding sessionId (sent by ccf-embed as body.sessionId) differentiates
+them so one visitor's request burst cannot exhaust another's limit.
+Limit raised to 30/min — generous for a single popup interaction
+per session.
+
+proxy.js updated: passes opts.sessionId = req.body.sessionId to
+generateDiscount so the rate-limiter key is populated.
+
+TEST UPDATED (discountConfigRoutes.test.js):
+  Rate-limit test now sends 31 requests with a unique sessionId;
+  verifies the 31st returns 'Too many requests'.
+
+============================================================
+C. ITEM 3 — Today.jsx upsell based on real config
+------------------------------------------------------------
+
+BEFORE: Upsell shown whenever waStats.pending===0 && waStats.sent===0,
+even when the merchant already has WA capture enabled (just no leads yet).
+
+FIX:
+  Added state: waConfigEnabled (null | true | false).
+  WA useEffect now fetches /api/discounts/:shop/config as a third
+  Promise.allSettled branch. On success sets waConfigEnabled from
+  config.whatsappCapture.enabled. On failure leaves null.
+
+  Outer condition changed:
+  • waConfigEnabled === false → upsell card (enable in popup settings)
+  • waConfigEnabled === true  → soft banner "WhatsApp capture is on.
+                                New leads will appear here."
+  • waConfigEnabled === null  → show nothing extra (config fetch failed)
+
+  Inner pending-list empty state adjusted:
+  "Everyone with consent has been contacted." now shown only when
+  waStats.sent > 0 (there were sends but none pending). When sent===0
+  the inner slot returns null — the outer block handles messaging.
+
+============================================================
+D. ITEM 4 — Customers.jsx cleanup
+------------------------------------------------------------
+
+4a. Removed unused `waMessage` state (useState + setWaMessage —
+    never written to or read outside its declaration).
+
+4b. Filter URL support verified: page.js (line 19+38) already reads
+    searchParams.get('filter') and passes it as initialFilter prop.
+    Customers.jsx validates initialFilter against FILTER_TABS (added
+    'whatsapp_captured' in Step 3). "View all →" link in Today.jsx
+    (/admin/customers?filter=whatsapp_captured) therefore works
+    end-to-end. NO CODE CHANGE NEEDED.
+
+============================================================
+E. REPORT-ONLY ITEMS (5a–5e)
+------------------------------------------------------------
+
+5a. Store link construction
+    wa.me URLs are built in backend/routes/whatsapp.js (send endpoint)
+    as "https://wa.me/" + toWaDigits(normalized) + "?text=" + message.
+    toWaDigits strips the leading "+" from E.164. URL-encoded message
+    is built server-side. Link returned to admin frontend as data.url.
+    Admin never constructs wa.me URLs directly.
+
+5b. Response shapes
+    GET /api/whatsapp/:shop/pending → { total: Number, items: [...] }
+    GET /api/whatsapp/:shop/stats  → { pending, sent, clicked, carted,
+                                       purchased } (date-scoped)
+    GET /api/whatsapp/:shop/profile/:id → { whatsapp: {...}, messages: [...],
+                                            canFollowup, canOrder, orderReason }
+    POST /api/whatsapp/:shop/send → { url } (wa.me link)
+    POST /api/whatsapp/:shop/opt-out → { success: true }
+
+5c. Pending query analysis
+    GET /pending uses two sequential queries:
+    1. Profile.find({ consentedAt exists, optedOutAt null }) — no index
+       currently on channels.whatsapp.consentedAt. For stores with
+       <10k opted-in profiles this is acceptable at MVP scale.
+    2. ScheduledJob.distinct('profileId', { channel:'whatsapp', ... }) —
+       all-time, not scoped to the date window. A profile that received
+       a message 6 months ago is still excluded from "pending".
+       This is the intended behaviour (once contacted = contacted).
+
+5d. Popup behaviour table (Step 2b)
+    action='email'    → waFlagOn=true + consent=true  → saves WA + email
+    action='email'    → waFlagOn=false + consent=true → ignores WA
+    action='whatsapp' → waFlagOn=true + consent=true  → saves WA, no code
+    action='whatsapp' → waFlagOn=false               → error (not enabled)
+    action='whatsapp' → consent=false                → error (consent required)
+    action='whatsapp' → invalid phone               → error (invalid phone)
+    action='push'     → waFlagOn=true + consent=true  → saves WA + push
+
+5e. git diff --stat (Step 3 vs Step 3b)
+    backend/routes/discounts.js      |  ~20 changed
+    backend/routes/proxy.js          |   +2 lines
+    backend/__tests__/discountConfigRoutes.test.js | +25 lines
+    frontend/app/admin/screens/Today.jsx     |  ~20 changed
+    frontend/app/admin/screens/Customers.jsx |   -2 lines
+
+============================================================
+F. TESTS SUMMARY
+
+Backend: 834 / 45 — all passed.
+(+5 vs Step 3 baseline of 829: 5 new phone normalisation test.each cases)
+Frontend: npm run build — compiled successfully, 0 errors.
+
+============================================================

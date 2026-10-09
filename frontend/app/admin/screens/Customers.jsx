@@ -114,7 +114,7 @@ export default function Customers({ shop, initialFilter, initialSignal, initialF
   }, []);
 
   const { sendWhatsapp, waError: waRowError, waFallbackUrl, clearWaError } = useWhatsapp();
-  const [waMessage, setWaMessage] = useState(null);
+
 
   const loadData = useCallback(
     async (signal) => {

@@ -10,13 +10,16 @@ const { verifyProxySignature, API_VERSION } = require('../utils/shopify');
 // DiscountConfig sub-doc key each maps to.
 const ACTIONS = ['push', 'email', 'phone', 'both', 'whatsapp'];
 
-// In-memory rate limiter for the 'whatsapp' action: max 10 requests/min per IP+shop.
-// Intentionally simple — state is lost on restart and not shared across instances.
+// In-memory rate limiter for the 'whatsapp' action.
+// Key: ip|shop|sessionId — sessionId differentiates visitors sharing a
+// public IP (CGNAT, corporate NAT) so one visitor's limit never blocks
+// another's. Limit intentionally generous (30/min) since a real visitor
+// has at most one popup interaction per session.
 const _waRateMap = {};
 const _WA_RATE_WINDOW = 60 * 1000; // 1 minute
-const _WA_RATE_LIMIT = 10;
-function _waRateCheck(ip, shop) {
-  const key = (ip || '') + '|' + (shop || '');
+const _WA_RATE_LIMIT = 30;
+function _waRateCheck(ip, shop, sessionId) {
+  const key = (ip || '') + '|' + (shop || '') + '|' + (sessionId || '');
   const now = Date.now();
   if (!_waRateMap[key]) _waRateMap[key] = [];
   _waRateMap[key] = _waRateMap[key].filter(function (t) { return now - t < _WA_RATE_WINDOW; });
@@ -90,8 +93,9 @@ async function generateDiscount(shopDomain, body = {}, opts = {}) {
 
   // WhatsApp-capture action: no discount minted — profile upsert only.
   if (action === 'whatsapp') {
-    // Rate-limit via caller-supplied IP (opts.ip).
-    if (opts.ip && !_waRateCheck(opts.ip, shop)) {
+    // Rate-limit via caller-supplied IP + sessionId (per-session key so
+    // visitors behind shared NAT/CGNAT don't block each other).
+    if (opts.ip && !_waRateCheck(opts.ip, shop, opts.sessionId || '')) {
       return { code: null, error: 'Too many requests' };
     }
     const waConfig = await DiscountConfig.findOne({ shopDomain: shop });
@@ -101,24 +105,18 @@ async function generateDiscount(shopDomain, body = {}, opts = {}) {
     const waConsent = body.whatsappConsent === true;
     if (!waConsent) return { code: null, error: 'Consent required' };
     const waPhone = body.whatsappPhone ? String(body.whatsappPhone).trim() : '';
-    const waDigits = waPhone.replace(/\D/g, '');
-    if (!waDigits || waDigits.length < 6 || waDigits.length > 15) {
-      return { code: null, error: 'Invalid phone number' };
-    }
-    try {
-      const { normalizePhone } = require('../utils/phone');
-      const { upsertProfile } = require('../services/profileService');
-      const waCountry = body.whatsappCountry || 'IN';
-      const normalized = normalizePhone(waDigits, waCountry);
-      if (normalized) {
-        const cartToken = body.cartToken ? String(body.cartToken).trim() : null;
-        upsertProfile(
-          shop,
-          { phone: normalized, email: null, sessionId: body.sessionId || null, cartToken },
-          { 'channels.whatsapp.phone': normalized, 'channels.whatsapp.consentedAt': new Date(), 'channels.whatsapp.source': 'popup', lastSeenAt: new Date() }
-        ).catch(() => {});
-      }
-    } catch (e) { /* phone normalizer optional */ }
+    if (!waPhone) return { code: null, error: 'Invalid phone number' };
+    const { normalizePhone } = require('../utils/phone');
+    const { upsertProfile } = require('../services/profileService');
+    const waCountry = body.whatsappCountry || 'IN';
+    const normalized = normalizePhone(waPhone, waCountry);
+    if (!normalized) return { code: null, error: 'Invalid phone number' };
+    const cartToken = body.cartToken ? String(body.cartToken).trim() : null;
+    upsertProfile(
+      shop,
+      { phone: normalized, email: null, sessionId: body.sessionId || null, cartToken },
+      { 'channels.whatsapp.phone': normalized, 'channels.whatsapp.consentedAt': new Date(), 'channels.whatsapp.source': 'popup', lastSeenAt: new Date() }
+    ).catch(() => {});
     return { success: true, whatsapp: true };
   }
 
