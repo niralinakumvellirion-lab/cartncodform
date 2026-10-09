@@ -282,6 +282,97 @@ function AllowButtonLabel({ step, allowText, wantsDiscount }) {
   return allowText;
 }
 
+// Mirrors ccf-push.js's ccfParseHex + colour derivation for the status card.
+function parseHexToRgb(hex) {
+  const h = (hex || '').replace('#', '');
+  const full = h.length === 3 ? h[0]+h[0]+h[1]+h[1]+h[2]+h[2] : h;
+  if (full.length !== 6) return null;
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  return (isNaN(r) || isNaN(g) || isNaN(b)) ? null : [r, g, b];
+}
+function statusCardPalette(accentHex, isSetup) {
+  if (!isSetup) return {
+    track: '#b7e4c7', tint: '#ecfdf3', title: '#14532d', subtitle: '#3b6b4e',
+    badge: '#15803d', orbitR: 21, orbitG: 128, orbitB: 61,
+  };
+  const rgb = parseHexToRgb(accentHex);
+  if (!rgb) return {
+    track: '#e3cfe0', tint: '#f7eff6', title: '#4a1f45', subtitle: '#6b4a67',
+    badge: accentHex || '#7a3b74', orbitR: 122, orbitG: 59, orbitB: 116,
+  };
+  const [r, g, b] = rgb;
+  const mix = (ch, w) => Math.round(ch * w + 255 * (1 - w));
+  const drk = (ch, by) => Math.round(ch * (1 - by));
+  return {
+    track: `rgb(${mix(r,0.22)},${mix(g,0.22)},${mix(b,0.22)})`,
+    tint: `rgb(${mix(r,0.10)},${mix(g,0.10)},${mix(b,0.10)})`,
+    title: `rgb(${drk(r,0.55)},${drk(g,0.55)},${drk(b,0.55)})`,
+    subtitle: `rgb(${drk(r,0.35)},${drk(g,0.35)},${drk(b,0.35)})`,
+    badge: accentHex, orbitR: r, orbitG: g, orbitB: b,
+  };
+}
+
+// Status card — replaces the allow button during 'setting_up' and 'subscribed'
+// preview steps. Matches ccf-push.js's ccfBuildStatusCard() structure exactly.
+function StatusCard({ step, accent, font }) {
+  const isSetup = step === 'setting_up';
+  const pal = statusCardPalette(accent, isSetup);
+  const orbitGrad = `conic-gradient(from 0deg,` +
+    `rgba(${pal.orbitR},${pal.orbitG},${pal.orbitB},0) 0deg,` +
+    `rgba(${pal.orbitR},${pal.orbitG},${pal.orbitB},0) 230deg,` +
+    `rgba(${pal.orbitR},${pal.orbitG},${pal.orbitB},1) 360deg)`;
+  return (
+    <div role="status" aria-live="polite" style={{
+      position: 'relative', overflow: 'hidden', boxSizing: 'border-box', width: '100%',
+      borderRadius: 12, padding: 2, background: pal.track, marginBottom: 10,
+      cursor: isSetup ? 'progress' : 'default',
+    }}>
+      <span className="ccf-status-orbit" style={{
+        position: 'absolute', left: '50%', top: '50%',
+        width: 420, height: 420, margin: '-210px 0 0 -210px',
+        display: 'block', pointerEvents: 'none', background: orbitGrad,
+      }} />
+      <div style={{
+        position: 'relative', minHeight: 60, borderRadius: 10, background: pal.tint,
+        padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12,
+        boxSizing: 'border-box',
+      }}>
+        <div style={{
+          width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
+          background: pal.badge, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {isSetup ? (
+            <span className="ccf-preview-spin" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+                style={{ display: 'block', transformOrigin: '9px 9px' }}>
+                <circle cx="12" cy="12" r="9" stroke="rgba(255,255,255,0.35)" strokeWidth="2" />
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" stroke="#ffffff" strokeWidth="2" />
+              </svg>
+            </span>
+          ) : (
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ffffff"
+              strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+              style={{ display: 'block' }}>
+              <path d="M5 12.5l4.5 4.5L19 7.5" />
+            </svg>
+          )}
+        </div>
+        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div style={{ fontSize: 15, lineHeight: '20px', fontWeight: 600, color: pal.title, fontFamily: font }}>
+            {isSetup ? 'Setting up…' : 'Subscribed!'}
+          </div>
+          <div style={{ fontSize: 13, lineHeight: '18px', fontWeight: 400, color: pal.subtitle, fontFamily: font }}>
+            {isSetup ? 'Just a moment' : 'Getting your discount…'}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Shared "unlocked code" view — matches renderDiscountCode()'s HTML exactly
 // (same colors-per-style, same chipBig/codeChipEmphasis sizing, same
 // "Expires in N days" + pulsing "Applying your discount automatically..."
@@ -1306,9 +1397,13 @@ function StyleCardPreview({
                   inputBg="#f9fafb" inputBorder="#e5e7eb" borderRadius={12}
                   fieldPad="11px 14px" fieldFontSize={13} fieldBorderWidth={1.5} />
               )}
-              <PreviewButton {...allowBtnCommon} interactive={interactive}>
-                <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
-              </PreviewButton>
+              {busy ? (
+                <StatusCard step={step} accent={accent} font={font} />
+              ) : (
+                <PreviewButton {...allowBtnCommon} interactive={interactive}>
+                  <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
+                </PreviewButton>
+              )}
               {(emailFieldEnabled || waFieldEnabled) && (
                 <OfferButton interactive={interactive} accent={accent} fg={fg} font={font} compact={compact} />
               )}
@@ -1409,9 +1504,13 @@ function StyleCardPreview({
                   inputBorder="rgba(255,255,255,0.3)" borderRadius={12}
                   fieldPad="11px 14px" fieldFontSize={13} fieldBorderWidth={1.5} />
               )}
-              <PreviewButton {...allowBtnCommon} interactive={interactive}>
-                <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
-              </PreviewButton>
+              {busy ? (
+                <StatusCard step={step} accent={accent} font={font} />
+              ) : (
+                <PreviewButton {...allowBtnCommon} interactive={interactive}>
+                  <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
+                </PreviewButton>
+              )}
               {(emailFieldEnabled || waFieldEnabled) && (
                 <OfferButton interactive={interactive} accent={accent} fg={fg} font={font} compact={compact} />
               )}
@@ -1479,11 +1578,15 @@ function StyleCardPreview({
             borderRadius={styleId === 'spotlight' ? 999 : 12}
             fieldPad="0 16px" fieldFontSize={15} fieldHeight={48} />
         )}
-        <PreviewButton {...allowBtnCommon} interactive={interactive}
-          style={{ ...allowBtnCommon.style, fontSize: 15, padding: 14,
-            ...(ctaLight ? { background: '#ffffff', color: '#0f1115', boxShadow: 'none', border: 'none' } : {}) }}>
-          <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
-        </PreviewButton>
+        {busy ? (
+          <StatusCard step={step} accent={accent} font={font} />
+        ) : (
+          <PreviewButton {...allowBtnCommon} interactive={interactive}
+            style={{ ...allowBtnCommon.style, fontSize: 15, padding: 14,
+              ...(ctaLight ? { background: '#ffffff', color: '#0f1115', boxShadow: 'none', border: 'none' } : {}) }}>
+            <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
+          </PreviewButton>
+        )}
         {(emailFieldEnabled || waFieldEnabled) && (
           <OfferButton interactive={interactive} accent={accent} fg={proFg} font={font} compact={compact} />
         )}
@@ -1689,9 +1792,13 @@ function StyleCardPreview({
                   {countdownNote}
                 </div>
               )}
-              <PreviewButton {...allowBtnCommon} interactive={interactive}>
-                <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
-              </PreviewButton>
+              {busy ? (
+                <StatusCard step={step} accent={accent} font={font} />
+              ) : (
+                <PreviewButton {...allowBtnCommon} interactive={interactive}>
+                  <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
+                </PreviewButton>
+              )}
               {(emailFieldEnabled || waFieldEnabled) && (
                 <OfferButton interactive={interactive} accent={accent} fg={fg} font={font} compact={compact} />
               )}
@@ -1752,9 +1859,13 @@ function StyleCardPreview({
                 inputBg="#f9fafb" inputFg={fg} inputBorder="#e5e7eb" borderRadius={12}
                 fieldPad="11px 14px" fieldFontSize={13} fieldBorderWidth={1.5} />
             )}
-            <PreviewButton {...allowBtnCommon} interactive={interactive}>
-              <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
-            </PreviewButton>
+            {busy ? (
+              <StatusCard step={step} accent={accent} font={font} />
+            ) : (
+              <PreviewButton {...allowBtnCommon} interactive={interactive}>
+                <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
+              </PreviewButton>
+            )}
             {(emailFieldEnabled || waFieldEnabled) && (
               <OfferButton interactive={interactive} accent={accent} fg={fg} font={font} compact={compact} />
             )}
@@ -1842,10 +1953,12 @@ function ClassicPreview({
   // — Split and Card now respect ctaStyle's full 5-variant look, same as
   // the storefront (previously this preview hardcoded a 10px/13px look
   // that ignored most of getCtaStyle's own output).
-  const allowBtnEl = (
+  const allowBtnEl = busy ? (
+    <StatusCard step={step} accent={accent} font={font} />
+  ) : (
     <PreviewButton {...allowBtnProps} interactive={interactive}
       style={{ ...getAllowButtonStyle(accent, cfg.ctaStyle), fontFamily: font, lineHeight: 1.2,
-        cursor: busy ? 'not-allowed' : 'pointer', opacity: busy ? 0.8 : 1 }}>
+        cursor: 'pointer', opacity: 1 }}>
       <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
     </PreviewButton>
   );
@@ -3406,6 +3519,9 @@ export default function Settings({ shop }) {
         // customer's does.
         '@keyframes ccfPreviewSpin{to{transform:rotate(360deg);}}' +
         '.ccf-preview-spin{animation:ccfPreviewSpin 0.9s linear infinite;}' +
+        '@keyframes ccfOrbitSpin{to{transform:rotate(360deg);}}' +
+        '.ccf-status-orbit{animation:ccfOrbitSpin 2.2s linear infinite;}' +
+        '@media (prefers-reduced-motion:reduce){.ccf-status-orbit{animation:none;}}' +
         // popup-customizer-2col: single column below ~900px (today's
         // layout), two columns above it. Rows opt into full-width via
         // .ccf-settings-full; group headings sit outside the grid so they

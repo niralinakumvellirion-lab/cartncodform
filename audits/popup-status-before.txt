@@ -1,0 +1,188 @@
+POPUP STATUS CARD — PRE-EDIT AUDIT (Step 0)
+2026-10-09
+============================================================
+
+FILES SEARCHED
+  extensions/cartncodform-embed/assets/ccf-push.js
+  frontend/app/admin/screens/Settings.jsx
+============================================================
+
+1. EVERY PLACE WHERE THE BUTTON LABEL BECOMES "Setting up..." OR "Subscribed!"
+============================================================
+
+A. ccf-push.js — STAGE 1: "Setting up..."
+------------------------------------------
+Function : allow.addEventListener('click', ...) inside showSoftPrompt()
+Line     : 2402
+Code     :
+  allow.disabled = true;
+  ccfSetLabel(allow, 'loader', 'Setting up...');   // ← sets innerHTML = spin icon + escaped text
+  allow.style.opacity = '0.8';
+  allow.style.cursor = 'not-allowed';
+Button styling at this point:
+  ccfAllowButtonStyle(accent, cfg.ctaStyle) — gradient/outlined/soft/pill full-width button.
+  Specific properties changed: disabled=true, opacity=0.8, cursor=not-allowed.
+  Background is NOT changed here (stays as original gradient/accent).
+What stays enabled:
+  deny (#ccf-deny-btn) — NOT disabled
+  offerBtn (#ccf-offer-btn) — NOT disabled
+  email input (#ccf-email-input) — NOT disabled
+  WA fields (#ccf-wa-country, #ccf-wa-phone, #ccf-wa-consent) — NOT disabled
+  All inputs remain fully interactive in the "Setting up..." state TODAY.
+
+B. ccf-push.js — STAGE 2a: "Getting your discount..." (already-subscribed / capture path)
+------------------------------------------------------------------------------------------
+Function : allow.addEventListener('click', ...) → granted-path branch (Notification.permission === 'granted')
+Line     : 2413
+Code     :
+  ccfSetLabel(allow, 'check', 'Getting your discount...');
+  allow.style.background = '#16a34a';
+Button styling at this point:
+  background changed to green #16a34a.
+  opacity and cursor stay at 0.8 / not-allowed from Stage 1.
+What stays enabled: same as Stage 1 (deny/inputs still not disabled).
+
+C. ccf-push.js — STAGE 2b: "Subscribed! Getting your discount..." / "Subscribed!"
+----------------------------------------------------------------------------------
+Function : allow.addEventListener('click', ...) → normal new-subscriber path (after push granted)
+Lines    : 2476–2479
+Code     :
+  ccfSetLabel(allow, 'check', wantsDiscount
+    ? 'Subscribed! Getting your discount...'
+    : 'Subscribed!');
+  allow.style.background = '#16a34a';
+Same button-styling changes as 2a.
+What stays enabled: same as Stage 1.
+
+D. ccf-push.js — Redirecting... (after discount generated)
+------------------------------------------------------------
+Lines    : 2439, 2503 (both call finishDiscount)
+Code     : if (d && d.code) ccfSetLabel(allow, 'gift', 'Redirecting...');
+NOTE: This is NOT one of the two target states. finishDiscount/renderDiscountCode
+replaces #ccf-content-section (which contains allow), so this label flashes briefly
+before the DOM node is replaced. Not within scope of this task.
+
+E. ccf-push.js — offerBtn "Saving..."  (capture-only / secondary CTA)
+----------------------------------------------------------------------
+Function : offerBtn.addEventListener('click', ...) inside showSoftPrompt()
+Lines    : 2559-2568
+Code     :
+  var origOfferText = offerBtn.textContent;
+  offerBtn.disabled = true;
+  if (allow) allow.disabled = true;
+  offerBtn.textContent = 'Saving...';   // ← NOT a targeted state, but runs in capture-only mode
+  function resetOfferBtn() { offerBtn.disabled = false; if (allow) allow.disabled = false;
+    offerBtn.textContent = origOfferText; }
+NOTE: "Saving..." label is NOT "Setting up…" — it is a SEPARATE label used when the
+offer button (secondary CTA) is clicked. In capture-only mode this IS the promoted
+primary CTA. Spec says "Same card and same behaviour in capture-only mode" — changes
+required for the isCaptureOnly offerBtn path.
+
+============================================================
+
+2. BUTTON STYLING IN EACH STATE (today, before edits)
+============================================================
+
+Normal (prompt):
+  ccfAllowButtonStyle(accent, cfg.ctaStyle):
+  - Gradient: `background:linear-gradient(135deg,ACCENT,ACCENTdd); color:#fff; border:none;`
+  - Outlined: `color:ACCENT; background:transparent; border:1.5px solid ACCENT;`
+  - Soft: `color:ACCENT; background:ACCENT1f; border:none;`
+  - All: `display:block; width:100%; padding:14px; font-size:15px; font-weight:700;
+          border-radius:RADIUS; cursor:pointer; letter-spacing:0.3px; margin-bottom:10px;`
+  Compact variant: `width:auto; padding:8px 16px; font-size:13px; no margin-bottom`
+
+Setting up...:
+  Same button element, same background/border/radius (NO background change).
+  disabled=true, opacity=0.8, cursor=not-allowed.
+  innerHTML = spin-icon SVG + "Setting up..." text.
+
+Subscribed! / Getting your discount...:
+  Same button element.
+  background changed to '#16a34a' (solid green).
+  disabled=true, opacity=0.8, cursor=not-allowed (set at Stage 1, not reset).
+  innerHTML = check-icon SVG + label text.
+
+============================================================
+
+3. admin Settings.jsx — SAME TWO STATES IN THE PREVIEW
+============================================================
+
+The admin preview DOES render these two states. Confirmed at lines 266-282.
+
+AllowButtonLabel component (line 270-283):
+  step === 'setting_up' → <><Icon name="loader" size={14} style={{marginRight:6}} />Setting up...</>
+  step === 'subscribed' → <><Icon name="check" size={14} style={{marginRight:6}} />
+                             {wantsDiscount ? 'Subscribed! Getting your discount...' : 'Subscribed!'}</>
+  Otherwise → allowText
+
+PreviewButton with allowBtnCommon (line 1229-1238):
+  disabled: busy  (busy = step === 'setting_up' || step === 'subscribed')
+  cursor: busy ? 'not-allowed' : 'pointer'
+  opacity: busy ? 0.8 : 1
+
+Same allowBtnCommon is spread into <PreviewButton> at:
+  - bottom_sheet     line ~1309
+  - story_card       line ~1412
+  - spotlight/noir/color_block  line ~1482 (with style overrides)
+  - flash_sale       line ~1692
+  - gift_reveal      line ~1755
+  - ClassicPreview   line ~1845  (allowBtnEl — defined once, used in card/split branches)
+
+ALL of the above need to render the new StatusCard when busy.
+
+============================================================
+
+4. WHAT IS CURRENTLY ENABLED WHILE BUSY (summary)
+============================================================
+
+Today, in both "Setting up..." and "Subscribed!" states:
+  #ccf-allow-btn    : disabled=true, opacity=0.8, cursor=not-allowed
+  #ccf-deny-btn     : STILL ENABLED (no change)
+  #ccf-offer-btn    : STILL ENABLED (no change)
+  #ccf-email-input  : STILL ENABLED (not disabled)
+  #ccf-wa-country   : STILL ENABLED
+  #ccf-wa-phone     : STILL ENABLED
+  #ccf-wa-consent   : STILL ENABLED
+
+Spec requirement: disable all of the above during busy states.
+
+============================================================
+
+5. GUARD AGAINST DOUBLE SUBMIT
+============================================================
+
+Today: `allow.disabled = true` at Stage 1 prevents a second click executing the
+handler body, because `disabled` prevents native click events on buttons.
+However, `allow.disabled` is checked inside the handler itself (not at the top).
+The spec requires an explicit early-return guard.
+
+============================================================
+
+6. FAILURE / RESET PATHS (current)
+============================================================
+
+resetButton() (line 2392-2398):
+  allow.disabled = false
+  allow.textContent = originalButtonText
+  allow.style.opacity = '1'
+  allow.style.cursor = 'pointer'
+  allow.style.background = originalButtonBg
+  Called on:
+    - .catch at line 2443 (granted-path subscribe fail)
+    - .catch at line 2506 (discount fetch after subscribe)
+    - .catch at line 2523 (full allow-flow failure)
+  NOT called on:
+    - push denied (cleanup() called instead — popup removed)
+    - finishDiscount (section swap — DOM removed)
+    - d.code === null (allow.disabled=true, setTimeout(cleanup,3000))
+
+resetOfferBtn() (line 2564-2568):
+  offerBtn.disabled = false
+  if (allow) allow.disabled = false
+  offerBtn.textContent = origOfferText
+  Called on:
+    - .catch in offerBtn handler
+    - else branch (unrecognised action)
+
+============================================================

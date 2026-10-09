@@ -351,6 +351,116 @@
     el.innerHTML = ccfIcon(iconKey, 16, true) + ccfEscapeHtml(text);
   }
 
+  // Parse a CSS hex colour (#rgb or #rrggbb) → [r,g,b] array, or null.
+  function ccfParseHex(hex) {
+    var h = (hex || '').replace('#', '');
+    if (h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+    if (h.length !== 6) return null;
+    var r = parseInt(h.slice(0, 2), 16);
+    var g = parseInt(h.slice(2, 4), 16);
+    var b = parseInt(h.slice(4, 6), 16);
+    if (isNaN(r) || isNaN(g) || isNaN(b)) return null;
+    return [r, g, b];
+  }
+
+  // Build the status card DOM element that replaces the allow/offer button
+  // during "Setting up…" and "Subscribed!" busy states.
+  // state: 'setting_up' | 'subscribed'
+  // accentHex: the button's accent colour (for setting_up palette derivation)
+  // font: font-family string
+  function ccfBuildStatusCard(state, accentHex, font) {
+    var isSetup = state === 'setting_up';
+    var rgb = ccfParseHex(accentHex);
+    var trackColor, tintColor, titleColor, subtitleColor, badgeColor, orR, orG, orB;
+
+    if (!isSetup) {
+      trackColor = '#b7e4c7'; tintColor = '#ecfdf3';
+      titleColor = '#14532d'; subtitleColor = '#3b6b4e';
+      badgeColor = '#15803d'; orR = 21; orG = 128; orB = 61;
+    } else if (rgb) {
+      var mix = function (ch, w) { return Math.round(ch * w + 255 * (1 - w)); };
+      var drk = function (ch, by) { return Math.round(ch * (1 - by)); };
+      trackColor = 'rgb(' + mix(rgb[0], 0.22) + ',' + mix(rgb[1], 0.22) + ',' + mix(rgb[2], 0.22) + ')';
+      tintColor = 'rgb(' + mix(rgb[0], 0.10) + ',' + mix(rgb[1], 0.10) + ',' + mix(rgb[2], 0.10) + ')';
+      titleColor = 'rgb(' + drk(rgb[0], 0.55) + ',' + drk(rgb[1], 0.55) + ',' + drk(rgb[2], 0.55) + ')';
+      subtitleColor = 'rgb(' + drk(rgb[0], 0.35) + ',' + drk(rgb[1], 0.35) + ',' + drk(rgb[2], 0.35) + ')';
+      badgeColor = accentHex; orR = rgb[0]; orG = rgb[1]; orB = rgb[2];
+    } else {
+      trackColor = '#e3cfe0'; tintColor = '#f7eff6';
+      titleColor = '#4a1f45'; subtitleColor = '#6b4a67';
+      badgeColor = '#7a3b74'; orR = 122; orG = 59; orB = 116;
+    }
+    var ff = font || 'inherit';
+
+    var card = document.createElement('div');
+    card.id = 'ccf-status-card';
+    card.setAttribute('role', 'status');
+    card.setAttribute('aria-live', 'polite');
+    card.style.cssText = 'position:relative;overflow:hidden;box-sizing:border-box;width:100%;' +
+      'border-radius:12px;padding:2px;background:' + trackColor + ';margin-bottom:10px;' +
+      (isSetup ? 'cursor:progress;' : '');
+
+    var orbit = document.createElement('span');
+    orbit.className = 'ccf-status-orbit';
+    orbit.style.cssText = 'position:absolute;left:50%;top:50%;width:420px;height:420px;' +
+      'margin:-210px 0 0 -210px;pointer-events:none;display:block;' +
+      'background:conic-gradient(from 0deg,' +
+      'rgba(' + orR + ',' + orG + ',' + orB + ',0) 0deg,' +
+      'rgba(' + orR + ',' + orG + ',' + orB + ',0) 230deg,' +
+      'rgba(' + orR + ',' + orG + ',' + orB + ',1) 360deg);';
+    card.appendChild(orbit);
+
+    var inner = document.createElement('div');
+    inner.style.cssText = 'position:relative;min-height:60px;border-radius:10px;background:' + tintColor + ';' +
+      'padding:10px 14px;display:flex;align-items:center;gap:12px;box-sizing:border-box;';
+    card.appendChild(inner);
+
+    var badge = document.createElement('div');
+    badge.style.cssText = 'width:34px;height:34px;border-radius:50%;flex:none;flex-shrink:0;' +
+      'background:' + badgeColor + ';display:flex;align-items:center;justify-content:center;';
+    inner.appendChild(badge);
+
+    var iconOpen = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24"' +
+      ' fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
+
+    var iconWrap = document.createElement('span');
+    if (isSetup) {
+      iconWrap.className = 'ccf-spin';
+      iconWrap.style.cssText = 'display:flex;align-items:center;justify-content:center;';
+      // Inner SVG: track circle (rgba white 0.35) + arc (white), spin applied to wrapper
+      iconWrap.innerHTML = iconOpen +
+        ' stroke-width="2" style="display:block;transform-origin:9px 9px;">' +
+        '<circle cx="12" cy="12" r="9" stroke="rgba(255,255,255,0.35)" stroke-width="2" fill="none"/>' +
+        '<path d="M21 12a9 9 0 1 1-6.219-8.56" stroke="#ffffff" stroke-width="2" fill="none"/>' +
+        '</svg>';
+    } else {
+      iconWrap.style.cssText = 'display:flex;align-items:center;justify-content:center;';
+      iconWrap.innerHTML = iconOpen +
+        ' stroke="#ffffff" stroke-width="2.8" style="display:block;">' +
+        '<path d="M5 12.5l4.5 4.5L19 7.5" fill="none"/>' +
+        '</svg>';
+    }
+    badge.appendChild(iconWrap);
+
+    var textCol = document.createElement('div');
+    textCol.style.cssText = 'min-width:0;display:flex;flex-direction:column;gap:2px;';
+    inner.appendChild(textCol);
+
+    var titleEl = document.createElement('div');
+    titleEl.style.cssText = 'font-size:15px;line-height:20px;font-weight:600;' +
+      'color:' + titleColor + ';font-family:' + ff + ';';
+    titleEl.textContent = isSetup ? 'Setting up…' : 'Subscribed!';
+    textCol.appendChild(titleEl);
+
+    var subtitleEl = document.createElement('div');
+    subtitleEl.style.cssText = 'font-size:13px;line-height:18px;font-weight:400;' +
+      'color:' + subtitleColor + ';font-family:' + ff + ';';
+    subtitleEl.textContent = isSetup ? 'Just a moment' : 'Getting your discount…';
+    textCol.appendChild(subtitleEl);
+
+    return card;
+  }
+
   // popup-style: format a real remaining duration (ms, already known to be
   // > 0) as text. Never called with a fabricated per-visitor duration —
   // see ccfResolveStyle()'s countdownSource handling below.
@@ -572,6 +682,15 @@
       }
       .ccf-spin {
         animation: ccfSpin 0.9s linear infinite;
+      }
+      @keyframes ccfOrbitSpin {
+        to { transform: rotate(360deg); }
+      }
+      .ccf-status-orbit {
+        animation: ccfOrbitSpin 2.2s linear infinite;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .ccf-status-orbit { animation: none; }
       }
       .ccf-discount-badge {
         animation: ccfBounce 2s ease infinite;
@@ -2331,6 +2450,25 @@
       ? false
       : ccfDiscountEnabled();
 
+    // Shared helper: disable/enable all interactive elements (except the
+    // main CTA itself) while the status card is visible.
+    function ccfSetPopupBusyInputs(disabled) {
+      var dEl = document.getElementById('ccf-deny-btn');
+      var oEl = document.getElementById('ccf-offer-btn');
+      var fBox = document.getElementById('ccf-discount-fields');
+      var eEl = document.getElementById('ccf-email-input');
+      var wcEl = document.getElementById('ccf-wa-country');
+      var wpEl = document.getElementById('ccf-wa-phone');
+      var wkEl = document.getElementById('ccf-wa-consent');
+      if (dEl) { dEl.disabled = disabled; dEl.style.opacity = disabled ? '0.6' : ''; dEl.style.cursor = disabled ? 'not-allowed' : ''; }
+      if (oEl) { oEl.disabled = disabled; oEl.style.opacity = disabled ? '0.4' : ''; oEl.style.cursor = disabled ? 'not-allowed' : ''; }
+      if (fBox) fBox.style.opacity = disabled ? '0.55' : '';
+      if (eEl) eEl.disabled = disabled;
+      if (wcEl) wcEl.disabled = disabled;
+      if (wpEl) wpEl.disabled = disabled;
+      if (wkEl) wkEl.disabled = disabled;
+    }
+
     function cleanup() {
       if (promptAutoDismissTimer) { clearTimeout(promptAutoDismissTimer); promptAutoDismissTimer = null; }
       if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
@@ -2382,26 +2520,38 @@
     }
 
     allow.addEventListener('click', function () {
+      if (allow.disabled) return; // Guard: ignore while busy
       // Read and validate the capture inputs BEFORE any teardown.
       var _cap = ccfReadCaptureInputs();
       var email = _cap.email, waPhone = _cap.waPhone, waCountry = _cap.waCountry;
 
       var originalButtonText = allow.textContent;
       var originalButtonBg = allow.style.background;
+      var _allowCard = null;
+
+      function showBusyCard(state) {
+        if (_allowCard && _allowCard.parentNode) _allowCard.parentNode.removeChild(_allowCard);
+        _allowCard = ccfBuildStatusCard(state, accent, font);
+        allow.style.display = 'none';
+        if (allow.parentNode) allow.parentNode.insertBefore(_allowCard, allow.nextSibling);
+        ccfSetPopupBusyInputs(true);
+      }
 
       function resetButton() {
+        if (_allowCard && _allowCard.parentNode) _allowCard.parentNode.removeChild(_allowCard);
+        _allowCard = null;
+        allow.style.display = '';
         allow.disabled = false;
         allow.textContent = originalButtonText;
         allow.style.opacity = '1';
         allow.style.cursor = 'pointer';
         allow.style.background = originalButtonBg;
+        ccfSetPopupBusyInputs(false);
       }
 
       // Stage 1: immediate feedback — keep the popup open while we work.
       allow.disabled = true;
-      ccfSetLabel(allow, 'loader', 'Setting up...');
-      allow.style.opacity = '0.8';
-      allow.style.cursor = 'not-allowed';
+      showBusyCard('setting_up');
 
       // Already-subscribed customer (discount-capture path) — there's no
       // native permission prompt to show, so skip requestPermission()
@@ -2410,8 +2560,7 @@
         var capAction = 'push';
         if (email) capAction = 'email';
 
-        ccfSetLabel(allow, 'check', 'Getting your discount...');
-        allow.style.background = '#16a34a';
+        showBusyCard('subscribed');
 
         registerSW()
           .then(function (reg) { return getToken(reg); })
@@ -2436,7 +2585,6 @@
               })
               .then(function (r) { return r.json(); })
               .then(function (d) {
-                if (d && d.code) ccfSetLabel(allow, 'gift', 'Redirecting...');
                 finishDiscount(d, capAction);
               });
           })
@@ -2473,10 +2621,7 @@
           .then(function () { setupForegroundMessages(); })
           .then(function () {
             // Stage 2: subscribed.
-            ccfSetLabel(allow, 'check', wantsDiscount
-              ? 'Subscribed! Getting your discount...'
-              : 'Subscribed!');
-            allow.style.background = '#16a34a';
+            showBusyCard('subscribed');
 
             if (!wantsDiscount) {
               setTimeout(cleanup, 900);
@@ -2500,7 +2645,6 @@
               .then(function (d) {
                 // Stage 3: discount generated — renderDiscountCode swaps the
                 // content section right after this, via finishDiscount().
-                if (d && d.code) ccfSetLabel(allow, 'gift', 'Redirecting...');
                 finishDiscount(d, action);
               })
               .catch(function () {
@@ -2539,6 +2683,7 @@
 
     if (offerBtn) {
       offerBtn.addEventListener('click', function () {
+        if (offerBtn.disabled) return; // Guard: ignore while busy
         var _ofCap = ccfReadCaptureInputs();
         var ofEmail = _ofCap.email, ofWaPhone = _ofCap.waPhone, ofWaCountry = _ofCap.waCountry;
 
@@ -2557,14 +2702,29 @@
 
         var ofAction = ofEmail ? 'email' : 'whatsapp';
         var origOfferText = offerBtn.textContent;
+        var _ofCard = null;
         offerBtn.disabled = true;
         if (allow) allow.disabled = true;
-        offerBtn.textContent = 'Saving...';
+
+        if (isCaptureOnly) {
+          // In capture-only mode offerBtn is the promoted primary CTA — show
+          // the same status card pattern as the allow button.
+          _ofCard = ccfBuildStatusCard('setting_up', accent, font);
+          offerBtn.style.display = 'none';
+          if (offerBtn.parentNode) offerBtn.parentNode.insertBefore(_ofCard, offerBtn.nextSibling);
+          ccfSetPopupBusyInputs(true);
+        } else {
+          offerBtn.textContent = 'Saving...';
+        }
 
         function resetOfferBtn() {
+          if (_ofCard && _ofCard.parentNode) _ofCard.parentNode.removeChild(_ofCard);
+          _ofCard = null;
+          offerBtn.style.display = '';
           offerBtn.disabled = false;
           if (allow) allow.disabled = false;
           offerBtn.textContent = origOfferText;
+          if (isCaptureOnly) ccfSetPopupBusyInputs(false);
         }
 
         fetch('/cart.js')

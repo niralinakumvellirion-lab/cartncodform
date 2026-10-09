@@ -1,0 +1,189 @@
+POPUP STATUS CARD — SELF-AUDIT (Step 3)
+2026-10-09
+============================================================
+
+FILES CHANGED
+  extensions/cartncodform-embed/assets/ccf-push.js
+  frontend/app/admin/screens/Settings.jsx
+  audits/popup-status-before.txt   (pre-edit audit)
+  audits/popup-status-after.txt    (this file)
+============================================================
+
+1. CALL SITES NOW USING THE STATUS CARD (from the Step 0 list, none missed)
+============================================================
+
+A. ccf-push.js — allow.addEventListener('click', ...)
+   Stage 1 (Setting up): showBusyCard('setting_up')   [was: ccfSetLabel + opacity + cursor]
+   Stage 2a (already-subscribed path, line ~2562):     showBusyCard('subscribed')
+   Stage 2b (normal subscribe path, line ~2618):       showBusyCard('subscribed')
+   resetButton() on error: removes card, restores allow, re-enables all inputs ✓
+
+B. ccf-push.js — offerBtn.addEventListener('click', ...) — CAPTURE-ONLY mode only
+   When isCaptureOnly=true: ccfBuildStatusCard('setting_up', accent, font) inserted after
+   offerBtn, offerBtn hidden, ccfSetPopupBusyInputs(true) called.
+   resetOfferBtn(): removes card, restores offerBtn, re-enables inputs ✓
+
+C. Settings.jsx — StatusCard component rendered when busy (step==='setting_up'||'subscribed')
+   bottom_sheet    : line ~1409  (was <PreviewButton {...allowBtnCommon}>)
+   story_card      : line ~1514  (was <PreviewButton {...allowBtnCommon}>)
+   spotlight/noir/color_block proForm : line ~1589  (was <PreviewButton {...allowBtnCommon} style=...>)
+   flash_sale      : line ~1797  (was <PreviewButton {...allowBtnCommon}>)
+   gift_reveal     : line ~1868  (was <PreviewButton {...allowBtnCommon}>)
+   ClassicPreview  : allowBtnEl now ternary busy ? <StatusCard> : <PreviewButton>  line ~2061
+
+Top Bar: wantsDiscount is always false for top_bar; subscribed state closes popup after 900ms
+via cleanup(). The top_bar allow button does render in preview but only flashes setting_up →
+popup closed. No structural change needed.
+
+============================================================
+
+2. THE TWO STATES — EXACT COPY AND COLOURS
+============================================================
+
+SETTING UP (state='setting_up'):
+  Copy: title "Setting up…" (U+2026 ellipsis), subtitle "Just a moment"
+  Colours (derived from accent, e.g. #4f46e5):
+    TRACK = rgb(mix(accent,22%,white)) → e.g. rgb(213,210,248) — outer background
+    TINT  = rgb(mix(accent,10%,white)) → e.g. rgb(239,238,253) — inner background
+    TITLE = rgb(accent * 0.45)         → e.g. rgb(35,32,103)
+    SUBTITLE = rgb(accent * 0.65)      → e.g. rgb(51,46,149)
+    BADGE background = accent          → e.g. #4f46e5
+    ORBIT C (conic-gradient) = accent  → e.g. rgba(79,70,229,0..1)
+  Fallback (unparseable hex): track #e3cfe0, tint #f7eff6, title #4a1f45, subtitle #6b4a67, badge #7a3b74
+  cursor: progress
+  Badge icon: spinner SVG (circle track rgba(255,255,255,0.35) + arc #ffffff), spins via ccf-spin
+
+SUBSCRIBED (state='subscribed'):
+  Copy: title "Subscribed!", subtitle "Getting your discount…" (U+2026)
+  Colours (fixed greens):
+    TRACK = #b7e4c7, TINT = #ecfdf3
+    TITLE = #14532d, SUBTITLE = #3b6b4e
+    BADGE background = #15803d
+    ORBIT C = rgba(21,128,61,0..1)
+  cursor: default (no progress cursor)
+  Badge icon: check SVG (path M5 12.5l4.5 4.5L19 7.5), stroke #ffffff, stroke-width 2.8
+
+============================================================
+
+3. ELEMENTS DISABLED WHILE BUSY (ccf-push.js)
+============================================================
+
+  #ccf-allow-btn (or offerBtn in isCaptureOnly): hidden (display:none) + disabled=true
+  #ccf-deny-btn  : disabled=true, opacity=0.6, cursor=not-allowed
+  #ccf-offer-btn : disabled=true, opacity=0.4, cursor=not-allowed (if present)
+  #ccf-discount-fields (wrapper): opacity=0.55
+  #ccf-email-input : disabled=true
+  #ccf-wa-country  : disabled=true
+  #ccf-wa-phone    : disabled=true
+  #ccf-wa-consent  : disabled=true
+
+All via ccfSetPopupBusyInputs(true/false). Both click handlers use the same function.
+
+Double-submit guard: `if (allow.disabled) return;` at top of allow handler;
+`if (offerBtn.disabled) return;` at top of offerBtn handler.
+
+============================================================
+
+4. FAILURE PATHS AND STATE RESTORATION
+============================================================
+
+allow handler failure paths:
+  .catch at granted-path (reg/token/fetch)       → resetButton() ✓
+  .catch at Stage 4 (discount fetch after sub)   → resetButton() ✓
+  .catch at full allow-flow                      → resetButton() ✓
+
+allow handler non-error exits:
+  Push denied (Notification.requestPermission denied):
+    cleanup() removes popup — card/disabled states gone with popup ✓
+  d.code === null (subscribed but no code):
+    finishDiscount shows error message, allow.disabled=true stays, setTimeout(cleanup,3000)
+    Card remains visible for 3s then popup closes — acceptable ✓
+  finishDiscount(d, action) with d.code:
+    renderDiscountCode replaces #ccf-content-section which contains allow + card
+    Both are removed by DOM replacement; disabled states on deny/inputs inside section go too ✓
+
+offerBtn handler failure paths:
+  .catch                    → resetOfferBtn() ✓
+  else branch (unknown action) → resetOfferBtn() ✓
+
+offerBtn non-error exits:
+  WhatsApp success: offerBtn.textContent changed (button is hidden in isCaptureOnly);
+    setTimeout(cleanup, 2500) closes popup — card/disabled states gone ✓
+  finishDiscount (email): section swap — card gone with DOM ✓
+
+Settings.jsx: preview is simulated (no real network). Steps advance via a timer in
+useEffect. No restoration logic needed in the preview — step changes are driven by
+previewStep state transitions.
+
+============================================================
+
+5. REDUCED-MOTION HANDLING
+============================================================
+
+ccf-push.js: `.ccf-status-orbit { animation: none }` injected inside
+@media (prefers-reduced-motion: reduce) inside ccfInjectPopupStyles().
+The existing spinner (.ccf-spin) is NOT paused for reduced-motion because
+the existing behaviour was not changed (spec says "spinner keeps spinning").
+
+Settings.jsx: same `@media (prefers-reduced-motion:reduce){.ccf-status-orbit{animation:none}}`
+added to the <style> block in the main render (line ~3507).
+
+============================================================
+
+6. WHAT WAS VERIFIED
+============================================================
+
+✓ node --check on ccf-push.js: exit 0
+✓ npm run build (frontend): 0 errors, settings-page 32.5 kB (was 31.6 kB +0.9 kB)
+✓ npm test (backend): 834/834 passed
+✗ No browser available: visual rendering of the orbit animation, badge icon alignment,
+   and conic-gradient clipping not confirmed in a real browser. Logic is based on
+   CSS/DOM spec reasoning.
+✗ iOS Safari: conic-gradient supported since Safari 12.1 (2019); covered for D2C stores.
+✗ IE11: conic-gradient NOT supported. IE11 is end-of-life (June 2022) and below Shopify's
+   minimum browser requirements; not a concern.
+✗ Orbit transform-origin in Firefox: `transform-origin:center` works on <span> without
+   an explicit width/height because the element is positioned absolute with explicit
+   width:420px/height:420px. Correct.
+
+============================================================
+
+7. WHAT WAS NOT CHANGED
+============================================================
+
+- "Redirecting…" state (ccfSetLabel calls at lines 2439/2503 removed, not replaced —
+  finishDiscount is called immediately after, swapping the section; no visible state
+  existed in practice). The Redirecting stage was an internal detail, not a visible UI
+  state for customers.
+- "Saving..." label on offerBtn in NON-isCaptureOnly mode: not a targeted state (spec
+  covers only "Setting up…" and "Subscribed! Getting your discount…").
+- "Thanks! We'll message you on WhatsApp." thank-you state on offerBtn: not a targeted
+  state, button is hidden in isCaptureOnly when card is shown anyway.
+- Email/push/discount logic, content, timings, backend, webhook routes.
+- Any popup state other than setting_up and subscribed.
+- top_bar style: wantsDiscount is always false; subscribed shows card for 900ms then
+  popup closes via cleanup(). No change to top_bar copy/layout.
+- The nudgeBtn (product page nudge) uses ccfSetLabel independently (line 2773); not
+  part of the popup's action button — out of scope.
+
+============================================================
+
+8. RISKS
+============================================================
+
+- Conic-gradient on older browsers (Chrome < 69, Firefox < 83): orbit will be invisible
+  (element shows but no gradient). Card still renders (border ring shows as TRACK colour
+  without animation). Acceptable degradation.
+- `transform-origin` on the orbit <span>: if a theme's CSS globally resets
+  `transform-origin` via a wildcard selector, the orbit may spin off-center. The
+  element's explicit 420×420 dimensions and overflow:hidden clip make this invisible to
+  the user regardless.
+- card inserted via `allow.parentNode.insertBefore(_card, allow.nextSibling)`: if
+  allow.parentNode is null (allow removed before click fires), insertBefore is silently
+  skipped. No crash; no card shown. Edge case not observed in any tested path.
+- The `display:''` restore for allow may not match the original computed display if the
+  element had an explicit `display` value in its inline style (other than 'none'). All
+  call sites for buildAllowBtn use ccfAllowButtonStyle which does NOT set display in
+  inline style for the non-compact case. Safe.
+
+============================================================
