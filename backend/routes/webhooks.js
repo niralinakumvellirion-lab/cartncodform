@@ -423,13 +423,14 @@ async function handleCustomersDataRequest(req, res) {
       .toString().trim().toLowerCase();
     const customerId = req.body.customer?.id ? String(req.body.customer.id) : null;
     const customerEmail = req.body.customer?.email || null;
+    const customerPhone = req.body.customer?.phone || null;
 
     console.log(`[gdpr] customers/data_request for shop ${shopDomain}, customer ${customerId || customerEmail || 'unknown'}`);
 
     // Log what data we hold for this customer, for manual fulfillment
     // if the merchant needs it. We do not have a customer support
     // channel to auto-deliver this, so we surface it in logs.
-    if (customerId || customerEmail) {
+    if (customerId || customerEmail || customerPhone) {
       const query = { shopDomain };
       if (customerId) query.customerId = customerId;
       else if (customerEmail) query.email = customerEmail.toLowerCase();
@@ -437,12 +438,21 @@ async function handleCustomersDataRequest(req, res) {
       const profileOr = [];
       if (customerId) profileOr.push({ 'identifiers.customerId': customerId });
       if (customerEmail) profileOr.push({ 'identifiers.emails': customerEmail.toLowerCase() });
+      if (customerPhone) profileOr.push({ 'identifiers.phones': customerPhone });
 
-      const [carts, events, profiles] = await Promise.all([
+      const codOrClauses = [];
+      if (customerEmail) codOrClauses.push({ email: customerEmail.toLowerCase() });
+      if (customerPhone) codOrClauses.push({ phone: customerPhone });
+
+      const CodOrder = require('../models/CodOrder');
+      const [carts, events, profiles, codOrders] = await Promise.all([
         AbandonedCustomer.find(query).lean(),
         StorefrontEvent.find(customerId ? { shopDomain, customerId } : {}).limit(100).lean(),
         profileOr.length
           ? Profile.find({ shopDomain, $or: profileOr }).lean()
+          : Promise.resolve([]),
+        codOrClauses.length
+          ? CodOrder.find({ shopDomain, $or: codOrClauses }).lean()
           : Promise.resolve([]),
       ]);
 
@@ -457,7 +467,8 @@ async function handleCustomersDataRequest(req, res) {
       // Both are already covered by the queries above via profileId linkage.
       console.log(
         `[gdpr] Data on file — AbandonedCustomer rows: ${carts.length}, StorefrontEvent rows: ${events.length}, ` +
-        `Profile rows (incl. WhatsApp channel): ${profiles.length}, ScheduledJob rows (incl. WhatsApp): ${jobs.length}`
+        `Profile rows (incl. WhatsApp channel): ${profiles.length}, ScheduledJob rows (incl. WhatsApp): ${jobs.length}, ` +
+        `CodOrder rows: ${codOrders.length}`
       );
     }
 
@@ -549,6 +560,19 @@ async function handleCustomersRedact(req, res) {
         )
       : { modifiedCount: 0 };
 
+    // CodOrder rows — anonymise PII fields (name, phone, email, address).
+    // CodOrder has no customerId; match by email and phone only.
+    const CodOrder = require('../models/CodOrder');
+    const codOrClauses = [];
+    if (customerEmail) codOrClauses.push({ email: customerEmail.toLowerCase() });
+    if (customerPhone) codOrClauses.push({ phone: customerPhone });
+    const codResult = codOrClauses.length
+      ? await CodOrder.updateMany(
+          { shopDomain, $or: codOrClauses },
+          { $set: { name: '[redacted]', phone: '[redacted]', email: '', address: '[redacted]' } }
+        )
+      : { modifiedCount: 0 };
+
     // Profile IS the customer record — channels.whatsapp (phone, consentedAt,
     // optedOutAt) is deleted with it since it's a subdocument.
     const profileResult = profileOr.length
@@ -559,7 +583,8 @@ async function handleCustomersRedact(req, res) {
     console.log(
       `[gdpr] Redacted — carts: ${cartResult.deletedCount}, events: ${eventResult.deletedCount}, ` +
       `subscriptions: ${subResult.deletedCount}, profiles (incl. WhatsApp): ${profileResult.deletedCount}, ` +
-      `jobs anonymised (incl. WhatsApp): ${jobResult.modifiedCount}`
+      `jobs anonymised (incl. WhatsApp): ${jobResult.modifiedCount}, ` +
+      `cod orders anonymised: ${codResult.modifiedCount}`
     );
 
     return res.status(200).json({ received: true });

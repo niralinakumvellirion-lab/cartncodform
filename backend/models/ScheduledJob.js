@@ -45,6 +45,7 @@ const scheduledJobSchema = new mongoose.Schema({
   // Phase G3: createdAt + updatedAt are managed by { timestamps: true } below.
   sentAt: { type: Date },
   error: { type: String },
+  purpose: { type: String, default: 'followup' }, // 'followup' | 'order' for whatsapp jobs
 }, { timestamps: true });
 
 // Compound index for the sender's poll query.

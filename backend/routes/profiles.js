@@ -204,7 +204,17 @@ router.get('/:shopDomain/profiles', requireAuth, requireStoreOwner, async (req, 
       Profile.countDocuments(query),
     ]);
 
-    return res.json({ profiles, total });
+    const profilesOut = profiles.map((p) => {
+      const wa = p.channels && p.channels.whatsapp;
+      const optedOut = !!(wa && wa.optedOutAt);
+      const hasWhatsappReachable = !optedOut && !!(
+        (wa && wa.consentedAt) ||
+        (wa && wa.phone) ||
+        (p.identifiers && p.identifiers.phones && p.identifiers.phones.length > 0)
+      );
+      return { ...p, hasWhatsappReachable };
+    });
+    return res.json({ profiles: profilesOut, total });
   } catch (err) {
     console.error('[profiles] GET profiles error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch profiles' });
@@ -230,7 +240,15 @@ router.get('/:shopDomain/profiles/:profileId', requireAuth, requireStoreOwner, a
     const signals = await Signal.find({ shopDomain: shop, profileId: profile._id })
       .sort({ strength: -1 });
 
-    return res.json({ profile, signals });
+    const wa = profile.channels && profile.channels.whatsapp;
+    const optedOut = !!(wa && wa.optedOutAt);
+    const hasWhatsappReachable = !optedOut && !!(
+      (wa && wa.consentedAt) ||
+      (wa && wa.phone) ||
+      (profile.identifiers && profile.identifiers.phones && profile.identifiers.phones.length > 0)
+    );
+
+    return res.json({ profile, signals, hasWhatsappReachable });
   } catch (err) {
     console.error('[profiles] GET profile error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch profile' });

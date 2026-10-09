@@ -1,0 +1,124 @@
+WHATSAPP STEP 1B — SELF-AUDIT
+2026-10-09
+============================================================
+
+SCOPE: order-purpose messages and CodOrder redact fix.
+Backend only. No storefront, popup, or frontend changes.
+
+============================================================
+1. backend/models/ScheduledJob.js — purpose field
+
+  Added:
+    purpose: { type: String, default: 'followup' }
+
+  Used only by WhatsApp jobs; ignored for push/email channels.
+
+============================================================
+2. backend/routes/webhooks.js — GDPR gaps closed
+
+  handleCustomersDataRequest:
+    - Extract customerPhone from req.body.customer.phone (was missing)
+    - Add CodOrder to profileOr phone lookup
+    - Inline-require CodOrder; build codOrClauses from customerEmail + customerPhone
+    - Query CodOrder.find({ shopDomain, $or: codOrClauses }).lean()
+    - Include codOrders.length in the log line
+
+  handleCustomersRedact:
+    - Inline-require CodOrder
+    - Build codOrClauses from customerEmail + customerPhone
+    - CodOrder.updateMany({ shopDomain, $or: codOrClauses },
+        { $set: { name:'[redacted]', phone:'[redacted]', email:'', address:'[redacted]' } })
+    - Anonymise (not delete) — preserves aggregate records for merchant analytics
+    - Include codResult.modifiedCount in the log line
+
+  handleShopRedact was already correct (deleteMany by shopDomain).
+
+============================================================
+3. backend/routes/whatsapp.js — purpose support
+
+  Added TZ_COUNTRY map (timezone → ISO 3166-1 alpha-2, default 'IN').
+  Added countryFromStore(store) helper.
+  Added waOrderMessage template (distinct from waFollowupMessage).
+  Added resolveOrderPhone(profile, shopDomain, defaultCountry):
+    1. channels.whatsapp.phone (E.164 already stored)
+    2. identifiers.phones[]
+    3. CodOrder rows linked by email or phone
+    4. AbandonedCustomer rows linked by email or phone
+    Returns first normalizable E.164, or null.
+
+  POST /:shopDomain/send — extended:
+    - Accepts optional body field: purpose: 'followup' | 'order' (default 'followup')
+    - followup: requires consentedAt + not optedOut (unchanged semantics)
+    - order: refuses if optedOut; resolves phone via resolveOrderPhone; 400 if no phone
+    - Job created with purpose field
+    - Returns { url, jobId, purpose }
+
+  GET /:shopDomain/stats — extended:
+    - sentFollowup = jobs where purpose is undefined or 'followup'
+    - sentOrder = jobs where purpose = 'order'
+    - sent = sentFollowup + sentOrder
+    - canMessageCount = profiles with channels.whatsapp.phone != null
+        OR identifiers.phones.0 exists (informational approximation)
+
+  GET /:shopDomain/profile/:profileId — extended:
+    - Profile select now includes identifiers (for resolveOrderPhone)
+    - canFollowup: consentedAt present + not optedOut
+    - canOrder: resolveOrderPhone succeeds + not optedOut
+    - orderReason: null | 'opted_out' | 'no_phone' | 'invalid_phone'
+    - Messages filtered to channel='whatsapp' (unchanged)
+
+  POST /:shopDomain/opt-out — unchanged.
+
+  No PII logged. All routes remain requireAuth + requireStoreOwner.
+
+============================================================
+4. backend/routes/profiles.js — hasWhatsappReachable
+
+  List route: maps over profiles array; adds hasWhatsappReachable boolean per item.
+    true when: not optedOut AND (consentedAt OR whatsapp.phone OR identifiers.phones[])
+  Detail route: computes same boolean and returns it as a top-level key.
+
+  Computed in JS (not DB query) — uses fields already returned by the existing .select().
+
+============================================================
+5. Tests
+
+  backend/__tests__/whatsapp.test.js (updated, was 14, now 32 tests):
+    /send purpose=followup: returns purpose in response
+    /send purpose=order: resolves phone from CodOrder; 400 on no phone; 400 on opted-out
+    /send unknown purpose: defaults to followup
+    /stats: sentFollowup + sentOrder breakdown; missing purpose defaults to followup
+    customers/redact: anonymises CodOrder by email; by phone
+    customers/data_request: CodOrder count in log
+    (existing tests updated: CodOrder.updateMany, StorefrontEvent.find, ScheduledJob.updateMany,
+     Profile.deleteMany added to mock factories and GDPR beforeEach)
+
+  backend/__tests__/webhooksCompliance.test.js (updated):
+    Added jest.mock('../models/CodOrder') + CodOrder mocks in beforeEach.
+
+============================================================
+6. TEST RUN
+
+  Test Suites: 45 passed, 45 total
+  Tests:       816 passed, 816 total
+
+  All green.
+
+============================================================
+7. UNCHANGED FILES (confirmed)
+
+  extensions/* — untouched
+  ccf-push.js — untouched
+  Any frontend file — untouched
+  backend/routes/discounts.js — untouched
+  backend/routes/proxy.js — untouched
+  backend/models/Profile.js — untouched
+
+============================================================
+8. WHAT WAS NOT DONE (deferred)
+
+  - Popup UI for WhatsApp phone field: Step 2
+  - Storefront ccf-push.js changes: Step 2
+  - Dashboard tab / customer detail UI: Steps 3-4
+
+============================================================

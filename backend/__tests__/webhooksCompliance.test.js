@@ -18,6 +18,7 @@ jest.mock('../models/StorefrontEvent');
 jest.mock('../models/CustomerPushSubscription');
 jest.mock('../models/Profile');
 jest.mock('../models/ScheduledJob');
+jest.mock('../models/CodOrder');
 
 const express = require('express');
 const AbandonedCustomer = require('../models/AbandonedCustomer');
@@ -25,6 +26,7 @@ const StorefrontEvent = require('../models/StorefrontEvent');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const Profile = require('../models/Profile');
 const ScheduledJob = require('../models/ScheduledJob');
+const CodOrder = require('../models/CodOrder');
 const webhooksRouter = require('../routes/webhooks');
 
 const SHOP = 'demo.myshopify.com';
@@ -58,6 +60,8 @@ beforeEach(() => {
   Profile.deleteMany.mockResolvedValue({ deletedCount: 0 });
   ScheduledJob.updateMany.mockResolvedValue({ modifiedCount: 0 });
   ScheduledJob.find.mockReturnValue({ limit: () => ({ lean: () => Promise.resolve([]) }) });
+  CodOrder.updateMany.mockResolvedValue({ modifiedCount: 0 });
+  CodOrder.find.mockReturnValue({ lean: () => Promise.resolve([]) });
   AbandonedCustomer.find.mockReturnValue({ lean: () => Promise.resolve([]) });
 });
 afterEach(() => jest.restoreAllMocks());
