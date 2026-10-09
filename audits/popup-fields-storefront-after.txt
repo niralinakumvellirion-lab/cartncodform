@@ -1,0 +1,220 @@
+POPUP: WHATSAPP FIELDS MATCH EMAIL FIELD HEIGHT AND STYLING — SELF-AUDIT
+2026-10-09
+============================================================
+Files changed:
+  extensions/cartncodform-embed/assets/ccf-push.js
+  frontend/app/admin/screens/Settings.jsx
+============================================================
+
+1. WHAT DIFFERED BEFORE (PER STYLE, FILE:LINE, VALUES)
+============================================================
+
+All mismatches are in ccfBuildWhatsappFields vs each style's email input.
+
+PROFORM (spotlight / noir / color_block)  — ccf-push.js line 1156
+  Email (line 1143):   height:48px; padding:0 16px; font-size:15px; border-radius:o.inputRadius
+  WA tel before:       baseStyle only → padding:11px 14px; font-size:13px; radius:12px; no height
+    → tel height ~41px vs email 48px  (7px SHORT)
+    → font-size 13px vs 15px
+    → border-radius always 12px vs inputRadius (999px for spotlight, 12px for others)
+    → padding 11px 14px vs 0 16px (visible text positioning differs)
+  WA select before:    padding:0 6px; no height; no chevron; radius always 12px
+
+FLASH SALE  — ccf-push.js line 1305
+  Email (line 1301):   ccfInputStyle() + background:#ffffff; border-color:#d4d4d8
+  WA tel before:       opts={} → inputBorder='#e5e7eb' (default)
+    → border color #e5e7eb vs email #d4d4d8  ✗
+
+GIFT REVEAL  — ccf-push.js line 1305
+  Email (line 1301):   ccfInputStyle() → background:#f9fafb
+  WA tel before:       opts={} → inputBg='#ffffff' (default)
+    → background #ffffff vs email #f9fafb  ✗ (minor)
+
+BOTTOM SHEET  — ccf-push.js line 1594
+  Email (line 1591):   ccfInputStyle() → background:#f9fafb
+  WA tel before:       opts={} → inputBg='#ffffff'
+    → background mismatch (minor)
+
+CLASSIC SPLIT (ccfBuildDiscountFields)  — ccf-push.js line 712
+  Email (line 709):    ccfInputStyle() → background:#f9fafb
+  WA tel before:       opts={} → inputBg='#ffffff'
+    → background mismatch (minor)
+
+CLASSIC CARD  — ccf-push.js line 2044
+  Email (line 2041):   ccfInputStyle() → background:#f9fafb
+  WA tel before:       opts={} → inputBg='#ffffff'
+    → background mismatch (minor)
+
+STORY CARD  — ccf-push.js line 1770
+  Email (line 1766):   ccfInputStyle() + background:rgba(255,255,255,0.15); border-color:rgba(255,255,255,0.3)
+  WA tel before:       opts pass inputBg/inputBorder explicitly  → ALL MATCH  ✓ (no change needed)
+
+ALL STYLES  — select had no chevron indicator (appearance:none, no arrow replacement)
+
+============================================================
+
+2. WHAT WAS CHANGED
+============================================================
+
+A. ccfBuildWhatsappFields (ccf-push.js lines 163–246 after edit)
+
+  New opts fields accepted (all optional, backward-compatible):
+    height      (number)  — explicit px height; applied to both select and tel
+    fontSize    (string)  — e.g. '15px'; appended after baseStyle, overrides '13px'
+    borderRadius (string) — e.g. '999px'; appended after baseStyle, overrides '12px'
+    telPadding  (string)  — e.g. '0 16px'; appended after baseStyle's 11px 14px
+
+  inputBg default: '#ffffff' → '#f9fafb'  (matches ccfInputStyle background)
+
+  Select: padding changed from '0 6px' to selPad = '${selVertPad} 20px ${selVertPad} 8px'
+    where selVertPad = first component of telPadding (or '11px' default).
+    Right-padding 20px accommodates the chevron; left-padding 8px gives text room.
+    'padding:0 6px' previously made the select text sit at the browser's default
+    vertical position (near top); now it matches the email's vertical padding exactly.
+
+  Select chevron: appearance:none with background-image SVG chevron
+    (path M1 1l4 4 4-4, stroke=inputFg, stroke-opacity=0.55, 10×6px)
+    built via encodeURIComponent — no DOM wrapper needed, no innerHTML.
+    background-position:right 6px center.
+
+  backgroundColor / backgroundImage / backgroundRepeat / backgroundPosition
+    replace the old `background:inputBg` shorthand so the chevron is additive.
+
+  Tel: telPad/fFontSize/fRadius/fHeight appended after baseStyle (override as needed).
+
+B. Call site changes (ccf-push.js)
+
+  Line 712  (classic/split):  {} → { inputBg: '#f9fafb' }
+  Line 1156 (proForm):        pal → explicit { fg, inputBg, inputBorder, height:48,
+                                fontSize:'15px', borderRadius:o.inputRadius, telPadding:'0 16px' }
+  Line 1305 (flash/gift):     {} → isFlashSale
+                                    ? { inputBg:'#ffffff', inputBorder:'#d4d4d8' }
+                                    : { inputBg:'#f9fafb' }
+  Line 1594 (bottom_sheet):   {} → { inputBg: '#f9fafb' }
+  Line 1770 (story_card):     UNCHANGED — already passes correct opts ✓
+  Line 2044 (classic card):   {} → { inputBg: '#f9fafb' }
+
+C. Settings.jsx WaRow call site sync (numbers only)
+
+  bottom_sheet  (~line 1289): borderRadius 8→12; fieldPad "8px 12px"→"11px 14px";
+                              add fieldFontSize=13, fieldBorderWidth=1.5, inputBg="#f9fafb"
+  story_card    (~line 1390): borderRadius 8→12; fieldPad "8px 12px"→"11px 14px";
+                              add fieldFontSize=13, fieldBorderWidth=1.5
+  spotlight/noir/color_block (~line 1459):
+                              fieldFontSize 14→15; fieldHeight 44→48
+  flash_sale    (~line 1659): borderRadius 8→12; fieldPad "8px 12px"→"11px 14px";
+                              add fieldFontSize=13, fieldBorderWidth=1.5
+  gift_reveal   (~line 1731): borderRadius 8→12; fieldPad "8px 12px"→"11px 14px";
+                              add fieldFontSize=13, fieldBorderWidth=1.5, inputBg="#f9fafb"
+  classic-card  (~line 1883): NO CHANGE — already fieldPad="11px 14px" etc. ✓
+  classic-split (~line 1913): NO CHANGE ✓
+
+============================================================
+
+3. PER-STYLE HEIGHT/RADIUS TABLE (STOREFRONT, AFTER FIX)
+============================================================
+Height = 2×borderW + 2×vertPad + fontSize × 1.2 (line-height)
+tel/select height now equals email height by construction.
+
+Style            BW     VertPad  FontSz  EmailH   TelH   SelH   Radius(email=tel=sel)
+---------------  -----  -------  ------  -------  -----  -----  -------
+classic/split    1.5px  11px     13px    ~41px    ~41px  ~41px  12px   ✓
+flash_sale       1.5px  11px     13px    ~41px    ~41px  ~41px  12px   ✓
+gift_reveal      1.5px  11px     13px    ~41px    ~41px  ~41px  12px   ✓
+bottom_sheet     1.5px  11px     13px    ~41px    ~41px  ~41px  12px   ✓
+story_card       1.5px  11px     13px    ~41px    ~41px  ~41px  12px   ✓
+classic card     1.5px  11px     13px    ~41px    ~41px  ~41px  12px   ✓
+spotlight        1.5px  n/a      15px    48px     48px   48px   999px  ✓
+noir             1.5px  n/a      15px    48px     48px   48px   12px   ✓
+color_block      1.5px  n/a      15px    48px     48px   48px   12px   ✓
+
+Select heights for non-proForm: flex-stretch (phoneRow align-items:stretch default) raises
+the select to the tel's height. selPad='11px 20px 11px 8px' sets the same vertical padding
+as the email, so the select's INTRINSIC height also matches (~41px). Flex-stretch confirms it.
+
+For proForm: fHeight=48 → explicit height:48px on both select and tel. ✓
+
+============================================================
+
+4. GOLDEN RULE: FLAG-OFF PATH UNCHANGED
+============================================================
+ccf-push.js line 167 (unchanged):
+  if (!ccfShowWhatsappField()) return;
+All changes are inside the body after that return. When the flag is off the function
+returns immediately and no DOM is touched. The email field, buttons, triggers, push
+logic, and all other popup code are unchanged. ✓
+
+============================================================
+
+5. PREVIEW-VS-REAL NUMBER TABLE (Settings.jsx WaRow props)
+============================================================
+
+Style            Metric      Before (prev commit)      Real storefront     After (this commit)
+---------------  ----------  ------------------------  ------------------  -------------------
+bottom_sheet     fieldPad    "8px 12px"                "11px 14px"         "11px 14px"  ✓
+                 fontSize    12 (default)              13                  13
+                 borderWidth 1 (default)               1.5                 1.5
+                 borderRadius 8                        12                  12
+                 inputBg     (none → #ffffff)          #f9fafb             "#f9fafb"
+
+story_card       fieldPad    "8px 12px"                "11px 14px"         "11px 14px"  ✓
+                 fontSize    12 (default)              13                  13
+                 borderWidth 1 (default)               1.5                 1.5
+                 borderRadius 8                        12                  12
+
+spotlight        fieldFontSize 14                      15                  15           ✓
+                 fieldHeight 44                        48                  48
+                 borderRadius 999                      999                 999 (no change)
+                 fieldPad    "0 16px"                  "0 16px"            "0 16px" (no change)
+
+noir/color_block fieldFontSize 14                      15                  15           ✓
+                 fieldHeight 44                        48                  48
+                 borderRadius 12                       12                  12 (no change)
+
+flash_sale       fieldPad    "8px 12px"                "11px 14px"         "11px 14px"  ✓
+                 fontSize    12 (default)              13                  13
+                 borderWidth 1 (default)               1.5                 1.5
+                 borderRadius 8                        12                  12
+
+gift_reveal      fieldPad    "8px 12px"                "11px 14px"         "11px 14px"  ✓
+                 fontSize    12 (default)              13                  13
+                 borderWidth 1 (default)               1.5                 1.5
+                 borderRadius 8                        12                  12
+                 inputBg     (none → #ffffff)          #f9fafb             "#f9fafb"
+
+classic-card     fieldPad    "11px 14px"               "11px 14px"         unchanged ✓
+classic-split    fieldPad    "11px 14px"               "11px 14px"         unchanged ✓
+
+============================================================
+
+6. GIT DIFF --STAT
+============================================================
+extensions/cartncodform-embed/assets/ccf-push.js  |  ~52 changed
+frontend/app/admin/screens/Settings.jsx           |  ~18 changed
+audits/popup-fields-storefront-after.txt          |  new file
+
+============================================================
+
+7. CHANGES OUTSIDE LISTED SCOPE
+============================================================
+None. No email fields, buttons, triggers, overlays, push logic, backend routes,
+models, or test files were modified.
+
+============================================================
+
+8. WHAT WAS NOT VERIFIED
+============================================================
+- Could not open a browser (no browser available in this session). The CSS
+  reasoning is based on the cascade rules and flex-stretch behaviour; it was
+  not visually confirmed on any real device.
+- iOS font-size zoom: all non-proForm styles use font-size:13px (sub-16px).
+  The email input has the same font-size:13px, so iOS zoom behaviour is
+  unchanged from before (no regression introduced). ProForm uses font-size:15px
+  (email already 15px, WA now also 15px — still sub-16px on both, same as before).
+- encodeURIComponent for rgba() colors in the SVG data URL: logically correct
+  (commas and parens are encoded, resulting in valid SVG stroke attribute syntax
+  when decoded by the browser). Not confirmed in a real browser.
+- story_card (line 1770): no code change made; existing opts already matched the
+  email. Not independently retested in a browser.
+
+============================================================

@@ -1303,7 +1303,8 @@ function StyleCardPreview({
               )}
               {waFieldEnabled && (
                 <WaRow interactive={interactive} font={font} compact={compact}
-                  inputBorder="#e5e7eb" borderRadius={8} fieldPad="8px 12px" />
+                  inputBg="#f9fafb" inputBorder="#e5e7eb" borderRadius={12}
+                  fieldPad="11px 14px" fieldFontSize={13} fieldBorderWidth={1.5} />
               )}
               <PreviewButton {...allowBtnCommon} interactive={interactive}>
                 <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
@@ -1405,7 +1406,8 @@ function StyleCardPreview({
               {waFieldEnabled && (
                 <WaRow interactive={interactive} font={font} compact={compact}
                   inputBg="rgba(255,255,255,0.15)" inputFg="#ffffff"
-                  inputBorder="rgba(255,255,255,0.3)" borderRadius={8} fieldPad="8px 12px" />
+                  inputBorder="rgba(255,255,255,0.3)" borderRadius={12}
+                  fieldPad="11px 14px" fieldFontSize={13} fieldBorderWidth={1.5} />
               )}
               <PreviewButton {...allowBtnCommon} interactive={interactive}>
                 <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
@@ -1475,7 +1477,7 @@ function StyleCardPreview({
           <WaRow interactive={interactive} font={font} compact={compact}
             inputBg={inputBg} inputFg={proFg} inputBorder={inputBorder}
             borderRadius={styleId === 'spotlight' ? 999 : 12}
-            fieldPad="0 16px" fieldFontSize={14} fieldHeight={44} />
+            fieldPad="0 16px" fieldFontSize={15} fieldHeight={48} />
         )}
         <PreviewButton {...allowBtnCommon} interactive={interactive}
           style={{ ...allowBtnCommon.style, fontSize: 15, padding: 14,
@@ -1674,8 +1676,8 @@ function StyleCardPreview({
               )}
               {waFieldEnabled && (
                 <WaRow interactive={interactive} font={font} compact={compact}
-                  inputBg="#ffffff" inputFg="#111827" inputBorder="#d4d4d8" borderRadius={8}
-                  fieldPad="8px 12px" />
+                  inputBg="#ffffff" inputFg="#111827" inputBorder="#d4d4d8" borderRadius={12}
+                  fieldPad="11px 14px" fieldFontSize={13} fieldBorderWidth={1.5} />
               )}
               {countdownDisplay ? (
                 <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '0.08em', marginBottom: 10,
@@ -1747,7 +1749,8 @@ function StyleCardPreview({
             )}
             {waFieldEnabled && (
               <WaRow interactive={interactive} font={font} compact={compact}
-                inputFg={fg} inputBorder="#e5e7eb" borderRadius={8} fieldPad="8px 12px" />
+                inputBg="#f9fafb" inputFg={fg} inputBorder="#e5e7eb" borderRadius={12}
+                fieldPad="11px 14px" fieldFontSize={13} fieldBorderWidth={1.5} />
             )}
             <PreviewButton {...allowBtnCommon} interactive={interactive}>
               <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />

@@ -161,15 +161,32 @@
     return 'IN';
   }
   // Builds country-select + phone-input + consent checkbox into `container`.
-  // opts: { inputBg, fg, inputBorder } — falls back to neutral defaults.
+  // opts: { inputBg, fg, inputBorder, height, fontSize, borderRadius, telPadding }
   // Returns immediately (no DOM change) when ccfShowWhatsappField() is false.
   function ccfBuildWhatsappFields(container, opts) {
     if (!ccfShowWhatsappField()) return;
     var o = opts || {};
-    var inputBg = o.inputBg || '#ffffff';
+    var inputBg = o.inputBg || '#f9fafb';
     var inputFg = o.fg || '#111827';
     var inputBorder = o.inputBorder || '#e5e7eb';
+    var fHeight = o.height || 0;
+    var fFontSize = o.fontSize || '';
+    var fRadius = o.borderRadius || '';
+    var telPad = o.telPadding || '';
+    // Vertical padding component — used to keep select height == tel height.
+    // '11px' matches ccfInputStyle()'s padding:11px 14px default.
+    var selVertPad = telPad ? telPad.split(' ')[0] : '11px';
+    var selPad = selVertPad + ' 20px ' + selVertPad + ' 8px';
     var baseStyle = ccfInputStyle();
+
+    // Small chevron embedded as a background-image SVG.
+    // inputFg is a CSS color from store config — never a user-entered string.
+    // encodeURIComponent safely URL-encodes any valid CSS color (hex or rgba).
+    var chevSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6" viewBox="0 0 10 6">' +
+      '<path d="M1 1l4 4 4-4" stroke="' + inputFg + '" stroke-opacity="0.55" stroke-width="1.5" ' +
+      'stroke-linecap="round" stroke-linejoin="round" fill="none"/>' +
+      '</svg>';
+    var chevBg = 'url("data:image/svg+xml,' + encodeURIComponent(chevSvg) + '")';
 
     var phoneRow = document.createElement('div');
     phoneRow.style.cssText = 'display:flex;gap:8px;margin-top:10px;';
@@ -177,8 +194,15 @@
     var sel = document.createElement('select');
     sel.id = 'ccf-wa-country';
     sel.style.cssText = 'flex-shrink:0;' + baseStyle +
-      'width:86px;padding:0 6px;-webkit-appearance:none;appearance:none;' +
-      'background:' + inputBg + ';color:' + inputFg + ';border-color:' + inputBorder + ';';
+      'width:86px;padding:' + selPad + ';' +
+      (fFontSize ? 'font-size:' + fFontSize + ';' : '') +
+      (fRadius ? 'border-radius:' + fRadius + ';' : '') +
+      (fHeight ? 'height:' + fHeight + 'px;' : '') +
+      '-webkit-appearance:none;appearance:none;' +
+      'background-color:' + inputBg + ';' +
+      'background-image:' + chevBg + ';' +
+      'background-repeat:no-repeat;background-position:right 6px center;' +
+      'color:' + inputFg + ';border-color:' + inputBorder + ';';
     var defCountry = ccfDefaultCountry();
     for (var di = 0; di < CCF_DIAL_CODES.length; di++) {
       var opt = document.createElement('option');
@@ -196,6 +220,10 @@
     tel.setAttribute('autocomplete', 'tel-national');
     tel.placeholder = 'WhatsApp number';
     tel.style.cssText = 'flex:1;min-width:0;' + baseStyle +
+      (telPad ? 'padding:' + telPad + ';' : '') +
+      (fFontSize ? 'font-size:' + fFontSize + ';' : '') +
+      (fRadius ? 'border-radius:' + fRadius + ';' : '') +
+      (fHeight ? 'height:' + fHeight + 'px;' : '') +
       'background:' + inputBg + ';color:' + inputFg + ';border-color:' + inputBorder + ';';
     phoneRow.appendChild(tel);
     container.appendChild(phoneRow);
@@ -709,7 +737,7 @@
       ei.style.cssText = ccfInputStyle();
       box.appendChild(ei);
     }
-    ccfBuildWhatsappFields(box, {});
+    ccfBuildWhatsappFields(box, { inputBg: '#f9fafb' });
     return box;
   }
 
@@ -1153,7 +1181,8 @@
         }
         c.appendChild(ew);
       }
-      ccfBuildWhatsappFields(c, pal);
+      ccfBuildWhatsappFields(c, { fg: pal.fg, inputBg: pal.inputBg, inputBorder: pal.inputBorder,
+        height: 48, fontSize: '15px', borderRadius: o.inputRadius, telPadding: '0 16px' });
       allow = buildAllowBtn(ccfAllowButtonStyle(pal.accent, cfg.ctaStyle) + 'font-size:16px;padding:15px;' +
         (o.ctaLight ? 'background:#ffffff;color:#0f1115;box-shadow:none;border:none;' : ''));
       c.appendChild(allow);
@@ -1302,7 +1331,9 @@
           (isFlashSale ? 'background:#ffffff;color:#111827;border-color:#d4d4d8;' : '');
         sContent.appendChild(sEmailInput);
       }
-      ccfBuildWhatsappFields(sContent, {});
+      ccfBuildWhatsappFields(sContent, isFlashSale
+        ? { inputBg: '#ffffff', inputBorder: '#d4d4d8' }
+        : { inputBg: '#f9fafb' });
 
       // Real-deadline countdown only — never a fake per-visitor timer.
       // 'fixed_date' with a valid future date: shown now, ticking live.
@@ -1591,7 +1622,7 @@
         bsEmailInput.style.cssText = ccfInputStyle();
         bsContent.appendChild(bsEmailInput);
       }
-      ccfBuildWhatsappFields(bsContent, {});
+      ccfBuildWhatsappFields(bsContent, { inputBg: '#f9fafb' });
 
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       bsContent.appendChild(allow);
@@ -2041,7 +2072,7 @@
         cardEmailInput.style.cssText = ccfInputStyle();
         cardContent.appendChild(cardEmailInput);
       }
-      ccfBuildWhatsappFields(cardContent, {});
+      ccfBuildWhatsappFields(cardContent, { inputBg: '#f9fafb' });
 
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       cardContent.appendChild(allow);
