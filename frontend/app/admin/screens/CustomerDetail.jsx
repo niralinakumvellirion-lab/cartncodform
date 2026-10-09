@@ -1046,7 +1046,7 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
   const displayName = email || `Anonymous shopper · #${String(profile._id || profileId).slice(-5)}`;
   const hasPush = !!profile.channels?.push?.subscribed;
   const hasEmail = !!(profile.channels?.email?.address || email);
-  const phone = profile.identifiers?.phones?.[0];
+  const phone = profile.channels?.whatsapp?.phone || profile.identifiers?.phones?.[0];
   const cdInitial = (email || displayName || '?').charAt(0).toUpperCase();
   const cdAvatarColor = getCDAvatarColor(displayName);
 

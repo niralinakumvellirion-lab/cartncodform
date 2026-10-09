@@ -289,7 +289,7 @@ async function generateDiscount(shopDomain, body = {}, opts = {}) {
         {
           ...(email
             ? {
-                'channels.email.address': email,
+                'channels.email.address': email.toLowerCase(),
                 'channels.email.source': 'popup',
                 'channels.email.capturedAt': new Date(),
               }

@@ -350,7 +350,7 @@ export default function Customers({ shop, initialFilter, initialSignal, initialF
                   : null;
 
                 const name =
-                  p.identifiers?.emails?.[0] || p.identifiers?.phones?.[0] || null;
+                  p.identifiers?.emails?.[0] || p.channels?.whatsapp?.phone || p.identifiers?.phones?.[0] || null;
                 const displayName = name
                   ? name
                   : `Anonymous shopper · #${p._id?.toString().slice(-5)}`;
@@ -399,6 +399,7 @@ export default function Customers({ shop, initialFilter, initialSignal, initialF
                           }}
                         >
                           {p.identifiers?.emails?.[0] ||
+                            p.channels?.whatsapp?.phone ||
                             p.identifiers?.phones?.[0] ||
                             `Anonymous #${p._id?.toString().slice(-5)}`}
                         </div>

@@ -25,4 +25,19 @@ function toWaDigits(e164) {
   return e164.replace(/^\+/, '');
 }
 
-module.exports = { normalizePhone, toWaDigits };
+/**
+ * Return the national number from an E.164 phone (e.g. "+919876543210" → "9876543210").
+ * Used by profileService to build backward-compat identity queries that match both
+ * the E.164 form and the old raw national-number form stored by the COD form.
+ * Returns null for non-E.164 input or parse errors.
+ */
+function getNationalNumber(e164) {
+  if (!e164 || !e164.startsWith('+')) return null;
+  try {
+    return parsePhoneNumber(e164).nationalNumber || null;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { normalizePhone, toWaDigits, getNationalNumber };

@@ -456,7 +456,7 @@ router.post('/cod-order', async (req, res) => {
     upsertProfile(shop, { phone: String(phone).trim(), email: cleanEmail || null }, {
       ...(cleanEmail
         ? {
-            'channels.email.address': cleanEmail,
+            'channels.email.address': cleanEmail.toLowerCase(),
             'channels.email.source': 'cod',
             'channels.email.capturedAt': new Date(),
           }

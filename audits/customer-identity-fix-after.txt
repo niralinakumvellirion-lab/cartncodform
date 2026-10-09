@@ -1,0 +1,116 @@
+SELF-AUDIT — customer identity fix (B1, B2, D2)
+2026-10-09
+============================================================
+
+FILES CHANGED
+  backend/utils/phone.js
+  backend/services/profileService.js
+  backend/routes/discounts.js
+  backend/routes/proxy.js
+  frontend/app/admin/screens/CustomerDetail.jsx
+  frontend/app/admin/screens/Customers.jsx
+  backend/__tests__/profileService.test.js
+
+============================================================
+
+FIX B1 — phone identity split
+
+Approach taken:
+  cleanIdentifiers(identifiers, defaultCountry) now normalises the phone field
+  to E.164 via normalizePhone(val, defaultCountry) before storing it.
+  Falls back to the raw trimmed value when normalisation fails (invalid/test numbers).
+
+  defaultCountry is threaded from upsertProfile(options.defaultCountry, default 'IN')
+  into cleanIdentifiers; NOT hard-coded inside cleanIdentifiers so the default site
+  is easy to grep for and change per-store in the future.
+
+  Backward compat: upsertProfile computes phoneVariants (a de-duped Set) before
+  calling buildQuery:
+    1. ids.phone (normalised E.164)
+    2. rawPhone if it differs from ids.phone (caller-side raw, e.g. proxy.js COD)
+    3. getNationalNumber(ids.phone) — the national number stripped from E.164
+       (e.g. "9876543210" from "+919876543210"), for profiles created before
+       this fix that stored the bare national number from the COD form.
+
+  buildQuery uses $in: phoneVariants when phoneVariants.length > 1, falling back
+  to a plain exact match for single-variant lookups.
+
+  getNationalNumber() added to backend/utils/phone.js using the same
+  parsePhoneNumber from libphonenumber-js already imported there.
+
+  No callers were changed to pass raw phone — they continue to pass whatever they
+  have. Both pre-normalized (discounts.js WA path) and un-normalized (proxy.js
+  COD path) phone values are handled centrally.
+
+Scope confirmed correct:
+  discounts.js action='whatsapp' at line 117: phone: normalized — unchanged.
+    phoneVariants will be ['+919876543210', '9876543210'] via getNationalNumber.
+  proxy.js /cod-order at line 456: phone: String(phone).trim() — unchanged.
+    rawPhone='9876543210', ids.phone='+919876543210' after cleanIdentifiers.
+    phoneVariants will be ['+919876543210', '9876543210'] via both rawPhone and
+    getNationalNumber (deduplicated).
+  Neither caller modified — backward compat achieved centrally.
+
+============================================================
+
+FIX B2 — email case inconsistency
+
+discounts.js:292  channels.email.address: email  →  email.toLowerCase()
+proxy.js:459      channels.email.address: cleanEmail  →  cleanEmail.toLowerCase()
+
+cleanEmail in proxy.js is already trimmed and lowercased upstream (line ~453:
+  cleanEmail = String(email).trim().toLowerCase()), so toLowerCase() is a no-op
+  there in practice but makes the intent explicit and guards against future
+  refactoring.
+
+email in discounts.js is trimmed (line 275) but NOT previously lowercased before
+  passing to channels.email.address. This is the actual fix site.
+
+============================================================
+
+FIX D2 — phone display preference
+
+CustomerDetail.jsx:1049
+  Before: const phone = profile.identifiers?.phones?.[0];
+  After:  const phone = profile.channels?.whatsapp?.phone || profile.identifiers?.phones?.[0];
+
+Customers.jsx — desktop (via displayName at line 353):
+  Before: ... || p.identifiers?.phones?.[0] || null
+  After:  ... || p.channels?.whatsapp?.phone || p.identifiers?.phones?.[0] || null
+
+Customers.jsx — mobile card inline (lines 401-402):
+  Before: p.identifiers?.emails?.[0] || p.identifiers?.phones?.[0] ||
+  After:  p.identifiers?.emails?.[0] || p.channels?.whatsapp?.phone || p.identifiers?.phones?.[0] ||
+
+avatarSource at Customers.jsx:477 intentionally NOT changed — it derives an
+  avatar initial from the email address only (non-phone field), no change needed.
+
+============================================================
+
+TESTS ADDED (backend/__tests__/profileService.test.js)
+
+  matchesClause mock updated to handle { $in: [...] } operator (required by B1
+  backward-compat queries).
+
+  5 new tests in describe('upsertProfile — phone normalisation (B1 fix)'):
+    p1. COD raw phone profile found and merged when E.164 arrives (getNationalNumber)
+    p2. Profile with raw national number found by E.164 submission
+    p3. Invalid phone (normalisation failure) stores raw value, creates profile
+    p4. channels.email.address update propagated verbatim (lowercasing is caller's job)
+    p5. Merge priority unchanged: email > phone after phone normalisation
+
+  Test suite: 841 passed, 841 total (836 before + 5 new).
+
+============================================================
+
+INVARIANTS VERIFIED
+
+  No PII logged — no changes to console.log calls.
+  No new /api routes — no new auth/requireStoreOwner guards needed.
+  localStorage not used — admin-side changes only (Polaris components).
+  LLM calls not affected — no changes to ai.js callers.
+  Out-of-scope items not touched: flow builder, campaigns, WhatsApp send logic,
+    multi-store, ScriptTags, NextAuth.
+  Commit does NOT push.
+
+============================================================

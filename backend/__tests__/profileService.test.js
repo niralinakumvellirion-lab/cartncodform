@@ -29,6 +29,10 @@ jest.mock('../models/Profile', () => {
   const matchesClause = (doc, clause) => {
     const [path, val] = Object.entries(clause)[0];
     const cur = getPath(doc, path);
+    // Support { $in: [...] } operator (used for backward-compat phone lookup).
+    if (val && typeof val === 'object' && Array.isArray(val.$in)) {
+      return val.$in.some((v) => (Array.isArray(cur) ? cur.includes(v) : cur === v));
+    }
     return Array.isArray(cur) ? cur.includes(val) : cur === val;
   };
 
@@ -306,5 +310,78 @@ describe('upsertProfile — updates param', () => {
     expect(result.orders.count).toBe(2);
     expect(result.orders.ltv).toBe(350);
     expect(result.orders.lastOrderAt).toBeTruthy();
+  });
+});
+
+describe('upsertProfile — phone normalisation (B1 fix)', () => {
+  test('p1. COD raw phone then popup E.164 resolve to ONE profile (not two)', async () => {
+    // Simulate a COD profile created before B1 fix: raw phone stored.
+    seedProfile({ _id: 'COD1', identifiers: { phones: ['9876543210'] } });
+
+    // WA popup now calls upsertProfile with an already-normalised E.164 phone.
+    // With the $in backward-compat query, the COD profile should be found and reused.
+    const result = await upsertProfile(
+      SHOP,
+      { phone: '+919876543210' },
+      { 'channels.whatsapp.phone': '+919876543210', 'channels.whatsapp.consentedAt': new Date() }
+    );
+
+    expect(Profile.__store()).toHaveLength(1);
+    expect(result._id).toBe('COD1');
+    expect(result.identifiers.phones).toContain('+919876543210');
+  });
+
+  test('p2. profile already holding raw phone is found by a new E.164 submission', async () => {
+    seedProfile({ _id: 'OLD1', identifiers: { phones: ['9123456789'] } });
+
+    const result = await upsertProfile(SHOP, { phone: '+919123456789' }, {});
+
+    expect(Profile.__store()).toHaveLength(1);
+    expect(result._id).toBe('OLD1');
+  });
+
+  test('p3. normalisation failure keeps raw value and still creates a profile', async () => {
+    // "NOTAPHONE" cannot be normalised — should be stored as-is and a profile created.
+    const result = await upsertProfile(
+      SHOP,
+      { phone: 'NOTAPHONE' },
+      { lastSeenAt: new Date() }
+    );
+
+    expect(result).toBeTruthy();
+    expect(Profile.__store()).toHaveLength(1);
+    expect(result.identifiers.phones).toContain('NOTAPHONE');
+  });
+
+  test('p4. channels.email.address update is stored verbatim (caller is responsible for lowercasing)', async () => {
+    // After the B2 fix, callers pass email.toLowerCase() in channels.email.address.
+    // This test confirms upsertProfile propagates the value correctly.
+    const result = await upsertProfile(
+      SHOP,
+      { email: 'user@example.com' },
+      { 'channels.email.address': 'user@example.com', 'channels.email.source': 'popup' }
+    );
+
+    expect(result).toBeTruthy();
+    const stored = Profile.__store()[0];
+    expect(stored.channels.email.address).toBe('user@example.com');
+  });
+
+  test('p5. merge priority unchanged after phone normalisation — email beats phone', async () => {
+    // Two profiles: one identified by email, one by phone.
+    const pEmail = seedProfile({ _id: 'PE', identifiers: { emails: ['x@y.com'] } });
+    seedProfile({ _id: 'PP', identifiers: { phones: ['+919876543210'] } });
+
+    // Submit with BOTH email and phone — email has higher priority, so pEmail is winner.
+    const result = await upsertProfile(
+      SHOP,
+      { email: 'x@y.com', phone: '+919876543210' },
+      {}
+    );
+
+    expect(Profile.__store()).toHaveLength(1);
+    expect(result._id).toBe(pEmail._id);
+    expect(result.identifiers.emails).toContain('x@y.com');
+    expect(result.identifiers.phones).toContain('+919876543210');
   });
 });

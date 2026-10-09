@@ -1,4 +1,5 @@
 const Profile = require('../models/Profile');
+const { normalizePhone, getNationalNumber } = require('../utils/phone');
 
 /**
  * Identity resolution + profile upsert.
@@ -32,7 +33,10 @@ const ARRAY_FIELD = {
   pushToken: 'pushTokens',
 };
 
-function cleanIdentifiers(identifiers = {}) {
+// defaultCountry is the ISO-3166-1 alpha-2 country code used when normalising
+// a bare local phone number (e.g. "9876543210") to E.164. Must be supplied by
+// the caller; no default here so the default site is easy to grep for.
+function cleanIdentifiers(identifiers = {}, defaultCountry) {
   const out = {};
   for (const key of PRIORITY) {
     let val = identifiers[key];
@@ -40,6 +44,13 @@ function cleanIdentifiers(identifiers = {}) {
     val = String(val).trim();
     if (!val) continue;
     if (key === 'email') val = val.toLowerCase();
+    if (key === 'phone') {
+      // Normalise to E.164 so identity lookups are consistent regardless of
+      // whether the caller supplied "9876543210" (COD form) or "+919876543210"
+      // (WA popup). Falls back to the raw trimmed value when normalisation
+      // fails (e.g. a deliberately invalid/test number) so no data is lost.
+      val = normalizePhone(val, defaultCountry) || val;
+    }
     out[key] = val;
   }
   return out;
@@ -61,11 +72,17 @@ function splitUpdates(updates = {}) {
 
 // Build the $or clause (+ shopDomain) that finds every profile any provided
 // identifier already points at.
-function buildQuery(shopDomain, ids) {
+//
+// phoneVariants: all string forms of the phone that should match (de-duped array).
+// Always contains ids.phone; may also contain the raw caller value and the
+// national-number form to find old profiles stored before E.164 normalisation.
+function buildQuery(shopDomain, ids, phoneVariants) {
   const or = [];
   for (const [key, val] of Object.entries(ids)) {
     if (key === 'customerId') {
       or.push({ 'identifiers.customerId': val });
+    } else if (key === 'phone' && phoneVariants && phoneVariants.length > 1) {
+      or.push({ 'identifiers.phones': { $in: phoneVariants } });
     } else {
       or.push({ [`identifiers.${ARRAY_FIELD[key]}`]: val });
     }
@@ -158,17 +175,36 @@ async function applyToProfile(profileId, shopDomain, ids, updates, existingCusto
   return doc;
 }
 
-async function upsertProfile(shopDomain, identifiers = {}, updates = {}) {
+// options.defaultCountry: ISO-3166-1 alpha-2 for phone normalisation (default 'IN').
+async function upsertProfile(shopDomain, identifiers = {}, updates = {}, options = {}) {
   try {
     const shop = String(shopDomain || '').trim().toLowerCase();
-    const ids = cleanIdentifiers(identifiers);
+    const defaultCountry = options.defaultCountry || 'IN';
+
+    // Capture raw phone BEFORE normalisation.
+    const rawPhone = identifiers.phone != null ? String(identifiers.phone).trim() : null;
+
+    const ids = cleanIdentifiers(identifiers, defaultCountry);
 
     if (!shop || Object.keys(ids).length === 0) {
       // Nothing to resolve on — silently no-op (no PII, no id to log).
       return null;
     }
 
-    const matches = await Profile.find(buildQuery(shop, ids));
+    // Build a de-duped set of phone variants for the backward-compat $in lookup.
+    // Includes: normalised E.164, raw caller value (if different), and the national
+    // number of the E.164 form (e.g. "9876543210" for "+919876543210") to match
+    // old profiles that stored a bare national number before this fix was deployed.
+    let phoneVariants = null;
+    if (ids.phone) {
+      const variants = new Set([ids.phone]);
+      if (rawPhone && rawPhone !== ids.phone) variants.add(rawPhone);
+      const nat = getNationalNumber(ids.phone);
+      if (nat) variants.add(nat);
+      phoneVariants = [...variants];
+    }
+
+    const matches = await Profile.find(buildQuery(shop, ids, phoneVariants));
 
     // ---- 0 matches: create fresh, then apply updates ----
     if (matches.length === 0) {
