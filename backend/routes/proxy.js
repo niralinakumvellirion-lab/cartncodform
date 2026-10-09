@@ -160,16 +160,19 @@ router.post('/generate-discount', async (req, res) => {
     return res.status(403).json({ code: null, error: 'Invalid signature' });
   }
 
-  // Phone / both discounts are retired — only push and email may mint a code.
+  // Phone / both discounts are retired — only push, email, and whatsapp pass.
   // Rejected before any config lookup or Shopify call.
   const action = String((req.body && req.body.action) || '').trim();
-  if (action !== 'push' && action !== 'email') {
+  if (action !== 'push' && action !== 'email' && action !== 'whatsapp') {
     return res.status(400).json({ error: 'Unsupported discount action' });
   }
 
   try {
     const shop = String(req.query.shop || req.body.shop || '').trim().toLowerCase();
-    const result = await generateDiscount(shop, req.body || {});
+    const ip = (req.headers && req.headers['x-forwarded-for'])
+      ? String(req.headers['x-forwarded-for']).split(',')[0].trim()
+      : (req.socket && req.socket.remoteAddress) || '';
+    const result = await generateDiscount(shop, req.body || {}, { ip });
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'no-store');
     // Always echo the shop domain so the storefront can build /discount/<code>

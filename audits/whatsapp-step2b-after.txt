@@ -1,0 +1,152 @@
+WHATSAPP STEP 2B — SELF-AUDIT
+2026-10-09
+============================================================
+
+SCOPE: Offer without push. Visitors with no push support (or who already
+denied push) can now submit their email and/or WhatsApp number via a new
+"Get my offer" button — no Notification.requestPermission() call involved.
+Flag off → zero behavioural change for existing stores.
+
+============================================================
+A. extensions/cartncodform-embed/assets/ccf-push.js
+------------------------------------------------------------
+
+1. NEW HELPERS (added after ccfBuildWhatsappFields, before ccfPct)
+
+   ccfCaptureMode()
+     Returns true when ccfShowEmailField() OR ccfShowWhatsappField().
+     Guards buildOfferBtn() and offerBtn insertions.
+
+   ccfReadCaptureInputs()
+     Reads #ccf-email-input, #ccf-wa-country/phone/consent from the DOM.
+     Email: basic @ + dot-after-@ format check.
+     WA: digit count 6-15 + consent; writes error text into ccf-wa-hint.
+     Returns { email, waPhone, waCountry }.
+     Used by BOTH the Allow handler and the offerBtn handler — single
+     validation path, no duplication.
+
+   canCaptureOnly()
+     True when ccfCaptureMode() && (!('Notification' in window) ||
+     Notification.permission === 'denied') && !promptAlreadyShown()
+     && !ccf_denied_session in sessionStorage.
+     Not true when push is available — preserves the push-first default.
+
+2. initIntentTriggers()
+   Guard changed from:
+     if (!canPrompt()) return;
+   to:
+     if (!canPrompt() && !_canCapOnly) return;
+   PAGE_LOAD inner guard similarly updated. No-push and denied browsers
+   now reach the popup code.
+
+3. showSoftPrompt()
+   Guard changed to:
+     if (!isDiscountCapture && !canPrompt() && !isCaptureOnly) return;
+   Already-shown check now also gates isCaptureOnly.
+   isCaptureOnly variable computed early in the function.
+
+4. var allow, deny, closeBtn, offerBtn = null;
+   offerBtn is null by default; set by buildOfferBtn().
+
+5. buildOfferBtn(accentColor, fgColor)
+   Secondary outlined button ("Get my offer"), no innerHTML.
+   ES5 compatible (var, no arrow functions, no template literals).
+   Sets module-level offerBtn reference.
+
+6. offerBtn insertions (7 popup styles, top_bar excluded):
+   buildProContent    — spot/noir/color_block (pal.accent, pal.fg)
+   flash_sale/gift    — sContent (accent, sFg)
+   bottom_sheet       — bsContent (accent, #111827)
+   story_card         — scContent (accent, scFg — white-on-dark)
+   card               — cardContent (accent, #111827)
+   classic/split mob  — mContent (accent, fg)
+   classic/split desk — rightPanel (accent, fg)
+   Added between c.appendChild(allow) and deny = buildDenyBtn().
+
+7. capture-only mode — post-style-branch code
+   When isCaptureOnly && allow && offerBtn:
+     allow.style.display = 'none'
+     offerBtn inherits allow's inline style string (primary CTA styling).
+
+8. Allow handler — ccfReadCaptureInputs() replaces ~20 lines of inline WA
+   reading logic. email, waPhone, waCountry come from the helper.
+
+9. Denial path (A6): after push.requestPermission() returns 'denied',
+   if email or waPhone was captured, fires a fire-and-forget
+   /generate-discount request (action: 'email' if email present, else
+   'whatsapp') before calling cleanup(). Popup closes immediately.
+
+10. offerBtn click handler (new):
+    • Calls ccfReadCaptureInputs(); blocks with inline hint if neither
+      field is valid ("Add your email or your WhatsApp number...").
+    • If email: POST action='email', includes waPhone if present.
+      Calls finishDiscount() on success — shows discount code in popup.
+    • If WA only: POST action='whatsapp'; on {success:true} shows
+      "Thanks! We'll message you on WhatsApp." then closes after 2.5s.
+    • On error: resets button text and re-enables inputs.
+
+    node --check: clean.
+
+============================================================
+B. backend/routes/discounts.js
+------------------------------------------------------------
+
+1. ACTIONS: added 'whatsapp'.
+
+2. In-memory rate limiter:
+   _waRateMap, _WA_RATE_WINDOW (60s), _WA_RATE_LIMIT (10).
+   _waRateCheck(ip, shop) — purges stale entries, returns false when
+   limit reached. Applied only to action 'whatsapp'.
+   State lost on restart; not shared across instances (acceptable for
+   MVP in-process poller).
+
+3. action 'whatsapp' early-return path in generateDiscount():
+   • Rate-checks opts.ip (skipped when falsy).
+   • Loads DiscountConfig; requires whatsappCapture.enabled === true.
+   • Requires whatsappConsent === true.
+   • Requires waDigits 6-15 chars.
+   • Upserts profile.channels.whatsapp via profileService (try/catch —
+     optional dep).
+   • Returns { success: true, whatsapp: true } — no discount code minted.
+
+4. email/push WA save gated on whatsappCapture.enabled:
+   Added `waFlagOn` check before the WA upsert block.
+   Prevents storing WA data for stores that have not opted in.
+
+============================================================
+C. backend/routes/proxy.js
+------------------------------------------------------------
+
+   Action whitelist: added 'whatsapp' alongside 'push' and 'email'.
+   IP extraction: reads x-forwarded-for header (first IP) or socket
+   remoteAddress; guards req.headers before access to prevent TypeError.
+   Passes { ip } as opts to generateDiscount().
+
+============================================================
+D. backend/__tests__/discountConfigRoutes.test.js
+------------------------------------------------------------
+
+   New tests (7):
+   • action 'whatsapp' — flag off (null config) → error body
+   • action 'whatsapp' — consent false → error
+   • action 'whatsapp' — invalid phone (3 digits) → error
+   • action 'whatsapp' — rate limit exceeded (11 calls same IP) → error
+   • action 'whatsapp' — success (flag on, consent, valid phone)
+   • action 'email' — WA fields ignored when flag is off
+
+   Updated test (1):
+   • whatsapp.test.js: "captures whatsapp consent" — now sets
+     whatsappCapture: { enabled: true } in the mock config, matching
+     the new flag gate.
+
+   Test run: 45 suites, 824 tests — all passed.
+   (+6 vs Step 2 baseline of 818)
+
+============================================================
+E. WHAT WAS NOT DONE (deferred)
+
+   • Profiles dashboard WA capture badge: Steps 3-4
+   • WhatsApp send flow from admin: Steps 3-4
+   • Persistent rate limiter (Redis/Mongo): low priority for MVP
+
+============================================================

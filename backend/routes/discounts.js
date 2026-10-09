@@ -8,7 +8,22 @@ const { verifyProxySignature, API_VERSION } = require('../utils/shopify');
 
 // The four storefront actions that can earn a discount code, and the
 // DiscountConfig sub-doc key each maps to.
-const ACTIONS = ['push', 'email', 'phone', 'both'];
+const ACTIONS = ['push', 'email', 'phone', 'both', 'whatsapp'];
+
+// In-memory rate limiter for the 'whatsapp' action: max 10 requests/min per IP+shop.
+// Intentionally simple — state is lost on restart and not shared across instances.
+const _waRateMap = {};
+const _WA_RATE_WINDOW = 60 * 1000; // 1 minute
+const _WA_RATE_LIMIT = 10;
+function _waRateCheck(ip, shop) {
+  const key = (ip || '') + '|' + (shop || '');
+  const now = Date.now();
+  if (!_waRateMap[key]) _waRateMap[key] = [];
+  _waRateMap[key] = _waRateMap[key].filter(function (t) { return now - t < _WA_RATE_WINDOW; });
+  if (_waRateMap[key].length >= _WA_RATE_LIMIT) return false;
+  _waRateMap[key].push(now);
+  return true;
+}
 const DEFAULT_PREFIX = {
   pushDiscount: 'PUSH',
   emailDiscount: 'EMAIL',
@@ -65,12 +80,46 @@ function sanitizeRule(input, fallbackPrefix) {
  *
  * @returns {Promise<{code: string|null, percentage?: number, expiryDays?: number, error?: string}>}
  */
-async function generateDiscount(shopDomain, body = {}) {
+async function generateDiscount(shopDomain, body = {}, opts = {}) {
   const shop = String(shopDomain || '').trim().toLowerCase();
   const action = String(body.action || '').trim();
 
   if (!shop || ACTIONS.indexOf(action) === -1) {
     return { code: null, error: 'Invalid action' };
+  }
+
+  // WhatsApp-capture action: no discount minted — profile upsert only.
+  if (action === 'whatsapp') {
+    // Rate-limit via caller-supplied IP (opts.ip).
+    if (opts.ip && !_waRateCheck(opts.ip, shop)) {
+      return { code: null, error: 'Too many requests' };
+    }
+    const waConfig = await DiscountConfig.findOne({ shopDomain: shop });
+    if (!waConfig || !waConfig.whatsappCapture || !waConfig.whatsappCapture.enabled) {
+      return { code: null, error: 'WhatsApp capture not enabled' };
+    }
+    const waConsent = body.whatsappConsent === true;
+    if (!waConsent) return { code: null, error: 'Consent required' };
+    const waPhone = body.whatsappPhone ? String(body.whatsappPhone).trim() : '';
+    const waDigits = waPhone.replace(/\D/g, '');
+    if (!waDigits || waDigits.length < 6 || waDigits.length > 15) {
+      return { code: null, error: 'Invalid phone number' };
+    }
+    try {
+      const { normalizePhone } = require('../utils/phone');
+      const { upsertProfile } = require('../services/profileService');
+      const waCountry = body.whatsappCountry || 'IN';
+      const normalized = normalizePhone(waDigits, waCountry);
+      if (normalized) {
+        const cartToken = body.cartToken ? String(body.cartToken).trim() : null;
+        upsertProfile(
+          shop,
+          { phone: normalized, email: null, sessionId: body.sessionId || null, cartToken },
+          { 'channels.whatsapp.phone': normalized, 'channels.whatsapp.consentedAt': new Date(), 'channels.whatsapp.source': 'popup', lastSeenAt: new Date() }
+        ).catch(() => {});
+      }
+    } catch (e) { /* phone normalizer optional */ }
+    return { success: true, whatsapp: true };
   }
 
   const [config, store] = await Promise.all([
@@ -255,10 +304,12 @@ async function generateDiscount(shopDomain, body = {}) {
     }
   }
 
-  // WhatsApp consent capture — only when the storefront sends explicit consent.
+  // WhatsApp consent capture — only when the storefront sends explicit consent
+  // AND the merchant has the whatsappCapture flag enabled.
   const waPhone = body.whatsappPhone ? String(body.whatsappPhone).trim() : '';
   const waConsent = body.whatsappConsent === true;
-  if (waPhone && waConsent) {
+  const waFlagOn = !!(config && config.whatsappCapture && config.whatsappCapture.enabled);
+  if (waPhone && waConsent && waFlagOn) {
     try {
       const { normalizePhone } = require('../utils/phone');
       const { upsertProfile: upsertWa } = require('../services/profileService');

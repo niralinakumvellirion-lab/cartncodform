@@ -616,7 +616,11 @@ beforeEach(() => {
   global.fetch = jest.fn().mockReturnValue(shopifyOk('PUSH-XYZ'));
 });
 
-test('generateDiscount: captures whatsapp consent when phone + consent present', async () => {
+test('generateDiscount: captures whatsapp consent when phone + consent present and flag on', async () => {
+  DiscountConfig.findOne.mockResolvedValue({
+    pushDiscount: { enabled: true, percentage: 10, maxUses: 100, expiryDays: 7, prefix: 'PUSH' },
+    whatsappCapture: { enabled: true },
+  });
   const r = await generateDiscount(SHOP, {
     action: 'push',
     whatsappPhone: '9876543210',

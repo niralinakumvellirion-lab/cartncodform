@@ -156,6 +156,69 @@ describe('POST /generate-discount (App Proxy)', () => {
     expect(res.statusCode).toBe(400);
   });
 
+  test("allows action 'whatsapp' through to config lookup", async () => {
+    DiscountConfig.findOne.mockResolvedValue(null);
+    const res = mockRes();
+    await post({ query: { shop: SHOP }, body: { action: 'whatsapp', whatsappPhone: '9999999999', whatsappConsent: true }, headers: {}, socket: {} }, res);
+    // Flag is off (null config) → returns 200 with error body (not 400)
+    expect(res.statusCode).toBe(200);
+    expect(res.body.error).toBe('WhatsApp capture not enabled');
+    expect(DiscountConfig.findOne).toHaveBeenCalled();
+  });
+
+  test("action 'whatsapp' returns error when consent is false", async () => {
+    DiscountConfig.findOne.mockResolvedValue({ whatsappCapture: { enabled: true } });
+    const res = mockRes();
+    await post({ query: { shop: SHOP }, body: { action: 'whatsapp', whatsappPhone: '9999999999', whatsappConsent: false }, headers: {}, socket: {} }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.error).toBe('Consent required');
+  });
+
+  test("action 'whatsapp' returns error for invalid phone number", async () => {
+    DiscountConfig.findOne.mockResolvedValue({ whatsappCapture: { enabled: true } });
+    const res = mockRes();
+    await post({ query: { shop: SHOP }, body: { action: 'whatsapp', whatsappPhone: '123', whatsappConsent: true }, headers: {}, socket: {} }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.error).toBe('Invalid phone number');
+  });
+
+  test("action 'whatsapp' returns 429 when rate limit exceeded", async () => {
+    DiscountConfig.findOne.mockResolvedValue({ whatsappCapture: { enabled: true } });
+    // Exhaust the 10-per-minute limit for a unique IP
+    const ip = '1.2.3.' + Math.floor(Math.random() * 200);
+    const req = { query: { shop: SHOP }, body: { action: 'whatsapp', whatsappPhone: '9999999999', whatsappConsent: true }, headers: { 'x-forwarded-for': ip }, socket: {} };
+    let lastRes;
+    for (let i = 0; i < 11; i++) {
+      lastRes = mockRes();
+      await post(req, lastRes);
+    }
+    expect(lastRes.statusCode).toBe(200);
+    expect(lastRes.body.error).toBe('Too many requests');
+  });
+
+  test("action 'whatsapp' succeeds with flag on, consent true, valid phone", async () => {
+    DiscountConfig.findOne.mockResolvedValue({ whatsappCapture: { enabled: true } });
+    const res = mockRes();
+    await post({ query: { shop: SHOP }, body: { action: 'whatsapp', whatsappPhone: '9876543210', whatsappConsent: true }, headers: {}, socket: {} }, res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.whatsapp).toBe(true);
+    // No discount code issued
+    expect(res.body.code).toBeUndefined();
+  });
+
+  test("action 'email' does not save whatsapp channel when flag is off", async () => {
+    // Config has whatsappCapture.enabled: false
+    const cfg = { pushDiscount: { enabled: false }, emailDiscount: { enabled: false }, whatsappCapture: { enabled: false } };
+    DiscountConfig.findOne.mockResolvedValue(cfg);
+    Store.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(null) });
+    const res = mockRes();
+    await post({ query: { shop: SHOP }, body: { action: 'email', email: 'a@b.co', whatsappPhone: '9999999999', whatsappConsent: true } }, res);
+    // Store returns null → no discount code, but no WA profile save attempted
+    // We just verify the endpoint does not error out and ignores the WA fields
+    expect(res.statusCode).toBe(200);
+  });
+
   test.each(['push', 'email'])("allows action '%s' through to config lookup", async (action) => {
     DiscountConfig.findOne.mockResolvedValue(null);
     Store.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(null) });

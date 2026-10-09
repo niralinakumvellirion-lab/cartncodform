@@ -221,6 +221,52 @@
     hint.style.cssText = 'font-size:11px;color:#dc2626;margin-top:4px;display:none;';
     container.appendChild(hint);
   }
+  // Capture mode: at least one of email-discount or WhatsApp-capture is active.
+  function ccfCaptureMode() {
+    return ccfShowEmailField() || ccfShowWhatsappField();
+  }
+  // Reads + validates email and WhatsApp capture inputs from the DOM.
+  // Hides/shows the ccf-wa-hint element as a side-effect for WA errors.
+  // Returns { email, waPhone, waCountry }.
+  function ccfReadCaptureInputs() {
+    var emailEl = document.getElementById('ccf-email-input');
+    var emailRaw = emailEl && emailEl.value ? emailEl.value.trim() : '';
+    var atIdx = emailRaw.indexOf('@');
+    var email = (atIdx > 0 && emailRaw.lastIndexOf('.') > atIdx + 1) ? emailRaw : '';
+    var waPhone = null, waCountry = 'IN';
+    if (ccfShowWhatsappField()) {
+      var waCountryEl = document.getElementById('ccf-wa-country');
+      var waPhoneEl = document.getElementById('ccf-wa-phone');
+      var waConsentEl = document.getElementById('ccf-wa-consent');
+      var waHintEl = document.getElementById('ccf-wa-hint');
+      if (waHintEl) waHintEl.style.display = 'none';
+      waCountry = waCountryEl ? waCountryEl.value : 'IN';
+      var waRaw = waPhoneEl ? waPhoneEl.value.trim() : '';
+      var waDigits = waRaw.replace(/\D/g, '');
+      var waConsent = waConsentEl ? waConsentEl.checked : false;
+      if (waDigits) {
+        if (waDigits.length < 6 || waDigits.length > 15) {
+          if (waHintEl) { waHintEl.textContent = 'Enter a valid phone number (6-15 digits).'; waHintEl.style.display = ''; }
+        } else if (!waConsent) {
+          if (waHintEl) { waHintEl.textContent = 'Please tick the box to receive WhatsApp messages.'; waHintEl.style.display = ''; }
+        } else {
+          waPhone = waDigits;
+        }
+      }
+    }
+    return { email: email, waPhone: waPhone, waCountry: waCountry };
+  }
+  // True when capture mode is on but push is unavailable or already denied.
+  // Respects the same session guards as canPrompt().
+  function canCaptureOnly() {
+    if (!ccfCaptureMode()) return false;
+    var noPush = !('Notification' in window);
+    var denied = !noPush && Notification.permission === 'denied';
+    if (!noPush && !denied) return false;
+    if (promptAlreadyShown()) return false;
+    try { if (sessionStorage.getItem('ccf_denied_session')) return false; } catch (e) {}
+    return true;
+  }
   function ccfPct(key) {
     var r = discountConfig && discountConfig[key];
     return (r && r.enabled && r.percentage) ? r.percentage : 0;
@@ -922,11 +968,11 @@
     // touching .permission, since it throws on browsers without support.
     var isDiscountCapture = ccfDiscountEnabled() &&
       ('Notification' in window) && Notification.permission === 'granted';
-    if (!isDiscountCapture && !canPrompt()) return;
-    // Don't re-show for the discount-capture path once the customer has
-    // already seen the popup this session (e.g. after cleanup() on a failed
-    // discount fetch — without this check any intent trigger would re-open it).
-    if (isDiscountCapture && promptAlreadyShown()) return;
+    var isCaptureOnly = canCaptureOnly();
+    if (!isDiscountCapture && !canPrompt() && !isCaptureOnly) return;
+    // Don't re-show for the discount-capture or capture-only path once the
+    // customer has already seen the popup this session.
+    if ((isDiscountCapture || isCaptureOnly) && promptAlreadyShown()) return;
     if (document.getElementById('ccf-push-prompt')) return;
     markPromptShown();
     ccfInjectPopupStyles();
@@ -995,6 +1041,22 @@
       b.type = 'button';
       b.textContent = denyLabel;
       b.setAttribute('style', styleStr);
+      return b;
+    }
+    // Secondary "Get my offer" button — shown only in capture mode.
+    // accentColor / fgColor set the outline; null → indigo / near-black defaults.
+    function buildOfferBtn(accentColor, fgColor) {
+      var b = document.createElement('button');
+      b.id = 'ccf-offer-btn';
+      b.type = 'button';
+      b.textContent = 'Get my offer';
+      b.setAttribute('aria-label', 'Get my offer without notifications');
+      b.style.cssText = 'display:block;width:100%;padding:13px;margin-bottom:8px;' +
+        'border:2px solid ' + (accentColor || '#4f46e5') + ';border-radius:12px;' +
+        'background:transparent;color:' + (fgColor || '#111827') + ';' +
+        'font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;' +
+        'text-align:center;box-sizing:border-box;-webkit-appearance:none;appearance:none;';
+      offerBtn = b;
       return b;
     }
     function buildBranding(styleStr) {
@@ -1095,6 +1157,7 @@
       allow = buildAllowBtn(ccfAllowButtonStyle(pal.accent, cfg.ctaStyle) + 'font-size:16px;padding:15px;' +
         (o.ctaLight ? 'background:#ffffff;color:#0f1115;box-shadow:none;border:none;' : ''));
       c.appendChild(allow);
+      if (ccfCaptureMode()) { c.appendChild(buildOfferBtn(pal.accent, pal.fg)); }
       deny = buildDenyBtn(ccfDenyButtonStyle() + 'color:' + pal.fg + ';opacity:0.65;font-size:13px;' +
         'text-decoration:underline;padding:12px 0;' + (o.denyDotted ? 'text-decoration-style:dotted;' : ''));
       c.appendChild(deny);
@@ -1131,7 +1194,7 @@
 
     var wrap = document.createElement('div');
     wrap.id = 'ccf-push-prompt';
-    var allow, deny, closeBtn;
+    var allow, deny, closeBtn, offerBtn = null;
     var overlay = null;
 
     if (ccfStyle.id === 'flash_sale' || ccfStyle.id === 'gift_reveal') {
@@ -1259,6 +1322,7 @@
 
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       sContent.appendChild(allow);
+      if (ccfCaptureMode()) { sContent.appendChild(buildOfferBtn(accent, sFg)); }
 
       if (!isFlashSale && styleFields.secondaryButtonStyle === 'pill') {
         // Only reachable when !isFlashSale (Gift Reveal), so the border is
@@ -1531,6 +1595,7 @@
 
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       bsContent.appendChild(allow);
+      if (ccfCaptureMode()) { bsContent.appendChild(buildOfferBtn(accent, '#111827')); }
 
       // mobile-popup-polish: padded up from ccfDenyButtonStyle()'s shared
       // 6px-tall default to a ~44px tap target — only for this style (not
@@ -1706,6 +1771,7 @@
 
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       scContent.appendChild(allow);
+      if (ccfCaptureMode()) { scContent.appendChild(buildOfferBtn(accent, scFg)); }
 
       // mobile-popup-polish: padded to a ~44px tap target, same as Bottom
       // Sheet above — per-style override, not a change to the
@@ -1979,6 +2045,7 @@
 
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       cardContent.appendChild(allow);
+      if (ccfCaptureMode()) { cardContent.appendChild(buildOfferBtn(accent, '#111827')); }
 
       // Plain text dismiss — no border/box, not underlined by default
       // (CSS handles the subtle hover color, see ccfInjectPopupStyles).
@@ -2098,6 +2165,7 @@
 
         allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
         mContent.appendChild(allow);
+        if (ccfCaptureMode()) { mContent.appendChild(buildOfferBtn(accent, fg)); }
 
         deny = buildDenyBtn(ccfDenyButtonStyle());
         mContent.appendChild(deny);
@@ -2165,6 +2233,7 @@
 
         allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
         rightPanel.appendChild(allow);
+        if (ccfCaptureMode()) { rightPanel.appendChild(buildOfferBtn(accent, fg)); }
 
         deny = buildDenyBtn(ccfDenyButtonStyle());
         rightPanel.appendChild(deny);
@@ -2213,6 +2282,17 @@
         else deny.parentNode.appendChild(discountFields);
       }
     }
+    // In capture-only mode (push unavailable or already denied) the Allow
+    // button cannot do anything useful — hide it so offerBtn becomes the CTA.
+    // Promote offerBtn to primary style by mirroring allow's inline style.
+    if (isCaptureOnly && allow && offerBtn) {
+      allow.style.display = 'none';
+      var allowStyleStr = allow.getAttribute('style') || '';
+      offerBtn.setAttribute('style', allowStyleStr);
+    } else if (isCaptureOnly && allow) {
+      allow.style.display = 'none';
+    }
+
     // Top Bar never shows a discount — no room for the unlocked-code reveal
     // state in a slim bar, and no #ccf-content-section swap target is built
     // for it above.
@@ -2271,32 +2351,9 @@
     }
 
     allow.addEventListener('click', function () {
-      // Read the discount inputs BEFORE any teardown.
-      var emailEl = document.getElementById('ccf-email-input');
-      var email = emailEl && emailEl.value ? emailEl.value.trim() : '';
-
-      // Read WhatsApp fields (if the flag is on) before any async work.
-      var waPhone = null, waCountry = 'IN';
-      if (ccfShowWhatsappField()) {
-        var waCountryEl = document.getElementById('ccf-wa-country');
-        var waPhoneEl = document.getElementById('ccf-wa-phone');
-        var waConsentEl = document.getElementById('ccf-wa-consent');
-        var waHintEl = document.getElementById('ccf-wa-hint');
-        if (waHintEl) waHintEl.style.display = 'none';
-        waCountry = waCountryEl ? waCountryEl.value : 'IN';
-        var waRaw = waPhoneEl ? waPhoneEl.value.trim() : '';
-        var waDigits = waRaw.replace(/\D/g, '');
-        var waConsent = waConsentEl ? waConsentEl.checked : false;
-        if (waDigits) {
-          if (waDigits.length < 6 || waDigits.length > 15) {
-            if (waHintEl) { waHintEl.textContent = 'Enter a valid phone number (6-15 digits).'; waHintEl.style.display = ''; }
-          } else if (!waConsent) {
-            if (waHintEl) { waHintEl.textContent = 'Please tick the box to receive WhatsApp messages.'; waHintEl.style.display = ''; }
-          } else {
-            waPhone = waDigits;
-          }
-        }
-      }
+      // Read and validate the capture inputs BEFORE any teardown.
+      var _cap = ccfReadCaptureInputs();
+      var email = _cap.email, waPhone = _cap.waPhone, waCountry = _cap.waCountry;
 
       var originalButtonText = allow.textContent;
       var originalButtonBg = allow.style.background;
@@ -2362,6 +2419,20 @@
         try { trackEvent('push_prompt_accepted', { trigger: trigger, granted: granted }); } catch (e) {}
         if (!granted) {
           try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+          // A6: visitor typed their email/WA before denying push — save it.
+          if (email || waPhone) {
+            var denAction = email ? 'email' : 'whatsapp';
+            var denBody = { action: denAction, sessionId: getSessionId() };
+            if (email) denBody.email = email;
+            if (waPhone) { denBody.whatsappPhone = waPhone; denBody.whatsappCountry = waCountry; denBody.whatsappConsent = true; }
+            fetch('/cart.js').then(function (r) { return r.json(); }).catch(function () { return { token: '' }; })
+              .then(function (cart) {
+                denBody.cartToken = cart.token ? cart.token.split('?')[0].trim() : null;
+                return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(denBody)
+                });
+              }).catch(function () {});
+          }
           cleanup();
           return;
         }
@@ -2432,6 +2503,69 @@
       closeBtn.addEventListener('click', function () {
         cleanup();
         try { sessionStorage.setItem('ccf_denied_session', '1'); } catch (e) {}
+      });
+    }
+
+    if (offerBtn) {
+      offerBtn.addEventListener('click', function () {
+        var _ofCap = ccfReadCaptureInputs();
+        var ofEmail = _ofCap.email, ofWaPhone = _ofCap.waPhone, ofWaCountry = _ofCap.waCountry;
+
+        if (!ofEmail && !ofWaPhone) {
+          // Show inline hint when neither input is valid
+          var oHintEl = document.getElementById('ccf-offer-hint') || document.getElementById('ccf-wa-hint');
+          if (!oHintEl) {
+            oHintEl = document.createElement('div');
+            oHintEl.id = 'ccf-offer-hint';
+            oHintEl.style.cssText = 'font-size:11px;color:#dc2626;margin-top:4px;';
+            if (offerBtn.parentNode) offerBtn.parentNode.insertBefore(oHintEl, offerBtn.nextSibling);
+          }
+          if (oHintEl) { oHintEl.textContent = 'Add your email or your WhatsApp number (tick the box).'; oHintEl.style.display = ''; }
+          return;
+        }
+
+        var ofAction = ofEmail ? 'email' : 'whatsapp';
+        var origOfferText = offerBtn.textContent;
+        offerBtn.disabled = true;
+        if (allow) allow.disabled = true;
+        offerBtn.textContent = 'Saving...';
+
+        function resetOfferBtn() {
+          offerBtn.disabled = false;
+          if (allow) allow.disabled = false;
+          offerBtn.textContent = origOfferText;
+        }
+
+        fetch('/cart.js')
+          .then(function (r) { return r.json(); })
+          .catch(function () { return { token: '' }; })
+          .then(function (cart) {
+            var cartToken = cart.token ? cart.token.split('?')[0].trim() : null;
+            var ofBody = { action: ofAction, sessionId: getSessionId(), cartToken: cartToken };
+            if (ofEmail) ofBody.email = ofEmail;
+            if (ofWaPhone) { ofBody.whatsappPhone = ofWaPhone; ofBody.whatsappCountry = ofWaCountry; ofBody.whatsappConsent = true; }
+            return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(ofBody)
+            })
+              .then(function (r) { return r.json(); })
+              .then(function (d) {
+                if (ofAction === 'whatsapp' && d && d.success) {
+                  // WhatsApp-only: show thank-you state then close
+                  offerBtn.textContent = 'Thanks! We\'ll message you on WhatsApp.';
+                  offerBtn.style.background = '#dcfce7';
+                  offerBtn.style.color = '#166534';
+                  offerBtn.style.border = '1px solid #86efac';
+                  setTimeout(cleanup, 2500);
+                } else if (ofAction === 'email') {
+                  finishDiscount(d, 'email');
+                } else {
+                  resetOfferBtn();
+                }
+              });
+          })
+          .catch(function () { resetOfferBtn(); });
       });
     }
   }
@@ -2669,7 +2803,8 @@
   // Wire the four intent triggers. First one to fire wins (session guard).
   var ccfExitIntentBound = false;
   function initIntentTriggers() {
-    if (!canPrompt()) return;
+    var _canCapOnly = canCaptureOnly();
+    if (!canPrompt() && !_canCapOnly) return;
 
     // Do not show the popup on product pages — home/collection/etc only.
     // Computed here (not the `var pageType = getPageType()` further down)
@@ -2687,9 +2822,9 @@
       hasToken = !!localStorage.getItem(PAGE_LOAD_TOKEN_KEY);
     } catch (e) {}
 
-    if (!hasToken && canPrompt()) {
+    if (!hasToken && (canPrompt() || _canCapOnly)) {
       setTimeout(function () {
-        if (canPrompt()) {
+        if (canPrompt() || canCaptureOnly()) {
           showSoftPrompt('page_load', null);
         }
       }, DWELL_MS);
