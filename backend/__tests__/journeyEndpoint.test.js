@@ -21,6 +21,18 @@ jest.mock('../utils/productImage', () => ({
   normalizeImageUrl: jest.requireActual('../utils/productImage').normalizeImageUrl,
   fetchProductImageWithTimeout: jest.fn(),
 }));
+jest.mock('../middleware/requireOwner', () => ({
+  requireAuth: (req, _res, next) => {
+    req.shopDomain = req.headers['x-test-shop'] || 'demo.myshopify.com';
+    next();
+  },
+  requireStoreOwner: (req, res, next) => {
+    if (req.shopDomain !== req.params.shopDomain) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+    next();
+  },
+}));
 
 const Signal = require('../models/Signal');
 const StorefrontEvent = require('../models/StorefrontEvent');
@@ -238,5 +250,45 @@ describe('topProducts imageUrl resolution', () => {
     await getJourneyData(SHOP, {});
 
     expect(fetchProductImageWithTimeout).toHaveBeenCalledTimes(3);
+  });
+});
+
+// HTTP-level tests: profileId=undefined / invalid -> 400 (not 500).
+// requireOwner is mocked at file top level. Uses an ephemeral Express server.
+describe('GET /journey profileId validation (HTTP)', () => {
+  let server;
+  let base;
+
+  beforeAll(() => new Promise((resolve) => {
+    const express = require('express');
+    const eventsRouter = require('../routes/events');
+    const app = express();
+    app.use(express.json());
+    app.use('/api/events', eventsRouter);
+    server = app.listen(0, () => {
+      base = `http://127.0.0.1:${server.address().port}`;
+      resolve();
+    });
+  }));
+  afterAll(() => new Promise((resolve) => server.close(resolve)));
+
+  test('z1. profileId=undefined returns 400 not 500', async () => {
+    const res = await fetch(
+      `${base}/api/events/demo.myshopify.com/journey?profileId=undefined`,
+      { headers: { 'x-test-shop': 'demo.myshopify.com' } }
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body).toEqual({ error: 'Invalid profileId' });
+  });
+
+  test('z2. profileId=not-an-objectid returns 400', async () => {
+    const res = await fetch(
+      `${base}/api/events/demo.myshopify.com/journey?profileId=not-valid`,
+      { headers: { 'x-test-shop': 'demo.myshopify.com' } }
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body).toEqual({ error: 'Invalid profileId' });
   });
 });

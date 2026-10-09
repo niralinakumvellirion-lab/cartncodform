@@ -943,9 +943,9 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
   }, []);
 
   const load = useCallback(async (ctl) => {
-    if (!shop || !profileId) {
+    if (!shop || !profileId || profileId === 'undefined') {
       setLoading(false);
-      setError('Missing shop or customer id in the URL.');
+      setNotFound(true);
       return;
     }
     setLoading(true);

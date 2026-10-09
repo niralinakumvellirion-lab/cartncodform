@@ -130,7 +130,7 @@ describe('GET /:shop/messages — channel/status/from/to', () => {
 describe('GET /:shop/profiles — email_captured / push_subscribed filters', () => {
   function mockProfiles(rows, total = rows.length) {
     Profile.find.mockReturnValue({
-      sort: () => ({ skip: () => ({ limit: () => ({ select: () => Promise.resolve(rows) }) }) }),
+      sort: () => ({ skip: () => ({ limit: () => ({ select: () => ({ lean: () => Promise.resolve(rows) }) }) }) }),
     });
     Profile.countDocuments.mockResolvedValue(total);
   }
@@ -316,7 +316,7 @@ describe('GET /:shop/profiles — signal filter (Do This Next drill-down)', () =
   }
   function mockProfiles(rows, total = rows.length) {
     Profile.find.mockReturnValue({
-      sort: () => ({ skip: () => ({ limit: () => ({ select: () => Promise.resolve(rows) }) }) }),
+      sort: () => ({ skip: () => ({ limit: () => ({ select: () => ({ lean: () => Promise.resolve(rows) }) }) }) }),
     });
     Profile.countDocuments.mockResolvedValue(total);
   }

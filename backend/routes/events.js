@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const StorefrontEvent = require('../models/StorefrontEvent');
 const ProductImageCache = require('../models/ProductImageCache');
 const { normalizeImageUrl, fetchProductImageWithTimeout } = require('../utils/productImage');
@@ -641,6 +642,10 @@ router.get('/:shopDomain/journey', requireAuth, requireStoreOwner, async (req, r
     const profileId = typeof req.query.profileId === 'string' && req.query.profileId
       ? req.query.profileId
       : null;
+
+    if (profileId !== null && !mongoose.Types.ObjectId.isValid(profileId)) {
+      return res.status(400).json({ error: 'Invalid profileId' });
+    }
 
     const data = await getJourneyData(req.params.shopDomain, { limit, page, profileId });
     return res.json(data);

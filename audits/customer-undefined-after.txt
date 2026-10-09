@@ -1,0 +1,94 @@
+CUSTOMER DETAIL UNDEFINED ID — SELF-AUDIT
+2026-10-09
+============================================================
+
+FILES CHANGED
+  backend/routes/profiles.js
+  backend/routes/events.js
+  backend/__tests__/journeyEndpoint.test.js
+  backend/__tests__/dashboardDrilldown.test.js  (mock chain update)
+  frontend/app/admin/screens/CustomerDetail.jsx
+
+FILES NOT CHANGED
+  frontend/app/admin/screens/Customers.jsx — p._id now works again (lean fix);
+    navigation calls unchanged, no id field rename needed
+  frontend/app/admin/screens/FestivalDetail.jsx — was already safe (r.profileId &&)
+  Any other file
+
+============================================================
+
+1. CHANGE SUMMARIES
+============================================================
+
+A. backend/routes/profiles.js — .lean() on Profile.find() query
+   Before:
+     Profile.find(query).sort(...).skip(...).limit(...).select(...)
+   After:
+     Profile.find(query).sort(...).skip(...).limit(...).select(...).lean()
+   Effect: p in the .map() is a plain JS object; { ...p, hasWhatsappReachable }
+   correctly spreads all schema fields (_id, identifiers, channels, etc.) to the
+   top level. Frontend now receives p._id = ObjectId string, not undefined.
+
+B. backend/routes/events.js — profileId 400 guard
+   Added: const mongoose = require('mongoose');
+   Added after profileId extraction:
+     if (profileId !== null && !mongoose.Types.ObjectId.isValid(profileId)) {
+       return res.status(400).json({ error: 'Invalid profileId' });
+     }
+   Effect: "undefined" / any non-ObjectId string returns 400 before reaching
+   Profile.findOne. Valid ObjectId strings and null (no profileId) pass through
+   unchanged.
+
+C. backend/__tests__/journeyEndpoint.test.js — profileId validation tests (HTTP)
+   Added jest.mock('../middleware/requireOwner') at file top level.
+   Added describe 'GET /journey profileId validation (HTTP)' with two tests:
+     z1. profileId=undefined → 400 { error: 'Invalid profileId' }
+     z2. profileId=not-valid  → 400 { error: 'Invalid profileId' }
+   Server: throwaway Express app on ephemeral port, driven with Node fetch.
+   beforeAll/afterAll use Promise not done callback (avoids Jest "cannot return
+   and use done" error).
+
+D. backend/__tests__/dashboardDrilldown.test.js — mock chain update
+   Two mockProfiles() helpers had select() returning Promise.resolve() directly.
+   Updated to add .lean() step: select: () => ({ lean: () => Promise.resolve(rows) })
+   This mirrors the actual query chain after the profiles.js fix.
+
+E. frontend/app/admin/screens/CustomerDetail.jsx — notFound guard
+   Before:
+     if (!shop || !profileId) { setError(...); }
+   After:
+     if (!shop || !profileId || profileId === 'undefined') { setNotFound(true); }
+   Effect: if the user somehow reaches /admin/customers/undefined (stale bookmark,
+   race condition), the component shows the existing "Customer not found" state
+   instead of fetching and showing a 500 error.
+
+============================================================
+
+2. VERIFICATION
+============================================================
+
+✓ cd backend && npm test: 836/836 pass (was 836/836 before, dashboardDrilldown
+  mock fix restores the 1 test that .lean() broke)
+✓ cd frontend && npm run build: clean, no TypeScript or lint errors
+✗ Browser: cannot verify click-through in a Shopify embedded admin iframe.
+  Code path is straightforward: lean() returns plain objects with correct _id,
+  which encodeURIComponent encodes to a valid ObjectId string, not "undefined".
+
+============================================================
+
+3. RISKS / EDGE CASES
+============================================================
+
+- .lean() strips Mongoose virtuals and .toJSON() transforms. The fields selected
+  (identifiers, stage, orders, channels, lastSeenAt, updatedAt, messages, interests)
+  are all plain schema fields with no virtuals defined; there is no toJSON transform
+  on the Profile model that the code relied on. Risk: none.
+- .lean() returns _id as a MongoDB ObjectId object, not a string. Mongoose's .toJSON()
+  would have converted it to a string. Now JSON.stringify converts the ObjectId to a
+  string automatically (ObjectId has toJSON() on its prototype). The frontend receives
+  the same hex string either way. Risk: none.
+- profileId === 'undefined' guard in CustomerDetail.jsx is intentionally narrow
+  (only the exact string "undefined"). An empty string is caught by !profileId.
+  Any other invalid-but-truthy string (e.g. "null") is caught by the backend 400.
+
+============================================================

@@ -200,7 +200,8 @@ router.get('/:shopDomain/profiles', requireAuth, requireStoreOwner, async (req, 
         .sort({ updatedAt: -1 })
         .skip(page * limit)
         .limit(limit)
-        .select('identifiers stage orders channels lastSeenAt updatedAt messages interests'),
+        .select('identifiers stage orders channels lastSeenAt updatedAt messages interests')
+        .lean(),
       Profile.countDocuments(query),
     ]);
 

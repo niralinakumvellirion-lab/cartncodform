@@ -1,0 +1,160 @@
+CUSTOMER DETAIL UNDEFINED ID — PRE-FIX AUDIT (Step 0)
+2026-10-09
+============================================================
+
+ROOT CAUSE IDENTIFIED
+============================================================
+
+File : backend/routes/profiles.js (lines 207-216, commit 4c9bc11)
+Bug  : { ...p } spread on a Mongoose 8 document only copies the document's
+       OWN enumerable properties: `$__` (internal state) and `_doc` (data).
+       Schema fields (_id, identifiers, channels, etc.) are defined as prototype
+       getters, NOT own enumerable properties. So { ...p } gives:
+         { '$__': {...}, '_doc': { _id: ObjectId, identifiers: {...}, ... } }
+       and the frontend receives p._id === undefined for every profile row.
+       This was introduced in commit 4c9bc11 ("WhatsApp step 1b") which added:
+         return { ...p, hasWhatsappReachable };  ← was: return res.json({ profiles, total })
+       Before that commit, profiles were returned directly (Mongoose docs), and
+       JSON.stringify called .toJSON() on each, giving top-level _id.
+
+Verified:
+  node -e "const m=require('mongoose');const s=new m.Schema({name:String});
+  const M=m.model('T',s);const d=new M({name:'x'});
+  console.log(Object.keys({...d}));"
+  → [ '$__', '_doc' ]   ← _id is NOT at the top level
+
+============================================================
+
+1. EVERY NAVIGATION SITE TO /admin/customers/:id
+============================================================
+
+A. Customers.jsx line 370 (mobile card view)
+   File: frontend/app/admin/screens/Customers.jsx
+   Code: onClick={() => navigate(`/admin/customers/${encodeURIComponent(p._id)}`)}
+   Field used: p._id
+   Source API: GET /api/profiles/:shop/profiles
+   API field: _id is nested under p._doc._id (Mongoose spread bug) → p._id = undefined
+   CAN PRODUCE /undefined: YES — EVERY ROW (primary bug site)
+
+B. Customers.jsx line 506 (desktop table view)
+   File: frontend/app/admin/screens/Customers.jsx
+   Code: onClick={() => navigate(`/admin/customers/${encodeURIComponent(p._id)}`)}
+   Field used: p._id
+   Source API: same
+   CAN PRODUCE /undefined: YES — EVERY ROW (same bug)
+
+C. FestivalDetail.jsx line 391 (queue recipients table)
+   File: frontend/app/admin/screens/FestivalDetail.jsx
+   Code: onClick={() => r.profileId && navigate(`/admin/customers/${r.profileId}?from=queue&fid=${festivalId}`)}
+   Field used: r.profileId
+   Source API: GET /api/queue/:shop/festival/:id/recipients
+   API field: profileId: match?.profileId || null  (lean profile._id via queue.js:730)
+   Guard: r.profileId && prevents null navigation
+   CAN PRODUCE /undefined: NO — guard handles null; lean docs have correct _id
+
+D. Today.jsx
+   Lines 600, 604: navigate('/admin/customers?filter=whatsapp_captured') → goes to LIST, not detail
+   WhatsApp pending list (lines 641-674): no onClick on rows, only a "WhatsApp" send button
+   New subscribers list (lines 459-508): no row-level navigation
+   CAN PRODUCE /undefined: NO
+
+E. Journey.jsx, Messages.jsx, customerShared.jsx, Insights.jsx, WhatToActOn.jsx
+   Searched for: navigate.*customer, router.push, admin/customers
+   None navigate to /admin/customers/:id
+   CAN PRODUCE /undefined: NO
+
+============================================================
+
+2. API JSON FIELD NAMES FOR THE ID IN EACH LIST API
+============================================================
+
+GET /api/profiles/:shop/profiles (Customers.jsx)
+  Before 4c9bc11: { profiles: [Mongoose doc] } → JSON.stringify calls .toJSON() → _id at top level
+  After  4c9bc11: { profiles: [{ '$__': ..., '_doc': { _id: ... }, hasWhatsappReachable }] }
+                  → p._id = undefined on frontend (BUG)
+  Fix: add .lean() so documents are plain objects before spreading
+
+GET /api/whatsapp/:shop/pending (Today.jsx WhatsApp pending list)
+  Returns: { profileId: String(p._id) }  (no navigation to customer detail from this list)
+
+GET /api/profiles/:shop/new-subscribers (Today.jsx new subscriber list)
+  Returns: { profileId: p._id }  (no navigation to customer detail)
+
+GET /api/queue/:shop/festival/:id/recipients (FestivalDetail.jsx)
+  Returns: { profileId: match?.profileId || null }  (null when anonymous)
+  Navigation has r.profileId && guard
+
+GET /api/events/:shop/journey (CustomerDetail.jsx load)
+  Query param: profileId (string)
+  Bug: the string "undefined" is a truthy non-empty string, passes the existing check
+    (typeof req.query.profileId === 'string' && req.query.profileId)
+  Then Profile.findOne({ _id: "undefined" }) throws Mongoose CastError → 500
+  Fix: validate with mongoose.Types.ObjectId.isValid before passing to getJourneyData
+
+============================================================
+
+3. WHICH SITE(S) CAN PRODUCE UNDEFINED AND WHY
+============================================================
+
+PRIMARY: Customers.jsx (both views, lines 370 and 506)
+  - `p` comes from the profiles API response
+  - profiles API spreads Mongoose docs: { ...p } gives { '$__', '_doc' } NOT fields at top level
+  - p._id = undefined → encodeURIComponent(undefined) = "undefined" → URL = /admin/customers/undefined
+
+SECONDARY (not a source, but amplifies the 500): events.js journey route
+  - Accepts profileId = "undefined" (the string) because it's a non-empty string
+  - Passes it to Profile.findOne({ _id: "undefined" }) which throws CastError → 500
+  - Fix: validate with mongoose.Types.ObjectId.isValid()
+
+============================================================
+
+4. PREDATES OR INTRODUCED BY WHATSAPP WORK?
+============================================================
+
+The spreading bug was INTRODUCED BY commit 4c9bc11 ("WhatsApp step 1b:
+order-purpose messages...") on 2026-10-09.
+
+Before that commit, profiles.js returned:
+  return res.json({ profiles, total });
+(Mongoose docs directly — JSON.stringify called .toJSON() on each)
+
+After that commit:
+  const profilesOut = profiles.map(p => ({ ...p, hasWhatsappReachable }));
+  return res.json({ profiles: profilesOut, total });
+(Plain objects from broken spread — _id missing from top level)
+
+git log -S "hasWhatsappReachable" -- backend/routes/profiles.js confirmed:
+  only commit 4c9bc11 introduced this change.
+
+============================================================
+
+5. WHAT THE BACKEND 500 CURRENTLY RETURNS
+============================================================
+
+events.js line 641-643 (current):
+  const profileId = typeof req.query.profileId === 'string' && req.query.profileId
+    ? req.query.profileId
+    : null;
+
+When profileId = "undefined" (non-empty string), passes the check → profileId = "undefined".
+Line 573: if (profileId) { await Profile.findOne({ _id: "undefined" }) }
+→ Mongoose CastError: Cast to ObjectId failed for value "undefined"
+→ catch block returns 500 { error: "Failed to fetch journey data" }
+
+============================================================
+
+6. CUSTOMERDETAIL.JSX CURRENT GUARD
+============================================================
+
+Line 946-950:
+  if (!shop || !profileId) {
+    setLoading(false);
+    setError('Missing shop or customer id in the URL.');
+    return;
+  }
+
+The string 'undefined' is truthy, so the guard passes.
+The component fetches GET .../journey?profileId=undefined → 500.
+The 500 error is caught and shown as an error state (not notFound state).
+
+============================================================
