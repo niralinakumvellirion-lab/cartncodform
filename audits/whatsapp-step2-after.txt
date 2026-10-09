@@ -1,0 +1,100 @@
+WHATSAPP STEP 2 — SELF-AUDIT
+2026-10-09
+============================================================
+
+SCOPE: Storefront popup WhatsApp field + admin toggle.
+Flag off (the default) → zero behavioural change.
+
+============================================================
+1. extensions/cartncodform-embed/assets/ccf-push.js
+
+  Added after ccfShowPhoneField():
+    ccfShowWhatsappField() — returns true only when
+      discountConfig.whatsappCapture.enabled is truthy.
+    CCF_DIAL_CODES — 12-country dial code array.
+    ccfDefaultCountry() — reads window.Shopify.country,
+      falls back to 'IN'.
+    ccfBuildWhatsappFields(container, opts) — builds
+      country select + phone input + consent checkbox +
+      error hint div into `container`; no-ops when flag is off.
+      No innerHTML with user-supplied values.
+      ES5 compatible (var, no arrow functions, no template literals).
+
+  Called in 6 popup-style locations after the email block:
+    ccfBuildDiscountFields() — classic/split layout
+    buildProContent()        — spotlight, noir, color_block
+    flash_sale/gift_reveal   — sContent
+    bottom_sheet             — bsContent
+    story_card               — scContent (white-on-dark palette)
+    card layout              — cardContent
+
+  NOT added to top_bar style: that style explicitly sets
+  wantsDiscount = false and has no email field.
+
+  allow.addEventListener('click') updated:
+    Reads ccf-wa-country, ccf-wa-phone, ccf-wa-consent
+    BEFORE any async work (same timing as email read).
+    Validates digit count (6-15) and consent flag.
+    Invalid → shows ccf-wa-hint message; waPhone stays null.
+    Valid + consented → waPhone set.
+    Both generate-discount fetch calls (granted-path and
+    new-subscriber path) include whatsappPhone, whatsappCountry,
+    whatsappConsent when waPhone is non-null.
+    WhatsApp validation never blocks the push/email flow.
+
+  node --check: clean.
+
+============================================================
+2. backend/routes/discounts.js
+
+  defaultConfig(): added whatsappCapture: { enabled: false }.
+  PATCH handler: accepts whatsappCapture.enabled when it is
+    a boolean; saves as 'whatsappCapture.enabled' via $set.
+  GET: already returns the full doc (includes whatsappCapture).
+
+  Backend already handles storefront WhatsApp consent in
+  generateDiscount() (Step 1b): upserts profile.channels.
+  whatsapp.phone + consentedAt via upsertProfile().
+
+============================================================
+3. frontend/app/admin/screens/Discounts.jsx
+
+  buildPayload(): added
+    out.whatsappCapture = { enabled: !!(config.whatsappCapture?.enabled) }
+
+  New WhatsApp capture card (before Save button):
+    Phone icon (Lucide path) in green.
+    Label: "Collect WhatsApp number in the popup".
+    Helper: "Visitors can share their WhatsApp number …
+      nothing is sent automatically."
+    Toggle: same 36×20px pill pattern as push/email toggles.
+    Wired to setConfig() — updates config.whatsappCapture.enabled.
+    Saved on next "Save discount settings" click via buildPayload().
+
+  npm run build: clean.
+
+============================================================
+4. Tests
+
+  backend/__tests__/discountConfigRoutes.test.js:
+    New: whatsappCapture.enabled is saved when sent as a boolean
+    New: whatsappCapture is ignored when enabled is not a boolean
+
+  Test run: 45 suites, 818 tests — all passed.
+  (+2 vs Step 1b baseline of 816)
+
+============================================================
+5. Extension deploy
+
+  No version field in shopify.extension.toml; Shopify serves
+  extension assets by content hash after `shopify app deploy`.
+  Deploy command: shopify app deploy (run from repo root).
+  No version bump needed.
+
+============================================================
+6. WHAT WAS NOT DONE (deferred)
+
+  - Profiles dashboard UI showing WA capture badge: Steps 3-4
+  - WhatsApp send flow from admin UI: Steps 3-4
+
+============================================================

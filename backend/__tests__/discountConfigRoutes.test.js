@@ -95,6 +95,16 @@ describe('PATCH /:shopDomain/config', () => {
     expect(update['bothDiscount.enabled']).toBe(false);
     expect(update.offerHeadline).toBe('Hello');
   });
+
+  test('whatsappCapture.enabled is saved when sent as a boolean', async () => {
+    const { update } = await run({ whatsappCapture: { enabled: true } });
+    expect(update['whatsappCapture.enabled']).toBe(true);
+  });
+
+  test('whatsappCapture is ignored when enabled is not a boolean', async () => {
+    const { update } = await run({ whatsappCapture: { enabled: 'yes' } });
+    expect(update['whatsappCapture.enabled']).toBeUndefined();
+  });
 });
 
 describe('GET /discount-config (App Proxy)', () => {

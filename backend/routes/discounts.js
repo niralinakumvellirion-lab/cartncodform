@@ -27,6 +27,7 @@ function defaultConfig(shop) {
     phoneDiscount: { enabled: false, percentage: 15, maxUses: 100, expiryDays: 7, prefix: 'PHONE', offerText: '' },
     bothDiscount: { enabled: false, percentage: 20, maxUses: 100, expiryDays: 7, prefix: 'VIP', offerText: '' },
     offerHeadline: 'Get a discount on your first order!',
+    whatsappCapture: { enabled: false },
   };
 }
 
@@ -333,6 +334,9 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
     }
     if (typeof req.body.offerHeadline === 'string') {
       set.offerHeadline = req.body.offerHeadline.slice(0, 200);
+    }
+    if (req.body.whatsappCapture && typeof req.body.whatsappCapture.enabled === 'boolean') {
+      set['whatsappCapture.enabled'] = req.body.whatsappCapture.enabled;
     }
 
     const config = await DiscountConfig.findOneAndUpdate(

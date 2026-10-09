@@ -144,6 +144,83 @@
   function ccfShowPhoneField() {
     return false;
   }
+  function ccfShowWhatsappField() {
+    return !!(discountConfig && discountConfig.whatsappCapture && discountConfig.whatsappCapture.enabled);
+  }
+  // Dial code map: ISO 3166-1 alpha-2 -> display label + digits prefix.
+  var CCF_DIAL_CODES = [
+    ['IN', '+91'], ['US', '+1'], ['GB', '+44'], ['AE', '+971'],
+    ['CA', '+1'], ['AU', '+61'], ['SG', '+65'], ['SA', '+966'],
+    ['PK', '+92'], ['BD', '+880'], ['LK', '+94'], ['NP', '+977']
+  ];
+  function ccfDefaultCountry() {
+    var c = (window.Shopify && window.Shopify.country) ? String(window.Shopify.country).toUpperCase() : 'IN';
+    for (var di = 0; di < CCF_DIAL_CODES.length; di++) {
+      if (CCF_DIAL_CODES[di][0] === c) return c;
+    }
+    return 'IN';
+  }
+  // Builds country-select + phone-input + consent checkbox into `container`.
+  // opts: { inputBg, fg, inputBorder } — falls back to neutral defaults.
+  // Returns immediately (no DOM change) when ccfShowWhatsappField() is false.
+  function ccfBuildWhatsappFields(container, opts) {
+    if (!ccfShowWhatsappField()) return;
+    var o = opts || {};
+    var inputBg = o.inputBg || '#ffffff';
+    var inputFg = o.fg || '#111827';
+    var inputBorder = o.inputBorder || '#e5e7eb';
+    var baseStyle = ccfInputStyle();
+
+    var phoneRow = document.createElement('div');
+    phoneRow.style.cssText = 'display:flex;gap:8px;margin-top:10px;';
+
+    var sel = document.createElement('select');
+    sel.id = 'ccf-wa-country';
+    sel.style.cssText = 'flex-shrink:0;' + baseStyle +
+      'width:86px;padding:0 6px;-webkit-appearance:none;appearance:none;' +
+      'background:' + inputBg + ';color:' + inputFg + ';border-color:' + inputBorder + ';';
+    var defCountry = ccfDefaultCountry();
+    for (var di = 0; di < CCF_DIAL_CODES.length; di++) {
+      var opt = document.createElement('option');
+      opt.value = CCF_DIAL_CODES[di][0];
+      opt.textContent = CCF_DIAL_CODES[di][0] + ' ' + CCF_DIAL_CODES[di][1];
+      if (CCF_DIAL_CODES[di][0] === defCountry) opt.selected = true;
+      sel.appendChild(opt);
+    }
+    phoneRow.appendChild(sel);
+
+    var tel = document.createElement('input');
+    tel.type = 'tel';
+    tel.id = 'ccf-wa-phone';
+    tel.setAttribute('inputmode', 'tel');
+    tel.setAttribute('autocomplete', 'tel-national');
+    tel.placeholder = 'WhatsApp number';
+    tel.style.cssText = 'flex:1;min-width:0;' + baseStyle +
+      'background:' + inputBg + ';color:' + inputFg + ';border-color:' + inputBorder + ';';
+    phoneRow.appendChild(tel);
+    container.appendChild(phoneRow);
+
+    var consentRow = document.createElement('div');
+    consentRow.style.cssText = 'display:flex;align-items:flex-start;gap:8px;margin-top:8px;';
+
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.id = 'ccf-wa-consent';
+    cb.style.cssText = 'flex-shrink:0;margin-top:2px;width:14px;height:14px;cursor:pointer;accent-color:#16a34a;';
+    consentRow.appendChild(cb);
+
+    var lbl = document.createElement('label');
+    lbl.setAttribute('for', 'ccf-wa-consent');
+    lbl.style.cssText = 'font-size:11px;line-height:1.4;color:' + inputFg + ';opacity:0.7;cursor:pointer;';
+    lbl.textContent = 'Message me on WhatsApp about offers and order updates. Reply STOP anytime.';
+    consentRow.appendChild(lbl);
+    container.appendChild(consentRow);
+
+    var hint = document.createElement('div');
+    hint.id = 'ccf-wa-hint';
+    hint.style.cssText = 'font-size:11px;color:#dc2626;margin-top:4px;display:none;';
+    container.appendChild(hint);
+  }
   function ccfPct(key) {
     var r = discountConfig && discountConfig[key];
     return (r && r.enabled && r.percentage) ? r.percentage : 0;
@@ -586,6 +663,7 @@
       ei.style.cssText = ccfInputStyle();
       box.appendChild(ei);
     }
+    ccfBuildWhatsappFields(box, {});
     return box;
   }
 
@@ -1013,6 +1091,7 @@
         }
         c.appendChild(ew);
       }
+      ccfBuildWhatsappFields(c, pal);
       allow = buildAllowBtn(ccfAllowButtonStyle(pal.accent, cfg.ctaStyle) + 'font-size:16px;padding:15px;' +
         (o.ctaLight ? 'background:#ffffff;color:#0f1115;box-shadow:none;border:none;' : ''));
       c.appendChild(allow);
@@ -1160,6 +1239,7 @@
           (isFlashSale ? 'background:#ffffff;color:#111827;border-color:#d4d4d8;' : '');
         sContent.appendChild(sEmailInput);
       }
+      ccfBuildWhatsappFields(sContent, {});
 
       // Real-deadline countdown only — never a fake per-visitor timer.
       // 'fixed_date' with a valid future date: shown now, ticking live.
@@ -1447,6 +1527,7 @@
         bsEmailInput.style.cssText = ccfInputStyle();
         bsContent.appendChild(bsEmailInput);
       }
+      ccfBuildWhatsappFields(bsContent, {});
 
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       bsContent.appendChild(allow);
@@ -1621,6 +1702,7 @@
           'background:rgba(255,255,255,0.15);color:' + scFg + ';border-color:rgba(255,255,255,0.3);';
         scContent.appendChild(scEmailInput);
       }
+      ccfBuildWhatsappFields(scContent, { fg: scFg, inputBg: 'rgba(255,255,255,0.15)', inputBorder: 'rgba(255,255,255,0.3)' });
 
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       scContent.appendChild(allow);
@@ -1893,6 +1975,7 @@
         cardEmailInput.style.cssText = ccfInputStyle();
         cardContent.appendChild(cardEmailInput);
       }
+      ccfBuildWhatsappFields(cardContent, {});
 
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       cardContent.appendChild(allow);
@@ -2191,6 +2274,30 @@
       // Read the discount inputs BEFORE any teardown.
       var emailEl = document.getElementById('ccf-email-input');
       var email = emailEl && emailEl.value ? emailEl.value.trim() : '';
+
+      // Read WhatsApp fields (if the flag is on) before any async work.
+      var waPhone = null, waCountry = 'IN';
+      if (ccfShowWhatsappField()) {
+        var waCountryEl = document.getElementById('ccf-wa-country');
+        var waPhoneEl = document.getElementById('ccf-wa-phone');
+        var waConsentEl = document.getElementById('ccf-wa-consent');
+        var waHintEl = document.getElementById('ccf-wa-hint');
+        if (waHintEl) waHintEl.style.display = 'none';
+        waCountry = waCountryEl ? waCountryEl.value : 'IN';
+        var waRaw = waPhoneEl ? waPhoneEl.value.trim() : '';
+        var waDigits = waRaw.replace(/\D/g, '');
+        var waConsent = waConsentEl ? waConsentEl.checked : false;
+        if (waDigits) {
+          if (waDigits.length < 6 || waDigits.length > 15) {
+            if (waHintEl) { waHintEl.textContent = 'Enter a valid phone number (6-15 digits).'; waHintEl.style.display = ''; }
+          } else if (!waConsent) {
+            if (waHintEl) { waHintEl.textContent = 'Please tick the box to receive WhatsApp messages.'; waHintEl.style.display = ''; }
+          } else {
+            waPhone = waDigits;
+          }
+        }
+      }
+
       var originalButtonText = allow.textContent;
       var originalButtonBg = allow.style.background;
 
@@ -2231,13 +2338,12 @@
               .catch(function () { return { token: '' }; })
               .then(function (cart) {
                 var cartToken = cart.token ? cart.token.split('?')[0].trim() : null;
+                var capBody = { action: capAction, email: email, sessionId: getSessionId(), cartToken: cartToken };
+                if (waPhone) { capBody.whatsappPhone = waPhone; capBody.whatsappCountry = waCountry; capBody.whatsappConsent = true; }
                 return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    action: capAction, email: email,
-                    sessionId: getSessionId(), cartToken: cartToken
-                  })
+                  body: JSON.stringify(capBody)
                 });
               })
               .then(function (r) { return r.json(); })
@@ -2280,13 +2386,12 @@
               .then(function (r) { return r.json(); })
               .then(function (cart) {
                 var cartToken = cart.token ? cart.token.split('?')[0].trim() : null;
+                var subBody = { action: action, email: email, sessionId: getSessionId(), cartToken: cartToken };
+                if (waPhone) { subBody.whatsappPhone = waPhone; subBody.whatsappCountry = waCountry; subBody.whatsappConsent = true; }
                 return fetch('/apps/cartncodform/generate-discount?shop=' + encodeURIComponent(SHOP_DOMAIN), {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    action: action, email: email,
-                    sessionId: getSessionId(), cartToken: cartToken
-                  })
+                  body: JSON.stringify(subBody)
                 });
               })
               .then(function (r) { return r.json(); })

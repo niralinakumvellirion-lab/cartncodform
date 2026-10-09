@@ -194,6 +194,7 @@ function buildPayload(config) {
       offerText: (d.offerText || '').slice(0, OFFER_TEXT_MAX),
     };
   }
+  out.whatsappCapture = { enabled: !!(config.whatsappCapture && config.whatsappCapture.enabled) };
   return out;
 }
 
@@ -507,6 +508,63 @@ export default function Discounts({ shop }) {
               </div>
             );
           })}
+
+          {/* WhatsApp number capture toggle */}
+          <div style={{ ...DS.card, marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Svg size={20} style={{ color: '#16a34a', flexShrink: 0 }}>
+                <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z" />
+              </Svg>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: DS.gray900 }}>
+                  Collect WhatsApp number in the popup
+                </div>
+                <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2, lineHeight: 1.5 }}>
+                  Visitors can share their WhatsApp number and consent to messages. You message them yourself from the Profiles dashboard — nothing is sent automatically.
+                </div>
+              </div>
+              <div
+                onClick={() =>
+                  setConfig((c) => ({
+                    ...c,
+                    whatsappCapture: {
+                      ...(c.whatsappCapture || {}),
+                      enabled: !(c.whatsappCapture && c.whatsappCapture.enabled),
+                    },
+                  }))
+                }
+                style={{
+                  width: '36px',
+                  height: '20px',
+                  borderRadius: '10px',
+                  cursor: 'pointer',
+                  background:
+                    config.whatsappCapture && config.whatsappCapture.enabled
+                      ? '#16a34a'
+                      : '#d1d5db',
+                  position: 'relative',
+                  transition: 'background 0.2s',
+                  flexShrink: 0,
+                  marginLeft: '2px',
+                }}
+              >
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '2px',
+                    left:
+                      config.whatsappCapture && config.whatsappCapture.enabled ? '18px' : '2px',
+                    width: '16px',
+                    height: '16px',
+                    borderRadius: '50%',
+                    background: '#fff',
+                    transition: 'left 0.2s',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                  }}
+                />
+              </div>
+            </div>
+          </div>
 
           {/* Save button — right aligned, status text to its left */}
           <div
