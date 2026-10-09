@@ -1,0 +1,194 @@
+WHATSAPP STEP 3 — SELF-AUDIT
+2026-10-09
+============================================================
+
+SCOPE: Admin UI for WhatsApp click-to-chat. Dashboard counters,
+pending-list, customer list filter + row button, customer detail
+WhatsApp tab. No changes to ccf-push.js, extensions, email templates,
+popup code, models, or webhooks.
+
+============================================================
+A. backend/routes/whatsapp.js
+------------------------------------------------------------
+
+NEW ROUTE: GET /:shopDomain/pending?limit=
+  • requireAuth + requireStoreOwner.
+  • Default limit=8, max=50, min=1 (clamped in-handler).
+  • Finds opted-in profiles (consentedAt exists + !null, optedOutAt null),
+    sorted channels.whatsapp.consentedAt DESC.
+  • Calls ScheduledJob.distinct('profileId') for the whatsapp channel —
+    all-time, not range-limited — to find ever-contacted profiles.
+  • Filters to uncontacted, slices to limit.
+  • Returns { total, items: [{ profileId, name, email, phone, consentedAt }] }.
+  • name derived from email local-part (first segment before ._+, title-cased).
+  • 500 on error.
+
+============================================================
+B. backend/__tests__/whatsapp.test.js
+------------------------------------------------------------
+
+pendingHandler registered from router stack.
+5 new tests:
+  1. Returns { total:0, items:[] } when no opted-in profiles.
+  2. Returns item with correct profileId/email/phone/name for one opted-in
+     profile with no jobs (ScheduledJob.distinct → []).
+  3. Excludes a profile whose ID is returned by ScheduledJob.distinct.
+  4. Respects limit=3 — total=10, items.length=3.
+  5. Clamps limit=999 to 50 — total=60, items.length=50.
+
+Full suite: 829 tests, 45 suites — all passed.
+(+5 vs Step 2b baseline of 824)
+
+============================================================
+C. AUDIT: activity.js + today-stats — channel filter correctness
+------------------------------------------------------------
+
+backend/routes/activity.js (GET /api/activity):
+  • Aggregates ALL AttributedEvent by eventType, no channel filter.
+  • WhatsApp-attributed events (ccf_src=whatsapp) WILL appear in counts.
+  • FINDING: this is intentional — the Activity screen shows cross-channel
+    engagement. No existing push/email card is broken; the route has no
+    per-channel display. Counts correctly include WA-attributed revisits,
+    carts, purchases. NO CHANGE NEEDED.
+
+backend/routes/profiles.js today-stats (GET /api/profiles/:shop/today-stats):
+  • pushSent: ScheduledJob.countDocuments({ channel: 'push', ... }) — ✅ explicitly filtered.
+  • emailSent: messages.channel: 'email' subdoc filter — ✅ explicitly filtered.
+  • emailCaptured: channels.email.capturedAt date range — ✅ profile-field, unaffected.
+  • pushSubscribers: channels.push.subscribed + subscribedAt date range — ✅ unaffected.
+  • NO WA jobs appear in any existing today-stats number. NO CHANGE NEEDED.
+
+Total recovered revenue (stats?.revenueRecovered):
+  • Comes from the yesterday-stats panel, which reads a legacy stats object
+    with no per-channel breakdown. WhatsApp has no ScheduledJob with
+    status:'pending' (all created as 'sent'), so it cannot affect any
+    poller-based revenue calculation. Any WA-attributed purchase event
+    would correctly add to cross-channel recovered revenue — this is the
+    desired behaviour. NO CHANGE NEEDED.
+
+orders/create attribution:
+  • Reads ccf_job query param → looks up ScheduledJob by _id, reads channel.
+    WA jobs exist as channel:'whatsapp' status:'sent', so attribution
+    correctly records the channel. Pre-existing push/email attribution
+    queries are unaffected. NO CHANGE NEEDED.
+
+============================================================
+D. frontend/app/admin/screens/customerShared.jsx
+------------------------------------------------------------
+
+Added at top: 'use client' directive, useState/useCallback import,
+apiSend import.
+
+NEW EXPORT: useWhatsapp()
+  Returns { sendWhatsapp, waError, waFallbackUrl, clearWaError }.
+
+  sendWhatsapp({ shopDomain, profileId, purpose }):
+    1. window.open('about:blank', '_blank') SYNCHRONOUSLY (pop-up blocker
+       compliance — must be in the call stack of the click handler).
+    2. w.opener = null if w exists (security: breaks opener reference).
+    3. POST /api/whatsapp/:shopDomain/send with profileId + purpose.
+    4. On success: w.location.href = data.url (navigates blank tab to wa.me).
+    5. On API error: w.close(), setWaError(message).
+    6. If window blocked (w is null): setWaFallbackUrl(data.url) — caller
+       renders an "Open WhatsApp" link.
+
+============================================================
+E. frontend/app/admin/screens/Today.jsx
+------------------------------------------------------------
+
+Imports: useCallback added, useWhatsapp imported from customerShared.
+
+New state:
+  waStats, waPending, waLoading — for WA section.
+  { sendWhatsapp, waError: waSendError, waFallbackUrl, clearWaError } from useWhatsapp().
+
+New timeAgo(dateStr) helper: "3m ago" / "5h ago" / "yesterday" / "Nd ago".
+
+New useEffect (keyed on [shop, dateFilter, refreshKey]):
+  Runs Promise.allSettled([/stats, /pending?limit=8]) independently;
+  non-blocking — main page renders regardless of WA fetch outcome.
+
+New JSX section (SECTION 3 — WhatsApp), placed between the stat grid and
+the existing error block:
+  • Conditional: only rendered when !waLoading && (waStats || waPending).
+  • Header: chat-bubble SVG (#128C7E), "WhatsApp" label, "View all →" link
+    to /admin/customers?filter=whatsapp_captured.
+  • Stat row: Pending / Sent by you / Visited / Carted / Purchased
+    (from waStats, date-filter-scoped).
+  • WA send error / fallback inline message (dismissible).
+  • Pending list: up to 8 rows; each shows name/email + "joined X ago" +
+    green WhatsApp button (sends purpose:'followup').
+  • Empty state: "Everyone with WhatsApp consent has been contacted."
+  • Upsell card: shown when waStats.pending===0 && waStats.sent===0
+    (flag off / no data yet).
+
+============================================================
+F. frontend/app/admin/screens/Customers.jsx
+------------------------------------------------------------
+
+Imports: useWhatsapp added.
+
+FILTER_TABS: added { key: 'whatsapp_captured', label: 'WhatsApp' }.
+  Backend already supported this filter key (profiles.js line 172).
+
+New state: waMessage (unused display state for future toasts), plus
+  { sendWhatsapp, waError: waRowError, waFallbackUrl, clearWaError } from useWhatsapp().
+
+New error/fallback banner: shown above the table when waRowError or waFallbackUrl
+  is set; includes "Open WhatsApp" link for fallback case.
+
+Desktop row REACH column:
+  When p.hasWhatsappReachable is true, a small green chat-bubble icon button
+  appears after ReachIcons. purpose: channels.whatsapp.consentedAt + !optedOutAt
+  → 'followup'; else → 'order'. stopPropagation prevents row click nav.
+  aria-label="Send WhatsApp message".
+
+Mobile rows: no WA button added (spec did not mention mobile rows).
+
+============================================================
+G. frontend/app/admin/screens/CustomerDetail.jsx
+------------------------------------------------------------
+
+Imports: useWhatsapp added.
+
+New state:
+  waProfile (from GET /profile/:profileId), waProfileLoading,
+  showWaOptOutConfirm, waOptingOut.
+  { sendWhatsapp, waError: waSendError, waFallbackUrl, clearWaError } from useWhatsapp().
+
+New loadWaProfile() callback + useEffect:
+  Fetches /api/whatsapp/:shop/profile/:profileId when customer loads.
+  Sets waProfile = { whatsapp, messages, canFollowup, canOrder, orderReason }.
+
+canWa = !!(waProfile && (waProfile.canFollowup || waProfile.canOrder)).
+sendCard condition: (!hasPush && !hasEmail && !canWa) for "nothing" state.
+
+optOutWhatsapp() async:
+  POST /api/whatsapp/:shop/opt-out → refetches waProfile → clears confirm.
+
+New "WhatsApp" tab in sendCard tabs row (shown when canWa):
+  Teal (#128C7E) active style, chat-bubble SVG icon.
+
+WhatsApp tab content (notifTab === 'whatsapp'):
+  • WA send error / fallback row (dismissible).
+  • canFollowup → primary green "WhatsApp" button (purpose:'followup').
+  • canOrder → secondary outlined "Order message" (or "WhatsApp (order message)"
+    when !canFollowup) button (purpose:'order').
+  • Neither case → reason text (opted_out / no_phone / invalid_phone).
+  • "Remove from WhatsApp" link when consentedAt present + not in confirm state.
+  • Confirm row: "Remove and opt out?" → "Yes, remove" / "Cancel".
+
+============================================================
+H. WHAT WAS NOT DONE (deferred / out of scope)
+
+  • WhatsApp message timeline on CustomerDetail (spec: "No message timeline yet").
+  • Persistent WA rate limiter (Redis/Mongo): low priority MVP.
+  • Mobile-row WA button in Customers.jsx.
+
+============================================================
+I. TESTS SUMMARY
+
+Backend: 829 / 45 — all passed.
+Frontend: npm run build — compiled successfully, 18 static pages, 0 errors.
+
+============================================================

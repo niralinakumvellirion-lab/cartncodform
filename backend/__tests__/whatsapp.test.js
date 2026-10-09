@@ -80,6 +80,7 @@ const STORE = { shopDomain: SHOP, timezone: 'Asia/Kolkata' }; // → country 'IN
 
 const sendHandler = handlerFor(whatsappRouter, '/:shopDomain/send', 'post');
 const statsHandler = handlerFor(whatsappRouter, '/:shopDomain/stats', 'get');
+const pendingHandler = handlerFor(whatsappRouter, '/:shopDomain/pending', 'get');
 const optOutHandler = handlerFor(whatsappRouter, '/:shopDomain/opt-out', 'post');
 const profileHandler = handlerFor(whatsappRouter, '/:shopDomain/profile/:profileId', 'get');
 
@@ -652,6 +653,108 @@ test('generateDiscount: skips capture when consent is false', async () => {
 // ---------------------------------------------------------------------------
 // Poller channel guard (regression from Step 1)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// GET /pending
+// ---------------------------------------------------------------------------
+
+test('pending: returns empty when no opted-in profiles', async () => {
+  Profile.find.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([]),
+  });
+  const res = mockRes();
+  await pendingHandler({ params: { shopDomain: SHOP }, query: {} }, res);
+  expect(res.statusCode).toBe(200);
+  expect(res.body).toEqual({ total: 0, items: [] });
+});
+
+test('pending: returns opted-in profiles with no whatsapp job', async () => {
+  const now = new Date();
+  const prof = {
+    _id: PROFILE_ID,
+    channels: { whatsapp: { consentedAt: now, phone: '+919876543210' }, email: { address: 'bob@example.com' } },
+    identifiers: { emails: ['bob@example.com'], phones: [] },
+  };
+  Profile.find.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([prof]),
+  });
+  ScheduledJob.distinct.mockResolvedValue([]); // no jobs yet
+
+  const res = mockRes();
+  await pendingHandler({ params: { shopDomain: SHOP }, query: {} }, res);
+  expect(res.statusCode).toBe(200);
+  expect(res.body.total).toBe(1);
+  expect(res.body.items).toHaveLength(1);
+  expect(res.body.items[0].profileId).toBe(PROFILE_ID);
+  expect(res.body.items[0].email).toBe('bob@example.com');
+  expect(res.body.items[0].phone).toBe('+919876543210');
+  expect(res.body.items[0].name).toBe('Bob');
+});
+
+test('pending: excludes profiles that already have a whatsapp job', async () => {
+  const now = new Date();
+  const prof = {
+    _id: PROFILE_ID,
+    channels: { whatsapp: { consentedAt: now, phone: '+919876543210' }, email: { address: 'bob@example.com' } },
+    identifiers: { emails: [], phones: [] },
+  };
+  Profile.find.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([prof]),
+  });
+  ScheduledJob.distinct.mockResolvedValue([PROFILE_ID]); // already contacted
+
+  const res = mockRes();
+  await pendingHandler({ params: { shopDomain: SHOP }, query: {} }, res);
+  expect(res.statusCode).toBe(200);
+  expect(res.body.total).toBe(0);
+  expect(res.body.items).toHaveLength(0);
+});
+
+test('pending: respects limit param (max 50)', async () => {
+  const now = new Date();
+  const profs = Array.from({ length: 10 }, (_, i) => ({
+    _id: `507f1f77bcf86cd79943901${i}`,
+    channels: { whatsapp: { consentedAt: now }, email: { address: `u${i}@x.com` } },
+    identifiers: { emails: [`u${i}@x.com`], phones: [] },
+  }));
+  Profile.find.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue(profs),
+  });
+  ScheduledJob.distinct.mockResolvedValue([]);
+
+  const res = mockRes();
+  await pendingHandler({ params: { shopDomain: SHOP }, query: { limit: '3' } }, res);
+  expect(res.body.total).toBe(10);
+  expect(res.body.items).toHaveLength(3);
+});
+
+test('pending: clamps limit above 50 to 50', async () => {
+  const now = new Date();
+  const profs = Array.from({ length: 60 }, (_, i) => ({
+    _id: `507f1f77bcf86cd79943${String(i).padStart(6, '0')}`,
+    channels: { whatsapp: { consentedAt: now }, email: {} },
+    identifiers: { emails: [], phones: [] },
+  }));
+  Profile.find.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    sort: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue(profs),
+  });
+  ScheduledJob.distinct.mockResolvedValue([]);
+
+  const res = mockRes();
+  await pendingHandler({ params: { shopDomain: SHOP }, query: { limit: '999' } }, res);
+  expect(res.body.total).toBe(60);
+  expect(res.body.items).toHaveLength(50);
+});
 
 test('poller: a whatsapp job created as sent is never status:pending', () => {
   const jobData = { channel: 'whatsapp', status: 'sent' };

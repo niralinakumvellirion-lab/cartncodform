@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import { ShimmerBox, ShimmerCard } from '../components/Shimmer';
-import { DS, StageBadge, ReachIcons } from './customerShared';
+import { DS, StageBadge, ReachIcons, useWhatsapp } from './customerShared';
 
 const SIGNAL_LABELS = {
   cart_abandon: 'Cart left behind',
@@ -868,6 +868,12 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
   const [timelineFilter, setTimelineFilter] = useState('all');
   const [showAllTimeline, setShowAllTimeline] = useState(false);
 
+  const [waProfile, setWaProfile] = useState(null);
+  const [waProfileLoading, setWaProfileLoading] = useState(false);
+  const [showWaOptOutConfirm, setShowWaOptOutConfirm] = useState(false);
+  const [waOptingOut, setWaOptingOut] = useState(false);
+  const { sendWhatsapp, waError: waSendError, waFallbackUrl, clearWaError } = useWhatsapp();
+
   // "Notifications sent" section — every ScheduledJob for this customer
   // (brain/automation + festival/manual broadcasts), a separate fetch
   // from the journey load above so a slow/failed notifications call
@@ -902,6 +908,29 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
     loadNotifications(ctl);
     return () => { ctl.aborted = true; };
   }, [loadNotifications]);
+
+  const loadWaProfile = useCallback(async (ctl) => {
+    if (!shop || !profileId) return;
+    setWaProfileLoading(true);
+    try {
+      const data = await apiGet(
+        `/api/whatsapp/${encodeURIComponent(shop)}/profile/${encodeURIComponent(profileId)}`
+      );
+      if (ctl?.aborted) return;
+      setWaProfile(data);
+    } catch {
+      if (ctl?.aborted) return;
+      setWaProfile(null);
+    } finally {
+      if (!ctl?.aborted) setWaProfileLoading(false);
+    }
+  }, [shop, profileId]);
+
+  useEffect(() => {
+    const ctl = { aborted: false };
+    loadWaProfile(ctl);
+    return () => { ctl.aborted = true; };
+  }, [loadWaProfile]);
 
   useEffect(() => {
     const check = () => {
@@ -1070,7 +1099,23 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
     groupedTimeline[groupedTimeline.length - 1].items.push(item);
   }
 
-  const sendCard = (!hasPush && !hasEmail) ? (
+  const canWa = !!(waProfile && (waProfile.canFollowup || waProfile.canOrder));
+
+  async function optOutWhatsapp() {
+    setWaOptingOut(true);
+    try {
+      await apiSend(`/api/whatsapp/${encodeURIComponent(shop)}/opt-out`, 'POST', { profileId });
+      setShowWaOptOutConfirm(false);
+      const ctl = { aborted: false };
+      await loadWaProfile(ctl);
+    } catch (e) {
+      setSendResult('Error: ' + (e.message || 'opt-out failed'));
+    } finally {
+      setWaOptingOut(false);
+    }
+  }
+
+  const sendCard = (!hasPush && !hasEmail && !canWa) ? (
     <div style={{ ...DS.card, padding: 16, marginBottom: 0, textAlign: 'center' }}>
       <div style={{ fontSize: 13, color: '#9ca3af' }}>
         🔕 No push subscription or email on file
@@ -1099,6 +1144,21 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
             color: notifTab === 'email' ? '#fff' : '#6b7280',
           }}>✉️ Email</button>
         )}
+        {canWa && (
+          <button onClick={() => setNotifTab('whatsapp')} style={{
+            flex: 1, padding: '7px 0', fontSize: 12, fontWeight: 600,
+            cursor: 'pointer', border: '1px solid #e5e7eb', borderRadius: 8,
+            background: notifTab === 'whatsapp' ? '#128C7E' : '#fff',
+            color: notifTab === 'whatsapp' ? '#fff' : '#128C7E',
+          }} aria-label="WhatsApp tab">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+              style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            WhatsApp
+          </button>
+        )}
       </div>
       {notifTab === 'push' && hasPush && (
         <NotificationComposer customer={customer} shop={shop}
@@ -1109,6 +1169,106 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
         <EmailComposer customer={customer} shop={shop}
           onSent={() => { setSendResult('Sent successfully!'); setTimeout(() => setSendResult(''), 3000); }}
           onError={(err) => setSendResult('Error: ' + err)} />
+      )}
+      {notifTab === 'whatsapp' && canWa && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {/* WA send error / fallback */}
+          {(waSendError || waFallbackUrl) && (
+            <div style={{
+              padding: '8px 12px', borderRadius: 8, fontSize: 12,
+              background: waFallbackUrl ? '#f0fdf4' : '#fef2f2',
+              border: `1px solid ${waFallbackUrl ? '#bbf7d0' : '#fecaca'}`,
+              color: waFallbackUrl ? '#15803d' : '#b91c1c',
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            }}>
+              {waFallbackUrl
+                ? <span>Popup blocked. <a href={waFallbackUrl} target="_blank" rel="noreferrer" style={{ color: '#128C7E', fontWeight: 600 }}>Open WhatsApp</a></span>
+                : <span>{waSendError}</span>}
+              <button onClick={clearWaError} aria-label="Dismiss" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, color: '#9ca3af', padding: 0, lineHeight: 1 }}>×</button>
+            </div>
+          )}
+
+          {/* Primary: followup button */}
+          {waProfile?.canFollowup && (
+            <button
+              onClick={() => sendWhatsapp({ shopDomain: shop, profileId, purpose: 'followup' })}
+              style={{ padding: '10px 14px', background: '#25D366', border: 'none', borderRadius: 10,
+                       fontSize: 14, fontWeight: 700, color: '#fff', cursor: 'pointer',
+                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              aria-label="Send WhatsApp follow-up message"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              WhatsApp
+            </button>
+          )}
+
+          {/* Secondary: order message (shown when canFollowup + canOrder, or when only canOrder) */}
+          {waProfile?.canOrder && (
+            <button
+              onClick={() => sendWhatsapp({ shopDomain: shop, profileId, purpose: 'order' })}
+              style={{ padding: '9px 14px', background: '#fff', border: '1px solid #86efac',
+                       borderRadius: 10, fontSize: 13, fontWeight: 600,
+                       color: '#128C7E', cursor: 'pointer',
+                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              aria-label="Send WhatsApp order message"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              {waProfile.canFollowup ? 'Order message' : 'WhatsApp (order message)'}
+            </button>
+          )}
+
+          {/* Neither case */}
+          {!waProfile?.canFollowup && !waProfile?.canOrder && (
+            <div style={{ fontSize: 12, color: '#9ca3af', padding: '8px 0' }}>
+              {waProfile?.orderReason === 'opted_out' && 'Customer has opted out of WhatsApp messages.'}
+              {waProfile?.orderReason === 'no_phone' && 'No phone number on file.'}
+              {waProfile?.orderReason === 'invalid_phone' && 'Phone number could not be normalised to E.164.'}
+            </div>
+          )}
+
+          {/* Remove from WhatsApp */}
+          {waProfile?.whatsapp?.consentedAt && !showWaOptOutConfirm && (
+            <button
+              onClick={() => setShowWaOptOutConfirm(true)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12,
+                       color: '#9ca3af', textAlign: 'left', padding: 0, marginTop: 2 }}
+              aria-label="Remove customer from WhatsApp list"
+            >
+              Remove from WhatsApp
+            </button>
+          )}
+          {showWaOptOutConfirm && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                          background: '#fef2f2', borderRadius: 8, border: '1px solid #fecaca' }}>
+              <span style={{ fontSize: 12, color: '#b91c1c', flex: 1 }}>
+                Remove and opt out?
+              </span>
+              <button
+                onClick={optOutWhatsapp}
+                disabled={waOptingOut}
+                style={{ padding: '4px 10px', background: '#dc2626', border: 'none', borderRadius: 6,
+                         fontSize: 12, fontWeight: 600, color: '#fff', cursor: waOptingOut ? 'not-allowed' : 'pointer' }}
+                aria-label="Confirm opt-out"
+              >
+                {waOptingOut ? 'Removing…' : 'Yes, remove'}
+              </button>
+              <button
+                onClick={() => setShowWaOptOutConfirm(false)}
+                style={{ padding: '4px 8px', background: '#f3f4f6', border: 'none', borderRadius: 6,
+                         fontSize: 12, fontWeight: 600, color: '#374151', cursor: 'pointer' }}
+                aria-label="Cancel opt-out"
+              >
+                Cancel
+              </button>
+            </div>
+          )}
+        </div>
       )}
       <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8,
                     display: 'flex', alignItems: 'center', gap: 4 }}>

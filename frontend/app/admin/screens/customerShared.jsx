@@ -1,3 +1,8 @@
+'use client';
+
+import { useState, useCallback } from 'react';
+import { apiSend } from '../../../lib/api';
+
 // Shared between Customers.jsx (list) and CustomerDetail.jsx.
 
 export const DS = {
@@ -176,4 +181,46 @@ export function ReachIcons({ customer }) {
       </svg>
     </div>
   );
+}
+
+/**
+ * useWhatsapp — manages the WhatsApp send flow for a single component.
+ * Opens a blank tab synchronously (pop-up blocker compliance) then sets
+ * its location once the API returns the wa.me URL.
+ */
+export function useWhatsapp() {
+  const [waError, setWaError] = useState(null);
+  const [waFallbackUrl, setWaFallbackUrl] = useState(null);
+
+  const sendWhatsapp = useCallback(async ({ shopDomain, profileId, purpose }) => {
+    // Must happen synchronously inside the click handler.
+    const w = window.open('about:blank', '_blank');
+    if (w) w.opener = null;
+
+    setWaError(null);
+    setWaFallbackUrl(null);
+
+    try {
+      const data = await apiSend(
+        `/api/whatsapp/${encodeURIComponent(shopDomain)}/send`,
+        'POST',
+        { profileId, purpose }
+      );
+      if (w) {
+        w.location.href = data.url;
+      } else {
+        setWaFallbackUrl(data.url);
+      }
+    } catch (err) {
+      if (w) w.close();
+      setWaError(err.message || 'Failed to send WhatsApp message');
+    }
+  }, []);
+
+  const clearWaError = useCallback(() => {
+    setWaError(null);
+    setWaFallbackUrl(null);
+  }, []);
+
+  return { sendWhatsapp, waError, waFallbackUrl, clearWaError };
 }

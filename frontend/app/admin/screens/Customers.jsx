@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet } from '../../../lib/api';
 import { ShimmerTable } from '../components/Shimmer';
-import { DS, StageBadge, ReachIcons } from './customerShared';
+import { DS, StageBadge, ReachIcons, useWhatsapp } from './customerShared';
 import DateRangeFilter, { getDateRange, matchDatePreset } from '../components/DateRangeFilter';
 import FilterDropdown from '../components/FilterDropdown';
 
@@ -57,6 +57,7 @@ const FILTER_TABS = [
   { key: 'going_quiet', label: 'Going quiet' },
   { key: 'push_subscribed', label: 'Push subscribers' },
   { key: 'email_captured', label: 'Email captured' },
+  { key: 'whatsapp_captured', label: 'WhatsApp' },
 ];
 
 const SIGNAL_LABELS = {
@@ -111,6 +112,9 @@ export default function Customers({ shop, initialFilter, initialSignal, initialF
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
+
+  const { sendWhatsapp, waError: waRowError, waFallbackUrl, clearWaError } = useWhatsapp();
+  const [waMessage, setWaMessage] = useState(null);
 
   const loadData = useCallback(
     async (signal) => {
@@ -195,6 +199,23 @@ export default function Customers({ shop, initialFilter, initialSignal, initialF
           }}
         >
           {error}
+        </div>
+      )}
+
+      {(waRowError || waFallbackUrl) && (
+        <div style={{
+          background: waFallbackUrl ? '#f0fdf4' : '#fef2f2',
+          border: `1px solid ${waFallbackUrl ? '#bbf7d0' : '#fecaca'}`,
+          borderRadius: 10, padding: '10px 14px', marginBottom: 12,
+          fontSize: 13, color: waFallbackUrl ? '#15803d' : '#b91c1c',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+        }}>
+          {waFallbackUrl ? (
+            <span>Popup was blocked. <a href={waFallbackUrl} target="_blank" rel="noreferrer" style={{ color: '#128C7E', fontWeight: 600 }}>Open WhatsApp</a></span>
+          ) : (
+            <span>{waRowError}</span>
+          )}
+          <button onClick={clearWaError} aria-label="Dismiss" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#9ca3af', lineHeight: 1, padding: 0 }}>×</button>
         </div>
       )}
 
@@ -539,8 +560,32 @@ export default function Customers({ shop, initialFilter, initialSignal, initialF
                     </div>
 
                     {/* REACH column */}
-                    <div style={{ display: 'flex', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <ReachIcons customer={p} />
+                      {p.hasWhatsappReachable && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const wa = p.channels?.whatsapp;
+                            const purpose = (wa?.consentedAt && !wa?.optedOutAt) ? 'followup' : 'order';
+                            sendWhatsapp({ shopDomain: shop, profileId: String(p._id), purpose });
+                          }}
+                          aria-label="Send WhatsApp message"
+                          title="Send WhatsApp"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            width: 24, height: 24, borderRadius: 6,
+                            background: '#dcfce7', border: '1px solid #86efac',
+                            cursor: 'pointer', padding: 0, flexShrink: 0,
+                          }}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                            stroke="#15803d" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
+                            aria-hidden="true">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                          </svg>
+                        </button>
+                      )}
                     </div>
 
                     {/* LAST MESSAGED column */}

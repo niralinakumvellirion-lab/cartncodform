@@ -296,6 +296,71 @@ router.get('/:shopDomain/stats', requireAuth, requireStoreOwner, async (req, res
 });
 
 /**
+ * GET /api/whatsapp/:shopDomain/pending?limit=
+ * Opted-in profiles (consentedAt set, optedOutAt null) that have never
+ * received a whatsapp job. Default limit=8, max=50. Newest consent first.
+ * -> { total, items: [{ profileId, name, email, phone, consentedAt }] }
+ */
+router.get('/:shopDomain/pending', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const rawLimit = parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(rawLimit) ? Math.min(50, Math.max(1, rawLimit)) : 8;
+
+    const optedIn = await Profile.find({
+      shopDomain: shop,
+      'channels.whatsapp.consentedAt': { $exists: true, $ne: null },
+      'channels.whatsapp.optedOutAt': null,
+    })
+      .select('_id channels.whatsapp.consentedAt channels.whatsapp.phone channels.email.address identifiers.emails identifiers.phones')
+      .sort({ 'channels.whatsapp.consentedAt': -1 })
+      .lean();
+
+    if (!optedIn.length) {
+      return res.json({ total: 0, items: [] });
+    }
+
+    const optedInIds = optedIn.map((p) => p._id);
+    const contactedIds = await ScheduledJob.distinct('profileId', {
+      shopDomain: shop,
+      channel: 'whatsapp',
+      profileId: { $in: optedInIds },
+    });
+    const contactedSet = new Set(contactedIds.map(String));
+
+    const pending = optedIn.filter((p) => !contactedSet.has(String(p._id)));
+    const total = pending.length;
+
+    const items = pending.slice(0, limit).map((p) => {
+      const email =
+        (p.channels && p.channels.email && p.channels.email.address) ||
+        (p.identifiers && p.identifiers.emails && p.identifiers.emails[0]) ||
+        null;
+      const phone =
+        (p.channels && p.channels.whatsapp && p.channels.whatsapp.phone) ||
+        (p.identifiers && p.identifiers.phones && p.identifiers.phones[0]) ||
+        null;
+      const local = email ? email.split('@')[0] : null;
+      const name = local
+        ? local.split(/[._+]/)[0].replace(/\b\w/g, (c) => c.toUpperCase())
+        : null;
+      return {
+        profileId: String(p._id),
+        name,
+        email,
+        phone,
+        consentedAt: p.channels.whatsapp.consentedAt,
+      };
+    });
+
+    return res.json({ total, items });
+  } catch (err) {
+    console.error('[whatsapp] GET /pending error:', err.message);
+    return res.status(500).json({ error: 'Failed to load pending profiles' });
+  }
+});
+
+/**
  * POST /api/whatsapp/:shopDomain/opt-out
  * Body: { profileId }
  * Sets channels.whatsapp.optedOutAt on the profile.
