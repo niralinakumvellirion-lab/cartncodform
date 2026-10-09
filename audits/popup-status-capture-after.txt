@@ -1,0 +1,126 @@
+POPUP: CAPTURE-ONLY SUCCESS + SAVING COPY — SELF-AUDIT
+2026-10-09
+============================================================
+Files changed:
+  extensions/cartncodform-embed/assets/ccf-push.js
+Settings.jsx: NOT changed (no capture-only success state exists in the preview).
+============================================================
+
+1. BEFORE/AFTER OF EACH SUCCESS BRANCH (offerBtn handler)
+============================================================
+
+BRANCH A: WhatsApp-only success (ofAction === 'whatsapp' && d.success)
+
+  BEFORE:
+    offerBtn.textContent = 'Thanks! We\'ll message you on WhatsApp.';
+    offerBtn.style.background = '#dcfce7';
+    offerBtn.style.color = '#166534';
+    offerBtn.style.border = '1px solid #86efac';
+    setTimeout(cleanup, 2500);
+    — In isCaptureOnly mode: offerBtn is hidden (display:none); these writes went to
+      the invisible button. Customer saw "Saving…" card the whole time. BUG ✗
+
+  AFTER:
+    if (isCaptureOnly && _ofCard) {
+      // Replace saving card with green success card in-place (no layout shift).
+      successCard = ccfBuildStatusCard('subscribed', accent, font,
+        'You're all set!', 'We'll message you on WhatsApp');
+      _ofCard.parentNode.insertBefore(successCard, _ofCard);
+      _ofCard.parentNode.removeChild(_ofCard);
+      _ofCard = successCard;
+    } else {
+      // Non-capture path unchanged.
+      offerBtn.textContent = 'Thanks! We\'ll message you on WhatsApp.';
+      offerBtn.style.background = '#dcfce7'; ...
+    }
+    setTimeout(cleanup, 2500);
+    — In isCaptureOnly mode: saving card replaced with green card in the same
+      DOM position. cleanup() removes the card (and its parent the popup) after
+      2500ms. No layout shift; inputs stay disabled until popup closes. ✓
+
+BRANCH B: Email success (ofAction === 'email')
+
+  BEFORE/AFTER: finishDiscount(d, 'email') — unchanged.
+  finishDiscount swaps #ccf-content-section which contains both the offerBtn
+  (hidden) and the status card. Both are removed together by the DOM swap. ✓
+  No fix needed.
+
+BRANCH C: Else / fallback (unrecognised action)
+
+  BEFORE/AFTER: resetOfferBtn() — unchanged. ✓
+
+============================================================
+
+2. COPY USED IN EACH STATE
+============================================================
+
+Capture-only busy (while fetching):
+  Title:    "Saving…"          ← CHANGED (was "Setting up…")
+  Subtitle: "Just a moment"   ← unchanged
+  Colours:  accent-derived setting_up palette (spinner badge)
+  Passed as: ccfBuildStatusCard('setting_up', accent, font, 'Saving…', 'Just a moment')
+
+Capture-only WhatsApp success:
+  Title:    "You're all set!"                 ← NEW
+  Subtitle: "We'll message you on WhatsApp"  ← NEW
+  Colours:  fixed green subscribed palette (check badge, #b7e4c7/#ecfdf3/#15803d)
+  Passed as: ccfBuildStatusCard('subscribed', accent, font,
+               'You’re all set!', 'We’ll message you on WhatsApp')
+
+Push allow flow (unchanged):
+  Stage 1 busy:    "Setting up…" / "Just a moment"
+  Stage 2 success: "Subscribed!" / "Getting your discount…"
+
+Non-capture offerBtn WhatsApp success (unchanged):
+  offerBtn.textContent = 'Thanks! We\'ll message you on WhatsApp.'  (button visible)
+
+============================================================
+
+3. ccfBuildStatusCard SIGNATURE CHANGE
+============================================================
+
+Before: ccfBuildStatusCard(state, accentHex, font)
+After:  ccfBuildStatusCard(state, accentHex, font, customTitle, customSubtitle)
+
+customTitle and customSubtitle are optional (undefined → existing defaults).
+All existing call sites pass only 3 args; their output is byte-identical. ✓
+
+============================================================
+
+4. WHAT WAS VERIFIED
+============================================================
+
+✓ node --check extensions/cartncodform-embed/assets/ccf-push.js: exit 0 (PASS)
+✓ No Settings.jsx change → no npm run build needed
+✗ No browser available: visual rendering of the success card swap not confirmed.
+  Logic: successCard is inserted before _ofCard and _ofCard is removed in the same
+  tick (synchronous), so there is no frame where both or neither is in the DOM.
+
+============================================================
+
+5. WHAT WAS NOT CHANGED
+============================================================
+
+- cleanup() timing (2500ms for WA success): unchanged
+- Double-submit guard (if (offerBtn.disabled) return): unchanged
+- Disabled/dimmed fields during busy state: unchanged (ccfSetPopupBusyInputs(true)
+  called before fetch, only reset by resetOfferBtn on failure; cleanup() removes
+  the popup on success so field state is moot)
+- resetOfferBtn() on failure: unchanged
+- Non-capture offerBtn WhatsApp thank-you text: unchanged
+- Email success path (finishDiscount): unchanged
+- Backend, admin screens, other popup states, tests: not touched
+- Settings.jsx: not touched (the preview has no capture-only simulation step)
+
+============================================================
+
+6. RISKS
+============================================================
+
+- _ofCard may be null if isCaptureOnly became false between click and fetch resolve
+  (impossible at runtime since isCaptureOnly is a closure variable set at render
+  time). Guard `isCaptureOnly && _ofCard` is safe in all real paths.
+- If _ofCard.parentNode is null (card removed by another path before fetch resolves):
+  insertBefore is skipped silently, successCard is orphaned (never shown). cleanup()
+  then removes the popup normally. No crash; no visible card. Acceptable edge case.
+============================================================

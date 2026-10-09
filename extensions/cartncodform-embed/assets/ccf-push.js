@@ -368,7 +368,7 @@
   // state: 'setting_up' | 'subscribed'
   // accentHex: the button's accent colour (for setting_up palette derivation)
   // font: font-family string
-  function ccfBuildStatusCard(state, accentHex, font) {
+  function ccfBuildStatusCard(state, accentHex, font, customTitle, customSubtitle) {
     var isSetup = state === 'setting_up';
     var rgb = ccfParseHex(accentHex);
     var trackColor, tintColor, titleColor, subtitleColor, badgeColor, orR, orG, orB;
@@ -449,13 +449,13 @@
     var titleEl = document.createElement('div');
     titleEl.style.cssText = 'font-size:15px;line-height:20px;font-weight:600;' +
       'color:' + titleColor + ';font-family:' + ff + ';';
-    titleEl.textContent = isSetup ? 'Setting up…' : 'Subscribed!';
+    titleEl.textContent = customTitle || (isSetup ? 'Setting up…' : 'Subscribed!');
     textCol.appendChild(titleEl);
 
     var subtitleEl = document.createElement('div');
     subtitleEl.style.cssText = 'font-size:13px;line-height:18px;font-weight:400;' +
       'color:' + subtitleColor + ';font-family:' + ff + ';';
-    subtitleEl.textContent = isSetup ? 'Just a moment' : 'Getting your discount…';
+    subtitleEl.textContent = customSubtitle || (isSetup ? 'Just a moment' : 'Getting your discount…');
     textCol.appendChild(subtitleEl);
 
     return card;
@@ -2708,8 +2708,8 @@
 
         if (isCaptureOnly) {
           // In capture-only mode offerBtn is the promoted primary CTA — show
-          // the same status card pattern as the allow button.
-          _ofCard = ccfBuildStatusCard('setting_up', accent, font);
+          // the status card with "Saving…" copy (not "Setting up…" which is for push).
+          _ofCard = ccfBuildStatusCard('setting_up', accent, font, 'Saving…', 'Just a moment');
           offerBtn.style.display = 'none';
           if (offerBtn.parentNode) offerBtn.parentNode.insertBefore(_ofCard, offerBtn.nextSibling);
           ccfSetPopupBusyInputs(true);
@@ -2743,11 +2743,22 @@
               .then(function (r) { return r.json(); })
               .then(function (d) {
                 if (ofAction === 'whatsapp' && d && d.success) {
-                  // WhatsApp-only: show thank-you state then close
-                  offerBtn.textContent = 'Thanks! We\'ll message you on WhatsApp.';
-                  offerBtn.style.background = '#dcfce7';
-                  offerBtn.style.color = '#166534';
-                  offerBtn.style.border = '1px solid #86efac';
+                  if (isCaptureOnly && _ofCard) {
+                    // Capture-only: replace the saving card with a success card in-place.
+                    var successCard = ccfBuildStatusCard('subscribed', accent, font,
+                      'You’re all set!', 'We’ll message you on WhatsApp');
+                    if (_ofCard.parentNode) {
+                      _ofCard.parentNode.insertBefore(successCard, _ofCard);
+                      _ofCard.parentNode.removeChild(_ofCard);
+                    }
+                    _ofCard = successCard;
+                  } else {
+                    // Non-capture: show thank-you text directly on the button.
+                    offerBtn.textContent = 'Thanks! We\'ll message you on WhatsApp.';
+                    offerBtn.style.background = '#dcfce7';
+                    offerBtn.style.color = '#166534';
+                    offerBtn.style.border = '1px solid #86efac';
+                  }
                   setTimeout(cleanup, 2500);
                 } else if (ofAction === 'email') {
                   finishDiscount(d, 'email');
