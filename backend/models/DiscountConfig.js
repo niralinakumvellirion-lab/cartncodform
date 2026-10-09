@@ -57,6 +57,11 @@ const discountConfigSchema = new mongoose.Schema({
     offerText: { type: String, default: '' },
   },
 
+  // WhatsApp consent capture toggle (shown in popup alongside email field).
+  whatsappCapture: {
+    enabled: { type: Boolean, default: false },
+  },
+
   // Popup text customization — shown above the email/phone fields.
   offerHeadline: {
     type: String,

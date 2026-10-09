@@ -1,0 +1,171 @@
+WHATSAPP STEP 1 — SELF-AUDIT
+2026-10-09
+============================================================
+
+SCOPE: backend consent capture, send/stats/opt-out endpoints, GDPR coverage.
+No storefront, popup, or frontend changes.
+
+============================================================
+1. backend/models/Profile.js — channels.whatsapp subdocument
+
+  Added to channels{}:
+    whatsapp: {
+      phone: String (E.164),
+      consentedAt: Date,
+      source: String ('popup' etc.),
+      optedOutAt: Date,
+    }
+
+  Added index:
+    { shopDomain: 1, 'channels.whatsapp.phone': 1 }, { sparse: true }
+
+  CONFIRMED: no other fields changed.
+
+============================================================
+2. backend/models/ScheduledJob.js — channel enum
+
+  Before: enum: ['push', 'email']
+  After:  enum: ['push', 'email', 'whatsapp']
+
+  Brain (services/brain.js) only selects 'push' or 'email' channels (selectChannel
+  checks avail.push / avail.email only), so brain will never create whatsapp jobs.
+
+============================================================
+3. backend/utils/phone.js — new normalizer
+
+  Created. Wraps libphonenumber-js.
+  - normalizePhone(raw, defaultCountry='IN') → E.164 or null
+  - toWaDigits(e164) → digits without '+' for wa.me URLs
+
+  libphonenumber-js added to backend/package.json (resolved: ^1.13.15).
+
+============================================================
+4. backend/routes/whatsapp.js — new file
+
+  4 routes, all requireAuth + requireStoreOwner with :shopDomain path param:
+
+  POST /:shopDomain/send
+    - Validates profileId, checks consentedAt present and optedOutAt absent
+    - Creates ScheduledJob(channel='whatsapp', status='sent') — never 'pending'
+    - Returns { url, jobId } where url is wa.me link with ccf_src/ccf_job attribution
+
+  GET /:shopDomain/stats?from=&to=
+    - pending = opted-in profiles with no whatsapp job (distinct profileIds)
+    - sent = whatsapp ScheduledJobs with sentAt in range
+    - clicked/carted/purchased via AttributedEvent distinct job counts
+
+  POST /:shopDomain/opt-out
+    - Sets channels.whatsapp.optedOutAt on profile
+
+  GET /:shopDomain/profile/:profileId
+    - Returns { whatsapp channel data, whatsapp messages only }
+
+  No PII logged. Business logic fully in backend.
+
+============================================================
+5. backend/server.js — mount + poller guard
+
+  Mount: app.use('/api/whatsapp', whatsappRouter)
+    Added after emailTemplatesRouter, before proxyRouter (line 164-165).
+
+  Poller guard (processScheduledJobs, line ~316):
+    ScheduledJob.find({ status: 'pending', channel: { $ne: 'whatsapp' }, runAt: ... })
+    Whatsapp jobs are always created as status:'sent' (primary protection).
+    The $ne guard is a secondary safety net.
+
+  today-stats queries already filter channel:'push' explicitly.
+  brain.js's selectChannel only knows push/email — cannot produce whatsapp jobs.
+
+============================================================
+6. backend/routes/proxy.js — /discount-config
+
+  Added whatsappCapture: { enabled: bool } to the response.
+  Reads from doc.whatsappCapture.enabled (defaults false if unset).
+
+============================================================
+7. backend/models/DiscountConfig.js
+
+  Added: whatsappCapture: { enabled: Boolean, default: false }
+
+============================================================
+8. backend/routes/discounts.js — generateDiscount WhatsApp capture
+
+  After the email/phone profile upsert block (line ~256):
+  - Reads body.whatsappPhone, body.whatsappConsent, body.whatsappCountry
+  - Only acts when both phone and explicit consent=true are present
+  - Normalizes to E.164 via normalizePhone
+  - Calls upsertProfile with channels.whatsapp.{phone, consentedAt, source:'popup'}
+  - Fire-and-forget (.catch(() => {}))
+
+  Note: upsertProfile required inline as 'upsertWa' to avoid scope overlap
+  with the email block's own require.
+
+============================================================
+9. backend/routes/webhooks.js — GDPR
+
+  customers/data_request:
+    - Added comment: Profile rows include channels.whatsapp; ScheduledJob rows
+      include whatsapp jobs via profileId linkage — both already covered.
+    - Updated log message to "(incl. WhatsApp channel)" and "(incl. WhatsApp)"
+
+  customers/redact:
+    - Added comment: channels.whatsapp is a Profile subdocument; deleted with Profile.
+    - ScheduledJob.updateMany already anonymises whatsapp jobs (they carry profileId).
+    - Updated log message labels.
+    - CodOrder redact gap NOT fixed here (deferred to Step 1b as specified).
+
+============================================================
+10. backend/routes/profiles.js — whatsapp_captured filter + select
+
+  Added filter 'whatsapp_captured':
+    query['channels.whatsapp.consentedAt'] = { $exists: true, $ne: null }
+    query['channels.whatsapp.optedOutAt'] = null
+
+  List route's .select('... channels ...') already returns the full channels
+  subdocument including channels.whatsapp — no select change needed.
+
+  Detail route returns full profile — channels.whatsapp included automatically.
+
+============================================================
+11. Tests
+
+  backend/__tests__/phone.test.js (new, 10 tests):
+    normalizePhone: valid Indian mobile, pre-E.164, invalid, empty, null, default country
+    toWaDigits: strip +, no-plus passthrough, null, empty/falsy → null
+
+  backend/__tests__/whatsapp.test.js (new, 14 tests):
+    /send: success (url + jobId), no consent, opted out, status='sent' assertion
+    /stats: pending/sent/clicked/carted/purchased counts
+    /opt-out: sets optedOutAt, rejects no-number profile
+    /profile/:id: returns whatsapp channel + filtered messages
+    generateDiscount: captures on phone+consent, skips on consent=false, skips on invalid phone
+    poller guard: channel filter logic, whatsapp job never pending
+
+  backend/__tests__/webhooksCompliance.test.js (updated):
+    Loosened log-message assertion to match new "(incl. WhatsApp)" label.
+
+============================================================
+12. TEST RUN
+
+  Test Suites: 45 passed, 45 total
+  Tests:       806 passed, 806 total
+
+  All green.
+
+============================================================
+13. UNCHANGED FILES (confirmed)
+
+  extensions/* — untouched
+  ccf-push.js — untouched
+  Any frontend file — untouched
+  backend/routes/cod.js — untouched
+
+============================================================
+14. WHAT WAS NOT DONE (deferred)
+
+  - CodOrder customers/redact gap: deferred to Step 1b as specified
+  - Popup UI for WhatsApp phone field: Step 2
+  - Storefront ccf-push.js changes: Step 2
+  - Dashboard tab / customer detail UI: Steps 3-4
+
+============================================================

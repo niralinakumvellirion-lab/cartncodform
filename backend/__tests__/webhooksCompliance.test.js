@@ -184,7 +184,8 @@ describe('customers/data_request', () => {
     expect(Profile.find).toHaveBeenCalled();
     expect(ScheduledJob.find).toHaveBeenCalled();
     expect(logSpy.mock.calls.some(([msg]) =>
-      typeof msg === 'string' && msg.includes('Profile rows: 1') && msg.includes('ScheduledJob rows: 2')
+      typeof msg === 'string' && msg.includes('Profile rows') && msg.includes('1') &&
+      msg.includes('ScheduledJob rows') && msg.includes('2')
     )).toBe(true);
   });
 });

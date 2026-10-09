@@ -169,6 +169,9 @@ router.get('/:shopDomain/profiles', requireAuth, requireStoreOwner, async (req, 
         if (rangeFrom) query['channels.push.subscribedAt'].$gte = rangeFrom;
         if (rangeTo) query['channels.push.subscribedAt'].$lte = rangeTo;
       }
+    } else if (filter === 'whatsapp_captured') {
+      query['channels.whatsapp.consentedAt'] = { $exists: true, $ne: null };
+      query['channels.whatsapp.optedOutAt'] = null;
     }
 
     const signalType = typeof req.query.signal === 'string' ? req.query.signal.trim() : '';

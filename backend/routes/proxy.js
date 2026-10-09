@@ -131,6 +131,7 @@ router.get('/discount-config', async (req, res) => {
       phoneDiscount: off(doc.phoneDiscount),
       bothDiscount: off(doc.bothDiscount),
       offerHeadline: doc.offerHeadline || 'Get a discount on your first order!',
+      whatsappCapture: { enabled: !!(doc.whatsappCapture && doc.whatsappCapture.enabled) },
     });
   } catch (err) {
     console.error('[proxy] GET /discount-config error:', err.message);

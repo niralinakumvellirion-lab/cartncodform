@@ -28,6 +28,12 @@ const profileSchema = new Schema({
       source: { type: String, enum: ['cod', 'form', 'checkout', 'popup'] },
       capturedAt: { type: Date },
     },
+    whatsapp: {
+      phone: { type: String, default: null },        // E.164
+      consentedAt: { type: Date, default: null },
+      source: { type: String, default: null },       // 'popup' etc.
+      optedOutAt: { type: Date, default: null },
+    },
   },
 
   stage: {
@@ -76,6 +82,9 @@ profileSchema.index({ shopDomain: 1, 'identifiers.phones': 1 }, { sparse: true }
 profileSchema.index({ shopDomain: 1, 'identifiers.cartTokens': 1 }, { sparse: true });
 profileSchema.index({ shopDomain: 1, 'identifiers.sessionIds': 1 }, { sparse: true });
 profileSchema.index({ shopDomain: 1, 'identifiers.pushTokens': 1 }, { sparse: true });
+
+// WhatsApp opt-in lookup.
+profileSchema.index({ shopDomain: 1, 'channels.whatsapp.phone': 1 }, { sparse: true });
 
 // Dashboard "most recently active" listing.
 profileSchema.index({ shopDomain: 1, updatedAt: -1 });

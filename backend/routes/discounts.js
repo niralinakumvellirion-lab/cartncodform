@@ -254,6 +254,37 @@ async function generateDiscount(shopDomain, body = {}) {
     }
   }
 
+  // WhatsApp consent capture — only when the storefront sends explicit consent.
+  const waPhone = body.whatsappPhone ? String(body.whatsappPhone).trim() : '';
+  const waConsent = body.whatsappConsent === true;
+  if (waPhone && waConsent) {
+    try {
+      const { normalizePhone } = require('../utils/phone');
+      const { upsertProfile: upsertWa } = require('../services/profileService');
+      const waCountry = body.whatsappCountry || 'IN';
+      const normalized = normalizePhone(waPhone, waCountry);
+      if (normalized) {
+        upsertWa(
+          shop,
+          {
+            phone: normalized,
+            email: email || null,
+            sessionId: body.sessionId || null,
+            cartToken: cartToken || null,
+          },
+          {
+            'channels.whatsapp.phone': normalized,
+            'channels.whatsapp.consentedAt': new Date(),
+            'channels.whatsapp.source': 'popup',
+            lastSeenAt: new Date(),
+          }
+        ).catch(() => {});
+      }
+    } catch (e) {
+      /* phone normalizer optional — ignore */
+    }
+  }
+
   // `shop` is included so the storefront can build /discount/<code> redirect
   // URLs (and absolute links) client-side without a second round-trip.
   return { code, percentage: cfg.percentage, expiryDays: cfg.expiryDays, shop };

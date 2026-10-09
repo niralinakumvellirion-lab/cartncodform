@@ -452,9 +452,12 @@ async function handleCustomersDataRequest(req, res) {
       if (profileIds.length) jobQuery.$or.push({ profileId: { $in: profileIds } });
       const jobs = jobQuery.$or.length ? await ScheduledJob.find(jobQuery).limit(100).lean() : [];
 
+      // Profile rows include channels.whatsapp consent data (phone, consentedAt,
+      // optedOutAt). ScheduledJob rows include whatsapp jobs (channel='whatsapp').
+      // Both are already covered by the queries above via profileId linkage.
       console.log(
         `[gdpr] Data on file — AbandonedCustomer rows: ${carts.length}, StorefrontEvent rows: ${events.length}, ` +
-        `Profile rows: ${profiles.length}, ScheduledJob rows: ${jobs.length}`
+        `Profile rows (incl. WhatsApp channel): ${profiles.length}, ScheduledJob rows (incl. WhatsApp): ${jobs.length}`
       );
     }
 
@@ -546,16 +549,17 @@ async function handleCustomersRedact(req, res) {
         )
       : { modifiedCount: 0 };
 
-    // Profile IS the customer record — nothing worth keeping survives
-    // redaction, so it's deleted outright, same as AbandonedCustomer.
+    // Profile IS the customer record — channels.whatsapp (phone, consentedAt,
+    // optedOutAt) is deleted with it since it's a subdocument.
     const profileResult = profileOr.length
       ? await Profile.deleteMany({ shopDomain, $or: profileOr })
       : { deletedCount: 0 };
 
+    // ScheduledJob anonymisation covers whatsapp jobs too (they carry profileId).
     console.log(
       `[gdpr] Redacted — carts: ${cartResult.deletedCount}, events: ${eventResult.deletedCount}, ` +
-      `subscriptions: ${subResult.deletedCount}, profiles: ${profileResult.deletedCount}, ` +
-      `jobs anonymised: ${jobResult.modifiedCount}`
+      `subscriptions: ${subResult.deletedCount}, profiles (incl. WhatsApp): ${profileResult.deletedCount}, ` +
+      `jobs anonymised (incl. WhatsApp): ${jobResult.modifiedCount}`
     );
 
     return res.status(200).json({ received: true });
