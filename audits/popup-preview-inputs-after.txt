@@ -1,0 +1,174 @@
+POPUP PREVIEW — INPUT FIELD CONSISTENCY — SELF-AUDIT
+2026-10-09
+============================================================
+Scope: frontend/app/admin/screens/Settings.jsx only.
+No backend, extension, gallery thumbnail, or other file touched.
+============================================================
+
+1. WHAT CHANGED IN WaRow
+============================================================
+File: frontend/app/admin/screens/Settings.jsx
+Function: WaRow (~line 1106)
+
+NEW PROPS added (all optional, with sensible defaults):
+  fieldPad        — padding string for the tel input; vertical component
+                    extracted and applied to the select (default: '8px 12px')
+  fieldFontSize   — number; font-size for both select and tel (default: compact?11:12)
+  fieldBorderWidth — number; border-width in px (default: 1)
+  fieldHeight     — number; explicit element height, for styles that size
+                    email inputs by height rather than padding (default: none)
+
+How heights are matched:
+  tel input:  uses `pad` (=fieldPad) and optional `height:fieldHeight`
+  select:     uses selPad = `${vp} 20px ${vp} 8px` where vp = pad.split(' ')[0],
+              and optional `height:fieldHeight`.
+              Same vertical padding as tel → same intrinsic height without
+              fieldHeight; same explicit height when fieldHeight is set.
+              Right padding is 20px to make room for the chevron indicator.
+
+Chevron indicator:
+  Old: appearance:none with no visual arrow (native arrow hidden, nothing added).
+  New: appearance:none + absolutely-positioned inline SVG chevron (path "M1 1l4 4
+       4-4", stroke=currentColor, 10×6px) inside a relative wrapper div.
+       The wrapper carries flexShrink:0 and the fixed width (compact?68:82).
+       The select fills 100% of the wrapper. The chevron is centred vertically
+       with top:50%, transform:translateY(-50%), pointerEvents:none, opacity:0.55.
+
+border string: `${bw}px solid ${inputBorder || '#e5e7eb'}` — bw from fieldBorderWidth.
+
+============================================================
+
+2. PER-STYLE CHANGES AND HEIGHT PROOF
+============================================================
+
+Email input heights are calculated as:
+  h = 2×border_px + 2×vert_pad_px + fontSize × lineHeight(1.2)
+
+BOTTOM_SHEET (line ~1289)
+  Email:   padding:'8px 12px', fontSize:12, border:1px  → h = 2+16+14.4 = 32.4px
+  Before:  WaRow padding:'8px 10px', fontSize:12, border:1px → h = 32.4px (heights matched,
+           but horizontal padding differed: email 12px vs WaRow 10px)
+  After:   fieldPad="8px 12px" → tel padding:'8px 12px'; select vp='8px', padding:'8px 20px 8px 8px'
+           h = 2+16+14.4 = 32.4px ✓  horizontal padding now matches email ✓
+
+STORY_CARD (line ~1390)
+  Email:   padding:'8px 12px', fontSize:12, border:1px rgba(255,255,255,0.3)
+  Before:  WaRow padding:'8px 10px', horizontal diff only
+  After:   fieldPad="8px 12px" → heights and horizontal padding match ✓
+
+SPOTLIGHT / NOIR / COLOR_BLOCK (line ~1459)
+  Email:   height:44 (explicit), padding:'0 16px', fontSize:14, border:inputBorder
+           borderRadius: spotlight=999, noir/color_block=12
+  Before:  WaRow padding:'8px 10px', fontSize:12, borderRadius spotlight=8
+           → h = 2+16+14.4 = 32.4px vs email 44px  (11.6px SHORT)
+           → fontSize 12 vs 14, borderRadius mismatch for spotlight
+  After:   fieldPad="0 16px" fieldFontSize=14 fieldHeight=44
+           borderRadius={styleId==='spotlight'?999:12}
+           tel: height:44, padding:'0 16px', fontSize:14 — matches email ✓
+           select: height:44, padding:'0 20px 0 8px', fontSize:14 — same height ✓
+           borderRadius now 999 for spotlight (matching email pill shape) ✓
+
+FLASH_SALE (line ~1659)
+  Email:   padding:'8px 12px', fontSize:12, border:'1px solid #d4d4d8'
+  Before:  WaRow padding:'8px 10px', horizontal diff only
+  After:   fieldPad="8px 12px" → heights and horizontal padding match ✓
+
+GIFT_REVEAL (line ~1731)
+  Email:   padding:'8px 12px', fontSize:12, border:'1px solid #e5e7eb', NO background
+  Before:  WaRow padding:'8px 10px', inputBg={bg} (store bgColor, e.g. '#fff7ed')
+           → email shows browser-default white, WaRow shows tinted bg: inconsistent
+  After:   fieldPad="8px 12px", inputBg={bg} REMOVED → WaRow defaults to '#ffffff'
+           Both email and WaRow fields show white background ✓
+           Heights match (same 8px vertical padding) ✓
+
+CLASSIC-CARD (line ~1883)
+  Email:   padding:'11px 14px', fontSize:13, border:'1.5px solid #e5e7eb', bg:'#f9fafb'
+  Before:  WaRow padding:'8px 10px', fontSize:12, border:1px → h = 32.4px vs email 40.6px (8px SHORT)
+           fontSize 12 vs 13, borderWidth 1 vs 1.5
+  After:   fieldPad="11px 14px" fieldFontSize=13 fieldBorderWidth=1.5
+           tel: padding:'11px 14px', fontSize:13, border:1.5px → h = 3+22+15.6 = 40.6px ✓
+           select: vp='11px', selPad='11px 20px 11px 8px' → h = 40.6px ✓
+           borderWidth, fontSize, background (#f9fafb) all match ✓
+
+CLASSIC-SPLIT (line ~1913 — inside discountFieldsEl)
+  Email:   padding:'11px 14px', fontSize:13, border:'1.5px solid #e5e7eb', bg:'#f9fafb'
+  Before:  same mismatches as classic-card
+  After:   fieldPad="11px 14px" fieldFontSize=13 fieldBorderWidth=1.5 → same fix ✓
+
+TOP_BAR: unchanged — no email field, no WaRow, no offer button. ✓
+
+============================================================
+
+3. AUDIT-ONLY — DOES ccf-push.js HAVE THE SAME MISMATCH?
+============================================================
+Read: extensions/cartncodform-embed/assets/ccf-push.js
+
+ccfInputStyle() (line 398):
+  width:100%;padding:11px 14px;font-size:13px;
+  border:1.5px solid #e5e7eb;border-radius:12px;box-sizing:border-box;
+  margin-bottom:8px;color:#111827;background:#f9fafb;font-family:inherit;
+  Intrinsic height = 2×1.5 + 2×11 + 13×1.2 = 3 + 22 + 15.6 = ~40.6px
+
+ccfBuildWhatsappFields() select (line 179):
+  uses baseStyle (ccfInputStyle) THEN overrides padding:0 6px; width:86px
+  — vertical padding becomes 0, intrinsic height ~18.6px
+  BUT: phoneRow is display:flex (default align-items:stretch) → select
+       STRETCHES to the row height (= tel height = ~40.6px) ✓ in most styles.
+  So flex stretch compensates for the zero vertical padding.
+
+FOR SPOTLIGHT (ccf-push.js line 1143 vs line 1156):
+  Email input: ccfInputStyle() + 'height:48px;padding:0 ...;font-size:14px;...'
+    → email height = 48px (explicit)
+  WA tel input (via ccfBuildWhatsappFields, line 1156): uses only baseStyle
+    → tel intrinsic height = ~40.6px; flex stretch to row max = ~40.6px
+  → EMAIL (48px) vs WA TEL (~40.6px): MISMATCH YES
+    File: extensions/cartncodform-embed/assets/ccf-push.js
+    Lines: 1143 (email height:48px), 1156 (ccfBuildWhatsappFields, no height override)
+
+FOR STORY_CARD (ccf-push.js lines 1766, 1770):
+  Email: ccfInputStyle() + 'border:1px solid rgba(255,255,255,0.3);...'
+    → email border = 1px → height = 2+22+15.6 = ~39.6px
+  WA tel: baseStyle border = 1.5px → height ~40.6px
+  → minor border-width mismatch (~1px height difference): MINOR YES
+    File: extensions/cartncodform-embed/assets/ccf-push.js lines 1766, 1770
+
+FOR ALL OTHER STYLES (flash_sale, gift_reveal, bottom_sheet, classic-card/split):
+  Both email and WA tel use ccfInputStyle() only → same height ~40.6px: NO MISMATCH
+
+SUMMARY: ccf-push.js has a height mismatch for spotlight (email 48px vs WA tel ~41px)
+and a minor border-width mismatch for story_card. The preview fix addresses the
+spotlight case and all other visual inconsistencies. The storefront mismatch is
+pre-existing in ccf-push.js and is outside this task's scope.
+
+============================================================
+
+4. GOLDEN RULE CHECK
+============================================================
+When both emailFieldEnabled=false and waFieldEnabled=false:
+  No WaRow is rendered (all calls guarded by {waFieldEnabled && ...}).
+  No OfferButton is rendered (guarded by {emailFieldEnabled || waFieldEnabled}).
+  Zero new markup: pixel-identical to pre-WaRow state. ✓
+
+============================================================
+
+5. WHAT WAS NOT CHANGED
+============================================================
+- Gallery thumbnails: no new props (fieldPad etc.) needed at gallery call sites
+  because gallery call sites already pass fieldPad etc. at the same paths.
+  Actually: gallery uses the same StyleCardPreview/ClassicPreview components
+  with compact=true; the WaRow call sites ARE the same ones as for the editor
+  preview — so they get the new props too ✓
+- Popup content, copy, colors, layout, scaling: unchanged.
+- Backend, extensions, tests: not touched.
+- FramedStyleThumb, DeviceFrameThumb, ClassicPreview signatures: unchanged.
+- OfferButton: unchanged.
+
+============================================================
+
+6. BUILD
+============================================================
+cd frontend && npm run build → compiled successfully, 0 errors, 0 warnings.
+Settings page bundle: 31.6 kB (unchanged — chevron SVG is inlined as JSX,
+no new imports; size is within rounding).
+
+============================================================

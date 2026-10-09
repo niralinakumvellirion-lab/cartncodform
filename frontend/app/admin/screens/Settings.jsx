@@ -1103,32 +1103,50 @@ function PreviewInput({ interactive = true, value, placeholder, style, onChange,
 
 // Mirrors ccf-push.js ccfBuildWhatsappFields layout.
 // interactive=false renders inputs disabled/read-only to match gallery cards.
-function WaRow({ interactive, font, compact, inputBg, inputFg, inputBorder, borderRadius }) {
-  const fs = compact ? 11 : 12;
+function WaRow({ interactive, font, compact, inputBg, inputFg, inputBorder, borderRadius,
+  fieldPad, fieldFontSize, fieldBorderWidth, fieldHeight }) {
+  const fs = fieldFontSize !== undefined ? fieldFontSize : (compact ? 11 : 12);
   const br = (borderRadius || 8) + 'px';
-  const p = compact ? '6px 8px' : '8px 10px';
+  const bw = fieldBorderWidth || 1;
+  const pad = fieldPad || (compact ? '6px 8px' : '8px 12px');
+  const vp = pad.split(' ')[0];
+  const selPad = fieldHeight ? `0 20px 0 8px` : `${vp} 20px ${vp} 8px`;
+  const bdrStr = `${bw}px solid ${inputBorder || '#e5e7eb'}`;
+  const bg = inputBg || '#ffffff';
+  const fg = inputFg || '#111827';
   return (
     <>
       <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-        <select
-          aria-label="Country dial code"
-          defaultValue="IN"
-          disabled={!interactive}
-          tabIndex={interactive ? 0 : -1}
-          style={{
-            flexShrink: 0, width: compact ? 68 : 82, padding: p, fontSize: fs,
-            borderRadius: br, border: `1px solid ${inputBorder || '#e5e7eb'}`,
-            background: inputBg || '#ffffff', color: inputFg || '#111827',
-            fontFamily: font, boxSizing: 'border-box', lineHeight: 1.2,
-            WebkitAppearance: 'none', appearance: 'none',
-            pointerEvents: interactive ? 'auto' : 'none',
-          }}
-          onChange={() => {}}
-        >
-          {CCF_PREVIEW_DIAL_CODES.map(([code, dial]) => (
-            <option key={code} value={code}>{code} {dial}</option>
-          ))}
-        </select>
+        <div style={{ position: 'relative', flexShrink: 0, width: compact ? 68 : 82 }}>
+          <select
+            aria-label="Country dial code"
+            defaultValue="IN"
+            disabled={!interactive}
+            tabIndex={interactive ? 0 : -1}
+            style={{
+              display: 'block', width: '100%', padding: selPad, fontSize: fs,
+              borderRadius: br, border: bdrStr, background: bg, color: fg,
+              fontFamily: font, boxSizing: 'border-box', lineHeight: 1.2,
+              WebkitAppearance: 'none', appearance: 'none',
+              pointerEvents: interactive ? 'auto' : 'none',
+              ...(fieldHeight ? { height: fieldHeight } : {}),
+            }}
+            onChange={() => {}}
+          >
+            {CCF_PREVIEW_DIAL_CODES.map(([code, dial]) => (
+              <option key={code} value={code}>{code} {dial}</option>
+            ))}
+          </select>
+          <span style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
+            pointerEvents: 'none', display: 'flex', color: fg, opacity: 0.55 }}
+            aria-hidden="true">
+            <svg width="10" height="6" viewBox="0 0 10 6" fill="none"
+              stroke="currentColor" strokeWidth="1.5"
+              strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1 1l4 4 4-4" />
+            </svg>
+          </span>
+        </div>
         <input
           type="tel"
           placeholder="WhatsApp number"
@@ -1136,10 +1154,10 @@ function WaRow({ interactive, font, compact, inputBg, inputFg, inputBorder, bord
           disabled={!interactive}
           aria-label="WhatsApp number"
           style={{
-            flex: 1, minWidth: 0, padding: p, fontSize: fs,
-            borderRadius: br, border: `1px solid ${inputBorder || '#e5e7eb'}`,
-            background: inputBg || '#ffffff', color: inputFg || '#111827',
+            flex: 1, minWidth: 0, padding: pad, fontSize: fs,
+            borderRadius: br, border: bdrStr, background: bg, color: fg,
             fontFamily: font, boxSizing: 'border-box', lineHeight: 1.2, outline: 'none',
+            ...(fieldHeight ? { height: fieldHeight } : {}),
           }}
         />
       </div>
@@ -1151,8 +1169,7 @@ function WaRow({ interactive, font, compact, inputBg, inputFg, inputBorder, bord
             accentColor: '#16a34a', cursor: interactive ? 'pointer' : 'default',
             pointerEvents: interactive ? 'auto' : 'none' }}
           onChange={() => {}} />
-        <span style={{ fontSize: compact ? 10 : 11, lineHeight: 1.4,
-          color: inputFg || '#111827', opacity: 0.7 }}>
+        <span style={{ fontSize: compact ? 10 : 11, lineHeight: 1.4, color: fg, opacity: 0.7 }}>
           Message me on WhatsApp about offers and order updates. Reply STOP anytime.
         </span>
       </div>
@@ -1286,7 +1303,7 @@ function StyleCardPreview({
               )}
               {waFieldEnabled && (
                 <WaRow interactive={interactive} font={font} compact={compact}
-                  inputBorder="#e5e7eb" borderRadius={8} />
+                  inputBorder="#e5e7eb" borderRadius={8} fieldPad="8px 12px" />
               )}
               <PreviewButton {...allowBtnCommon} interactive={interactive}>
                 <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
@@ -1388,7 +1405,7 @@ function StyleCardPreview({
               {waFieldEnabled && (
                 <WaRow interactive={interactive} font={font} compact={compact}
                   inputBg="rgba(255,255,255,0.15)" inputFg="#ffffff"
-                  inputBorder="rgba(255,255,255,0.3)" borderRadius={8} />
+                  inputBorder="rgba(255,255,255,0.3)" borderRadius={8} fieldPad="8px 12px" />
               )}
               <PreviewButton {...allowBtnCommon} interactive={interactive}>
                 <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
@@ -1457,7 +1474,8 @@ function StyleCardPreview({
         {waFieldEnabled && (
           <WaRow interactive={interactive} font={font} compact={compact}
             inputBg={inputBg} inputFg={proFg} inputBorder={inputBorder}
-            borderRadius={styleId === 'spotlight' ? 8 : 12} />
+            borderRadius={styleId === 'spotlight' ? 999 : 12}
+            fieldPad="0 16px" fieldFontSize={14} fieldHeight={44} />
         )}
         <PreviewButton {...allowBtnCommon} interactive={interactive}
           style={{ ...allowBtnCommon.style, fontSize: 15, padding: 14,
@@ -1656,7 +1674,8 @@ function StyleCardPreview({
               )}
               {waFieldEnabled && (
                 <WaRow interactive={interactive} font={font} compact={compact}
-                  inputBg="#ffffff" inputFg="#111827" inputBorder="#d4d4d8" borderRadius={8} />
+                  inputBg="#ffffff" inputFg="#111827" inputBorder="#d4d4d8" borderRadius={8}
+                  fieldPad="8px 12px" />
               )}
               {countdownDisplay ? (
                 <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: '0.08em', marginBottom: 10,
@@ -1728,7 +1747,7 @@ function StyleCardPreview({
             )}
             {waFieldEnabled && (
               <WaRow interactive={interactive} font={font} compact={compact}
-                inputBg={bg} inputFg={fg} inputBorder="#e5e7eb" borderRadius={8} />
+                inputFg={fg} inputBorder="#e5e7eb" borderRadius={8} fieldPad="8px 12px" />
             )}
             <PreviewButton {...allowBtnCommon} interactive={interactive}>
               <AllowButtonLabel step={step} allowText={allowText} wantsDiscount={wantsDiscount} />
@@ -1881,7 +1900,8 @@ function ClassicPreview({
               )}
               {waFieldEnabled && (
                 <WaRow interactive={interactive} font={font}
-                  inputBg="#f9fafb" inputFg="#111827" inputBorder="#e5e7eb" borderRadius={12} />
+                  inputBg="#f9fafb" inputFg="#111827" inputBorder="#e5e7eb" borderRadius={12}
+                  fieldPad="11px 14px" fieldFontSize={13} fieldBorderWidth={1.5} />
               )}
               {allowBtnEl}
               {(showEmailField || waFieldEnabled) && (
@@ -1911,7 +1931,8 @@ function ClassicPreview({
       )}
       {waFieldEnabled && (
         <WaRow interactive={interactive} font={font}
-          inputBg="#f9fafb" inputFg="#111827" inputBorder="#e5e7eb" borderRadius={12} />
+          inputBg="#f9fafb" inputFg="#111827" inputBorder="#e5e7eb" borderRadius={12}
+          fieldPad="11px 14px" fieldFontSize={13} fieldBorderWidth={1.5} />
       )}
     </div>
   );
