@@ -2741,7 +2741,7 @@ export default function Settings({ shop }) {
             transition: 'all 0.15s',
           }}
         >
-          {popupDevice === tab.key ? `Editing: ${tab.key === 'desktop' ? '🖥 Desktop' : '📱 Mobile'}` : tab.label}
+          {tab.label}
         </button>
       ))}
     </div>
@@ -2906,94 +2906,67 @@ export default function Settings({ shop }) {
                 the previewResetKey effect above (fires on style/device/
                 setting changes) — there is no other way back to Prompt. */}
 
-            {/* Dual desktop + mobile preview — both live.
-                Device toggle above controls which config is being EDITED.
-                For mobile-only styles (bottom_sheet, top_bar, story_card),
-                only the mobile frame is shown. */}
-            {(() => {
-              const sharedPreviewProps = {
-                step: previewStep,
-                email: previewEmail,
-                onEmailChange: setPreviewEmail,
-                onAllow: () => setPreviewStep('setting_up'),
-                onDismiss: () => setPreviewStep('dismissed'),
-                wantsDiscount: previewWantsDiscount,
-                unlockedInfo: previewUnlockedInfo,
-                emailHint: previewEmailHint,
-                offerPct: previewOfferPct,
-              };
-              const dismissedReason = previewStep === 'dismissed' || previewStep === 'closed'
-                ? (previewStep === 'closed' ? 'closed' : 'dismissed') : null;
-              const isMobileOnly = MOBILE_ONLY_STYLE_IDS.includes(activeStyleId);
-              // Root cause of the previous tiny-preview bug: wrapping each
-              // frame in a flex-column with alignItems:'center' made the
-              // outline wrapper shrink to its content size, so DeviceFrameThumb's
-              // hostRef (width:'100%') measured its own shrunken content and
-              // ResizeObserver never updated k from the 0.2/0.25 initial value.
-              // Fix: CSS grid cells are block-formatting contexts with
-              // layout-determined widths; width:'100%' on hostRef correctly
-              // picks up the cell width, and ResizeObserver fires correctly.
-              const narrow = isMobileOnly || isMobileView;
-              const gridCols = narrow ? '1fr' : 'minmax(0,1fr) 300px';
-              const mobileWrapStyle = narrow
-                ? { maxWidth: 300, margin: '0 auto', width: '100%' }
-                : {};
-              return (
-                <div style={{ display: 'grid', gridTemplateColumns: gridCols,
-                              gap: 24, alignItems: 'start' }}>
-                  {!isMobileOnly && (
-                    <div>
-                      <div style={{ textAlign: 'center', fontSize: 11, fontWeight: 600,
-                                    marginBottom: 6,
-                                    color: popupDevice === 'desktop' ? '#4f46e5' : '#9ca3af' }}>
-                        {popupDevice === 'desktop' ? '✏️ Editing' : '🖥 Desktop'}
-                      </div>
-                      <div style={{ outline: popupDevice === 'desktop' ? '2px solid #4f46e5' : '2px solid transparent',
-                                    outlineOffset: 3, borderRadius: 14 }}>
-                        <FramedStyleThumb
-                          device="desktop"
-                          styleId={activeStyleId}
-                          layout={popup.layout || 'split'}
-                          cfg={popup}
-                          styleFields={activeStyleFields}
-                          emailFieldEnabled={previewShowEmailField}
-                          waFieldEnabled={previewShowWaField}
-                          discountOfferText={previewDiscountOfferText}
-                          discountOfferHeadline={discountRules.offerHeadline}
-                          maxH={560}
-                          dismissedReason={dismissedReason}
-                          previewProps={sharedPreviewProps}
-                        />
-                      </div>
-                    </div>
-                  )}
-                  <div style={mobileWrapStyle}>
-                    <div style={{ textAlign: 'center', fontSize: 11, fontWeight: 600,
-                                  marginBottom: 6,
-                                  color: popupDevice === 'mobile' ? '#4f46e5' : '#9ca3af' }}>
-                      {popupDevice === 'mobile' ? '✏️ Editing' : '📱 Mobile'}
-                    </div>
-                    <div style={{ outline: popupDevice === 'mobile' ? '2px solid #4f46e5' : '2px solid transparent',
-                                  outlineOffset: 3, borderRadius: 14 }}>
-                      <FramedStyleThumb
-                        device="mobile"
-                        styleId={activeStyleId}
-                        layout="card"
-                        cfg={mergeConfig(popup, mobilePopup)}
-                        styleFields={activeStyleFields}
-                        emailFieldEnabled={previewShowEmailField}
-                        waFieldEnabled={previewShowWaField}
-                        discountOfferText={previewDiscountOfferText}
-                        discountOfferHeadline={discountRules.offerHeadline}
-                        maxH={560}
-                        dismissedReason={dismissedReason}
-                        previewProps={sharedPreviewProps}
-                      />
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
+            {/* Single preview driven by the Desktop/Mobile toggle above.
+                The container is a plain block element (no flex alignItems:center)
+                so DeviceFrameThumb's hostRef width:'100%' measures the real
+                container width and ResizeObserver computes the correct scale.
+                Mobile is constrained to maxWidth:340 and centred; desktop fills
+                the available preview-card width. */}
+            {popupDevice === 'desktop' ? (
+              <FramedStyleThumb
+                device="desktop"
+                styleId={activeStyleId}
+                layout={popup.layout || 'split'}
+                cfg={popup}
+                styleFields={activeStyleFields}
+                emailFieldEnabled={previewShowEmailField}
+                waFieldEnabled={previewShowWaField}
+                discountOfferText={previewDiscountOfferText}
+                discountOfferHeadline={discountRules.offerHeadline}
+                maxH={800}
+                dismissedReason={previewStep === 'dismissed' || previewStep === 'closed'
+                  ? (previewStep === 'closed' ? 'closed' : 'dismissed') : null}
+                previewProps={{
+                  step: previewStep,
+                  email: previewEmail,
+                  onEmailChange: setPreviewEmail,
+                  onAllow: () => setPreviewStep('setting_up'),
+                  onDismiss: () => setPreviewStep('dismissed'),
+                  wantsDiscount: previewWantsDiscount,
+                  unlockedInfo: previewUnlockedInfo,
+                  emailHint: previewEmailHint,
+                  offerPct: previewOfferPct,
+                }}
+              />
+            ) : (
+              <div style={{ maxWidth: 340, margin: '0 auto' }}>
+                <FramedStyleThumb
+                  device="mobile"
+                  styleId={activeStyleId}
+                  layout="card"
+                  cfg={mergeConfig(popup, mobilePopup)}
+                  styleFields={activeStyleFields}
+                  emailFieldEnabled={previewShowEmailField}
+                  waFieldEnabled={previewShowWaField}
+                  discountOfferText={previewDiscountOfferText}
+                  discountOfferHeadline={discountRules.offerHeadline}
+                  maxH={640}
+                  dismissedReason={previewStep === 'dismissed' || previewStep === 'closed'
+                    ? (previewStep === 'closed' ? 'closed' : 'dismissed') : null}
+                  previewProps={{
+                    step: previewStep,
+                    email: previewEmail,
+                    onEmailChange: setPreviewEmail,
+                    onAllow: () => setPreviewStep('setting_up'),
+                    onDismiss: () => setPreviewStep('dismissed'),
+                    wantsDiscount: previewWantsDiscount,
+                    unlockedInfo: previewUnlockedInfo,
+                    emailHint: previewEmailHint,
+                    offerPct: previewOfferPct,
+                  }}
+                />
+              </div>
+            )}
 
             {/* The one Save button while the customizer is open — pinned to
                 the bottom of the sticky right column. Same save-status-

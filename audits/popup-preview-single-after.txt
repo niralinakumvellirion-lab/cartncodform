@@ -1,0 +1,95 @@
+POPUP PREVIEW — SINGLE FRAME RESTORE — SELF-AUDIT
+2026-10-09
+============================================================
+
+REQUIREMENT CHECKLIST
+============================================================
+
+1. Single preview driven by toggle — DONE
+   File: frontend/app/admin/screens/Settings.jsx
+   The IIFE + grid that rendered two frames is replaced with a ternary:
+     popupDevice === 'desktop' → desktop FramedStyleThumb (fills container)
+     popupDevice === 'mobile'  → mobile FramedStyleThumb (max 340px, centred)
+   Only one frame is ever in the DOM at a time. Grid/side-by-side removed.
+   "Editing:" outline/tag labels removed.
+
+2. Toggle labels restored — DONE
+   Line ~2744 (was modified in dba0662):
+   Before dba0662: `{tab.label}` ('🖥 Desktop' / '📱 Mobile')
+   After dba0662:  `{popupDevice === tab.key ? 'Editing: ...' : tab.label}`
+   Now: `{tab.label}` (original, confirmed via git show dba0662^)
+
+3. WhatsApp row, OfferButton, waFieldEnabled, previewResetKey — KEPT
+   WaRow / OfferButton components: unchanged (lines ~1102, ~1159)
+   waFieldEnabled in FramedStyleThumb calls: passed as {previewShowWaField}
+   previewShowWaField derived from discountRules.whatsappCapture.enabled: kept
+   previewResetKey includes waField: kept
+
+4. Sizing — DONE
+   Desktop (popupDevice='desktop'):
+     Container: plain block element, no constraining wrapper.
+     DeviceFrameThumb hostRef (width:'100%') measures the preview card inner
+     width. k = w / 1280. maxH=800 (height cap so k never exceeds 800/776=1.03,
+     i.e. effectively no cap at normal pane widths since w/1280 < 0.63 for a
+     820px card). Frame fills available width.
+
+   Mobile (popupDevice='mobile'):
+     Container: <div style={{ maxWidth:340, margin:'0 auto' }}>
+     hostRef measures min(card_inner_width, 340).
+     k = min(measured_w / 410, 640 / 800) = min(340/410, 0.80) = min(0.829, 0.80) = 0.80
+     Frame: 410*0.80 = 328px wide, 800*0.80 = 640px tall. Centred.
+
+5. Toggle re-render — DONE
+   Switching popupDevice causes the ternary to render the other branch,
+   mounting a fresh DeviceFrameThumb with a new hostRef. ResizeObserver fires
+   on mount and measures the correct container width. No leftover state from
+   the previous device. previewResetKey (includes device) already resets
+   previewStep to 'prompt' on toggle.
+
+============================================================
+
+FRAME WIDTHS AND SCALE TABLE
+============================================================
+Preview card padding: 16px each side → inner = pane - 32px.
+
+DESKTOP (k = inner / 1280, frame_w = inner, frame_h = 776 * k):
+Pane    Inner    k        Frame (W×H)
+1100    1068     0.834    1068 × 647px
+ 900     868     0.678     868 × 526px
+ 840     808     0.631     808 × 490px
+ 700     668     0.522     668 × 405px
+
+MOBILE (maxWidth:340 → measured_w = min(inner, 340) = 340 for all):
+k = min(340/410, 640/800) = min(0.829, 0.800) = 0.800
+Frame = 328 × 640px at all pane widths ≥ 372px (340 + 32).
+At pane < 372px: inner < 340, measured_w = inner, k = min(inner/410, 0.80).
+
+No horizontal overflow at any listed width: desktop fills exactly inner width;
+mobile is max 340px with auto margins, never exceeds inner.
+
+============================================================
+
+GIT DIFF --STAT (expected)
+============================================================
+frontend/app/admin/screens/Settings.jsx  |  ~75 changed
+audits/popup-preview-single-after.txt    |  new file
+
+============================================================
+
+CHANGES OUTSIDE LISTED SCOPE
+============================================================
+None. No other file touched. No styles, gallery, API calls, or backend changed.
+
+============================================================
+
+WHAT WAS NOT VERIFIED
+============================================================
+- Could not open a browser (no browser available in this session).
+  Layout reasoning is based on CSS block/ResizeObserver behaviour; not
+  visually confirmed.
+- The brief flash while ResizeObserver fires on first mount (initial k=0.2/0.25
+  before RO fires) is inherited from DeviceFrameThumb and not new.
+- Pane widths below 372px (mobile wrapper narrower than 340px): measured_w
+  shrinks and k drops proportionally. Not a supported viewport for Shopify admin.
+
+============================================================
