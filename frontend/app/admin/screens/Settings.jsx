@@ -2925,62 +2925,72 @@ export default function Settings({ shop }) {
               const dismissedReason = previewStep === 'dismissed' || previewStep === 'closed'
                 ? (previewStep === 'closed' ? 'closed' : 'dismissed') : null;
               const isMobileOnly = MOBILE_ONLY_STYLE_IDS.includes(activeStyleId);
-              const desktopFrame = !isMobileOnly && (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
-                              flex: '1 1 auto', minWidth: 0 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6,
-                                color: popupDevice === 'desktop' ? '#4f46e5' : '#9ca3af' }}>
-                    {popupDevice === 'desktop' ? '✏️ Editing' : '🖥 Desktop'}
-                  </div>
-                  <div style={{ outline: popupDevice === 'desktop' ? '2px solid #4f46e5' : '2px solid transparent',
-                                outlineOffset: 3, borderRadius: 14 }}>
-                    <FramedStyleThumb
-                      device="desktop"
-                      styleId={activeStyleId}
-                      layout={popup.layout || 'split'}
-                      cfg={popup}
-                      styleFields={activeStyleFields}
-                      emailFieldEnabled={previewShowEmailField}
-                      waFieldEnabled={previewShowWaField}
-                      discountOfferText={previewDiscountOfferText}
-                      discountOfferHeadline={discountRules.offerHeadline}
-                      maxH={560}
-                      dismissedReason={dismissedReason}
-                      previewProps={sharedPreviewProps}
-                    />
-                  </div>
-                </div>
-              );
-              const mobileFrame = (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center',
-                              flex: '0 0 auto' }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 6,
-                                color: popupDevice === 'mobile' ? '#4f46e5' : '#9ca3af' }}>
-                    {popupDevice === 'mobile' ? '✏️ Editing' : '📱 Mobile'}
-                  </div>
-                  <div style={{ outline: popupDevice === 'mobile' ? '2px solid #4f46e5' : '2px solid transparent',
-                                outlineOffset: 3, borderRadius: 14 }}>
-                    <FramedStyleThumb
-                      device="mobile"
-                      styleId={activeStyleId}
-                      layout="card"
-                      cfg={mergeConfig(popup, mobilePopup)}
-                      styleFields={activeStyleFields}
-                      emailFieldEnabled={previewShowEmailField}
-                      waFieldEnabled={previewShowWaField}
-                      discountOfferText={previewDiscountOfferText}
-                      discountOfferHeadline={discountRules.offerHeadline}
-                      maxH={560}
-                      dismissedReason={dismissedReason}
-                      previewProps={sharedPreviewProps}
-                    />
-                  </div>
-                </div>
-              );
+              // Root cause of the previous tiny-preview bug: wrapping each
+              // frame in a flex-column with alignItems:'center' made the
+              // outline wrapper shrink to its content size, so DeviceFrameThumb's
+              // hostRef (width:'100%') measured its own shrunken content and
+              // ResizeObserver never updated k from the 0.2/0.25 initial value.
+              // Fix: CSS grid cells are block-formatting contexts with
+              // layout-determined widths; width:'100%' on hostRef correctly
+              // picks up the cell width, and ResizeObserver fires correctly.
+              const narrow = isMobileOnly || isMobileView;
+              const gridCols = narrow ? '1fr' : 'minmax(0,1fr) 300px';
+              const mobileWrapStyle = narrow
+                ? { maxWidth: 300, margin: '0 auto', width: '100%' }
+                : {};
               return (
-                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap',
-                              justifyContent: 'center', alignItems: 'flex-start' }}>
-                  {isMobileOnly ? mobileFrame : <>{desktopFrame}{mobileFrame}</>}
+                <div style={{ display: 'grid', gridTemplateColumns: gridCols,
+                              gap: 24, alignItems: 'start' }}>
+                  {!isMobileOnly && (
+                    <div>
+                      <div style={{ textAlign: 'center', fontSize: 11, fontWeight: 600,
+                                    marginBottom: 6,
+                                    color: popupDevice === 'desktop' ? '#4f46e5' : '#9ca3af' }}>
+                        {popupDevice === 'desktop' ? '✏️ Editing' : '🖥 Desktop'}
+                      </div>
+                      <div style={{ outline: popupDevice === 'desktop' ? '2px solid #4f46e5' : '2px solid transparent',
+                                    outlineOffset: 3, borderRadius: 14 }}>
+                        <FramedStyleThumb
+                          device="desktop"
+                          styleId={activeStyleId}
+                          layout={popup.layout || 'split'}
+                          cfg={popup}
+                          styleFields={activeStyleFields}
+                          emailFieldEnabled={previewShowEmailField}
+                          waFieldEnabled={previewShowWaField}
+                          discountOfferText={previewDiscountOfferText}
+                          discountOfferHeadline={discountRules.offerHeadline}
+                          maxH={560}
+                          dismissedReason={dismissedReason}
+                          previewProps={sharedPreviewProps}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  <div style={mobileWrapStyle}>
+                    <div style={{ textAlign: 'center', fontSize: 11, fontWeight: 600,
+                                  marginBottom: 6,
+                                  color: popupDevice === 'mobile' ? '#4f46e5' : '#9ca3af' }}>
+                      {popupDevice === 'mobile' ? '✏️ Editing' : '📱 Mobile'}
+                    </div>
+                    <div style={{ outline: popupDevice === 'mobile' ? '2px solid #4f46e5' : '2px solid transparent',
+                                  outlineOffset: 3, borderRadius: 14 }}>
+                      <FramedStyleThumb
+                        device="mobile"
+                        styleId={activeStyleId}
+                        layout="card"
+                        cfg={mergeConfig(popup, mobilePopup)}
+                        styleFields={activeStyleFields}
+                        emailFieldEnabled={previewShowEmailField}
+                        waFieldEnabled={previewShowWaField}
+                        discountOfferText={previewDiscountOfferText}
+                        discountOfferHeadline={discountRules.offerHeadline}
+                        maxH={560}
+                        dismissedReason={dismissedReason}
+                        previewProps={sharedPreviewProps}
+                      />
+                    </div>
+                  </div>
                 </div>
               );
             })()}

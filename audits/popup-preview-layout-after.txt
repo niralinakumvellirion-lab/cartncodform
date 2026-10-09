@@ -1,0 +1,161 @@
+POPUP PREVIEW LAYOUT FIX — SELF-AUDIT
+2026-10-09
+============================================================
+
+1. ROOT CAUSE OF TINY SCALE
+============================================================
+File: frontend/app/admin/screens/Settings.jsx
+Introduced in commit dba0662 (Popup customization: WhatsApp row, offer button,
+desktop+mobile preview).
+
+The IIFE in popupPreviewCard wrapped each frame in:
+
+  desktopFrame:
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center',
+                  flex:'1 1 auto', minWidth:0 }}>
+      <div style={{ outline:..., borderRadius:14 }}>       ← outline wrapper
+        <FramedStyleThumb ... />
+
+  mobileFrame:
+    <div style={{ display:'flex', flexDirection:'column', alignItems:'center',
+                  flex:'0 0 auto' }}>
+
+`alignItems:'center'` on a flex column causes cross-axis (horizontal) children
+to SHRINK TO CONTENT WIDTH rather than fill the column. The outline wrapper was
+therefore only as wide as whatever the FramedStyleThumb rendered inside it.
+
+FramedStyleThumb → DeviceFrameThumb:
+  line 960: <div ref={hostRef} style={{ width:'100%', ... }}>
+
+`width:'100%'` resolves to 100% of the outline wrapper. Because the outline
+wrapper had already shrunk to the content, hostRef.clientWidth equalled the
+initial rendered content width — i.e., W * initialK:
+  Desktop: 1280 * 0.2 = 256px
+  Mobile:  410  * 0.25 = 102px
+
+The ResizeObserver (lines 863-872) measured those same 256px / 102px and
+computed k = 256/1280 = 0.2 / k = min(102/410, 560/800) = 0.248 — no change
+from the initial values. The frames were permanently stuck at their tiny
+initial scales.
+
+Additionally:
+- `flex:'0 0 auto'` on the mobile wrapper meant it never grew past its
+  shrink-to-fit content width regardless of available space.
+- The outer container used `justifyContent:'center'` (flex), leaving large
+  dead space on each side of the two tiny frames.
+
+============================================================
+
+2. WHAT WAS CHANGED
+============================================================
+File: frontend/app/admin/screens/Settings.jsx
+Lines: the IIFE inside `popupPreviewCard` (approx lines 2927-2985 pre-fix,
+now 2927-2997 post-fix).
+
+Old structure:
+  flex container (display:flex, justifyContent:center)
+    desktopFrame: flex-column, alignItems:center, flex:1 1 auto
+    mobileFrame:  flex-column, alignItems:center, flex:0 0 auto
+
+New structure:
+  CSS grid (display:grid, gridTemplateColumns: gridCols, gap:24, alignItems:start)
+    desktop cell: plain <div> (no flex, no alignItems)
+      label (textAlign:center)
+      outline wrapper (block, fills grid cell)
+        FramedStyleThumb
+    mobile cell: plain <div> (maxWidth:300,margin:0 auto when narrow)
+      label (textAlign:center)
+      outline wrapper (block, fills cell or 300px constraint)
+        FramedStyleThumb
+
+  gridCols logic:
+    - isMobileOnly || isMobileView (window.innerWidth<=768) → '1fr'
+      (stack; mobile cell constrained to maxWidth:300, margin:0 auto)
+    - otherwise → 'minmax(0,1fr) 300px'
+
+Why grid cells fix the ResizeObserver:
+  Grid cells are block-formatting contexts with widths determined by the grid
+  algorithm, independent of their children. A plain <div> inside a grid cell
+  fills the cell width (default block stretch). The outline wrapper therefore
+  has a layout-determined width that DeviceFrameThumb's hostRef (width:'100%')
+  correctly measures, and ResizeObserver fires with the real container width.
+
+No other code was changed (DeviceFrameThumb, gallery, styles, API calls).
+
+============================================================
+
+3. FRAME WIDTHS AND SCALE AT REPRESENTATIVE PANE WIDTHS
+============================================================
+Assumptions:
+  - Preview card padding: 16px each side → inner available = pane - 32px
+  - Grid gap: 24px
+  - Mobile column: 300px (fixed in 2-col grid); k_mobile = min(300/410, 560/800)
+    = min(0.732, 0.700) = 0.700 → mobile frame = 287px wide, 560px tall
+  - Desktop column: inner - 24 - 300
+  - k_desktop = desktop_col / 1280
+  - isMobileView threshold: window.innerWidth <= 768
+
+Pane   Inner   Layout    Desktop col   k_desktop   Desktop frame   Mobile frame
+----   -----   ------    -----------   ---------   -------------   ------------
+1100   1068    2-column   744px        0.581        744×450px       287×560px
+ 900    868    2-column   544px        0.425        544×330px       287×560px
+ 840    808    2-column   484px        0.378        484×295px       287×560px
+ 700    668    2-column   344px        0.269        344×209px       287×560px
+
+At 700px, window.innerWidth is 700 which is > 768, so 2-column layout applies.
+The desktop column is 344px, which is small but ~34% larger than the 256px
+bug state. The popup content (e.g. classic-split: 680px wide) appears at
+680*0.269=183px visible width — readable labels but small body text.
+
+At ≤768px (isMobileView=true), stacked layout:
+  Desktop: full inner width (e.g. 700px inner → k=700/1280=0.547, frame=700px)
+  Mobile:  maxWidth:300, centred → same 287×560px as above
+
+No horizontal overflow at any width: grid enforces minmax(0,1fr) which allows
+desktop column to shrink to 0 before overflow occurs.
+
+============================================================
+
+4. GIT DIFF --STAT (expected)
+============================================================
+frontend/app/admin/screens/Settings.jsx  |  ~40 changed (IIFE rewrite)
+audits/popup-preview-layout-after.txt    |   new file
+
+============================================================
+
+5. CHANGES OUTSIDE THE LISTED SCOPE
+============================================================
+None. Only the IIFE inside `popupPreviewCard` was modified. No changes to:
+  - DeviceFrameThumb or its ResizeObserver logic
+  - FramedStyleThumb, StyleCardPreview, ClassicPreview
+  - WaRow, OfferButton, CCF_PREVIEW_DIAL_CODES
+  - Gallery thumbnails or their FramedStyleThumb call sites
+  - discountRules state, previewShowWaField, previewResetKey
+  - deviceToggle labels
+  - Any backend file, extension, or test
+
+============================================================
+
+6. WHAT WAS NOT VERIFIED
+============================================================
+- Could not open a browser (no browser available in this session). The layout
+  reasoning is based on CSS grid spec and the DeviceFrameThumb ResizeObserver
+  logic; it was not visually confirmed.
+- Mobile-only styles (bottom_sheet, top_bar, story_card): single-column grid
+  with only the mobile frame; expected to centre correctly at max 300px.
+  Not visually verified.
+- The initial k=0.2/0.25 flash before ResizeObserver fires: expected to be
+  sub-frame on most browsers since RO fires during the layout phase; not
+  measured.
+- Very narrow panes (<400px): the desktop column could compress to near zero
+  (minmax(0,1fr) allows it). Not considered a supported viewport for the admin.
+
+============================================================
+
+7. BUILD
+============================================================
+cd frontend && npm run build → compiled successfully, 0 errors.
+Settings page bundle: 31.6 kB (unchanged from prior commit — IIFE rewrite is
+same logical size, no new imports or components).
+
+============================================================
