@@ -73,13 +73,18 @@ function findChain(result) {
 // ====================================================================
 
 describe('GET /:shopDomain/channels', () => {
+  // New Promise.all order: pushSentAgg, pushPendingAgg, pushOriginAgg,
+  // emailSentAgg, emailPendingAgg, emailOriginAgg, [ScheduledJob.find waJobsSent],
+  // waOriginAgg, [Profile.find waOptedIn]
   function setupEmpty() {
     ScheduledJob.aggregate
       .mockResolvedValueOnce([])  // push sent types
       .mockResolvedValueOnce([])  // push pending types
-      .mockResolvedValueOnce([])  // email sent types (from jobs)
-      .mockResolvedValueOnce([]); // email pending types
-    Profile.aggregate.mockResolvedValue([]);          // email sent from messages
+      .mockResolvedValueOnce([])  // push origin breakdown
+      .mockResolvedValueOnce([])  // email sent types
+      .mockResolvedValueOnce([])  // email pending types
+      .mockResolvedValueOnce([])  // email origin breakdown
+      .mockResolvedValueOnce([]); // wa origin breakdown
     ScheduledJob.find.mockReturnValue(findChain([])); // WA jobs sent
     Profile.find.mockReturnValue(findChain([]));       // WA opted-in
   }
@@ -98,6 +103,10 @@ describe('GET /:shopDomain/channels', () => {
     expect(data.whatsapp.pending).toBe(0);
     expect(data.push.types).toEqual([]);
     expect(data.email.types).toEqual([]);
+    // sentByOrigin present on all channels
+    expect(data.push.sentByOrigin).toEqual({ automated: 0, scheduled: 0, manual: 0 });
+    expect(data.email.sentByOrigin).toEqual({ automated: 0, scheduled: 0, manual: 0 });
+    expect(data.whatsapp.sentByOrigin).toEqual({ automated: 0, scheduled: 0, manual: 0 });
   });
 
   test('ch2. push sent aggregation totals correctly and builds types array', async () => {
@@ -107,9 +116,11 @@ describe('GET /:shopDomain/channels', () => {
         { _id: 'browse_abandon', sent: 3, rep: { title: 'Hi', body: 'Saw something?' } },
       ])  // push sent
       .mockResolvedValueOnce([])   // push pending
+      .mockResolvedValueOnce([])   // push origin
       .mockResolvedValueOnce([])   // email sent
-      .mockResolvedValueOnce([]);  // email pending
-    Profile.aggregate.mockResolvedValue([]);
+      .mockResolvedValueOnce([])   // email pending
+      .mockResolvedValueOnce([])   // email origin
+      .mockResolvedValueOnce([]); // wa origin
     ScheduledJob.find.mockReturnValue(findChain([]));
     Profile.find.mockReturnValue(findChain([]));
 
@@ -135,9 +146,11 @@ describe('GET /:shopDomain/channels', () => {
         { _id: 'cart_abandon', pending: 4, rep: { title: 'Pending' } },
         { _id: 'browse_abandon', pending: 1, rep: { title: 'Browse' } },
       ])  // push pending
+      .mockResolvedValueOnce([])   // push origin
       .mockResolvedValueOnce([])   // email sent
-      .mockResolvedValueOnce([]);  // email pending
-    Profile.aggregate.mockResolvedValue([]);
+      .mockResolvedValueOnce([])   // email pending
+      .mockResolvedValueOnce([])   // email origin
+      .mockResolvedValueOnce([]); // wa origin
     ScheduledJob.find.mockReturnValue(findChain([]));
     Profile.find.mockReturnValue(findChain([]));
 
@@ -152,13 +165,18 @@ describe('GET /:shopDomain/channels', () => {
     expect(cartType.preview.title).toBe('Sent');
   });
 
-  test('ch4. email sent uses Profile.messages aggregate total', async () => {
+  test('ch4. email sent uses ScheduledJob count (not Profile.messages)', async () => {
     ScheduledJob.aggregate
       .mockResolvedValueOnce([])  // push sent
       .mockResolvedValueOnce([])  // push pending
-      .mockResolvedValueOnce([])  // email sent types
-      .mockResolvedValueOnce([]); // email pending
-    Profile.aggregate.mockResolvedValueOnce([{ total: 12 }]);  // email messages count
+      .mockResolvedValueOnce([])  // push origin
+      .mockResolvedValueOnce([
+        { _id: 'cart_abandon', sent: 7 },
+        { _id: 'manual', sent: 5 },
+      ])  // email sent — now comes from ScheduledJob, not Profile.messages
+      .mockResolvedValueOnce([])  // email pending
+      .mockResolvedValueOnce([])  // email origin
+      .mockResolvedValueOnce([]); // wa origin
     ScheduledJob.find.mockReturnValue(findChain([]));
     Profile.find.mockReturnValue(findChain([]));
 
@@ -166,19 +184,25 @@ describe('GET /:shopDomain/channels', () => {
     const data = await res.json();
 
     expect(data.email.sent).toBe(12);
+    // Manual type appears in types list
+    const manualType = data.email.types.find((t) => t.type === 'manual');
+    expect(manualType).toBeDefined();
+    expect(manualType.sent).toBe(5);
   });
 
   test('ch5. WhatsApp sent counted and purpose breakdown returned', async () => {
     ScheduledJob.aggregate
       .mockResolvedValueOnce([])  // push sent
       .mockResolvedValueOnce([])  // push pending
+      .mockResolvedValueOnce([])  // push origin
       .mockResolvedValueOnce([])  // email sent
-      .mockResolvedValueOnce([]); // email pending
-    Profile.aggregate.mockResolvedValue([]);
+      .mockResolvedValueOnce([])  // email pending
+      .mockResolvedValueOnce([])  // email origin
+      .mockResolvedValueOnce([]); // wa origin
     ScheduledJob.find.mockReturnValue(findChain([
-      { purpose: 'followup' },
-      { purpose: 'followup' },
-      { purpose: 'order' },
+      { purpose: 'followup', origin: 'manual' },
+      { purpose: 'followup', origin: 'manual' },
+      { purpose: 'order', origin: 'manual' },
     ]));
     Profile.find.mockReturnValue(findChain([]));
 
@@ -195,8 +219,10 @@ describe('GET /:shopDomain/channels', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
-    Profile.aggregate.mockResolvedValue([]);
     ScheduledJob.find.mockReturnValue(findChain([]));  // WA jobs sent
     // 3 opted-in profiles
     Profile.find.mockReturnValue(findChain([
@@ -224,6 +250,33 @@ describe('GET /:shopDomain/channels', () => {
     expect(res.status).toBe(500);
     const data = await res.json();
     expect(data.error).toBe('Failed to load channel stats');
+  });
+
+  test('ch9. sentByOrigin counts automated/scheduled/manual from origin aggregate', async () => {
+    ScheduledJob.aggregate
+      .mockResolvedValueOnce([])  // push sent
+      .mockResolvedValueOnce([])  // push pending
+      .mockResolvedValueOnce([
+        { _id: 'automated', count: 10 },
+        { _id: 'scheduled', count: 3 },
+        { _id: 'manual', count: 2 },
+      ])  // push origin
+      .mockResolvedValueOnce([])  // email sent
+      .mockResolvedValueOnce([])  // email pending
+      .mockResolvedValueOnce([
+        { _id: 'automated', count: 7 },
+        { _id: 'manual', count: 5 },
+      ])  // email origin
+      .mockResolvedValueOnce([]); // wa origin
+    ScheduledJob.find.mockReturnValue(findChain([]));
+    Profile.find.mockReturnValue(findChain([]));
+
+    const res = await get(`/api/dashboard/${SHOP}/channels?from=${FROM}&to=${TO}`);
+    const data = await res.json();
+
+    expect(data.push.sentByOrigin).toEqual({ automated: 10, scheduled: 3, manual: 2 });
+    expect(data.email.sentByOrigin).toEqual({ automated: 7, scheduled: 0, manual: 5 });
+    expect(data.whatsapp.sentByOrigin).toEqual({ automated: 0, scheduled: 0, manual: 0 });
   });
 });
 
@@ -442,5 +495,73 @@ describe('GET /:shopDomain/channels/:channel/items', () => {
     const data = await res.json();
 
     expect(data.items[0].outcomeChip).toBeNull();
+  });
+
+  test('i12. items include origin and sentByLabel fields', async () => {
+    ScheduledJob.find.mockReturnValue(findChain([
+      {
+        _id: 'job5',
+        signalType: 'manual',
+        sentAt: new Date(),
+        profileId: null,
+        payload: { title: 'Hello', body: 'World', imageUrl: '' },
+        outcome: 'delivered',
+        origin: 'manual',
+        sentBy: 'owner',
+      },
+    ]));
+    ScheduledJob.countDocuments = jest.fn().mockResolvedValue(1);
+    Profile.find.mockReturnValue(findChain([]));
+
+    const res = await get(`/api/dashboard/${SHOP}/channels/push/items?status=sent&from=${FROM}&to=${TO}`);
+    const data = await res.json();
+
+    expect(data.items[0].origin).toBe('manual');
+    expect(data.items[0].sentByLabel).toBe('You');
+  });
+
+  test('i13. origin filter is applied to ScheduledJob query', async () => {
+    ScheduledJob.find.mockReturnValue(findChain([]));
+    ScheduledJob.countDocuments = jest.fn().mockResolvedValue(0);
+    Profile.find.mockReturnValue(findChain([]));
+
+    await get(`/api/dashboard/${SHOP}/channels/push/items?status=sent&origin=manual&from=${FROM}&to=${TO}`);
+
+    const [query] = ScheduledJob.find.mock.calls[0];
+    expect(query.origin).toBe('manual');
+  });
+
+  test('i14. invalid origin param is ignored (query has no origin filter)', async () => {
+    ScheduledJob.find.mockReturnValue(findChain([]));
+    ScheduledJob.countDocuments = jest.fn().mockResolvedValue(0);
+    Profile.find.mockReturnValue(findChain([]));
+
+    await get(`/api/dashboard/${SHOP}/channels/push/items?status=sent&origin=invalid&from=${FROM}&to=${TO}`);
+
+    const [query] = ScheduledJob.find.mock.calls[0];
+    expect(query.origin).toBeUndefined();
+  });
+
+  test('i15. automated items return origin="automated" and no sentByLabel', async () => {
+    ScheduledJob.find.mockReturnValue(findChain([
+      {
+        _id: 'job6',
+        signalType: 'cart_abandon',
+        sentAt: new Date(),
+        profileId: null,
+        payload: {},
+        outcome: null,
+        origin: 'automated',
+        sentBy: null,
+      },
+    ]));
+    ScheduledJob.countDocuments = jest.fn().mockResolvedValue(1);
+    Profile.find.mockReturnValue(findChain([]));
+
+    const res = await get(`/api/dashboard/${SHOP}/channels/push/items?status=sent&from=${FROM}&to=${TO}`);
+    const data = await res.json();
+
+    expect(data.items[0].origin).toBe('automated');
+    expect(data.items[0].sentByLabel).toBeNull();
   });
 });

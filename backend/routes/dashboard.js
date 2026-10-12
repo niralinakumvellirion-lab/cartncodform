@@ -73,10 +73,12 @@ router.get('/:shopDomain/channels', requireAuth, requireStoreOwner, async (req, 
     const [
       pushSentAgg,
       pushPendingAgg,
+      pushOriginAgg,
       emailSentAgg,
       emailPendingAgg,
-      emailSentFromMsgAgg,
+      emailOriginAgg,
       waJobsSent,
+      waOriginAgg,
       waOptedIn,
     ] = await Promise.all([
       // Push sent by signalType — get sent count + latest payload as representative preview.
@@ -91,7 +93,12 @@ router.get('/:shopDomain/channels', requireAuth, requireStoreOwner, async (req, 
         { $sort: { runAt: 1 } },
         { $group: { _id: '$signalType', pending: { $sum: 1 }, rep: { $first: '$payload' } } },
       ]),
-      // Email sent (rule-based jobs) by signalType.
+      // Push sent count by origin (automated / scheduled / manual).
+      ScheduledJob.aggregate([
+        { $match: { shopDomain: shop, channel: 'push', status: 'sent', sentAt: { $gte: from, $lte: to } } },
+        { $group: { _id: '$origin', count: { $sum: 1 } } },
+      ]),
+      // Email sent by signalType (now includes all sources — ScheduledJob rows created for every path).
       ScheduledJob.aggregate([
         { $match: { shopDomain: shop, channel: 'email', status: 'sent', sentAt: { $gte: from, $lte: to } } },
         { $sort: { sentAt: -1 } },
@@ -103,12 +110,10 @@ router.get('/:shopDomain/channels', requireAuth, requireStoreOwner, async (req, 
         { $sort: { runAt: 1 } },
         { $group: { _id: '$signalType', pending: { $sum: 1 }, rep: { $first: '$payload' } } },
       ]),
-      // Email sent total from Profile.messages — captures both brain+rule paths.
-      Profile.aggregate([
-        { $match: { shopDomain: shop } },
-        { $unwind: '$messages' },
-        { $match: { 'messages.channel': 'email', 'messages.sentAt': { $gte: from, $lte: to } } },
-        { $count: 'total' },
+      // Email sent count by origin.
+      ScheduledJob.aggregate([
+        { $match: { shopDomain: shop, channel: 'email', status: 'sent', sentAt: { $gte: from, $lte: to } } },
+        { $group: { _id: '$origin', count: { $sum: 1 } } },
       ]),
       // WhatsApp jobs sent in range (purpose breakdown).
       ScheduledJob.find({
@@ -117,8 +122,13 @@ router.get('/:shopDomain/channels', requireAuth, requireStoreOwner, async (req, 
         status: 'sent',
         sentAt: { $gte: from, $lte: to },
       })
-        .select('purpose')
+        .select('purpose origin')
         .lean(),
+      // WhatsApp sent count by origin.
+      ScheduledJob.aggregate([
+        { $match: { shopDomain: shop, channel: 'whatsapp', status: 'sent', sentAt: { $gte: from, $lte: to } } },
+        { $group: { _id: '$origin', count: { $sum: 1 } } },
+      ]),
       // Opted-in profiles (for pending count).
       Profile.find({
         shopDomain: shop,
@@ -129,37 +139,40 @@ router.get('/:shopDomain/channels', requireAuth, requireStoreOwner, async (req, 
         .lean(),
     ]);
 
+    function buildOriginCounts(agg) {
+      const out = { automated: 0, scheduled: 0, manual: 0 };
+      for (const row of agg) {
+        const k = row._id;
+        if (k === 'automated' || k === 'scheduled' || k === 'manual') out[k] += row.count;
+      }
+      return out;
+    }
+
+    function buildTypeMap(sentAgg, pendingAgg) {
+      const typeMap = {};
+      for (const t of sentAgg) {
+        const key = t._id || 'other';
+        typeMap[key] = { type: key, label: typeLabel(t._id), sent: t.sent, pending: 0, preview: t.rep || null };
+      }
+      for (const t of pendingAgg) {
+        const key = t._id || 'other';
+        if (!typeMap[key]) typeMap[key] = { type: key, label: typeLabel(t._id), sent: 0, pending: 0, preview: null };
+        typeMap[key].pending += t.pending;
+        if (!typeMap[key].preview) typeMap[key].preview = t.rep || null;
+      }
+      return Object.values(typeMap).sort((a, b) => (b.sent + b.pending) - (a.sent + a.pending));
+    }
+
     // ---- Push ----
     const pushSentTotal = pushSentAgg.reduce((s, t) => s + t.sent, 0);
     const pushPendingTotal = pushPendingAgg.reduce((s, t) => s + t.pending, 0);
-    const pushTypeMap = {};
-    for (const t of pushSentAgg) {
-      const key = t._id || 'other';
-      pushTypeMap[key] = { type: key, label: typeLabel(t._id), sent: t.sent, pending: 0, preview: t.rep || null };
-    }
-    for (const t of pushPendingAgg) {
-      const key = t._id || 'other';
-      if (!pushTypeMap[key]) pushTypeMap[key] = { type: key, label: typeLabel(t._id), sent: 0, pending: 0, preview: null };
-      pushTypeMap[key].pending += t.pending;
-      if (!pushTypeMap[key].preview) pushTypeMap[key].preview = t.rep || null;
-    }
-    const pushTypes = Object.values(pushTypeMap).sort((a, b) => (b.sent + b.pending) - (a.sent + a.pending));
+    const pushTypes = buildTypeMap(pushSentAgg, pushPendingAgg);
 
     // ---- Email ----
-    const emailSentTotal = emailSentFromMsgAgg[0]?.total || 0;
+    // emailSentTotal now comes from ScheduledJob (all email sources write a row).
+    const emailSentTotal = emailSentAgg.reduce((s, t) => s + t.sent, 0);
     const emailPendingTotal = emailPendingAgg.reduce((s, t) => s + t.pending, 0);
-    const emailTypeMap = {};
-    for (const t of emailSentAgg) {
-      const key = t._id || 'other';
-      emailTypeMap[key] = { type: key, label: typeLabel(t._id), sent: t.sent, pending: 0, preview: t.rep || null };
-    }
-    for (const t of emailPendingAgg) {
-      const key = t._id || 'other';
-      if (!emailTypeMap[key]) emailTypeMap[key] = { type: key, label: typeLabel(t._id), sent: 0, pending: 0, preview: null };
-      emailTypeMap[key].pending += t.pending;
-      if (!emailTypeMap[key].preview) emailTypeMap[key].preview = t.rep || null;
-    }
-    const emailTypes = Object.values(emailTypeMap).sort((a, b) => (b.sent + b.pending) - (a.sent + a.pending));
+    const emailTypes = buildTypeMap(emailSentAgg, emailPendingAgg);
 
     // ---- WhatsApp ----
     const waSent = waJobsSent.length;
@@ -178,9 +191,25 @@ router.get('/:shopDomain/channels', requireAuth, requireStoreOwner, async (req, 
     }
 
     return res.json({
-      push: { sent: pushSentTotal, pending: pushPendingTotal, types: pushTypes },
-      email: { sent: emailSentTotal, pending: emailPendingTotal, types: emailTypes },
-      whatsapp: { sent: waSent, pending: waPending, sentFollowup: waSentFollowup, sentOrder: waSentOrder },
+      push: {
+        sent: pushSentTotal,
+        pending: pushPendingTotal,
+        sentByOrigin: buildOriginCounts(pushOriginAgg),
+        types: pushTypes,
+      },
+      email: {
+        sent: emailSentTotal,
+        pending: emailPendingTotal,
+        sentByOrigin: buildOriginCounts(emailOriginAgg),
+        types: emailTypes,
+      },
+      whatsapp: {
+        sent: waSent,
+        pending: waPending,
+        sentFollowup: waSentFollowup,
+        sentOrder: waSentOrder,
+        sentByOrigin: buildOriginCounts(waOriginAgg),
+      },
     });
   } catch (err) {
     console.error('[dashboard] GET channels error:', err.message);
@@ -199,6 +228,7 @@ router.get('/:shopDomain/channels', requireAuth, requireStoreOwner, async (req, 
  *   customer: { profileId, name, email },
  *   preview: { push: title/body/imageUrl | email: subject/preheader/body | wa: message },
  *   outcome (sent items only),
+ *   origin (automated | scheduled | manual | null),
  *   purpose + consentedAt (WhatsApp pending only)
  */
 router.get('/:shopDomain/channels/:channel/items', requireAuth, requireStoreOwner, async (req, res) => {
@@ -211,6 +241,10 @@ router.get('/:shopDomain/channels/:channel/items', requireAuth, requireStoreOwne
 
     const statusParam = req.query.status === 'pending' ? 'pending' : 'sent';
     const typeParam = typeof req.query.type === 'string' ? req.query.type.trim() : '';
+    const VALID_ORIGINS = ['automated', 'scheduled', 'manual'];
+    const originParam = typeof req.query.origin === 'string' && VALID_ORIGINS.includes(req.query.origin)
+      ? req.query.origin
+      : null; // null = all origins
 
     let page = parseInt(req.query.page, 10);
     if (!Number.isFinite(page) || page < 0) page = 0;
@@ -266,6 +300,7 @@ router.get('/:shopDomain/channels/:channel/items', requireAuth, requireStoreOwne
     const jobQuery = { shopDomain: shop, channel, status: statusParam };
     if (statusParam === 'sent') jobQuery.sentAt = { $gte: from, $lte: to };
     if (typeParam) jobQuery.signalType = typeParam;
+    if (originParam) jobQuery.origin = originParam;
 
     const sortField = statusParam === 'sent' ? 'sentAt' : 'runAt';
     const sortOrder = statusParam === 'sent' ? -1 : 1;
@@ -275,7 +310,7 @@ router.get('/:shopDomain/channels/:channel/items', requireAuth, requireStoreOwne
         .sort({ [sortField]: sortOrder })
         .skip(page * limit)
         .limit(limit)
-        .select('_id signalType purpose sentAt runAt profileId payload messageText outcome')
+        .select('_id signalType purpose sentAt runAt profileId payload messageText outcome origin sentBy')
         .lean(),
       ScheduledJob.countDocuments(jobQuery),
     ]);
@@ -343,6 +378,8 @@ router.get('/:shopDomain/channels/:channel/items', requireAuth, requireStoreOwne
         preview,
         outcome: j.outcome || null,
         outcomeChip: rawChip ? (WA_OUTCOME_CHIP[rawChip] || null) : null,
+        origin: j.origin || null,
+        sentByLabel: j.sentBy === 'owner' ? 'You' : null,
       };
     });
 
