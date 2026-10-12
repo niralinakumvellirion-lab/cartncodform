@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
@@ -36,6 +36,9 @@ const EVENT_LABELS = {
   push_prompt_shown: 'Popup shown',
   push_prompt_accepted: 'Accepted notifications',
   product_view: 'Viewed product',
+  add_to_cart: 'Added to cart',
+  reached_checkout: 'Reached checkout',
+  purchase: 'Placed an order',
 };
 
 const EVENT_DOT_COLORS = {
@@ -43,6 +46,9 @@ const EVENT_DOT_COLORS = {
   push_prompt_shown: '#f59e0b',
   push_prompt_accepted: '#10b981',
   product_view: '#8b5cf6',
+  add_to_cart: '#f97316',
+  reached_checkout: '#2563eb',
+  purchase: '#16a34a',
 };
 
 // Converts a raw storefront path (e.g. /collections/all,
@@ -1468,6 +1474,60 @@ const cardTitle = {
   textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: 6,
 };
 
+function formatActiveHoursRange(hours) {
+  if (!hours || hours.length === 0) return null;
+  const sorted = [...hours].sort((a, b) => a - b);
+  const fmtH = (h) => {
+    const ampm = h >= 12 ? 'pm' : 'am';
+    const h12 = h % 12 || 12;
+    return `${h12} ${ampm}`;
+  };
+  return `${fmtH(sorted[0])} – ${fmtH(sorted[sorted.length - 1])}`;
+}
+
+function CollapsibleCard({ title, hint, open, onToggle, children }) {
+  return (
+    <div style={{
+      background: '#fff', border: '1px solid #E2E5EB', borderRadius: 14,
+      marginBottom: 0, overflow: 'hidden',
+      boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+    }}>
+      <button
+        onClick={onToggle}
+        aria-expanded={open}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', padding: '16px 20px',
+          background: 'none', border: 'none', cursor: 'pointer',
+          textAlign: 'left', minHeight: 44,
+          outline: 'none',
+        }}
+        onFocus={(e) => (e.currentTarget.style.boxShadow = '0 0 0 3px #2459D640')}
+        onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
+      >
+        <span style={{ fontSize: 17, fontWeight: 700, color: '#15181E' }}>{title}</span>
+        <svg
+          width="16" height="16" viewBox="0 0 24 24" fill="none"
+          stroke="#5A6272" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+          aria-hidden="true"
+          style={{ flexShrink: 0, transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+        >
+          <polyline points="6 9 12 15 18 9"/>
+        </svg>
+      </button>
+      {!open && (
+        <div style={{ padding: '0 20px 14px', fontSize: 12, color: '#5A6272' }}>{hint}</div>
+      )}
+      {open && (
+        <>
+          <div style={{ borderTop: '1px solid #E2E5EB' }} />
+          <div style={{ padding: '16px 20px' }}>{children}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function CustomerDetail({ shop, profileId, from, fid }) {
   const router = useRouter();
   // Carries `shop` forward on client-side nav (every admin/*/page.js
@@ -1487,6 +1547,8 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
   const [isMedium, setIsMedium] = useState(false);
   const [timelineFilter, setTimelineFilter] = useState('all');
   const [showAllTimeline, setShowAllTimeline] = useState(false);
+  const [whatTheyWantOpen, setWhatTheyWantOpen] = useState(false);
+  const [whatsHappenedOpen, setWhatsHappenedOpen] = useState(false);
 
   const [waProfile, setWaProfile] = useState(null);
   const [waProfileLoading, setWaProfileLoading] = useState(false);
@@ -1676,15 +1738,17 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
 
   const events = (customer.recentEvents || []).filter((e) => EVENT_LABELS[e.type]);
 
-  // Health strip stats — derived from already-fetched notifications + topProducts
+  // Stats — derived from already-fetched notifications + topProducts
   const pushSentCount  = notifications.filter(n => n.channel === 'push').length;
   const emailSentCount = notifications.filter(n => n.channel === 'email').length;
+  const waSentCount    = notifications.filter(n => n.channel === 'whatsapp').length;
   const deliveredCount = notifications.filter(n => n.outcome === 'delivered').length;
   const failedCount    = notifications.filter(n => n.outcome === 'failed').length;
   const heldCount      = notifications.filter(n => ['skipped', 'cancelled'].includes(n.outcome)).length;
-  const didntArriveCount  = failedCount + heldCount;
   const distinctProducts  = customer.topProducts?.length || 0;
-  const totalProductViews = (customer.topProducts || []).reduce((s, p) => s + (p.count || 0), 0);
+  // Use the API-supplied total (all products) if available; fall back to summing top-3
+  const totalProductViews = customer.totalProductViews
+    || (customer.topProducts || []).reduce((s, p) => s + (p.count || 0), 0);
 
   // Warning bar: same signalType sent 5+ times with fewer than half delivered
   const signalGroups = {};
@@ -1831,136 +1895,147 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
     </div>
   );
 
+  // Stat tile sub-label for "Messages sent"
+  const msgSentParts = [
+    pushSentCount  > 0 ? `${pushSentCount} push`      : null,
+    emailSentCount > 0 ? `${emailSentCount} email`     : null,
+    waSentCount    > 0 ? `${waSentCount} WhatsApp`     : null,
+  ].filter(Boolean);
+  const msgSentSub = msgSentParts.length > 0 ? msgSentParts.join(' · ') : 'no breakdown yet';
+
+  // Stat tile sub-label for "Didn't arrive"
+  const didntArriveSub = heldCount > 0 ? `failed · +${heldCount} held back` : 'failed';
+
+  const statTiles = [
+    {
+      label: 'Messages sent',
+      value: notifications.length,
+      sub: msgSentSub,
+      color: '#15181E',
+    },
+    {
+      label: 'Reached them',
+      value: deliveredCount,
+      sub: 'confirmed delivered',
+      color: '#16a34a',
+    },
+    {
+      label: "Didn't arrive",
+      value: failedCount,
+      sub: didntArriveSub,
+      color: '#d97706',
+    },
+    {
+      label: 'Products viewed',
+      value: totalProductViews,
+      sub: `views across ${distinctProducts} product${distinctProducts !== 1 ? 's' : ''}`,
+      color: '#15181E',
+    },
+  ];
+
+  const activeHoursLabel = formatActiveHoursRange(customer.activeHours);
+
+  // Attribution lookup for timeline WA send rows
+  const attrByJob = {};
+  for (const a of (waProfile?.attribution || [])) {
+    attrByJob[a.jobId] = a;
+  }
+
   return (
     <div style={{ ...DS.page, maxWidth: 1200, overflowX: 'hidden', width: '100%' }}>
       {backButton}
 
-      {/* === 1. Identity strip === */}
+      {/* === 1. User card === */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 16,
-        padding: '16px 20px', background: '#fff',
-        border: '1px solid #e3e3e3', borderRadius: 12, marginBottom: 16,
-        flexWrap: 'wrap',
+        background: '#fff', border: '1px solid #E2E5EB', borderRadius: 14,
+        padding: '20px 24px', marginBottom: 16,
+        boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
       }}>
         <div style={{
-          width: 48, height: 48, borderRadius: '50%', flexShrink: 0,
-          background: cdAvatarColor.bg, color: cdAvatarColor.text,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 18, fontWeight: 700,
+          display: 'flex', gap: 24,
+          flexDirection: isNarrow ? 'column' : 'row',
+          alignItems: isNarrow ? 'stretch' : 'flex-start',
         }}>
-          {cdInitial}
-        </div>
-        <div style={{ flex: 1, minWidth: 180 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 15, fontWeight: 600, color: '#111827', wordBreak: 'break-all' }}>
-              {displayName}
-            </span>
-            <StageBadge customer={profile} />
-          </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '3px 9px', borderRadius: 99, fontSize: 11, fontWeight: 600,
-              background: hasPush ? '#dcfce7' : '#f3f4f6',
-              color: hasPush ? '#16a34a' : '#9ca3af',
-            }}>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-              </svg>
-              Push {hasPush ? 'on' : 'off'}
-            </span>
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '3px 9px', borderRadius: 99, fontSize: 11, fontWeight: 600,
-              background: hasEmail ? '#dcfce7' : '#f3f4f6',
-              color: hasEmail ? '#16a34a' : '#9ca3af',
-            }}>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                <polyline points="22,6 12,13 2,6"/>
-              </svg>
-              Email {hasEmail ? 'on' : 'off'}
-            </span>
-            {phone && (
+          {/* Left: avatar + identity + channel chips */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 10 }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: '50%', flexShrink: 0,
+                background: cdAvatarColor.bg, color: cdAvatarColor.text,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 17, fontWeight: 700,
+              }}>
+                {cdInitial}
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#15181E',
+                              wordBreak: 'break-all', lineHeight: 1.3 }}>
+                  {displayName}
+                </div>
+                {phone && (
+                  <div style={{ fontSize: 12, color: '#5A6272', marginTop: 2 }}>{phone}</div>
+                )}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              <StageBadge customer={profile} />
               <span style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
                 padding: '3px 9px', borderRadius: 99, fontSize: 11, fontWeight: 600,
-                background: '#f3f4f6', color: '#374151',
+                background: hasPush ? '#dcfce7' : '#f3f4f6',
+                color: hasPush ? '#16a34a' : '#9ca3af',
               }}>
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
                   strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.38 2 2 0 0 1 3.6 1.18h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.77a16 16 0 0 0 6.29 6.29l.91-.91a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+                  <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                  <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
                 </svg>
-                {phone}
+                Push {hasPush ? 'on' : 'off'}
               </span>
-            )}
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '3px 9px', borderRadius: 99, fontSize: 11, fontWeight: 600,
+                background: hasEmail ? '#dcfce7' : '#f3f4f6',
+                color: hasEmail ? '#16a34a' : '#9ca3af',
+              }}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                  <polyline points="22,6 12,13 2,6"/>
+                </svg>
+                Email {hasEmail ? 'on' : 'off'}
+              </span>
+            </div>
           </div>
-        </div>
-        <div style={{ display: 'flex', gap: 24, flexShrink: 0 }}>
-          {[
-            { label: 'First Seen', val: formatCDDate(profile.createdAt) },
-            { label: 'Last Seen',  val: formatCDDate(profile.lastSeenAt) },
-          ].map(({ label, val }) => (
-            <div key={label}>
-              <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
-                            textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 3 }}>
-                {label}
+
+          {/* Right: 2×2 stat tiles */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 10,
+            flexShrink: 0,
+            width: isNarrow ? '100%' : 380,
+          }}>
+            {statTiles.map(({ label, value, sub, color }) => (
+              <div key={label} style={{
+                background: '#F7F8FA', border: '1px solid #E2E5EB', borderRadius: 10,
+                padding: '12px 14px',
+              }}>
+                <div style={{ fontSize: 22, fontWeight: 700, color, lineHeight: 1, marginBottom: 3 }}>
+                  {notifLoading ? '—' : value}
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#15181E',
+                              textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 2 }}>
+                  {label}
+                </div>
+                <div style={{ fontSize: 11, color: '#5A6272' }}>{sub}</div>
               </div>
-              <div style={{ fontSize: 13, color: '#374151', fontWeight: 500 }}>{val}</div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* === 2. Health strip === */}
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: isNarrow ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)',
-        gap: 12, marginBottom: 16,
-      }}>
-        {[
-          {
-            label: 'Messages Sent',
-            value: notifications.length,
-            sub: `${pushSentCount} push · ${emailSentCount} email`,
-            color: '#111827',
-          },
-          {
-            label: 'Reached Them',
-            value: deliveredCount,
-            sub: 'confirmed delivered',
-            color: '#16a34a',
-          },
-          {
-            label: "Didn't Arrive",
-            value: didntArriveCount,
-            sub: `${failedCount} failed · ${heldCount} held back`,
-            color: '#d97706',
-          },
-          {
-            label: 'Products Viewed',
-            value: distinctProducts,
-            sub: `${totalProductViews} total view${totalProductViews !== 1 ? 's' : ''}`,
-            color: '#111827',
-          },
-        ].map(({ label, value, sub, color }) => (
-          <div key={label} style={{ ...DS.card, padding: '12px 16px', marginBottom: 0 }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
-                          textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-              {label}
-            </div>
-            <div style={{ fontSize: 24, fontWeight: 700, color, lineHeight: 1, marginBottom: 3 }}>
-              {notifLoading ? '—' : value}
-            </div>
-            <div style={{ fontSize: 11, color: '#9ca3af' }}>{sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* === 3. Warning bar (conditional) === */}
+      {/* === 2. Warning bar (conditional) === */}
       {!notifLoading && warningEntry && (
         <div style={{
           padding: '10px 16px', background: '#fffbeb',
@@ -1978,24 +2053,128 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
         </div>
       )}
 
-      {/* === 4. Main grid (1.75fr / 1fr) === */}
+      {/* === 3. Two collapsible columns === */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: isNarrow ? '1fr' : 'minmax(0, 1.75fr) minmax(0, 1fr)',
-        gap: 16,
+        gridTemplateColumns: isNarrow ? '1fr' : '1fr 1fr',
+        gap: 16, marginBottom: 16,
         alignItems: 'start',
       }}>
 
-        {/* LEFT: Merged timeline */}
-        <div style={{ ...DS.card, padding: 16, marginBottom: 0 }}>
+        {/* LEFT: What they want */}
+        <CollapsibleCard
+          title="What they want"
+          hint="Click to see what they are looking for"
+          open={whatTheyWantOpen}
+          onToggle={() => setWhatTheyWantOpen((x) => !x)}
+        >
+          {/* Cart signal callout */}
+          {customer.topSignal?.type === 'cart_abandon' && (
+            <div style={{
+              background: '#fffbeb', border: '1px solid #fde68a',
+              borderRadius: 8, padding: '8px 12px', fontSize: 12,
+              color: '#92400e', marginBottom: 12, display: 'flex', gap: 6,
+            }}>
+              <span>🛒</span>
+              <span>They abandoned their cart — high purchase intent.</span>
+            </div>
+          )}
+
+          {/* Top products */}
+          {customer.topProducts?.length > 0 ? (
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#5A6272',
+                            textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+                Most viewed
+                {totalProductViews > 0 && distinctProducts > 0 && (
+                  <span style={{ fontWeight: 400, color: '#9ca3af' }}>
+                    {' '}· top {Math.min(3, distinctProducts)} of {totalProductViews} view{totalProductViews !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+              {customer.topProducts.map((p, i) => (
+                <div key={p.productId}>
+                  {i > 0 && <div style={{ borderTop: '1px solid #F0F1F3', margin: '10px 0' }} />}
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                    <ProductThumbnail imageUrl={p.imageUrl} title={p.title} size={56} radius={8} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#15181E', marginBottom: 3,
+                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {p.title}
+                      </div>
+                      <div style={{ fontSize: 11, color: '#5A6272' }}>
+                        Viewed {p.count} time{p.count !== 1 ? 's' : ''}
+                        {p.lastSeen ? ` · ${formatCDDate(p.lastSeen)}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 12, color: '#9ca3af', padding: '4px 0' }}>No product views yet</div>
+          )}
+
+          {/* Best time to reach */}
+          {activeHoursLabel && (
+            <div style={{
+              marginTop: 16, padding: '10px 12px',
+              background: '#F0F7FF', border: '1px solid #C7DCFA',
+              borderRadius: 8, fontSize: 12, color: '#1D4ED8',
+              display: 'flex', gap: 6, alignItems: 'center',
+            }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+              </svg>
+              Best time to reach: {activeHoursLabel}
+            </div>
+          )}
+        </CollapsibleCard>
+
+        {/* RIGHT: What's happened */}
+        <CollapsibleCard
+          title="What's happened"
+          hint="Click to view customer details and timeline"
+          open={whatsHappenedOpen}
+          onToggle={() => setWhatsHappenedOpen((x) => !x)}
+        >
+          {/* Customer details grid */}
+          <div style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px',
+            marginBottom: 16,
+          }}>
+            {[
+              { label: 'Email', val: email || '—' },
+              { label: 'Phone', val: phone || '—' },
+              { label: 'First seen', val: formatCDDate(profile.createdAt) },
+              { label: 'Last seen', val: formatCDDate(profile.lastSeenAt) },
+              { label: 'Orders', val: profile.orders?.count > 0 ? `${profile.orders.count} order${profile.orders.count !== 1 ? 's' : ''}` : '—' },
+              { label: 'Stage', val: profile.stage || '—' },
+            ].map(({ label, val }) => (
+              <div key={label}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
+                              textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>
+                  {label}
+                </div>
+                <div style={{ fontSize: 12, color: '#374151', fontWeight: 500,
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {val}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div style={{ borderTop: '1px solid #F0F1F3', marginBottom: 12 }} />
+
+          {/* Timeline header + filter */}
           <div style={{
             display: 'flex', alignItems: 'center',
-            justifyContent: 'space-between', marginBottom: 12,
+            justifyContent: 'space-between', marginBottom: 10,
             flexWrap: 'wrap', gap: 8,
           }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: '#111827',
-                          textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-              What&apos;s happened
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#5A6272',
+                          textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Timeline
             </div>
             <div style={{ display: 'flex', gap: 4 }}>
               {[
@@ -2006,10 +2185,10 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
                 <button key={key}
                   onClick={() => setTimelineFilter(key)}
                   style={{
-                    padding: '4px 10px', fontSize: 11, fontWeight: 600, borderRadius: 99,
+                    padding: '3px 9px', fontSize: 11, fontWeight: 600, borderRadius: 99,
                     cursor: 'pointer', border: '1px solid',
-                    background: timelineFilter === key ? '#4f46e5' : '#fff',
-                    borderColor: timelineFilter === key ? '#4f46e5' : '#e5e7eb',
+                    background: timelineFilter === key ? '#2459D6' : '#fff',
+                    borderColor: timelineFilter === key ? '#2459D6' : '#e5e7eb',
                     color: timelineFilter === key ? '#fff' : '#6b7280',
                   }}>
                   {label}
@@ -2039,17 +2218,26 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
                     });
                     if (item._type === 'sent') {
                       const n = item.n;
+                      const isWa = n.channel === 'whatsapp';
+                      const attr = isWa ? attrByJob[String(n._id)] : null;
+                      const attrChips = attr ? [
+                        attr.revisit        && { label: 'Revisited', color: '#3b82f6', bg: '#eff6ff' },
+                        attr.add_to_cart    && { label: 'Added to cart', color: '#f97316', bg: '#fff7ed' },
+                        attr.checkout_start && { label: 'Reached checkout', color: '#2563eb', bg: '#eff6ff' },
+                        attr.purchase       && { label: 'Placed order', color: '#16a34a', bg: '#f0fdf4' },
+                      ].filter(Boolean) : [];
                       return (
                         <div key={n._id || idx} style={{
                           display: 'flex', gap: 8, alignItems: 'flex-start', padding: '5px 0',
                         }}>
-                          <span style={{ width: 58, flexShrink: 0, fontSize: 11,
+                          <span style={{ width: 52, flexShrink: 0, fontSize: 11,
                                          color: '#9ca3af', paddingTop: 2 }}>
                             {time}
                           </span>
                           <span style={{
                             width: 8, height: 8, borderRadius: '50%',
-                            flexShrink: 0, marginTop: 4, background: '#818cf8',
+                            flexShrink: 0, marginTop: 4,
+                            background: isWa ? '#25D366' : '#818cf8',
                           }} />
                           <div style={{
                             flex: 1, minWidth: 0,
@@ -2060,9 +2248,12 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
                               display: 'flex', alignItems: 'flex-start',
                               justifyContent: 'space-between', gap: 6, marginBottom: 3,
                             }}>
-                              <div style={{ fontSize: 10, fontWeight: 700, color: '#818cf8',
-                                            textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                                You sent
+                              <div style={{
+                                fontSize: 10, fontWeight: 700,
+                                color: isWa ? '#25D366' : '#818cf8',
+                                textTransform: 'uppercase', letterSpacing: '0.06em',
+                              }}>
+                                {isWa ? 'Opened in WhatsApp' : 'You sent'}
                               </div>
                               <StatusPill outcome={n.outcome} status={n.status} />
                             </div>
@@ -2077,6 +2268,19 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
                               {SIGNAL_LABELS[n.signalType] || n.signalType || 'Notification'}
                               {n.channel ? ` · ${n.channel}` : ''}
                             </div>
+                            {attrChips.length > 0 && (
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 5 }}>
+                                {attrChips.map((chip) => (
+                                  <span key={chip.label} style={{
+                                    fontSize: 10, fontWeight: 600, padding: '2px 6px',
+                                    borderRadius: 99, background: chip.bg, color: chip.color,
+                                    border: `1px solid ${chip.color}30`,
+                                  }}>
+                                    {chip.label}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -2086,7 +2290,7 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
                       <div key={idx} style={{
                         display: 'flex', gap: 8, alignItems: 'flex-start', padding: '5px 0',
                       }}>
-                        <span style={{ width: 58, flexShrink: 0, fontSize: 11,
+                        <span style={{ width: 52, flexShrink: 0, fontSize: 11,
                                        color: '#9ca3af', paddingTop: 4 }}>
                           {time}
                         </span>
@@ -2099,7 +2303,8 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
                           <div style={{ fontSize: 12, color: '#374151' }}>
                             {EVENT_LABELS[e.type]}
                           </div>
-                          {e.type === 'product_view' && (e.meta?.productTitle || e.path) && (
+                          {(e.type === 'product_view' || e.type === 'add_to_cart') &&
+                              (e.meta?.productTitle || e.path) && (
                             <div style={{ fontSize: 11, color: '#9ca3af' }}>
                               {e.meta?.productTitle || getFriendlyPath(e.path)}
                             </div>
@@ -2130,42 +2335,13 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
               )}
             </>
           )}
-        </div>
-
-        {/* RIGHT: What they want + Send a message */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
-          {customer.topProducts?.length > 0 && (
-            <div style={{ ...DS.card, padding: 16, marginBottom: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#111827',
-                            textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>
-                What they want
-              </div>
-              {customer.topProducts.map((p, i) => (
-                <div key={p.productId}>
-                  {i > 0 && (
-                    <div style={{ borderTop: '1px solid #f3f4f6', margin: '10px 0' }} />
-                  )}
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                    <ProductThumbnail imageUrl={p.imageUrl} title={p.title} size={64} radius={10} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 4,
-                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {p.title}
-                      </div>
-                      <div style={{ fontSize: 11, color: '#9ca3af' }}>
-                        Viewed {p.count} time{p.count !== 1 ? 's' : ''}
-                        {p.lastSeen ? ` · ${formatCDDate(p.lastSeen)}` : ''}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {sendCard}
-        </div>
+        </CollapsibleCard>
 
       </div>
+
+      {/* === 4. Send a message (full-width below) === */}
+      {sendCard}
+
     </div>
   );
 }
