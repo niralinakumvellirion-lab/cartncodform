@@ -265,6 +265,68 @@ async function upsertProfile(shopDomain, identifiers = {}, updates = {}, options
     mergeUpdate.$set.messages = capMessages(mergedMessages);
     if (Object.keys(mergeUpdate.$addToSet).length === 0) delete mergeUpdate.$addToSet;
 
+    // FIX 1: carry the most recently captured email address to the winner.
+    // The loop above only merges identifiers.* arrays; channels.email is not propagated.
+    const emailCandidates = [winner, ...losers]
+      .map((p) => {
+        const ce = p.channels && p.channels.email;
+        return ce && ce.address ? ce : null;
+      })
+      .filter(Boolean);
+    if (emailCandidates.length > 0) {
+      emailCandidates.sort(
+        (a, b) => new Date(b.capturedAt || 0) - new Date(a.capturedAt || 0)
+      );
+      const best = emailCandidates[0];
+      const winnerCapture =
+        winner.channels && winner.channels.email && winner.channels.email.capturedAt;
+      if (!winnerCapture || new Date(best.capturedAt || 0) > new Date(winnerCapture)) {
+        mergeUpdate.$set['channels.email.address'] = best.address;
+        mergeUpdate.$set['channels.email.source'] = best.source || null;
+        mergeUpdate.$set['channels.email.capturedAt'] = best.capturedAt || null;
+      }
+    }
+
+    // FIX 2: carry the most recent WhatsApp consent; never silently drop an opt-out.
+    const waCandidates = [winner, ...losers]
+      .map((p) => {
+        const wa = p.channels && p.channels.whatsapp;
+        return wa && wa.consentedAt ? wa : null;
+      })
+      .filter(Boolean);
+    if (waCandidates.length > 0) {
+      waCandidates.sort(
+        (a, b) => new Date(b.consentedAt || 0) - new Date(a.consentedAt || 0)
+      );
+      const bestWa = waCandidates[0];
+      const winnerConsent =
+        winner.channels && winner.channels.whatsapp && winner.channels.whatsapp.consentedAt;
+      if (!winnerConsent || new Date(bestWa.consentedAt) > new Date(winnerConsent)) {
+        mergeUpdate.$set['channels.whatsapp.phone'] = bestWa.phone;
+        mergeUpdate.$set['channels.whatsapp.consentedAt'] = bestWa.consentedAt;
+        mergeUpdate.$set['channels.whatsapp.source'] = bestWa.source || null;
+      }
+    }
+    // Preserve any opt-out. Keep the latest optedOutAt unless the best consent
+    // candidate's consentedAt is more recent (re-consent after opt-out).
+    const allOptOuts = [winner, ...losers]
+      .map((p) => p.channels && p.channels.whatsapp && p.channels.whatsapp.optedOutAt)
+      .filter(Boolean);
+    if (allOptOuts.length > 0) {
+      allOptOuts.sort((a, b) => new Date(b) - new Date(a));
+      const latestOptOut = allOptOuts[0];
+      const effectiveConsent =
+        mergeUpdate.$set['channels.whatsapp.consentedAt'] ||
+        (winner.channels && winner.channels.whatsapp && winner.channels.whatsapp.consentedAt);
+      if (!effectiveConsent || new Date(latestOptOut) > new Date(effectiveConsent)) {
+        // Opt-out is most recent (or no consent) — preserve it
+        mergeUpdate.$set['channels.whatsapp.optedOutAt'] = latestOptOut;
+      } else {
+        // Re-consent post-dates the opt-out — explicitly clear optedOutAt on the winner
+        mergeUpdate.$set['channels.whatsapp.optedOutAt'] = null;
+      }
+    }
+
     await Profile.findOneAndUpdate({ _id: winner._id, shopDomain: shop }, mergeUpdate);
     await Profile.deleteMany({ _id: { $in: losers.map((l) => l._id) } });
     console.log(`[profile] merged ${losers.length} profile(s) into ${winner._id} for ${shop}`);

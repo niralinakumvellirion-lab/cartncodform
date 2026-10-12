@@ -13,9 +13,13 @@ jest.mock('../models/Store', () => ({
 jest.mock('../models/DiscountConfig', () => ({
   findOne: jest.fn(),
 }));
+jest.mock('../services/profileService', () => ({
+  upsertProfile: jest.fn().mockResolvedValue(null),
+}));
 
 const Store = require('../models/Store');
 const DiscountConfig = require('../models/DiscountConfig');
+const { upsertProfile } = require('../services/profileService');
 const { generateDiscount } = require('../routes/discounts');
 
 const SHOP = 'demo.myshopify.com';
@@ -161,4 +165,37 @@ test('g. both primary and bothDiscount disabled -> code null, no Shopify call', 
 
   expect(r.code).toBeNull();
   expect(global.fetch).not.toHaveBeenCalled();
+});
+
+test('h. upsertProfile failure is logged with shop+action only — no PII in args', async () => {
+  const err = new Error('DB timeout');
+  upsertProfile.mockRejectedValueOnce(err);
+
+  global.fetch.mockReturnValue(
+    shopifyJson({
+      data: {
+        discountCodeBasicCreate: {
+          codeDiscountNode: { id: 'gid://shopify/DiscountCodeBasic/1' },
+          userErrors: [],
+        },
+      },
+    })
+  );
+  DiscountConfig.findOne.mockResolvedValue(PUSH_CFG);
+
+  // generateDiscount returns synchronously before the fire-and-forget settles;
+  // await a tick so the .catch() handler runs.
+  await generateDiscount(SHOP, { action: 'push', email: 'user@example.com', sessionId: 's1' });
+  await new Promise((r) => setImmediate(r));
+
+  const errorCalls = console.error.mock.calls.filter((c) =>
+    c.some((a) => typeof a === 'string' && a.includes('[discount]'))
+  );
+  expect(errorCalls.length).toBeGreaterThan(0);
+
+  // Shop domain and action must appear; raw email must NOT appear.
+  const logged = errorCalls[0].join(' ');
+  expect(logged).toContain(SHOP);
+  expect(logged).toContain('push');
+  expect(logged).not.toContain('user@example.com');
 });

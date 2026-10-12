@@ -296,7 +296,9 @@ async function generateDiscount(shopDomain, body = {}, opts = {}) {
             : {}),
           lastSeenAt: new Date(),
         }
-      ).catch(() => {});
+      ).catch((err) => {
+        console.error('[discount] upsertProfile failed for', shop, action, err.message);
+      });
     } catch (e) {
       /* profileService optional — ignore */
     }
@@ -328,7 +330,9 @@ async function generateDiscount(shopDomain, body = {}, opts = {}) {
             'channels.whatsapp.source': 'popup',
             lastSeenAt: new Date(),
           }
-        ).catch(() => {});
+        ).catch((err) => {
+          console.error('[discount] upsertWa failed for', shop, action, err.message);
+        });
       }
     } catch (e) {
       /* phone normalizer optional — ignore */

@@ -385,3 +385,101 @@ describe('upsertProfile — phone normalisation (B1 fix)', () => {
     expect(result.identifiers.phones).toContain('+919876543210');
   });
 });
+
+describe('upsertProfile — merge carries channels.email (FIX 1)', () => {
+  test('m1. email only on loser — winner gets that email after merge', async () => {
+    const winner = seedProfile({ _id: 'W1', identifiers: { pushTokens: ['t1'] } });
+    const loser = seedProfile({ _id: 'L1', identifiers: { sessionIds: ['s1'] } });
+    loser.channels.email = {
+      address: 'loser@example.com',
+      source: 'popup',
+      capturedAt: new Date('2026-06-01').toISOString(),
+    };
+
+    await upsertProfile(SHOP, { pushToken: 't1', sessionId: 's1' }, {});
+
+    expect(Profile.__store()).toHaveLength(1);
+    const merged = Profile.__store()[0];
+    expect(merged.channels.email.address).toBe('loser@example.com');
+    expect(merged.channels.email.source).toBe('popup');
+  });
+
+  test('m2. both have emails — loser capturedAt is later, loser email wins', async () => {
+    const winner = seedProfile({ _id: 'W2', identifiers: { pushTokens: ['t2'] } });
+    winner.channels.email = {
+      address: 'early@example.com',
+      source: 'popup',
+      capturedAt: new Date('2026-01-01').toISOString(),
+    };
+    const loser = seedProfile({ _id: 'L2', identifiers: { sessionIds: ['s2'] } });
+    loser.channels.email = {
+      address: 'later@example.com',
+      source: 'popup',
+      capturedAt: new Date('2026-06-01').toISOString(),
+    };
+
+    await upsertProfile(SHOP, { pushToken: 't2', sessionId: 's2' }, {});
+
+    const merged = Profile.__store()[0];
+    expect(merged.channels.email.address).toBe('later@example.com');
+  });
+
+  test('m3. three-way merge — profile with latest capturedAt wins', async () => {
+    const w = seedProfile({ _id: 'W3', identifiers: { pushTokens: ['t3'] } });
+    w.channels.email = { address: 'first@example.com', source: 'popup', capturedAt: new Date('2026-01-01').toISOString() };
+    const l1 = seedProfile({ _id: 'L3a', identifiers: { sessionIds: ['s3a'] } });
+    l1.channels.email = { address: 'second@example.com', source: 'popup', capturedAt: new Date('2026-03-01').toISOString() };
+    const l2 = seedProfile({ _id: 'L3b', identifiers: { cartTokens: ['c3'] } });
+    l2.channels.email = { address: 'third@example.com', source: 'popup', capturedAt: new Date('2026-06-01').toISOString() };
+
+    await upsertProfile(SHOP, { pushToken: 't3', sessionId: 's3a', cartToken: 'c3' }, {});
+
+    expect(Profile.__store()).toHaveLength(1);
+    expect(Profile.__store()[0].channels.email.address).toBe('third@example.com');
+  });
+
+  test('m4. no email anywhere — winner stays without email after merge', async () => {
+    seedProfile({ _id: 'W4', identifiers: { pushTokens: ['t4'] } });
+    seedProfile({ _id: 'L4', identifiers: { sessionIds: ['s4'] } });
+
+    await upsertProfile(SHOP, { pushToken: 't4', sessionId: 's4' }, {});
+
+    const merged = Profile.__store()[0];
+    expect(merged.channels.email.address).toBeFalsy();
+  });
+});
+
+describe('upsertProfile — merge carries channels.whatsapp (FIX 2)', () => {
+  test('m5. WhatsApp opt-out on loser — optedOutAt survives the merge', async () => {
+    const winner = seedProfile({ _id: 'W5', identifiers: { pushTokens: ['t5'] } });
+    const loser = seedProfile({ _id: 'L5', identifiers: { sessionIds: ['s5'] } });
+    loser.channels.whatsapp = {
+      phone: '+919000000001',
+      consentedAt: new Date('2026-01-01').toISOString(),
+      source: 'popup',
+      optedOutAt: new Date('2026-03-01').toISOString(),
+    };
+
+    await upsertProfile(SHOP, { pushToken: 't5', sessionId: 's5' }, {});
+
+    const merged = Profile.__store()[0];
+    expect(merged.channels.whatsapp.optedOutAt).toBeTruthy();
+  });
+
+  test('m6. re-consent after opt-out — consentedAt more recent, optedOutAt not set on winner', async () => {
+    const winner = seedProfile({ _id: 'W6', identifiers: { pushTokens: ['t6'] } });
+    const loser = seedProfile({ _id: 'L6', identifiers: { sessionIds: ['s6'] } });
+    loser.channels.whatsapp = {
+      phone: '+919000000002',
+      consentedAt: new Date('2026-06-01').toISOString(),
+      source: 'popup',
+      optedOutAt: new Date('2026-03-01').toISOString(),
+    };
+
+    await upsertProfile(SHOP, { pushToken: 't6', sessionId: 's6' }, {});
+
+    const merged = Profile.__store()[0];
+    expect(merged.channels.whatsapp.consentedAt).toBeTruthy();
+    expect(merged.channels.whatsapp.optedOutAt).toBeFalsy();
+  });
+});

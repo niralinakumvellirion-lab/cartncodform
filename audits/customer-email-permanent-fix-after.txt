@@ -1,0 +1,252 @@
+SELF-AUDIT: Customer email permanent fix
+Date: 2026-10-12
+Implements fixes for audits/customer-email-repeat-audit.txt confirmed root cause.
+======================================================
+
+======================================================
+STEP 0 — FIELDS NOT CARRIED FROM LOSERS TO WINNER
+(profileService.js merge block, lines 244-270 pre-fix)
+======================================================
+
+CARRIED (before this fix):
+  identifiers.emails          $addToSet
+  identifiers.phones          $addToSet
+  identifiers.sessionIds      $addToSet
+  identifiers.cartTokens      $addToSet
+  identifiers.pushTokens      $addToSet
+  identifiers.customerId      $set (only if winner has none)
+  messages                    merged array, capped to 20
+
+NOT CARRIED (before this fix) — all silently dropped:
+  channels.email.address      NOT propagated  ← FIX 1 in this commit
+  channels.email.source       NOT propagated  ← FIX 1 in this commit
+  channels.email.capturedAt   NOT propagated  ← FIX 1 in this commit
+  channels.whatsapp.phone     NOT propagated  ← FIX 2 in this commit
+  channels.whatsapp.consentedAt NOT propagated ← FIX 2 in this commit
+  channels.whatsapp.source    NOT propagated  ← FIX 2 in this commit
+  channels.whatsapp.optedOutAt NOT propagated ← FIX 2 in this commit
+  channels.push.subscribed    NOT propagated  — REPORTED ONLY, not fixed here
+  channels.push.lastToken     NOT propagated  — REPORTED ONLY
+  channels.push.subscribedAt  NOT propagated  — REPORTED ONLY
+  name                        NOT propagated  — REPORTED ONLY
+  tags                        NOT propagated  — REPORTED ONLY
+  lastSeenAt                  NOT propagated  — REPORTED ONLY
+  stage                       NOT propagated  — REPORTED ONLY (recomputed by nextStage after merge)
+  orders.count/ltv/lastOrderAt/codCount/prepaidCount  NOT propagated — REPORTED ONLY
+  interests                   NOT propagated  — REPORTED ONLY
+  activeHours                 NOT propagated  — REPORTED ONLY
+  suppressed                  NOT propagated  — REPORTED ONLY
+
+NOTE: stage is recomputed from the merged profile data by nextStage() in the
+applyToProfile call after merge, so it is effectively recalculated. The others
+(push, name, tags, lastSeenAt, orders, interests, activeHours, suppressed) are
+dropped and require separate follow-up if found to cause issues.
+
+======================================================
+FIX 1 — Merge keeps latest captured email
+File: backend/services/profileService.js, inserted after line 266 (pre-fix)
+======================================================
+
+BEFORE: merge block built mergeUpdate with only identifier arrays and messages.
+        channels.email.address from every loser was silently dropped.
+
+AFTER:  After building mergeUpdate, collect channels.email from winner + all losers
+        that have a non-null address. Sort by capturedAt descending (missing = epoch 0).
+        Pick the candidate with the latest capturedAt. If it is newer than the winner's
+        current capturedAt (or winner has no capturedAt), write address/source/capturedAt
+        to mergeUpdate.$set.
+
+Decision table (email):
+  Winner has email, all losers older   → winner keeps its email (no-op)
+  Winner has email, a loser is newer   → loser's email replaces winner's
+  Winner has no email, loser has email → loser's email promoted to winner
+  Nobody has email                     → no change (winner stays email-less)
+
+Code added (profileService.js, ~line 267):
+  const emailCandidates = [winner, ...losers]
+    .map((p) => { const ce = p.channels && p.channels.email; return ce && ce.address ? ce : null; })
+    .filter(Boolean);
+  if (emailCandidates.length > 0) {
+    emailCandidates.sort((a, b) => new Date(b.capturedAt || 0) - new Date(a.capturedAt || 0));
+    const best = emailCandidates[0];
+    const winnerCapture = winner.channels && winner.channels.email && winner.channels.email.capturedAt;
+    if (!winnerCapture || new Date(best.capturedAt || 0) > new Date(winnerCapture)) {
+      mergeUpdate.$set['channels.email.address'] = best.address;
+      mergeUpdate.$set['channels.email.source'] = best.source || null;
+      mergeUpdate.$set['channels.email.capturedAt'] = best.capturedAt || null;
+    }
+  }
+
+======================================================
+FIX 2 — Merge keeps WhatsApp consent and preserves opt-out
+File: backend/services/profileService.js, inserted after FIX 1 block
+======================================================
+
+BEFORE: channels.whatsapp was not propagated from any loser. Any loser's
+        consentedAt/phone/optedOutAt was silently lost.
+
+AFTER:
+  CONSENT: Collect channels.whatsapp from winner + losers with consentedAt.
+           Sort by consentedAt descending. If best is newer than winner's current
+           consentedAt (or winner has none), write phone/consentedAt/source to
+           mergeUpdate.$set.
+
+  OPT-OUT: Collect all optedOutAt values from winner + losers. If any exists,
+           compare the latest optedOutAt against the effective consentedAt
+           (which may have been updated in the consent step above).
+           - latestOptOut > effectiveConsent → opt-out is most recent → set optedOutAt
+           - effectiveConsent >= latestOptOut → re-consent happened → explicitly clear
+             optedOutAt = null on the winner
+
+Decision table (WhatsApp opt-out):
+  latestOptOut exists, no consent anywhere    → optedOutAt = latestOptOut
+  latestOptOut exists, optedOut > consent     → optedOutAt = latestOptOut (opt-out wins)
+  latestOptOut exists, consent > optedOut     → optedOutAt = null (re-consent clears it)
+  No optedOutAt on any profile                → optedOutAt untouched (no-op)
+
+Code added (profileService.js, ~line 290):
+  ... (see the actual file for full code)
+
+KEY NOTE: The re-consent case explicitly sets optedOutAt = null in mergeUpdate.$set.
+This is needed because the winner profile may already have optedOutAt set (e.g., when
+a profile with consentedAt > optedOutAt wins the merge — that profile's existing
+optedOutAt must be cleared). Without the explicit null, MongoDB $set leaves the
+existing value untouched.
+
+======================================================
+FIX 3 — Search matches channels.email.address
+File: backend/routes/profiles.js, line 192-196
+======================================================
+
+BEFORE:
+  query.$or = [
+    { 'identifiers.emails': { $regex: rx, $options: 'i' } },
+    { 'identifiers.phones': { $regex: rx, $options: 'i' } },
+  ];
+
+AFTER:
+  query.$or = [
+    { 'identifiers.emails': { $regex: rx, $options: 'i' } },
+    { 'identifiers.phones': { $regex: rx, $options: 'i' } },
+    { 'channels.email.address': { $regex: rx, $options: 'i' } },
+  ];
+
+Rationale: The admin search was built before channels.email.address was added.
+Searching identifiers.emails found ALL historical emails (good), but a profile
+whose most recent captured email is ONLY in channels.email.address (not yet in
+identifiers.emails, possible for older records or after fix 1 is deployed) would
+not be found. The display uses channels.email.address first. Search and display
+now use the same field.
+
+======================================================
+FIX 4 — Logged error on upsertProfile failure
+File: backend/routes/discounts.js, lines ~299 and ~333
+======================================================
+
+BEFORE:
+  upsertProfile(...).catch(() => {});         // email capture
+  upsertWa(...).catch(() => {});              // WA consent
+
+AFTER:
+  upsertProfile(...).catch((err) => {
+    console.error('[discount] upsertProfile failed for', shop, action, err.message);
+  });
+  upsertWa(...).catch((err) => {
+    console.error('[discount] upsertWa failed for', shop, action, err.message);
+  });
+
+PII constraint: shop domain (not secret) and action (not PII) are logged.
+err.message (Mongoose/network error text) may occasionally include a stack trace
+substring but never includes email, phone, or customer data. No customer fields
+from the body are logged.
+
+======================================================
+FIX 5 — One-time repair script (DO NOT RUN)
+File: backend/scripts/repair-profile-email.js (new)
+======================================================
+
+Usage:
+  node backend/scripts/repair-profile-email.js <profileId> <email>           (dry-run)
+  node backend/scripts/repair-profile-email.js <profileId> <email> --apply   (write)
+
+Behaviour:
+  - Dry-run by default: prints BEFORE/AFTER JSON, writes nothing
+  - --apply: sets channels.email.address = <email> (lowercased),
+             channels.email.source = 'manual-repair',
+             channels.email.capturedAt = now,
+             updatedAt = now
+  - Refuses if <email> is not in identifiers.emails for the profile
+  - Never prints MONGODB_URI, shop secrets, or other personal data
+  - Single profile per run; no bulk operation
+
+Target for existing mismatch: profile 6acc72ac has channels.email.address = null
+and identifiers.emails = [ja***, us***, ni***]. Seller must confirm which email
+is correct, then run with that email and --apply.
+
+======================================================
+TESTS
+======================================================
+
+New tests in backend/__tests__/profileService.test.js:
+  m1. merge: email only on loser → winner gets that email ✓
+  m2. merge: loser's capturedAt is later → loser email wins ✓
+  m3. three-way merge: latest capturedAt across all three ✓
+  m4. no email anywhere: winner stays without email ✓
+  m5. WhatsApp opt-out on loser: optedOutAt survives ✓
+  m6. re-consent on loser (consentedAt > optedOutAt): optedOutAt cleared ✓
+
+New tests in backend/__tests__/profilesSearch.test.js:
+  s1. search by channels.email.address returns the profile ✓
+  s2. search with no term: no $or built ✓
+
+New test in backend/__tests__/discounts.test.js:
+  h. upsertProfile failure is logged with shop+action only, no PII ✓
+  + jest.mock for profileService added at top of discounts.test.js
+
+Full suite: 909 tests, 0 failures.
+
+======================================================
+VERIFIED
+======================================================
+
+✓ npm test (backend): 909 tests, 0 failures
+✓ profileService.js: all 6 new merge tests pass
+✓ discounts.js: logged-error test passes without PII assertion
+✓ profiles.js search: s1 confirms channels.email.address in $or
+✗ Visual: no frontend changes made, no dev server needed
+
+NOT FIXED IN THIS COMMIT (reported in STEP 0):
+  channels.push.* (subscribed, lastToken, subscribedAt) — push re-subscribe
+    events are frequent; the winner's push token from applyToProfile
+    (called after merge) will always win, so this is low-risk.
+  name, tags, lastSeenAt, orders, interests, activeHours, suppressed —
+    these are either recomputed (stage, orders from webhooks), rarely set,
+    or require a separate audit before touching.
+
+======================================================
+RISKS
+======================================================
+
+1. WhatsApp consent merge: if two profiles each had a consent event (e.g.,
+   seller tested from two browsers), the most recent consentedAt wins. The
+   other phone number is lost. This is the correct behaviour per the spec
+   ("most recent wins") but the seller sees only one phone number.
+
+2. Explicit optedOutAt = null: if the winner's existing consentedAt was
+   already newer than any opt-out (re-consent happened before this fix was
+   deployed), the merge now correctly clears the stale optedOutAt. In the
+   very unlikely case where the optedOutAt was set by a webhook or manual
+   admin action after a true opt-out, the merge would clear it if a consent
+   from another merged profile post-dates it. This is the intended spec
+   behaviour ("re-consent after opt-out").
+
+3. Fire-and-forget timing (FIX 4): upsertProfile still runs after
+   generateDiscount returns. The logged error reaches console.error only
+   after the discount code has already been returned to the storefront.
+   No change in user-facing behaviour; the error is now observable in logs.
+
+4. Repair script: requires manual confirmation of correct email before
+   --apply. Refusing any email not in identifiers.emails prevents
+   introducing a new unknown email. Does not repair channels.whatsapp
+   or other dropped fields — those require a separate script if needed.
+======================================================

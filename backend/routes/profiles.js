@@ -192,6 +192,7 @@ router.get('/:shopDomain/profiles', requireAuth, requireStoreOwner, async (req, 
       query.$or = [
         { 'identifiers.emails': { $regex: rx, $options: 'i' } },
         { 'identifiers.phones': { $regex: rx, $options: 'i' } },
+        { 'channels.email.address': { $regex: rx, $options: 'i' } },
       ];
     }
 
