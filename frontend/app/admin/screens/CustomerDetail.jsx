@@ -621,40 +621,40 @@ function PushDesktopPreview({ title, body, shop, productImage }) {
       <div style={{
         background: '#fff', borderRadius: 12,
         boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
-        border: '1px solid #e5e7eb', padding: '12px 14px',
+        border: '1px solid #e5e7eb', overflow: 'hidden',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-          <div style={{ width: 16, height: 16, borderRadius: 4,
-                        background: '#4f46e5', flexShrink: 0 }} />
-          <span style={{ fontSize: 11, fontWeight: 700, color: '#374151', flex: 1 }}>
-            {storeName}
-          </span>
-          <span style={{ fontSize: 10, color: '#9ca3af' }}>now</span>
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-          {productImage && (
-            <img src={productImage} alt="" style={{
-              width: 48, height: 48, borderRadius: 6, objectFit: 'cover', flexShrink: 0,
-            }} />
-          )}
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginBottom: 2,
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {title || 'Notification title'}
-            </div>
-            <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.4,
-                          overflow: 'hidden', display: '-webkit-box',
-                          WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
-              {body || 'Notification body'}
-            </div>
+        <div style={{ padding: '12px 14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+            <div style={{ width: 16, height: 16, borderRadius: 4,
+                          background: '#4f46e5', flexShrink: 0 }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#374151', flex: 1 }}>
+              {storeName}
+            </span>
+            <span style={{ fontSize: 10, color: '#9ca3af' }}>now</span>
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginBottom: 2,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {title || 'Notification title'}
+          </div>
+          <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.4,
+                        overflow: 'hidden', display: '-webkit-box',
+                        WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+            {body || 'Notification body'}
           </div>
         </div>
+        {/* Large image banner — shown below text, like Chrome desktop notifications */}
+        {productImage && (
+          <img src={productImage} alt="Product" style={{
+            display: 'block', width: '100%', height: 140,
+            objectFit: 'cover',
+          }} />
+        )}
       </div>
     </div>
   );
 }
 
-function PushMobilePreview({ title, body, shop }) {
+function PushMobilePreview({ title, body, shop, productImage }) {
   const storeName = (shop || '').split('.')[0] || 'Your store';
   return (
     <div style={{ height: '100%',
@@ -671,22 +671,44 @@ function PushMobilePreview({ title, body, shop }) {
       </div>
       <div style={{ background: 'rgba(255,255,255,0.14)',
                     backdropFilter: 'blur(10px)',
-                    borderRadius: 12, padding: '9px 11px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
-          <div style={{ width: 18, height: 18, borderRadius: 4,
-                        background: '#4f46e5', flexShrink: 0 }} />
-          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.8)',
-                         textTransform: 'uppercase', flex: 1 }}>
-            {storeName}
-          </span>
-          <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.45)' }}>now</span>
+                    borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{ padding: '9px 11px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+            <div style={{ width: 18, height: 18, borderRadius: 4,
+                          background: '#4f46e5', flexShrink: 0 }} />
+            <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.8)',
+                           textTransform: 'uppercase', flex: 1 }}>
+              {storeName}
+            </span>
+            <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.45)' }}>now</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#fff', marginBottom: 2,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {title || 'Notification title'}
+              </div>
+              <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)', lineHeight: 1.4,
+                            overflow: 'hidden', display: '-webkit-box',
+                            WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                {body || 'Notification body'}
+              </div>
+            </div>
+            {productImage && (
+              <img src={productImage} alt="Product" style={{
+                width: 44, height: 44, borderRadius: 6,
+                objectFit: 'cover', flexShrink: 0,
+              }} />
+            )}
+          </div>
         </div>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#fff', marginBottom: 2 }}>
-          {title || 'Notification title'}
-        </div>
-        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)', lineHeight: 1.4 }}>
-          {body || 'Notification body'}
-        </div>
+        {/* Expanded image below — like Android rich notification */}
+        {productImage && (
+          <img src={productImage} alt="Product" style={{
+            display: 'block', width: '100%', height: 80,
+            objectFit: 'cover',
+          }} />
+        )}
       </div>
     </div>
   );
@@ -1337,11 +1359,13 @@ function NotificationComposer({ customer, shop, onSent, onError, onTitleChange, 
     const signal = customer?.topSignal?.type;
     const rawProduct = customer?.topProducts?.[0]?.title || '';
     const product = /^\d+$/.test(rawProduct) ? '' : rawProduct;
+    // Keep push titles short — truncate product name to ≤22 chars.
+    const shortProduct = product.length > 22 ? product.slice(0, 22).trimEnd() + '…' : product;
     const suggestion = SUGGESTIONS[signal] || {
       title: () => 'Hello from the store',
       body: () => 'We have something special for you.',
     };
-    setTitle(suggestion.title(product));
+    setTitle(suggestion.title(shortProduct));
     setBody(suggestion.body(product));
   }, [customer]);
 
@@ -1934,7 +1958,7 @@ function EmailComposer({ customer, shop, onSent, onError, onPreviewHtmlChange, o
             </>
           )}
           <div style={{ fontSize: 12, color: '#6b7280' }}>
-            <a href="/admin/settings#email-templates"
+            <a href="/admin/email-templates"
               style={{ color: '#2459D6', textDecoration: 'underline' }}>
               Manage templates
             </a>
@@ -2094,7 +2118,7 @@ function SendSection({
                 <PushDesktopPreview title={pushTitle} body={pushBody}
                   shop={shop} productImage={pushProductImage} />
                 <PhoneFrame>
-                  <PushMobilePreview title={pushTitle} body={pushBody} shop={shop} />
+                  <PushMobilePreview title={pushTitle} body={pushBody} shop={shop} productImage={pushProductImage} />
                 </PhoneFrame>
               </>
             )}
@@ -2586,18 +2610,18 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
             </div>
           </div>
 
-          {/* Right: 2×2 stat tiles */}
+          {/* Right: 4 stat tiles in one row */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '1fr 1fr',
+            gridTemplateColumns: 'repeat(4, 1fr)',
             gap: 10,
-            flexShrink: 0,
-            width: isNarrow ? '100%' : 380,
+            flex: isNarrow ? 'none' : '1 1 0',
+            width: isNarrow ? '100%' : undefined,
           }}>
             {statTiles.map(({ label, value, sub, color }) => (
               <div key={label} style={{
                 background: '#F7F8FA', border: '1px solid #E2E5EB', borderRadius: 10,
-                padding: '12px 14px',
+                padding: '10px 12px',
               }}>
                 <div style={{ fontSize: 22, fontWeight: 700, color, lineHeight: 1, marginBottom: 3 }}>
                   {notifLoading ? '—' : value}
