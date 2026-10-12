@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Page } from '@shopify/polaris';
 import { apiGet, apiSend } from '../../../lib/api';
-import { useWhatsapp } from './customerShared';
 
 const DS = {
   page: {
@@ -113,20 +112,103 @@ const DATE_FILTERS = [
   { key: '30d', label: 'Last 30 days' },
 ];
 
-const NOTIF_STATS = [
-  { key: 'pushSent', label: 'Push Sent' },
-  { key: 'emailsSent', label: 'Emails Sent' },
-  { key: 'popupsShown', label: 'Popups Shown' },
-  { key: 'emailsCaptured', label: 'Emails Captured' },
-  { key: 'pushSubscribers', label: 'Push Subscribers' },
-];
+const CHANNEL_COLORS = {
+  push:      { fg: '#4f46e5', bg: '#eef2ff' },
+  email:     { fg: '#d97706', bg: '#fef3c7' },
+  whatsapp:  { fg: '#128C7E', bg: '#f0fdf4' },
+};
 
-const ACTIVITY_STATS = [
-  { key: 'add_to_cart', label: 'Added to Cart' },
-  { key: 'checkout_start', label: 'Started Checkout' },
-  { key: 'purchase', label: 'Purchased' },
-  { key: 'revisit', label: 'Revisited' },
-];
+function ChannelIcon({ channel, size = 14, color }) {
+  const c = color || CHANNEL_COLORS[channel]?.fg || '#6b7280';
+  if (channel === 'push') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+        stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+        <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      </svg>
+    );
+  }
+  if (channel === 'email') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+        stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+        <polyline points="22,6 12,13 2,6"/>
+      </svg>
+    );
+  }
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke={c} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    </svg>
+  );
+}
+
+function ChannelCard({ channel, label, sent, pending, types, loading, onDetails }) {
+  const { fg, bg } = CHANNEL_COLORS[channel];
+  return (
+    <div style={{ ...DS.card, padding: 0, overflow: 'hidden', marginBottom: 0 }}>
+      <div style={{ padding: '14px 16px', borderBottom: '1px solid #f3f4f6',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ width: 28, height: 28, borderRadius: 8, background: bg,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <ChannelIcon channel={channel} />
+          </div>
+          <span style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>{label}</span>
+        </div>
+        <button
+          onClick={onDetails}
+          style={{ fontSize: 11, color: fg, cursor: 'pointer', fontWeight: 600,
+                   background: 'none', border: 'none', padding: '4px 0' }}
+          aria-label={`View ${label} details`}
+        >
+          Details →
+        </button>
+      </div>
+
+      <div style={{ display: 'flex', borderBottom: '1px solid #f3f4f6' }}>
+        <div style={{ flex: 1, padding: '14px 16px', borderRight: '1px solid #f3f4f6' }}>
+          <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Sent</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: loading ? '#d1d5db' : fg }}>
+            {loading ? '—' : sent}
+          </div>
+        </div>
+        <div style={{ flex: 1, padding: '14px 16px' }}>
+          <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Pending</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: loading ? '#d1d5db' : '#374151' }}>
+            {loading ? '—' : pending}
+          </div>
+        </div>
+      </div>
+
+      {!loading && types && types.length > 0 ? (
+        <div style={{ padding: '10px 16px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {types.slice(0, 3).map((t) => (
+            <span key={t.type} style={{
+              fontSize: 11, padding: '3px 8px', borderRadius: 999,
+              background: bg, color: fg, fontWeight: 600, whiteSpace: 'nowrap',
+            }}>
+              {t.label}{t.sent > 0 ? ` ${t.sent}` : ''}
+              {t.pending > 0 ? ` · ${t.pending} pending` : ''}
+            </span>
+          ))}
+          {types.length > 3 && (
+            <span style={{ fontSize: 11, color: '#9ca3af', padding: '3px 0' }}>
+              +{types.length - 3} more
+            </span>
+          )}
+        </div>
+      ) : !loading ? (
+        <div style={{ padding: '12px 16px', fontSize: 12, color: '#9ca3af' }}>
+          No activity in this period
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function getDateRange(f) {
   const to = new Date();
@@ -176,25 +258,15 @@ export default function Today({ shop }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Redesign — date-filtered notification stats (Row 1) + attributed
-  // activity stats (Row 2, add_to_cart/checkout_start/purchase/revisit
-  // counts from AttributedEvent, Phase 1/2). Both rows share one loading
-  // flag since they're fetched together, keyed on the same date filter.
   const [dateFilter, setDateFilter] = useState('7d');
-  const [activity, setActivity] = useState(null);
-  const [notifStats, setNotifStats] = useState(null);
-  const [notifLoading, setNotifLoading] = useState(true);
-  // Header Refresh button — bumping this re-runs the stats effect below
-  // (it's in that effect's dependency array) without needing its own
-  // separate fetch logic.
+  // Header Refresh button — bumping this re-runs the channel-stats effect below.
   const [refreshKey, setRefreshKey] = useState(0);
 
-  // WhatsApp section — non-blocking, keyed on dateFilter + refreshKey.
-  const [waStats, setWaStats] = useState(null);
-  const [waPending, setWaPending] = useState(null);
-  const [waLoading, setWaLoading] = useState(false);
-  const [waConfigEnabled, setWaConfigEnabled] = useState(null); // null=unknown, true/false=loaded
-  const { sendWhatsapp, waError: waSendError, waFallbackUrl, clearWaError } = useWhatsapp();
+  // Channel cards — Push / Email / WhatsApp, keyed on dateFilter + refreshKey.
+  const [channelStats, setChannelStats] = useState(null);
+  const [channelLoading, setChannelLoading] = useState(true);
+  // Which channel detail drawer is open — set in STEP 3. { channel, status }
+  const [openChannel, setOpenChannel] = useState(null);
 
   // Phase 1 — real-time new subscriber alerts.
   const [newSubscribers, setNewSubscribers] = useState([]);
@@ -206,46 +278,13 @@ export default function Today({ shop }) {
     if (!shop) return;
     let cancelled = false;
     const { from, to } = getDateRange(dateFilter);
-    setNotifLoading(true);
-    Promise.allSettled([
-      apiGet(`/api/activity?shop=${encodeURIComponent(shop)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
-      apiGet(`/api/profiles/${encodeURIComponent(shop)}/today-stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
-    ])
-      .then(([actResult, statsResult]) => {
-        if (cancelled) return;
-        setActivity(actResult.status === 'fulfilled' ? actResult.value : null);
-        setNotifStats(statsResult.status === 'fulfilled' ? statsResult.value : null);
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setNotifLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [shop, dateFilter, refreshKey]);
-
-  useEffect(() => {
-    if (!shop) return;
-    let cancelled = false;
-    setWaLoading(true);
-    const { from, to } = getDateRange(dateFilter);
-    Promise.allSettled([
-      apiGet(`/api/whatsapp/${encodeURIComponent(shop)}/stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
-      apiGet(`/api/whatsapp/${encodeURIComponent(shop)}/pending?limit=8`),
-      apiGet(`/api/discounts/${encodeURIComponent(shop)}/config`),
-    ]).then(([statsRes, pendingRes, cfgRes]) => {
-      if (cancelled) return;
-      if (statsRes.status === 'fulfilled') setWaStats(statsRes.value);
-      if (pendingRes.status === 'fulfilled') setWaPending(pendingRes.value);
-      if (cfgRes.status === 'fulfilled') {
-        setWaConfigEnabled(!!(cfgRes.value?.config?.whatsappCapture?.enabled));
-      } else {
-        setWaConfigEnabled(null);
-      }
-    }).finally(() => {
-      if (!cancelled) setWaLoading(false);
-    });
+    setChannelLoading(true);
+    apiGet(
+      `/api/dashboard/${encodeURIComponent(shop)}/channels?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+    )
+      .then((data) => { if (!cancelled) setChannelStats(data); })
+      .catch(() => { if (!cancelled) setChannelStats(null); })
+      .finally(() => { if (!cancelled) setChannelLoading(false); });
     return () => { cancelled = true; };
   }, [shop, dateFilter, refreshKey]);
 
@@ -373,12 +412,12 @@ export default function Today({ shop }) {
   const refreshButton = (
     <button
       onClick={() => setRefreshKey(k => k + 1)}
-      disabled={notifLoading}
+      disabled={channelLoading}
       style={{
         display: 'flex', alignItems: 'center', gap: 6,
         ...DS.btnSecondary,
-        cursor: notifLoading ? 'not-allowed' : 'pointer',
-        opacity: notifLoading ? 0.6 : 1,
+        cursor: channelLoading ? 'not-allowed' : 'pointer',
+        opacity: channelLoading ? 0.6 : 1,
       }}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -389,7 +428,7 @@ export default function Today({ shop }) {
         <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36
           A9 9 0 0 0 20.49 15"/>
       </svg>
-      {notifLoading ? 'Refreshing...' : 'Refresh'}
+      {channelLoading ? 'Refreshing...' : 'Refresh'}
     </button>
   );
 
@@ -511,206 +550,44 @@ export default function Today({ shop }) {
         </div>
       )}
 
-      {/* SECTION 2 — Notifications (left) + Attributed Activity (right),
-          stacked vertically within each card instead of wide grids. */}
-      <div style={{ display: 'grid',
-                    gridTemplateColumns: isMobileView ? '1fr' : '1fr 1fr',
-                    gap: 16, marginBottom: 20 }}>
-
-        {/* Left — Notifications */}
-        <div style={{ ...DS.card, padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #f3f4f6',
-                        display: 'flex', justifyContent: 'space-between',
-                        alignItems: 'center' }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
-                           textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Notifications
-            </span>
-            <span style={{ fontSize: 11, color: '#9ca3af' }}>
-              {dateFilter === '7d' ? 'Last 7 days' :
-               dateFilter === '30d' ? 'Last 30 days' :
-               dateFilter === 'today' ? 'Today' : 'Yesterday'}
-            </span>
-          </div>
-          {NOTIF_STATS.map(({ key, label }) => (
-            <div key={key} style={{ display: 'flex', justifyContent: 'space-between',
-                                    alignItems: 'center', padding: '12px 20px',
-                                    borderBottom: '1px solid #f9fafb' }}>
-              <span style={{ fontSize: 13, color: '#6b7280' }}>{label}</span>
-              <span style={{ fontSize: 16, fontWeight: 700, color: '#111827' }}>
-                {notifLoading ? '—' : (notifStats?.[key] ?? 0)}
-              </span>
-            </div>
-          ))}
-        </div>
-
-        {/* Right — Activity */}
-        <div style={{ ...DS.card, padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #f3f4f6',
-                        display: 'flex', justifyContent: 'space-between',
-                        alignItems: 'center' }}>
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
-                           textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Attributed Activity
-            </span>
-            <span
-              onClick={() => navigate('/admin/activity')}
-              style={{ fontSize: 11, color: '#4f46e5', cursor: 'pointer',
-                       fontWeight: 600 }}>
-              View all →
-            </span>
-          </div>
-          {ACTIVITY_STATS.map(({ key, label, color }) => (
-            <div key={key}
-              onClick={() => navigate(`/admin/activity?type=${key}`)}
-              style={{ display: 'flex', justifyContent: 'space-between',
-                       alignItems: 'center', padding: '12px 20px',
-                       borderBottom: '1px solid #f9fafb',
-                       cursor: 'pointer', transition: 'background 0.15s' }}
-              onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-            >
-              <span style={{ fontSize: 13, color: '#6b7280' }}>{label}</span>
-              <span style={{ fontSize: 16, fontWeight: 700, color: color || '#111827' }}>
-                {notifLoading ? '—' : (activity?.summary?.[key] ?? 0)}
-              </span>
-            </div>
-          ))}
-        </div>
+      {/* SECTION 2 — Channel cards: Push / Email / WhatsApp */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: isMobileView ? '1fr' : 'repeat(3, 1fr)',
+        gap: 16,
+        marginBottom: 20,
+      }}>
+        <ChannelCard
+          channel="push"
+          label="Push"
+          sent={channelStats?.push?.sent ?? 0}
+          pending={channelStats?.push?.pending ?? 0}
+          types={channelStats?.push?.types ?? []}
+          loading={channelLoading}
+          onDetails={() => setOpenChannel({ channel: 'push', status: 'sent' })}
+        />
+        <ChannelCard
+          channel="email"
+          label="Email"
+          sent={channelStats?.email?.sent ?? 0}
+          pending={channelStats?.email?.pending ?? 0}
+          types={channelStats?.email?.types ?? []}
+          loading={channelLoading}
+          onDetails={() => setOpenChannel({ channel: 'email', status: 'sent' })}
+        />
+        <ChannelCard
+          channel="whatsapp"
+          label="WhatsApp"
+          sent={channelStats?.whatsapp?.sent ?? 0}
+          pending={channelStats?.whatsapp?.pending ?? 0}
+          types={[
+            ...(channelStats?.whatsapp?.sentFollowup ? [{ type: 'followup', label: 'Follow-up', sent: channelStats.whatsapp.sentFollowup, pending: 0 }] : []),
+            ...(channelStats?.whatsapp?.sentOrder ? [{ type: 'order', label: 'Order msg', sent: channelStats.whatsapp.sentOrder, pending: 0 }] : []),
+          ]}
+          loading={channelLoading}
+          onDetails={() => setOpenChannel({ channel: 'whatsapp', status: 'pending' })}
+        />
       </div>
-
-      {/* SECTION 3 — WhatsApp (non-blocking, separate fetch) */}
-      {!waLoading && (waStats || waPending) && (
-        <div style={{ ...DS.card, padding: 0, overflow: 'hidden', marginBottom: 20 }}>
-          {/* Header */}
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #f3f4f6',
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                stroke="#128C7E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                aria-hidden="true">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-              </svg>
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
-                             textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                WhatsApp
-              </span>
-            </div>
-            <span
-              onClick={() => navigate('/admin/customers?filter=whatsapp_captured')}
-              style={{ fontSize: 11, color: '#128C7E', cursor: 'pointer', fontWeight: 600 }}
-              role="link"
-              tabIndex={0}
-              onKeyDown={(e) => e.key === 'Enter' && navigate('/admin/customers?filter=whatsapp_captured')}
-              aria-label="View all WhatsApp customers"
-            >
-              View all →
-            </span>
-          </div>
-
-          {/* Stat row */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 0, borderBottom: '1px solid #f9fafb' }}>
-            {[
-              { label: 'Pending', value: waStats?.pending ?? '—' },
-              { label: 'Sent by you', value: waStats?.sent ?? '—' },
-              { label: 'Visited', value: waStats?.clicked ?? '—' },
-              { label: 'Carted', value: waStats?.carted ?? '—' },
-              { label: 'Purchased', value: waStats?.purchased ?? '—' },
-            ].map(({ label, value }, i) => (
-              <div key={label} style={{ padding: '12px 20px', borderRight: i < 4 ? '1px solid #f9fafb' : 'none' }}>
-                <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 2 }}>{label}</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: '#111827' }}>{value}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* WA send error / fallback link */}
-          {(waSendError || waFallbackUrl) && (
-            <div style={{ padding: '10px 20px', background: waFallbackUrl ? '#f0fdf4' : '#fef2f2',
-                          borderBottom: '1px solid #f9fafb', fontSize: 13,
-                          color: waFallbackUrl ? '#15803d' : '#b91c1c',
-                          display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              {waFallbackUrl
-                ? <span>Popup blocked. <a href={waFallbackUrl} target="_blank" rel="noreferrer" style={{ color: '#128C7E', fontWeight: 600 }}>Open WhatsApp</a></span>
-                : <span>{waSendError}</span>}
-              <button onClick={clearWaError} aria-label="Dismiss" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#9ca3af', lineHeight: 1, padding: 0 }}>×</button>
-            </div>
-          )}
-
-          {/* Pending list */}
-          {waPending?.items?.length > 0 ? waPending.items.map((item, i) => (
-              <div key={item.profileId} style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '10px 20px',
-                borderBottom: i < waPending.items.length - 1 ? '1px solid #f9fafb' : 'none',
-              }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#111827',
-                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {item.name || item.email || item.phone || 'Anonymous'}
-                  </div>
-                  <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 1 }}>
-                    {item.email && item.name ? item.email + ' · ' : ''}
-                    joined {timeAgo(item.consentedAt)}
-                  </div>
-                </div>
-                <button
-                  onClick={() => sendWhatsapp({ shopDomain: shop, profileId: item.profileId, purpose: 'followup' })}
-                  aria-label={`Send WhatsApp to ${item.name || item.email || 'customer'}`}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 5,
-                    padding: '6px 12px', background: '#25D366', border: 'none',
-                    borderRadius: 7, cursor: 'pointer', fontSize: 12, fontWeight: 600,
-                    color: '#fff', flexShrink: 0, marginLeft: 12,
-                  }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-                    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                    aria-hidden="true">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-                  </svg>
-                  WhatsApp
-                </button>
-              </div>
-            ))
-          ) : waStats?.sent > 0 ? (
-            <div style={{ padding: '16px 20px', fontSize: 13, color: '#9ca3af' }}>
-              Everyone with WhatsApp consent has been contacted.
-            </div>
-          ) : null}
-        </div>
-      )}
-
-      {/* Config-aware empty state / upsell when no WA data yet */}
-      {!waLoading && waStats && waStats.pending === 0 && waStats.sent === 0 && waConfigEnabled !== null && (
-        waConfigEnabled === false ? (
-          <div style={{ ...DS.card, padding: '16px 20px', marginBottom: 20,
-                        display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-            <div style={{ width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-                          background: '#f0fdf4', display: 'flex', alignItems: 'center',
-                          justifyContent: 'center' }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                stroke="#128C7E" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                aria-hidden="true">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-              </svg>
-            </div>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 3 }}>
-                Reach customers on WhatsApp
-              </div>
-              <div style={{ fontSize: 12, color: '#6b7280' }}>
-                Enable WhatsApp capture in popup settings to start collecting consent.
-              </div>
-            </div>
-          </div>
-        ) : (
-          <div style={{ ...DS.card, padding: '14px 20px', marginBottom: 20,
-                        fontSize: 13, color: '#6b7280' }}>
-            WhatsApp capture is on. New leads will appear here.
-          </div>
-        )
-      )}
 
       {error && (
         <div
