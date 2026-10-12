@@ -435,6 +435,20 @@ function rankWaSuggestions(customer, waProfile) {
     }];
   }
 
+  // canOrder=true but canFollowup=false and no eligible order suggestions
+  // (e.g. phone present but opted out of follow-ups, no orders yet).
+  // Without this fallback the composer renders with no selectable message.
+  if (ranked.length === 0 && waProfile?.canOrder) {
+    return [{
+      key: 'say_hello',
+      purpose: 'order',
+      title: 'Say hello',
+      reason: () => 'WhatsApp enabled',
+      preview: () => "Hi there! We have something for you.",
+      eligible: () => true,
+    }];
+  }
+
   return ranked.slice(0, 3);
 }
 
@@ -737,7 +751,7 @@ function WaComposer({
       )}
 
       {/* Product selector — shown when customer has viewed products */}
-      {(waProfile?.recentProducts?.length > 0) && (
+      {(Array.isArray(waProfile?.recentProducts) && waProfile.recentProducts.length > 0) && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: '#6b7280',
                         textTransform: 'uppercase', letterSpacing: '0.05em' }}>

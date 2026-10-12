@@ -1,0 +1,72 @@
+SELF-AUDIT: WhatsApp composer missing elements — post-fix
+Date: 2026-10-12
+===================================================================
+
+DIAGNOSIS SUMMARY (see whatsapp-composer-missing-before.txt)
+-------------------------------------------------------------
+Root cause: rankWaSuggestions() returned [] for canOrder=true /
+canFollowup=false customers with no eligible order suggestions. After
+0ff1081 the product chips started rendering for these customers (new
+recentProducts API data), making the empty suggestion/editor state
+newly visible. The JSX structure was correct throughout.
+
+
+CHANGES MADE
+------------
+
+CustomerDetail.jsx — rankWaSuggestions() (line ~422)
+  Added fallback for canOrder=true / canFollowup=false / no ranked:
+
+    if (ranked.length === 0 && waProfile?.canOrder) {
+      return [{ key:'say_hello', purpose:'order', title:'Say hello',
+                reason:()=>'WhatsApp enabled',
+                preview:()=>"Hi there! We have something for you.",
+                eligible:()=>true }];
+    }
+
+  Ensures editor always shows when WaComposer renders (canWa=true
+  guarantees canFollowup OR canOrder, now both get a fallback).
+
+CustomerDetail.jsx — product selector condition (line ~751)
+  Changed:
+    {(waProfile?.recentProducts?.length > 0) && (
+  To:
+    {(Array.isArray(waProfile?.recentProducts) && waProfile.recentProducts.length > 0) && (
+
+  Prevents .map() from throwing if recentProducts is a non-array
+  truthy value (defensive guard, no behaviour change for valid API).
+
+
+STATE COVERAGE AFTER FIX
+-------------------------
+  a. has cart           → cart_reminder → suggestions ✓ editor ✓
+  b. no specific signal → say_hello (canFollowup) → suggestions ✓ editor ✓
+  c. has order          → order_thank_you → suggestions ✓ editor ✓
+  d. COD order          → cod_confirmation → suggestions ✓ editor ✓
+  e. has recentProducts → product chips ✓ suggestions ✓ editor ✓
+  f. has selectedProduct → link-preview card ✓ (inside editor, state e+f)
+
+  canOrder-only / no orders → previously broken → now returns
+  say_hello (purpose='order') → suggestions ✓ editor ✓ ✓ FIXED
+
+
+RENDER ORDER VERIFIED
+---------------------
+  Suggested messages (line 697) →
+  Link in message / product chips (line 751) →
+  Message box / textarea (line 817) →
+  Link preview card (line 881, inside message box) →
+  Link note (line 905, inside message box) →
+  Send button (line 934)
+
+
+CHECKS
+------
+✓ npm run build (frontend): compiled successfully, 0 errors/warnings
+  Browser test: not possible in this session (no dev server).
+  Logic verified by reading all affected render conditions.
+
+Not changed:
+  ProductThumb, JSX structure, suggestion card rendering, parent
+  state management, sendWhatsapp wiring — all unchanged.
+===================================================================
