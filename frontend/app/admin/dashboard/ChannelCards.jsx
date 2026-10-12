@@ -45,8 +45,15 @@ export function ChannelIcon({ channel, size = 14, color }) {
   );
 }
 
-export function ChannelCard({ channel, label, sent, pending, types, loading, onDetails }) {
+export function ChannelCard({ channel, label, sent, pending, types, sentByOrigin, loading, onDetails }) {
   const { fg, bg } = CHANNEL_COLORS[channel];
+
+  const autoCount = sentByOrigin?.automated ?? 0;
+  const scheduledCount = sentByOrigin?.scheduled ?? 0;
+  const manualCount = sentByOrigin?.manual ?? 0;
+  const autoTotal = autoCount + scheduledCount;
+  const showOriginSplit = !loading && sentByOrigin && (autoTotal > 0 || manualCount > 0);
+
   return (
     <div style={{ ...CARD_STYLE, padding: 0, overflow: 'hidden' }}>
       <div style={{ padding: '14px 16px', borderBottom: '1px solid #f3f4f6',
@@ -74,6 +81,13 @@ export function ChannelCard({ channel, label, sent, pending, types, loading, onD
           <div style={{ fontSize: 22, fontWeight: 800, color: loading ? '#d1d5db' : fg }}>
             {loading ? '—' : sent}
           </div>
+          {showOriginSplit && (
+            <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 3 }}>
+              {autoTotal > 0 && `Auto ${autoTotal}`}
+              {autoTotal > 0 && manualCount > 0 && ' · '}
+              {manualCount > 0 && `Manual ${manualCount}`}
+            </div>
+          )}
         </div>
         <div style={{ flex: 1, padding: '14px 16px' }}>
           <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>Pending</div>
@@ -128,16 +142,27 @@ function DrawerItem({ item, channel, shop, sendWhatsapp }) {
           )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, flexShrink: 0, marginLeft: 12 }}>
-          <span style={{ fontSize: 10, fontWeight: 600, background: bg,
-                         color: fg, padding: '2px 7px', borderRadius: 999 }}>
-            {item.label}
-          </span>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {item.origin === 'manual' && (
+              <span style={{ fontSize: 10, fontWeight: 600, background: '#fef3c7',
+                             color: '#d97706', padding: '2px 7px', borderRadius: 999 }}>
+                Manual
+              </span>
+            )}
+            <span style={{ fontSize: 10, fontWeight: 600, background: bg,
+                           color: fg, padding: '2px 7px', borderRadius: 999 }}>
+              {item.label}
+            </span>
+          </div>
           {item.time && (
             <span style={{ fontSize: 10, color: '#9ca3af' }}>
               {new Date(item.time).toLocaleDateString('en-IN', {
                 day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit',
               })}
             </span>
+          )}
+          {item.sentByLabel && (
+            <span style={{ fontSize: 10, color: '#9ca3af' }}>Sent by {item.sentByLabel}</span>
           )}
         </div>
       </div>
@@ -229,6 +254,7 @@ function DrawerItem({ item, channel, shop, sendWhatsapp }) {
 
 export function ChannelDrawer({ shop, channel, initialStatus, onClose, isMobileView, from, to }) {
   const [activeTab, setActiveTab] = useState(initialStatus);
+  const [originFilter, setOriginFilter] = useState('all');
   const [items, setItems] = useState([]);
   const [loadingItems, setLoadingItems] = useState(true);
   const [total, setTotal] = useState(0);
@@ -287,12 +313,13 @@ export function ChannelDrawer({ shop, channel, initialStatus, onClose, isMobileV
     const params = new URLSearchParams({ status: activeTab, page: String(page), limit: String(LIMIT) });
     if (from) params.set('from', from);
     if (to) params.set('to', to);
+    if (originFilter !== 'all') params.set('origin', originFilter);
     apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/${channel}/items?${params}`)
       .then((data) => { if (!cancelled) { setItems(data.items || []); setTotal(data.total || 0); } })
       .catch(() => { if (!cancelled) setItems([]); })
       .finally(() => { if (!cancelled) setLoadingItems(false); });
     return () => { cancelled = true; };
-  }, [shop, channel, activeTab, page, from, to]);
+  }, [shop, channel, activeTab, page, originFilter, from, to]);
 
   // WhatsApp header stats
   useEffect(() => {
@@ -307,7 +334,8 @@ export function ChannelDrawer({ shop, channel, initialStatus, onClose, isMobileV
     return () => { cancelled = true; };
   }, [shop, channel, from, to]);
 
-  const handleTabChange = (tab) => { setPage(0); setActiveTab(tab); };
+  const handleTabChange = (tab) => { setPage(0); setOriginFilter('all'); setActiveTab(tab); };
+  const handleOriginChange = (o) => { setPage(0); setOriginFilter(o); };
 
   const { fg } = CHANNEL_COLORS[channel];
 
@@ -404,6 +432,32 @@ export function ChannelDrawer({ shop, channel, initialStatus, onClose, isMobileV
             </button>
           ))}
         </div>
+
+        {/* Origin filter — only for sent items */}
+        {activeTab === 'sent' && (
+          <div style={{ display: 'flex', gap: 6, padding: '10px 20px', flexShrink: 0,
+                        borderBottom: '1px solid #f3f4f6', flexWrap: 'wrap' }}>
+            {[
+              { value: 'all', label: 'All' },
+              { value: 'automated', label: 'Automated' },
+              { value: 'manual', label: 'Manual' },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => handleOriginChange(opt.value)}
+                style={{
+                  fontSize: 11, fontWeight: 600, padding: '3px 10px', borderRadius: 999,
+                  border: `1px solid ${originFilter === opt.value ? fg : '#e5e7eb'}`,
+                  background: originFilter === opt.value ? fg : '#fff',
+                  color: originFilter === opt.value ? '#fff' : '#6b7280',
+                  cursor: 'pointer',
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* WA error/fallback banner */}
         {channel === 'whatsapp' && (waSendError || waFallbackUrl) && (

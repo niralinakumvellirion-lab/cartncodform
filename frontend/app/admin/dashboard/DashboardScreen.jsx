@@ -1328,6 +1328,7 @@ export default function DashboardScreen({ shop }) {
               sent={channelStats?.push?.sent ?? 0}
               pending={channelStats?.push?.pending ?? 0}
               types={channelStats?.push?.types ?? []}
+              sentByOrigin={channelStats?.push?.sentByOrigin}
               loading={channelLoading}
               onDetails={() => setOpenChannel({ channel: 'push', status: 'sent' })}
             />
@@ -1337,6 +1338,7 @@ export default function DashboardScreen({ shop }) {
               sent={channelStats?.email?.sent ?? 0}
               pending={channelStats?.email?.pending ?? 0}
               types={channelStats?.email?.types ?? []}
+              sentByOrigin={channelStats?.email?.sentByOrigin}
               loading={channelLoading}
               onDetails={() => setOpenChannel({ channel: 'email', status: 'sent' })}
             />
@@ -1349,6 +1351,7 @@ export default function DashboardScreen({ shop }) {
                 ...(channelStats?.whatsapp?.sentFollowup ? [{ type: 'followup', label: 'Follow-up', sent: channelStats.whatsapp.sentFollowup, pending: 0 }] : []),
                 ...(channelStats?.whatsapp?.sentOrder ? [{ type: 'order', label: 'Order msg', sent: channelStats.whatsapp.sentOrder, pending: 0 }] : []),
               ]}
+              sentByOrigin={channelStats?.whatsapp?.sentByOrigin}
               loading={channelLoading}
               onDetails={() => setOpenChannel({ channel: 'whatsapp', status: 'pending' })}
             />
