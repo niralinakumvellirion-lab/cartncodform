@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import { ShimmerBox, ShimmerCard } from '../components/Shimmer';
@@ -438,6 +438,50 @@ function rankWaSuggestions(customer, waProfile) {
   return ranked.slice(0, 3);
 }
 
+// Resolve first name from customer profile (mirrors backend resolveFirstName).
+function resolveWaFirstName(customer) {
+  const profile = customer?.profile;
+  const email =
+    profile?.channels?.email?.address ||
+    profile?.identifiers?.emails?.[0];
+  if (!email) return 'there';
+  const local = email.split('@')[0].split(/[._+]/)[0];
+  return local.charAt(0).toUpperCase() + local.slice(1);
+}
+
+// Full message body per template key — WITHOUT the store link (server appends it).
+// Mirrors WA_TEMPLATES in backend/routes/whatsapp.js.
+const WA_TEMPLATE_BODY = {
+  cart_reminder: (n, s) =>
+    `Hi ${n}! 🛒 You left something in your cart at ${s}.\n\n` +
+    `Complete your order before it sells out.\n\n` +
+    `Reply STOP to opt out.`,
+  welcome_offer: (n, s) =>
+    `Hi ${n}! Welcome to ${s}. 🎉\n\n` +
+    `We're glad you're here. Explore our collection and find something you'll love.\n\n` +
+    `Reply STOP to opt out.`,
+  cod_confirmation: (n, s) =>
+    `Hi ${n}! This is ${s}.\n\n` +
+    `We're confirming your Cash on Delivery order. Please keep your phone handy for delivery.\n\n` +
+    `Reply STOP to opt out.`,
+  order_thank_you: (n, s) =>
+    `Hi ${n}! Thank you for your order at ${s}. 🙏\n\n` +
+    `We're getting it ready for you.\n\n` +
+    `Reply STOP to opt out.`,
+  win_back: (n, s) =>
+    `Hi ${n}! It's been a while — we miss you at ${s}. 💛\n\n` +
+    `Come check out what's new.\n\n` +
+    `Reply STOP to opt out.`,
+  product_followup: (n, s) =>
+    `Hi ${n}! Still thinking about what you saw at ${s}?\n\n` +
+    `We saved it for you. Take another look.\n\n` +
+    `Reply STOP to opt out.`,
+  say_hello: (n, s) =>
+    `Hi ${n}! This is ${s}.\n\n` +
+    `We have something special for you. Come take a look.\n\n` +
+    `Reply STOP to opt out.`,
+};
+
 // Product thumbnail shown next to product-specific suggestion cards,
 // shared by NotificationComposer and EmailComposer, and next to each row
 // in the "Most interested in" list.
@@ -506,16 +550,84 @@ function WaComposer({
   const suggestions = rankWaSuggestions(customer, waProfile);
   const selected = selectedWaSuggestion || suggestions[0] || null;
 
-  const WA_GREEN = '#25D366';
-  const WA_TEAL  = '#128C7E';
+  const [messageText, setMessageText] = useState('');
+  const [dirtyText, setDirtyText] = useState(false);
+  const [pendingSuggestion, setPendingSuggestion] = useState(null);
+  const taRef = useRef(null);
+
+  const firstName = resolveWaFirstName(customer);
+  const storeName = (shop || '').split('.')[0];
+  const MAX_CHARS = 1000;
+
+  function buildBody(key) {
+    const fn = WA_TEMPLATE_BODY[key];
+    if (fn) return fn(firstName, storeName);
+    return selected?.purpose === 'order'
+      ? `Hi ${firstName}! This is ${storeName}.\n\nWe wanted to reach out about your order.\n\nReply STOP to opt out.`
+      : `Hi ${firstName}! You left something in your cart at ${storeName}.\n\nComplete your order before it sells out.\n\nReply STOP to opt out.`;
+  }
+
+  // Refill textarea whenever the selected suggestion changes.
+  useEffect(() => {
+    if (!selected) return;
+    setMessageText(buildBody(selected.key));
+    setDirtyText(false);
+    setPendingSuggestion(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.key, firstName, storeName]);
+
+  // Auto-grow textarea up to ~10 rows (240 px).
+  function autoGrow(el) {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 240) + 'px';
+  }
+  useEffect(() => { autoGrow(taRef.current); }, [messageText]);
+
+  function insertAt(text) {
+    const ta = taRef.current;
+    if (!ta) return;
+    const s = ta.selectionStart;
+    const e = ta.selectionEnd;
+    const next = messageText.slice(0, s) + text + messageText.slice(e);
+    setMessageText(next);
+    setDirtyText(true);
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(s + text.length, s + text.length);
+    });
+  }
+
+  function handleSuggestionClick(s) {
+    if (s.key === selected?.key) return;
+    if (dirtyText) { setPendingSuggestion(s); return; }
+    setSelectedWaSuggestion(s);
+  }
+
+  function confirmReplace() {
+    setSelectedWaSuggestion(pendingSuggestion);
+    setPendingSuggestion(null);
+  }
 
   function handleSend() {
-    if (!selected) return;
-    // 'say_hello' is a frontend-only fallback; send without template key
-    // so the backend uses its default followup message.
+    const trimmed = messageText.trim();
+    if (!selected || !trimmed || trimmed.length > MAX_CHARS) return;
     const tpl = selected.key === 'say_hello' ? undefined : selected.key;
-    sendWhatsapp({ shopDomain: shop, profileId, purpose: selected.purpose, template: tpl });
+    sendWhatsapp({ shopDomain: shop, profileId, purpose: selected.purpose, template: tpl, message: trimmed });
   }
+
+  const charCount = messageText.length;
+  const overLimit = charCount > MAX_CHARS;
+  const nearLimit = charCount > MAX_CHARS * 0.9 && !overLimit;
+  const isEmpty = !messageText.trim();
+
+  const WA_GREEN = '#25D366';
+  const WA_TEAL  = '#128C7E';
+  const chipStyle = {
+    fontSize: 10, fontWeight: 600, padding: '2px 7px',
+    border: '1px solid #d1d5db', borderRadius: 99, background: '#f9fafb',
+    color: '#374151', cursor: 'pointer',
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10,
@@ -551,7 +663,7 @@ function WaComposer({
                 key={s.key}
                 role="listitem"
                 aria-pressed={isSel}
-                onClick={() => setSelectedWaSuggestion(s)}
+                onClick={() => handleSuggestionClick(s)}
                 style={{
                   display: 'block', width: '100%', textAlign: 'left',
                   padding: '10px 12px',
@@ -585,16 +697,119 @@ function WaComposer({
                     </svg>
                   )}
                 </div>
-                <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>
+                <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 2 }}>
                   {s.reason(customer)}
-                </div>
-                <div style={{ fontSize: 11, color: '#374151', lineHeight: 1.4,
-                              fontStyle: 'italic' }}>
-                  "{s.preview(customer)}"
                 </div>
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* Inline replace-edits prompt */}
+      {pendingSuggestion && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                      flexWrap: 'wrap', gap: 6, padding: '8px 10px',
+                      background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8 }}>
+          <span style={{ fontSize: 12, color: '#92400e' }}>
+            Replace your edits with &ldquo;{pendingSuggestion.title}&rdquo;?
+          </span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button
+              onClick={confirmReplace}
+              style={{ ...chipStyle, background: '#f59e0b', border: 'none',
+                       color: '#fff', fontWeight: 700 }}
+            >
+              Replace
+            </button>
+            <button
+              onClick={() => setPendingSuggestion(null)}
+              style={chipStyle}
+            >
+              Keep mine
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Message editor */}
+      {selected && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          {/* Label row + quick-insert chips */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                        flexWrap: 'wrap', gap: 4 }}>
+            <label htmlFor="wa-msg-edit" style={{
+              fontSize: 10, fontWeight: 700, color: '#6b7280',
+              textTransform: 'uppercase', letterSpacing: '0.05em',
+            }}>
+              Message
+            </label>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              <button onClick={() => insertAt(firstName)} style={chipStyle}
+                aria-label="Insert customer name">
+                + Name
+              </button>
+              <button onClick={() => insertAt(storeName)} style={chipStyle}
+                aria-label="Insert store name">
+                + Store
+              </button>
+              {dirtyText && (
+                <button
+                  onClick={() => { setMessageText(buildBody(selected.key)); setDirtyText(false); }}
+                  style={{ ...chipStyle, color: '#6b7280' }}
+                  aria-label="Reset to suggestion text"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Textarea */}
+          <textarea
+            id="wa-msg-edit"
+            ref={taRef}
+            value={messageText}
+            onChange={(e) => {
+              setMessageText(e.target.value);
+              setDirtyText(true);
+              autoGrow(e.target);
+            }}
+            aria-label="WhatsApp message"
+            aria-describedby="wa-char-count wa-link-note"
+            rows={4}
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              padding: '9px 12px', fontSize: 13, lineHeight: 1.5,
+              border: `1px solid ${overLimit ? '#fca5a5' : '#e5e7eb'}`,
+              borderRadius: 8, outline: 'none', color: '#111827',
+              resize: 'none', fontFamily: 'inherit', overflowY: 'auto',
+              minHeight: '80px', maxHeight: '240px',
+            }}
+          />
+
+          {/* Character counter */}
+          <div id="wa-char-count" style={{
+            fontSize: 11, textAlign: 'right',
+            color: overLimit ? '#dc2626' : nearLimit ? '#d97706' : '#9ca3af',
+          }}>
+            {charCount} / {MAX_CHARS}{overLimit ? ' — too long' : ''}
+          </div>
+
+          {/* Store link note — non-editable */}
+          <div id="wa-link-note" role="note" style={{
+            fontSize: 11, color: '#6b7280', background: '#f9fafb',
+            border: '1px solid #e5e7eb', borderRadius: 6,
+            padding: '6px 8px', display: 'flex', alignItems: 'flex-start', gap: 5,
+          }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+              strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }} aria-hidden="true">
+              <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            Your store link is added automatically so we can track visits, carts and orders.
+          </div>
         </div>
       )}
 
@@ -609,23 +824,35 @@ function WaComposer({
 
       {/* Send button */}
       {selected && (
-        <button
-          onClick={handleSend}
-          style={{
-            padding: '10px 14px', background: WA_GREEN, border: 'none',
-            borderRadius: 10, fontSize: 14, fontWeight: 700, color: '#fff',
-            cursor: 'pointer', display: 'flex', alignItems: 'center',
-            justifyContent: 'center', gap: 6, width: '100%', boxSizing: 'border-box',
-          }}
-          aria-label={`Send WhatsApp: ${selected.title}`}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
-            strokeLinejoin="round" aria-hidden="true">
-            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-          </svg>
-          Send via WhatsApp
-        </button>
+        <>
+          <button
+            onClick={handleSend}
+            disabled={isEmpty || overLimit}
+            style={{
+              padding: '10px 14px',
+              background: isEmpty || overLimit ? '#9ca3af' : WA_GREEN,
+              border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700,
+              color: '#fff', cursor: isEmpty || overLimit ? 'not-allowed' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              gap: 6, width: '100%', boxSizing: 'border-box',
+              transition: 'background 0.2s',
+            }}
+            aria-label={`Send WhatsApp: ${selected.title}`}
+            aria-disabled={isEmpty || overLimit}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+              strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            Send via WhatsApp
+          </button>
+          {isEmpty && (
+            <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center' }}>
+              Message is empty — add some text above to send.
+            </div>
+          )}
+        </>
       )}
 
       {/* Remove from WhatsApp */}

@@ -1,0 +1,185 @@
+SELF-AUDIT: WhatsApp editable message before send — post-edit
+Date: 2026-10-12
+===================================================================
+
+STEP 0 FINDINGS (recap)
+------------------------
+- WaComposer showed only a short italic preview; no textarea, no editing.
+- POST /send accepted {profileId, purpose, template?} — no `message` field.
+- Sent text was NOT stored on ScheduledJob (no messageText field).
+- Store link was embedded mid-template, not appended as a footer.
+- Today.jsx and Customers.jsx call sendWhatsapp with no template/message —
+  they must remain on the default path.
+
+UI BEHAVIOUR PER STATE
+-----------------------
+Selected (no edits):
+  Suggestion card highlighted green; textarea pre-filled with full
+  template text for that suggestion (name + store substituted). Send
+  button enabled.
+
+Edited:
+  Textarea value diverges from the suggestion default. "Reset" chip
+  appears. Character counter updates. Send button stays enabled unless
+  empty or over 1000 chars.
+
+Reset:
+  Clicking "Reset" refills textarea with the original suggestion text,
+  clears dirtyText, removes the Reset chip.
+
+Switch suggestion (not edited):
+  Clicking a different suggestion card immediately swaps it; useEffect
+  refills the textarea and clears dirty state.
+
+Switch suggestion (edited):
+  An inline amber banner appears: "Replace your edits with '<title>'?".
+  Two buttons: Replace (confirms switch, re-fills textarea) and
+  Keep mine (dismisses banner, keeps current text and selection).
+
+Empty textarea:
+  Send button disabled (grey, cursor: not-allowed). Hint text below:
+  "Message is empty — add some text above to send."
+
+Over 1000 chars:
+  Counter turns red with "— too long". Send button disabled. No 400
+  from server since the client already blocks it.
+
+Near limit (>900 chars):
+  Counter turns amber. Send button still enabled.
+
+Quick-insert chips:
+  "+ Name" inserts customer first name at cursor.
+  "+ Store" inserts store name at cursor.
+  Cursor is restored after React re-render via requestAnimationFrame.
+
+Link note:
+  Static non-editable grey box below the textarea with lock icon:
+  "Your store link is added automatically so we can track visits,
+  carts and orders." aria id="wa-link-note" tied to textarea's
+  aria-describedby.
+
+POST /SEND CONTRACT — BEFORE AND AFTER
+----------------------------------------
+Before:  { profileId, purpose?, template? }
+After:   { profileId, purpose?, template?, message? }
+
+New `message` field (server-side, whatsapp.js):
+  - Validated: trim → strip control chars [\x00-\x08\x0b\x0c\x0e-\x1f\x7f]
+    → trim again → empty-after-trim → 400 "Message is empty"
+    → length > 1000 → 400 "Message too long (max 1000 characters)"
+  - Replaces template body but consent/opt-out eligibility is unchanged.
+  - When message is present, server builds:
+      body = customMessage already contains storeLink ? customMessage
+           : `${customMessage}\n\n${storeLink}`
+  - The storeLink is `https://${shop}?ccf_src=whatsapp&ccf_job=${job._id}`
+    (built after job creation, so ccf_job is always present).
+  - If the client included the exact link already: no duplicate.
+
+HOW THE TRACKING LINK IS GUARANTEED
+-------------------------------------
+- For custom messages: server appends `\n\n${storeLink}` unless the
+  exact storeLink string is already in the text (line ~280-283).
+- For default/template path: link is embedded inside the template
+  build() call (unchanged path). Also stored in messageText.
+- The client NEVER controls whether the link is present; the server
+  always ensures it.
+
+ScheduledJob.messageText (new field):
+  - Added to ScheduledJob schema: `messageText: { type: String, default: null }`
+  - Stored via updateOne after job creation and message assembly.
+  - Sliced to 1000 chars before storing.
+  - Never logged to console.
+
+FILES CHANGED + LINE RANGES
+-----------------------------
+frontend/app/admin/screens/CustomerDetail.jsx
+  line 3: added useRef to import
+  lines 441–486: resolveWaFirstName() + WA_TEMPLATE_BODY map (new)
+  lines 544–730: WaComposer rewritten — textarea, chips, inline replace
+    prompt, char counter, link note, disabled send button with hint
+
+frontend/app/admin/screens/customerShared.jsx
+  lines 204–218: sendWhatsapp destructures + passes `message` field
+
+backend/routes/whatsapp.js
+  lines 166–176: updated JSDoc
+  lines 183–203: message validation (empty, control chars, length)
+  lines 269–285: custom-message branch + appendlink logic
+  lines 287–289: messageText stored via updateOne
+
+backend/models/ScheduledJob.js
+  line 48: added messageText field
+
+backend/__tests__/whatsapp.test.js
+  line 18: added updateOne to ScheduledJob mock
+  line 95: ScheduledJob.updateOne.mockResolvedValue({}) in beforeEach
+  lines 991–1155: 12 new custom-message tests
+
+TESTS ADDED (12 new)
+---------------------
+custom message replaces template body
+store link always appended with ccf_job
+does not duplicate link when already present
+empty string after trim → 400
+over 1000 chars → 400
+exactly 1000 chars → 200
+strips bare control characters
+newlines and tabs preserved
+eligibility still enforced (no consent)
+eligibility still enforced (opted out)
+messageText stored on ScheduledJob
+default path: messageText stored too (template path)
+
+OTHER SEND ENTRY POINTS CHECKED
+---------------------------------
+Today.jsx:658:
+  sendWhatsapp({ shopDomain, profileId, purpose: 'followup' })
+  No message. Unchanged. Uses default waFollowupMessage server-side. ✓
+
+Customers.jsx:572:
+  sendWhatsapp({ shopDomain, profileId, purpose })
+  No message. Unchanged. Uses default waFollowupMessage/waOrderMessage. ✓
+
+Neither caller goes through WaComposer. The new `message` body field in
+customerShared.jsx is only included when `message` is truthy:
+  `if (message) body.message = message;` — falsy → omitted. ✓
+
+VERIFIED
+---------
+✓ npm test (backend): 885 tests, 0 failures (12 new)
+✓ npm run build (frontend): compiled successfully, 0 errors/warnings
+
+NOT VISUALLY TESTED
+--------------------
+No dev server in this session. Textarea auto-grow, cursor-restore after
+chip insert, and inline replace banner are logic-correct but not
+visually tested. The send path (message → POST /send → wa.me URL in
+new tab) is covered by the backend test suite.
+
+RISKS
+------
+1. Promotional text on an order-purpose send:
+   The server enforces only consent/phone eligibility — it does NOT
+   validate that the message content is appropriate for the purpose.
+   A seller CAN write a promotional/marketing message and send it with
+   purpose='order' (which requires no consent). This is a compliance
+   risk for WhatsApp Business Policy. Mitigation options (not yet
+   implemented): add a UI warning when purpose='order' and text looks
+   promotional; or restrict custom messages to followup only. This is
+   flagged for a future task.
+
+2. say_hello fallback with custom message:
+   If a seller selects say_hello and edits the text, purpose='followup'
+   and template=undefined. The backend uses default waFollowupMessage
+   path — wait, no: with customMessage present, the server uses
+   customMessage (with link appended). The eligibility check (consent)
+   still runs for followup purpose. Correct behaviour. ✓
+
+3. Link duplication check:
+   The check `customMessage.includes(storeLink)` works because storeLink
+   includes the specific ccf_job ID, which is unique per job. Edge case:
+   if a customer previously received a different job's link and the
+   seller copy-pastes it into the message, the IDs differ and the new
+   link is still appended. This is correct behaviour (we always want the
+   current job's link). ✓
+===================================================================

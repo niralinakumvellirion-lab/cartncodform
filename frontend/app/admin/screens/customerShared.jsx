@@ -201,7 +201,7 @@ export function useWhatsapp() {
   const [waError, setWaError] = useState(null);
   const [waFallbackUrl, setWaFallbackUrl] = useState(null);
 
-  const sendWhatsapp = useCallback(async ({ shopDomain, profileId, purpose, template }) => {
+  const sendWhatsapp = useCallback(async ({ shopDomain, profileId, purpose, template, message }) => {
     // Must happen synchronously inside the click handler.
     const w = window.open('about:blank', '_blank');
     if (w) w.opener = null;
@@ -211,6 +211,7 @@ export function useWhatsapp() {
 
     const body = { profileId, purpose };
     if (template) body.template = template;
+    if (message) body.message = message;
 
     try {
       const data = await apiSend(

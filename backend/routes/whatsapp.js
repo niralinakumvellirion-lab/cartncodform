@@ -165,11 +165,15 @@ function resolveFirstName(profile) {
 
 /**
  * POST /api/whatsapp/:shopDomain/send
- * Body: { profileId, purpose?: 'followup' | 'order', template?: string }
+ * Body: { profileId, purpose?: 'followup'|'order', template?: string, message?: string }
  * purpose defaults to 'followup'.
- * template (optional): one of the WA_TEMPLATES keys. When supplied, overrides
- *   the default message and locks the purpose to the template's own purpose.
- *   Unknown template key → 400. Eligibility is re-checked server-side.
+ * template (optional): one of the WA_TEMPLATES keys. Locks purpose to the template's own.
+ *   Unknown key → 400. Eligibility re-checked server-side.
+ * message (optional): custom text (1–1000 chars after trim, no bare control chars).
+ *   Replaces the template body. The server always appends the store link on its own
+ *   line regardless of what the client sent. If the text already contains the exact
+ *   tracking link, it is not duplicated. Eligibility checks (consent/opt-out) are
+ *   unchanged. The final sent text is saved as ScheduledJob.messageText.
  * followup: requires channels.whatsapp.consentedAt + not opted out.
  * order: any normalizable phone; refuses if opted out.
  * Returns { url, jobId, purpose }.
@@ -178,6 +182,22 @@ router.post('/:shopDomain/send', requireAuth, requireStoreOwner, async (req, res
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
     const { profileId } = req.body;
+
+    // Validate custom message when provided.
+    let customMessage = null;
+    if (req.body.message !== undefined && req.body.message !== null) {
+      const raw = String(req.body.message);
+      // Strip bare control characters (keep \t \n \r).
+      const cleaned = raw.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
+      const trimmed = cleaned.trim();
+      if (!trimmed) {
+        return res.status(400).json({ error: 'Message is empty' });
+      }
+      if (trimmed.length > 1000) {
+        return res.status(400).json({ error: 'Message too long (max 1000 characters)' });
+      }
+      customMessage = trimmed;
+    }
 
     // Resolve template first — it locks the purpose.
     const templateKey = req.body.template || null;
@@ -254,11 +274,26 @@ router.post('/:shopDomain/send', requireAuth, requireStoreOwner, async (req, res
 
     const firstName = resolveFirstName(profile);
     const storeName = shop.split('.')[0];
-    const message = tpl
-      ? tpl.build(firstName, storeName, storeLink)
-      : (purpose === 'order'
-          ? waOrderMessage(firstName, shop, storeLink)
-          : waFollowupMessage(firstName, shop, storeLink));
+
+    let message;
+    if (customMessage) {
+      // Custom text: server appends storeLink on its own line unless already present.
+      const body = customMessage.includes(storeLink)
+        ? customMessage
+        : `${customMessage}\n\n${storeLink}`;
+      message = body;
+    } else {
+      // Default template path — unchanged behaviour.
+      message = tpl
+        ? tpl.build(firstName, storeName, storeLink)
+        : (purpose === 'order'
+            ? waOrderMessage(firstName, shop, storeLink)
+            : waFollowupMessage(firstName, shop, storeLink));
+    }
+
+    // Store final sent text (never log message bodies to console).
+    await ScheduledJob.updateOne({ _id: job._id }, { $set: { messageText: message.slice(0, 1000) } });
+
     const url = `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 
     return res.status(200).json({ url, jobId: job._id, purpose });

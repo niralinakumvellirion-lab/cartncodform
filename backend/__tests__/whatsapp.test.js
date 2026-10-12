@@ -16,6 +16,7 @@ jest.mock('../models/ScheduledJob', () => ({
   distinct: jest.fn(),
   countDocuments: jest.fn(),
   updateMany: jest.fn(),
+  updateOne: jest.fn(),
 }));
 jest.mock('../models/AttributedEvent', () => ({
   find: jest.fn(),
@@ -92,6 +93,7 @@ beforeEach(() => {
   const emptyChain = { lean: emptyLean };
   CodOrder.find.mockReturnValue({ lean: emptyLean, select: jest.fn().mockReturnValue(emptyChain) });
   AbandonedCustomer.find.mockReturnValue({ lean: emptyLean, select: jest.fn().mockReturnValue(emptyChain) });
+  ScheduledJob.updateOne.mockResolvedValue({});
 });
 afterEach(() => jest.restoreAllMocks());
 
@@ -985,4 +987,237 @@ test('send template: default path unchanged when template omitted', async () => 
   const decoded = decodeURIComponent(res.body.url);
   // Original followup template text
   expect(decoded).toContain('You left something in your cart at');
+});
+
+// ---------------------------------------------------------------------------
+// POST /send — custom message field
+// ---------------------------------------------------------------------------
+
+const CONSENTED_PROFILE = {
+  _id: PROFILE_ID, shopDomain: SHOP,
+  channels: { whatsapp: { phone: '+919876543210', consentedAt: new Date(), optedOutAt: null },
+              email: { address: 'alice@example.com' } },
+  identifiers: { emails: ['alice@example.com'], phones: [] },
+};
+
+test('custom message: replaces template body in the url', async () => {
+  Profile.findOne.mockResolvedValue(CONSENTED_PROFILE);
+  ScheduledJob.create.mockResolvedValue({ _id: 'msgJob1' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup', message: 'Hello from my store!' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  const decoded = decodeURIComponent(res.body.url);
+  expect(decoded).toContain('Hello from my store!');
+  // Template text should NOT appear
+  expect(decoded).not.toContain('You left something in your cart at');
+});
+
+test('custom message: store link always appended with ccf_job', async () => {
+  Profile.findOne.mockResolvedValue(CONSENTED_PROFILE);
+  ScheduledJob.create.mockResolvedValue({ _id: 'msgJob2' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup', message: 'Come visit us.' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  const decoded = decodeURIComponent(res.body.url);
+  expect(decoded).toContain('ccf_src=whatsapp');
+  expect(decoded).toContain('ccf_job=msgJob2');
+});
+
+test('custom message: does not duplicate link when already present', async () => {
+  Profile.findOne.mockResolvedValue(CONSENTED_PROFILE);
+  ScheduledJob.create.mockResolvedValue({ _id: 'msgJob3' });
+
+  // First call to get the storeLink format
+  const storeLink = `https://${SHOP}?ccf_src=whatsapp&ccf_job=msgJob3`;
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup', message: `Visit us: ${storeLink}` },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  const decoded = decodeURIComponent(res.body.url);
+  // Link should appear exactly once
+  const occurrences = decoded.split(storeLink).length - 1;
+  expect(occurrences).toBe(1);
+});
+
+test('custom message: empty string after trim → 400', async () => {
+  Profile.findOne.mockResolvedValue(null); // should not be reached
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup', message: '   ' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(400);
+  expect(res.body.error).toMatch(/empty/i);
+  expect(Profile.findOne).not.toHaveBeenCalled();
+});
+
+test('custom message: over 1000 chars → 400', async () => {
+  Profile.findOne.mockResolvedValue(null);
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup', message: 'a'.repeat(1001) },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(400);
+  expect(res.body.error).toMatch(/too long/i);
+  expect(Profile.findOne).not.toHaveBeenCalled();
+});
+
+test('custom message: exactly 1000 chars → 200', async () => {
+  Profile.findOne.mockResolvedValue(CONSENTED_PROFILE);
+  ScheduledJob.create.mockResolvedValue({ _id: 'msg1kJob' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup', message: 'x'.repeat(1000) },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+});
+
+test('custom message: strips bare control characters', async () => {
+  Profile.findOne.mockResolvedValue(CONSENTED_PROFILE);
+  ScheduledJob.create.mockResolvedValue({ _id: 'ctrlJob' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup',
+              message: 'Hello\x01\x02World' }, // \x01 and \x02 are control chars
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  const decoded = decodeURIComponent(res.body.url);
+  expect(decoded).toContain('HelloWorld');
+  expect(decoded).not.toContain('\x01');
+});
+
+test('custom message: newlines and tabs are preserved', async () => {
+  Profile.findOne.mockResolvedValue(CONSENTED_PROFILE);
+  ScheduledJob.create.mockResolvedValue({ _id: 'nlJob' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup',
+              message: 'Line one\nLine two' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  const decoded = decodeURIComponent(res.body.url);
+  expect(decoded).toContain('Line one\nLine two');
+});
+
+test('custom message: eligibility still enforced (no consent for followup)', async () => {
+  Profile.findOne.mockResolvedValue({
+    _id: PROFILE_ID, shopDomain: SHOP,
+    channels: { whatsapp: { phone: '+919876543210', consentedAt: null, optedOutAt: null } },
+    identifiers: {},
+  });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup', message: 'Hello!' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(400);
+  expect(res.body.error).toContain('consent');
+  expect(ScheduledJob.create).not.toHaveBeenCalled();
+});
+
+test('custom message: eligibility still enforced (opted out)', async () => {
+  Profile.findOne.mockResolvedValue({
+    _id: PROFILE_ID, shopDomain: SHOP,
+    channels: { whatsapp: { phone: '+919876543210', consentedAt: new Date(), optedOutAt: new Date() } },
+    identifiers: {},
+  });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup', message: 'Hello!' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(400);
+  expect(ScheduledJob.create).not.toHaveBeenCalled();
+});
+
+test('custom message: messageText stored on ScheduledJob', async () => {
+  Profile.findOne.mockResolvedValue(CONSENTED_PROFILE);
+  ScheduledJob.create.mockResolvedValue({ _id: 'storeJob' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup', message: 'My custom text.' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  expect(ScheduledJob.updateOne).toHaveBeenCalledWith(
+    { _id: 'storeJob' },
+    { $set: { messageText: expect.stringContaining('My custom text.') } }
+  );
+  // Link is also in messageText
+  const call = ScheduledJob.updateOne.mock.calls[0];
+  expect(call[1].$set.messageText).toContain('ccf_job=storeJob');
+});
+
+test('default path: messageText still stored (template path)', async () => {
+  Profile.findOne.mockResolvedValue(CONSENTED_PROFILE);
+  ScheduledJob.create.mockResolvedValue({ _id: 'dfltStore' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, template: 'cart_reminder' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  expect(ScheduledJob.updateOne).toHaveBeenCalledWith(
+    { _id: 'dfltStore' },
+    { $set: { messageText: expect.stringContaining('ccf_job=dfltStore') } }
+  );
 });

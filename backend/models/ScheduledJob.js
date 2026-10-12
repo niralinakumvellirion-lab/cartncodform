@@ -46,6 +46,7 @@ const scheduledJobSchema = new mongoose.Schema({
   sentAt: { type: Date },
   error: { type: String },
   purpose: { type: String, default: 'followup' }, // 'followup' | 'order' for whatsapp jobs
+  messageText: { type: String, default: null }, // final sent text for whatsapp jobs (max 1000)
 }, { timestamps: true });
 
 // Compound index for the sender's poll query.
