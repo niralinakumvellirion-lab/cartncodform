@@ -1,0 +1,149 @@
+SELF-AUDIT: Dashboard channel section redesign — post-edit
+Date: 2026-10-12
+Three commits; not pushed.
+======================================================
+
+======================================================
+STEP 0 — AUDIT FILE
+======================================================
+  Written: audits/dashboard-channels-before.txt
+  Contents: funnel-tile locations with file:line, data model fields,
+  sent/pending semantics per channel, preview component survey,
+  feasibility verdict. Confirmed all data reachable before starting.
+
+======================================================
+STEP 1 — BACKEND
+======================================================
+
+New file: backend/routes/dashboard.js
+Registered: backend/server.js, line ~167
+
+Endpoint 1: GET /api/dashboard/:shopDomain/channels?from=&to=
+  Auth: requireAuth + requireStoreOwner (shopDomain-scoped)
+  Returns: { push:{sent,pending,types[]}, email:{...same}, whatsapp:{sent,pending,sentFollowup,sentOrder} }
+  Push/email: 4 ScheduledJob.aggregate() calls in Promise.all (no N+1)
+  Email sent total: Profile.aggregate over messages (same as today-stats — both paths)
+  WhatsApp: ScheduledJob.find + Profile.find + ScheduledJob.distinct (only if opted-in exist)
+  type[] shape: { type, label, sent, pending, preview } — latest payload as representative
+
+Endpoint 2: GET /api/dashboard/:shopDomain/channels/:channel/items?status=sent|pending&type=&page=&limit=
+  Auth: same
+  Limit capped at 50. Page defaults to 0.
+  WhatsApp pending: from Profile records (opted-in minus contacted), not ScheduledJob
+  All other cases: ScheduledJob.find + countDocuments + Profile.find enrichment
+  Profile enrichment: channels.email.address only — no push tokens, phones, or other PII
+  nameFromEmail: derives display name from local-part only (no raw email in name field)
+
+Tests: backend/__tests__/dashboardChannels.test.js
+  16 tests — ch1–ch8 (summary endpoint), i1–i8 (items endpoint)
+  Covers: zero counts, push type merging, email Profile.messages aggregate, WA purpose breakdown,
+  WA pending minus contacted, pagination skip/limit, type filter, wrong-shop 403, DB error 500.
+  925 tests total, 0 failures.
+
+======================================================
+STEP 2 — CARDS
+======================================================
+
+File modified: frontend/app/admin/screens/Today.jsx
+
+Removed:
+  NOTIF_STATS, ACTIVITY_STATS constants
+  waStats, waPending, waLoading, waConfigEnabled state
+  activity, notifStats, notifLoading state
+  First useEffect (fetched activity + today-stats)
+  Second useEffect (fetched WA stats + pending + discounts/config)
+  SECTION 2 JSX (Notifications + Activity cards, lines ~514-580)
+  SECTION 3 JSX (WhatsApp section + config-aware empty state, lines ~582-713)
+  useWhatsapp import (temporarily removed; re-added in STEP 3)
+
+Added:
+  CHANNEL_COLORS constant (fg/bg per channel)
+  ChannelIcon component (push bell / email envelope / WA bubble — inline SVG)
+  ChannelCard component: header with icon+label+Details→, Sent/Pending counts, type pills
+  channelStats, channelLoading state
+  openChannel state { channel, status } (set by Details → button; drawer added in STEP 3)
+  New single useEffect: fetches /api/dashboard/:shop/channels; keyed on shop+dateFilter+refreshKey
+  refreshButton now uses channelLoading instead of notifLoading
+
+Layout: 3-column CSS grid (repeat(3,1fr)); stacks to 1 column at isMobileView (≤768px).
+  Each card: 14px side gutters. No horizontal scroll at 360px (flex-wrap in type pills).
+Colors: indigo (#4f46e5 / #eef2ff) / amber (#d97706 / #fef3c7) / green (#128C7E / #f0fdf4)
+  Color is never the only differentiator (channel name + icon also distinguish cards).
+
+Build: npm run build — no warnings, no errors.
+
+======================================================
+STEP 3 — DETAIL VIEWS
+======================================================
+
+File modified: frontend/app/admin/screens/Today.jsx (same file)
+Added import: useRef, useWhatsapp re-imported
+
+New components added before export default function Today:
+
+DrawerItem: renders one job item with customer info, type pill, timestamp,
+  push preview (🔔 + title/body + optional image),
+  email preview (subject header box + body snippet),
+  WA bubble (right-aligned dcf8c6 chat bubble),
+  outcome badge (coloured: converted=green, clicked=indigo, else gray),
+  green WhatsApp send button for WA pending items (uses sendWhatsapp from parent).
+
+ChannelDrawer: full detail drawer/sheet
+  Layout: position:fixed, right:0, top:0, bottom:0, width=480px desktop / 100% mobile
+  Overlay: semi-transparent black, onClick=onClose
+  Header: channel icon+name + ×close button (ref for focus restore)
+  Tabs: Sent / Pending with bottom border indicator in channel fg colour
+  WA error banner: shown only for whatsapp channel (waSendError / waFallbackUrl)
+  Items list: scrollable flex:1 region, shows DrawerItem per item
+  Pagination footer: Prev/Next buttons, "X–Y of Z" count, only when total > 20
+
+Accessibility:
+  role="dialog", aria-label, aria-modal="true" on panel
+  Focus trap: Tab/Shift+Tab contained inside drawer (all non-disabled focusable elements)
+  Esc key: closes via document keydown listener (cleaned up on unmount)
+  Focus restore: previousFocusRef saves document.activeElement on mount; restored on unmount
+  Close button: ref on closeBtnRef, focused on mount
+
+Data flow:
+  openChannel state {channel, status} set by card Details → buttons
+  ChannelDrawer fetches /api/dashboard/:shop/channels/:channel/items on tab+page change
+  From/to derived from dateFilter inside ChannelDrawer using same getDateRange()
+  Page resets to 0 on tab switch
+  useWhatsapp() called inside ChannelDrawer — sendWhatsapp passed to DrawerItem
+
+Build: npm run build — no warnings, no errors.
+
+======================================================
+CHECKS
+======================================================
+
+✓ Backend tests: 925 / 925 passing (16 new in dashboardChannels.test.js)
+✓ Frontend build: npm run build — compiled successfully, no TS/lint errors
+✓ Green WA send button preserved in ChannelDrawer (WhatsApp pending tab)
+✗ Visual: no Shopify dev server — cannot test in browser. Cannot claim golden-path verified.
+
+======================================================
+RISKS / KNOWN LIMITATIONS
+======================================================
+
+1. Email sent count (summary card) uses Profile.messages aggregate, which counts
+   both brain+rule paths. The items list uses ScheduledJob only, which means
+   brain-email jobs appear as push items (not email) in the items view. The
+   email items drawer will show fewer items than the sent count on the card
+   for shops that use the brain email path heavily. This matches the audit's
+   "known risk" note and requires a separate Profile.messages→items join to fix.
+
+2. WhatsApp pending is still an all-time count (not filtered by date range).
+   This is the same behaviour as the existing /stats endpoint and is preserved
+   intentionally per spec ("pending = right now").
+
+3. WA pending item name: derived from email local-part if no profile.name.
+   Some items may show "Anonymous" if the profile has neither email nor name.
+   This matches the existing pending list behaviour.
+
+4. Mobile breakpoint for the drawer: uses the same isMobileView state (≤768px)
+   as the rest of Today.jsx. The drawer goes full-screen on mobile.
+
+5. No skeleton/placeholder for drawer loading state — shows "Loading…" text only.
+   A future iteration could add skeleton rows for better perceived performance.
+======================================================
