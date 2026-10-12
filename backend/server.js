@@ -164,6 +164,8 @@ const emailTemplatesRouter = require('./routes/emailTemplates');
 app.use('/api/email-templates', emailTemplatesRouter);
 const whatsappRouter = require('./routes/whatsapp');
 app.use('/api/whatsapp', whatsappRouter);
+const dashboardRouter = require('./routes/dashboard');
+app.use('/api/dashboard', dashboardRouter);
 app.use('/apps/cartncodform', proxyRouter);
 
 // --- 404 + error handlers ---------------------------------------------------
