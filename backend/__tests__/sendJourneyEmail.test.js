@@ -164,6 +164,23 @@ test('h. Resend failure creates ScheduledJob with status="failed"', async () => 
   expect(job.origin).toBe('manual');
 });
 
+test('j. suppressed profile -> 400, no email sent', async () => {
+  Profile.findOne.mockReturnValue({
+    select: jest.fn().mockResolvedValue({
+      _id: 'pid1',
+      identifiers: { emails: ['shopper@example.com'] },
+      channels: {},
+      suppressed: true,
+    }),
+  });
+
+  const r = await sendJourneyEmail(SHOP, { profileId: 'pid1', subject: 'Hi', body: 'there' });
+
+  expect(r.status).toBe(400);
+  expect(r.payload.error).toMatch(/suppressed/i);
+  expect(mockSend).not.toHaveBeenCalled();
+});
+
 test('i. ScheduledJob logging failure does not fail the send', async () => {
   Profile.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(profileMock('a@e.com')) });
   mockSend.mockResolvedValue({ data: { id: 'r2' }, error: null });

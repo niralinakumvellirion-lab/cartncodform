@@ -117,6 +117,18 @@ beforeEach(() => {
     select: jest.fn().mockReturnThis(),
     lean: jest.fn().mockResolvedValue([]),
   });
+  // Default: no WA ScheduledJobs (profile handler attribution path).
+  ScheduledJob.find.mockReturnValue({
+    sort: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([]),
+  });
+  // Default: no attribution events.
+  AttributedEvent.find.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([]),
+  });
   ProductImageCache.find.mockReturnValue({
     select: jest.fn().mockReturnThis(),
     lean: jest.fn().mockResolvedValue([]),
@@ -513,6 +525,77 @@ test('profile: messages filtered to whatsapp channel only', async () => {
   expect(res.body.messages[0].channel).toBe('whatsapp');
 });
 
+test('profile: attribution array returned, grouped by jobId', async () => {
+  const JOB_A = '507f1f77bcf86cd799439011';
+  const JOB_B = '507f1f77bcf86cd799439012';
+  Profile.findOne.mockReturnValue({
+    select: jest.fn().mockReturnValue({
+      lean: jest.fn().mockResolvedValue({
+        _id: PROFILE_ID,
+        channels: { whatsapp: { phone: '+919876543210', consentedAt: new Date() } },
+        identifiers: { phones: [], emails: [] },
+        messages: [],
+      }),
+    }),
+  });
+  const mongoId = (s) => ({ _id: s, toString: () => s });
+  ScheduledJob.find.mockReturnValue({
+    sort: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([mongoId(JOB_A), mongoId(JOB_B)]),
+  });
+  const attrTs = new Date('2026-10-01T10:00:00Z');
+  AttributedEvent.find.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([
+      { jobId: JOB_A, eventType: 'revisit',    ts: attrTs },
+      { jobId: JOB_A, eventType: 'purchase',   ts: attrTs },
+      { jobId: JOB_B, eventType: 'add_to_cart', ts: attrTs },
+    ]),
+  });
+
+  const res = mockRes();
+  await profileHandler(
+    { params: { shopDomain: SHOP, profileId: PROFILE_ID }, store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  const { attribution } = res.body;
+  expect(attribution).toHaveLength(2);
+  const a = attribution.find((x) => x.jobId === JOB_A);
+  const b = attribution.find((x) => x.jobId === JOB_B);
+  expect(a.revisit).toMatchObject({ at: expect.any(Date) });
+  expect(a.purchase).toMatchObject({ at: expect.any(Date) });
+  expect(a.add_to_cart).toBeNull();
+  expect(b.add_to_cart).toMatchObject({ at: expect.any(Date) });
+  expect(b.revisit).toBeNull();
+});
+
+test('profile: attribution ScheduledJob scoped by shopDomain', async () => {
+  Profile.findOne.mockReturnValue({
+    select: jest.fn().mockReturnValue({
+      lean: jest.fn().mockResolvedValue({
+        _id: PROFILE_ID,
+        channels: { whatsapp: { phone: '+919876543210', consentedAt: new Date() } },
+        identifiers: { phones: [], emails: [] },
+        messages: [],
+      }),
+    }),
+  });
+
+  const res = mockRes();
+  await profileHandler(
+    { params: { shopDomain: SHOP, profileId: PROFILE_ID }, store: STORE },
+    res
+  );
+
+  expect(ScheduledJob.find).toHaveBeenCalledWith(
+    expect.objectContaining({ shopDomain: SHOP, channel: 'whatsapp' })
+  );
+});
+
 // ---------------------------------------------------------------------------
 // CodOrder GDPR fix (handleCustomersRedact and handleCustomersDataRequest)
 // ---------------------------------------------------------------------------
@@ -559,7 +642,10 @@ beforeEach(() => {
     lean: jest.fn().mockResolvedValue([]),
   });
   ScheduledJob.find.mockReturnValue({
-    limit: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
+    sort: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([]),
   });
   ScheduledJob.updateMany.mockResolvedValue({ modifiedCount: 0 });
   CodOrder.updateMany.mockResolvedValue({ modifiedCount: 0 });

@@ -676,7 +676,42 @@ router.get('/:shopDomain/profile/:profileId', requireAuth, requireStoreOwner, as
 
     const recentProducts = await resolveRecentProducts(shop, profile);
 
-    return res.json({ whatsapp: wa, messages: waMessages, canFollowup, canOrder, orderReason, recentProducts });
+    // Last 5 WA ScheduledJobs for this profile, plus their attribution events.
+    const recentWaJobs = await ScheduledJob.find({
+      shopDomain: shop,
+      profileId: profile._id,
+      channel: 'whatsapp',
+    }).sort({ createdAt: -1 }).limit(5).select('_id').lean();
+
+    const jobIds = recentWaJobs.map((j) => j._id);
+    const attrEvents = jobIds.length > 0
+      ? await AttributedEvent.find({
+          shopDomain: shop,
+          jobId: { $in: jobIds },
+        }).select('jobId eventType ts').lean()
+      : [];
+
+    const attrByJob = {};
+    for (const ev of attrEvents) {
+      const key = String(ev.jobId);
+      if (!attrByJob[key]) attrByJob[key] = {};
+      // Keep the earliest occurrence of each type (first click wins).
+      if (!attrByJob[key][ev.eventType]) attrByJob[key][ev.eventType] = ev.ts;
+    }
+
+    const attribution = jobIds.map((jid) => {
+      const key = String(jid);
+      const a = attrByJob[key] || {};
+      return {
+        jobId: key,
+        revisit: a.revisit ? { at: a.revisit } : null,
+        add_to_cart: a.add_to_cart ? { at: a.add_to_cart } : null,
+        checkout_start: a.checkout_start ? { at: a.checkout_start } : null,
+        purchase: a.purchase ? { at: a.purchase } : null,
+      };
+    });
+
+    return res.json({ whatsapp: wa, messages: waMessages, canFollowup, canOrder, orderReason, recentProducts, attribution });
   } catch (err) {
     console.error('[whatsapp] GET /profile/:profileId error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch WhatsApp profile data' });

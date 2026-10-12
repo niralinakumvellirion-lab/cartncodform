@@ -121,11 +121,11 @@ test('b. single profile, single signal -> product interests extracted + sorted',
   });
 
   // Queried by this profile's sessionIds + cartTokens combined, filtered to
-  // the 4 event types the Journey timeline displays (journey-filter task).
+  // all 7 event types the Journey timeline displays.
   expect(StorefrontEvent.find).toHaveBeenCalledWith({
     shopDomain: SHOP,
     sessionId: { $in: ['sess-p1'] },
-    type: { $in: ['page_view', 'push_prompt_shown', 'push_prompt_accepted', 'product_view'] },
+    type: { $in: ['page_view', 'push_prompt_shown', 'push_prompt_accepted', 'product_view', 'add_to_cart', 'reached_checkout', 'purchase'] },
   });
 });
 
@@ -251,6 +251,56 @@ describe('topProducts imageUrl resolution', () => {
 
     expect(fetchProductImageWithTimeout).toHaveBeenCalledTimes(3);
   });
+});
+
+test('e. activeHours from profile is returned in the journey entry', async () => {
+  const p1 = { ...profile('p1'), activeHours: [18, 19, 20] };
+  Signal.find.mockReturnValue(signalChain([
+    { profileId: p1, strength: 0.7, type: 'lapsing' },
+  ]));
+  StorefrontEvent.find.mockReturnValue(eventChain([]));
+
+  const data = await getJourneyData(SHOP, {});
+
+  expect(data.customers[0].activeHours).toEqual([18, 19, 20]);
+});
+
+test('f. totalProductViews sums view counts across all products (not just top 3)', async () => {
+  const p1 = profile('p1');
+  Signal.find.mockReturnValue(signalChain([
+    { profileId: p1, strength: 0.8, type: 'high_intent' },
+  ]));
+  StorefrontEvent.find.mockReturnValue(eventChain([
+    { type: 'product_view', meta: { productId: 'A', productTitle: 'A' }, ts: new Date() },
+    { type: 'product_view', meta: { productId: 'A', productTitle: 'A' }, ts: new Date() },
+    { type: 'product_view', meta: { productId: 'B', productTitle: 'B' }, ts: new Date() },
+    { type: 'product_view', meta: { productId: 'C', productTitle: 'C' }, ts: new Date() },
+    { type: 'product_view', meta: { productId: 'D', productTitle: 'D' }, ts: new Date() },
+  ]));
+
+  const data = await getJourneyData(SHOP, {});
+
+  expect(data.customers[0].totalProductViews).toBe(5);
+  expect(data.customers[0].topProducts).toHaveLength(3);
+});
+
+test('g. recentEvents includes add_to_cart, reached_checkout, purchase entries', async () => {
+  const p1 = profile('p1');
+  Signal.find.mockReturnValue(signalChain([
+    { profileId: p1, strength: 0.6, type: 'cart_abandon' },
+  ]));
+  StorefrontEvent.find.mockReturnValue(eventChain([
+    { type: 'add_to_cart', meta: { productTitle: 'Shirt' }, ts: new Date() },
+    { type: 'reached_checkout', meta: {}, ts: new Date() },
+    { type: 'purchase', meta: {}, ts: new Date() },
+  ]));
+
+  const data = await getJourneyData(SHOP, {});
+
+  const types = data.customers[0].recentEvents.map((e) => e.type);
+  expect(types).toContain('add_to_cart');
+  expect(types).toContain('reached_checkout');
+  expect(types).toContain('purchase');
 });
 
 // HTTP-level tests: profileId=undefined / invalid -> 400 (not 500).

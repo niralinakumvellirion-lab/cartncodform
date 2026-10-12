@@ -456,7 +456,7 @@ async function buildJourneyEntry(shop, profile, entrySignals) {
   const events = await StorefrontEvent.find({
     shopDomain: shop,
     sessionId: { $in: [...sessionIds, ...cartTokens] },
-    type: { $in: ['page_view', 'push_prompt_shown', 'push_prompt_accepted', 'product_view'] },
+    type: { $in: ['page_view', 'push_prompt_shown', 'push_prompt_accepted', 'product_view', 'add_to_cart', 'reached_checkout', 'purchase'] },
   })
     .sort({ ts: -1 })
     .limit(20)
@@ -491,6 +491,8 @@ async function buildJourneyEntry(shop, profile, entrySignals) {
       if (evImage) productViews[productId].eventImageUrl = evImage;
     }
   });
+
+  const totalProductViews = Object.values(productViews).reduce((s, p) => s + p.count, 0);
 
   const topProducts = Object.values(productViews)
     .sort((a, b) => b.count - a.count)
@@ -556,6 +558,8 @@ async function buildJourneyEntry(shop, profile, entrySignals) {
     signals: entrySignals,
     recentEvents: events,
     topProducts: topProductsWithImages,
+    totalProductViews,
+    activeHours: profile?.activeHours || [],
   };
 }
 
@@ -573,7 +577,7 @@ async function getJourneyData(shopDomain, { limit = 50, page = 0, profileId = nu
   // would never appear there no matter how high `limit` is set).
   if (profileId) {
     const profile = await Profile.findOne({ _id: profileId, shopDomain: shop })
-      .select('identifiers stage orders channels lastSeenAt createdAt');
+      .select('identifiers stage orders channels lastSeenAt createdAt activeHours');
     if (!profile) return { customers: [], total: 0 };
 
     const profileSignals = await Signal.find({ shopDomain: shop, profileId: profile._id })

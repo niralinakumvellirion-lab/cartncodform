@@ -528,9 +528,13 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
 
   const shop = String(shopDomain || '').trim().toLowerCase();
   const profile = await Profile.findOne({ _id: profileId, shopDomain: shop })
-    .select('identifiers channels');
+    .select('identifiers channels suppressed');
   if (!profile) {
     return { status: 404, payload: { error: 'Profile not found' } };
+  }
+
+  if (profile.suppressed) {
+    return { status: 400, payload: { error: 'This customer is suppressed and cannot receive emails' } };
   }
 
   const email = profile.channels?.email?.address ||
@@ -613,6 +617,62 @@ router.post('/send-journey-email', requireAuth, async (req, res) => {
     return res.status(status).json(payload);
   } catch (err) {
     console.error('[email] send-journey-email error:', err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/push/preview-journey-email
+ * Body: { profileId, subject, body }
+ * Returns { html } — the rendered email HTML using the same buildEmailHtml
+ * path and brand data as send-journey-email. MUST NOT send or log anything.
+ */
+router.post('/preview-journey-email', requireAuth, async (req, res) => {
+  try {
+    const Profile = require('../models/Profile');
+    const Store = require('../models/Store');
+    const { buildEmailHtml } = require('../utils/email');
+
+    const { profileId, subject, body } = req.body;
+    if (!profileId || !subject || !body) {
+      return res.status(400).json({ error: 'Missing fields' });
+    }
+    if (subject.length > 200 || body.length > 5000) {
+      return res.status(400).json({ error: 'Fields too long' });
+    }
+
+    const shop = req.shopDomain;
+    const profile = await Profile.findOne({ _id: profileId, shopDomain: shop })
+      .select('_id');
+    if (!profile) {
+      return res.status(404).json({ error: 'Profile not found' });
+    }
+
+    let storeName = shop;
+    let logoUrl = null;
+    let primaryColor = null;
+    try {
+      const store = await Store.findOne({ shopDomain: shop }).select('shopName logoUrl primaryColor');
+      if (store) {
+        storeName = store.shopName || shop;
+        logoUrl = store.logoUrl || null;
+        primaryColor = store.primaryColor || null;
+      }
+    } catch { /* non-fatal */ }
+
+    const html = buildEmailHtml({
+      subject,
+      body,
+      storeName,
+      logoUrl,
+      primaryColor,
+      layout: 'hero',
+      showLogo: true,
+    });
+
+    return res.json({ html });
+  } catch (err) {
+    console.error('[email] preview-journey-email error:', err.message);
     return res.status(500).json({ error: err.message });
   }
 });
