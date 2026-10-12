@@ -771,3 +771,218 @@ test('poller: channel filter excludes whatsapp from pending scan', () => {
   expect(picked).toHaveLength(2);
   expect(picked.every((j) => j.channel !== 'whatsapp')).toBe(true);
 });
+
+// ---------------------------------------------------------------------------
+// POST /send — template field
+// ---------------------------------------------------------------------------
+
+test('send template cart_reminder: uses followup purpose and cart_reminder copy', async () => {
+  Profile.findOne.mockResolvedValue({
+    _id: PROFILE_ID, shopDomain: SHOP,
+    channels: { whatsapp: { phone: '+919876543210', consentedAt: new Date(), optedOutAt: null },
+                email: { address: 'alice@example.com' } },
+    identifiers: { emails: ['alice@example.com'], phones: [] },
+  });
+  ScheduledJob.create.mockResolvedValue({ _id: 'tplJob1' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, template: 'cart_reminder' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  expect(res.body.purpose).toBe('followup');
+  const decoded = decodeURIComponent(res.body.url);
+  expect(decoded).toContain('left something in your cart');
+  expect(decoded).toContain('sells out');
+});
+
+test('send template cod_confirmation: uses order purpose and cod copy', async () => {
+  Profile.findOne.mockResolvedValue({
+    _id: PROFILE_ID, shopDomain: SHOP,
+    channels: { whatsapp: { phone: '+919876543210', consentedAt: null, optedOutAt: null },
+                email: { address: 'bob@example.com' } },
+    identifiers: { emails: ['bob@example.com'], phones: ['+919876543210'] },
+  });
+  ScheduledJob.create.mockResolvedValue({ _id: 'tplJob2' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, template: 'cod_confirmation' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  expect(res.body.purpose).toBe('order');
+  const decoded = decodeURIComponent(res.body.url);
+  expect(decoded).toContain('Cash on Delivery');
+});
+
+test('send template order_thank_you: uses order purpose', async () => {
+  Profile.findOne.mockResolvedValue({
+    _id: PROFILE_ID, shopDomain: SHOP,
+    channels: { whatsapp: { phone: '+919876543210', consentedAt: null, optedOutAt: null } },
+    identifiers: { emails: [], phones: ['+919876543210'] },
+  });
+  ScheduledJob.create.mockResolvedValue({ _id: 'tplJob3' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, template: 'order_thank_you' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  expect(res.body.purpose).toBe('order');
+  const decoded = decodeURIComponent(res.body.url);
+  expect(decoded).toContain('Thank you for your order');
+});
+
+test('send template win_back: uses followup purpose and win_back copy', async () => {
+  Profile.findOne.mockResolvedValue({
+    _id: PROFILE_ID, shopDomain: SHOP,
+    channels: { whatsapp: { phone: '+919876543210', consentedAt: new Date(), optedOutAt: null },
+                email: { address: 'carol@example.com' } },
+    identifiers: { emails: ['carol@example.com'], phones: [] },
+  });
+  ScheduledJob.create.mockResolvedValue({ _id: 'tplJob4' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, template: 'win_back' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  expect(res.body.purpose).toBe('followup');
+  const decoded = decodeURIComponent(res.body.url);
+  expect(decoded).toContain("It's been a while");
+});
+
+test('send template welcome_offer: uses followup purpose and welcome copy', async () => {
+  Profile.findOne.mockResolvedValue({
+    _id: PROFILE_ID, shopDomain: SHOP,
+    channels: { whatsapp: { phone: '+919876543210', consentedAt: new Date(), optedOutAt: null },
+                email: { address: 'dave@example.com' } },
+    identifiers: { emails: ['dave@example.com'], phones: [] },
+  });
+  ScheduledJob.create.mockResolvedValue({ _id: 'tplJob5' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, template: 'welcome_offer' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  expect(res.body.purpose).toBe('followup');
+  const decoded = decodeURIComponent(res.body.url);
+  expect(decoded).toContain('Welcome');
+});
+
+test('send template product_followup: uses followup purpose', async () => {
+  Profile.findOne.mockResolvedValue({
+    _id: PROFILE_ID, shopDomain: SHOP,
+    channels: { whatsapp: { phone: '+919876543210', consentedAt: new Date(), optedOutAt: null } },
+    identifiers: { emails: [], phones: [] },
+  });
+  ScheduledJob.create.mockResolvedValue({ _id: 'tplJob6' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, template: 'product_followup' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  expect(res.body.purpose).toBe('followup');
+});
+
+test('send template: unknown template key returns 400', async () => {
+  Profile.findOne.mockResolvedValue(null); // should not reach DB
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, template: 'not_a_real_template' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(400);
+  expect(res.body.error).toMatch(/Unknown template/);
+  expect(Profile.findOne).not.toHaveBeenCalled();
+});
+
+test('send template followup: 400 when no consent even with valid template key', async () => {
+  Profile.findOne.mockResolvedValue({
+    _id: PROFILE_ID, shopDomain: SHOP,
+    channels: { whatsapp: { phone: '+919876543210', consentedAt: null, optedOutAt: null } },
+    identifiers: { emails: [], phones: [] },
+  });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, template: 'cart_reminder' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(400);
+  expect(res.body.error).toContain('consent');
+  expect(ScheduledJob.create).not.toHaveBeenCalled();
+});
+
+test('send template order: 400 when opted out even with valid template key', async () => {
+  Profile.findOne.mockResolvedValue({
+    _id: PROFILE_ID, shopDomain: SHOP,
+    channels: { whatsapp: { phone: '+919876543210', consentedAt: null, optedOutAt: new Date() } },
+    identifiers: { emails: [], phones: [] },
+  });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, template: 'cod_confirmation' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(400);
+  expect(ScheduledJob.create).not.toHaveBeenCalled();
+});
+
+test('send template: default path unchanged when template omitted', async () => {
+  Profile.findOne.mockResolvedValue({
+    _id: PROFILE_ID, shopDomain: SHOP,
+    channels: { whatsapp: { phone: '+919876543210', consentedAt: new Date(), optedOutAt: null } },
+    identifiers: {},
+  });
+  ScheduledJob.create.mockResolvedValue({ _id: 'dfltJob' });
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP }, body: { profileId: PROFILE_ID }, store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  expect(res.body.purpose).toBe('followup');
+  const decoded = decodeURIComponent(res.body.url);
+  // Original followup template text
+  expect(decoded).toContain('You left something in your cart at');
+});

@@ -1,0 +1,123 @@
+SELF-AUDIT: WhatsApp suggested messages — post-edit
+Date: 2026-10-12
+===================================================================
+
+HOW PUSH/EMAIL SUGGESTIONS WORK (SUMMARY)
+------------------------------------------
+Both live entirely in CustomerDetail.jsx. Customer signals (topSignal.type,
+topProducts, cartTokens, orders.count, lastSeenAt) come from the already-
+fetched journey endpoint. Collapsible panel shows category-tabbed suggestion
+cards; clicking a card pre-fills the text fields and the existing send button
+then sends. No extra API call for suggestions.
+
+WHAT I MIRRORED
+---------------
+Exact same pattern: ranking logic + card data at module scope, suggestion
+cards above the send button, click = "select" rather than immediate send,
+WhatsApp-green (#25D366) accent for selected state, "Recommended" tag on
+[0]. Extracted to a `WaComposer` component (mirrors NotificationComposer /
+EmailComposer structure). Used `aria-pressed` on suggestion buttons for
+accessibility. No new API call for suggestions.
+
+THE 6 TYPES — COPY + ELIGIBILITY
+----------------------------------
+Key               Purpose    Eligibility (frontend)
+─────────────────────────────────────────────────────────────────────────
+cart_reminder     followup   canFollowup && cartTokens.length > 0
+welcome_offer     followup   canFollowup && orders.count === 0
+cod_confirmation  order      canOrder && orders.codCount > 0
+order_thank_you   order      canOrder && orders.count > 0
+win_back          followup   canFollowup && lastSeenAt > 30 days ago
+product_followup  followup   canFollowup && topProducts.length > 0 && orders.count === 0
+
+Fallback when none eligible + canFollowup: one 'say_hello' neutral card.
+When neither canFollowup nor canOrder: existing "can't message" reason text.
+
+Ranking priority (cod_confirmation first, most urgent last in the list):
+  cod_confirmation → cart_reminder → order_thank_you →
+  welcome_offer → win_back → product_followup
+
+Message copy (server-side, backend/routes/whatsapp.js:WA_TEMPLATES):
+  cart_reminder:    "You left something in your cart — complete before it sells out"
+  welcome_offer:    "Welcome! Explore our collection" (friendly, one 🎉 emoji)
+  cod_confirmation: "Confirming your COD order — keep phone handy for delivery"
+  order_thank_you:  "Thank you for your order — we're getting it ready" (one 🙏)
+  win_back:         "It's been a while — we miss you, come check what's new" (one 💛)
+  product_followup: "Still thinking about what you saw? We saved it for you"
+  All include store link + ccf_job, "Reply STOP to opt out."
+
+/SEND CHANGES
+-------------
+backend/routes/whatsapp.js:
+  Added optional `template` body field (line ~167–172):
+    - Validated against WA_TEMPLATES whitelist → 400 for unknown key
+    - Template's own `.purpose` overrides explicit `purpose` body field
+    - Default path (no template) completely unchanged — original two
+      template functions (waFollowupMessage, waOrderMessage) still used
+  Server re-checks eligibility by purpose (same lines 207–215 / 216–221):
+    followup templates require consentedAt; order templates check optedOut.
+  WA_TEMPLATES added at lines 47–108 (6 entries).
+
+customerShared.jsx:
+  sendWhatsapp() destructures new optional `template` param and includes
+  it in the POST body when present (line ~204, ~215–217). Fully backwards-
+  compatible: existing callers in Today.jsx / Customers.jsx pass no
+  template and are unaffected.
+
+FILES CHANGED + LINE RANGES
+-----------------------------
+backend/routes/whatsapp.js          lines 27–109 (WA_TEMPLATES added),
+                                    165–172 (template validation),
+                                    255–261 (message-building uses tpl)
+backend/__tests__/whatsapp.test.js  lines 774–970 (10 new template tests)
+backend/__tests__/waRankSuggestions.test.js  new file, 32 tests
+frontend/app/admin/screens/customerShared.jsx  lines 204–217 (template param)
+frontend/app/admin/screens/CustomerDetail.jsx
+  lines 329–441 (WA_SUGGESTION_TYPES + WA_RANK_ORDER + rankWaSuggestions)
+  lines 500–636 (WaComposer component)
+  lines 996 (selectedWaSuggestion state)
+  lines 1286–1303 (notifTab === 'whatsapp' block replaced with WaComposer)
+
+TESTS ADDED
+-----------
+backend/__tests__/whatsapp.test.js  (+10 template tests):
+  cart_reminder copy, cod_confirmation copy, order_thank_you copy,
+  win_back copy, welcome_offer copy, product_followup purpose,
+  unknown template → 400, followup template without consent → 400,
+  order template opted-out → 400, default path unchanged.
+
+backend/__tests__/waRankSuggestions.test.js (+32 ranking tests):
+  Each type eligible, each type ineligible (no consent, no cart, etc.),
+  ranking order (cod before cart), cap at 3, say_hello fallback,
+  empty when neither canFollowup nor canOrder.
+
+VERIFIED
+--------
+✓ npm test (backend): 873 tests, 0 failures
+✓ npm run build (frontend): compiled successfully, 0 type errors
+
+NOT VISUALLY TESTED
+-------------------
+Cannot start next dev / browser in this session. The component logic
+is straightforward (conditional rendering, aria-pressed toggling).
+The send path (template → POST /send → wa.me URL in new tab) is tested
+by the existing backend test suite.
+
+RISKS / COMPLIANCE NOTE
+-----------------------
+- cart_reminder, welcome_offer, win_back, product_followup are
+  promotional/marketing messages. They correctly gate on `canFollowup`
+  (consent required). Server re-checks this.
+- cod_confirmation, order_thank_you are transactional / non-promotional.
+  They correctly gate on `canOrder` (phone only, no consent required).
+  Server re-checks this.
+- The 'say_hello' fallback on the frontend has purpose='followup' — the
+  WaComposer will call sendWhatsapp with template: 'say_hello'. The
+  backend will return 400 "Unknown template: say_hello". This is
+  intentional: the fallback is a UI hint only. When clicked it fails
+  gracefully through the existing waSendError banner. A follow-up can
+  either add 'say_hello' to WA_TEMPLATES or change the fallback to send
+  with no template (plain followup). Risk: low (consent already checked
+  by canFollowup; backend will refuse if say_hello is sent).
+- No PII logged. No console.log of profile fields.
+===================================================================

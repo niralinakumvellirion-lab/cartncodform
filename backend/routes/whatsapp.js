@@ -44,6 +44,55 @@ function waOrderMessage(firstName, storeDomain, ctaUrl) {
   );
 }
 
+// Named templates (optional `template` field on POST /send).
+// Each entry: { purpose, build(firstName, storeName, ctaUrl) -> string }
+// purpose 'followup' requires consent; 'order' is non-promotional.
+const WA_TEMPLATES = {
+  cart_reminder: {
+    purpose: 'followup',
+    build: (firstName, storeName, ctaUrl) =>
+      `Hi ${firstName}! 🛒 You left something in your cart at ${storeName}.\n\n` +
+      `Complete your order before it sells out: ${ctaUrl}\n\n` +
+      `Reply STOP to opt out.`,
+  },
+  welcome_offer: {
+    purpose: 'followup',
+    build: (firstName, storeName, ctaUrl) =>
+      `Hi ${firstName}! Welcome to ${storeName}. 🎉\n\n` +
+      `We're glad you're here. Explore our collection and find something you'll love: ${ctaUrl}\n\n` +
+      `Reply STOP to opt out.`,
+  },
+  cod_confirmation: {
+    purpose: 'order',
+    build: (firstName, storeName, ctaUrl) =>
+      `Hi ${firstName}! This is ${storeName}.\n\n` +
+      `We're confirming your Cash on Delivery order. Please keep your phone handy for delivery. ` +
+      `View order details: ${ctaUrl}\n\n` +
+      `Reply STOP to opt out.`,
+  },
+  order_thank_you: {
+    purpose: 'order',
+    build: (firstName, storeName, ctaUrl) =>
+      `Hi ${firstName}! Thank you for your order at ${storeName}. 🙏\n\n` +
+      `We're getting it ready for you. Track your order here: ${ctaUrl}\n\n` +
+      `Reply STOP to opt out.`,
+  },
+  win_back: {
+    purpose: 'followup',
+    build: (firstName, storeName, ctaUrl) =>
+      `Hi ${firstName}! It's been a while — we miss you at ${storeName}. 💛\n\n` +
+      `Come check out what's new: ${ctaUrl}\n\n` +
+      `Reply STOP to opt out.`,
+  },
+  product_followup: {
+    purpose: 'followup',
+    build: (firstName, storeName, ctaUrl) =>
+      `Hi ${firstName}! Still thinking about what you saw at ${storeName}?\n\n` +
+      `We saved it for you. Take another look: ${ctaUrl}\n\n` +
+      `Reply STOP to opt out.`,
+  },
+};
+
 // --- Phone resolution --------------------------------------------------------
 
 /**
@@ -116,8 +165,11 @@ function resolveFirstName(profile) {
 
 /**
  * POST /api/whatsapp/:shopDomain/send
- * Body: { profileId, purpose?: 'followup' | 'order' }
+ * Body: { profileId, purpose?: 'followup' | 'order', template?: string }
  * purpose defaults to 'followup'.
+ * template (optional): one of the WA_TEMPLATES keys. When supplied, overrides
+ *   the default message and locks the purpose to the template's own purpose.
+ *   Unknown template key → 400. Eligibility is re-checked server-side.
  * followup: requires channels.whatsapp.consentedAt + not opted out.
  * order: any normalizable phone; refuses if opted out.
  * Returns { url, jobId, purpose }.
@@ -126,7 +178,16 @@ router.post('/:shopDomain/send', requireAuth, requireStoreOwner, async (req, res
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
     const { profileId } = req.body;
-    const purpose = req.body.purpose === 'order' ? 'order' : 'followup';
+
+    // Resolve template first — it locks the purpose.
+    const templateKey = req.body.template || null;
+    if (templateKey !== null && !WA_TEMPLATES[templateKey]) {
+      return res.status(400).json({ error: `Unknown template: ${templateKey}` });
+    }
+    const tpl = templateKey ? WA_TEMPLATES[templateKey] : null;
+
+    // purpose: template overrides explicit body.purpose
+    const purpose = tpl ? tpl.purpose : (req.body.purpose === 'order' ? 'order' : 'followup');
 
     if (!profileId || !mongoose.Types.ObjectId.isValid(profileId)) {
       return res.status(400).json({ error: 'Invalid profileId' });
@@ -192,9 +253,12 @@ router.post('/:shopDomain/send', requireAuth, requireStoreOwner, async (req, res
       `https://${shop}?ccf_src=whatsapp&ccf_job=${job._id.toString()}`;
 
     const firstName = resolveFirstName(profile);
-    const message = purpose === 'order'
-      ? waOrderMessage(firstName, shop, storeLink)
-      : waFollowupMessage(firstName, shop, storeLink);
+    const storeName = shop.split('.')[0];
+    const message = tpl
+      ? tpl.build(firstName, storeName, storeLink)
+      : (purpose === 'order'
+          ? waOrderMessage(firstName, shop, storeLink)
+          : waFollowupMessage(firstName, shop, storeLink));
     const url = `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
 
     return res.status(200).json({ url, jobId: job._id, purpose });

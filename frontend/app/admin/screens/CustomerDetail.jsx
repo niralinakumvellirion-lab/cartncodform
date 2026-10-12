@@ -326,6 +326,118 @@ const EMAIL_SUGGESTIONS = [
   },
 ];
 
+// --- WhatsApp suggestion types -----------------------------------------------
+// Each type: { key, purpose, title, reason(customer), preview(customer),
+//             eligible(customer, waProfile) }
+// purpose 'followup' requires consent; 'order' is non-promotional.
+
+const WA_SUGGESTION_TYPES = [
+  {
+    key: 'cart_reminder',
+    purpose: 'followup',
+    title: 'Cart reminder',
+    reason: (c) => {
+      const cart = c?.profile?.identifiers?.cartTokens;
+      return cart?.length ? 'Has an abandoned cart' : 'Cart detected';
+    },
+    preview: () => "You left something in your cart — complete your order before it sells out.",
+    eligible: (c, wa) => !!(wa?.canFollowup && c?.profile?.identifiers?.cartTokens?.length > 0),
+  },
+  {
+    key: 'welcome_offer',
+    purpose: 'followup',
+    title: 'Welcome + offer',
+    reason: () => 'New subscriber, no order yet',
+    preview: () => "Welcome! We're glad you're here — explore our collection.",
+    eligible: (c, wa) => !!(wa?.canFollowup && (c?.profile?.orders?.count || 0) === 0),
+  },
+  {
+    key: 'cod_confirmation',
+    purpose: 'order',
+    title: 'COD order confirmation',
+    reason: () => 'Cash on Delivery order placed',
+    preview: () => "We're confirming your Cash on Delivery order — keep your phone handy for delivery.",
+    eligible: (c, wa) => !!(wa?.canOrder && (c?.profile?.orders?.codCount || 0) > 0),
+  },
+  {
+    key: 'order_thank_you',
+    purpose: 'order',
+    title: 'Order update / thank you',
+    reason: (c) => {
+      const last = c?.profile?.orders?.lastOrderAt;
+      if (!last) return 'Has a recent order';
+      const days = Math.floor((Date.now() - new Date(last)) / 86400000);
+      return days <= 1 ? 'Ordered today' : `Ordered ${days} day${days > 1 ? 's' : ''} ago`;
+    },
+    preview: () => "Thank you for your order! We're getting it ready for you.",
+    eligible: (c, wa) => !!(wa?.canOrder && (c?.profile?.orders?.count || 0) > 0),
+  },
+  {
+    key: 'win_back',
+    purpose: 'followup',
+    title: 'Win-back',
+    reason: (c) => {
+      const last = c?.profile?.lastSeenAt;
+      if (!last) return 'Not seen recently';
+      const days = Math.floor((Date.now() - new Date(last)) / 86400000);
+      return `Not seen for ${days} day${days !== 1 ? 's' : ''}`;
+    },
+    preview: () => "It's been a while — we miss you! Come check out what's new.",
+    eligible: (c, wa) => {
+      if (!wa?.canFollowup) return false;
+      const last = c?.profile?.lastSeenAt;
+      if (!last) return false;
+      return (Date.now() - new Date(last)) >= 30 * 86400000;
+    },
+  },
+  {
+    key: 'product_followup',
+    purpose: 'followup',
+    title: 'Product follow-up',
+    reason: (c) => {
+      const p = c?.topProducts?.[0]?.title;
+      return p && !/^\d+$/.test(p) ? `Viewed ${p}` : 'Viewed products, no purchase';
+    },
+    preview: () => "Still thinking about what you saw? We saved it for you.",
+    eligible: (c, wa) =>
+      !!(wa?.canFollowup && c?.topProducts?.length > 0 && (c?.profile?.orders?.count || 0) === 0),
+  },
+];
+
+/**
+ * rankWaSuggestions(customer, waProfile) → [recommended, ...alternatives]
+ * Returns 1–3 eligible suggestion objects, best first. If none are eligible,
+ * returns one neutral 'say_hello' placeholder (purpose: 'followup', needs consent)
+ * or an empty array when canFollowup is also false.
+ *
+ * Priority order (highest first):
+ *   cod_confirmation, cart_reminder, order_thank_you, welcome_offer,
+ *   win_back, product_followup
+ */
+const WA_RANK_ORDER = [
+  'cod_confirmation', 'cart_reminder', 'order_thank_you',
+  'welcome_offer', 'win_back', 'product_followup',
+];
+
+function rankWaSuggestions(customer, waProfile) {
+  const ranked = WA_RANK_ORDER
+    .map(key => WA_SUGGESTION_TYPES.find(t => t.key === key))
+    .filter(t => t && t.eligible(customer, waProfile));
+
+  if (ranked.length === 0 && waProfile?.canFollowup) {
+    return [{
+      key: 'say_hello',
+      purpose: 'followup',
+      title: 'Say hello',
+      reason: () => 'Subscriber with no specific signal',
+      preview: () => "Hi there! We have something special waiting for you in our store.",
+      eligible: () => true,
+    }];
+  }
+
+  return ranked.slice(0, 3);
+}
+
 // Product thumbnail shown next to product-specific suggestion cards,
 // shared by NotificationComposer and EmailComposer, and next to each row
 // in the "Most interested in" list.
@@ -382,6 +494,176 @@ function StatusPill({ outcome, status }) {
     }}>
       {s.label}
     </span>
+  );
+}
+
+function WaComposer({
+  customer, waProfile, shop, profileId,
+  sendWhatsapp, waSendError, waFallbackUrl, clearWaError,
+  selectedWaSuggestion, setSelectedWaSuggestion,
+  showWaOptOutConfirm, setShowWaOptOutConfirm, optOutWhatsapp, waOptingOut,
+}) {
+  const suggestions = rankWaSuggestions(customer, waProfile);
+  const selected = selectedWaSuggestion || suggestions[0] || null;
+
+  const WA_GREEN = '#25D366';
+  const WA_TEAL  = '#128C7E';
+
+  function handleSend() {
+    if (!selected) return;
+    // 'say_hello' is a frontend-only fallback; send without template key
+    // so the backend uses its default followup message.
+    const tpl = selected.key === 'say_hello' ? undefined : selected.key;
+    sendWhatsapp({ shopDomain: shop, profileId, purpose: selected.purpose, template: tpl });
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10,
+                  width: '100%', boxSizing: 'border-box' }}>
+
+      {/* Error / fallback banner */}
+      {(waSendError || waFallbackUrl) && (
+        <div style={{
+          padding: '8px 12px', borderRadius: 8, fontSize: 12,
+          background: waFallbackUrl ? '#f0fdf4' : '#fef2f2',
+          border: `1px solid ${waFallbackUrl ? '#bbf7d0' : '#fecaca'}`,
+          color: waFallbackUrl ? '#15803d' : '#b91c1c',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          {waFallbackUrl
+            ? <span>Popup blocked. <a href={waFallbackUrl} target="_blank" rel="noreferrer"
+                style={{ color: WA_TEAL, fontWeight: 600 }}>Open WhatsApp</a></span>
+            : <span>{waSendError}</span>}
+          <button onClick={clearWaError} aria-label="Dismiss"
+            style={{ background: 'none', border: 'none', cursor: 'pointer',
+                     fontSize: 15, color: '#9ca3af', padding: 0, lineHeight: 1 }}>×</button>
+        </div>
+      )}
+
+      {/* Suggestion cards */}
+      {suggestions.length > 0 && (
+        <div role="list" aria-label="Suggested messages"
+          style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {suggestions.map((s, i) => {
+            const isSel = selected?.key === s.key;
+            return (
+              <button
+                key={s.key}
+                role="listitem"
+                aria-pressed={isSel}
+                onClick={() => setSelectedWaSuggestion(s)}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left',
+                  padding: '10px 12px',
+                  background: isSel ? '#f0fdf4' : '#fff',
+                  border: `1.5px solid ${isSel ? WA_GREEN : '#e5e7eb'}`,
+                  borderRadius: 10, cursor: 'pointer',
+                  transition: 'border-color 0.15s, background 0.15s',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center',
+                              justifyContent: 'space-between', marginBottom: 3 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {i === 0 && (
+                      <span style={{
+                        fontSize: 9, fontWeight: 800, letterSpacing: '0.6px',
+                        background: WA_GREEN, color: '#fff',
+                        borderRadius: 4, padding: '1px 5px',
+                        textTransform: 'uppercase',
+                      }}>Recommended</span>
+                    )}
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#111827' }}>
+                      {s.title}
+                    </span>
+                  </div>
+                  {isSel && (
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                      stroke={WA_GREEN} strokeWidth="2.5" strokeLinecap="round"
+                      strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="20 6 9 17 4 12"/>
+                    </svg>
+                  )}
+                </div>
+                <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 4 }}>
+                  {s.reason(customer)}
+                </div>
+                <div style={{ fontSize: 11, color: '#374151', lineHeight: 1.4,
+                              fontStyle: 'italic' }}>
+                  "{s.preview(customer)}"
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Neither eligible */}
+      {!waProfile?.canFollowup && !waProfile?.canOrder && (
+        <div style={{ fontSize: 12, color: '#9ca3af', padding: '8px 0' }}>
+          {waProfile?.orderReason === 'opted_out' && 'Customer has opted out of WhatsApp messages.'}
+          {waProfile?.orderReason === 'no_phone' && 'No phone number on file.'}
+          {waProfile?.orderReason === 'invalid_phone' && 'Phone number could not be normalised to E.164.'}
+        </div>
+      )}
+
+      {/* Send button */}
+      {selected && (
+        <button
+          onClick={handleSend}
+          style={{
+            padding: '10px 14px', background: WA_GREEN, border: 'none',
+            borderRadius: 10, fontSize: 14, fontWeight: 700, color: '#fff',
+            cursor: 'pointer', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', gap: 6, width: '100%', boxSizing: 'border-box',
+          }}
+          aria-label={`Send WhatsApp: ${selected.title}`}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+            strokeLinejoin="round" aria-hidden="true">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+          </svg>
+          Send via WhatsApp
+        </button>
+      )}
+
+      {/* Remove from WhatsApp */}
+      {waProfile?.whatsapp?.consentedAt && !showWaOptOutConfirm && (
+        <button
+          onClick={() => setShowWaOptOutConfirm(true)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12,
+                   color: '#9ca3af', textAlign: 'left', padding: 0, marginTop: 2 }}
+          aria-label="Remove customer from WhatsApp list"
+        >
+          Remove from WhatsApp
+        </button>
+      )}
+      {showWaOptOutConfirm && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                      background: '#fef2f2', borderRadius: 8, border: '1px solid #fecaca' }}>
+          <span style={{ fontSize: 12, color: '#b91c1c', flex: 1 }}>Remove and opt out?</span>
+          <button
+            onClick={optOutWhatsapp}
+            disabled={waOptingOut}
+            style={{ padding: '4px 10px', background: '#dc2626', border: 'none', borderRadius: 6,
+                     fontSize: 12, fontWeight: 600, color: '#fff',
+                     cursor: waOptingOut ? 'not-allowed' : 'pointer' }}
+            aria-label="Confirm opt-out"
+          >
+            {waOptingOut ? 'Removing…' : 'Yes, remove'}
+          </button>
+          <button
+            onClick={() => setShowWaOptOutConfirm(false)}
+            style={{ padding: '4px 8px', background: '#f3f4f6', border: 'none', borderRadius: 6,
+                     fontSize: 12, fontWeight: 600, color: '#374151', cursor: 'pointer' }}
+            aria-label="Cancel opt-out"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -872,6 +1154,7 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
   const [waProfileLoading, setWaProfileLoading] = useState(false);
   const [showWaOptOutConfirm, setShowWaOptOutConfirm] = useState(false);
   const [waOptingOut, setWaOptingOut] = useState(false);
+  const [selectedWaSuggestion, setSelectedWaSuggestion] = useState(null);
   const { sendWhatsapp, waError: waSendError, waFallbackUrl, clearWaError } = useWhatsapp();
 
   // "Notifications sent" section — every ScheduledJob for this customer
@@ -1171,104 +1454,22 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
           onError={(err) => setSendResult('Error: ' + err)} />
       )}
       {notifTab === 'whatsapp' && canWa && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* WA send error / fallback */}
-          {(waSendError || waFallbackUrl) && (
-            <div style={{
-              padding: '8px 12px', borderRadius: 8, fontSize: 12,
-              background: waFallbackUrl ? '#f0fdf4' : '#fef2f2',
-              border: `1px solid ${waFallbackUrl ? '#bbf7d0' : '#fecaca'}`,
-              color: waFallbackUrl ? '#15803d' : '#b91c1c',
-              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            }}>
-              {waFallbackUrl
-                ? <span>Popup blocked. <a href={waFallbackUrl} target="_blank" rel="noreferrer" style={{ color: '#128C7E', fontWeight: 600 }}>Open WhatsApp</a></span>
-                : <span>{waSendError}</span>}
-              <button onClick={clearWaError} aria-label="Dismiss" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 15, color: '#9ca3af', padding: 0, lineHeight: 1 }}>×</button>
-            </div>
-          )}
-
-          {/* Primary: followup button */}
-          {waProfile?.canFollowup && (
-            <button
-              onClick={() => sendWhatsapp({ shopDomain: shop, profileId, purpose: 'followup' })}
-              style={{ padding: '10px 14px', background: '#25D366', border: 'none', borderRadius: 10,
-                       fontSize: 14, fontWeight: 700, color: '#fff', cursor: 'pointer',
-                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-              aria-label="Send WhatsApp follow-up message"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-              </svg>
-              WhatsApp
-            </button>
-          )}
-
-          {/* Secondary: order message (shown when canFollowup + canOrder, or when only canOrder) */}
-          {waProfile?.canOrder && (
-            <button
-              onClick={() => sendWhatsapp({ shopDomain: shop, profileId, purpose: 'order' })}
-              style={{ padding: '9px 14px', background: '#fff', border: '1px solid #86efac',
-                       borderRadius: 10, fontSize: 13, fontWeight: 600,
-                       color: '#128C7E', cursor: 'pointer',
-                       display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-              aria-label="Send WhatsApp order message"
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-              </svg>
-              {waProfile.canFollowup ? 'Order message' : 'WhatsApp (order message)'}
-            </button>
-          )}
-
-          {/* Neither case */}
-          {!waProfile?.canFollowup && !waProfile?.canOrder && (
-            <div style={{ fontSize: 12, color: '#9ca3af', padding: '8px 0' }}>
-              {waProfile?.orderReason === 'opted_out' && 'Customer has opted out of WhatsApp messages.'}
-              {waProfile?.orderReason === 'no_phone' && 'No phone number on file.'}
-              {waProfile?.orderReason === 'invalid_phone' && 'Phone number could not be normalised to E.164.'}
-            </div>
-          )}
-
-          {/* Remove from WhatsApp */}
-          {waProfile?.whatsapp?.consentedAt && !showWaOptOutConfirm && (
-            <button
-              onClick={() => setShowWaOptOutConfirm(true)}
-              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12,
-                       color: '#9ca3af', textAlign: 'left', padding: 0, marginTop: 2 }}
-              aria-label="Remove customer from WhatsApp list"
-            >
-              Remove from WhatsApp
-            </button>
-          )}
-          {showWaOptOutConfirm && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
-                          background: '#fef2f2', borderRadius: 8, border: '1px solid #fecaca' }}>
-              <span style={{ fontSize: 12, color: '#b91c1c', flex: 1 }}>
-                Remove and opt out?
-              </span>
-              <button
-                onClick={optOutWhatsapp}
-                disabled={waOptingOut}
-                style={{ padding: '4px 10px', background: '#dc2626', border: 'none', borderRadius: 6,
-                         fontSize: 12, fontWeight: 600, color: '#fff', cursor: waOptingOut ? 'not-allowed' : 'pointer' }}
-                aria-label="Confirm opt-out"
-              >
-                {waOptingOut ? 'Removing…' : 'Yes, remove'}
-              </button>
-              <button
-                onClick={() => setShowWaOptOutConfirm(false)}
-                style={{ padding: '4px 8px', background: '#f3f4f6', border: 'none', borderRadius: 6,
-                         fontSize: 12, fontWeight: 600, color: '#374151', cursor: 'pointer' }}
-                aria-label="Cancel opt-out"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-        </div>
+        <WaComposer
+          customer={customer}
+          waProfile={waProfile}
+          shop={shop}
+          profileId={profileId}
+          sendWhatsapp={sendWhatsapp}
+          waSendError={waSendError}
+          waFallbackUrl={waFallbackUrl}
+          clearWaError={clearWaError}
+          selectedWaSuggestion={selectedWaSuggestion}
+          setSelectedWaSuggestion={setSelectedWaSuggestion}
+          showWaOptOutConfirm={showWaOptOutConfirm}
+          setShowWaOptOutConfirm={setShowWaOptOutConfirm}
+          optOutWhatsapp={optOutWhatsapp}
+          waOptingOut={waOptingOut}
+        />
       )}
       <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8,
                     display: 'flex', alignItems: 'center', gap: 4 }}>
