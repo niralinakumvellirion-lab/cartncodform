@@ -4,8 +4,11 @@ const mongoose = require('mongoose');
 const Profile = require('../models/Profile');
 const ScheduledJob = require('../models/ScheduledJob');
 const AttributedEvent = require('../models/AttributedEvent');
+const StorefrontEvent = require('../models/StorefrontEvent');
+const ProductImageCache = require('../models/ProductImageCache');
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
 const { toWaDigits, normalizePhone } = require('../utils/phone');
+const { normalizeImageUrl } = require('../utils/productImage');
 
 // Timezone → ISO 3166-1 alpha-2 country code for phone normalisation.
 // Defaults to 'IN' for anything not listed.
@@ -161,6 +164,102 @@ function resolveFirstName(profile) {
   return local.charAt(0).toUpperCase() + local.slice(1);
 }
 
+// --- Product helpers ---------------------------------------------------------
+
+function extractHandle(path) {
+  if (typeof path !== 'string') return null;
+  const m = /\/products\/([^/?#]+)/.exec(path);
+  return m ? m[1].toLowerCase() : null;
+}
+
+function isProxiedUrl(url) {
+  return typeof url === 'string' && /^https?:\/\/[^/]+\.myshopify\.com\/cdn\//i.test(url);
+}
+
+/**
+ * Returns up to 3 products (viewed or in cart) for this profile in the last
+ * 30 days, most recent first. Requires no Admin API call — cache + event
+ * imageUrl only, so it stays fast for the profile endpoint.
+ */
+async function resolveRecentProducts(shop, profile) {
+  const sessionIds = (profile.identifiers && profile.identifiers.sessionIds) || [];
+  const cartTokens = (profile.identifiers && profile.identifiers.cartTokens) || [];
+  if (!sessionIds.length && !cartTokens.length) return [];
+
+  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const events = await StorefrontEvent.find({
+    shopDomain: shop,
+    sessionId: { $in: [...sessionIds, ...cartTokens] },
+    type: { $in: ['product_view', 'add_to_cart'] },
+    ts: { $gte: since },
+    'meta.productId': { $exists: true, $ne: null },
+  })
+    .sort({ ts: -1 })
+    .limit(100)
+    .select('type path meta ts')
+    .lean();
+
+  const byProduct = {};
+  for (const e of events) {
+    const pid = e.meta && e.meta.productId;
+    if (!pid) continue;
+    const key = String(pid);
+    if (!byProduct[key]) {
+      byProduct[key] = {
+        productId: key,
+        title: (e.meta && e.meta.productTitle) || null,
+        handle: extractHandle(e.path),
+        imageUrl: null,
+        lastViewedAt: e.ts,
+        source: e.type === 'product_view' ? 'viewed' : 'cart',
+      };
+    }
+    if (e.ts > byProduct[key].lastViewedAt) byProduct[key].lastViewedAt = e.ts;
+    if (e.type === 'product_view') byProduct[key].source = 'viewed';
+    if (!byProduct[key].title && e.meta && e.meta.productTitle) {
+      byProduct[key].title = e.meta.productTitle;
+    }
+    if (!byProduct[key].handle) byProduct[key].handle = extractHandle(e.path);
+    if (e.type === 'product_view' && e.meta && e.meta.imageUrl && !byProduct[key].imageUrl) {
+      const img = normalizeImageUrl(e.meta.imageUrl);
+      if (img && !isProxiedUrl(img)) byProduct[key].imageUrl = img;
+    }
+  }
+
+  const sorted = Object.values(byProduct)
+    .filter((p) => p.handle)
+    .sort((a, b) => new Date(b.lastViewedAt) - new Date(a.lastViewedAt))
+    .slice(0, 3);
+
+  if (!sorted.length) return [];
+
+  const pids = sorted.map((p) => p.productId);
+  const cached = await ProductImageCache.find({ shopDomain: shop, productId: { $in: pids } })
+    .select('productId imageUrl')
+    .lean();
+  const imageMap = {};
+  cached.forEach((c) => {
+    const img = normalizeImageUrl(c.imageUrl);
+    if (img && !isProxiedUrl(img)) imageMap[String(c.productId)] = img;
+  });
+
+  return sorted.map((p) => ({
+    handle: p.handle,
+    title: p.title,
+    imageUrl: imageMap[p.productId] || p.imageUrl || null,
+    url: `https://${shop}/products/${p.handle}`,
+    lastViewedAt: p.lastViewedAt,
+    source: p.source,
+  }));
+}
+
+function applyProductPlaceholder(text, productTitle) {
+  if (!productTitle) {
+    return text.replace(/\s*\{product\}\s*/g, ' ').replace(/ {2,}/g, ' ').trim();
+  }
+  return text.replace(/\{product\}/g, productTitle);
+}
+
 // --- Routes ------------------------------------------------------------------
 
 /**
@@ -256,6 +355,29 @@ router.post('/:shopDomain/send', requireAuth, requireStoreOwner, async (req, res
       return res.status(400).json({ error: 'Invalid phone number on profile' });
     }
 
+    // Resolve product handle: validate against recent events (server re-checks).
+    const rawHandle = typeof req.body.productHandle === 'string' && req.body.productHandle.trim()
+      ? req.body.productHandle.trim().toLowerCase()
+      : null;
+
+    const recentProducts = await resolveRecentProducts(shop, profile);
+
+    let selectedHandle = null;
+    if (rawHandle) {
+      const found = recentProducts.find((p) => p.handle === rawHandle);
+      if (!found) {
+        return res.status(400).json({ error: 'Product not in recent views for this customer' });
+      }
+      selectedHandle = rawHandle;
+    } else {
+      // Auto-pick most recently viewed product; null → home URL (as before).
+      selectedHandle = recentProducts.length > 0 ? recentProducts[0].handle : null;
+    }
+
+    const productTitle = selectedHandle
+      ? (recentProducts.find((p) => p.handle === selectedHandle) || {}).title || null
+      : null;
+
     // Create directly as 'sent' — never pending, so the poller never picks it up.
     const job = await ScheduledJob.create({
       shopDomain: shop,
@@ -267,28 +389,32 @@ router.post('/:shopDomain/send', requireAuth, requireStoreOwner, async (req, res
       stepIndex: 0,
       ruleId: null,
       purpose,
+      productHandle: selectedHandle || null,
     });
 
-    const storeLink =
-      `https://${shop}?ccf_src=whatsapp&ccf_job=${job._id.toString()}`;
+    // ctaUrl: product page when a product is selected, store home otherwise.
+    const ctaUrl = selectedHandle
+      ? `https://${shop}/products/${selectedHandle}?ccf_src=whatsapp&ccf_job=${job._id.toString()}`
+      : `https://${shop}?ccf_src=whatsapp&ccf_job=${job._id.toString()}`;
 
     const firstName = resolveFirstName(profile);
     const storeName = shop.split('.')[0];
 
     let message;
     if (customMessage) {
-      // Custom text: server appends storeLink on its own line unless already present.
-      const body = customMessage.includes(storeLink)
+      // Custom text: server appends ctaUrl on its own line unless already present.
+      const body = customMessage.includes(ctaUrl)
         ? customMessage
-        : `${customMessage}\n\n${storeLink}`;
-      message = body;
+        : `${customMessage}\n\n${ctaUrl}`;
+      message = applyProductPlaceholder(body, productTitle);
     } else {
-      // Default template path — unchanged behaviour.
-      message = tpl
-        ? tpl.build(firstName, storeName, storeLink)
+      // Default template path.
+      const raw = tpl
+        ? tpl.build(firstName, storeName, ctaUrl)
         : (purpose === 'order'
-            ? waOrderMessage(firstName, shop, storeLink)
-            : waFollowupMessage(firstName, shop, storeLink));
+            ? waOrderMessage(firstName, shop, ctaUrl)
+            : waFollowupMessage(firstName, shop, ctaUrl));
+      message = applyProductPlaceholder(raw, productTitle);
     }
 
     // Store final sent text (never log message bodies to console).
@@ -497,11 +623,13 @@ router.post('/:shopDomain/opt-out', requireAuth, requireStoreOwner, async (req, 
 /**
  * GET /api/whatsapp/:shopDomain/profile/:profileId
  * Returns:
- *   { whatsapp, messages, canFollowup, canOrder, orderReason }
+ *   { whatsapp, messages, canFollowup, canOrder, orderReason, recentProducts }
  * canFollowup: true when consented and not opted out.
  * canOrder: true when a normalizable phone exists and not opted out.
  * orderReason: null | 'opted_out' | 'no_phone' | 'invalid_phone'
- * Each message includes its purpose field.
+ * recentProducts: up to 3 [{handle, title, imageUrl, url, lastViewedAt, source}]
+ *   from product_view / add_to_cart events in the last 30 days, most recent first.
+ *   Home/collection-only visitors return [].
  */
 router.get('/:shopDomain/profile/:profileId', requireAuth, requireStoreOwner, async (req, res) => {
   try {
@@ -544,7 +672,9 @@ router.get('/:shopDomain/profile/:profileId', requireAuth, requireStoreOwner, as
       }
     }
 
-    return res.json({ whatsapp: wa, messages: waMessages, canFollowup, canOrder, orderReason });
+    const recentProducts = await resolveRecentProducts(shop, profile);
+
+    return res.json({ whatsapp: wa, messages: waMessages, canFollowup, canOrder, orderReason, recentProducts });
   } catch (err) {
     console.error('[whatsapp] GET /profile/:profileId error:', err.message);
     return res.status(500).json({ error: 'Failed to fetch WhatsApp profile data' });

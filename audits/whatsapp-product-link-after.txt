@@ -1,0 +1,152 @@
+SELF-AUDIT: WhatsApp product link preview — post-edit
+Date: 2026-10-12
+===================================================================
+
+STEP 0 FINDINGS (recap)
+------------------------
+Pre-audit confirmed: product_view data IS recorded via StorefrontEvent
+(type, path, meta.productId, meta.productTitle, meta.imageUrl), handle
+extractable from StorefrontEvent.path, ProductImageCache resolves images
+by productId, store domain is *.myshopify.com (redirect preserves ccf_job).
+No new storefront tracking required. Proceeded to Step 1.
+
+
+BACKEND CHANGES (Step 1)
+========================
+
+backend/models/ScheduledJob.js
+  + productHandle: { type: String, default: null }
+    Stored on every WhatsApp job; null for home-URL sends.
+
+backend/routes/whatsapp.js
+  + require('../models/StorefrontEvent')
+  + require('../models/ProductImageCache')
+  + require('../utils/productImage').normalizeImageUrl
+
+  New helpers (all pure / no side effects outside of DB reads):
+    extractHandle(path)          — /products/{handle} → 'handle', null otherwise
+    isProxiedUrl(url)            — detects *.myshopify.com/cdn/ URLs (skip in imageUrl)
+    resolveRecentProducts(shop, profile) → up to 3 products, most recent first:
+      - Queries StorefrontEvent by sessionIds + cartTokens, last 30 days
+      - Dedupes by productId, keeps best title + handle per product
+      - Filters proxied imageUrls; overlays ProductImageCache if available
+      - Returns [] when no sessions on profile (home-only visitors)
+    applyProductPlaceholder(text, productTitle)
+      - Replaces {product} with productTitle
+      - Removes {product} cleanly (no extra spaces) when productTitle is null
+
+  GET /:shopDomain/profile/:profileId:
+    + Calls resolveRecentProducts(shop, profile)
+    + Adds recentProducts to response JSON
+
+  POST /:shopDomain/send:
+    + Reads req.body.productHandle (string | absent)
+    + Calls resolveRecentProducts(shop, profile)
+    + Validates rawHandle against recentProducts → 400 if not found
+    + Auto-picks recentProducts[0] when no handle supplied
+    + Builds ctaUrl: /products/{handle}?ccf_src=whatsapp&ccf_job={id}
+      or home URL when no product
+    + Applies applyProductPlaceholder(message, productTitle)
+    + Stores productHandle on ScheduledJob.create
+    + Renamed storeLink → ctaUrl throughout POST /send
+
+SECURITY INVARIANTS HELD:
+  ✓ Server builds URL — never accepts a URL from the client
+  ✓ productHandle validated against recentProducts (server re-fetches)
+  ✓ No PII in console.log
+  ✓ requireAuth + requireStoreOwner on all routes (unchanged)
+  ✓ Scoped by shopDomain throughout
+
+
+FRONTEND CHANGES (Step 2)
+==========================
+
+frontend/app/admin/screens/customerShared.jsx
+  + sendWhatsapp accepts productHandle; passes it in body when truthy
+
+frontend/app/admin/screens/CustomerDetail.jsx
+  + selectedProduct / setSelectedProduct state in parent
+  + loadWaProfile sets selectedProduct to recentProducts[0] on load
+    (null when no products or error)
+  + selectedProduct / setSelectedProduct passed to WaComposer
+  + New ProductThumb component: renders product image with fallback
+    placeholder (image icon SVG) on load error — no layout shift
+  + WaComposer accepts selectedProduct / setSelectedProduct props
+  + WaComposer: product selector shown when recentProducts.length > 0
+    - Thumbnail chips for each product (up to 3)
+    - "Store home" chip for the null-product option
+    - Selected chip highlighted green (WA_GREEN border + light bg)
+    - Image inline in chip (16px); onError hides image silently
+  + WaComposer: link preview card shown when selectedProduct is not null
+    - ProductThumb (40px) + product title + store name
+    - "Link preview" badge
+  + WaComposer: link note updated
+    - With product: "Product link added: {title} — opens product page..."
+    - Without product: original store link copy
+  + handleSend passes productHandle: selectedProduct?.handle || null
+
+
+TESTS (Step 1)
+==============
+
+backend/__tests__/whatsapp.test.js
+  + top-level jest.mock for StorefrontEvent, ProductImageCache,
+    normalizeImageUrl (utils/productImage)
+  + main beforeEach: full chain mock for StorefrontEvent.find
+    (sort/limit/select/lean all mockReturnThis; lean resolves [])
+  + main beforeEach: chain mock for ProductImageCache.find
+    (select/lean; lean resolves [])
+  + GDPR beforeEach: StorefrontEvent.find upgraded to same full chain
+    (fixes TypeError: .sort is not a function in GDPR section tests)
+  + mockProfileChain() helper for profileHandler tests (.select().lean())
+  + PROFILED_CONSENTED_DATA fixture (includes sessionIds)
+  + 12 new tests:
+    GET /profile: recentProducts empty when no product events
+    GET /profile: recentProducts returns viewed products
+    GET /profile: recentProducts uses cache imageUrl over event imageUrl
+    GET /profile: skips proxied myshopify.com/cdn/ event imageUrls
+    GET /profile: home-only visitor has no recentProducts
+    productHandle: home URL used when no products in last 30 days
+    productHandle: unknown handle → 400
+    productHandle: client-supplied full URL is ignored
+    productHandle: {product} placeholder removed cleanly when no product
+    productHandle: 30-day cutoff
+    productHandle: product URL has correct path and ccf params
+    productHandle: productHandle stored on ScheduledJob
+
+
+VERIFIED
+=========
+✓ npm test (backend): 900 tests, 0 failures (12 new)
+✓ npm run build (frontend): compiled successfully, 0 errors/warnings
+
+
+NOT VISUALLY TESTED
+--------------------
+No dev server in this session. Product selector chip interaction,
+ProductThumb error fallback, link preview card render, and link note
+text swap are logic-correct but not visually tested.
+
+
+RISKS
+======
+1. ProductThumb in product selector chip (16px): if no imageUrl is
+   available for a product, the placeholder div (16x16 grey square)
+   renders. The chip layout uses flex so the size is fixed — no layout
+   shift. ✓
+
+2. recentProducts populated at load time: if the customer views a new
+   product AFTER the CustomerDetail page loaded, the selector won't
+   reflect it until the page is refreshed. This is acceptable for the
+   current version.
+
+3. Auto-picked product (recentProducts[0]) may surprise some sellers
+   if the most recently viewed product is unrelated to the current
+   cart. The seller can override by clicking a different chip or
+   "Store home". ✓
+
+4. {product} placeholder: only removed from the message text — not
+   from the message template definitions in WA_TEMPLATE_BODY (which
+   don't currently use it). The applyProductPlaceholder post-process
+   step is a no-op on templates without the placeholder. ✓
+===================================================================

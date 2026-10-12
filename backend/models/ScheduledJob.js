@@ -47,6 +47,7 @@ const scheduledJobSchema = new mongoose.Schema({
   error: { type: String },
   purpose: { type: String, default: 'followup' }, // 'followup' | 'order' for whatsapp jobs
   messageText: { type: String, default: null }, // final sent text for whatsapp jobs (max 1000)
+  productHandle: { type: String, default: null }, // Shopify product handle used in the ctaUrl
 }, { timestamps: true });
 
 // Compound index for the sender's poll query.

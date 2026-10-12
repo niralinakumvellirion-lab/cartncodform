@@ -18,6 +18,20 @@ jest.mock('../models/ScheduledJob', () => ({
   updateMany: jest.fn(),
   updateOne: jest.fn(),
 }));
+jest.mock('../models/StorefrontEvent', () => ({
+  deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
+  find: jest.fn(),
+}));
+jest.mock('../models/ProductImageCache', () => ({
+  find: jest.fn(),
+}));
+jest.mock('../utils/productImage', () => ({
+  normalizeImageUrl: jest.fn((url) => {
+    if (!url || typeof url !== 'string') return null;
+    if (url.startsWith('//')) url = `https:${url}`;
+    return /^https?:\/\//i.test(url) ? url : null;
+  }),
+}));
 jest.mock('../models/AttributedEvent', () => ({
   find: jest.fn(),
 }));
@@ -55,6 +69,8 @@ const ScheduledJob = require('../models/ScheduledJob');
 const AttributedEvent = require('../models/AttributedEvent');
 const CodOrder = require('../models/CodOrder');
 const AbandonedCustomer = require('../models/AbandonedCustomer');
+const StorefrontEvent = require('../models/StorefrontEvent');
+const ProductImageCache = require('../models/ProductImageCache');
 const { upsertProfile } = require('../services/profileService');
 const whatsappRouter = require('../routes/whatsapp');
 const { generateDiscount } = require('../routes/discounts');
@@ -94,6 +110,17 @@ beforeEach(() => {
   CodOrder.find.mockReturnValue({ lean: emptyLean, select: jest.fn().mockReturnValue(emptyChain) });
   AbandonedCustomer.find.mockReturnValue({ lean: emptyLean, select: jest.fn().mockReturnValue(emptyChain) });
   ScheduledJob.updateOne.mockResolvedValue({});
+  // Default: no product events (home-only visitor), no cached images.
+  StorefrontEvent.find.mockReturnValue({
+    sort: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([]),
+  });
+  ProductImageCache.find.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([]),
+  });
 });
 afterEach(() => jest.restoreAllMocks());
 
@@ -494,10 +521,6 @@ jest.mock('../utils/shopify', () => ({
   verifyWebhookHmac: jest.fn().mockReturnValue(true),
   verifyProxySignature: jest.fn().mockReturnValue(true),
 }));
-jest.mock('../models/StorefrontEvent', () => ({
-  deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
-  find: jest.fn(),
-}));
 jest.mock('../models/CustomerPushSubscription', () => ({ deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) }));
 jest.mock('../models/PushClick', () => ({ deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) }));
 
@@ -525,13 +548,15 @@ function makeGdprReq(topic, body) {
   };
 }
 
-const StorefrontEvent = require('../models/StorefrontEvent');
 beforeEach(() => {
   jest.spyOn(console, 'log').mockImplementation(() => {});
   Profile.find.mockReturnValue({ lean: jest.fn().mockResolvedValue([]) });
   AbandonedCustomer.deleteMany.mockResolvedValue({ deletedCount: 0 });
   StorefrontEvent.find.mockReturnValue({
-    limit: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
+    sort: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([]),
   });
   ScheduledJob.find.mockReturnValue({
     limit: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
@@ -1220,4 +1245,389 @@ test('default path: messageText still stored (template path)', async () => {
     { _id: 'dfltStore' },
     { $set: { messageText: expect.stringContaining('ccf_job=dfltStore') } }
   );
+});
+
+// ---------------------------------------------------------------------------
+// GET /profile/:profileId — recentProducts field
+// ---------------------------------------------------------------------------
+
+// Helper: sets up Profile.findOne with the .select().lean() chain (used by profileHandler)
+function mockProfileChain(profileData) {
+  Profile.findOne.mockReturnValue({
+    select: jest.fn().mockReturnValue({
+      lean: jest.fn().mockResolvedValue(profileData),
+    }),
+  });
+}
+
+const PROFILED_CONSENTED_DATA = {
+  _id: '507f1f77bcf86cd799439011',
+  shopDomain: SHOP,
+  channels: {
+    whatsapp: { phone: '+919876543210', consentedAt: new Date(), optedOutAt: null },
+    email: { address: 'alice@example.com' },
+  },
+  identifiers: { emails: ['alice@example.com'], phones: [], sessionIds: ['sess-abc'], cartTokens: [] },
+  messages: [],
+};
+
+test('GET /profile: recentProducts empty when no product events', async () => {
+  mockProfileChain(PROFILED_CONSENTED_DATA);
+  // StorefrontEvent.find already returns [] by default (beforeEach)
+
+  const res = mockRes();
+  await profileHandler(
+    { params: { shopDomain: SHOP, profileId: PROFILE_ID }, store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  expect(res.body.recentProducts).toEqual([]);
+});
+
+test('GET /profile: recentProducts returns viewed products', async () => {
+  mockProfileChain(PROFILED_CONSENTED_DATA);
+  StorefrontEvent.find.mockReturnValue({
+    sort: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([
+      {
+        type: 'product_view',
+        path: '/products/blue-widget',
+        meta: { productId: '111', productTitle: 'Blue Widget', imageUrl: 'https://cdn.shopify.com/img.jpg' },
+        ts: new Date('2026-10-10T12:00:00Z'),
+      },
+    ]),
+  });
+
+  const res = mockRes();
+  await profileHandler(
+    { params: { shopDomain: SHOP, profileId: PROFILE_ID }, store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  expect(res.body.recentProducts).toHaveLength(1);
+  expect(res.body.recentProducts[0].handle).toBe('blue-widget');
+  expect(res.body.recentProducts[0].title).toBe('Blue Widget');
+  expect(res.body.recentProducts[0].source).toBe('viewed');
+});
+
+test('GET /profile: recentProducts uses cache imageUrl over event imageUrl', async () => {
+  mockProfileChain(PROFILED_CONSENTED_DATA);
+  StorefrontEvent.find.mockReturnValue({
+    sort: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([
+      {
+        type: 'product_view',
+        path: '/products/red-shirt',
+        meta: { productId: '222', productTitle: 'Red Shirt', imageUrl: 'https://cdn.shopify.com/event.jpg' },
+        ts: new Date('2026-10-09T00:00:00Z'),
+      },
+    ]),
+  });
+  ProductImageCache.find.mockReturnValue({
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([
+      { productId: '222', imageUrl: 'https://cdn.shopify.com/cached.jpg' },
+    ]),
+  });
+
+  const res = mockRes();
+  await profileHandler(
+    { params: { shopDomain: SHOP, profileId: PROFILE_ID }, store: STORE },
+    res
+  );
+
+  expect(res.body.recentProducts[0].imageUrl).toBe('https://cdn.shopify.com/cached.jpg');
+});
+
+test('GET /profile: skips proxied myshopify.com/cdn/ event imageUrls', async () => {
+  mockProfileChain(PROFILED_CONSENTED_DATA);
+  StorefrontEvent.find.mockReturnValue({
+    sort: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([
+      {
+        type: 'product_view',
+        path: '/products/green-hat',
+        meta: {
+          productId: '333', productTitle: 'Green Hat',
+          imageUrl: 'https://demo.myshopify.com/cdn/shop/products/hat.jpg',
+        },
+        ts: new Date('2026-10-08T00:00:00Z'),
+      },
+    ]),
+  });
+
+  const res = mockRes();
+  await profileHandler(
+    { params: { shopDomain: SHOP, profileId: PROFILE_ID }, store: STORE },
+    res
+  );
+
+  // imageUrl should be null (proxied URL rejected, no cache hit)
+  expect(res.body.recentProducts[0].imageUrl).toBeNull();
+  expect(res.body.recentProducts[0].handle).toBe('green-hat');
+});
+
+test('GET /profile: home-only visitor has no recentProducts', async () => {
+  mockProfileChain({
+    ...PROFILED_CONSENTED_DATA,
+    identifiers: { sessionIds: ['sess-home'], cartTokens: [], emails: [], phones: [] },
+  });
+  // StorefrontEvent returns only page_view events (no product_view with productId)
+  StorefrontEvent.find.mockReturnValue({
+    sort: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([
+      { type: 'page_view', path: '/', meta: {}, ts: new Date() },
+    ]),
+  });
+
+  const res = mockRes();
+  await profileHandler(
+    { params: { shopDomain: SHOP, profileId: PROFILE_ID }, store: STORE },
+    res
+  );
+
+  // page_view has no productId → filtered out → empty
+  expect(res.body.recentProducts).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
+// POST /send — productHandle field
+// ---------------------------------------------------------------------------
+
+const SEND_CONSENTED = {
+  _id: PROFILE_ID,
+  shopDomain: SHOP,
+  channels: {
+    whatsapp: { phone: '+919876543210', consentedAt: new Date(), optedOutAt: null },
+    email: { address: 'alice@example.com' },
+  },
+  identifiers: { emails: ['alice@example.com'], phones: [], sessionIds: ['sess-send'], cartTokens: [] },
+  messages: [],
+};
+
+function mockProductEvent(handle, productId) {
+  StorefrontEvent.find.mockReturnValue({
+    sort: jest.fn().mockReturnThis(),
+    limit: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    lean: jest.fn().mockResolvedValue([
+      {
+        type: 'product_view',
+        path: `/products/${handle}`,
+        meta: { productId, productTitle: `${handle} title`, imageUrl: null },
+        ts: new Date('2026-10-10T12:00:00Z'),
+      },
+    ]),
+  });
+}
+
+test('productHandle: auto-picks most recent product URL when no handle given', async () => {
+  Profile.findOne.mockResolvedValue(SEND_CONSENTED);
+  ScheduledJob.create.mockResolvedValue({ _id: 'autoPick' });
+  mockProductEvent('cool-widget', '999');
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  const decoded = decodeURIComponent(res.body.url);
+  expect(decoded).toContain('/products/cool-widget');
+  expect(decoded).toContain('ccf_job=autoPick');
+});
+
+test('productHandle: home URL used when no products in last 30 days', async () => {
+  Profile.findOne.mockResolvedValue(SEND_CONSENTED);
+  ScheduledJob.create.mockResolvedValue({ _id: 'homeJob' });
+  // Default: no events (set in beforeEach)
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  const decoded = decodeURIComponent(res.body.url);
+  // Home URL — no /products/ path
+  expect(decoded).not.toContain('/products/');
+  expect(decoded).toContain('ccf_job=homeJob');
+});
+
+test('productHandle: explicit valid handle → product URL built server-side', async () => {
+  Profile.findOne.mockResolvedValue(SEND_CONSENTED);
+  ScheduledJob.create.mockResolvedValue({ _id: 'explicitProd' });
+  mockProductEvent('fancy-shoes', '777');
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup', productHandle: 'fancy-shoes' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  const decoded = decodeURIComponent(res.body.url);
+  expect(decoded).toContain('/products/fancy-shoes');
+  expect(decoded).toContain(`ccf_job=explicitProd`);
+});
+
+test('productHandle: unknown handle (not in recent events) → 400', async () => {
+  Profile.findOne.mockResolvedValue(SEND_CONSENTED);
+  // No events → recentProducts = []
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup', productHandle: 'not-a-real-product' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(400);
+  expect(res.body.error).toMatch(/not in recent views/i);
+  expect(ScheduledJob.create).not.toHaveBeenCalled();
+});
+
+test('productHandle: client-supplied full URL is ignored (only handle accepted)', async () => {
+  Profile.findOne.mockResolvedValue(SEND_CONSENTED);
+  // No events
+  // Client passes a URL string instead of a handle — should fail validation
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: {
+        profileId: PROFILE_ID,
+        purpose: 'followup',
+        productHandle: 'https://evil.com/products/something',
+      },
+      store: STORE },
+    res
+  );
+
+  // The URL will be lowercased and treated as a handle — won't match any event
+  expect(res.statusCode).toBe(400);
+  expect(ScheduledJob.create).not.toHaveBeenCalled();
+});
+
+test('productHandle: {product} placeholder replaced with product title', async () => {
+  Profile.findOne.mockResolvedValue(SEND_CONSENTED);
+  ScheduledJob.create.mockResolvedValue({ _id: 'phJob' });
+  mockProductEvent('silk-saree', '888');
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: {
+        profileId: PROFILE_ID,
+        purpose: 'followup',
+        productHandle: 'silk-saree',
+        message: 'Still thinking about {product}? We saved it for you.',
+      },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  const decoded = decodeURIComponent(res.body.url);
+  expect(decoded).toContain('Still thinking about silk-saree title?');
+});
+
+test('productHandle: {product} placeholder removed cleanly when no product', async () => {
+  Profile.findOne.mockResolvedValue(SEND_CONSENTED);
+  ScheduledJob.create.mockResolvedValue({ _id: 'noPhJob' });
+  // No events → no product
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: {
+        profileId: PROFILE_ID,
+        purpose: 'followup',
+        message: 'Hi! Check out {product} now.',
+      },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  const decoded = decodeURIComponent(res.body.url);
+  // {product} removed, no double spaces
+  expect(decoded).not.toContain('{product}');
+  expect(decoded).not.toContain('  ');
+});
+
+test('productHandle: stored on ScheduledJob', async () => {
+  Profile.findOne.mockResolvedValue(SEND_CONSENTED);
+  ScheduledJob.create.mockResolvedValue({ _id: 'storeHJob' });
+  mockProductEvent('test-watch', '555');
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup', productHandle: 'test-watch' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  expect(ScheduledJob.create).toHaveBeenCalledWith(
+    expect.objectContaining({ productHandle: 'test-watch' })
+  );
+});
+
+test('productHandle: 30-day cutoff — event older than 30 days not eligible', async () => {
+  Profile.findOne.mockResolvedValue(SEND_CONSENTED);
+  // Simulate: StorefrontEvent.find returns empty (events filtered by ts: { $gte: since })
+  // In real usage, the DB query filters by date. Here we just return [] to simulate cutoff.
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup', productHandle: 'old-product' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(400);
+  expect(res.body.error).toMatch(/not in recent views/i);
+});
+
+test('default path (no product handle): ccf_job still appended and default path unchanged', async () => {
+  Profile.findOne.mockResolvedValue({
+    ...SEND_CONSENTED,
+    identifiers: { sessionIds: [], cartTokens: [] },
+  });
+  ScheduledJob.create.mockResolvedValue({ _id: 'noSessJob' });
+  // No sessionIds → resolveRecentProducts returns [] immediately
+
+  const res = mockRes();
+  await sendHandler(
+    { params: { shopDomain: SHOP },
+      body: { profileId: PROFILE_ID, purpose: 'followup' },
+      store: STORE },
+    res
+  );
+
+  expect(res.statusCode).toBe(200);
+  const decoded = decodeURIComponent(res.body.url);
+  expect(decoded).toContain('ccf_job=noSessJob');
+  expect(decoded).not.toContain('/products/');
 });

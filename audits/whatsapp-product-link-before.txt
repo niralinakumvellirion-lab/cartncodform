@@ -1,0 +1,240 @@
+AUDIT: WhatsApp product link preview — pre-edit state
+Date: 2026-10-12
+===================================================================
+
+PART 1 — PRODUCT-VIEW DATA RECORDED TODAY
+===================================================================
+
+1a. Storefront tracking
+-----------------------
+Script: extensions/cartncodform-embed/assets/ccf-push.js
+Injected via: extensions/cartncodform-embed/blocks/push-notifications.liquid
+  (the .liquid block renders `data-product-title` on #ccf-embed-root
+   via Liquid, but this is only for the popup — not sent as an event)
+
+Events fired on product pages (ccf-push.js lines 3638–3639):
+  trackEvent('product_view', getProductMeta())
+
+getProductMeta() returns (lines 3471–3513):
+  {
+    productId:    p.id (Shopify numeric product ID, stringified)
+    productTitle: liquid title || window.ShopifyAnalytics.meta.product.title || document.title
+    productPrice: p.price
+    title:        p.title (from ShopifyAnalytics)
+    vendor:       p.vendor
+    type:         p.type
+    price:        p.price
+    variantId:    p.variants[0].id
+    imageUrl:     document.querySelector('meta[property="og:image"]').content
+                  (og:image from the page — the product's primary Open Graph image)
+  }
+
+trackEvent() adds to every event (lines 3531–3537):
+  path:     window.location.pathname   e.g. "/products/blue-widget"
+  pageType: window.ShopifyAnalytics.meta.page.pageType  → "product"
+
+The event is flushed to POST /api/events as a StorefrontEvent document.
+This means:
+  - StorefrontEvent.type = 'product_view'
+  - StorefrontEvent.path = '/products/{handle}'   ← handle IS here, extractable
+  - StorefrontEvent.pageType = 'product'
+  - StorefrontEvent.meta.productId = numeric ID string
+  - StorefrontEvent.meta.productTitle = title string
+  - StorefrontEvent.meta.imageUrl = og:image URL (may be a myshopify.com/cdn/ URL
+    or cdn.shopify.com URL, depending on the theme)
+
+add_to_cart events (lines 3730–3744):
+  meta.productId = variant/product ID (addedPid)
+  meta.cartToken = Shopify cart token (from /cart.js)
+  meta.url       = window.location.href (full URL including handle if on PDP)
+  NO title, NO imageUrl in this event
+
+page_view / collection_view / cart_view / search events:
+  NO productId, NO handle. Home-only / collection-only visits leave ZERO
+  product data in StorefrontEvent for that session.
+
+1b. What IS stored per product
+--------------------------------
+StorefrontEvent rows (type='product_view'):
+  ✓ productId (numeric, as string)
+  ✓ productTitle
+  ✓ imageUrl (og:image, may need normalisation)
+  ✓ path → handle extractable via path.split('/products/')[1]?.split(/[?#]/)[0]
+  ✓ ts (timestamp)
+  ✓ sessionId (links to profile via identifiers.sessionIds)
+
+Profile model (backend/models/Profile.js):
+  ✗ NO topProducts field
+  ✗ NO lastViewed field
+  Product data lives ONLY in StorefrontEvent (90-day TTL).
+
+ProductImageCache (backend/models/ProductImageCache.js):
+  ✓ Keyed by { shopDomain, productId }
+  ✓ Stores imageUrl (direct CDN URL, 24h TTL)
+  ✓ Written by buildJourneyEntry() (events.js) and webhooks.js
+
+1c. Querying products for a profile
+-------------------------------------
+StorefrontEvent.find({
+  shopDomain,
+  sessionId: { $in: [...profile.identifiers.sessionIds, ...profile.identifiers.cartTokens] },
+  type: 'product_view',
+  ts: { $gte: 30daysAgo }
+})
+
+This is exactly what buildJourneyEntry() (events.js:448–559) does — it already
+resolves topProducts (top 3 by view count) with resolved imageUrl.
+The existing pattern in buildJourneyEntry() is the right model to follow.
+
+1d. Home/collection-only visitors
+------------------------------------
+No 'product_view' events → no productId, no handle, no title, no image.
+The recentProducts list for these profiles will be empty.
+The link falls back to the store home link (as today). CORRECT.
+
+1e. Cart product vs. viewed product
+--------------------------------------
+'add_to_cart' has productId but no handle (unless path is also a PDP, which
+it might be on some themes). Since add_to_cart also captures `meta.url`
+(window.location.href), the handle COULD be extracted from that URL —
+but this is inconsistent across themes (cart page, drawer, etc.).
+Recommendation: treat 'add_to_cart' as a secondary signal. A product
+a customer both viewed and added to cart appears via both event types.
+Deduplicate by productId when building recentProducts.
+
+CONCLUSION (Part 1):
+Product-view data IS recorded today. No new storefront tracking is
+needed. The feature can be built using existing StorefrontEvent rows.
+
+
+PART 2 — HOW THE STORE LINK IS BUILT TODAY
+===================================================================
+
+2a. Domain used (backend/routes/whatsapp.js:272–273)
+-------------------------------------------------------
+storeLink = `https://${shop}?ccf_src=whatsapp&ccf_job=${job._id}`
+
+`shop` is req.params.shopDomain, normalised to lowercase — this is
+always the *.myshopify.com domain (e.g. "my-store.myshopify.com").
+
+The Store model has no "primaryDomain" or "customDomain" field.
+All routes use the myshopify.com domain as-is.
+
+2b. Path
+----------
+Today: root path only (no /products/... path) — storeLink = `https://${shop}`
+For product links: `https://${shop}/products/${handle}`
+Both will redirect to the store's primary custom domain when visited.
+
+2c. ccf_job parameter
+-----------------------
+storeLink is built AFTER ScheduledJob.create() (line 260–270), so
+job._id is always present in the URL. Attribution works because the
+storefront script reads ?ccf_job from the URL and passes it in the
+event batch (POST /api/events, ccf_job field).
+
+2d. Redirect and ccf_job survival
+------------------------------------
+Shopify's myshopify.com → primary domain redirect (301/302 by Shopify's
+own CDN layer) DOES preserve query string parameters. Standard HTTP
+redirect semantics: the client re-requests the full URL including
+the query string at the new location. So ccf_job survives the redirect
+and is seen by the storefront script on the product or home page.
+
+VERIFIED via the existing storefront attribution flow: the attribution
+tests in backend/__tests__/ already test the ?ccf_job param being
+read from StorefrontEvent rows, confirming that the param does reach
+the storefront after any redirect. No custom redirect handling is
+needed.
+
+One edge case: some stores set up a custom storefront proxy that
+strips query strings. This is rare, outside the app's control, and
+outside the scope of this task.
+
+2e. Product URL pattern
+------------------------
+`https://${shop}/products/${handle}?ccf_src=whatsapp&ccf_job=${job._id}`
+Handle must be extracted from StorefrontEvent.path (safe) or provided
+by the client (NOT safe — server must never use a client-supplied URL).
+
+
+PART 3 — PRODUCT IMAGES
+===================================================================
+
+3a. Available data sources
+----------------------------
+1. StorefrontEvent.meta.imageUrl — og:image scraped at page load.
+   May be a myshopify.com/cdn/... URL (password-blocked on dev stores,
+   redirect hop on live) or a cdn.shopify.com/... URL (always public).
+   normalizeImageUrl() is already applied in buildJourneyEntry().
+
+2. ProductImageCache — { shopDomain, productId, imageUrl }.
+   Keyed by productId (numeric string). 24h TTL.
+   Written by buildJourneyEntry() when og:image is clean, or by
+   fetchProductImageWithTimeout() via Shopify Admin API.
+
+3. Shopify Admin API — `GET /admin/api/2025-01/products/${productId}.json`
+   Returns product.image.src (direct cdn.shopify.com URL).
+   Used by fetchProductImageWithTimeout() (utils/productImage.js).
+   Time-boxed at 3s. Writes to ProductImageCache on success.
+
+3b. Handle vs. productId
+--------------------------
+ProductImageCache is keyed by productId, not handle.
+All existing image-resolution code uses productId.
+The Admin API endpoint used is also /products/{id}, not /products/{handle}.
+Therefore: storing productId is sufficient for image resolution.
+The handle is only needed for building the product page URL.
+
+3c. Image availability at WhatsApp send time
+----------------------------------------------
+When the seller clicks "Send": they are already looking at the
+CustomerDetail screen, which calls the GET /profile endpoint.
+The GET /profile response needs to return recentProducts with
+imageUrl already resolved (or at least the og:image URL from
+StorefrontEvent, which is enough for the preview card).
+
+The product image shown in the WhatsApp link preview (when the
+customer receives the message) comes from WhatsApp's own link-unfurl
+of the /products/{handle} URL. This uses the store's Open Graph
+meta tags, which are set by the Shopify theme — entirely outside
+this app's control. If the theme's og:image is correct, WhatsApp
+renders it. The app cannot inject an image into the wa.me link.
+
+
+SUMMARY OF FINDINGS
+===================================================================
+
+DATA AVAILABLE:
+  ✓ product_view events fire on product pages (ccf-push.js line 3639)
+  ✓ StorefrontEvent stores: productId, productTitle, og:imageUrl, path
+  ✓ Product handle is extractable from StorefrontEvent.path
+    (pattern: /products/{handle}, split on '/' and strip ?#)
+  ✓ ProductImageCache resolves images by productId
+  ✓ fetchProductImageWithTimeout() provides a fallback via Admin API
+  ✓ buildJourneyEntry() already aggregates topProducts per-profile
+    (top 3 by view count) — the exact pattern this feature needs
+
+DATA NOT AVAILABLE:
+  ✗ Handle not in StorefrontEvent.meta — only extractable from .path
+  ✗ Profile model has no denormalised topProducts/lastViewed
+  ✗ Cart contents (not stored as product records, only cartToken)
+  ✗ No store primary domain — myshopify.com domain is used throughout
+
+STORE LINK DOMAIN:
+  Today: https://{shop}.myshopify.com → redirects to primary domain
+  Redirect preserves ?ccf_job (standard HTTP redirect semantics)
+  No change to domain strategy needed
+
+WHAT CAN BE BUILT WITHOUT NEW TRACKING:
+  ✓ GET /profile/:profileId → add recentProducts (up to 3):
+    Query StorefrontEvent for product_view events in last 30 days,
+    grouped by productId, most recent first, with imageUrl resolved.
+    Handle extracted from StorefrontEvent.path.
+  ✓ POST /send → accept productHandle, validate against recentProducts,
+    build /products/{handle}?ccf_src=...&ccf_job=... URL server-side.
+    Never accept a URL from the client.
+  ✓ Frontend: recentProducts selector + link-preview card using imageUrl.
+
+NO NEW STOREFRONT TRACKING REQUIRED. Proceed to Step 1.
+===================================================================

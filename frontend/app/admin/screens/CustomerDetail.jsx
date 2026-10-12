@@ -541,11 +541,37 @@ function StatusPill({ outcome, status }) {
   );
 }
 
+function ProductThumb({ imageUrl, size = 40 }) {
+  const [imgErr, setImgErr] = useState(false);
+  if (!imageUrl || imgErr) {
+    return (
+      <div style={{
+        width: size, height: size, borderRadius: 6, flexShrink: 0,
+        background: '#f3f4f6', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <svg width={Math.round(size * 0.45)} height={Math.round(size * 0.45)}
+          viewBox="0 0 24 24" fill="none" stroke="#d1d5db" strokeWidth="2"
+          strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <polyline points="21 15 16 10 5 21"/>
+        </svg>
+      </div>
+    );
+  }
+  return (
+    <img src={imageUrl} alt="" style={{
+      width: size, height: size, borderRadius: 6, objectFit: 'cover', flexShrink: 0,
+    }} onError={() => setImgErr(true)} />
+  );
+}
+
 function WaComposer({
   customer, waProfile, shop, profileId,
   sendWhatsapp, waSendError, waFallbackUrl, clearWaError,
   selectedWaSuggestion, setSelectedWaSuggestion,
   showWaOptOutConfirm, setShowWaOptOutConfirm, optOutWhatsapp, waOptingOut,
+  selectedProduct, setSelectedProduct,
 }) {
   const suggestions = rankWaSuggestions(customer, waProfile);
   const selected = selectedWaSuggestion || suggestions[0] || null;
@@ -613,7 +639,11 @@ function WaComposer({
     const trimmed = messageText.trim();
     if (!selected || !trimmed || trimmed.length > MAX_CHARS) return;
     const tpl = selected.key === 'say_hello' ? undefined : selected.key;
-    sendWhatsapp({ shopDomain: shop, profileId, purpose: selected.purpose, template: tpl, message: trimmed });
+    sendWhatsapp({
+      shopDomain: shop, profileId, purpose: selected.purpose,
+      template: tpl, message: trimmed,
+      productHandle: selectedProduct?.handle || null,
+    });
   }
 
   const charCount = messageText.length;
@@ -703,6 +733,46 @@ function WaComposer({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* Product selector — shown when customer has viewed products */}
+      {(waProfile?.recentProducts?.length > 0) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#6b7280',
+                        textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Link in message
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+            {waProfile.recentProducts.map((p) => {
+              const isSel = selectedProduct?.handle === p.handle;
+              return (
+                <button key={p.handle} onClick={() => setSelectedProduct(p)} title={p.title}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '4px 9px', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                    background: isSel ? '#f0fdf4' : '#f9fafb',
+                    border: `1.5px solid ${isSel ? WA_GREEN : '#e5e7eb'}`,
+                    borderRadius: 20, color: isSel ? '#15803d' : '#374151',
+                  }}>
+                  <ProductThumb imageUrl={p.imageUrl} size={16} />
+                  <span style={{ maxWidth: 100, overflow: 'hidden',
+                                 textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {p.title || p.handle}
+                  </span>
+                </button>
+              );
+            })}
+            <button onClick={() => setSelectedProduct(null)}
+              style={{
+                padding: '4px 9px', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+                background: !selectedProduct ? '#f0fdf4' : '#f9fafb',
+                border: `1.5px solid ${!selectedProduct ? WA_GREEN : '#e5e7eb'}`,
+                borderRadius: 20, color: !selectedProduct ? '#15803d' : '#374151',
+              }}>
+              Store home
+            </button>
+          </div>
         </div>
       )}
 
@@ -796,7 +866,32 @@ function WaComposer({
             {charCount} / {MAX_CHARS}{overLimit ? ' — too long' : ''}
           </div>
 
-          {/* Store link note — non-editable */}
+          {/* Link preview card — shown when a product is selected */}
+          {selectedProduct && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '6px 10px', borderRadius: 8,
+              border: '1px solid #e5e7eb', background: '#f9fafb',
+            }}>
+              <ProductThumb imageUrl={selectedProduct.imageUrl} size={40} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#111827',
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {selectedProduct.title || selectedProduct.handle}
+                </div>
+                <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 1 }}>
+                  {(shop || '').replace(/\.myshopify\.com$/, '')}
+                </div>
+              </div>
+              <span style={{
+                fontSize: 9, fontWeight: 700, color: '#6b7280',
+                background: '#e5e7eb', borderRadius: 4, padding: '1px 5px',
+                textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0,
+              }}>Link preview</span>
+            </div>
+          )}
+
+          {/* Link note — non-editable */}
           <div id="wa-link-note" role="note" style={{
             fontSize: 11, color: '#6b7280', background: '#f9fafb',
             border: '1px solid #e5e7eb', borderRadius: 6,
@@ -808,7 +903,9 @@ function WaComposer({
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
               <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
             </svg>
-            Your store link is added automatically so we can track visits, carts and orders.
+            {selectedProduct
+              ? <>Product link added: <strong>{selectedProduct.title || selectedProduct.handle}</strong> — opens product page for WhatsApp link preview.</>
+              : 'Your store link is added automatically so we can track visits, carts and orders.'}
           </div>
         </div>
       )}
@@ -1382,6 +1479,7 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
   const [showWaOptOutConfirm, setShowWaOptOutConfirm] = useState(false);
   const [waOptingOut, setWaOptingOut] = useState(false);
   const [selectedWaSuggestion, setSelectedWaSuggestion] = useState(null);
+  const [selectedProduct, setSelectedProduct] = useState(null);
   const { sendWhatsapp, waError: waSendError, waFallbackUrl, clearWaError } = useWhatsapp();
 
   // "Notifications sent" section — every ScheduledJob for this customer
@@ -1428,9 +1526,11 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
       );
       if (ctl?.aborted) return;
       setWaProfile(data);
+      setSelectedProduct(data?.recentProducts?.[0] || null);
     } catch {
       if (ctl?.aborted) return;
       setWaProfile(null);
+      setSelectedProduct(null);
     } finally {
       if (!ctl?.aborted) setWaProfileLoading(false);
     }
@@ -1696,6 +1796,8 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
           setShowWaOptOutConfirm={setShowWaOptOutConfirm}
           optOutWhatsapp={optOutWhatsapp}
           waOptingOut={waOptingOut}
+          selectedProduct={selectedProduct}
+          setSelectedProduct={setSelectedProduct}
         />
       )}
       <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8,
