@@ -20,10 +20,12 @@ jest.mock('../middleware/requireOwner', () => ({
 }));
 jest.mock('../models/ScheduledJob');
 jest.mock('../models/Profile');
+jest.mock('../models/AttributedEvent');
 
 const express = require('express');
 const ScheduledJob = require('../models/ScheduledJob');
 const Profile = require('../models/Profile');
+const AttributedEvent = require('../models/AttributedEvent');
 const dashboardRouter = require('../routes/dashboard');
 
 const SHOP = 'demo.myshopify.com';
@@ -385,5 +387,60 @@ describe('GET /:shopDomain/channels/:channel/items', () => {
   test('i8. items endpoint returns 403 for wrong shop', async () => {
     const res = await get(`/api/dashboard/other.myshopify.com/channels/push/items`, SHOP);
     expect(res.status).toBe(403);
+  });
+
+  test('i9. WA sent items return outcomeChip from AttributedEvent (furthest event wins)', async () => {
+    const jobId = '507f1f77bcf86cd799439022';
+    ScheduledJob.find.mockReturnValue(findChain([
+      { _id: jobId, purpose: 'followup', sentAt: new Date(), profileId: null,
+        messageText: 'Hi!', outcome: null },
+    ]));
+    ScheduledJob.countDocuments = jest.fn().mockResolvedValue(1);
+    Profile.find.mockReturnValue(findChain([]));
+    AttributedEvent.find.mockReturnValue(findChain([
+      { jobId, eventType: 'revisit' },
+      { jobId, eventType: 'add_to_cart' },
+    ]));
+
+    const res = await get(`/api/dashboard/${SHOP}/channels/whatsapp/items?status=sent&from=${FROM}&to=${TO}`);
+    const data = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(data.items[0].outcomeChip).toBe('Added to cart');
+  });
+
+  test('i10. WA sent items: purchase beats add_to_cart in priority', async () => {
+    const jobId = '507f1f77bcf86cd799439033';
+    ScheduledJob.find.mockReturnValue(findChain([
+      { _id: jobId, purpose: 'followup', sentAt: new Date(), profileId: null,
+        messageText: 'Buy now!', outcome: null },
+    ]));
+    ScheduledJob.countDocuments = jest.fn().mockResolvedValue(1);
+    Profile.find.mockReturnValue(findChain([]));
+    AttributedEvent.find.mockReturnValue(findChain([
+      { jobId, eventType: 'add_to_cart' },
+      { jobId, eventType: 'purchase' },
+    ]));
+
+    const res = await get(`/api/dashboard/${SHOP}/channels/whatsapp/items?status=sent&from=${FROM}&to=${TO}`);
+    const data = await res.json();
+
+    expect(data.items[0].outcomeChip).toBe('Bought');
+  });
+
+  test('i11. WA sent items: no AttributedEvents returns null outcomeChip', async () => {
+    const jobId = '507f1f77bcf86cd799439044';
+    ScheduledJob.find.mockReturnValue(findChain([
+      { _id: jobId, purpose: 'order', sentAt: new Date(), profileId: null,
+        messageText: 'Order ready', outcome: null },
+    ]));
+    ScheduledJob.countDocuments = jest.fn().mockResolvedValue(1);
+    Profile.find.mockReturnValue(findChain([]));
+    AttributedEvent.find.mockReturnValue(findChain([]));
+
+    const res = await get(`/api/dashboard/${SHOP}/channels/whatsapp/items?status=sent&from=${FROM}&to=${TO}`);
+    const data = await res.json();
+
+    expect(data.items[0].outcomeChip).toBeNull();
   });
 });

@@ -3,6 +3,16 @@ const router = express.Router();
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
 const ScheduledJob = require('../models/ScheduledJob');
 const Profile = require('../models/Profile');
+const AttributedEvent = require('../models/AttributedEvent');
+
+// Furthest-event priority for WhatsApp outcome chips (higher index = better outcome).
+const WA_EVENT_PRIORITY = ['revisit', 'add_to_cart', 'checkout_start', 'purchase'];
+const WA_OUTCOME_CHIP = {
+  revisit: 'Visited',
+  checkout_start: 'Started checkout',
+  add_to_cart: 'Added to cart',
+  purchase: 'Bought',
+};
 
 // Human-readable labels for signalType / purpose values.
 const SIGNAL_LABELS = {
@@ -283,6 +293,23 @@ router.get('/:shopDomain/channels/:channel/items', requireAuth, requireStoreOwne
       }
     }
 
+    // WhatsApp sent — derive outcome chip from AttributedEvent (one batch query, no N+1).
+    const outcomeChipMap = {};
+    if (channel === 'whatsapp' && statusParam === 'sent' && jobs.length) {
+      const jobIds = jobs.map((j) => j._id);
+      const attrEvents = await AttributedEvent.find({
+        shopDomain: shop,
+        jobId: { $in: jobIds },
+      }).select('jobId eventType').lean();
+      for (const ev of attrEvents) {
+        const jid = String(ev.jobId);
+        const cur = outcomeChipMap[jid];
+        if (!cur || WA_EVENT_PRIORITY.indexOf(ev.eventType) > WA_EVENT_PRIORITY.indexOf(cur)) {
+          outcomeChipMap[jid] = ev.eventType;
+        }
+      }
+    }
+
     const items = jobs.map((j) => {
       const pInfo = profileMap[String(j.profileId)] || { email: null, name: null };
       let preview;
@@ -301,6 +328,7 @@ router.get('/:shopDomain/channels/:channel/items', requireAuth, requireStoreOwne
       } else {
         preview = { message: j.messageText || null };
       }
+      const rawChip = outcomeChipMap[String(j._id)];
       return {
         id: String(j._id),
         type: j.signalType || j.purpose || null,
@@ -314,6 +342,7 @@ router.get('/:shopDomain/channels/:channel/items', requireAuth, requireStoreOwne
         },
         preview,
         outcome: j.outcome || null,
+        outcomeChip: rawChip ? (WA_OUTCOME_CHIP[rawChip] || null) : null,
       };
     });
 
