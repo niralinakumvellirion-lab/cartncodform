@@ -586,12 +586,315 @@ function ProductThumb({ imageUrl, size = 40 }) {
   );
 }
 
+/* ─── Phone frame (shared by all mobile previews) ─── */
+function PhoneFrame({ children, height }) {
+  return (
+    <div style={{
+      width: 252, flexShrink: 0,
+      background: '#1C1C1E', borderRadius: 44,
+      padding: '14px 8px',
+      boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
+    }}>
+      <div style={{
+        width: 88, height: 8, background: '#000',
+        borderRadius: 99, margin: '0 auto 10px',
+      }} />
+      <div style={{
+        borderRadius: 30, overflow: 'hidden',
+        height: height || 480, background: '#000',
+      }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/* ─── Push previews ─── */
+function PushDesktopPreview({ title, body, shop, productImage }) {
+  const storeName = (shop || '').split('.')[0] || 'Your store';
+  return (
+    <div style={{ flex: '1 1 220px', maxWidth: 420 }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
+                    textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+        Desktop
+      </div>
+      <div style={{
+        background: '#fff', borderRadius: 12,
+        boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+        border: '1px solid #e5e7eb', padding: '12px 14px',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+          <div style={{ width: 16, height: 16, borderRadius: 4,
+                        background: '#4f46e5', flexShrink: 0 }} />
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#374151', flex: 1 }}>
+            {storeName}
+          </span>
+          <span style={{ fontSize: 10, color: '#9ca3af' }}>now</span>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+          {productImage && (
+            <img src={productImage} alt="" style={{
+              width: 48, height: 48, borderRadius: 6, objectFit: 'cover', flexShrink: 0,
+            }} />
+          )}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginBottom: 2,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {title || 'Notification title'}
+            </div>
+            <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.4,
+                          overflow: 'hidden', display: '-webkit-box',
+                          WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+              {body || 'Notification body'}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PushMobilePreview({ title, body, shop }) {
+  const storeName = (shop || '').split('.')[0] || 'Your store';
+  return (
+    <div style={{ height: '100%',
+                  background: 'linear-gradient(160deg, #1e293b 0%, #0f172a 100%)',
+                  display: 'flex', flexDirection: 'column',
+                  padding: '22px 10px 10px' }}>
+      <div style={{ textAlign: 'center', fontSize: 30, fontWeight: 300,
+                    color: '#fff', marginBottom: 2 }}>
+        {new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false })}
+      </div>
+      <div style={{ textAlign: 'center', fontSize: 10, color: 'rgba(255,255,255,0.55)',
+                    marginBottom: 18 }}>
+        {new Date().toLocaleDateString('en-IN', { weekday: 'long', month: 'short', day: 'numeric' })}
+      </div>
+      <div style={{ background: 'rgba(255,255,255,0.14)',
+                    backdropFilter: 'blur(10px)',
+                    borderRadius: 12, padding: '9px 11px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 4 }}>
+          <div style={{ width: 18, height: 18, borderRadius: 4,
+                        background: '#4f46e5', flexShrink: 0 }} />
+          <span style={{ fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.8)',
+                         textTransform: 'uppercase', flex: 1 }}>
+            {storeName}
+          </span>
+          <span style={{ fontSize: 9, color: 'rgba(255,255,255,0.45)' }}>now</span>
+        </div>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#fff', marginBottom: 2 }}>
+          {title || 'Notification title'}
+        </div>
+        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.75)', lineHeight: 1.4 }}>
+          {body || 'Notification body'}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Email previews ─── */
+const _PREV_EMPTY = (
+  <div style={{ fontSize: 11, color: '#9ca3af', padding: '24px 16px',
+                textAlign: 'center', background: '#f9fafb',
+                borderRadius: 8, border: '1px solid #e5e7eb' }}>
+    Preview appears as you type
+  </div>
+);
+const _PREV_LOADING = (
+  <div style={{ fontSize: 11, color: '#9ca3af', padding: '24px 16px',
+                textAlign: 'center', background: '#f9fafb',
+                borderRadius: 8, border: '1px solid #e5e7eb' }}>
+    Loading preview…
+  </div>
+);
+const _PREV_UNAVAIL = (
+  <div style={{ fontSize: 11, color: '#9ca3af', padding: '24px 16px',
+                textAlign: 'center', background: '#f9fafb',
+                borderRadius: 8, border: '1px solid #e5e7eb' }}>
+    Preview unavailable
+  </div>
+);
+
+function EmailDesktopPreview({ html, loading }) {
+  return (
+    <div style={{ flex: '1 1 220px', minWidth: 0, maxWidth: 620 }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
+                    textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+        Desktop
+      </div>
+      {loading ? _PREV_LOADING
+        : html ? (
+          <iframe srcDoc={html} sandbox="allow-same-origin" title="Email preview desktop"
+            style={{ width: '100%', height: 420, border: '1px solid #E2E5EB',
+                     borderRadius: 8, display: 'block' }} />
+        ) : _PREV_EMPTY}
+    </div>
+  );
+}
+
+function EmailMobilePreview({ html, loading }) {
+  const scale = 234 / 360;
+  const iframeH = 700;
+  const containerH = Math.round(iframeH * scale);
+  if (loading) return (
+    <div style={{ height: containerH, background: '#111', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center' }}>
+      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>Loading…</span>
+    </div>
+  );
+  if (!html) return (
+    <div style={{ height: containerH, background: '#111', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center' }}>
+      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>Preview will appear here</span>
+    </div>
+  );
+  return (
+    <div style={{ height: containerH, overflow: 'hidden', background: '#fff' }}>
+      <iframe srcDoc={html} sandbox="allow-same-origin" title="Email preview mobile"
+        style={{ width: 360, height: iframeH, border: 'none',
+                 transform: `scale(${scale})`, transformOrigin: 'top left' }} />
+    </div>
+  );
+}
+
+/* ─── WhatsApp previews ─── */
+function WaBubble({ messageText, selectedProduct, shop, firstName, phone, containerStyle, textSize, headerSize, miniLayout }) {
+  const WA_GREEN = '#25D366';
+  const WA_TEAL = '#128C7E';
+  const storeDomain = (shop || '').replace(/\.myshopify\.com$/, '');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column',
+                  height: '100%', ...containerStyle }}>
+      {/* Chat header */}
+      <div style={{ background: WA_TEAL, padding: miniLayout ? '7px 9px' : '10px 14px',
+                    display: 'flex', alignItems: 'center', gap: miniLayout ? 6 : 10, flexShrink: 0 }}>
+        <div style={{
+          width: miniLayout ? 26 : 32, height: miniLayout ? 26 : 32,
+          borderRadius: '50%', flexShrink: 0,
+          background: 'rgba(255,255,255,0.2)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: miniLayout ? 11 : 14, color: '#fff', fontWeight: 700,
+        }}>
+          {(firstName || phone || '?').charAt(0).toUpperCase()}
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: miniLayout ? 11 : 13, fontWeight: 700, color: '#fff',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {firstName || phone || 'Customer'}
+          </div>
+          {phone && !miniLayout && (
+            <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.7)' }}>{phone}</div>
+          )}
+        </div>
+      </div>
+      {/* Chat area */}
+      <div style={{ flex: 1, background: '#ECE5DD',
+                    padding: miniLayout ? '8px 8px' : '12px 12px', overflowY: 'auto' }}>
+        {messageText.trim() ? (
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{
+              background: WA_GREEN,
+              borderRadius: miniLayout ? '10px 10px 2px 10px' : '12px 12px 2px 12px',
+              padding: miniLayout ? '6px 9px' : '8px 12px',
+              maxWidth: '90%',
+            }}>
+              {selectedProduct && (
+                <div style={{
+                  background: 'rgba(0,0,0,0.15)', borderRadius: miniLayout ? 5 : 6,
+                  padding: miniLayout ? '4px 6px' : '6px 8px',
+                  marginBottom: miniLayout ? 4 : 6,
+                  display: 'flex', gap: miniLayout ? 5 : 8, alignItems: 'center',
+                }}>
+                  {selectedProduct.imageUrl && (
+                    <img src={selectedProduct.imageUrl} alt="" style={{
+                      width: miniLayout ? 28 : 36, height: miniLayout ? 28 : 36,
+                      borderRadius: miniLayout ? 3 : 4, objectFit: 'cover', flexShrink: 0,
+                    }} />
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: miniLayout ? 9 : 11, fontWeight: 700, color: '#fff',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {selectedProduct.title || selectedProduct.handle}
+                    </div>
+                    <div style={{ fontSize: miniLayout ? 8 : 10, color: 'rgba(255,255,255,0.7)' }}>
+                      {storeDomain}
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div style={{
+                fontSize: textSize || 13, color: '#fff', lineHeight: 1.5,
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                maxHeight: miniLayout ? 100 : undefined, overflow: miniLayout ? 'hidden' : undefined,
+              }}>
+                {messageText}
+              </div>
+              {selectedProduct && (
+                <div style={{
+                  fontSize: miniLayout ? 9 : 12, color: 'rgba(200,240,220,0.9)',
+                  marginTop: miniLayout ? 2 : 4,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  {shop ? `https://${shop}/products/${selectedProduct.handle}` : 'Product link'}
+                </div>
+              )}
+              <div style={{
+                fontSize: miniLayout ? 8 : 10, color: 'rgba(255,255,255,0.65)',
+                textAlign: 'right', marginTop: miniLayout ? 2 : 4,
+              }}>
+                {new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })} ✓✓
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={{
+            fontSize: miniLayout ? 9 : 12, color: '#9ca3af',
+            textAlign: 'center', paddingTop: miniLayout ? 16 : 20,
+          }}>
+            Preview appears as you type
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WaDesktopPreview({ messageText, selectedProduct, shop, customer }) {
+  const firstName = resolveWaFirstName(customer);
+  const phone = customer?.profile?.channels?.whatsapp?.phone || customer?.profile?.identifiers?.phones?.[0];
+  return (
+    <div style={{ flex: '1 1 220px', maxWidth: 420 }}>
+      <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
+                    textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+        Desktop
+      </div>
+      <div style={{ borderRadius: 12, overflow: 'hidden',
+                    border: '1px solid #E2E5EB', minHeight: 160 }}>
+        <WaBubble messageText={messageText || ''} selectedProduct={selectedProduct}
+          shop={shop} firstName={firstName} phone={phone} />
+      </div>
+    </div>
+  );
+}
+
+function WaMobilePreview({ messageText, selectedProduct, shop, customer }) {
+  const firstName = resolveWaFirstName(customer);
+  const phone = customer?.profile?.channels?.whatsapp?.phone || customer?.profile?.identifiers?.phones?.[0];
+  return (
+    <WaBubble messageText={messageText || ''} selectedProduct={selectedProduct}
+      shop={shop} firstName={firstName} phone={phone} miniLayout />
+  );
+}
+
 function WaComposer({
   customer, waProfile, shop, profileId,
   sendWhatsapp, waSendError, waFallbackUrl, clearWaError,
   selectedWaSuggestion, setSelectedWaSuggestion,
   showWaOptOutConfirm, setShowWaOptOutConfirm, optOutWhatsapp, waOptingOut,
   selectedProduct, setSelectedProduct,
+  onMessageChange,
 }) {
   const suggestions = rankWaSuggestions(customer, waProfile);
   const selected = selectedWaSuggestion || suggestions[0] || null;
@@ -621,6 +924,11 @@ function WaComposer({
     setPendingSuggestion(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.key, firstName, storeName]);
+
+  // Notify parent of message text for live preview in right column.
+  useEffect(() => {
+    if (onMessageChange) onMessageChange(messageText);
+  }, [messageText, onMessageChange]);
 
   // Auto-grow textarea up to ~10 rows (240 px).
   function autoGrow(el) {
@@ -925,7 +1233,7 @@ function WaComposer({
             </svg>
             {selectedProduct
               ? <>Product link added: <strong>{selectedProduct.title || selectedProduct.handle}</strong> — opens product page for WhatsApp link preview.</>
-              : 'Your store link is added automatically so we can track visits, carts and orders.'}
+              : 'Opens WhatsApp. Press Send there to finish. History will show \'Opened in WhatsApp\'.'}
           </div>
         </div>
       )}
@@ -962,7 +1270,7 @@ function WaComposer({
               strokeLinejoin="round" aria-hidden="true">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
-            Send via WhatsApp
+            Open in WhatsApp
           </button>
           {isEmpty && (
             <div style={{ fontSize: 11, color: '#9ca3af', textAlign: 'center' }}>
@@ -1008,43 +1316,11 @@ function WaComposer({
         </div>
       )}
 
-      {/* WhatsApp chat bubble preview */}
-      {messageText.trim() && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af',
-                        textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
-            Preview
-          </div>
-          <div style={{
-            background: '#ECE5DD', borderRadius: 12,
-            padding: '10px 12px', maxWidth: 340,
-          }}>
-            <div style={{
-              background: WA_GREEN, borderRadius: '12px 12px 2px 12px',
-              padding: '8px 12px', marginLeft: 'auto',
-              maxWidth: '85%', width: 'fit-content',
-            }}>
-              <div style={{
-                fontSize: 13, color: '#fff', lineHeight: 1.5,
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              }}>
-                {messageText}
-              </div>
-              <div style={{
-                fontSize: 10, color: 'rgba(255,255,255,0.7)',
-                textAlign: 'right', marginTop: 4,
-              }}>
-                {new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })} ✓✓
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-function NotificationComposer({ customer, shop, onSent, onError }) {
+function NotificationComposer({ customer, shop, onSent, onError, onTitleChange, onBodyChange }) {
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
@@ -1068,6 +1344,10 @@ function NotificationComposer({ customer, shop, onSent, onError }) {
     setTitle(suggestion.title(product));
     setBody(suggestion.body(product));
   }, [customer]);
+
+  // Notify parent for live right-column preview.
+  useEffect(() => { if (onTitleChange) onTitleChange(title); }, [title, onTitleChange]);
+  useEffect(() => { if (onBodyChange) onBodyChange(body); }, [body, onBodyChange]);
 
   async function send() {
     if (!title || !body || sending) return;
@@ -1266,10 +1546,6 @@ function NotificationComposer({ customer, shop, onSent, onError }) {
           }}
         />
       </div>
-      <div style={{ fontSize: '11px', color: '#9ca3af' }}>
-        Signal: {SIGNAL_LABELS[customer?.topSignal?.type] || '—'} ·
-        Strength: {((customer?.topSignal?.strength || 0) * 100).toFixed(0)}%
-      </div>
       <button
         onClick={send}
         disabled={sending || !title || !body}
@@ -1277,62 +1553,40 @@ function NotificationComposer({ customer, shop, onSent, onError }) {
           padding: '11px', fontSize: '14px', fontWeight: '700',
           color: '#fff',
           background: sending || !title || !body ? '#9ca3af' : '#4f46e5',
-          border: 'none', borderRadius: '10px',
+          border: 'none', borderRadius: '10px', minHeight: 44,
           cursor: sending || !title || !body ? 'not-allowed' : 'pointer',
           transition: 'background 0.2s',
         }}
       >
         {sending ? '⏳ Sending...' : '🔔 Send notification'}
       </button>
-
-      {/* Push notification preview mockup */}
-      {(title || body) && (
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af',
-                        textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
-            Preview
-          </div>
-          <div style={{
-            background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',
-            borderRadius: 16, padding: '10px 14px',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
-            maxWidth: 340,
-          }}>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-              <div style={{
-                width: 36, height: 36, borderRadius: 8, flexShrink: 0,
-                background: '#4f46e5', display: 'flex', alignItems: 'center',
-                justifyContent: 'center', fontSize: 18,
-              }}>🔔</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between',
-                              marginBottom: 2 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: '#fff' }}>
-                    {(shop || '').split('.')[0] || 'Your store'}
-                  </span>
-                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>now</span>
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#fff',
-                              marginBottom: 2, overflow: 'hidden',
-                              textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {title || 'Notification title'}
-                </div>
-                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)',
-                              overflow: 'hidden', textOverflow: 'ellipsis',
-                              display: '-webkit-box', WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical' }}>
-                  {body || 'Notification body'}
-                </div>
-              </div>
-            </div>
-          </div>
+      <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+        Sends right away to this customer.
+      </div>
+      {(hasTopProduct || productImage) && (
+        <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+          {hasTopProduct && (
+            <span style={{ fontSize: 11, background: '#f3f4f6', border: '1px solid #e5e7eb',
+                           borderRadius: 20, padding: '2px 8px', color: '#374151',
+                           display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ color: '#9ca3af' }}>Opens:</span> {rawTopProductTitle}
+            </span>
+          )}
+          {productImage && (
+            <span style={{ fontSize: 11, background: '#f3f4f6', border: '1px solid #e5e7eb',
+                           borderRadius: 20, padding: '2px 8px', color: '#374151',
+                           display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ color: '#9ca3af' }}>Image:</span> {rawTopProductTitle || 'product'}
+            </span>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function EmailComposer({ customer, shop, onSent, onError }) {
+function EmailComposer({ customer, shop, onSent, onError, onPreviewHtmlChange, onPreviewLoadingChange }) {
+  const [emailMode, setEmailMode] = useState('write');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
@@ -1340,7 +1594,9 @@ function EmailComposer({ customer, shop, onSent, onError }) {
   const [activeCategory, setActiveCategory] = useState(0);
 
   const [templates, setTemplates] = useState([]);
-  const [previewHtml, setPreviewHtml] = useState('');
+  const [selectedTemplateId, setSelectedTemplateId] = useState(null);
+  const [templateSending, setTemplateSending] = useState(false);
+  const [templateLoading, setTemplateLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const previewTimer = useRef(null);
 
@@ -1352,23 +1608,37 @@ function EmailComposer({ customer, shop, onSent, onError }) {
   }, [shop]);
 
   useEffect(() => {
+    if (emailMode !== 'write') return;
     const profileId = customer?.profile?._id;
-    if (!subject || !body || !profileId) { setPreviewHtml(''); return; }
+    if (!subject || !body || !profileId) {
+      if (onPreviewHtmlChange) onPreviewHtmlChange('');
+      return;
+    }
     clearTimeout(previewTimer.current);
     previewTimer.current = setTimeout(async () => {
       setPreviewLoading(true);
+      if (onPreviewLoadingChange) onPreviewLoadingChange(true);
       try {
         const res = await apiSend('/api/push/preview-journey-email', 'POST',
           { profileId, subject, body });
-        setPreviewHtml(res?.html || '');
+        const html = res?.html || '';
+        if (onPreviewHtmlChange) onPreviewHtmlChange(html);
       } catch (_) {
-        setPreviewHtml('');
+        if (onPreviewHtmlChange) onPreviewHtmlChange('');
       } finally {
         setPreviewLoading(false);
+        if (onPreviewLoadingChange) onPreviewLoadingChange(false);
       }
     }, 600);
     return () => clearTimeout(previewTimer.current);
-  }, [subject, body, customer?.profile?._id]);
+  }, [subject, body, customer?.profile?._id, emailMode]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clear preview when switching modes.
+  useEffect(() => {
+    if (onPreviewHtmlChange) onPreviewHtmlChange('');
+    if (onPreviewLoadingChange) onPreviewLoadingChange(false);
+    setSelectedTemplateId(null);
+  }, [emailMode]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   const rawTopProductTitle = customer?.topProducts?.[0]?.title || '';
   const hasTopProduct = !!(rawTopProductTitle && !/^\d+$/.test(rawTopProductTitle));
@@ -1421,6 +1691,56 @@ function EmailComposer({ customer, shop, onSent, onError }) {
   const email = customer?.profile?.channels?.email?.address ||
     customer?.profile?.identifiers?.emails?.[0];
 
+  /* ── template-mode helpers ── */
+  async function loadTemplatePreview(id) {
+    setTemplateLoading(true);
+    if (onPreviewLoadingChange) onPreviewLoadingChange(true);
+    try {
+      const res = await apiGet(`/api/email-templates/${encodeURIComponent(id)}/preview`);
+      const html = res?.html || '';
+      if (onPreviewHtmlChange) onPreviewHtmlChange(html);
+    } catch (_) {
+      if (onPreviewHtmlChange) onPreviewHtmlChange('');
+    } finally {
+      setTemplateLoading(false);
+      if (onPreviewLoadingChange) onPreviewLoadingChange(false);
+    }
+  }
+
+  async function sendTemplate() {
+    const profileId = customer?.profile?._id;
+    if (!selectedTemplateId || !profileId || templateSending) return;
+    setTemplateSending(true);
+    try {
+      await apiSend(`/api/email-templates/${encodeURIComponent(selectedTemplateId)}/send`, 'POST',
+        { profileId });
+      onSent();
+    } catch (e) {
+      onError(e.message);
+    } finally {
+      setTemplateSending(false);
+    }
+  }
+
+  function handleSelectTemplate(t) {
+    setSelectedTemplateId(t._id);
+    loadTemplatePreview(t._id);
+  }
+
+  function templateTypeChip(type) {
+    const map = {
+      special_offer: { bg: '#eff6ff', color: '#1d4ed8', label: 'Special offer' },
+      festival:      { bg: '#fff7ed', color: '#c2410c', label: 'Festival' },
+    };
+    const s = map[type] || { bg: '#f3f4f6', color: '#374151', label: type || 'Template' };
+    return (
+      <span style={{ fontSize: 10, background: s.bg, color: s.color,
+                     borderRadius: 10, padding: '1px 7px', fontWeight: 600 }}>
+        {s.label}
+      </span>
+    );
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px',
                   width: '100%', boxSizing: 'border-box', overflowX: 'hidden' }}>
@@ -1428,192 +1748,377 @@ function EmailComposer({ customer, shop, onSent, onError }) {
         Sending to: <strong>{email}</strong>
       </div>
 
-      {/* Suggestion toggle */}
-      <div
-        onClick={() => setShowSuggestions(s => !s)}
-        style={{ display: 'flex', justifyContent: 'space-between',
-                 alignItems: 'center', padding: '8px 10px',
-                 background: '#f9fafb', borderRadius: 8,
-                 cursor: 'pointer', fontSize: 13, color: '#374151',
-                 fontWeight: 500, userSelect: 'none' }}
-      >
-        <span>Email ideas</span>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
-          strokeLinejoin="round"
-          style={{ transform: showSuggestions ? 'rotate(180deg)' : 'none',
-                   transition: 'transform 0.2s' }}>
-          <polyline points="6 9 12 15 18 9"/>
-        </svg>
+      {/* Segmented control */}
+      <div role="group" style={{ display: 'flex', gap: 2, background: '#f3f4f6',
+                                  borderRadius: 8, padding: 2, width: 'fit-content' }}>
+        {[['write', 'Write a message'], ['template', 'Use a template']].map(([mode, label]) => (
+          <button key={mode} onClick={() => setEmailMode(mode)}
+            style={{
+              padding: '5px 12px', fontSize: 12, fontWeight: 600,
+              border: 'none', borderRadius: 6, cursor: 'pointer',
+              background: emailMode === mode ? '#fff' : 'transparent',
+              color: emailMode === mode ? '#2459D6' : '#6b7280',
+              boxShadow: emailMode === mode ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              transition: 'all 0.15s',
+            }}>
+            {label}
+          </button>
+        ))}
       </div>
 
-      {showSuggestions && (
-        <div style={{ border: '1px solid #e5e7eb', borderRadius: 10,
-                      overflow: 'hidden' }}>
-          {/* Category tabs */}
-          <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb',
-                        overflowX: 'auto' }}>
-            {EMAIL_SUGGESTIONS.map((cat, i) => (
-              <button key={i} onClick={() => setActiveCategory(i)}
-                style={{
-                  padding: '7px 12px', fontSize: 12, fontWeight: 600,
-                  border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
-                  background: activeCategory === i ? cat.color : '#fff',
-                  color: activeCategory === i ? cat.textColor : '#6b7280',
-                  borderBottom: activeCategory === i
-                    ? `2px solid ${cat.textColor}` : '2px solid transparent',
-                }}>
-                {cat.category}
-              </button>
-            ))}
+      {emailMode === 'write' && (
+        <>
+          {/* Suggestion toggle */}
+          <div
+            onClick={() => setShowSuggestions(s => !s)}
+            style={{ display: 'flex', justifyContent: 'space-between',
+                     alignItems: 'center', padding: '8px 10px',
+                     background: '#f9fafb', borderRadius: 8,
+                     cursor: 'pointer', fontSize: 13, color: '#374151',
+                     fontWeight: 500, userSelect: 'none' }}
+          >
+            <span>Email ideas</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ transform: showSuggestions ? 'rotate(180deg)' : 'none',
+                       transition: 'transform 0.2s' }}>
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
           </div>
-          {/* Suggestion cards */}
-          <div style={{ padding: 10, display: 'flex', flexDirection: 'column',
-                        gap: 8 }}>
-            {(() => {
-              const showThumb = EMAIL_SUGGESTIONS[activeCategory].category === 'Cart & Purchase' ||
-                hasTopProduct;
-              return EMAIL_SUGGESTIONS[activeCategory].suggestions.map((s, i) => (
-                <div key={i}
-                  onClick={() => {
-                    setSubject(s.subject);
-                    setBody(s.body);
-                    setShowSuggestions(false);
-                  }}
-                  style={{
-                    padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
-                    border: '1px solid #e5e7eb', background: '#fff',
-                    fontSize: 13,
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
-                  onMouseLeave={e => e.currentTarget.style.background = '#fff'}
-                >
-                  <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
-                    {showThumb && <ProductThumbnail imageUrl={productImage} title={rawTopProductTitle} />}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 600, color: '#111827',
-                                    marginBottom: 2 }}>{s.label}</div>
-                      <div style={{ color: '#6b7280', fontSize: 12 }}>
-                        {s.subject}
+
+          {showSuggestions && (
+            <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', borderBottom: '1px solid #e5e7eb', overflowX: 'auto' }}>
+                {EMAIL_SUGGESTIONS.map((cat, i) => (
+                  <button key={i} onClick={() => setActiveCategory(i)}
+                    style={{
+                      padding: '7px 12px', fontSize: 12, fontWeight: 600,
+                      border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
+                      background: activeCategory === i ? cat.color : '#fff',
+                      color: activeCategory === i ? cat.textColor : '#6b7280',
+                      borderBottom: activeCategory === i
+                        ? `2px solid ${cat.textColor}` : '2px solid transparent',
+                    }}>
+                    {cat.category}
+                  </button>
+                ))}
+              </div>
+              <div style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {(() => {
+                  const showThumb = EMAIL_SUGGESTIONS[activeCategory].category === 'Cart & Purchase' ||
+                    hasTopProduct;
+                  return EMAIL_SUGGESTIONS[activeCategory].suggestions.map((s, i) => (
+                    <div key={i}
+                      onClick={() => { setSubject(s.subject); setBody(s.body); setShowSuggestions(false); }}
+                      style={{ padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                               border: '1px solid #e5e7eb', background: '#fff', fontSize: 13 }}
+                      onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+                      onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                    >
+                      <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+                        {showThumb && <ProductThumbnail imageUrl={productImage} title={rawTopProductTitle} />}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, color: '#111827', marginBottom: 2 }}>{s.label}</div>
+                          <div style={{ color: '#6b7280', fontSize: 12 }}>{s.subject}</div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </div>
-              ));
-            })()}
+                  ));
+                })()}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280',
+                            textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+              Subject
+            </label>
+            <input value={subject} onChange={(e) => setSubject(e.target.value)}
+              placeholder="Email subject"
+              style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: '13px',
+                       border: '1px solid #e5e7eb', borderRadius: '8px', outline: 'none', color: '#111827' }} />
           </div>
-        </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280',
+                            textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+              Message
+            </label>
+            <textarea value={body} onChange={(e) => setBody(e.target.value)}
+              placeholder="Email message" rows={6}
+              style={{ width: '100%', boxSizing: 'border-box', padding: '9px 12px', fontSize: '13px',
+                       border: '1px solid #e5e7eb', borderRadius: '8px', outline: 'none', color: '#111827',
+                       resize: 'vertical', fontFamily: 'inherit', lineHeight: '1.5' }} />
+          </div>
+          <div style={{ fontSize: '11px', color: '#9ca3af' }}>
+            Sent from: notifications@shopireachboost.com
+          </div>
+          <button onClick={send} disabled={sending || !subject || !body}
+            style={{ padding: '11px', fontSize: '14px', fontWeight: '700', color: '#fff', minHeight: 44,
+                     background: sending || !subject || !body ? '#9ca3af' : '#0ea5e9',
+                     border: 'none', borderRadius: '10px',
+                     cursor: sending || !subject || !body ? 'not-allowed' : 'pointer',
+                     transition: 'background 0.2s' }}>
+            {sending ? '⏳ Sending...' : '✉️ Send email'}
+          </button>
+        </>
       )}
 
-      {/* Template picker */}
-      {templates.length > 0 && (
-        <div>
-          <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280',
-                          textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-            Template
-          </label>
-          <select
-            defaultValue=""
-            onChange={(e) => {
-              const t = templates.find((x) => x._id === e.target.value);
-              if (t) { setSubject(t.subject || ''); setBody(t.body || ''); }
-            }}
-            style={{
-              width: '100%', boxSizing: 'border-box',
-              padding: '9px 12px', fontSize: '13px',
-              border: '1px solid #e5e7eb', borderRadius: '8px',
-              outline: 'none', color: '#111827', background: '#fff',
-            }}
-          >
-            <option value="">-- Pick a template --</option>
-            {templates.map((t) => (
-              <option key={t._id} value={t._id}>{t.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      <div>
-        <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280',
-                        textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-          Subject
-        </label>
-        <input
-          value={subject}
-          onChange={(e) => setSubject(e.target.value)}
-          placeholder="Email subject"
-          style={{
-            width: '100%', boxSizing: 'border-box',
-            padding: '9px 12px', fontSize: '13px',
-            border: '1px solid #e5e7eb', borderRadius: '8px',
-            outline: 'none', color: '#111827',
-          }}
-        />
-      </div>
-      <div>
-        <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280',
-                        textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-          Message
-        </label>
-        <textarea
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          placeholder="Email message"
-          rows={6}
-          style={{
-            width: '100%', boxSizing: 'border-box',
-            padding: '9px 12px', fontSize: '13px',
-            border: '1px solid #e5e7eb', borderRadius: '8px',
-            outline: 'none', color: '#111827',
-            resize: 'vertical', fontFamily: 'inherit',
-            lineHeight: '1.5',
-          }}
-        />
-      </div>
-      <div style={{ fontSize: '11px', color: '#9ca3af' }}>
-        Sent from: notifications@shopireachboost.com
-      </div>
-      <button
-        onClick={send}
-        disabled={sending || !subject || !body}
-        style={{
-          padding: '11px', fontSize: '14px', fontWeight: '700', color: '#fff',
-          background: sending || !subject || !body ? '#9ca3af' : '#0ea5e9',
-          border: 'none', borderRadius: '10px',
-          cursor: sending || !subject || !body ? 'not-allowed' : 'pointer',
-          transition: 'background 0.2s',
-        }}
-      >
-        {sending ? '⏳ Sending...' : '✉️ Send email'}
-      </button>
-
-      {/* Live email preview */}
-      {(previewLoading || previewHtml) && (
-        <div style={{ marginTop: 4 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af',
-                        textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-            Preview
-          </div>
-          {previewLoading ? (
-            <div style={{ fontSize: 12, color: '#9ca3af', padding: '16px',
-                          textAlign: 'center', background: '#f9fafb',
-                          borderRadius: 8, border: '1px solid #e5e7eb' }}>
-              Loading preview…
+      {emailMode === 'template' && (
+        <>
+          {templates.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '24px 16px',
+                          background: '#f9fafb', borderRadius: 10,
+                          border: '1px dashed #e5e7eb' }}>
+              <div style={{ fontSize: 24, marginBottom: 8 }}>📋</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 4 }}>
+                No templates yet
+              </div>
+              <div style={{ fontSize: 12, color: '#9ca3af' }}>
+                Create templates in Settings to use them here.
+              </div>
             </div>
           ) : (
-            <iframe
-              srcDoc={previewHtml}
-              sandbox="allow-same-origin"
-              title="Email preview"
-              style={{
-                width: '100%', height: 420,
-                border: '1px solid #e5e7eb', borderRadius: 8,
-                display: 'block',
-              }}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {templates.map((t) => {
+                const isSelected = selectedTemplateId === t._id;
+                return (
+                  <button key={t._id}
+                    onClick={() => handleSelectTemplate(t)}
+                    style={{
+                      textAlign: 'left', padding: '10px 12px', borderRadius: 8,
+                      border: `1.5px solid ${isSelected ? '#2459D6' : '#e5e7eb'}`,
+                      background: isSelected ? '#F5F8FE' : '#fff',
+                      cursor: 'pointer', width: '100%',
+                      display: 'flex', alignItems: 'flex-start', gap: 10,
+                    }}
+                  >
+                    <span style={{ marginTop: 2, flexShrink: 0,
+                                   width: 14, height: 14, borderRadius: '50%',
+                                   border: `2px solid ${isSelected ? '#2459D6' : '#d1d5db'}`,
+                                   background: isSelected ? '#2459D6' : 'transparent',
+                                   display: 'inline-block' }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>{t.name}</span>
+                        {templateTypeChip(t.type)}
+                      </div>
+                      {t.subject && (
+                        <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2,
+                                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {t.subject}
+                        </div>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {selectedTemplateId && (
+            <>
+              <div style={{ fontSize: 11, color: '#9ca3af', fontStyle: 'italic' }}>
+                The template&apos;s own content is sent — you cannot edit it here.
+              </div>
+              <button onClick={sendTemplate}
+                disabled={templateSending || templateLoading}
+                style={{ padding: '11px', fontSize: '14px', fontWeight: '700', color: '#fff', minHeight: 44,
+                         background: templateSending || templateLoading ? '#9ca3af' : '#0ea5e9',
+                         border: 'none', borderRadius: '10px',
+                         cursor: templateSending || templateLoading ? 'not-allowed' : 'pointer',
+                         transition: 'background 0.2s' }}>
+                {templateSending ? '⏳ Sending...' : '✉️ Send template'}
+              </button>
+            </>
+          )}
+          <div style={{ fontSize: 12, color: '#6b7280' }}>
+            <a href="/admin/settings#email-templates"
+              style={{ color: '#2459D6', textDecoration: 'underline' }}>
+              Manage templates
+            </a>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ─── SendSection — two-column send card ─── */
+function SendSection({
+  hasPush, hasEmail, canWa,
+  customer, shop, waProfile, isNarrow,
+  sendWhatsapp, waSendError, waFallbackUrl, clearWaError,
+  selectedWaSuggestion, setSelectedWaSuggestion,
+  showWaOptOutConfirm, setShowWaOptOutConfirm, optOutWhatsapp, waOptingOut,
+  selectedProduct, setSelectedProduct,
+  notifTab, setNotifTab,
+  sendResult, setSendResult,
+  loadNotifications,
+}) {
+  const activeTab = notifTab;
+  const setActiveTab = setNotifTab;
+  const profileId = customer?.profile?._id;
+
+  // Preview state lifted up from composers.
+  const [pushTitle, setPushTitle] = useState('');
+  const [pushBody, setPushBody] = useState('');
+  const [emailPreviewHtml, setEmailPreviewHtml] = useState('');
+  const [emailPreviewLoading, setEmailPreviewLoading] = useState(false);
+  const [waMessageText, setWaMessageText] = useState('');
+
+  const pushProductImage = customer?.topProducts?.[0]?.imageUrl || null;
+
+  function handleSent() {
+    setSendResult('Sent!');
+    if (loadNotifications) loadNotifications({ aborted: false });
+    setTimeout(() => setSendResult(''), 3000);
+  }
+  function handleError(msg) {
+    setSendResult('Error: ' + (msg || 'Something went wrong'));
+  }
+
+  const ACC = '#2459D6';
+  const tabs = [
+    hasPush    && { key: 'push',      label: 'Push',      accent: ACC,      status: 'Subscribed' },
+    hasEmail   && { key: 'email',     label: 'Email',     accent: '#0ea5e9', status: 'Message or template' },
+    canWa      && { key: 'whatsapp',  label: 'WhatsApp',  accent: '#128C7E', status: 'Opted in' },
+  ].filter(Boolean);
+
+  if (tabs.length === 0) {
+    return (
+      <div style={{ background: '#fff', border: '1px solid #E2E5EB', borderRadius: 14,
+                    padding: 20, textAlign: 'center', fontSize: 13, color: '#9ca3af' }}>
+        No push subscription, email, or WhatsApp consent on file.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid #E2E5EB', borderRadius: 14,
+                  overflow: 'hidden' }}>
+      {/* Card header + tabs */}
+      <div style={{ padding: '16px 20px 0', borderBottom: '1px solid #E2E5EB' }}>
+        <div style={{ fontSize: 17, fontWeight: 700, color: '#15181E', marginBottom: 12 }}>
+          Send a message
+        </div>
+        <div role="tablist" style={{ display: 'flex', gap: 0, flexWrap: 'wrap' }}>
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab.key;
+            return (
+              <button key={tab.key} role="tab" aria-selected={isActive}
+                onClick={() => setActiveTab(tab.key)}
+                style={{
+                  padding: '9px 16px', fontSize: 13, fontWeight: 600,
+                  border: 'none', cursor: 'pointer',
+                  background: isActive ? '#F5F8FE' : 'transparent',
+                  color: isActive ? tab.accent : '#5A6272',
+                  borderBottom: isActive ? `2.5px solid ${tab.accent}` : '2.5px solid transparent',
+                  display: 'flex', flexDirection: 'column', alignItems: 'flex-start',
+                  gap: 1, minWidth: 80,
+                  outline: 'none',
+                }}
+                onFocus={e => e.currentTarget.style.boxShadow = `0 0 0 2px ${tab.accent}44`}
+                onBlur={e => e.currentTarget.style.boxShadow = 'none'}
+              >
+                <span>{tab.label}</span>
+                <span style={{ fontSize: 10, fontWeight: 500,
+                               color: isActive ? tab.accent : '#9ca3af' }}>
+                  {tab.status}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Two-column body */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: isNarrow ? '1fr' : 'minmax(0, 460px) 1fr',
+        alignItems: 'start',
+      }}>
+        {/* LEFT — editor */}
+        <div style={{
+          padding: 20,
+          borderRight: isNarrow ? 'none' : '1px solid #E2E5EB',
+          borderBottom: isNarrow ? '1px solid #E2E5EB' : 'none',
+        }}>
+          {activeTab === 'push' && hasPush && (
+            <NotificationComposer
+              customer={customer} shop={shop}
+              onTitleChange={setPushTitle} onBodyChange={setPushBody}
+              onSent={handleSent} onError={handleError}
             />
           )}
+          {activeTab === 'email' && hasEmail && (
+            <EmailComposer
+              customer={customer} shop={shop}
+              onPreviewHtmlChange={setEmailPreviewHtml}
+              onPreviewLoadingChange={setEmailPreviewLoading}
+              onSent={handleSent} onError={handleError}
+            />
+          )}
+          {activeTab === 'whatsapp' && canWa && (
+            <WaComposer
+              customer={customer} waProfile={waProfile} shop={shop} profileId={profileId}
+              sendWhatsapp={sendWhatsapp} waSendError={waSendError} waFallbackUrl={waFallbackUrl}
+              clearWaError={clearWaError}
+              selectedWaSuggestion={selectedWaSuggestion}
+              setSelectedWaSuggestion={setSelectedWaSuggestion}
+              showWaOptOutConfirm={showWaOptOutConfirm}
+              setShowWaOptOutConfirm={setShowWaOptOutConfirm}
+              optOutWhatsapp={optOutWhatsapp} waOptingOut={waOptingOut}
+              selectedProduct={selectedProduct} setSelectedProduct={setSelectedProduct}
+              onMessageChange={setWaMessageText}
+            />
+          )}
+          {sendResult && (
+            <div style={{ marginTop: 12, fontSize: 13, fontWeight: 600, textAlign: 'center',
+                          color: sendResult.startsWith('Error') ? '#dc2626' : '#16a34a' }}>
+              {sendResult}
+            </div>
+          )}
         </div>
-      )}
+
+        {/* RIGHT — preview */}
+        <div style={{ padding: 20 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af',
+                        textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 16 }}>
+            Preview
+          </div>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            {activeTab === 'push' && (
+              <>
+                <PushDesktopPreview title={pushTitle} body={pushBody}
+                  shop={shop} productImage={pushProductImage} />
+                <PhoneFrame>
+                  <PushMobilePreview title={pushTitle} body={pushBody} shop={shop} />
+                </PhoneFrame>
+              </>
+            )}
+            {activeTab === 'email' && (
+              <>
+                <EmailDesktopPreview html={emailPreviewHtml} loading={emailPreviewLoading} />
+                <PhoneFrame>
+                  <EmailMobilePreview html={emailPreviewHtml} loading={emailPreviewLoading} />
+                </PhoneFrame>
+              </>
+            )}
+            {activeTab === 'whatsapp' && (
+              <>
+                <WaDesktopPreview messageText={waMessageText}
+                  selectedProduct={selectedProduct} shop={shop} customer={customer} />
+                <PhoneFrame>
+                  <WaMobilePreview messageText={waMessageText}
+                    selectedProduct={selectedProduct} shop={shop} customer={customer} />
+                </PhoneFrame>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1967,97 +2472,6 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
     }
   }
 
-  const sendCard = (!hasPush && !hasEmail && !canWa) ? (
-    <div style={{ ...DS.card, padding: 16, marginBottom: 0, textAlign: 'center' }}>
-      <div style={{ fontSize: 13, color: '#9ca3af' }}>
-        🔕 No push subscription or email on file
-      </div>
-    </div>
-  ) : (
-    <div style={{ ...DS.card, padding: 16, marginBottom: 0 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: '#111827',
-                    textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
-        Send a message
-      </div>
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-        {hasPush && (
-          <button onClick={() => setNotifTab('push')} style={{
-            flex: 1, padding: '7px 0', fontSize: 12, fontWeight: 600,
-            cursor: 'pointer', border: '1px solid #e5e7eb', borderRadius: 8,
-            background: notifTab === 'push' ? '#4f46e5' : '#fff',
-            color: notifTab === 'push' ? '#fff' : '#6b7280',
-          }}>🔔 Push</button>
-        )}
-        {hasEmail && (
-          <button onClick={() => setNotifTab('email')} style={{
-            flex: 1, padding: '7px 0', fontSize: 12, fontWeight: 600,
-            cursor: 'pointer', border: '1px solid #e5e7eb', borderRadius: 8,
-            background: notifTab === 'email' ? '#4f46e5' : '#fff',
-            color: notifTab === 'email' ? '#fff' : '#6b7280',
-          }}>✉️ Email</button>
-        )}
-        {canWa && (
-          <button onClick={() => setNotifTab('whatsapp')} style={{
-            flex: 1, padding: '7px 0', fontSize: 12, fontWeight: 600,
-            cursor: 'pointer', border: '1px solid #e5e7eb', borderRadius: 8,
-            background: notifTab === 'whatsapp' ? '#128C7E' : '#fff',
-            color: notifTab === 'whatsapp' ? '#fff' : '#128C7E',
-          }} aria-label="WhatsApp tab">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-              style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} aria-hidden="true">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-            WhatsApp
-          </button>
-        )}
-      </div>
-      {notifTab === 'push' && hasPush && (
-        <NotificationComposer customer={customer} shop={shop}
-          onSent={() => { setSendResult('Sent successfully!'); setTimeout(() => setSendResult(''), 3000); }}
-          onError={(err) => setSendResult('Error: ' + err)} />
-      )}
-      {notifTab === 'email' && hasEmail && (
-        <EmailComposer customer={customer} shop={shop}
-          onSent={() => { setSendResult('Sent successfully!'); setTimeout(() => setSendResult(''), 3000); }}
-          onError={(err) => setSendResult('Error: ' + err)} />
-      )}
-      {notifTab === 'whatsapp' && canWa && (
-        <WaComposer
-          customer={customer}
-          waProfile={waProfile}
-          shop={shop}
-          profileId={profileId}
-          sendWhatsapp={sendWhatsapp}
-          waSendError={waSendError}
-          waFallbackUrl={waFallbackUrl}
-          clearWaError={clearWaError}
-          selectedWaSuggestion={selectedWaSuggestion}
-          setSelectedWaSuggestion={setSelectedWaSuggestion}
-          showWaOptOutConfirm={showWaOptOutConfirm}
-          setShowWaOptOutConfirm={setShowWaOptOutConfirm}
-          optOutWhatsapp={optOutWhatsapp}
-          waOptingOut={waOptingOut}
-          selectedProduct={selectedProduct}
-          setSelectedProduct={setSelectedProduct}
-        />
-      )}
-      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8,
-                    display: 'flex', alignItems: 'center', gap: 4 }}>
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
-          stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-        </svg>
-        Quiet hours respected
-      </div>
-      {sendResult && (
-        <div style={{ marginTop: 8, fontSize: 13, textAlign: 'center',
-          color: sendResult.startsWith('Error') ? '#dc2626' : '#16a34a' }}>
-          {sendResult}
-        </div>
-      )}
-    </div>
-  );
 
   // Stat tile sub-label for "Messages sent"
   const msgSentParts = [
@@ -2504,7 +2918,21 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
       </div>
 
       {/* === 4. Send a message (full-width below) === */}
-      {sendCard}
+      <SendSection
+        hasPush={hasPush} hasEmail={hasEmail} canWa={canWa}
+        customer={customer} shop={shop} waProfile={waProfile} isNarrow={isNarrow}
+        sendWhatsapp={sendWhatsapp} waSendError={waSendError} waFallbackUrl={waFallbackUrl}
+        clearWaError={clearWaError}
+        selectedWaSuggestion={selectedWaSuggestion}
+        setSelectedWaSuggestion={setSelectedWaSuggestion}
+        showWaOptOutConfirm={showWaOptOutConfirm}
+        setShowWaOptOutConfirm={setShowWaOptOutConfirm}
+        optOutWhatsapp={optOutWhatsapp} waOptingOut={waOptingOut}
+        selectedProduct={selectedProduct} setSelectedProduct={setSelectedProduct}
+        notifTab={notifTab} setNotifTab={setNotifTab}
+        sendResult={sendResult} setSendResult={setSendResult}
+        loadNotifications={loadNotifications}
+      />
 
     </div>
   );

@@ -1,0 +1,109 @@
+CUSTOMER DETAIL — SEND SECTION TWO-COLUMN + LIVE PREVIEWS — SELF-AUDIT
+=======================================================================
+Date: 2026-10-12
+Branch: main
+Scope: frontend/app/admin/screens/CustomerDetail.jsx only
+
+=== 1. WHAT CHANGED ===
+
+1.1 NEW PREVIEW COMPONENTS (added before WaComposer, ~350 lines)
+  - PhoneFrame: 252px dark bezel, pill notch, 480px screen height.
+  - PushDesktopPreview: browser-toast card (store name, "now", title, body,
+    product image when available).
+  - PushMobilePreview: lock-screen notification in gradient dark bg.
+  - EmailDesktopPreview / EmailMobilePreview: iframes with sandbox=
+    "allow-same-origin" (needed so inline CSS inside the email HTML
+    is parsed; scripts remain blocked). Mobile scales 360px iframe to
+    ~0.65 to fit 234px content area.
+  - WaBubble: shared WhatsApp chat bubble component used by both
+    WaDesktopPreview (full size, desktop chat wrapper) and
+    WaMobilePreview (miniLayout mode, phone frame).
+
+1.2 WaComposer
+  - Added onMessageChange prop; useEffect notifies parent on every
+    messageText change so SendSection can drive the live preview.
+  - Button label: "Send via WhatsApp" → "Open in WhatsApp".
+  - Link note: updated to "Opens WhatsApp. Press Send there to finish.
+    History will show 'Opened in WhatsApp'." (product-selected branch
+    unchanged — still shows the product name note).
+  - Removed the inline bubble preview (moved to right column).
+
+1.3 NotificationComposer
+  - Added onTitleChange / onBodyChange props; two useEffects call them
+    on every title/body change.
+  - Removed "Signal: … · Strength: …" line.
+  - Removed old dark CSS mockup preview (moved to right column).
+  - Added "Sends right away to this customer." note below send button.
+  - Added read-only chips "Opens: <product>" and "Image: <product>"
+    rendered only when top product exists / productImage exists.
+  - Added minHeight: 44 to send button.
+
+1.4 EmailComposer
+  - Added emailMode state ('write' | 'template') managed internally.
+  - Added segmented control "Write a message" / "Use a template".
+  - Write mode: existing suggestions + subject/body/send button kept
+    intact. Removed the old <select> template picker (which pre-filled
+    subject+body). Debounced preview useEffect now calls
+    onPreviewHtmlChange / onPreviewLoadingChange callbacks instead of
+    updating local state. Preview cleared when mode switches.
+  - Template mode: loads GET /api/email-templates on mount (same call
+    as before). Selectable cards with radio dot, name, type chip,
+    subject. Selecting a card calls GET /api/email-templates/:id/preview
+    via loadTemplatePreview() → onPreviewHtmlChange. Send calls
+    POST /api/email-templates/:id/send { profileId } → onSent().
+    Empty state when no templates. "Manage templates" link to settings.
+    Note "The template's own content is sent…" shown when selected.
+  - Removed the old inline iframe preview section.
+  - Added minHeight: 44 to send buttons.
+
+1.5 SendSection (new component, ~150 lines)
+  - Receives notifTab/setNotifTab and sendResult/setSendResult from
+    CustomerDetail (preserving optOutWhatsapp error path).
+  - Owns lifted preview state: pushTitle, pushBody, emailPreviewHtml,
+    emailPreviewLoading, waMessageText.
+  - Tab header: role=tablist, three role=tab buttons with status lines
+    ("Subscribed" / "Message or template" / "Opted in"), accent border
+    + #F5F8FE active bg, visible focus ring via onFocus/onBlur.
+  - Two-column grid: left max 460px (editor), right (Preview label +
+    desktop preview + phone frame). Stacks to single column when
+    isNarrow (< 900px).
+  - Empty state when no channel available.
+
+1.6 CustomerDetail
+  - Removed sendCard variable definition (~90 lines).
+  - Replaced {sendCard} render with <SendSection .../> passing all
+    required props including loadNotifications.
+
+=== 2. MUST-NOT-CHANGE VERIFICATION ===
+
+- Send route shapes unchanged: POST /api/push/send-journey,
+  POST /api/push/send-journey-email, WA sendWhatsapp() — all
+  invocations unchanged inside their respective composers.
+- WA consent/opt-out/purpose rules: WaComposer eligibility checks
+  (hasPurpose, isPurposeLocked, say_hello fallback, product chips,
+  link-preview, opt-out confirm dialog) — untouched.
+- WA suggestion ranking: rankWaSuggestions() untouched.
+- Email suggestion logic: unchanged.
+- Push suggestion/auto-fill logic: unchanged.
+- Existing disabled/no-token/no-email states: unchanged (each composer
+  still renders its own disabled state within the left column; SendSection
+  shows an empty-state card when no channels at all).
+- "Sent from <address>" line in EmailComposer write mode: kept.
+- loadWaProfile, optOutWhatsapp, all CustomerDetail state other than
+  sendCard: unchanged.
+
+=== 3. GAPS / BROWSER TESTING ===
+
+- Browser testing was not possible (no dev server open in this session).
+  Visual correctness of the phone frame, preview scaling, and two-column
+  responsive layout cannot be confirmed here — say so explicitly.
+- EmailMobilePreview scale factor (0.65) is calculated from 234/360;
+  if the phone content area differs at runtime the email will clip or
+  show whitespace. Adjust `scale` in EmailMobilePreview if needed.
+- "Manage templates" link points to /admin/settings#email-templates;
+  adjust if the settings anchor differs.
+
+=== 4. TEST RESULTS ===
+
+Backend: 950/950 tests pass (49 suites).
+Frontend build: clean, no type errors, no warnings.
