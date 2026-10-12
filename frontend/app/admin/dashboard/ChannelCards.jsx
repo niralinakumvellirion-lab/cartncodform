@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { apiGet } from '../../lib/api';
+import { apiGet } from '../../../lib/api';
 import { useWhatsapp } from '../screens/customerShared';
 
 const CARD_STYLE = {

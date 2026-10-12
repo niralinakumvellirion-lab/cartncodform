@@ -9,6 +9,7 @@ import { ImageUploadPair } from '../components/ImageUploadPair';
 import { ProductPicker } from '../components/ProductPicker';
 import MultiDateScheduler from '../components/MultiDateScheduler';
 import DateRangeFilter, { DATE_FILTERS, getDateRange } from '../components/DateRangeFilter';
+import { ChannelCard, ChannelDrawer } from './ChannelCards';
 
 const DS = {
   page: {
@@ -286,22 +287,6 @@ const SORT_TABS = [
 ];
 
 // DATE_FILTERS and getDateRange are imported from ../components/DateRangeFilter
-
-const NOTIF_STATS = [
-  { key: 'pushSent', label: 'Push Sent' },
-  { key: 'emailsSent', label: 'Emails Sent' },
-  { key: 'popupsShown', label: 'Popups Shown' },
-  { key: 'emailsCaptured', label: 'Emails Captured' },
-  { key: 'pushSubscribers', label: 'Push Subscribers' },
-];
-
-const ACTIVITY_STATS = [
-  { key: 'add_to_cart', label: 'Added to Cart' },
-  { key: 'checkout_start', label: 'Started Checkout' },
-  { key: 'purchase', label: 'Purchased' },
-  { key: 'revisit', label: 'Revisited' },
-];
-
 
 const SIGNAL_LABELS = {
   cart_abandon: 'Cart left behind',
@@ -730,9 +715,9 @@ export default function DashboardScreen({ shop }) {
       if (from && to) setCustomRange({ from, to });
     }
   }, []);
-  const [activity, setActivity] = useState(null);
-  const [notifStats, setNotifStats] = useState(null);
-  const [notifLoading, setNotifLoading] = useState(true);
+  const [channelStats, setChannelStats] = useState(null);
+  const [channelLoading, setChannelLoading] = useState(true);
+  const [openChannel, setOpenChannel] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   // Phase: shimmer-on-refresh — distinguishes a manual Refresh click
   // (isRefreshing true -> shimmer overlay) from the page's first load
@@ -745,45 +730,9 @@ export default function DashboardScreen({ shop }) {
   const [sendingTo, setSendingTo] = useState(null);
   const [sendResults, setSendResults] = useState({});
 
-  // KPI tile drill-downs (audits/dashboard-kpi-drilldown-audit.txt):
-  // Popups Shown opens an in-page slide-out panel (nothing existing to
-  // navigate to); New Subscribers Today scrolls to + briefly highlights
-  // the section that already renders this same list further down the
-  // page, rather than navigating anywhere.
   const [popupsPanelOpen, setPopupsPanelOpen] = useState(false);
-  const [openInfoIdx, setOpenInfoIdx] = useState(null);
-  const [popoverPos, setPopoverPos] = useState(null);
-  const [hoveredFunnelIdx, setHoveredFunnelIdx] = useState(null);
-  const funnelInfoRefs = useRef([]);
   const newSubsRef = useRef(null);
   const [highlightNewSubs, setHighlightNewSubs] = useState(false);
-
-  useEffect(() => {
-    if (openInfoIdx === null) return;
-    function onKey(e) { if (e.key === 'Escape') setOpenInfoIdx(null); }
-    function onOutside(e) {
-      const ref = funnelInfoRefs.current[openInfoIdx];
-      if (ref && !ref.contains(e.target)) setOpenInfoIdx(null);
-    }
-    document.addEventListener('keydown', onKey);
-    document.addEventListener('mousedown', onOutside);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.removeEventListener('mousedown', onOutside);
-    };
-  }, [openInfoIdx]);
-
-  useEffect(() => {
-    if (openInfoIdx === null) { setPopoverPos(null); return; }
-    const ref = funnelInfoRefs.current[openInfoIdx];
-    if (!ref) return;
-    const rect = ref.getBoundingClientRect();
-    const isFirst = openInfoIdx === 0;
-    setPopoverPos(isFirst
-      ? { top: rect.bottom + 6, left: rect.left }
-      : { top: rect.bottom + 6, right: window.innerWidth - rect.right }
-    );
-  }, [openInfoIdx]);
 
   function scrollToNewSubscribers() {
     if (!newSubscribers.length || !newSubsRef.current) return;
@@ -913,7 +862,7 @@ export default function DashboardScreen({ shop }) {
   const [isNarrow, setIsNarrow] = useState(false);
   const [isMedium, setIsMedium] = useState(false);
 
-  // --- Today.jsx: activity + notifStats fetch, keyed on date filter ---
+  // Channel cards — Push / Email / WhatsApp, keyed on date filter + refreshKey.
   useEffect(() => {
     if (!shop) return;
     if (dateFilter === 'custom' && (!customRange.from || !customRange.to)) return;
@@ -921,23 +870,14 @@ export default function DashboardScreen({ shop }) {
     const { from, to } = dateFilter === 'custom'
       ? getCustomRange(customRange.from, customRange.to)
       : getDateRange(dateFilter);
-    setNotifLoading(true);
-    Promise.allSettled([
-      apiGet(`/api/activity?shop=${encodeURIComponent(shop)}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
-      apiGet(`/api/profiles/${encodeURIComponent(shop)}/today-stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
-    ])
-      .then(([actResult, statsResult]) => {
-        if (cancelled) return;
-        setActivity(actResult.status === 'fulfilled' ? actResult.value : null);
-        setNotifStats(statsResult.status === 'fulfilled' ? statsResult.value : null);
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setNotifLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    setChannelLoading(true);
+    apiGet(
+      `/api/dashboard/${encodeURIComponent(shop)}/channels?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`
+    )
+      .then((data) => { if (!cancelled) setChannelStats(data); })
+      .catch(() => { if (!cancelled) setChannelStats(null); })
+      .finally(() => { if (!cancelled) setChannelLoading(false); });
+    return () => { cancelled = true; };
   }, [shop, dateFilter, customRange, refreshKey]);
 
   // --- Today.jsx: poll for new subscribers every 30s ---
@@ -1019,18 +959,13 @@ export default function DashboardScreen({ shop }) {
   }, []);
 
   // Clears isRefreshing once both effects a Refresh click kicks off
-  // (notifLoading via refreshKey, insightsLoading via loadInsights())
-  // have settled back to false. Not given verbatim by the task (its own
-  // sketch was just "// after data loads: setIsRefreshing(false)" inside
-  // the click handler, which can't work directly since refreshKey only
-  // triggers an effect asynchronously and isn't awaitable at the click
-  // site) — watching both loading flags is the accurate way to know
-  // when the refresh has actually finished.
+  // (channelLoading via refreshKey, insightsLoading via loadInsights())
+  // have settled back to false.
   useEffect(() => {
-    if (isRefreshing && !notifLoading && !insightsLoading) {
+    if (isRefreshing && !channelLoading && !insightsLoading) {
       setIsRefreshing(false);
     }
-  }, [isRefreshing, notifLoading, insightsLoading]);
+  }, [isRefreshing, channelLoading, insightsLoading]);
 
   // Fetch the last 6 distinct sends for the Recent Sends card.
   // Uses the dedicated endpoint so festival sends appear as one row
@@ -1172,90 +1107,9 @@ export default function DashboardScreen({ shop }) {
         return `${fmt(customRange.from)} – ${fmt(customRange.to)}`;
       })()
     : 'Custom range';
-  const kpiRow1 = [
-    {
-      label: 'Push Sent', value: notifStats?.pushSent,
-      ariaLabel: 'Push Sent — view sent push notifications',
-      onClick: () => navigate(`/admin/messages?channel=push&status=sent&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
-    },
-    {
-      label: 'Emails Sent', value: notifStats?.emailsSent,
-      ariaLabel: 'Emails Sent — view sent emails',
-      onClick: () => navigate(`/admin/messages?channel=email&status=sent&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
-    },
-    {
-      label: 'Push Subscribers', value: notifStats?.pushSubscribers,
-      ariaLabel: 'Push Subscribers — view subscribed customers',
-      onClick: () => navigate(`/admin/customers?filter=push_subscribed&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
-    },
-  ];
-  const kpiRow2 = [
-    {
-      label: 'Popups Shown', value: notifStats?.popupsShown,
-      ariaLabel: 'Popups Shown — view popup impressions',
-      onClick: () => setPopupsPanelOpen(true),
-    },
-    {
-      label: 'Emails Captured', value: notifStats?.emailsCaptured,
-      ariaLabel: 'Emails Captured — view customers who gave an email',
-      onClick: () => navigate(`/admin/customers?filter=email_captured&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
-    },
-    {
-      label: 'New Subscribers Today', value: newSubscribers.length,
-      ariaLabel: 'New Subscribers Today — jump to the list below',
-      onClick: scrollToNewSubscribers,
-    },
-  ];
-  const ACT_COLORS = {
-    add_to_cart: '#f59e0b',
-    checkout_start: '#8b5cf6',
-    purchase: '#16a34a',
-    revisit: '#3b82f6',
-  };
-
   const showingLabel = dateFilter === 'custom'
     ? (customRange.from && customRange.to ? customLabel : 'Custom range')
     : { '7d': 'Last 7 days', '30d': 'Last 30 days', '90d': 'Last 90 days' }[dateFilter] || dateFilter;
-
-  const funnelCols = isNarrow ? 'repeat(2, 1fr)' : isMedium ? 'repeat(3, 1fr)' : 'repeat(5, 1fr)';
-
-  const funnelSteps = [
-    {
-      label: 'SAW THE POPUP',
-      info: 'Visitors who were shown your push opt-in popup',
-      value: notifStats?.popupsShown ?? 0,
-      onClick: () => setPopupsPanelOpen(true),
-      color: '#6366f1',
-    },
-    {
-      label: 'SUBSCRIBED',
-      info: 'Visitors who accepted push notifications',
-      value: notifStats?.pushSubscribers ?? 0,
-      onClick: () => navigate(`/admin/customers?filter=push_subscribed&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
-      color: '#8b5cf6',
-    },
-    {
-      label: 'ADDED TO CART',
-      info: 'Subscribers who added a product to their cart',
-      value: activity?.summary?.add_to_cart ?? 0,
-      onClick: () => navigate(`/admin/activity?type=add_to_cart&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
-      color: '#f59e0b',
-    },
-    {
-      label: 'STARTED CHECKOUT',
-      info: 'Subscribers who started the checkout process',
-      value: activity?.summary?.checkout_start ?? 0,
-      onClick: () => navigate(`/admin/activity?type=checkout_start&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
-      color: '#0ea5e9',
-    },
-    {
-      label: 'PURCHASED',
-      info: 'Subscribers who completed a purchase',
-      value: activity?.summary?.purchase ?? 0,
-      onClick: () => navigate(`/admin/activity?type=purchase&from=${encodeURIComponent(kpiFrom)}&to=${encodeURIComponent(kpiTo)}`),
-      color: '#16a34a',
-    },
-  ];
 
   // Festivals already queued (draft or approved — NOT sent/cancelled, so
   // a sent festival becomes suggestible again next year) should not be
@@ -1314,12 +1168,12 @@ export default function DashboardScreen({ shop }) {
         // after data loads: setIsRefreshing(false) — handled by the
         // watcher effect above once notifLoading/insightsLoading settle
       }}
-      disabled={notifLoading || insightsLoading}
+      disabled={channelLoading || insightsLoading}
       style={{
         display: 'flex', alignItems: 'center', gap: 6,
         ...DS.btnSecondary,
-        cursor: (notifLoading || insightsLoading) ? 'not-allowed' : 'pointer',
-        opacity: (notifLoading || insightsLoading) ? 0.6 : 1,
+        cursor: (channelLoading || insightsLoading) ? 'not-allowed' : 'pointer',
+        opacity: (channelLoading || insightsLoading) ? 0.6 : 1,
       }}
     >
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -1330,7 +1184,7 @@ export default function DashboardScreen({ shop }) {
         <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36
           A9 9 0 0 0 20.49 15"/>
       </svg>
-      {(notifLoading || insightsLoading) ? 'Refreshing...' : 'Refresh'}
+      {(channelLoading || insightsLoading) ? 'Refreshing...' : 'Refresh'}
     </button>
   );
 
@@ -1462,70 +1316,42 @@ export default function DashboardScreen({ shop }) {
         {/* LEFT — main content */}
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
 
-          {/* FUNNEL CARD */}
-          <div style={{ ...DS.card, marginBottom: 0 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14 }}>
-              Conversion Funnel
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: funnelCols, gap: 12 }}>
-              {funnelSteps.map((step, i) => {
-                const prev = i > 0 ? funnelSteps[i - 1].value : null;
-                const rate = (prev && prev > 0) ? Math.min(100, Math.round((step.value / prev) * 100)) : null;
-                const isHovered = hoveredFunnelIdx === i;
-                const infoOpen = openInfoIdx === i;
-                return (
-                  <div
-                    key={step.label}
-                    role="button"
-                    tabIndex={0}
-                    onClick={step.onClick}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); step.onClick(); } }}
-                    onMouseEnter={() => setHoveredFunnelIdx(i)}
-                    onMouseLeave={() => setHoveredFunnelIdx(null)}
-                    style={{
-                      padding: '10px 12px',
-                      background: isHovered ? '#f0f0ff' : '#fafafa',
-                      border: isHovered ? '1px solid #c7d2fe' : '1px solid #f3f4f6',
-                      borderRadius: 8,
-                      cursor: 'pointer',
-                      position: 'relative',
-                      transition: 'background 0.15s, border-color 0.15s',
-                      display: 'flex',
-                      flexDirection: 'column',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <span style={{ fontSize: 9, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', flex: 1, paddingRight: 4 }}>
-                        {step.label}
-                      </span>
-                      <span ref={(el) => { funnelInfoRefs.current[i] = el; }}>
-                        <button
-                          type="button"
-                          aria-label={`Info: ${step.label}`}
-                          aria-expanded={infoOpen}
-                          onClick={(e) => { e.stopPropagation(); setOpenInfoIdx(infoOpen ? null : i); }}
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', color: infoOpen ? '#6366f1' : '#d1d5db', padding: 0, fontSize: 11, lineHeight: 1 }}
-                        >
-                          ⓘ
-                        </button>
-                      </span>
-                    </div>
-                    <div style={{ marginTop: 'auto', paddingTop: 8 }}>
-                      <div style={{ fontSize: 22, fontWeight: 800, color: '#111827', lineHeight: 1 }}>
-                        {(notifLoading || todayLoading) ? '—' : step.value.toLocaleString('en-IN')}
-                      </div>
-                      <div style={{ height: 3, background: '#e5e7eb', borderRadius: 2, margin: '8px 0 4px' }}>
-                        <div style={{ height: '100%', background: step.color, borderRadius: 2, width: rate !== null ? `${rate}%` : '100%', transition: 'width 0.4s ease' }} />
-                      </div>
-                      {rate !== null
-                        ? <div style={{ fontSize: 10, color: '#9ca3af' }}>{rate}% of {funnelSteps[i - 1].label.toLowerCase()}</div>
-                        : <div style={{ fontSize: 10, color: '#9ca3af' }}>Starting point</div>
-                      }
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+          {/* CHANNEL CARDS — Push / Email / WhatsApp */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: isNarrow ? '1fr' : 'repeat(3, 1fr)',
+            gap: 12,
+          }}>
+            <ChannelCard
+              channel="push"
+              label="Push"
+              sent={channelStats?.push?.sent ?? 0}
+              pending={channelStats?.push?.pending ?? 0}
+              types={channelStats?.push?.types ?? []}
+              loading={channelLoading}
+              onDetails={() => setOpenChannel({ channel: 'push', status: 'sent' })}
+            />
+            <ChannelCard
+              channel="email"
+              label="Email"
+              sent={channelStats?.email?.sent ?? 0}
+              pending={channelStats?.email?.pending ?? 0}
+              types={channelStats?.email?.types ?? []}
+              loading={channelLoading}
+              onDetails={() => setOpenChannel({ channel: 'email', status: 'sent' })}
+            />
+            <ChannelCard
+              channel="whatsapp"
+              label="WhatsApp"
+              sent={channelStats?.whatsapp?.sent ?? 0}
+              pending={channelStats?.whatsapp?.pending ?? 0}
+              types={[
+                ...(channelStats?.whatsapp?.sentFollowup ? [{ type: 'followup', label: 'Follow-up', sent: channelStats.whatsapp.sentFollowup, pending: 0 }] : []),
+                ...(channelStats?.whatsapp?.sentOrder ? [{ type: 'order', label: 'Order msg', sent: channelStats.whatsapp.sentOrder, pending: 0 }] : []),
+              ]}
+              loading={channelLoading}
+              onDetails={() => setOpenChannel({ channel: 'whatsapp', status: 'pending' })}
+            />
           </div>
 
           {/* Two-col: Do This Next | Recent Sends */}
@@ -2657,29 +2483,22 @@ export default function DashboardScreen({ shop }) {
         onClose={() => setPopupsPanelOpen(false)}
       />
 
-      {openInfoIdx !== null && popoverPos && funnelSteps[openInfoIdx] && (
-        <div
-          role="tooltip"
-          style={{
-            position: 'fixed',
-            top: popoverPos.top,
-            ...('left' in popoverPos ? { left: popoverPos.left } : { right: popoverPos.right }),
-            zIndex: 500,
-            background: '#1f2937',
-            color: '#f9fafb',
-            fontSize: 11,
-            lineHeight: 1.5,
-            padding: '8px 12px',
-            borderRadius: 6,
-            width: 240,
-            whiteSpace: 'normal',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
-            pointerEvents: 'none',
-          }}
-        >
-          {funnelSteps[openInfoIdx].info}
-        </div>
-      )}
+      {openChannel && (() => {
+        const { from: drFrom, to: drTo } = dateFilter === 'custom'
+          ? getCustomRange(customRange.from, customRange.to)
+          : getDateRange(dateFilter);
+        return (
+          <ChannelDrawer
+            shop={shop}
+            channel={openChannel.channel}
+            initialStatus={openChannel.status}
+            onClose={() => setOpenChannel(null)}
+            isMobileView={isMobileView}
+            from={drFrom}
+            to={drTo}
+          />
+        );
+      })()}
     </div>
   );
 }
