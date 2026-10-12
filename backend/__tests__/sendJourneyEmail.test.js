@@ -15,6 +15,11 @@ jest.mock('../models/Store', () => ({
   findOne: jest.fn(),
 }));
 
+const mockScheduledJobCreate = jest.fn().mockResolvedValue({});
+jest.mock('../models/ScheduledJob', () => ({
+  create: (...args) => mockScheduledJobCreate(...args),
+}));
+
 const mockSend = jest.fn();
 jest.mock('resend', () => ({
   Resend: jest.fn().mockImplementation(() => ({
@@ -30,11 +35,14 @@ const SHOP = 'demo.myshopify.com';
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.spyOn(console, 'error').mockImplementation(() => {});
+  mockScheduledJobCreate.mockResolvedValue({});
   // Default store mock — sendJourneyEmail loads brand data from Store.
   Store.findOne.mockReturnValue({
     select: jest.fn().mockResolvedValue({ shopName: 'Test Store', logoUrl: null, primaryColor: null }),
   });
 });
+afterEach(() => jest.restoreAllMocks());
 
 test('a. missing profileId/subject/body -> 400, no DB/email call', async () => {
   const r = await sendJourneyEmail(SHOP, { profileId: null, subject: 'Hi', body: '' });
@@ -120,4 +128,49 @@ test('f. Resend reports an error -> 500', async () => {
 
   expect(r.status).toBe(500);
   expect(r.payload.error).toBe('Invalid API key');
+});
+
+const profileMock = (email) => ({
+  _id: 'pid1',
+  identifiers: { emails: [email] },
+  channels: {},
+});
+
+test('g. successful send creates ScheduledJob with origin="manual"', async () => {
+  Profile.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(profileMock('a@e.com')) });
+  mockSend.mockResolvedValue({ data: { id: 'r1' }, error: null });
+
+  await sendJourneyEmail(SHOP, { profileId: 'pid1', subject: 'Subj', body: 'Body' });
+
+  expect(mockScheduledJobCreate).toHaveBeenCalledTimes(1);
+  const job = mockScheduledJobCreate.mock.calls[0][0];
+  expect(job.origin).toBe('manual');
+  expect(job.sentBy).toBe('owner');
+  expect(job.channel).toBe('email');
+  expect(job.status).toBe('sent');
+  expect(job.signalType).toBe('manual');
+});
+
+test('h. Resend failure creates ScheduledJob with status="failed"', async () => {
+  Profile.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(profileMock('a@e.com')) });
+  mockSend.mockResolvedValue({ data: null, error: { message: 'Rate limit' } });
+
+  const r = await sendJourneyEmail(SHOP, { profileId: 'pid1', subject: 'S', body: 'B' });
+
+  expect(r.status).toBe(500);
+  expect(mockScheduledJobCreate).toHaveBeenCalledTimes(1);
+  const job = mockScheduledJobCreate.mock.calls[0][0];
+  expect(job.status).toBe('failed');
+  expect(job.origin).toBe('manual');
+});
+
+test('i. ScheduledJob logging failure does not fail the send', async () => {
+  Profile.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(profileMock('a@e.com')) });
+  mockSend.mockResolvedValue({ data: { id: 'r2' }, error: null });
+  mockScheduledJobCreate.mockRejectedValue(new Error('Mongo write error'));
+
+  const r = await sendJourneyEmail(SHOP, { profileId: 'pid1', subject: 'S', body: 'B' });
+
+  expect(r.status).toBe(200);
+  expect(console.error).toHaveBeenCalled();
 });

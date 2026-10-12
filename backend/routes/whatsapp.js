@@ -390,6 +390,8 @@ router.post('/:shopDomain/send', requireAuth, requireStoreOwner, async (req, res
       ruleId: null,
       purpose,
       productHandle: selectedHandle || null,
+      origin: 'manual',
+      sentBy: 'owner',
     });
 
     // ctaUrl: product page when a product is selected, store home otherwise.

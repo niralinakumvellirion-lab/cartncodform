@@ -543,6 +543,32 @@ router.post('/:id/send', requireAuth, async (req, res) => {
       return res.status(500).json({ error: error.message });
     }
 
+    // Log ScheduledJob row for dashboard visibility — must not break the send.
+    const sendOk = !error;
+    try {
+      const ScheduledJob = require('../models/ScheduledJob');
+      await ScheduledJob.create({
+        shopDomain: req.shopDomain,
+        profileId: profile._id,
+        signalType: 'manual',
+        channel: 'email',
+        status: sendOk ? 'sent' : 'failed',
+        sentAt: sendOk ? new Date() : undefined,
+        runAt: new Date(),
+        payload: { subject: template.subject, preheader: template.preheader || '', body: template.body || '' },
+        origin: 'manual',
+        sentBy: 'owner',
+        error: sendOk ? undefined : (error ? error.message : undefined),
+      });
+    } catch (logErr) {
+      console.error('[email-templates] send log error:', logErr.message);
+    }
+
+    if (!sendOk) {
+      console.error('[email-templates] Resend error:', error.message);
+      return res.status(500).json({ error: error.message });
+    }
+
     console.log('[email-templates] sent template', String(template._id), 'for shop', req.shopDomain);
     return res.json({ ok: true, id: data?.id, warnings });
   } catch (err) {
@@ -627,6 +653,8 @@ router.post('/:id/broadcast', requireAuth, async (req, res) => {
       body: template.body,
       imageUrl: template.imageUrl || '',
       recipients: logRecipients,
+      origin: 'manual',
+      sentBy: 'owner',
     });
 
     console.log(`[email-templates] broadcast ${String(template._id)}: sent=${sent} failed=${failed}`);

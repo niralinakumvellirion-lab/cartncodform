@@ -263,6 +263,14 @@ test('17. non-cart/checkout-abandon signals never query AbandonedCustomer for an
   );
 });
 
+test('18. brain jobs are created with origin="automated"', async () => {
+  Signal.find.mockResolvedValue([{ type: 'cart_abandon', strength: 0.9, productId: null }]);
+  await runBrainForProfile('p1', SHOP);
+  expect(ScheduledJob.create).toHaveBeenCalledWith(
+    expect.objectContaining({ origin: 'automated' })
+  );
+});
+
 
 // --- computeRunAt: zone-aware send time ------------------------------------
 // A send scheduled for H:00 must fire at H:00 ON THE STORE'S WALL CLOCK,

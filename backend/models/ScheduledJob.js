@@ -48,6 +48,15 @@ const scheduledJobSchema = new mongoose.Schema({
   purpose: { type: String, default: 'followup' }, // 'followup' | 'order' for whatsapp jobs
   messageText: { type: String, default: null }, // final sent text for whatsapp jobs (max 1000)
   productHandle: { type: String, default: null }, // Shopify product handle used in the ctaUrl
+
+  // Send origin — how this notification was triggered.
+  origin: {
+    type: String,
+    enum: ['automated', 'scheduled', 'manual', null],
+    default: null,
+  },
+  // Opaque identifier for who triggered a manual send ('owner' for single-store installs).
+  sentBy: { type: String, default: null },
 }, { timestamps: true });
 
 // Compound index for the sender's poll query.

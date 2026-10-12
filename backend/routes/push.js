@@ -226,6 +226,24 @@ router.post('/send-customer', requireAuth, async (req, res) => {
       return res.status(500).json({ success: false, error: result.error });
     }
 
+    // Log per-recipient ScheduledJob rows so this broadcast appears in the dashboard.
+    try {
+      await logBroadcastSend({
+        shopDomain: shopDomain.trim().toLowerCase(),
+        festivalQueueId: null,
+        signalType: 'manual',
+        channel: 'push',
+        title,
+        body,
+        imageUrl: resolvedImageUrl || '',
+        recipients: result.recipients || [],
+        origin: 'manual',
+        sentBy: 'owner',
+      });
+    } catch (logErr) {
+      console.error('[send-customer] log error:', logErr.message);
+    }
+
     return res.json({ success: true, sent: result.sent || 0 });
   } catch (err) {
     console.error('[push] POST /send-customer error:', err.message);
@@ -375,6 +393,24 @@ async function sendJourneyPush(shopDomain, { profileId, title, body, url, imageU
     shop, title, body, url, imageUrl || null, false, cartToken
   );
 
+  // Log ScheduledJob rows for dashboard visibility.
+  try {
+    await logBroadcastSend({
+      shopDomain: shop,
+      festivalQueueId: null,
+      signalType: 'manual',
+      channel: 'push',
+      title,
+      body,
+      imageUrl: imageUrl || '',
+      recipients: result.recipients || [],
+      origin: 'manual',
+      sentBy: 'owner',
+    });
+  } catch (logErr) {
+    console.error('[send-journey] log error:', logErr.message);
+  }
+
   if (!result.success) {
     return { status: 500, payload: { success: false, error: result.error } };
   }
@@ -455,6 +491,8 @@ router.post('/send-now', requireAuth, async (req, res) => {
       runAt: new Date(), // send immediately
       payload: { title, body, subject, imageUrl: '' },
       reason: 'Manual send from Today screen',
+      origin: 'manual',
+      sentBy: 'owner',
     });
 
     return res.json({
@@ -537,7 +575,29 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
     headers: UNSUBSCRIBE_HEADERS,
   });
 
-  if (error) {
+  const sendOk = !error;
+
+  // Log ScheduledJob row for dashboard visibility — must not break the send.
+  try {
+    const ScheduledJob = require('../models/ScheduledJob');
+    await ScheduledJob.create({
+      shopDomain: shop,
+      profileId: profile._id,
+      signalType: 'manual',
+      channel: 'email',
+      status: sendOk ? 'sent' : 'failed',
+      sentAt: sendOk ? new Date() : undefined,
+      runAt: new Date(),
+      payload: { subject, body, imageUrl: imageUrl || '' },
+      origin: 'manual',
+      sentBy: 'owner',
+      error: sendOk ? undefined : error.message,
+    });
+  } catch (logErr) {
+    console.error('[send-journey-email] log error:', logErr.message);
+  }
+
+  if (!sendOk) {
     console.error('[email] Resend error:', error.message);
     return { status: 500, payload: { error: error.message } };
   }
@@ -657,6 +717,8 @@ router.post('/send-store', requireAuth, async (req, res) => {
       body,
       imageUrl: mobileImage,
       recipients: mobileResult.recipients,
+      origin: 'manual',
+      sentBy: 'owner',
     });
     await logBroadcastSend({
       shopDomain: shop,
@@ -666,6 +728,8 @@ router.post('/send-store', requireAuth, async (req, res) => {
       body,
       imageUrl: desktopImage,
       recipients: desktopResult.recipients,
+      origin: 'manual',
+      sentBy: 'owner',
     });
 
     if (!mobileResult.success && !desktopResult.success) {

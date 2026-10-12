@@ -520,6 +520,21 @@ async function processScheduledJobs() {
                     }
                   );
 
+                  // Create a ScheduledJob row for this bonus email so the
+                  // dashboard drawer can show it (Profile.messages alone is
+                  // not queried by /channels/:channel/items).
+                  await ScheduledJob.create({
+                    shopDomain: job.shopDomain,
+                    profileId: job.profileId,
+                    signalType: job.signalType,
+                    channel: 'email',
+                    status: 'sent',
+                    sentAt: new Date(),
+                    runAt: new Date(),
+                    payload: { subject, body: body.replace(/\n/g, '<br>') },
+                    origin: 'automated',
+                  }).catch((e) => console.error('[poller] bonus email job log error:', e.message));
+
                   console.log('[poller] email sent for job', job._id, 'signal:', job.signalType);
                 }
               }
@@ -674,6 +689,7 @@ async function processFestivalQueue() {
           body: item.body,
           imageUrl: mobileImage,
           recipients: mobileResult.recipients,
+          origin: 'scheduled',
         });
         await logBroadcastSend({
           shopDomain: item.shopDomain,
@@ -683,6 +699,7 @@ async function processFestivalQueue() {
           body: item.body,
           imageUrl: desktopImage,
           recipients: desktopResult.recipients,
+          origin: 'scheduled',
         });
 
         const totalSent = (mobileResult.sent || 0) + (desktopResult.sent || 0);

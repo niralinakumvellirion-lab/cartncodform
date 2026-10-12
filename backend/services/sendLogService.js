@@ -37,6 +37,8 @@ const LOG_BATCH_SIZE = 500;
  * @param {string} opts.body
  * @param {string} [opts.imageUrl]
  * @param {Array<{token:string, customerId:?string, cartToken:?string, sessionId:?string, success:boolean, errorCode:?string}>} opts.recipients
+ * @param {string|null} [opts.origin] - 'automated' | 'scheduled' | 'manual'
+ * @param {string|null} [opts.sentBy] - opaque sender identifier
  */
 async function logBroadcastSend({
   shopDomain,
@@ -47,6 +49,8 @@ async function logBroadcastSend({
   body,
   imageUrl = '',
   recipients,
+  origin = null,
+  sentBy = null,
 }) {
   if (!recipients || !recipients.length) return;
 
@@ -65,6 +69,8 @@ async function logBroadcastSend({
     outcome: r.success ? 'delivered' : 'failed',
     runAt: now,
     sentAt: now,
+    origin,
+    sentBy,
   }));
 
   try {

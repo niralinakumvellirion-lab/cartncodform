@@ -117,6 +117,43 @@ test('a logging failure does not throw — the send already happened', async () 
   expect(console.error).toHaveBeenCalled();
 });
 
+test('origin and sentBy are written to every row', async () => {
+  ScheduledJob.insertMany.mockResolvedValue([]);
+
+  await logBroadcastSend({
+    shopDomain: 'shop.myshopify.com',
+    signalType: 'manual',
+    title: 'T',
+    body: 'B',
+    recipients: [recipient({ token: 'x1' }), recipient({ token: 'x2' })],
+    origin: 'manual',
+    sentBy: 'owner',
+  });
+
+  const [rows] = ScheduledJob.insertMany.mock.calls[0];
+  expect(rows).toHaveLength(2);
+  rows.forEach((r) => {
+    expect(r.origin).toBe('manual');
+    expect(r.sentBy).toBe('owner');
+  });
+});
+
+test('origin defaults to null when not supplied', async () => {
+  ScheduledJob.insertMany.mockResolvedValue([]);
+
+  await logBroadcastSend({
+    shopDomain: 'shop.myshopify.com',
+    signalType: 'festival',
+    title: 'T',
+    body: 'B',
+    recipients: [recipient()],
+  });
+
+  const [rows] = ScheduledJob.insertMany.mock.calls[0];
+  expect(rows[0].origin).toBeNull();
+  expect(rows[0].sentBy).toBeNull();
+});
+
 test('no-op when recipients is empty or missing', async () => {
   await logBroadcastSend({ shopDomain: 'shop.myshopify.com', signalType: 'manual', title: 'T', body: 'B', recipients: [] });
   await logBroadcastSend({ shopDomain: 'shop.myshopify.com', signalType: 'manual', title: 'T', body: 'B' });

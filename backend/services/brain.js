@@ -305,6 +305,7 @@ async function runBrainForProfile(profileId, shopDomain, cfg = null) {
       stepIndex: 0,
       status: 'pending',
       runAt,
+      origin: 'automated',
     });
   } catch (err) {
     // 11000 = the unique brain-job index caught a race — treat as already scheduled.
