@@ -1007,6 +1007,39 @@ function WaComposer({
           </button>
         </div>
       )}
+
+      {/* WhatsApp chat bubble preview */}
+      {messageText.trim() && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af',
+                        textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+            Preview
+          </div>
+          <div style={{
+            background: '#ECE5DD', borderRadius: 12,
+            padding: '10px 12px', maxWidth: 340,
+          }}>
+            <div style={{
+              background: WA_GREEN, borderRadius: '12px 12px 2px 12px',
+              padding: '8px 12px', marginLeft: 'auto',
+              maxWidth: '85%', width: 'fit-content',
+            }}>
+              <div style={{
+                fontSize: 13, color: '#fff', lineHeight: 1.5,
+                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+              }}>
+                {messageText}
+              </div>
+              <div style={{
+                fontSize: 10, color: 'rgba(255,255,255,0.7)',
+                textAlign: 'right', marginTop: 4,
+              }}>
+                {new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })} ✓✓
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1251,6 +1284,50 @@ function NotificationComposer({ customer, shop, onSent, onError }) {
       >
         {sending ? '⏳ Sending...' : '🔔 Send notification'}
       </button>
+
+      {/* Push notification preview mockup */}
+      {(title || body) && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af',
+                        textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+            Preview
+          </div>
+          <div style={{
+            background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)',
+            borderRadius: 16, padding: '10px 14px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+            maxWidth: 340,
+          }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+                background: '#4f46e5', display: 'flex', alignItems: 'center',
+                justifyContent: 'center', fontSize: 18,
+              }}>🔔</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between',
+                              marginBottom: 2 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: '#fff' }}>
+                    {(shop || '').split('.')[0] || 'Your store'}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)' }}>now</span>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#fff',
+                              marginBottom: 2, overflow: 'hidden',
+                              textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {title || 'Notification title'}
+                </div>
+                <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.75)',
+                              overflow: 'hidden', textOverflow: 'ellipsis',
+                              display: '-webkit-box', WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical' }}>
+                  {body || 'Notification body'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1261,6 +1338,37 @@ function EmailComposer({ customer, shop, onSent, onError }) {
   const [sending, setSending] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [activeCategory, setActiveCategory] = useState(0);
+
+  const [templates, setTemplates] = useState([]);
+  const [previewHtml, setPreviewHtml] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const previewTimer = useRef(null);
+
+  useEffect(() => {
+    if (!shop) return;
+    apiGet(`/api/email-templates?shop=${encodeURIComponent(shop)}`)
+      .then((d) => setTemplates(d?.templates || []))
+      .catch(() => {});
+  }, [shop]);
+
+  useEffect(() => {
+    const profileId = customer?.profile?._id;
+    if (!subject || !body || !profileId) { setPreviewHtml(''); return; }
+    clearTimeout(previewTimer.current);
+    previewTimer.current = setTimeout(async () => {
+      setPreviewLoading(true);
+      try {
+        const res = await apiSend('/api/push/preview-journey-email', 'POST',
+          { profileId, subject, body });
+        setPreviewHtml(res?.html || '');
+      } catch (_) {
+        setPreviewHtml('');
+      } finally {
+        setPreviewLoading(false);
+      }
+    }, 600);
+    return () => clearTimeout(previewTimer.current);
+  }, [subject, body, customer?.profile?._id]);
 
   const rawTopProductTitle = customer?.topProducts?.[0]?.title || '';
   const hasTopProduct = !!(rawTopProductTitle && !/^\d+$/.test(rawTopProductTitle));
@@ -1397,6 +1505,34 @@ function EmailComposer({ customer, shop, onSent, onError }) {
         </div>
       )}
 
+      {/* Template picker */}
+      {templates.length > 0 && (
+        <div>
+          <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280',
+                          textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+            Template
+          </label>
+          <select
+            defaultValue=""
+            onChange={(e) => {
+              const t = templates.find((x) => x._id === e.target.value);
+              if (t) { setSubject(t.subject || ''); setBody(t.body || ''); }
+            }}
+            style={{
+              width: '100%', boxSizing: 'border-box',
+              padding: '9px 12px', fontSize: '13px',
+              border: '1px solid #e5e7eb', borderRadius: '8px',
+              outline: 'none', color: '#111827', background: '#fff',
+            }}
+          >
+            <option value="">-- Pick a template --</option>
+            {templates.map((t) => (
+              <option key={t._id} value={t._id}>{t.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
       <div>
         <label style={{ display: 'block', fontSize: 10, fontWeight: 700, color: '#6b7280',
                         textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
@@ -1450,6 +1586,34 @@ function EmailComposer({ customer, shop, onSent, onError }) {
       >
         {sending ? '⏳ Sending...' : '✉️ Send email'}
       </button>
+
+      {/* Live email preview */}
+      {(previewLoading || previewHtml) && (
+        <div style={{ marginTop: 4 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af',
+                        textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
+            Preview
+          </div>
+          {previewLoading ? (
+            <div style={{ fontSize: 12, color: '#9ca3af', padding: '16px',
+                          textAlign: 'center', background: '#f9fafb',
+                          borderRadius: 8, border: '1px solid #e5e7eb' }}>
+              Loading preview…
+            </div>
+          ) : (
+            <iframe
+              srcDoc={previewHtml}
+              sandbox="allow-same-origin"
+              title="Email preview"
+              style={{
+                width: '100%', height: 420,
+                border: '1px solid #e5e7eb', borderRadius: 8,
+                display: 'block',
+              }}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 }
