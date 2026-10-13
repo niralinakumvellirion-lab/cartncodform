@@ -1,0 +1,35 @@
+AUDIT: queue-photo-info-visible
+Commit: 77047a6
+Date: 2026-10-13
+
+Where the info tag lives:
+  File: frontend/app/admin/components/ImageUploadPair.jsx
+  Line 19 (before change): const [showImageInfo, setShowImageInfo] = useState(false);
+  Lines 54-71: {showImageInfo && (<div> … guidance box … </div>)}
+  The guidance box shows "360×180px, 2:1, JPG/PNG, under 1MB" and a crop tip.
+  It is toggled by a small "i" button (line 37-50).
+
+Why it was hidden:
+  useState(false) means showImageInfo starts false on every render.
+  The box is only shown when showImageInfo === true, which requires the user
+  to click the "i" button first.
+
+What was changed:
+  1. ImageUploadPair.jsx line 18: added optional prop defaultInfoOpen = false
+  2. ImageUploadPair.jsx line 19: changed useState(false) → useState(defaultInfoOpen)
+  3. QueueScreen.jsx ~line 998: added defaultInfoOpen={true} to the ImageUploadPair
+     used inside AddEngagementView's push step only.
+
+Other usages of ImageUploadPair (all unchanged — no defaultInfoOpen passed, default false):
+  - frontend/app/admin/dashboard/DashboardScreen.jsx line 2043:
+      <ImageUploadPair mobileImageUrl={…} desktopImageUrl={…}
+        onMobileChange={…} onDesktopChange={…} />
+      Info tag starts closed. No change.
+  - frontend/app/admin/queue/QueueScreen.jsx ~line 2580 (Queue edit modal):
+      <ImageUploadPair … /> (no defaultInfoOpen)
+      Info tag starts closed. No change.
+
+The user can still click the "i" button to close (or re-open) the info tag in
+AddEngagementView; toggle behaviour is unchanged.
+
+Build result: clean, 0 errors.
