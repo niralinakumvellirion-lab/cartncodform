@@ -319,10 +319,10 @@ describe('GET /:id/preview', () => {
     await preview({ shopDomain: SHOP, params: { id: TEMPLATE_ID } }, res);
     expect(res.statusCode).toBe(200);
     expect(res.body.html).toBe('<html>rendered</html>');
-    // no imageUrl → placeholder:true + no_photo warning
+    // no imageUrl → placeholder:false (matches send) + no_photo warning
     expect(res.body.warnings).toEqual(['no_photo']);
     expect(mockRenderEmailDocument).toHaveBeenCalledWith(
-      expect.objectContaining({ subject: 'Sub', body: 'Line 1\nLine 2', placeholder: true })
+      expect.objectContaining({ subject: 'Sub', body: 'Line 1\nLine 2', placeholder: false })
     );
   });
 

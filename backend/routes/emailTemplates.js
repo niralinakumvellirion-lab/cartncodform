@@ -348,7 +348,8 @@ router.get('/:id/preview', requireAuth, async (req, res) => {
 
     const { storeName, logoUrl, primaryColor } = await loadBrandData(req.shopDomain);
     const store = { shopName: storeName, logoUrl, primaryColor, shopDomain: req.shopDomain };
-    const design = designFromTemplate(template, store, { placeholder: !template.imageUrl });
+    // placeholder: false → preview matches what /:id/send actually sends
+    const design = designFromTemplate(template, store, { placeholder: false });
     const html = renderEmailDocument(design);
     const warnings = template.imageUrl ? [] : ['no_photo'];
 

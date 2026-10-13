@@ -140,6 +140,38 @@ describe('email parity — preview vs send vs broadcast', () => {
   }
 });
 
+// ── customer detail preview vs send (placeholder: false for both) ────────────
+// Verifies that /:id/preview (now using placeholder:false) produces the same
+// HTML as /:id/send for every layout × photo case.  If this breaks it means
+// the two routes diverged on placeholder again.
+
+describe('customer detail: preview route === send route (placeholder: false)', () => {
+  for (const { label: storeLabel, store } of STORES) {
+    describe(`store: ${storeLabel}`, () => {
+      for (const photoCase of PHOTO_CASES) {
+        describe(`photo: ${photoCase}`, () => {
+          for (const layout of LAYOUTS) {
+            test(layout, () => {
+              const t = makeTemplate(layout, photoCase);
+              // /:id/preview (fixed) and /:id/send both use placeholder: false
+              const designPreview = designFromTemplate(t, store, { placeholder: false });
+              const designSend    = designFromTemplate(t, store, { placeholder: false });
+              const htmlPreview   = renderEmailDocument(designPreview);
+              const htmlSend      = renderEmailDocument(designSend);
+              expect(htmlPreview).toBe(htmlSend);
+              // no_photo: neither contains a placeholder box
+              if (!t.imageUrl) {
+                expect(htmlPreview).not.toContain('appears here');
+                expect(htmlSend).not.toContain('appears here');
+              }
+            });
+          }
+        });
+      }
+    });
+  }
+});
+
 // ── journey email hygiene ─────────────────────────────────────────────────────
 
 describe('journey email hygiene — buildEmailHtml', () => {

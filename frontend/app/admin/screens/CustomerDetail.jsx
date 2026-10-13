@@ -1711,12 +1711,33 @@ function EmailComposer({
   const previewTimer  = useRef(null);
   const reqCountRef   = useRef(0);
 
-  useEffect(() => {
+  // Fetch the template list. Called on mount, on mode switch, and on tab focus.
+  const fetchTemplates = useCallback(() => {
     if (!shop) return;
     apiGet(`/api/email-templates?shop=${encodeURIComponent(shop)}`)
       .then((d) => setTemplates(d?.templates || []))
       .catch(() => {});
   }, [shop]);
+
+  // Initial fetch on mount + whenever shop changes.
+  useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
+
+  // Re-fetch when the user opens "Use a template" mode so they always see the
+  // current saved version (covers the case where they edited a template in
+  // another tab or in the Email Templates screen without causing a full remount).
+  useEffect(() => {
+    if (emailMode === 'template') fetchTemplates();
+  }, [emailMode, fetchTemplates]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-fetch when the tab regains focus (e.g. user navigated to Email Templates,
+  // saved a change, and switched back to this tab).
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === 'visible') fetchTemplates();
+    }
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [fetchTemplates]);
 
   useEffect(() => {
     if (emailMode !== 'write') return;
