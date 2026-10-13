@@ -32,7 +32,9 @@ const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner')
 const ATTRIBUTION_TYPE_MAP = {
   page_view: 'revisit',
   add_to_cart: 'add_to_cart',
-  checkout_start: 'checkout_start',
+  // ccf-push.js emits 'reached_checkout' on the checkout-button click.
+  reached_checkout: 'checkout_start',
+  checkout_start: 'checkout_start', // forward-compat; not currently emitted
   purchase: 'purchase',
 };
 
