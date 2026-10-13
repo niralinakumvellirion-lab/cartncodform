@@ -348,16 +348,30 @@ function groupFestivalItemsByDay(items) {
 // re-render (e.g. when navigating between months). Fixed by keying every
 // cell — empty and real — by the array index `i`, which is unique across
 // the whole array regardless of cell type.
-const MAX_CHIPS_PER_DAY = 2;
+function FestivalIcon({ size, color }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} aria-hidden="true">
+      <path d="M12 2l2.09 6.26L20 10l-5.45 3.97 1.63 6.03L12 16.77l-4.18 3.26 1.63-6.03L4 10l5.91-1.74z"/>
+    </svg>
+  );
+}
 
-// MonthCalendar — renders one month grid, now a complete 6x7-capable
-// grid with dimmed leading/trailing days from adjacent months (purely
-// visual — those dimmed cells show only a day number, no festival/queue
-// matching against their real month, keeping this presentation-only).
-// `onItemClick` is a new prop (this component is local to this file,
-// not a shared/exported one, so this isn't touching any external API) —
-// wires the existing openEditModal() into the previously-inert chips.
-function MonthCalendar({ month, items, festivals, onItemClick, onSentClick }) {
+function BellIcon({ size, color }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={color} aria-hidden="true">
+      <path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6V11c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/>
+    </svg>
+  );
+}
+
+// MonthCalendar — icon-only cells. Each cell is a square via
+// aspect-ratio:1/1 (no minHeight) so cells never grow from content.
+// Festival + notification icons sit in one flex row; both must fit
+// side-by-side at any width (never wrap). Props:
+//   selectedDayStr / selectedDayType — highlight the active icon.
+//   onFestivalClick(dateStr, festivalObj) / onNotificationsClick(dateStr)
+//   isNarrow — true when viewport ≤ 600px (passed from QueueScreen).
+function MonthCalendar({ month, items, festivals, selectedDayStr, selectedDayType, onFestivalClick, onNotificationsClick, isNarrow }) {
   const year = month.getFullYear();
   const mon = month.getMonth();
   const firstDay = new Date(year, mon, 1).getDay();
@@ -378,16 +392,24 @@ function MonthCalendar({ month, items, festivals, onItemClick, onSentClick }) {
   }
 
   const todayReal = new Date();
+  // Responsive sizing — narrow = viewport ≤ 600px (calendar cells ~44px).
+  const gridGap  = isNarrow ? 3 : 6;
+  const cellPad  = isNarrow ? 2 : 4;
+  const iconSize = isNarrow ? 18 : 28;
+  const glyphSz  = isNarrow ? 12 : 17;
+  const iconGap  = isNarrow ? 2 : 4;
+  const dayNumSz = isNarrow ? 11 : 12;
+  const dayCirc  = isNarrow ? 18 : 22;
 
   return (
     <div style={{
-      display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 1,
+      display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: gridGap,
       background: '#e5e7eb', border: '1px solid #e5e7eb',
       borderRadius: 10, overflow: 'hidden',
     }}>
       {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
         <div key={d} style={{
-          background: '#f9fafb', padding: '8px 0',
+          background: '#f9fafb', padding: '6px 0',
           textAlign: 'center', fontSize: 10,
           fontWeight: 700, color: '#9ca3af',
           textTransform: 'uppercase', letterSpacing: '0.06em',
@@ -397,103 +419,316 @@ function MonthCalendar({ month, items, festivals, onItemClick, onSentClick }) {
         if (cell.outside) {
           return (
             <div key={i} style={{
-              background: '#fbfbfc', minHeight: 90, padding: 6,
+              background: '#fbfbfc', aspectRatio: '1 / 1',
+              padding: cellPad, overflow: 'hidden',
             }}>
-              <div style={{ fontSize: 12, color: '#d1d5db' }}>{cell.day}</div>
+              <div style={{ fontSize: dayNumSz, color: '#d1d5db' }}>{cell.day}</div>
             </div>
           );
         }
 
         const day = cell.day;
         const dateStr = `${year}-${String(mon+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
-        const isToday = todayReal.toDateString() ===
-          new Date(year, mon, day).toDateString();
+        const isToday = todayReal.toDateString() === new Date(year, mon, day).toDateString();
+        const isSelected = selectedDayStr === dateStr;
         const festival = festivals.find(f => f.date.startsWith(dateStr));
         const queued = items.filter(item => {
           const d = new Date(item.scheduledAt);
-          return d.getFullYear() === year &&
-                 d.getMonth() === mon &&
-                 d.getDate() === day;
+          return d.getFullYear() === year && d.getMonth() === mon && d.getDate() === day;
         });
-        const visibleChips = queued.slice(0, MAX_CHIPS_PER_DAY);
-        const extraCount = queued.length - MAX_CHIPS_PER_DAY;
+
+        const festiveSel = isSelected && selectedDayType === 'festival';
+        const notifSel   = isSelected && selectedDayType === 'notifications';
 
         return (
           <div key={i}
-            onMouseEnter={e => { if (!isToday) e.currentTarget.style.background = '#f9fafb'; }}
-            onMouseLeave={e => { e.currentTarget.style.background = isToday ? '#eef2ff' : '#fff'; }}
             style={{
-              background: isToday ? '#eef2ff' : '#fff',
-              minHeight: 90, padding: 6, position: 'relative',
-              boxShadow: isToday ? 'inset 0 0 0 1.5px #4f46e5' : 'none',
+              background: isSelected ? '#F5F8FE' : isToday ? '#eef2ff' : '#fff',
+              aspectRatio: '1 / 1',
+              padding: cellPad,
+              boxShadow: isSelected
+                ? 'inset 0 0 0 2px #4f46e5'
+                : isToday ? 'inset 0 0 0 1.5px #4f46e5' : 'none',
               transition: 'background 0.12s',
+              overflow: 'hidden',
+              display: 'flex', flexDirection: 'column',
             }}
           >
+            {/* Day number */}
             <div style={{
-              width: 22, height: 22, borderRadius: '50%',
+              width: dayCirc, height: dayCirc, borderRadius: '50%',
               background: isToday ? '#4f46e5' : 'transparent',
               color: isToday ? '#fff' : '#111827',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 12, fontWeight: isToday ? 700 : 400, marginBottom: 4,
+              fontSize: dayNumSz, fontWeight: isToday ? 700 : 400, flexShrink: 0,
             }}>{day}</div>
-            {festival && (
-              <div style={{
-                fontSize: 10, background: '#fef3c7', color: '#d97706',
-                borderRadius: 5, padding: '2px 5px', marginBottom: 2,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                fontWeight: 600,
-              }}>{festival.emoji} {festival.name}</div>
-            )}
-            {visibleChips.map(q => {
-              // Reuse the same status->color mapping the Planning List
-              // already uses (FESTIVAL_STATUS_BADGE) — previously sent
-              // items shared draft's blue here, indistinguishable at a
-              // glance from "not sent yet".
-              const badge = FESTIVAL_STATUS_BADGE[q.status] || FESTIVAL_STATUS_BADGE.draft;
-              const summary = q.summary;
-              const showStats = q.status === 'sent' && summary && summary.total > 0;
-              return (
-                <div key={q._id}
-                  onClick={() => {
-                    if (q.status === 'sent' && onSentClick) onSentClick(q._id);
-                    else onItemClick && onItemClick(q);
-                  }}
-                  style={{
-                    fontSize: 11,
-                    background: badge.bg,
-                    color: badge.color,
-                    borderRadius: 5, padding: '2px 5px', marginBottom: 2,
-                    cursor: 'pointer', fontWeight: 600,
-                    textDecoration: badge.strike ? 'line-through' : 'none',
-                  }}
-                >
-                  <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {q.title}
+
+            {/* Icon row — festival + notification, never wrapping */}
+            {(festival || queued.length > 0) && (
+              <div style={{ display: 'flex', flexWrap: 'nowrap', gap: iconGap, marginTop: 4 }}>
+                {festival && (
+                  <button
+                    onClick={() => onFestivalClick(dateStr, festival)}
+                    aria-label={`${festival.name}, festival`}
+                    title={festival.name}
+                    aria-pressed={festiveSel}
+                    className="ccf-icon-btn"
+                    style={{
+                      width: iconSize, height: iconSize, flexShrink: 0,
+                      borderRadius: 6, padding: 0,
+                      border: festiveSel ? '2px solid #8A5A00' : '1.5px solid rgba(138,90,0,0.18)',
+                      background: festiveSel ? '#8A5A00' : '#FFF3D6',
+                      color: festiveSel ? '#fff' : '#8A5A00',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <FestivalIcon size={glyphSz} color="currentColor" />
+                  </button>
+                )}
+                {queued.length > 0 && (
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                    <button
+                      onClick={() => onNotificationsClick(dateStr)}
+                      aria-label={queued.length === 1 ? '1 notification' : `${queued.length} notifications`}
+                      title={queued.length === 1 ? '1 notification' : `${queued.length} notifications`}
+                      aria-pressed={notifSel}
+                      className="ccf-icon-btn"
+                      style={{
+                        width: iconSize, height: iconSize, flexShrink: 0,
+                        borderRadius: 6, padding: 0,
+                        border: notifSel ? '2px solid #2459D6' : '1.5px solid rgba(36,89,214,0.18)',
+                        background: notifSel ? '#2459D6' : '#EAF0FD',
+                        color: notifSel ? '#fff' : '#2459D6',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <BellIcon size={glyphSz} color="currentColor" />
+                    </button>
+                    {queued.length >= 2 && (
+                      <div style={{
+                        position: 'absolute', top: -5, right: -5,
+                        background: '#111827', color: '#fff',
+                        borderRadius: 10, fontSize: 9, fontWeight: 700,
+                        padding: '0 3px', minWidth: 14, height: 14,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        pointerEvents: 'none',
+                      }}>{queued.length}</div>
+                    )}
                   </div>
-                  {showStats && (
-                    <div style={{ fontSize: 10, fontWeight: 500, opacity: 0.75, marginTop: 1, lineHeight: 1.25 }}>
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Push</div>
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {summary.delivered} delivered
-                      </div>
-                      {summary.failed > 0 && (
-                        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {summary.failed} failed
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {extraCount > 0 && (
-              <div style={{ fontSize: 10, color: '#9ca3af', padding: '1px 5px', fontWeight: 600 }}>
-                +{extraCount} more
+                )}
               </div>
             )}
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// DayDetailsPanel — shown in the right column when a calendar icon is
+// clicked. Festival tab: name, date, suggestion, sample message.
+// Notifications tab: list of cards with the same Approve/Edit/Delete/
+// View actions as the planning list (same handlers, no duplicated logic).
+function DayDetailsPanel({
+  dateStr, dayPanelTab, setDayPanelTab,
+  festivalCalendar, festivalItems,
+  onBack, shop, openEditModal, goToFestivalDetail, setFestivalItems,
+}) {
+  const festival = festivalCalendar.find(f => f.date.startsWith(dateStr));
+  const parts = dateStr.split('-');
+  const notifications = festivalItems.filter(item => {
+    const d = new Date(item.scheduledAt);
+    return d.getFullYear() === Number(parts[0]) &&
+           d.getMonth()    === Number(parts[1]) - 1 &&
+           d.getDate()     === Number(parts[2]);
+  });
+  const hasBoth = festival && notifications.length > 0;
+  const activeTab = hasBoth ? dayPanelTab : (festival ? 'festival' : 'notifications');
+  const displayDate = new Date(Number(parts[0]), Number(parts[1])-1, Number(parts[2]))
+    .toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+
+  return (
+    <div style={{
+      background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14,
+      overflow: 'hidden', display: 'flex', flexDirection: 'column',
+    }}>
+      {/* Panel header */}
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6', flexShrink: 0 }}>
+        <button
+          onClick={onBack}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            background: 'none', border: 'none', cursor: 'pointer',
+            fontSize: 12, fontWeight: 600, color: '#6b7280', padding: 0, marginBottom: 6,
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+          Back to planning list
+        </button>
+        <div style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: hasBoth ? 10 : 0 }}>
+          {displayDate}
+        </div>
+        {hasBoth && (
+          <div style={{ display: 'inline-flex', gap: 2, background: '#f3f4f6', borderRadius: 8, padding: 3 }}>
+            {[{key:'festival',label:'Festival'},{key:'notifications',label:'Notifications'}].map(t => (
+              <button key={t.key} onClick={() => setDayPanelTab(t.key)} style={{
+                padding: '5px 12px', fontSize: 12, fontWeight: 600, borderRadius: 6,
+                border: 'none', cursor: 'pointer',
+                background: activeTab === t.key ? '#fff' : 'transparent',
+                color: activeTab === t.key ? '#111827' : '#6b7280',
+                boxShadow: activeTab === t.key ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              }}>{t.label}</button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Scrollable content */}
+      <div style={{ overflowY: 'auto', maxHeight: '70vh', padding: 16 }}>
+        {/* FESTIVAL TAB */}
+        {activeTab === 'festival' && festival && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              {festival.imageUrl ? (
+                <img src={festival.imageUrl} alt=""
+                  style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }}
+                  onError={e => { e.target.style.display = 'none'; }} />
+              ) : (
+                <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#FFF3D6',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 26, flexShrink: 0 }}>
+                  {festival.emoji || '🎉'}
+                </div>
+              )}
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: '#111827' }}>{festival.name}</div>
+                <div style={{ fontSize: 13, color: '#9ca3af', marginTop: 2 }}>
+                  {new Date(Number(parts[0]), Number(parts[1])-1, Number(parts[2]))
+                    .toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                </div>
+              </div>
+            </div>
+            {festival.suggestion && (
+              <div style={{ background: '#f9fafb', borderRadius: 10, padding: '10px 14px', marginBottom: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
+                  textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Suggestion</div>
+                <div style={{ fontSize: 13, color: '#374151' }}>{festival.suggestion}</div>
+              </div>
+            )}
+            {festival.message && (
+              <div style={{ background: '#fef9f0', border: '1px solid #fde68a',
+                borderRadius: 10, padding: '10px 14px' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af',
+                  textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Sample message</div>
+                <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.5 }}>{festival.message}</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* NOTIFICATIONS TAB */}
+        {activeTab === 'notifications' && (
+          notifications.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '32px 0', color: '#9ca3af', fontSize: 13 }}>
+              No notifications for this day.
+            </div>
+          ) : notifications.map((item, ii) => {
+            const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
+            return (
+              <div key={item._id} style={{
+                background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10,
+                padding: '12px 14px', marginBottom: ii < notifications.length - 1 ? 10 : 0,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 6 }}>
+                  {(item.mobileImageUrl || item.desktopImageUrl) && (
+                    <img src={item.mobileImageUrl || item.desktopImageUrl} alt=""
+                      style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }}
+                      onError={e => { e.target.style.display = 'none'; }} />
+                  )}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 2 }}>
+                      {item.title}
+                    </div>
+                    {item.body && (
+                      <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.4,
+                        display: '-webkit-box', WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                        {item.body}
+                      </div>
+                    )}
+                  </div>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+                    background: badge.bg, color: badge.color, flexShrink: 0,
+                    textDecoration: badge.strike ? 'line-through' : 'none',
+                  }}>{badge.label}</span>
+                </div>
+                <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>
+                  {item.festival ? `${item.festival} · ` : ''}
+                  {new Date(item.scheduledAt).toLocaleTimeString('en-IN', {
+                    hour: 'numeric', minute: '2-digit', hour12: true,
+                  })}
+                  {' · '}{item.targetType === 'product'
+                    ? `→ ${item.productTitle || 'Product'}` : '→ Storefront home'}
+                </div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {item.status === 'sent' ? (
+                    <button onClick={() => goToFestivalDetail(item._id)} style={{
+                      padding: '5px 10px', borderRadius: 6, border: '1px solid #e5e7eb',
+                      background: '#fff', color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                    }}>View</button>
+                  ) : (
+                    <>
+                      {item.status === 'draft' && (
+                        <button onClick={async () => {
+                          await apiSend(
+                            `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
+                            'PATCH', { status: 'approved' }
+                          );
+                          setFestivalItems(prev => prev.map(i =>
+                            i._id === item._id ? { ...i, status: 'approved' } : i
+                          ));
+                        }} style={{
+                          padding: '5px 10px', borderRadius: 6, border: 'none',
+                          background: '#4f46e5', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                        }}>Approve</button>
+                      )}
+                      <button onClick={() => openEditModal(item)} style={{
+                        padding: '5px 10px', borderRadius: 6, border: '1px solid #e5e7eb',
+                        background: '#fff', color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                      }}>Edit</button>
+                      <button onClick={async () => {
+                        await apiSend(
+                          `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
+                          'DELETE', {}
+                        );
+                        const remaining = festivalItems.filter(i => i._id !== item._id);
+                        setFestivalItems(remaining);
+                        // Close panel if no notifications remain for this day
+                        const stillHere = remaining.filter(fi => {
+                          const d = new Date(fi.scheduledAt);
+                          return d.getFullYear() === Number(parts[0]) &&
+                                 d.getMonth()    === Number(parts[1]) - 1 &&
+                                 d.getDate()     === Number(parts[2]);
+                        });
+                        if (stillHere.length === 0) onBack();
+                      }} style={{
+                        padding: '5px 10px', borderRadius: 6, border: '1px solid #fee2e2',
+                        background: '#fff', color: '#dc2626', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                      }}>Delete</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
@@ -520,13 +755,21 @@ export default function QueueScreen({ shop }) {
       @media (max-width: 1099px) {
         .ccf-queue-split { grid-template-columns: 1fr !important; }
       }
+      .ccf-icon-btn:focus-visible {
+        outline: 2px solid #4f46e5;
+        outline-offset: 2px;
+      }
     `;
     document.head.appendChild(s);
   }
 
   const [isMobileView, setIsMobileView] = useState(false);
+  const [isNarrowCal, setIsNarrowCal] = useState(false);
   useEffect(() => {
-    const check = () => setIsMobileView(window.innerWidth <= 768);
+    const check = () => {
+      setIsMobileView(window.innerWidth <= 768);
+      setIsNarrowCal(window.innerWidth <= 600);
+    };
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
@@ -721,6 +964,45 @@ export default function QueueScreen({ shop }) {
     setEditMultiDates(null);
   }
 
+  // Day details panel — tracks which date is selected and which tab.
+  const [selectedDayStr, setSelectedDayStr] = useState(null);
+  const [dayPanelTab, setDayPanelTab] = useState('festival');
+  const panelRef = useRef(null);
+
+  // Escape closes the panel (scoped: only active when a day is selected).
+  useEffect(() => {
+    if (!selectedDayStr) return;
+    const onKey = (e) => { if (e.key === 'Escape') setSelectedDayStr(null); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [selectedDayStr]);
+
+  // On narrow screens (<1100px grid stacks), scroll the panel into view
+  // when it first opens so the merchant doesn't have to scroll manually.
+  useEffect(() => {
+    if (selectedDayStr && panelRef.current && window.innerWidth < 1100) {
+      panelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [selectedDayStr]);
+
+  function handleFestivalClick(dateStr) {
+    if (selectedDayStr === dateStr && dayPanelTab === 'festival') {
+      setSelectedDayStr(null);
+    } else {
+      setSelectedDayStr(dateStr);
+      setDayPanelTab('festival');
+    }
+  }
+
+  function handleNotificationsClick(dateStr) {
+    if (selectedDayStr === dateStr && dayPanelTab === 'notifications') {
+      setSelectedDayStr(null);
+    } else {
+      setSelectedDayStr(dateStr);
+      setDayPanelTab('notifications');
+    }
+  }
+
   // Every OTHER document sharing this item's group — already available
   // from the same festivalItems list fetch, no new endpoint needed (see
   // audits/queue-multi-date-audit.txt section 2). Only computed when the
@@ -881,7 +1163,7 @@ export default function QueueScreen({ shop }) {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <button
-                onClick={() => setCurrentMonth(new Date())}
+                onClick={() => { setCurrentMonth(new Date()); setSelectedDayStr(null); }}
                 onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
                 onMouseLeave={e => e.currentTarget.style.background = '#fff'}
                 style={{
@@ -895,7 +1177,7 @@ export default function QueueScreen({ shop }) {
               </button>
               <button
                 aria-label="Previous month"
-                onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+                onClick={() => { setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1)); setSelectedDayStr(null); }}
                 onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
                 onMouseLeave={e => e.currentTarget.style.background = '#fff'}
                 style={{
@@ -912,7 +1194,7 @@ export default function QueueScreen({ shop }) {
               </button>
               <button
                 aria-label="Next month"
-                onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+                onClick={() => { setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1)); setSelectedDayStr(null); }}
                 onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
                 onMouseLeave={e => e.currentTarget.style.background = '#fff'}
                 style={{
@@ -939,18 +1221,32 @@ export default function QueueScreen({ shop }) {
               month={currentMonth}
               items={festivalItems}
               festivals={festivalCalendar}
-              onItemClick={openEditModal}
-              onSentClick={goToFestivalDetail}
+              selectedDayStr={selectedDayStr}
+              selectedDayType={dayPanelTab}
+              onFestivalClick={handleFestivalClick}
+              onNotificationsClick={handleNotificationsClick}
+              isNarrow={isNarrowCal}
             />
           )}
         </div>
 
-        {/* RIGHT: Planning list column — scrolls internally so the page
-            height stays close to the calendar's height. */}
-        <div style={{
-          background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14,
-          overflow: 'hidden',
-        }}>
+        {/* RIGHT: Details panel when a day is selected; planning list otherwise. */}
+        <div ref={panelRef}>
+          {selectedDayStr ? (
+            <DayDetailsPanel
+              dateStr={selectedDayStr}
+              dayPanelTab={dayPanelTab}
+              setDayPanelTab={setDayPanelTab}
+              festivalCalendar={festivalCalendar}
+              festivalItems={festivalItems}
+              onBack={() => setSelectedDayStr(null)}
+              shop={shop}
+              openEditModal={openEditModal}
+              goToFestivalDetail={goToFestivalDetail}
+              setFestivalItems={setFestivalItems}
+            />
+          ) : (
+            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, overflow: 'hidden' }}>
           <div style={{ overflowY: 'auto', maxHeight: '70vh', padding: '12px 12px 4px' }}>
             {festivalLoading ? (
               <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 40 }}>
@@ -1109,6 +1405,8 @@ export default function QueueScreen({ shop }) {
               ))
             )}
           </div>
+            </div>
+          )}
         </div>
       </div>
 
