@@ -777,6 +777,27 @@ function DayDetailsPanel({
 // ─── AddEngagementView ────────────────────────────────────────────────────────
 // Renders the multi-step add-engagement panel (list → choose → form → saved).
 // All state is owned by QueueScreen; this component is pure render.
+const SEGMENT_OPTS = [
+  { value: 'everyone',       label: 'Everyone with an email',   desc: 'All subscribers in your list' },
+  { value: 'email_captured', label: 'Signed up by email',       desc: 'Customers who gave their email at checkout or signup' },
+  { value: 'has_cart',       label: 'Left items in cart',        desc: 'Customers with items still in their cart' },
+  { value: 'bought_once',    label: 'Bought once',              desc: 'First-time buyers — a great group to win back' },
+  { value: 'going_quiet',    label: 'Going quiet',              desc: 'Subscribers who haven\'t engaged in a while' },
+];
+
+const EMAIL_SEGMENT_LABELS = Object.fromEntries(SEGMENT_OPTS.map(o => [o.value, o.label]));
+
+function audienceLineForItem(item) {
+  const ch = item.channel;
+  if (!ch) return null;
+  if (ch === 'push') return 'All push subscribers';
+  if (ch === 'email') return EMAIL_SEGMENT_LABELS[item.segment] || 'Everyone with an email';
+  if (ch === 'whatsapp') return 'You send it yourself';
+  return null;
+}
+
+const MAX_PHOTO_BYTES = 1024 * 1024; // 1 MB
+
 function AddEngagementView({
   dateStr, festivalItems,
   step, channel,
@@ -785,6 +806,13 @@ function AddEngagementView({
   sendTime, setSendTime,
   saving, error, banner, newId,
   emailTemplates,
+  mobileImageUrl, setMobileImageUrl,
+  desktopImageUrl, setDesktopImageUrl,
+  photoError, setPhotoError,
+  previewDevice, setPreviewDevice,
+  segment, setSegment,
+  emailSegmentCounts,
+  pushSubscriberCount,
   onBack, onOpenStep, onSave, onAddAnother, onDone,
 }) {
   const parts = dateStr.split('-');
@@ -801,8 +829,29 @@ function AddEngagementView({
 
   const CHANNEL_CHIP = { push: { bg: '#dbeafe', color: '#1d4ed8', label: 'Push' }, email: { bg: '#ede9fe', color: '#6d28d9', label: 'Email' }, whatsapp: { bg: '#dcfce7', color: '#15803d', label: 'WhatsApp' } };
 
+  // 1 MB guard for photo uploads — done here, not in ImageUploadPair.jsx
+  function handleMobileChange(dataUri) {
+    if (dataUri && dataUri.length > MAX_PHOTO_BYTES * 1.37) { // base64 overhead
+      setPhotoError('Mobile photo must be under 1 MB. Please choose a smaller file.');
+      return;
+    }
+    setPhotoError('');
+    setMobileImageUrl(dataUri);
+  }
+  function handleDesktopChange(dataUri) {
+    if (dataUri && dataUri.length > MAX_PHOTO_BYTES * 1.37) {
+      setPhotoError('Desktop photo must be under 1 MB. Please choose a smaller file.');
+      return;
+    }
+    setPhotoError('');
+    setDesktopImageUrl(dataUri);
+  }
+
+  const selectedSegmentCount = emailSegmentCounts ? emailSegmentCounts[segment] : null;
+  const emailZeroCount = typeof selectedSegmentCount === 'number' && selectedSegmentCount === 0;
+
   const pushValid = channel === 'push' && title && title.length <= 50;
-  const emailValid = channel === 'email' && templateId && subject;
+  const emailValid = channel === 'email' && templateId && subject && !emailZeroCount;
   const waValid = channel === 'whatsapp' && body && body.length <= 300;
   const canSave = pushValid || emailValid || waValid;
 
@@ -838,6 +887,7 @@ function AddEngagementView({
                 {notifications.map(item => {
                   const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
                   const cc = CHANNEL_CHIP[item.channel || 'push'];
+                  const audLine = audienceLineForItem(item);
                   return (
                     <div key={item._id} style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -846,6 +896,7 @@ function AddEngagementView({
                         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: badge.bg, color: badge.color }}>{badge.label}</span>
                       </div>
                       {item.body && <div style={{ fontSize: 12, color: '#6b7280' }}>{item.body}</div>}
+                      {audLine && <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>Audience: {audLine}</div>}
                     </div>
                   );
                 })}
@@ -875,6 +926,7 @@ function AddEngagementView({
               const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
               const cc = CHANNEL_CHIP[item.channel || 'push'];
               const isNew = item._id === newId;
+              const audLine = audienceLineForItem(item);
               return (
                 <div key={item._id} style={{ background: isNew ? '#eef2ff' : '#f9fafb', border: isNew ? '1.5px solid #a5b4fc' : '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
@@ -883,6 +935,7 @@ function AddEngagementView({
                     <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: badge.bg, color: badge.color }}>{badge.label}</span>
                   </div>
                   {item.body && <div style={{ fontSize: 12, color: '#6b7280' }}>{item.body}</div>}
+                  {audLine && <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 3 }}>Audience: {audLine}</div>}
                 </div>
               );
             })}
@@ -936,18 +989,98 @@ function AddEngagementView({
                 placeholder="e.g. Get 30% off all products — offer ends tonight!"
               />
             </div>
+            {/* Photo field */}
+            <div style={{ marginBottom: 4 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 2 }}>
+                Photo <span style={{ fontWeight: 400, color: '#9ca3af' }}>(optional)</span>
+              </label>
+              <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6 }}>2:1 · JPG or PNG · under 1 MB</div>
+              <ImageUploadPair
+                mobileImageUrl={mobileImageUrl}
+                desktopImageUrl={desktopImageUrl}
+                onMobileChange={handleMobileChange}
+                onDesktopChange={handleDesktopChange}
+              />
+              {photoError && <div style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}>{photoError}</div>}
+            </div>
             <div style={{ marginBottom: 16 }}>
               <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Send time</label>
               <input type="time" value={sendTime} onChange={e => setSendTime(e.target.value)}
                 style={{ padding: '7px 10px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: 13 }}
               />
             </div>
-            {/* Push preview */}
+            {/* Push preview with device switch */}
             <div style={{ background: '#f9fafb', borderRadius: 10, padding: '12px 14px', marginBottom: 16, border: '1px solid #e5e7eb' }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Preview</div>
-              <div style={{ background: '#111827', color: '#fff', borderRadius: 10, padding: '10px 14px' }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>{title || 'Notification title'}</div>
-                <div style={{ fontSize: 12, color: '#d1d5db' }}>{body || 'Your message will appear here.'}</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Preview</span>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {['mobile', 'desktop'].map(d => (
+                    <button key={d} onClick={() => setPreviewDevice(d)}
+                      style={{ padding: '3px 10px', borderRadius: 6, border: '1.5px solid', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                        borderColor: previewDevice === d ? '#4f46e5' : '#e5e7eb',
+                        background: previewDevice === d ? '#eef2ff' : '#fff',
+                        color: previewDevice === d ? '#4f46e5' : '#6b7280' }}>
+                      {d.charAt(0).toUpperCase() + d.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {(() => {
+                const img = previewDevice === 'mobile' ? mobileImageUrl : desktopImageUrl;
+                return (
+                  <div style={{ background: '#111827', color: '#fff', borderRadius: 10, overflow: 'hidden' }}>
+                    {img ? (
+                      <img src={img} alt="" style={{ width: '100%', aspectRatio: '2/1', objectFit: 'cover', display: 'block' }} />
+                    ) : null}
+                    <div style={{ padding: '10px 14px' }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>{title || 'Notification title'}</div>
+                      <div style={{ fontSize: 12, color: '#d1d5db' }}>{body || 'Your message will appear here.'}</div>
+                    </div>
+                  </div>
+                );
+              })()}
+              {(() => {
+                const img = previewDevice === 'mobile' ? mobileImageUrl : desktopImageUrl;
+                return img
+                  ? <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>This is how the photo will look on {previewDevice}.</div>
+                  : <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>No photo for {previewDevice}, so it will send as text only.</div>;
+              })()}
+            </div>
+            {/* Audience picker — push */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Who gets this?</span>
+                <span style={{ fontSize: 11, color: '#6b7280' }}>
+                  About {pushSubscriberCount === null ? '…' : pushSubscriberCount.total} customers
+                </span>
+              </div>
+              <div role="radiogroup" aria-label="Audience">
+                {/* Enabled: everyone */}
+                <div role="radio" aria-checked={true} onClick={() => {}}
+                  style={{ border: '1.5px solid #4f46e5', borderRadius: 8, padding: '10px 12px', marginBottom: 6,
+                    background: '#eef2ff', cursor: 'default' }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: '#4f46e5' }}>All push subscribers</div>
+                  <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>Everyone who allowed notifications on your store</div>
+                </div>
+                {/* Disabled soon cards */}
+                {[
+                  { label: 'Left items in cart', desc: 'Push subscribers with items in cart' },
+                  { label: 'Bought once', desc: 'First-time buyers with push enabled' },
+                  { label: 'Going quiet', desc: 'Push subscribers who haven\'t opened recently' },
+                ].map(opt => (
+                  <div key={opt.label} role="radio" aria-checked={false} aria-disabled="true"
+                    style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 12px', marginBottom: 6,
+                      background: '#f9fafb', opacity: 0.6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{opt.label}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: '#e0e7ff', color: '#4338ca' }}>Soon</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{opt.desc}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+                Push reaches everyone who allowed notifications. Narrower groups are not available yet.
               </div>
             </div>
             {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 10 }}>{error}</div>}
@@ -997,6 +1130,47 @@ function AddEngagementView({
                 style={{ padding: '7px 10px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: 13 }}
               />
             </div>
+            {/* Audience picker — email */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Who gets this?</span>
+                <span style={{ fontSize: 11, color: '#6b7280' }}>
+                  About {emailSegmentCounts === null || emailSegmentCounts[segment] === null
+                    ? '…'
+                    : emailSegmentCounts[segment] === -1
+                      ? '–'
+                      : emailSegmentCounts[segment]} customers
+                </span>
+              </div>
+              <div role="radiogroup" aria-label="Audience">
+                {SEGMENT_OPTS.map(opt => {
+                  const count = emailSegmentCounts ? emailSegmentCounts[opt.value] : null;
+                  const countStr = count === null ? '…' : count === -1 ? '–' : String(count);
+                  const sel = segment === opt.value;
+                  return (
+                    <div key={opt.value} role="radio" aria-checked={sel}
+                      onClick={() => setSegment(opt.value)}
+                      style={{ border: `1.5px solid ${sel ? '#4f46e5' : '#e5e7eb'}`, borderRadius: 8,
+                        padding: '10px 12px', marginBottom: 6, cursor: 'pointer',
+                        background: sel ? '#eef2ff' : '#fff' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: sel ? '#4f46e5' : '#374151' }}>{opt.label}</span>
+                        <span style={{ fontSize: 11, color: '#6b7280' }}>{countStr} customers</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>{opt.desc}</div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
+                Customers who opted out are skipped automatically.
+              </div>
+              {emailZeroCount && (
+                <div style={{ color: '#dc2626', fontSize: 12, marginTop: 6 }}>
+                  No customers in this group yet.
+                </div>
+              )}
+            </div>
             {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 10 }}>{error}</div>}
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => onOpenStep('list', null)} style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
@@ -1039,6 +1213,13 @@ function AddEngagementView({
               <input type="time" value={sendTime} onChange={e => setSendTime(e.target.value)}
                 style={{ padding: '7px 10px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: 13 }}
               />
+            </div>
+            {/* WhatsApp audience info box */}
+            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 12px', marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#1e40af', marginBottom: 2 }}>Who gets this?</div>
+              <div style={{ fontSize: 12, color: '#1d4ed8' }}>
+                You send this one yourself, so you choose who to message when it appears on your Dashboard.
+              </div>
             </div>
             <div style={{ background: '#fffbeb', borderRadius: 8, padding: '8px 12px', marginBottom: 14, fontSize: 12, color: '#92400e' }}>
               You send this yourself. It will appear on your Dashboard on this day.
@@ -1329,6 +1510,17 @@ export default function QueueScreen({ shop }) {
   const [addEngBanner, setAddEngBanner] = useState('');
   const [addEngNewId, setAddEngNewId] = useState(null);
   const [emailTemplates, setEmailTemplates] = useState([]);
+  // Photo (push only)
+  const [addEngMobileImageUrl, setAddEngMobileImageUrl] = useState('');
+  const [addEngDesktopImageUrl, setAddEngDesktopImageUrl] = useState('');
+  const [addEngPhotoError, setAddEngPhotoError] = useState('');
+  const [addEngPreviewDevice, setAddEngPreviewDevice] = useState('mobile');
+  // Audience
+  const [addEngSegment, setAddEngSegment] = useState('everyone');
+  // Email segment counts: { everyone: null|number, email_captured: null|number, … }
+  // null = still loading, -1 = error
+  const [emailSegmentCounts, setEmailSegmentCounts] = useState(null);
+  const [pushSubscriberCount, setPushSubscriberCount] = useState(null);
 
   // Escape closes the panel (scoped: only active when a day is selected).
   useEffect(() => {
@@ -1387,14 +1579,39 @@ export default function QueueScreen({ shop }) {
     if (channel) {
       const channelChanged = channel !== addEngChannel;
       setAddEngChannel(channel);
-      if (channel === 'push') setAddEngSendTime('10:00');
+      if (channel === 'push') {
+        setAddEngSendTime('10:00');
+        setAddEngSegment('everyone');
+        // Fetch push subscriber count once per session.
+        if (pushSubscriberCount === null) {
+          apiGet(`/api/queue/${encodeURIComponent(shop)}/push-subscriber-count`)
+            .then(d => setPushSubscriberCount(d))
+            .catch(() => setPushSubscriberCount({ mobile: 0, desktop: 0, total: 0 }));
+        }
+      }
       if (channel === 'email') {
         setAddEngSendTime('18:00');
+        setAddEngSegment('everyone');
         // Fetch email templates lazily
         if (emailTemplates.length === 0) {
           apiGet(`/api/email-templates/${encodeURIComponent(shop)}`)
             .then(d => setEmailTemplates(d.templates || []))
             .catch(() => {});
+        }
+        // Fetch all segment counts in parallel, cache for session.
+        if (!emailSegmentCounts) {
+          const segs = ['everyone', 'email_captured', 'has_cart', 'bought_once', 'going_quiet'];
+          const initial = Object.fromEntries(segs.map(s => [s, null]));
+          setEmailSegmentCounts(initial);
+          Promise.all(
+            segs.map(s =>
+              apiGet(`/api/email-templates/${encodeURIComponent(shop)}/count?segment=${s}`)
+                .then(d => ({ seg: s, count: typeof d.count === 'number' ? d.count : -1 }))
+                .catch(() => ({ seg: s, count: -1 }))
+            )
+          ).then(results => {
+            setEmailSegmentCounts(Object.fromEntries(results.map(r => [r.seg, r.count])));
+          });
         }
       }
       if (channel === 'whatsapp') setAddEngSendTime('11:00');
@@ -1404,6 +1621,10 @@ export default function QueueScreen({ shop }) {
         setAddEngSubject('');
         setAddEngTemplateId(null);
         setAddEngError('');
+        setAddEngMobileImageUrl('');
+        setAddEngDesktopImageUrl('');
+        setAddEngPhotoError('');
+        setAddEngPreviewDevice('mobile');
       }
     }
   }
@@ -1417,9 +1638,12 @@ export default function QueueScreen({ shop }) {
       if (addEngChannel === 'push') {
         payload.title = addEngTitle;
         payload.body = addEngBody;
+        payload.mobileImageUrl = addEngMobileImageUrl || '';
+        payload.desktopImageUrl = addEngDesktopImageUrl || '';
       } else if (addEngChannel === 'email') {
         payload.templateId = addEngTemplateId;
         payload.subject = addEngSubject;
+        payload.segment = addEngSegment;
       } else {
         payload.body = addEngBody;
       }
@@ -1699,6 +1923,13 @@ export default function QueueScreen({ shop }) {
               saving={addEngSaving} error={addEngError}
               banner={addEngBanner} newId={addEngNewId}
               emailTemplates={emailTemplates}
+              mobileImageUrl={addEngMobileImageUrl} setMobileImageUrl={setAddEngMobileImageUrl}
+              desktopImageUrl={addEngDesktopImageUrl} setDesktopImageUrl={setAddEngDesktopImageUrl}
+              photoError={addEngPhotoError} setPhotoError={setAddEngPhotoError}
+              previewDevice={addEngPreviewDevice} setPreviewDevice={setAddEngPreviewDevice}
+              segment={addEngSegment} setSegment={setAddEngSegment}
+              emailSegmentCounts={emailSegmentCounts}
+              pushSubscriberCount={pushSubscriberCount}
               onBack={() => { setAddEngMode(false); setSelectedDayStr(null); }}
               onOpenStep={openAddEngStep}
               onSave={saveEngagement}
