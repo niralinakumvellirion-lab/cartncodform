@@ -317,6 +317,15 @@ function formatGroupHeading(date) {
   });
 }
 
+// Returns true when the scheduled date (ISO string or Date) falls before
+// the start of today in the user's local timezone. Today and future dates
+// return false. Used to suppress the Approve action on past items.
+function isPastDay(dateOrIso) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return new Date(dateOrIso) < today;
+}
+
 function groupFestivalItemsByDay(items) {
   const groups = new Map();
   items.forEach((item) => {
@@ -684,7 +693,7 @@ function DayDetailsPanel({
                     }}>View</button>
                   ) : (
                     <>
-                      {item.status === 'draft' && (
+                      {item.status === 'draft' && !isPastDay(item.scheduledAt) && (
                         <button onClick={async () => {
                           await apiSend(
                             `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
@@ -1357,7 +1366,7 @@ export default function QueueScreen({ shop }) {
                                 }}>View</button>
                             ) : (
                               <>
-                                {item.status === 'draft' && (
+                                {item.status === 'draft' && !isPastDay(item.scheduledAt) && (
                                   <button
                                     onClick={async () => {
                                       await apiSend(
