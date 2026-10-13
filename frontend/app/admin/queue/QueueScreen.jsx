@@ -810,9 +810,15 @@ function AddEngagementView({
     <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, overflow: 'hidden' }}>
       {/* Header */}
       <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6' }}>
-        <button onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#6b7280', padding: 0, marginBottom: 6 }}>
+        <button
+          onClick={() => {
+            if (step === 'list') onBack();
+            else if (step === 'choose') onOpenStep('list', null);
+            else onOpenStep('choose', null);
+          }}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#6b7280', padding: 0, marginBottom: 6 }}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
-          {step === 'list' ? `Back to ${dayLabel}` : `Back to ${dayLabel}`}
+          {step === 'list' ? 'Back to planning list' : step === 'choose' ? `Back to ${dayLabel}` : 'Back to channels'}
         </button>
         <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
           {step === 'list' ? dayLabel : step === 'choose' ? `Add engagement · ${dayLabel}` : step === 'saved' ? dayLabel : `${channel === 'push' ? 'Push' : channel === 'email' ? 'Email' : 'WhatsApp'} · ${dayLabel}`}
@@ -946,7 +952,7 @@ function AddEngagementView({
             </div>
             {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 10 }}>{error}</div>}
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => onOpenStep('choose', null)} style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => onOpenStep('list', null)} style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
               <button onClick={onSave} disabled={!canSave || saving}
                 style={{ flex: 2, padding: '9px 0', borderRadius: 8, border: 'none', background: canSave && !saving ? '#4f46e5' : '#e5e7eb', color: canSave && !saving ? '#fff' : '#9ca3af', fontSize: 13, fontWeight: 700, cursor: canSave && !saving ? 'pointer' : 'not-allowed' }}>
                 {saving ? 'Saving…' : 'Save engagement'}
@@ -993,7 +999,7 @@ function AddEngagementView({
             </div>
             {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 10 }}>{error}</div>}
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => onOpenStep('choose', null)} style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => onOpenStep('list', null)} style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
               <button onClick={onSave} disabled={!canSave || saving || emailTemplates.length === 0}
                 style={{ flex: 2, padding: '9px 0', borderRadius: 8, border: 'none', background: canSave && !saving ? '#4f46e5' : '#e5e7eb', color: canSave && !saving ? '#fff' : '#9ca3af', fontSize: 13, fontWeight: 700, cursor: canSave && !saving ? 'pointer' : 'not-allowed' }}>
                 {saving ? 'Saving…' : 'Save engagement'}
@@ -1039,7 +1045,7 @@ function AddEngagementView({
             </div>
             {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 10 }}>{error}</div>}
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => onOpenStep('choose', null)} style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => onOpenStep('list', null)} style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
               <button onClick={onSave} disabled={!canSave || saving}
                 style={{ flex: 2, padding: '9px 0', borderRadius: 8, border: 'none', background: canSave && !saving ? '#4f46e5' : '#e5e7eb', color: canSave && !saving ? '#fff' : '#9ca3af', fontSize: 13, fontWeight: 700, cursor: canSave && !saving ? 'pointer' : 'not-allowed' }}>
                 {saving ? 'Saving…' : 'Save engagement'}
@@ -1379,6 +1385,7 @@ export default function QueueScreen({ shop }) {
   function openAddEngStep(step, channel) {
     setAddEngStep(step);
     if (channel) {
+      const channelChanged = channel !== addEngChannel;
       setAddEngChannel(channel);
       if (channel === 'push') setAddEngSendTime('10:00');
       if (channel === 'email') {
@@ -1391,11 +1398,13 @@ export default function QueueScreen({ shop }) {
         }
       }
       if (channel === 'whatsapp') setAddEngSendTime('11:00');
-      setAddEngTitle('');
-      setAddEngBody('');
-      setAddEngSubject('');
-      setAddEngTemplateId(null);
-      setAddEngError('');
+      if (channelChanged) {
+        setAddEngTitle('');
+        setAddEngBody('');
+        setAddEngSubject('');
+        setAddEngTemplateId(null);
+        setAddEngError('');
+      }
     }
   }
 
@@ -1699,7 +1708,7 @@ export default function QueueScreen({ shop }) {
                 setAddEngBanner('');
                 setAddEngNewId(null);
               }}
-              onDone={() => { setAddEngMode(false); setSelectedDayStr(null); }}
+              onDone={() => { setAddEngStep('list'); setAddEngBanner(''); setAddEngNewId(null); }}
             />
           ) : selectedDayStr ? (
             <DayDetailsPanel
