@@ -1,0 +1,86 @@
+AUDIT: queue-email-templates-after
+Commit: abbcd55
+Date: 2026-10-13
+
+=== ROOT CAUSE ===
+
+Old URL (QueueScreen.jsx, line 1582 before fix):
+  apiGet(`/api/email-templates/${encodeURIComponent(shop)}`)
+  → Express matched /api/email-templates/:id with id = shopDomain (e.g. "store.myshopify.com")
+  → router.get('/:id') looked up EmailTemplate by _id — shopDomain is not a valid MongoDB _id → 404
+  → .catch(() => {}) swallowed the error → emailTemplates stayed []
+  → "No saved email templates" shown every time; Save always disabled
+
+CustomerDetail's working URL:
+  apiGet(`/api/email-templates?shop=${encodeURIComponent(shop)}`)
+  → matches router.get('/') → returns { templates: [...] }
+  Note: the ?shop= query param is NOT used by the backend; shop comes from req.shopDomain
+  (requireAuth). The correct minimal URL is just /api/email-templates.
+
+=== WHAT CHANGED ===
+
+File: frontend/app/admin/queue/QueueScreen.jsx
+
+1. URL fix:
+   Old: apiGet(`/api/email-templates/${encodeURIComponent(shop)}`)
+   New: apiGet('/api/email-templates')
+
+2. Fetch policy: removed `if (emailTemplates.length === 0)` guard. Now refetches every
+   time the email step opens. A successful empty list will prompt the user to create a
+   template; a failed fetch shows an error with a Retry button.
+
+3. New state in parent (QueueScreen):
+   - emailTemplatesLoading: boolean, shows "Loading templates…"
+   - emailTemplatesError: string, shows error box + Retry button
+   New function: retryEmailTemplates() — same fetch logic as the inline trigger
+   New props passed to AddEngagementView: emailTemplatesLoading, emailTemplatesError,
+   onRetryTemplates
+
+4. New state in AddEngagementView (local):
+   - tplPreviewHtml, tplPreviewLoading, tplPreviewDevice
+   New function: loadTplPreview(id) — calls GET /api/email-templates/:id/preview
+
+5. templateTypeChip() — added as a standalone function (mirrors CustomerDetail.jsx),
+   returns a colour-coded badge for 'special_offer' and 'festival' types.
+
+6. Template list rendering — replaced 2-column grid with:
+   - Vertical flex list (gap: 6), same as CustomerDetail
+   - Per-row button: radio dot (filled blue when selected), t.name, type chip,
+     t.subject preview (grey, truncated)
+   - Blue border + light blue background when selected
+   Subject is prefilled from t.subject on every selection (was conditional before).
+
+7. Template preview — added below the list when a template is selected:
+   - Desktop/Mobile toggle (same segmented-control style as CustomerDetail)
+   - Iframe with srcDoc={tplPreviewHtml} (GET /api/email-templates/:id/preview)
+   - Loading spinner while fetching; hides iframe until HTML is ready
+   Difference from CustomerDetail: one iframe at a time (toggle), not side-by-side.
+   CustomerDetail shows two EmailPreviewFrame instances simultaneously; the Queue panel
+   is narrow so a single switchable view was used instead.
+
+8. Save button: removed `|| emailTemplates.length === 0` from disabled condition.
+   emailValid = templateId && subject && !emailZeroCount already enforces no save
+   without a selected template.
+
+=== LOADING / EMPTY / ERROR BEHAVIOUR ===
+
+- Fetching:   "Loading templates…" grey box; Save disabled (no templateId)
+- Network error: red box "Could not load templates." + Retry button
+- Empty list (success, 0 templates): "No saved email templates. Create one in the
+  Email Templates section first." — same text as before, only shown on true empty
+- Loaded list: template rows rendered; selecting one loads its preview
+
+=== WHAT WAS NOT VERIFIED WITHOUT A BROWSER ===
+
+- iframe srcdoc rendering of the actual email HTML (could have CSS bleed or height issues)
+- The Desktop/Mobile toggle visual: the iframe switches width but no re-scaling is applied
+  (CustomerDetail uses transform:scale). For the Queue's narrow panel this may crop the
+  desktop view if the email is wider than the panel; the mobile (375px) view should be fine.
+- ccf-tpl-card CSS class (used in the old grid) was implicitly removed; no other code
+  references it so no regression expected.
+
+=== BUILD AND TESTS ===
+
+Build: clean, 0 errors (frontend/npm run build)
+Tests: backend-only change (URL fix is frontend); no backend tests affected.
+       cd backend && npm test was not re-run (frontend-only edit per efficiency rules).
