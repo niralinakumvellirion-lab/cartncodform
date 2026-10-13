@@ -291,6 +291,36 @@ async function handleOrderWebhook(req, res) {
                 { $set: { 'messages.$.outcome': 'converted' } }
               );
             }
+
+            // Record an AttributedEvent for the purchase so the Activity page can
+            // count it. Idempotent: upsert on (shopDomain, eventType, meta.orderId)
+            // — Shopify may retry orders/create; the second delivery finds the row
+            // and $setOnInsert does nothing.
+            if (order.id) {
+              try {
+                const AttributedEvent = require('../models/AttributedEvent');
+                await AttributedEvent.updateOne(
+                  { shopDomain, eventType: 'purchase', 'meta.orderId': String(order.id) },
+                  {
+                    $setOnInsert: {
+                      shopDomain,
+                      profileId: job.profileId || undefined,
+                      jobId: job._id,
+                      eventType: 'purchase',
+                      ts: new Date(),
+                      meta: {
+                        orderId: String(order.id),
+                        orderTotal: revenueAmount != null ? Number(revenueAmount) : null,
+                        currency: revenueCurrency,
+                      },
+                    },
+                  },
+                  { upsert: true }
+                );
+              } catch (aeErr) {
+                console.error('[webhook:order] AttributedEvent purchase error:', aeErr.message);
+              }
+            }
           }
         } catch (convErr) {
           console.error('[webhook:order] outcome=converted update error:', convErr.message);
