@@ -517,6 +517,9 @@ export default function QueueScreen({ shop }) {
       @media (max-width: 600px) {
         .ccf-upload-pair-grid { grid-template-columns: 1fr !important; }
       }
+      @media (max-width: 1099px) {
+        .ccf-queue-split { grid-template-columns: 1fr !important; }
+      }
     `;
     document.head.appendChild(s);
   }
@@ -546,7 +549,6 @@ export default function QueueScreen({ shop }) {
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Phase 2: calendar + planning view state.
-  const [queueTab, setQueueTab] = useState('calendar');
   const [festivalItems, setFestivalItems] = useState([]);
   const [festivalLoading, setFestivalLoading] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -843,7 +845,7 @@ export default function QueueScreen({ shop }) {
     <div
       style={{
         padding: isMobileView ? '20px 12px 32px' : '24px 20px 32px',
-        maxWidth: '1100px',
+        maxWidth: '1400px',
         margin: '0 auto',
       }}
     >
@@ -857,270 +859,258 @@ export default function QueueScreen({ shop }) {
         </p>
       </div>
 
-      {/* TABS: Calendar | Planning List — segmented control, same pill
-          pattern as the Dashboard's own DATE_FILTERS switcher. */}
-      <div style={{
-        display: 'inline-flex', gap: 4, padding: 4,
-        background: '#f3f4f6', borderRadius: 10, marginBottom: 24,
+      {/* TWO-COLUMN SPLIT — Calendar left, Planning list right.
+          Side-by-side ≥1100px viewport; stacked below (ccf-queue-split
+          media query at top of component). */}
+      <div className="ccf-queue-split" style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+        gap: 20,
+        alignItems: 'start',
       }}>
-        {[
-          { key: 'calendar', label: 'Calendar' },
-          { key: 'planning', label: 'Planning List' },
-        ].map(tab => (
-          <button
-            key={tab.key}
-            onClick={() => setQueueTab(tab.key)}
-            style={{
-              padding: '8px 18px', minHeight: 36, fontSize: 13, fontWeight: 600,
-              border: 'none', borderRadius: 7, cursor: 'pointer',
-              background: queueTab === tab.key ? '#4f46e5' : 'transparent',
-              color: queueTab === tab.key ? '#fff' : '#6b7280',
-              transition: 'background 0.15s, color 0.15s',
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
 
-      {/* MONTH NAVIGATION — calendar tab only. Prev/next/Today handlers
-          not given verbatim by the task; Today jumps to new Date(), the
-          same seed value currentMonth starts from. */}
-      {queueTab === 'calendar' && (
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          marginBottom: 16, flexWrap: 'wrap', gap: 12,
-        }}>
-          <div style={{ fontSize: 19, fontWeight: 600, color: '#111827' }}>
-            {currentMonth.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button
-              onClick={() => setCurrentMonth(new Date())}
-              onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
-              onMouseLeave={e => e.currentTarget.style.background = '#fff'}
-              style={{
-                padding: '6px 14px', fontSize: 12, fontWeight: 600,
-                border: '1px solid #e5e7eb', borderRadius: 8,
-                background: '#fff', color: '#374151', cursor: 'pointer',
-                transition: 'background 0.15s',
-              }}
-            >
-              Today
-            </button>
-            <button
-              aria-label="Previous month"
-              onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
-              onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
-              onMouseLeave={e => e.currentTarget.style.background = '#fff'}
-              style={{
-                width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb',
-                background: '#fff', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'background 0.15s',
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#374151"
-                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="15 18 9 12 15 6"/>
-              </svg>
-            </button>
-            <button
-              aria-label="Next month"
-              onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
-              onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
-              onMouseLeave={e => e.currentTarget.style.background = '#fff'}
-              style={{
-                width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb',
-                background: '#fff', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                transition: 'background 0.15s',
-              }}
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#374151"
-                strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="9 18 15 12 9 6"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* CONTENT AREA */}
-      {queueTab === 'calendar' ? (
-        festivalLoading ? (
-          <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 40 }}>
-            Loading...
-          </div>
-        ) : (
-          <MonthCalendar
-            month={currentMonth}
-            items={festivalItems}
-            festivals={festivalCalendar}
-            onItemClick={openEditModal}
-            onSentClick={goToFestivalDetail}
-          />
-        )
-      ) : (
+        {/* LEFT: Calendar column */}
         <div>
+          {/* MONTH NAVIGATION */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 16, flexWrap: 'wrap', gap: 12,
+          }}>
+            <div style={{ fontSize: 19, fontWeight: 600, color: '#111827' }}>
+              {currentMonth.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button
+                onClick={() => setCurrentMonth(new Date())}
+                onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+                onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                style={{
+                  padding: '6px 14px', fontSize: 12, fontWeight: 600,
+                  border: '1px solid #e5e7eb', borderRadius: 8,
+                  background: '#fff', color: '#374151', cursor: 'pointer',
+                  transition: 'background 0.15s',
+                }}
+              >
+                Today
+              </button>
+              <button
+                aria-label="Previous month"
+                onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() - 1, 1))}
+                onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+                onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                style={{
+                  width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb',
+                  background: '#fff', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'background 0.15s',
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#374151"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="15 18 9 12 15 6"/>
+                </svg>
+              </button>
+              <button
+                aria-label="Next month"
+                onClick={() => setCurrentMonth(m => new Date(m.getFullYear(), m.getMonth() + 1, 1))}
+                onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+                onMouseLeave={e => e.currentTarget.style.background = '#fff'}
+                style={{
+                  width: 32, height: 32, borderRadius: '50%', border: '1px solid #e5e7eb',
+                  background: '#fff', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'background 0.15s',
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#374151"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          {/* CALENDAR */}
           {festivalLoading ? (
             <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 40 }}>
               Loading...
             </div>
-          ) : festivalItems.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '48px 20px' }}>
-              <div style={{ fontSize: 32, opacity: 0.4, marginBottom: 8 }}>📋</div>
-              <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
-                Nothing queued yet
-              </div>
-              <div style={{ fontSize: 13, color: '#9ca3af', marginTop: 4 }}>
-                Head to the Dashboard's Notification Suggestions to plan your first festival notification.
-              </div>
-            </div>
           ) : (
-            groupFestivalItemsByDay(festivalItems).map((group) => (
-              <div key={`${group.date.getFullYear()}-${group.date.getMonth()}-${group.date.getDate()}`}
-                style={{ marginBottom: 20 }}>
-                <div style={{
-                  fontSize: 11, fontWeight: 700, color: '#9ca3af',
-                  textTransform: 'uppercase', letterSpacing: '0.06em',
-                  marginBottom: 8, paddingLeft: 2,
-                }}>
-                  {formatGroupHeading(group.date)}
+            <MonthCalendar
+              month={currentMonth}
+              items={festivalItems}
+              festivals={festivalCalendar}
+              onItemClick={openEditModal}
+              onSentClick={goToFestivalDetail}
+            />
+          )}
+        </div>
+
+        {/* RIGHT: Planning list column — scrolls internally so the page
+            height stays close to the calendar's height. */}
+        <div style={{
+          background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14,
+          overflow: 'hidden',
+        }}>
+          <div style={{ overflowY: 'auto', maxHeight: '70vh', padding: '12px 12px 4px' }}>
+            {festivalLoading ? (
+              <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 40 }}>
+                Loading...
+              </div>
+            ) : festivalItems.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '48px 20px' }}>
+                <div style={{ fontSize: 32, opacity: 0.4, marginBottom: 8 }}>📋</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
+                  Nothing queued yet
                 </div>
-                <div style={{
-                  background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12,
-                  overflow: 'hidden',
-                }}>
-                  {group.items.map((item, ii) => {
-                    const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
-                    const isLastInGroup = ii === group.items.length - 1;
-                    return (
-                      <div key={item._id}
-                        onMouseEnter={e => {
-                          e.currentTarget.style.background = '#f9fafb';
-                          const actions = e.currentTarget.querySelector('[data-row-actions]');
-                          if (actions) actions.style.opacity = '1';
-                        }}
-                        onMouseLeave={e => {
-                          e.currentTarget.style.background = '#fff';
-                          const actions = e.currentTarget.querySelector('[data-row-actions]');
-                          if (actions) actions.style.opacity = '0.55';
-                        }}
-                        style={{
-                          padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
-                          borderBottom: isLastInGroup ? 'none' : '1px solid #f9fafb',
-                          transition: 'background 0.12s',
-                        }}
-                      >
-                        {(item.mobileImageUrl || item.desktopImageUrl) && (
-                          <img
-                            src={item.mobileImageUrl || item.desktopImageUrl}
-                            alt=""
-                            style={{
-                              width: 32, height: 32, borderRadius: 8,
-                              objectFit: 'cover', flexShrink: 0,
-                            }}
-                            onError={e => { e.target.style.display = 'none'; }}
-                          />
-                        )}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{
-                            fontSize: 14, fontWeight: 600, color: '#111827',
-                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                          }}>
-                            {item.title}
-                          </div>
-                          <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
-                            {item.festival ? `${item.festival} · ` : ''}
-                            {new Date(item.scheduledAt).toLocaleTimeString('en-IN', {
-                              hour: 'numeric', minute: '2-digit', hour12: true,
-                            })}
-                          </div>
-                          <div style={{
-                            fontSize: 12, color: '#9ca3af', marginTop: 2,
-                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                          }}>
-                            {item.targetType === 'product'
-                              ? `→ ${item.productTitle || 'Product'}`
-                              : '→ Storefront home'}
-                          </div>
-                        </div>
-                        <span style={{
-                          fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
-                          background: badge.bg, color: badge.color, flexShrink: 0,
-                          textDecoration: badge.strike ? 'line-through' : 'none',
-                        }}>
-                          {badge.label}
-                        </span>
-                        <div data-row-actions style={{
-                          display: 'flex', gap: 6, flexShrink: 0,
-                          opacity: 0.55, transition: 'opacity 0.15s',
-                        }}>
-                          {/* A 'sent' document is historical fact — never
-                              editable or deletable (the backend now
-                              rejects both with 409 regardless). "View"
-                              is the only action, same detail page a
-                              sent calendar chip already links to. */}
-                          {item.status === 'sent' ? (
-                            <button
-                              onClick={() => goToFestivalDetail(item._id)}
+                <div style={{ fontSize: 13, color: '#9ca3af', marginTop: 4 }}>
+                  Head to the Dashboard's Notification Suggestions to plan your first festival notification.
+                </div>
+              </div>
+            ) : (
+              groupFestivalItemsByDay(festivalItems).map((group) => (
+                <div key={`${group.date.getFullYear()}-${group.date.getMonth()}-${group.date.getDate()}`}
+                  style={{ marginBottom: 16 }}>
+                  <div style={{
+                    fontSize: 11, fontWeight: 700, color: '#9ca3af',
+                    textTransform: 'uppercase', letterSpacing: '0.06em',
+                    marginBottom: 8, paddingLeft: 2,
+                  }}>
+                    {formatGroupHeading(group.date)}
+                  </div>
+                  <div style={{
+                    background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12,
+                    overflow: 'hidden',
+                  }}>
+                    {group.items.map((item, ii) => {
+                      const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
+                      const isLastInGroup = ii === group.items.length - 1;
+                      return (
+                        <div key={item._id}
+                          onMouseEnter={e => {
+                            e.currentTarget.style.background = '#f9fafb';
+                            const actions = e.currentTarget.querySelector('[data-row-actions]');
+                            if (actions) actions.style.opacity = '1';
+                          }}
+                          onMouseLeave={e => {
+                            e.currentTarget.style.background = '#fff';
+                            const actions = e.currentTarget.querySelector('[data-row-actions]');
+                            if (actions) actions.style.opacity = '0.55';
+                          }}
+                          style={{
+                            padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
+                            borderBottom: isLastInGroup ? 'none' : '1px solid #f9fafb',
+                            transition: 'background 0.12s',
+                          }}
+                        >
+                          {(item.mobileImageUrl || item.desktopImageUrl) && (
+                            <img
+                              src={item.mobileImageUrl || item.desktopImageUrl}
+                              alt=""
                               style={{
-                                padding: '5px 10px', borderRadius: 6,
-                                border: '1px solid #e5e7eb', background: '#fff',
-                                color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                              }}>View</button>
-                          ) : (
-                            <>
-                              {item.status === 'draft' && (
-                                <button
-                                  onClick={async () => {
-                                    await apiSend(
-                                      `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
-                                      'PATCH', { status: 'approved' }
-                                    );
-                                    setFestivalItems(prev => prev.map(i =>
-                                      i._id === item._id ? {...i, status: 'approved'} : i
-                                    ));
-                                  }}
-                                  style={{
-                                    padding: '5px 10px', borderRadius: 6, border: 'none',
-                                    background: '#4f46e5', color: '#fff', fontSize: 11,
-                                    fontWeight: 600, cursor: 'pointer',
-                                  }}>Approve</button>
-                              )}
+                                width: 32, height: 32, borderRadius: 8,
+                                objectFit: 'cover', flexShrink: 0,
+                              }}
+                              onError={e => { e.target.style.display = 'none'; }}
+                            />
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{
+                              fontSize: 14, fontWeight: 600, color: '#111827',
+                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                            }}>
+                              {item.title}
+                            </div>
+                            <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
+                              {item.festival ? `${item.festival} · ` : ''}
+                              {new Date(item.scheduledAt).toLocaleTimeString('en-IN', {
+                                hour: 'numeric', minute: '2-digit', hour12: true,
+                              })}
+                            </div>
+                            <div style={{
+                              fontSize: 12, color: '#9ca3af', marginTop: 2,
+                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                            }}>
+                              {item.targetType === 'product'
+                                ? `→ ${item.productTitle || 'Product'}`
+                                : '→ Storefront home'}
+                            </div>
+                          </div>
+                          <span style={{
+                            fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
+                            background: badge.bg, color: badge.color, flexShrink: 0,
+                            textDecoration: badge.strike ? 'line-through' : 'none',
+                          }}>
+                            {badge.label}
+                          </span>
+                          <div data-row-actions style={{
+                            display: 'flex', gap: 6, flexShrink: 0,
+                            opacity: 0.55, transition: 'opacity 0.15s',
+                          }}>
+                            {/* A 'sent' document is historical fact — never
+                                editable or deletable (the backend now
+                                rejects both with 409 regardless). "View"
+                                is the only action, same detail page a
+                                sent calendar chip already links to. */}
+                            {item.status === 'sent' ? (
                               <button
-                                onClick={() => openEditModal(item)}
+                                onClick={() => goToFestivalDetail(item._id)}
                                 style={{
                                   padding: '5px 10px', borderRadius: 6,
                                   border: '1px solid #e5e7eb', background: '#fff',
                                   color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                                }}>Edit</button>
-                              <button
-                                onClick={async () => {
-                                  await apiSend(
-                                    `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
-                                    'DELETE', {}
-                                  );
-                                  setFestivalItems(prev => prev.filter(i => i._id !== item._id));
-                                }}
-                                style={{
-                                  padding: '5px 10px', borderRadius: 6,
-                                  border: '1px solid #fee2e2', background: '#fff',
-                                  color: '#dc2626', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                                }}>Delete</button>
-                            </>
-                          )}
+                                }}>View</button>
+                            ) : (
+                              <>
+                                {item.status === 'draft' && (
+                                  <button
+                                    onClick={async () => {
+                                      await apiSend(
+                                        `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
+                                        'PATCH', { status: 'approved' }
+                                      );
+                                      setFestivalItems(prev => prev.map(i =>
+                                        i._id === item._id ? {...i, status: 'approved'} : i
+                                      ));
+                                    }}
+                                    style={{
+                                      padding: '5px 10px', borderRadius: 6, border: 'none',
+                                      background: '#4f46e5', color: '#fff', fontSize: 11,
+                                      fontWeight: 600, cursor: 'pointer',
+                                    }}>Approve</button>
+                                )}
+                                <button
+                                  onClick={() => openEditModal(item)}
+                                  style={{
+                                    padding: '5px 10px', borderRadius: 6,
+                                    border: '1px solid #e5e7eb', background: '#fff',
+                                    color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                                  }}>Edit</button>
+                                <button
+                                  onClick={async () => {
+                                    await apiSend(
+                                      `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
+                                      'DELETE', {}
+                                    );
+                                    setFestivalItems(prev => prev.filter(i => i._id !== item._id));
+                                  }}
+                                  style={{
+                                    padding: '5px 10px', borderRadius: 6,
+                                    border: '1px solid #fee2e2', background: '#fff',
+                                    color: '#dc2626', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                                  }}>Delete</button>
+                              </>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))
-          )}
+              ))
+            )}
+          </div>
         </div>
-      )}
+      </div>
 
       {/* SENT NOTIFICATIONS — the pre-existing ScheduledJob-based
           list (filter tabs, stats row, table/card list, pagination),
