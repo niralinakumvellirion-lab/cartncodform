@@ -158,6 +158,23 @@ router.get('/:shopDomain/recent-sends', requireAuth, requireStoreOwner,
   }
 });
 
+// GET /api/queue/:shopDomain/push-subscriber-count
+router.get('/:shopDomain/push-subscriber-count', requireAuth, requireStoreOwner,
+  async (req, res) => {
+  try {
+    const shop = req.shopDomain;
+    const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+    const [mobile, desktop] = await Promise.all([
+      CustomerPushSubscription.countDocuments({ shopDomain: shop, deviceType: 'mobile' }),
+      CustomerPushSubscription.countDocuments({ shopDomain: shop, deviceType: 'desktop' }),
+    ]);
+    return res.json({ mobile, desktop, total: mobile + desktop });
+  } catch (err) {
+    console.error('[queue] push-subscriber-count error:', err.message);
+    return res.status(500).json({ error: 'Failed to count push subscribers' });
+  }
+});
+
 // POST /api/queue/:shopDomain/:jobId/send-now
 // Force a pending job to run immediately
 router.post('/:shopDomain/:jobId/send-now', requireAuth,
@@ -235,11 +252,20 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
     const { title, body, imageUrl, scheduledAt, festival,
             status, mobileImageUrl, desktopImageUrl,
             targetType, productId, productHandle, productTitle,
-            channel, templateId, subject } = req.body;
+            channel, templateId, subject, segment } = req.body;
 
     const resolvedChannel = channel || 'push';
     if (!['push', 'email', 'whatsapp'].includes(resolvedChannel)) {
       return res.status(400).json({ error: 'channel must be push, email, or whatsapp' });
+    }
+
+    const VALID_SEGMENTS = ['everyone', 'email_captured', 'has_cart', 'bought_once', 'going_quiet'];
+    let resolvedSegment = 'everyone';
+    if (resolvedChannel === 'email') {
+      if (segment && !VALID_SEGMENTS.includes(segment)) {
+        return res.status(400).json({ error: `segment must be one of ${VALID_SEGMENTS.join(', ')}` });
+      }
+      resolvedSegment = segment || 'everyone';
     }
 
     if (!scheduledAt) {
@@ -305,6 +331,7 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
       channel: resolvedChannel,
       templateId: templateId || null,
       subject: subject || '',
+      segment: resolvedSegment,
     };
 
     // Multi-date: scheduledAt as an array of local datetime strings —

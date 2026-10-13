@@ -693,12 +693,20 @@ async function processFestivalQueue() {
             continue;
           }
           const { sendEmailBroadcast } = require('./utils/emailBroadcast');
+          const VALID_EMAIL_SEGMENTS = ['everyone', 'email_captured', 'has_cart', 'bought_once', 'going_quiet'];
+          const emailSegment = item.segment || 'everyone';
+          if (!VALID_EMAIL_SEGMENTS.includes(emailSegment)) {
+            console.error(`[festival-queue] email item ${item._id} has invalid segment "${emailSegment}" — cancelling`);
+            await FestivalQueue.findByIdAndUpdate(item._id, { status: 'cancelled', $unset: { sendClaimedAt: 1 } });
+            continue;
+          }
           const result = await sendEmailBroadcast({
             shopDomain: item.shopDomain,
             templateId: item.templateId,
             subject: item.subject || undefined,
             logOrigin: 'scheduled',
             festivalQueueId: item._id,
+            segment: emailSegment,
           });
 
           console.log(

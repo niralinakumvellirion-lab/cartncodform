@@ -1,0 +1,69 @@
+PRE-AUDIT: queue-photo-audience
+Date: 2026-10-13
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+(a) Body-size limit — can two base64 images (~1.5 MB each) pass?
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+backend/server.js line 71: express.json({ limit: '10mb', … })
+
+App-wide global limit is 10 MB. Two 1.5 MB images → ~3 MB of base64
+(base64 inflates ×4/3 → ~2 MB raw → fine within 10 MB even before any
+queue-specific override). No per-route body limit exists on the queue
+router. Conclusion: 10 MB global limit is sufficient; no per-route
+increase is required.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+(b) How AddEngagementView builds the preview and POST body
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Preview (QueueScreen.jsx lines 945–952): a static <div> card with a
+dark background, shows `title || 'Notification title'` and
+`body || 'Your message will appear here.'` — text only, no image.
+
+saveEngagement (lines 1411–1441):
+  payload = { channel, scheduledAt }
+  push: adds title, body
+  email: adds templateId, subject
+  whatsapp: adds body (only)
+POST /api/queue/:shop/festival via apiSend
+
+The backend (queue.js line 296–298) already stores mobileImageUrl and
+desktopImageUrl when present in the request body, but saveEngagement
+never sends them for push items today.
+
+State variables for images: none — AddEngagementView does not hold
+mobileImageUrl or desktopImageUrl in state.
+
+State threading: title/body/subject/templateId are held in QueueScreen
+state (setAddEngTitle, setAddEngBody, …) and passed as props to
+AddEngagementView; the component is stateless for those values.
+openAddEngStep clears them when the channel changes.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+(c) VALID_SEGMENTS and GET /api/email-templates/count response
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+VALID_SEGMENTS (defined identically in two places):
+  backend/routes/emailTemplates.js line 49
+  backend/utils/emailBroadcast.js line 28
+  ['everyone', 'email_captured', 'has_cart', 'bought_once', 'going_quiet']
+
+GET /api/email-templates/count?segment=X (emailTemplates.js lines 204–218):
+  - requireAuth scoped (no requireStoreOwner — uses req.shopDomain set
+    by requireAuth)
+  - Returns: { count: <Number> }
+  - 400 if segment not in VALID_SEGMENTS
+  - 500 on DB error
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Other observations
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- FestivalQueue has no `segment` field today. processFestivalQueue's
+  sendEmailBroadcast call does not pass a segment, so it defaults to
+  'everyone' inside emailBroadcast.js.
+- CustomerPushSubscription.deviceType is 'mobile' | 'desktop' | 'unknown'.
+  The new subscriber-count endpoint will sum countDocuments per type.
+- Queue route uses express.Router() with no body-parser override — inherits
+  the global 10 MB limit.

@@ -236,6 +236,81 @@ describe('GET /:shop/recent-sends — real channel from FestivalQueue', () => {
   });
 });
 
+// ─── Segment validation on POST /festival ─────────────────────────────────
+
+describe('POST /:shop/festival — segment field', () => {
+  beforeEach(() => {
+    FestivalQueue.findOneAndUpdate.mockResolvedValue(null);
+    FestivalQueue.create.mockImplementation((f) => Promise.resolve({ _id: 'newseg', ...f }));
+    EmailTemplate.findOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ _id: 'tpl1' }) }) });
+  });
+
+  test('email channel: valid segment stored', async () => {
+    const res = await post({ channel: 'email', templateId: 'tpl1', subject: 'Hi', scheduledAt: FUTURE, segment: 'has_cart' });
+    expect(res.status).toBe(200);
+    const [fields] = FestivalQueue.create.mock.calls[0];
+    expect(fields.segment).toBe('has_cart');
+  });
+
+  test('email channel: invalid segment → 400', async () => {
+    const res = await post({ channel: 'email', templateId: 'tpl1', subject: 'Hi', scheduledAt: FUTURE, segment: 'vip' });
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.error).toMatch(/segment/);
+    expect(FestivalQueue.create).not.toHaveBeenCalled();
+  });
+
+  test('email channel: omitted segment defaults to everyone', async () => {
+    const res = await post({ channel: 'email', templateId: 'tpl1', subject: 'Hi', scheduledAt: FUTURE });
+    expect(res.status).toBe(200);
+    const [fields] = FestivalQueue.create.mock.calls[0];
+    expect(fields.segment).toBe('everyone');
+  });
+
+  test('push channel: segment field is ignored, stored as everyone', async () => {
+    const res = await post({ channel: 'push', title: 'T', body: 'B', scheduledAt: FUTURE, segment: 'bought_once' });
+    expect(res.status).toBe(200);
+    const [fields] = FestivalQueue.create.mock.calls[0];
+    expect(fields.segment).toBe('everyone');
+  });
+
+  test('whatsapp channel: segment field is ignored, stored as everyone', async () => {
+    const res = await post({ channel: 'whatsapp', body: 'Hi', scheduledAt: FUTURE, segment: 'has_cart' });
+    expect(res.status).toBe(200);
+    const [fields] = FestivalQueue.create.mock.calls[0];
+    expect(fields.segment).toBe('everyone');
+  });
+});
+
+// ─── push-subscriber-count endpoint ───────────────────────────────────────
+
+describe('GET /:shop/push-subscriber-count', () => {
+  const CustomerPushSubscription = require('../models/CustomerPushSubscription');
+
+  test('returns shop-scoped mobile/desktop/total counts', async () => {
+    CustomerPushSubscription.countDocuments
+      .mockResolvedValueOnce(12)  // mobile
+      .mockResolvedValueOnce(7);  // desktop
+
+    const res = await fetch(`${base}/api/queue/${SHOP}/push-subscriber-count`, {
+      headers: { 'x-test-shop': SHOP },
+    });
+    const data = await res.json();
+    expect(res.status).toBe(200);
+    expect(data).toEqual({ mobile: 12, desktop: 7, total: 19 });
+    // Both queries scope by shopDomain.
+    expect(CustomerPushSubscription.countDocuments).toHaveBeenNthCalledWith(1, { shopDomain: SHOP, deviceType: 'mobile' });
+    expect(CustomerPushSubscription.countDocuments).toHaveBeenNthCalledWith(2, { shopDomain: SHOP, deviceType: 'desktop' });
+  });
+
+  test('wrong shop → 403 from requireStoreOwner', async () => {
+    const res = await fetch(`${base}/api/queue/other.myshopify.com/push-subscriber-count`, {
+      headers: { 'x-test-shop': SHOP },
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
 // ─── processFestivalQueue poller tests ────────────────────────────────────
 
 // Poller tests require loading server.js with all its heavy deps mocked.
@@ -451,5 +526,45 @@ describe('processFestivalQueue poller', () => {
     await Promise.all([_processFestivalQueue(), _processFestivalQueue()]);
 
     expect(mockSendEmailBroadcast).toHaveBeenCalledTimes(1);
+  });
+
+  test('poller passes item.segment to sendEmailBroadcast', async () => {
+    const item = { _id: 'fqseg1', shopDomain: 'demo.myshopify.com', channel: 'email',
+      templateId: 'tpl1', subject: 'S', title: 'T', segment: 'has_cart', failedAttempts: 0 };
+    mockFindItems([item]);
+    mockSendEmailBroadcast.mockResolvedValue({ sent: 3, failed: 0, total: 3 });
+
+    await _processFestivalQueue();
+
+    expect(mockSendEmailBroadcast).toHaveBeenCalledWith(expect.objectContaining({
+      segment: 'has_cart',
+    }));
+  });
+
+  test('old row without segment field defaults to everyone in poller', async () => {
+    const item = { _id: 'fqseg2', shopDomain: 'demo.myshopify.com', channel: 'email',
+      templateId: 'tpl1', subject: 'S', title: 'T', failedAttempts: 0 };
+    mockFindItems([item]);
+    mockSendEmailBroadcast.mockResolvedValue({ sent: 3, failed: 0, total: 3 });
+
+    await _processFestivalQueue();
+
+    expect(mockSendEmailBroadcast).toHaveBeenCalledWith(expect.objectContaining({
+      segment: 'everyone',
+    }));
+  });
+
+  test('invalid stored segment causes item to be cancelled, not sent to everyone', async () => {
+    const item = { _id: 'fqseg3', shopDomain: 'demo.myshopify.com', channel: 'email',
+      templateId: 'tpl1', subject: 'S', title: 'T', segment: 'bogus_segment', failedAttempts: 0 };
+    mockFindItems([item]);
+
+    await _processFestivalQueue();
+
+    expect(mockSendEmailBroadcast).not.toHaveBeenCalled();
+    expect(mockFestivalQueue.findByIdAndUpdate).toHaveBeenCalledWith(
+      'fqseg3',
+      expect.objectContaining({ status: 'cancelled' })
+    );
   });
 });
