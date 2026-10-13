@@ -6,6 +6,7 @@ import { apiGet, apiSend } from '../../../lib/api';
 import QuietHoursWarning, { useQuietHoursSettings, formatLocalDateTimeInput } from '../components/QuietHoursWarning';
 import { ShimmerCard } from '../components/Shimmer';
 import { ImageUploadPair } from '../components/ImageUploadPair';
+import { EmailPreviewFrame } from '../components/EmailPreviewFrame';
 import { ProductPicker } from '../components/ProductPicker';
 import MultiDateScheduler from '../components/MultiDateScheduler';
 
@@ -1197,27 +1198,25 @@ function AddEngagementView({
                       </button>
                     ))}
                   </div>
-                  {tplPreviewLoading ? (
-                    <div style={{ fontSize: 12, color: '#9ca3af', padding: '20px 0', textAlign: 'center' }}>
-                      Loading preview…
-                    </div>
-                  ) : tplPreviewHtml ? (
-                    <div style={{ borderRadius: 8, overflow: 'hidden',
+                  {tplPreviewDevice === 'mobile' ? (
+                    <div style={{ height: 480, borderRadius: 8, overflow: 'hidden',
                                   border: '1px solid #e5e7eb' }}>
-                      <iframe
-                        srcDoc={tplPreviewHtml}
-                        sandbox="allow-same-origin"
-                        style={{
-                          width: tplPreviewDevice === 'desktop' ? '100%' : '375px',
-                          maxWidth: '100%',
-                          height: 420,
-                          border: 'none',
-                          display: 'block',
-                        }}
-                        title="Email preview"
+                      <EmailPreviewFrame
+                        html={tplPreviewHtml}
+                        device="mobile"
+                        loading={tplPreviewLoading}
+                        templateMode={true}
                       />
                     </div>
-                  ) : null}
+                  ) : (
+                    <EmailPreviewFrame
+                      html={tplPreviewHtml}
+                      device="desktop"
+                      loading={tplPreviewLoading}
+                      templateMode={true}
+                      subject={subject}
+                    />
+                  )}
                 </div>
               )}
             </div>
