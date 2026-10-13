@@ -798,6 +798,20 @@ function audienceLineForItem(item) {
 
 const MAX_PHOTO_BYTES = 1024 * 1024; // 1 MB
 
+function templateTypeChip(type) {
+  const map = {
+    special_offer: { bg: '#eff6ff', color: '#1d4ed8', label: 'Special offer' },
+    festival:      { bg: '#fff7ed', color: '#c2410c', label: 'Festival' },
+  };
+  const s = map[type] || { bg: '#f3f4f6', color: '#374151', label: type || 'Template' };
+  return (
+    <span style={{ fontSize: 10, background: s.bg, color: s.color,
+                   borderRadius: 10, padding: '1px 7px', fontWeight: 600 }}>
+      {s.label}
+    </span>
+  );
+}
+
 function AddEngagementView({
   dateStr, festivalItems,
   step, channel,
@@ -805,7 +819,7 @@ function AddEngagementView({
   subject, setSubject, templateId, setTemplateId,
   sendTime, setSendTime,
   saving, error, banner, newId,
-  emailTemplates,
+  emailTemplates, emailTemplatesLoading, emailTemplatesError, onRetryTemplates,
   mobileImageUrl, setMobileImageUrl,
   desktopImageUrl, setDesktopImageUrl,
   photoError, setPhotoError,
@@ -845,6 +859,23 @@ function AddEngagementView({
     }
     setPhotoError('');
     setDesktopImageUrl(dataUri);
+  }
+
+  const [tplPreviewHtml, setTplPreviewHtml] = useState('');
+  const [tplPreviewLoading, setTplPreviewLoading] = useState(false);
+  const [tplPreviewDevice, setTplPreviewDevice] = useState('desktop');
+
+  async function loadTplPreview(id) {
+    setTplPreviewLoading(true);
+    setTplPreviewHtml('');
+    try {
+      const r = await apiGet(`/api/email-templates/${encodeURIComponent(id)}/preview`);
+      setTplPreviewHtml(r?.html || '');
+    } catch (_) {
+      setTplPreviewHtml('');
+    } finally {
+      setTplPreviewLoading(false);
+    }
   }
 
   const selectedSegmentCount = emailSegmentCounts ? emailSegmentCounts[segment] : null;
@@ -1087,18 +1118,106 @@ function AddEngagementView({
           <div>
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Choose a template</div>
-              {emailTemplates.length === 0 ? (
+              {emailTemplatesLoading ? (
+                <div style={{ fontSize: 13, color: '#9ca3af', background: '#f9fafb', borderRadius: 8, padding: 12 }}>
+                  Loading templates…
+                </div>
+              ) : emailTemplatesError ? (
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: 12 }}>
+                  <div style={{ fontSize: 13, color: '#dc2626', marginBottom: 8 }}>Could not load templates.</div>
+                  <button onClick={onRetryTemplates}
+                    style={{ fontSize: 12, fontWeight: 700, color: '#fff', background: '#dc2626',
+                             border: 'none', borderRadius: 6, padding: '5px 12px', cursor: 'pointer' }}>
+                    Retry
+                  </button>
+                </div>
+              ) : emailTemplates.length === 0 ? (
                 <div style={{ fontSize: 13, color: '#9ca3af', background: '#f9fafb', borderRadius: 8, padding: 12 }}>
                   No saved email templates. Create one in the Email Templates section first.
                 </div>
               ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                  {emailTemplates.map(t => (
-                    <div key={t._id} className={`ccf-tpl-card${templateId === t._id ? ' selected' : ''}`} onClick={() => { setTemplateId(t._id); if (!subject) setSubject(t.subject || ''); }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 2 }}>{t.name || t.subject || 'Untitled'}</div>
-                      {templateId === t._id && <div style={{ color: '#4f46e5', fontSize: 11, fontWeight: 700 }}>✓ Selected</div>}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {emailTemplates.map(t => {
+                    const isSel = templateId === t._id;
+                    return (
+                      <button key={t._id}
+                        onClick={() => {
+                          setTemplateId(t._id);
+                          setSubject(t.subject || '');
+                          loadTplPreview(t._id);
+                        }}
+                        style={{
+                          textAlign: 'left', padding: '10px 12px', borderRadius: 8,
+                          border: `1.5px solid ${isSel ? '#2459D6' : '#e5e7eb'}`,
+                          background: isSel ? '#F5F8FE' : '#fff',
+                          cursor: 'pointer', width: '100%',
+                          display: 'flex', alignItems: 'flex-start', gap: 10,
+                        }}
+                      >
+                        <span style={{ marginTop: 2, flexShrink: 0,
+                                       width: 14, height: 14, borderRadius: '50%',
+                                       border: `2px solid ${isSel ? '#2459D6' : '#d1d5db'}`,
+                                       background: isSel ? '#2459D6' : 'transparent',
+                                       display: 'inline-block' }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>{t.name}</span>
+                            {templateTypeChip(t.type)}
+                          </div>
+                          {t.subject && (
+                            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2,
+                                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {t.subject}
+                            </div>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Template preview */}
+              {templateId && !emailTemplatesLoading && !emailTemplatesError && (
+                <div style={{ marginTop: 12 }}>
+                  {/* Desktop / Mobile toggle */}
+                  <div role="group" style={{ display: 'flex', gap: 2, background: '#f3f4f6',
+                                              borderRadius: 8, padding: 2, width: 'fit-content',
+                                              marginBottom: 8 }}>
+                    {[['desktop', 'Desktop'], ['mobile', 'Mobile']].map(([d, label]) => (
+                      <button key={d} onClick={() => setTplPreviewDevice(d)}
+                        style={{
+                          padding: '4px 10px', fontSize: 11, fontWeight: 600,
+                          border: 'none', borderRadius: 6, cursor: 'pointer',
+                          background: tplPreviewDevice === d ? '#fff' : 'transparent',
+                          color: tplPreviewDevice === d ? '#2459D6' : '#6b7280',
+                          boxShadow: tplPreviewDevice === d ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                        }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                  {tplPreviewLoading ? (
+                    <div style={{ fontSize: 12, color: '#9ca3af', padding: '20px 0', textAlign: 'center' }}>
+                      Loading preview…
                     </div>
-                  ))}
+                  ) : tplPreviewHtml ? (
+                    <div style={{ borderRadius: 8, overflow: 'hidden',
+                                  border: '1px solid #e5e7eb' }}>
+                      <iframe
+                        srcDoc={tplPreviewHtml}
+                        sandbox="allow-same-origin"
+                        style={{
+                          width: tplPreviewDevice === 'desktop' ? '100%' : '375px',
+                          maxWidth: '100%',
+                          height: 420,
+                          border: 'none',
+                          display: 'block',
+                        }}
+                        title="Email preview"
+                      />
+                    </div>
+                  ) : null}
                 </div>
               )}
             </div>
@@ -1159,7 +1278,7 @@ function AddEngagementView({
             {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 10 }}>{error}</div>}
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => onOpenStep('list', null)} style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-              <button onClick={onSave} disabled={!canSave || saving || emailTemplates.length === 0}
+              <button onClick={onSave} disabled={!canSave || saving}
                 style={{ flex: 2, padding: '9px 0', borderRadius: 8, border: 'none', background: canSave && !saving ? '#4f46e5' : '#e5e7eb', color: canSave && !saving ? '#fff' : '#9ca3af', fontSize: 13, fontWeight: 700, cursor: canSave && !saving ? 'pointer' : 'not-allowed' }}>
                 {saving ? 'Saving…' : 'Save engagement'}
               </button>
@@ -1495,6 +1614,8 @@ export default function QueueScreen({ shop }) {
   const [addEngBanner, setAddEngBanner] = useState('');
   const [addEngNewId, setAddEngNewId] = useState(null);
   const [emailTemplates, setEmailTemplates] = useState([]);
+  const [emailTemplatesLoading, setEmailTemplatesLoading] = useState(false);
+  const [emailTemplatesError, setEmailTemplatesError] = useState('');
   // Photo (push only)
   const [addEngMobileImageUrl, setAddEngMobileImageUrl] = useState('');
   const [addEngDesktopImageUrl, setAddEngDesktopImageUrl] = useState('');
@@ -1559,6 +1680,14 @@ export default function QueueScreen({ shop }) {
     setAddEngNewId(null);
   }
 
+  function retryEmailTemplates() {
+    setEmailTemplatesLoading(true);
+    setEmailTemplatesError('');
+    apiGet('/api/email-templates')
+      .then(d => { setEmailTemplates(d?.templates || []); setEmailTemplatesLoading(false); })
+      .catch(() => { setEmailTemplatesError('Could not load templates.'); setEmailTemplatesLoading(false); });
+  }
+
   function openAddEngStep(step, channel) {
     setAddEngStep(step);
     if (channel) {
@@ -1577,12 +1706,12 @@ export default function QueueScreen({ shop }) {
       if (channel === 'email') {
         setAddEngSendTime('18:00');
         setAddEngSegment('everyone');
-        // Fetch email templates lazily
-        if (emailTemplates.length === 0) {
-          apiGet(`/api/email-templates/${encodeURIComponent(shop)}`)
-            .then(d => setEmailTemplates(d.templates || []))
-            .catch(() => {});
-        }
+        // Always refetch when email step opens (never cache a failed/empty result).
+        setEmailTemplatesLoading(true);
+        setEmailTemplatesError('');
+        apiGet('/api/email-templates')
+          .then(d => { setEmailTemplates(d?.templates || []); setEmailTemplatesLoading(false); })
+          .catch(() => { setEmailTemplatesError('Could not load templates.'); setEmailTemplatesLoading(false); });
         // Fetch all segment counts in parallel, cache for session.
         if (!emailSegmentCounts) {
           const segs = ['everyone', 'email_captured', 'has_cart', 'bought_once', 'going_quiet'];
@@ -1908,6 +2037,9 @@ export default function QueueScreen({ shop }) {
               saving={addEngSaving} error={addEngError}
               banner={addEngBanner} newId={addEngNewId}
               emailTemplates={emailTemplates}
+              emailTemplatesLoading={emailTemplatesLoading}
+              emailTemplatesError={emailTemplatesError}
+              onRetryTemplates={retryEmailTemplates}
               mobileImageUrl={addEngMobileImageUrl} setMobileImageUrl={setAddEngMobileImageUrl}
               desktopImageUrl={addEngDesktopImageUrl} setDesktopImageUrl={setAddEngDesktopImageUrl}
               photoError={addEngPhotoError} setPhotoError={setAddEngPhotoError}
