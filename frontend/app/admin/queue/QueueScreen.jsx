@@ -574,7 +574,7 @@ function MonthCalendar({ month, items, festivals, selectedDayStr, selectedDayTyp
 function DayDetailsPanel({
   dateStr, dayPanelTab, setDayPanelTab,
   festivalCalendar, festivalItems,
-  onBack, shop, openEditModal, goToFestivalDetail, setFestivalItems,
+  onBack, onAddEngagement, shop, openEditModal, goToFestivalDetail, setFestivalItems,
 }) {
   const festival = festivalCalendar.find(f => f.date.startsWith(dateStr));
   const parts = dateStr.split('-');
@@ -769,6 +769,16 @@ function DayDetailsPanel({
               </div>
             );
           })
+        )}
+        {!isPastDay(dateStr + 'T00:00') && (
+          <button
+            onClick={onAddEngagement}
+            style={{ width: '100%', marginTop: 16, padding: '10px 0', borderRadius: 8,
+                     border: 'none', background: '#4f46e5', color: '#fff',
+                     fontSize: 14, fontWeight: 700, cursor: 'pointer' }}
+          >
+            + Add engagement
+          </button>
         )}
       </div>
     </div>
@@ -2098,6 +2108,12 @@ export default function QueueScreen({ shop }) {
               festivalCalendar={festivalCalendar}
               festivalItems={festivalItems}
               onBack={() => setSelectedDayStr(null)}
+              onAddEngagement={() => {
+                setAddEngMode('list');
+                setAddEngStep('list');
+                setAddEngBanner('');
+                setAddEngNewId(null);
+              }}
               shop={shop}
               openEditModal={openEditModal}
               goToFestivalDetail={goToFestivalDetail}

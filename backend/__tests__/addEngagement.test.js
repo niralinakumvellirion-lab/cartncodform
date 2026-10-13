@@ -282,6 +282,46 @@ describe('POST /:shop/festival — segment field', () => {
   });
 });
 
+// ─── Multiple engagements on the same date ────────────────────────────────
+
+describe('POST /:shop/festival — multiple engagements same date', () => {
+  beforeEach(() => {
+    let n = 0;
+    FestivalQueue.create.mockImplementation(f => Promise.resolve({ _id: `item${++n}`, ...f }));
+    EmailTemplate.findOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve({ _id: 'tpl1' }) }) });
+  });
+
+  test('two push items at the same date/time both create new docs (no upsert)', async () => {
+    const res1 = await post({ channel: 'push', title: 'Morning sale', body: 'A', scheduledAt: FUTURE });
+    const res2 = await post({ channel: 'push', title: 'Evening sale', body: 'B', scheduledAt: FUTURE });
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
+    expect(FestivalQueue.create).toHaveBeenCalledTimes(2);
+    expect(FestivalQueue.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('push + email + whatsapp on the same date all create separate docs', async () => {
+    const res1 = await post({ channel: 'push', title: 'Push msg', body: 'A', scheduledAt: FUTURE });
+    const res2 = await post({ channel: 'email', templateId: 'tpl1', subject: 'Sub', scheduledAt: FUTURE });
+    const res3 = await post({ channel: 'whatsapp', body: 'WA msg', scheduledAt: FUTURE });
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(200);
+    expect(res3.status).toBe(200);
+    expect(FestivalQueue.create).toHaveBeenCalledTimes(3);
+    expect(FestivalQueue.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('manual item on a festival date does not modify the festival item', async () => {
+    // No festival field in payload → if (festival) guard skips findOneAndUpdate
+    const res = await post({ channel: 'push', title: 'Manual', body: 'B', scheduledAt: FUTURE });
+    expect(res.status).toBe(200);
+    expect(FestivalQueue.create).toHaveBeenCalledTimes(1);
+    expect(FestivalQueue.findOneAndUpdate).not.toHaveBeenCalled();
+    const [fields] = FestivalQueue.create.mock.calls[0];
+    expect(fields.festival).toBe('');
+  });
+});
+
 // ─── push-subscriber-count endpoint ───────────────────────────────────────
 
 describe('GET /:shop/push-subscriber-count', () => {
