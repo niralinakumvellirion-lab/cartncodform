@@ -97,6 +97,15 @@ async function fetchWithTimeout(url, options, method) {
   }
 }
 
+// Build a full admin.shopify.com embedded-app URL.
+// Falls back to the relative path if shop is absent or not a myshopify.com domain.
+export function buildShopifyAdminAppUrl(shop, path) {
+  if (!shop || !shop.endsWith('.myshopify.com')) return path;
+  const storeHandle = shop.replace(/\.myshopify\.com$/, '');
+  const appHandle = 'cartncod-form';
+  return `https://admin.shopify.com/store/${storeHandle}/apps/${appHandle}${path}`;
+}
+
 export async function apiSend(path, method, body) {
   const url = `${BACKEND_URL}${path}`;
   const token = await getAuthToken();
