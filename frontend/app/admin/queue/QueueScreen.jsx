@@ -380,7 +380,7 @@ function BellIcon({ size, color }) {
 //   selectedDayStr / selectedDayType — highlight the active icon.
 //   onFestivalClick(dateStr, festivalObj) / onNotificationsClick(dateStr)
 //   isNarrow — true when viewport ≤ 600px (passed from QueueScreen).
-function MonthCalendar({ month, items, festivals, selectedDayStr, selectedDayType, onFestivalClick, onNotificationsClick, isNarrow }) {
+function MonthCalendar({ month, items, festivals, selectedDayStr, selectedDayType, onFestivalClick, onNotificationsClick, onDayCellClick, isNarrow }) {
   const year = month.getFullYear();
   const mon = month.getMonth();
   const firstDay = new Date(year, mon, 1).getDay();
@@ -449,6 +449,11 @@ function MonthCalendar({ month, items, festivals, selectedDayStr, selectedDayTyp
         const festiveSel = isSelected && selectedDayType === 'festival';
         const notifSel   = isSelected && selectedDayType === 'notifications';
 
+        const isPast = new Date(year, mon, day) < new Date(todayReal.getFullYear(), todayReal.getMonth(), todayReal.getDate());
+        const isFutureOrToday = !isPast;
+        const emptyAndFuture = isFutureOrToday && !festival && queued.length === 0;
+        const cellDateLabel = new Date(year, mon, day).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+
         return (
           <div key={i}
             style={{
@@ -461,23 +466,48 @@ function MonthCalendar({ month, items, festivals, selectedDayStr, selectedDayTyp
               transition: 'background 0.12s',
               overflow: 'hidden',
               display: 'flex', flexDirection: 'column',
+              position: 'relative',
             }}
           >
+            {/* Transparent full-cell click target for today/future */}
+            {isFutureOrToday && onDayCellClick && (
+              <button
+                className="ccf-day-cell-btn"
+                aria-label={`Add engagement on ${cellDateLabel}`}
+                onClick={e => { e.stopPropagation(); onDayCellClick(dateStr); }}
+                style={{ zIndex: 0 }}
+              />
+            )}
+
             {/* Day number */}
             <div style={{
               width: dayCirc, height: dayCirc, borderRadius: '50%',
               background: isToday ? '#4f46e5' : 'transparent',
-              color: isToday ? '#fff' : '#111827',
+              color: isPast ? '#9ca3af' : isToday ? '#fff' : '#111827',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
               fontSize: dayNumSz, fontWeight: isToday ? 700 : 400, flexShrink: 0,
+              position: 'relative', zIndex: 1,
             }}>{day}</div>
+
+            {/* Dashed "+" hint on empty future days */}
+            {emptyAndFuture && (
+              <div style={{
+                position: 'absolute', bottom: cellPad + 3, left: '50%',
+                transform: 'translateX(-50%)',
+                width: glyphSz, height: glyphSz, borderRadius: '50%',
+                border: '1.5px dashed #d1d5db',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: glyphSz * 0.7, color: '#d1d5db',
+                pointerEvents: 'none', zIndex: 1,
+              }}>+</div>
+            )}
 
             {/* Icon row — festival + notification, never wrapping */}
             {(festival || queued.length > 0) && (
-              <div style={{ display: 'flex', flexWrap: 'nowrap', gap: iconGap, marginTop: 4 }}>
+              <div style={{ display: 'flex', flexWrap: 'nowrap', gap: iconGap, marginTop: 4, position: 'relative', zIndex: 1 }}>
                 {festival && (
                   <button
-                    onClick={() => onFestivalClick(dateStr, festival)}
+                    onClick={e => { e.stopPropagation(); onFestivalClick(dateStr, festival); }}
                     aria-label={`${festival.name}, festival`}
                     title={festival.name}
                     aria-pressed={festiveSel}
@@ -489,16 +519,16 @@ function MonthCalendar({ month, items, festivals, selectedDayStr, selectedDayTyp
                       background: festiveSel ? '#8A5A00' : '#FFF3D6',
                       color: festiveSel ? '#fff' : '#8A5A00',
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      cursor: 'pointer',
+                      cursor: 'pointer', position: 'relative', zIndex: 2,
                     }}
                   >
                     <FestivalIcon size={glyphSz} color="currentColor" />
                   </button>
                 )}
                 {queued.length > 0 && (
-                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                  <div style={{ position: 'relative', flexShrink: 0, zIndex: 2 }}>
                     <button
-                      onClick={() => onNotificationsClick(dateStr)}
+                      onClick={e => { e.stopPropagation(); onNotificationsClick(dateStr); }}
                       aria-label={queued.length === 1 ? '1 notification' : `${queued.length} notifications`}
                       title={queued.length === 1 ? '1 notification' : `${queued.length} notifications`}
                       aria-pressed={notifSel}
@@ -742,6 +772,287 @@ function DayDetailsPanel({
   );
 }
 
+// ─── AddEngagementView ────────────────────────────────────────────────────────
+// Renders the multi-step add-engagement panel (list → choose → form → saved).
+// All state is owned by QueueScreen; this component is pure render.
+function AddEngagementView({
+  dateStr, festivalItems,
+  step, channel,
+  title, setTitle, body, setBody,
+  subject, setSubject, templateId, setTemplateId,
+  sendTime, setSendTime,
+  saving, error, banner, newId,
+  emailTemplates,
+  onBack, onOpenStep, onSave, onAddAnother, onDone,
+}) {
+  const parts = dateStr.split('-');
+  const dayDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  const dayLabel = dayDate.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+  const isPast = isPastDay(dateStr + 'T00:00');
+
+  const notifications = festivalItems.filter(item => {
+    const d = new Date(item.scheduledAt);
+    return d.getFullYear() === Number(parts[0]) &&
+           d.getMonth() === Number(parts[1]) - 1 &&
+           d.getDate() === Number(parts[2]);
+  });
+
+  const CHANNEL_CHIP = { push: { bg: '#dbeafe', color: '#1d4ed8', label: 'Push' }, email: { bg: '#ede9fe', color: '#6d28d9', label: 'Email' }, whatsapp: { bg: '#dcfce7', color: '#15803d', label: 'WhatsApp' } };
+
+  const pushValid = channel === 'push' && title && title.length <= 50;
+  const emailValid = channel === 'email' && templateId && subject;
+  const waValid = channel === 'whatsapp' && body && body.length <= 300;
+  const canSave = pushValid || emailValid || waValid;
+
+  return (
+    <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ padding: '12px 16px', borderBottom: '1px solid #f3f4f6' }}>
+        <button onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#6b7280', padding: 0, marginBottom: 6 }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+          {step === 'list' ? `Back to ${dayLabel}` : `Back to ${dayLabel}`}
+        </button>
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>
+          {step === 'list' ? dayLabel : step === 'choose' ? `Add engagement · ${dayLabel}` : step === 'saved' ? dayLabel : `${channel === 'push' ? 'Push' : channel === 'email' ? 'Email' : 'WhatsApp'} · ${dayLabel}`}
+        </div>
+      </div>
+
+      <div style={{ overflowY: 'auto', maxHeight: '75vh', padding: 16 }}>
+        {/* STEP: LIST */}
+        {step === 'list' && (
+          <div>
+            {notifications.length === 0 ? (
+              <div style={{ border: '2px dashed #e5e7eb', borderRadius: 10, padding: '24px 16px', textAlign: 'center', color: '#9ca3af', fontSize: 13, marginBottom: 16 }}>
+                Nothing scheduled for this day
+              </div>
+            ) : (
+              <div style={{ marginBottom: 14 }}>
+                {notifications.map(item => {
+                  const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
+                  const cc = CHANNEL_CHIP[item.channel || 'push'];
+                  return (
+                    <div key={item._id} style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        {cc && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: cc.bg, color: cc.color }}>{cc.label}</span>}
+                        <span style={{ fontSize: 13, fontWeight: 600, color: '#111827', flex: 1 }}>{item.title || item.subject || '(no title)'}</span>
+                        <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: badge.bg, color: badge.color }}>{badge.label}</span>
+                      </div>
+                      {item.body && <div style={{ fontSize: 12, color: '#6b7280' }}>{item.body}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {!isPast ? (
+              <button onClick={() => onOpenStep('choose', null)} style={{ width: '100%', padding: '10px 0', borderRadius: 8, border: 'none', background: '#4f46e5', color: '#fff', fontSize: 14, fontWeight: 700, cursor: 'pointer' }}>
+                + Add engagement
+              </button>
+            ) : (
+              <div style={{ fontSize: 13, color: '#9ca3af', textAlign: 'center', padding: '8px 0' }}>
+                This date has passed, so new engagements cannot be added.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* STEP: SAVED (re-uses list view with banner) */}
+        {step === 'saved' && (
+          <div>
+            <div style={{ background: '#dcfce7', border: '1px solid #86efac', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 13, color: '#166534' }}>
+              {channel === 'whatsapp'
+                ? 'Saved as a draft. Approve it to add it to your Dashboard tasks.'
+                : 'Saved as a draft. Approve it from the day list to schedule it.'}
+            </div>
+            {notifications.map(item => {
+              const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
+              const cc = CHANNEL_CHIP[item.channel || 'push'];
+              const isNew = item._id === newId;
+              return (
+                <div key={item._id} style={{ background: isNew ? '#eef2ff' : '#f9fafb', border: isNew ? '1.5px solid #a5b4fc' : '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    {cc && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: cc.bg, color: cc.color }}>{cc.label}</span>}
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#111827', flex: 1 }}>{item.title || item.subject || '(no title)'}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: badge.bg, color: badge.color }}>{badge.label}</span>
+                  </div>
+                  {item.body && <div style={{ fontSize: 12, color: '#6b7280' }}>{item.body}</div>}
+                </div>
+              );
+            })}
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <button onClick={onAddAnother} style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Add another</button>
+              <button onClick={onDone} style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: 'none', background: '#4f46e5', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Done</button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP: CHOOSE channel */}
+        {step === 'choose' && (
+          <div>
+            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 14 }}>What kind of engagement do you want to add?</div>
+            {[
+              { key: 'push', label: 'Push notification', desc: 'A short alert with a title and message.' },
+              { key: 'email', label: 'Email', desc: 'Pick one of your saved templates.' },
+              { key: 'whatsapp', label: 'WhatsApp', desc: 'A message you send yourself. It shows on your Dashboard that day.' },
+            ].map(opt => (
+              <button key={opt.key} onClick={() => onOpenStep(opt.key, opt.key)} style={{
+                display: 'flex', flexDirection: 'column', width: '100%', textAlign: 'left',
+                background: '#f9fafb', border: '1.5px solid #e5e7eb', borderRadius: 10,
+                padding: '14px 16px', marginBottom: 10, cursor: 'pointer',
+                transition: 'border-color 0.12s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.borderColor = '#4f46e5'}
+              onMouseLeave={e => e.currentTarget.style.borderColor = '#e5e7eb'}
+              >
+                <span style={{ fontSize: 14, fontWeight: 700, color: '#111827', marginBottom: 3 }}>{opt.label}</span>
+                <span style={{ fontSize: 12, color: '#6b7280' }}>{opt.desc}</span>
+              </button>
+            ))}
+            <button onClick={() => onOpenStep('list', null)} style={{ background: 'none', border: 'none', color: '#6b7280', fontSize: 12, cursor: 'pointer', padding: '4px 0' }}>← Cancel</button>
+          </div>
+        )}
+
+        {/* STEP: PUSH form */}
+        {step === 'push' && (
+          <div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Title <span style={{ color: '#9ca3af' }}>{title.length}/50</span></label>
+              <input value={title} onChange={e => setTitle(e.target.value)} maxLength={50}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: 13, boxSizing: 'border-box', outline: 'none' }}
+                placeholder="e.g. Diwali Sale — 30% off everything"
+              />
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Message <span style={{ color: '#9ca3af' }}>{body.length}/120</span></label>
+              <textarea value={body} onChange={e => setBody(e.target.value)} maxLength={120} rows={3}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: 13, resize: 'vertical', boxSizing: 'border-box', outline: 'none' }}
+                placeholder="e.g. Get 30% off all products — offer ends tonight!"
+              />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Send time</label>
+              <input type="time" value={sendTime} onChange={e => setSendTime(e.target.value)}
+                style={{ padding: '7px 10px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: 13 }}
+              />
+            </div>
+            {/* Push preview */}
+            <div style={{ background: '#f9fafb', borderRadius: 10, padding: '12px 14px', marginBottom: 16, border: '1px solid #e5e7eb' }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Preview</div>
+              <div style={{ background: '#111827', color: '#fff', borderRadius: 10, padding: '10px 14px' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 3 }}>{title || 'Notification title'}</div>
+                <div style={{ fontSize: 12, color: '#d1d5db' }}>{body || 'Your message will appear here.'}</div>
+              </div>
+            </div>
+            {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 10 }}>{error}</div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => onOpenStep('choose', null)} style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={onSave} disabled={!canSave || saving}
+                style={{ flex: 2, padding: '9px 0', borderRadius: 8, border: 'none', background: canSave && !saving ? '#4f46e5' : '#e5e7eb', color: canSave && !saving ? '#fff' : '#9ca3af', fontSize: 13, fontWeight: 700, cursor: canSave && !saving ? 'pointer' : 'not-allowed' }}>
+                {saving ? 'Saving…' : 'Save engagement'}
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8, textAlign: 'center' }}>
+              Saved as a draft. Approve it from the day list to schedule it.
+            </div>
+          </div>
+        )}
+
+        {/* STEP: EMAIL form */}
+        {step === 'email' && (
+          <div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Choose a template</div>
+              {emailTemplates.length === 0 ? (
+                <div style={{ fontSize: 13, color: '#9ca3af', background: '#f9fafb', borderRadius: 8, padding: 12 }}>
+                  No saved email templates. Create one in the Email Templates section first.
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  {emailTemplates.map(t => (
+                    <div key={t._id} className={`ccf-tpl-card${templateId === t._id ? ' selected' : ''}`} onClick={() => { setTemplateId(t._id); if (!subject) setSubject(t.subject || ''); }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111827', marginBottom: 2 }}>{t.name || t.subject || 'Untitled'}</div>
+                      {templateId === t._id && <div style={{ color: '#4f46e5', fontSize: 11, fontWeight: 700 }}>✓ Selected</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Subject line</label>
+              <input value={subject} onChange={e => setSubject(e.target.value)}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: 13, boxSizing: 'border-box', outline: 'none' }}
+                placeholder="e.g. Happy Diwali — a special offer inside 🪔"
+              />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Send time</label>
+              <input type="time" value={sendTime} onChange={e => setSendTime(e.target.value)}
+                style={{ padding: '7px 10px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: 13 }}
+              />
+            </div>
+            {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 10 }}>{error}</div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => onOpenStep('choose', null)} style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={onSave} disabled={!canSave || saving || emailTemplates.length === 0}
+                style={{ flex: 2, padding: '9px 0', borderRadius: 8, border: 'none', background: canSave && !saving ? '#4f46e5' : '#e5e7eb', color: canSave && !saving ? '#fff' : '#9ca3af', fontSize: 13, fontWeight: 700, cursor: canSave && !saving ? 'pointer' : 'not-allowed' }}>
+                {saving ? 'Saving…' : 'Save engagement'}
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8, textAlign: 'center' }}>
+              Saved as a draft. Approve it from the day list to schedule it.
+            </div>
+          </div>
+        )}
+
+        {/* STEP: WHATSAPP form */}
+        {step === 'whatsapp' && (
+          <div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Quick start</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                {['Cart reminder', 'Festival wish', 'New arrivals'].map(chip => (
+                  <button key={chip} onClick={() => setBody(body ? `${body} ${chip}` : chip)}
+                    className="ccf-chip">{chip}</button>
+                ))}
+              </div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Message <span style={{ color: '#9ca3af' }}>{body.length}/300</span></label>
+              <textarea value={body} onChange={e => setBody(e.target.value)} maxLength={300} rows={4}
+                style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: 13, resize: 'vertical', boxSizing: 'border-box', outline: 'none' }}
+                placeholder="Hi! We have a special offer for you..."
+              />
+            </div>
+            {/* Chat bubble preview */}
+            <div style={{ background: '#e2ffc7', borderRadius: '18px 18px 4px 18px', padding: '10px 14px', maxWidth: 240, marginBottom: 14, fontSize: 13, color: '#111827' }}>
+              {body || 'Your WhatsApp message will appear here.'}
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Send time (reminder)</label>
+              <input type="time" value={sendTime} onChange={e => setSendTime(e.target.value)}
+                style={{ padding: '7px 10px', borderRadius: 8, border: '1.5px solid #e5e7eb', fontSize: 13 }}
+              />
+            </div>
+            <div style={{ background: '#fffbeb', borderRadius: 8, padding: '8px 12px', marginBottom: 14, fontSize: 12, color: '#92400e' }}>
+              You send this yourself. It will appear on your Dashboard on this day.
+            </div>
+            {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 10 }}>{error}</div>}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => onOpenStep('choose', null)} style={{ flex: 1, padding: '9px 0', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', color: '#374151', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={onSave} disabled={!canSave || saving}
+                style={{ flex: 2, padding: '9px 0', borderRadius: 8, border: 'none', background: canSave && !saving ? '#4f46e5' : '#e5e7eb', color: canSave && !saving ? '#fff' : '#9ca3af', fontSize: 13, fontWeight: 700, cursor: canSave && !saving ? 'pointer' : 'not-allowed' }}>
+                {saving ? 'Saving…' : 'Save engagement'}
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8, textAlign: 'center' }}>
+              Saved as a draft. Approve it to add it to your Dashboard tasks.
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function QueueScreen({ shop }) {
   const router = useRouter();
   const goToFestivalDetail = (id) => {
@@ -760,6 +1071,7 @@ export default function QueueScreen({ shop }) {
     s.textContent = `
       @media (max-width: 600px) {
         .ccf-upload-pair-grid { grid-template-columns: 1fr !important; }
+        .ccf-eng-split { flex-direction: column !important; }
       }
       @media (max-width: 1099px) {
         .ccf-queue-split { grid-template-columns: 1fr !important; }
@@ -768,6 +1080,22 @@ export default function QueueScreen({ shop }) {
         outline: 2px solid #4f46e5;
         outline-offset: 2px;
       }
+      .ccf-day-cell-btn {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        background: transparent; border: none; cursor: pointer; padding: 0;
+        border-radius: 0;
+      }
+      .ccf-day-cell-btn:focus-visible { outline: 2px solid #4f46e5; outline-offset: -2px; }
+      .ccf-tpl-card { cursor: pointer; border-radius: 8px; padding: 10px 12px;
+        border: 2px solid #e5e7eb; transition: border-color 0.12s; }
+      .ccf-tpl-card:hover { border-color: #a5b4fc; }
+      .ccf-tpl-card.selected { border-color: #4f46e5; background: #eef2ff; }
+      .ccf-chip { display: inline-flex; align-items: center; padding: 4px 10px;
+        border-radius: 20px; font-size: 11px; font-weight: 700; cursor: pointer;
+        border: 1.5px solid #e5e7eb; background: #f9fafb; color: #374151;
+        transition: all 0.1s; }
+      .ccf-chip:hover { background: #4f46e5; color: #fff; border-color: #4f46e5; }
+      .ccf-chip.active { background: #4f46e5; color: #fff; border-color: #4f46e5; }
     `;
     document.head.appendChild(s);
   }
@@ -978,6 +1306,22 @@ export default function QueueScreen({ shop }) {
   const [dayPanelTab, setDayPanelTab] = useState('festival');
   const panelRef = useRef(null);
 
+  // Add-engagement flow state.
+  // addEngMode: false = day-details/planning; 'list'|'choose'|'push'|'email'|'whatsapp'|'saved'
+  const [addEngMode, setAddEngMode] = useState(false);
+  const [addEngStep, setAddEngStep] = useState('list');
+  const [addEngChannel, setAddEngChannel] = useState(null);
+  const [addEngTitle, setAddEngTitle] = useState('');
+  const [addEngBody, setAddEngBody] = useState('');
+  const [addEngSubject, setAddEngSubject] = useState('');
+  const [addEngTemplateId, setAddEngTemplateId] = useState(null);
+  const [addEngSendTime, setAddEngSendTime] = useState('10:00');
+  const [addEngSaving, setAddEngSaving] = useState(false);
+  const [addEngError, setAddEngError] = useState('');
+  const [addEngBanner, setAddEngBanner] = useState('');
+  const [addEngNewId, setAddEngNewId] = useState(null);
+  const [emailTemplates, setEmailTemplates] = useState([]);
+
   // Escape closes the panel (scoped: only active when a day is selected).
   useEffect(() => {
     if (!selectedDayStr) return;
@@ -995,7 +1339,8 @@ export default function QueueScreen({ shop }) {
   }, [selectedDayStr]);
 
   function handleFestivalClick(dateStr) {
-    if (selectedDayStr === dateStr && dayPanelTab === 'festival') {
+    setAddEngMode(false);
+    if (selectedDayStr === dateStr && dayPanelTab === 'festival' && !addEngMode) {
       setSelectedDayStr(null);
     } else {
       setSelectedDayStr(dateStr);
@@ -1004,11 +1349,83 @@ export default function QueueScreen({ shop }) {
   }
 
   function handleNotificationsClick(dateStr) {
-    if (selectedDayStr === dateStr && dayPanelTab === 'notifications') {
+    setAddEngMode(false);
+    if (selectedDayStr === dateStr && dayPanelTab === 'notifications' && !addEngMode) {
       setSelectedDayStr(null);
     } else {
       setSelectedDayStr(dateStr);
       setDayPanelTab('notifications');
+    }
+  }
+
+  function handleDayCellClick(dateStr) {
+    if (isPastDay(new Date(dateStr))) return;
+    if (selectedDayStr === dateStr && addEngMode) {
+      // Toggle off
+      setSelectedDayStr(null);
+      setAddEngMode(false);
+      setAddEngStep('list');
+      return;
+    }
+    setSelectedDayStr(dateStr);
+    setAddEngMode('list');
+    setAddEngStep('list');
+    setAddEngBanner('');
+    setAddEngNewId(null);
+  }
+
+  function openAddEngStep(step, channel) {
+    setAddEngStep(step);
+    if (channel) {
+      setAddEngChannel(channel);
+      if (channel === 'push') setAddEngSendTime('10:00');
+      if (channel === 'email') {
+        setAddEngSendTime('18:00');
+        // Fetch email templates lazily
+        if (emailTemplates.length === 0) {
+          apiGet(`/api/email-templates/${encodeURIComponent(shop)}`)
+            .then(d => setEmailTemplates(d.templates || []))
+            .catch(() => {});
+        }
+      }
+      if (channel === 'whatsapp') setAddEngSendTime('11:00');
+      setAddEngTitle('');
+      setAddEngBody('');
+      setAddEngSubject('');
+      setAddEngTemplateId(null);
+      setAddEngError('');
+    }
+  }
+
+  async function saveEngagement() {
+    setAddEngSaving(true);
+    setAddEngError('');
+    try {
+      const scheduledAt = `${selectedDayStr}T${addEngSendTime}`;
+      const payload = { channel: addEngChannel, scheduledAt };
+      if (addEngChannel === 'push') {
+        payload.title = addEngTitle;
+        payload.body = addEngBody;
+      } else if (addEngChannel === 'email') {
+        payload.templateId = addEngTemplateId;
+        payload.subject = addEngSubject;
+      } else {
+        payload.body = addEngBody;
+      }
+      const result = await apiSend(
+        `/api/queue/${encodeURIComponent(shop)}/festival`,
+        'POST', payload
+      );
+      setAddEngNewId(result.id || null);
+      // Refetch items
+      const data = await apiGet(`/api/queue/${encodeURIComponent(shop)}/festival`);
+      setFestivalItems(data.items || []);
+      setAddEngBanner('Saved as a draft. It will not go out until you approve it below.');
+      setAddEngStep('saved');
+    } catch (e) {
+      setAddEngError(e.message || 'Failed to save');
+    } finally {
+      setAddEngSaving(false);
     }
   }
 
@@ -1231,17 +1648,58 @@ export default function QueueScreen({ shop }) {
               items={festivalItems}
               festivals={festivalCalendar}
               selectedDayStr={selectedDayStr}
-              selectedDayType={dayPanelTab}
+              selectedDayType={addEngMode ? 'add' : dayPanelTab}
               onFestivalClick={handleFestivalClick}
               onNotificationsClick={handleNotificationsClick}
+              onDayCellClick={handleDayCellClick}
               isNarrow={isNarrowCal}
             />
           )}
+          {/* Legend */}
+          <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', fontSize: 11, color: '#9ca3af' }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: '#FFF3D6', border: '1px solid rgba(138,90,0,0.2)' }} />
+              Festival
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: '#EAF0FD', border: '1px solid rgba(36,89,214,0.18)' }} />
+              Scheduled engagement
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', border: '1.5px dashed #d1d5db' }} />
+              Click any upcoming date to add an engagement
+            </span>
+          </div>
         </div>
 
         {/* RIGHT: Details panel when a day is selected; planning list otherwise. */}
         <div ref={panelRef}>
-          {selectedDayStr ? (
+          {addEngMode && selectedDayStr ? (
+            <AddEngagementView
+              dateStr={selectedDayStr}
+              festivalItems={festivalItems}
+              step={addEngStep}
+              channel={addEngChannel}
+              title={addEngTitle} setTitle={setAddEngTitle}
+              body={addEngBody} setBody={setAddEngBody}
+              subject={addEngSubject} setSubject={setAddEngSubject}
+              templateId={addEngTemplateId} setTemplateId={setAddEngTemplateId}
+              sendTime={addEngSendTime} setSendTime={setAddEngSendTime}
+              saving={addEngSaving} error={addEngError}
+              banner={addEngBanner} newId={addEngNewId}
+              emailTemplates={emailTemplates}
+              onBack={() => { setAddEngMode(false); setSelectedDayStr(null); }}
+              onOpenStep={openAddEngStep}
+              onSave={saveEngagement}
+              onAddAnother={() => {
+                setAddEngStep('choose');
+                setAddEngChannel(null);
+                setAddEngBanner('');
+                setAddEngNewId(null);
+              }}
+              onDone={() => { setAddEngMode(false); setSelectedDayStr(null); }}
+            />
+          ) : selectedDayStr ? (
             <DayDetailsPanel
               dateStr={selectedDayStr}
               dayPanelTab={dayPanelTab}
@@ -1340,6 +1798,11 @@ export default function QueueScreen({ shop }) {
                                 : '→ Storefront home'}
                             </div>
                           </div>
+                          {item.channel && item.channel !== 'push' && (() => {
+                            const CHIP = { email: { bg: '#ede9fe', color: '#6d28d9', label: 'Email' }, whatsapp: { bg: '#dcfce7', color: '#15803d', label: 'WhatsApp' } };
+                            const c = CHIP[item.channel];
+                            return c ? <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: c.bg, color: c.color, flexShrink: 0 }}>{c.label}</span> : null;
+                          })()}
                           <span style={{
                             fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
                             background: badge.bg, color: badge.color, flexShrink: 0,

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { apiGet } from '../../../lib/api';
+import { apiGet, apiSend } from '../../../lib/api';
 import { useWhatsapp } from '../screens/customerShared';
 
 const CARD_STYLE = {
@@ -123,6 +123,33 @@ export function ChannelCard({ channel, label, sent, pending, types, sentByOrigin
   );
 }
 
+function MarkDoneButton({ shop, festivalQueueId }) {
+  const [done, setDone] = useState(false);
+  const [loading, setLoading] = useState(false);
+  if (done) return <span style={{ fontSize: 11, color: '#16a34a', fontWeight: 600 }}>✓ Marked done</span>;
+  return (
+    <button
+      disabled={loading}
+      onClick={async () => {
+        setLoading(true);
+        try {
+          await apiSend(`/api/queue/${encodeURIComponent(shop)}/festival/${festivalQueueId}`, 'PATCH', { status: 'sent' });
+          setDone(true);
+        } catch {
+          setLoading(false);
+        }
+      }}
+      style={{
+        padding: '6px 12px', background: '#f0fdf4', border: '1.5px solid #86efac',
+        borderRadius: 7, cursor: loading ? 'not-allowed' : 'pointer',
+        fontSize: 12, fontWeight: 600, color: '#15803d', opacity: loading ? 0.6 : 1,
+      }}
+    >
+      {loading ? '…' : 'Mark as done'}
+    </button>
+  );
+}
+
 function DrawerItem({ item, channel, shop, sendWhatsapp }) {
   const { fg, bg } = CHANNEL_COLORS[channel];
   return (
@@ -234,18 +261,22 @@ function DrawerItem({ item, channel, shop, sendWhatsapp }) {
         })()}
 
         {channel === 'whatsapp' && item.status === 'pending' && (
-          <button
-            onClick={() => sendWhatsapp({ shopDomain: shop, profileId: item.customer?.profileId, purpose: 'followup' })}
-            aria-label={`Send WhatsApp to ${item.customer?.name || item.customer?.email || 'customer'}`}
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              padding: '6px 12px', background: '#25D366', border: 'none',
-              borderRadius: 7, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#fff',
-            }}
-          >
-            <ChannelIcon channel="whatsapp" size={12} color="#fff" />
-            WhatsApp
-          </button>
+          item.isFestivalBroadcast ? (
+            <MarkDoneButton shop={shop} festivalQueueId={item.festivalQueueId} />
+          ) : (
+            <button
+              onClick={() => sendWhatsapp({ shopDomain: shop, profileId: item.customer?.profileId, purpose: 'followup' })}
+              aria-label={`Send WhatsApp to ${item.customer?.name || item.customer?.email || 'customer'}`}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '6px 12px', background: '#25D366', border: 'none',
+                borderRadius: 7, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#fff',
+              }}
+            >
+              <ChannelIcon channel="whatsapp" size={12} color="#fff" />
+              WhatsApp
+            </button>
+          )
         )}
       </div>
     </div>
