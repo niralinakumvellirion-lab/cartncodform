@@ -1,0 +1,66 @@
+AUDIT: queue-manage-templates-shopify-url
+Commit: b1a06c3
+Date: 2026-10-13
+
+=== OLD HREF ===
+  /admin/email-templates  (relative path, both links)
+
+=== NEW HREF ===
+  https://admin.shopify.com/store/<storeHandle>/apps/cartncod-form/admin/email-templates
+  e.g. for cartncod-form.myshopify.com:
+  https://admin.shopify.com/store/cartncod-form/apps/cartncod-form/admin/email-templates
+
+=== HOW storeHandle AND appHandle ARE OBTAINED ===
+
+storeHandle:
+  shop prop (cartncod-form.myshopify.com) → .replace(/\.myshopify\.com$/, '') → cartncod-form
+  shop is the QueueScreen prop, already used everywhere in the file.
+
+appHandle:
+  Hardcoded default 'cartncod-form' in the helper.
+  Checked for an existing constant or env var: none found.
+  shopify.app.toml has no top-level app handle field; line 40's
+  handle = "cartncodform-push" is the theme extension handle, not the app handle.
+  NEXT_PUBLIC_* env vars in .env.example do not include an app handle.
+  The required destination in the task spec confirms the handle is 'cartncod-form'.
+
+=== HELPER REUSED OR NEW ===
+
+New function added to frontend/lib/api.js after line 99 (before apiSend):
+
+  export function buildShopifyAdminAppUrl(shop, path) {
+    if (!shop || !shop.endsWith('.myshopify.com')) return path;
+    const storeHandle = shop.replace(/\.myshopify\.com$/, '');
+    const appHandle = 'cartncod-form';
+    return `https://admin.shopify.com/store/${storeHandle}/apps/${appHandle}${path}`;
+  }
+
+No existing helper was found (searched frontend for 'admin.shopify.com', 'apps/', 'appHandle').
+
+=== FALLBACK BEHAVIOUR ===
+
+If shop is falsy or does not end with '.myshopify.com', the function returns the
+relative path ('/admin/email-templates') unchanged. This preserves the old behaviour
+for edge cases where the shop prop is not yet set.
+
+=== WHERE CALLED ===
+
+QueueScreen.jsx (line ~1368):
+  const manageTemplatesUrl = buildShopifyAdminAppUrl(shop, '/admin/email-templates');
+Passed as manageTemplatesUrl prop to AddEngagementView.
+
+Both links (label-row and empty-state) now: href={manageTemplatesUrl}
+
+=== ROUTE EXISTS ===
+
+frontend/app/admin/email-templates/page.js — confirmed present and renders EmailTemplatesScreen.
+
+=== UNCHANGED ===
+
+target="_blank", rel="noopener noreferrer", aria-label="Manage email templates",
+visibilitychange refetch logic, Customer detail's own link — all unchanged.
+
+=== BUILD AND TESTS ===
+
+Build: ✓ Compiled successfully, ✓ Generating static pages (18/18), 0 errors.
+Tests: frontend-only change; backend tests not re-run.
