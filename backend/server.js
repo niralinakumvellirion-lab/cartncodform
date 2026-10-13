@@ -652,13 +652,65 @@ async function processFestivalQueue() {
     const now = new Date();
     // Same .limit(20)-per-tick safeguard processScheduledJobs already
     // uses above, for the same reason (bound how much one tick can do).
+    // WhatsApp items are never auto-sent — the seller sends manually; they
+    // are excluded from this query so the poller never touches them.
     const dueItems = await FestivalQueue.find({
       status: 'approved',
       scheduledAt: { $lte: now },
+      channel: { $in: ['push', 'email', null] },
     }).limit(20);
 
     for (const item of dueItems) {
       try {
+        const ch = item.channel || 'push';
+
+        // WhatsApp items are manual tasks — never auto-sent by the poller.
+        // The query already excludes them, but guard here defensively.
+        if (ch === 'whatsapp') continue;
+
+        // ── EMAIL ──────────────────────────────────────────────────────────
+        if (ch === 'email') {
+          if (!item.templateId) {
+            console.error(`[festival-queue] email item ${item._id} has no templateId — cancelling`);
+            await FestivalQueue.findByIdAndUpdate(item._id, { status: 'cancelled' });
+            continue;
+          }
+          const { sendEmailBroadcast } = require('./utils/emailBroadcast');
+          const result = await sendEmailBroadcast({
+            shopDomain: item.shopDomain,
+            templateId: item.templateId,
+            subject: item.subject || undefined,
+            logOrigin: 'scheduled',
+            festivalQueueId: item._id,
+          });
+
+          console.log(
+            `[festival-queue] email item ${item._id} "${item.title}" — ` +
+            `sent=${result.sent} failed=${result.failed}${result.error ? ` error=${result.error}` : ''}`
+          );
+
+          if (!result.error) {
+            await FestivalQueue.findByIdAndUpdate(item._id, {
+              status: 'sent',
+              sentAt: new Date(),
+              recipientCount: result.sent,
+            });
+          } else {
+            const failedAttempts = (item.failedAttempts || 0) + 1;
+            console.error(
+              `[festival-queue] email item ${item._id} FAILED (attempt ${failedAttempts}/${FESTIVAL_MAX_FAILED_ATTEMPTS}): ${result.error}`
+            );
+            if (failedAttempts > FESTIVAL_MAX_FAILED_ATTEMPTS) {
+              await FestivalQueue.findByIdAndUpdate(item._id, { status: 'cancelled', failedAttempts });
+              console.error(`[festival-queue] email item ${item._id} CANCELLED`);
+            } else {
+              await FestivalQueue.findByIdAndUpdate(item._id, { failedAttempts });
+            }
+          }
+          continue;
+        }
+
+        // ── PUSH (or missing channel) ───────────────────────────────────────
         const clickUrl = buildClickUrl(item.shopDomain, item.targetType, item.productHandle);
 
         const rawMobile = item.mobileImageUrl || '';
@@ -704,7 +756,7 @@ async function processFestivalQueue() {
 
         const totalSent = (mobileResult.sent || 0) + (desktopResult.sent || 0);
         console.log(
-          `[festival-queue] item ${item._id} "${item.festival || item.title}" — ` +
+          `[festival-queue] push item ${item._id} "${item.festival || item.title}" — ` +
           `clickUrl=${clickUrl} mobileSent=${mobileResult.sent || 0} desktopSent=${desktopResult.sent || 0}`
         );
 
@@ -714,13 +766,13 @@ async function processFestivalQueue() {
             sentAt: new Date(),
             recipientCount: totalSent,
           });
-          console.log(`[festival-queue] item ${item._id} marked sent (recipientCount=${totalSent})`);
+          console.log(`[festival-queue] push item ${item._id} marked sent (recipientCount=${totalSent})`);
         } else {
           // Total failure — both legs failed outright.
           const failedAttempts = (item.failedAttempts || 0) + 1;
           const errMsg = mobileResult.error || desktopResult.error || 'Unknown error';
           console.error(
-            `[festival-queue] item ${item._id} "${item.festival || item.title}" ` +
+            `[festival-queue] push item ${item._id} "${item.festival || item.title}" ` +
             `FAILED (attempt ${failedAttempts}/${FESTIVAL_MAX_FAILED_ATTEMPTS}): ${errMsg}`
           );
           if (failedAttempts > FESTIVAL_MAX_FAILED_ATTEMPTS) {
@@ -729,7 +781,7 @@ async function processFestivalQueue() {
               failedAttempts,
             });
             console.error(
-              `[festival-queue] item ${item._id} CANCELLED after ${failedAttempts} ` +
+              `[festival-queue] push item ${item._id} CANCELLED after ${failedAttempts} ` +
               `consecutive failed attempts — last error: ${errMsg}`
             );
           } else {
@@ -779,3 +831,4 @@ if (require.main === module) { start(); }
 
 module.exports = app;
 module.exports._processScheduledJobs = processScheduledJobs;
+module.exports._processFestivalQueue = processFestivalQueue;

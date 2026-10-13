@@ -1,0 +1,311 @@
+AUDIT: queue-add-engagement-before (Part 1 — read-only)
+Date: 2026-10-13
+Branch: main
+Task: Add "add an engagement" flow to the Queue calendar
+
+═══════════════════════════════════════════════════════════
+Q1 — HOW FestivalQueue ITEMS ARE STORED
+═══════════════════════════════════════════════════════════
+
+Model: backend/models/FestivalQueue.js
+
+Fields:
+  shopDomain    String  required, indexed — scopes every query
+  title         String  required
+  body          String  default ''
+  imageUrl      String  (legacy single image, kept for compat)
+  mobileImageUrl  String
+  desktopImageUrl String
+  scheduledAt   Date    required
+  groupId       ObjectId  null for ungrouped; set when multiple dates form a campaign
+  festival      String  default '' — the festival name key (from festivalCalendar)
+  targetType    String  enum ['home','product']
+  productId     String
+  productHandle String
+  productTitle  String
+  status        String  enum ['draft','approved','sent','cancelled']
+  sentAt        Date
+  recipientCount  Number
+  failedAttempts  Number
+
+Channel: NONE — there is no `channel` field on FestivalQueue. The model
+  is exclusively push. The poller (processFestivalQueue in server.js:650)
+  calls sendPushToCustomers — nothing else. `recent-sends` hardcodes
+  `channel: 'push'` when building the result from festival rows.
+
+Template reference: NONE — there is no `templateId` or any email-related
+  field on FestivalQueue. Email and WhatsApp are not in the model at all.
+
+API the Queue page uses:
+  GET    /api/queue/:shop/festival         — list all items (QueueScreen.jsx, festivalItems state)
+  POST   /api/queue/:shop/festival         — create (used by Dashboard suggestions panel)
+  PATCH  /api/queue/:shop/festival/:id     — approve (status→'approved') or edit
+  DELETE /api/queue/:shop/festival/:id     — delete one item (or whole group with ?group=true)
+  GET    /api/push/festivals               — festival calendar data (festivalCalendar state)
+
+All routes use requireAuth + requireStoreOwner. Scope is always by shopDomain,
+  never by email.
+
+═══════════════════════════════════════════════════════════
+Q2 — DOES A CREATE ENDPOINT ALREADY EXIST?
+═══════════════════════════════════════════════════════════
+
+YES. POST /api/queue/:shopDomain/festival (queue.js:231) already exists.
+
+Required body fields:  title, scheduledAt
+Optional fields:       body, imageUrl, mobileImageUrl, desktopImageUrl,
+                       festival, status ('draft' or 'approved'), targetType,
+                       productId, productHandle, productTitle
+
+scheduledAt accepts:
+  a) "YYYY-MM-DDTHH:mm" (local store time) — converted to UTC via store timezone
+  b) A full ISO string — passed through as-is
+  c) An array of "YYYY-MM-DDTHH:mm" strings — creates one document per date,
+     all sharing a new groupId. Optional joinGroupId / joinItemId for
+     adding to an existing group.
+
+Idempotency: when `festival` is present, upserts on (shopDomain, festival,
+  scheduledAt, status ∈ ['draft','approved']) — same festival+date is not
+  duplicated. When `festival` is absent (a manually added item), always creates.
+
+No channel field accepted. The endpoint cannot create email or WhatsApp items.
+
+═══════════════════════════════════════════════════════════
+Q3 — EMAIL TEMPLATES: templateId REFERENCE AND LIST ENDPOINT
+═══════════════════════════════════════════════════════════
+
+FestivalQueue has NO templateId field. Email templates live in a separate
+  collection (EmailTemplate model, routes under /api/email-templates).
+
+List endpoint:
+  GET /api/email-templates/           (emailTemplates.js:101, requireAuth only)
+  Returns all email templates for the authenticated shop.
+  No :shopDomain segment — shop resolved from session token inside requireAuth.
+  Response shape (from reading the route): array of template objects with
+  at least _id, name/title, design.ctaUrl, design.subject, etc.
+
+Send endpoints:
+  POST /api/email-templates/:id/send       — send to one recipient (profileId in body)
+  POST /api/email-templates/:id/broadcast  — send to all subscribers for the shop
+
+FestivalQueue cannot hold a templateId reference today. Adding email to the
+  queue would require either:
+    (a) A separate email queue model, or
+    (b) Adding `channel` and `templateId` fields to FestivalQueue.
+
+Option (b) is the lighter path: the existing POST/GET/PATCH/DELETE festival
+  endpoints already handle all lifecycle operations; adding two nullable fields
+  keeps the queue uniform and lets the frontend/poller branch on `channel`.
+
+═══════════════════════════════════════════════════════════
+Q4 — DISPATCH PATH PER CHANNEL
+═══════════════════════════════════════════════════════════
+
+PUSH (fully implemented):
+  processFestivalQueue() — server.js:650. Runs every poller tick (every 30s).
+  Finds FestivalQueue items with status='approved', scheduledAt <= now.
+  Calls sendPushToCustomers (mobile + desktop legs), then logBroadcastSend.
+  On success: marks item status='sent', stores recipientCount.
+  On failure: increments failedAttempts; cancels after FESTIVAL_MAX_FAILED_ATTEMPTS.
+  CAN BE DISPATCHED: YES.
+
+EMAIL (partially possible):
+  No FestivalQueue dispatch path exists. emailTemplates.js has:
+    /:id/send      — sends to ONE profileId (not a broadcast)
+    /:id/broadcast — sends to all email subscribers for the shop
+  A festival email queue item would need the poller to call broadcast for a
+  given template at the scheduled time. The infrastructure exists (Resend,
+  EmailTemplate model, broadcast endpoint) but processFestivalQueue does not
+  call it. Adding a `channel: 'email'` branch to processFestivalQueue is
+  technically feasible.
+  CAN BE DISPATCHED: NOT YET — would need a new poller branch.
+
+WHATSAPP:
+  CLAUDE.md explicitly states "No WhatsApp/SMS in this version" and lists
+  WhatsApp under "Out of scope — do not add". Even if a WhatsApp sender
+  existed, it must not be added here.
+  CAN BE DISPATCHED: OUT OF SCOPE — do not implement.
+
+═══════════════════════════════════════════════════════════
+Q5 — WHERE IN QueueScreen.jsx ARE THE CALENDAR CELLS AND DayDetailsPanel?
+═══════════════════════════════════════════════════════════
+
+Line numbers as of commit 2349562:
+
+  FestivalIcon component          line 360
+  BellIcon component              line 368
+  MonthCalendar component         line 383
+    — cell rendering (isSelected, icon buttons)  ~lines 420–540
+  DayDetailsPanel component       line 543
+    — derives festival + notifications from props
+    — Notifications tab with Approve/Edit/Delete/View  ~lines 600–740
+
+  QueueScreen state:
+    selectedDayStr                line 977
+    dayPanelTab                   line 978
+    panelRef                      line ~980
+
+  Event handlers:
+    handleFestivalClick           line 997
+    handleNotificationsClick      line 1006
+
+  Two-column grid wrapper:
+    <div className="ccf-queue-split">   line 1156
+
+  MonthCalendar usage (in left column): line ~1220–1240
+    — passes selectedDayStr, onFestivalClick, onNotificationsClick
+
+  Right column conditional:
+    {selectedDayStr ? <DayDetailsPanel .../> : <planning list>}
+    line ~1244–1250+
+
+  DayDetailsPanel receives:
+    dateStr={selectedDayStr}
+    dayPanelTab, setDayPanelTab
+    festivalCalendar, festivalItems
+    onBack (→ setSelectedDayStr(null))
+    shop, openEditModal, goToFestivalDetail, setFestivalItems
+
+═══════════════════════════════════════════════════════════
+CLEAR PATH FORWARD?
+═══════════════════════════════════════════════════════════
+
+YES for push. The existing POST /api/queue/:shop/festival endpoint and the
+  FestivalQueue model fully support creating a new push item. The "add
+  engagement" flow for push is entirely a frontend concern: show a UI on
+  the calendar cell or DayDetailsPanel, collect title/body/time, POST to the
+  existing endpoint.
+
+PARTIAL for email. The model needs two new nullable fields (channel, templateId).
+  The POST endpoint needs to accept and store them. The poller needs a new
+  branch in processFestivalQueue to call broadcast at the scheduled time.
+  The EmailTemplate list endpoint already exists (GET /api/email-templates/).
+
+WhatsApp: owner decision overrides CLAUDE.md "no WhatsApp" for THIS feature.
+  WhatsApp items are never auto-sent; they appear as manual tasks on the Dashboard.
+
+═══════════════════════════════════════════════════════════
+PART 1B — WHATSAPP AND BROADCAST DETAILS
+═══════════════════════════════════════════════════════════
+
+Q1 — HOW DASHBOARD CURRENTLY LISTS WHATSAPP MESSAGES
+
+Model: ScheduledJob (channel='whatsapp') for sent messages.
+       Profile records (with channels.whatsapp.consentedAt) for pending.
+
+Route: GET /api/dashboard/:shop/channels/:channel/items?status=pending|sent
+       backend/routes/dashboard.js, mounted at /api/dashboard.
+
+"Pending" path (dashboard.js:258-296):
+  Queries Profile records with channels.whatsapp.consentedAt set, optedOutAt null.
+  Excludes profiles that already have any ScheduledJob with channel='whatsapp'.
+  Returns one item per CUSTOMER (opted-in prospect, never yet messaged):
+    { id: profileId, type: 'followup', label: 'Follow-up', status: 'pending',
+      time: consentedAt, customer: { profileId, name, email }, preview: { message: null } }
+  No due date / title / body on the item — it's just "this customer is ready to be messaged".
+
+"Sent" path (dashboard.js:299-384):
+  Queries ScheduledJob with channel='whatsapp', status='sent', sentAt in range.
+  Returns one item per sent ScheduledJob row.
+
+Action in the frontend (ChannelCards.jsx:236-248):
+  When channel='whatsapp' and item.status='pending': renders a "WhatsApp" button
+  that calls sendWhatsapp({ shopDomain, profileId: item.customer.profileId, purpose: 'followup' })
+  → POST /api/whatsapp/:shop/send with profileId
+  → creates a ScheduledJob (status='sent'), returns a wa.me/?text=... URL
+  → seller clicks that URL in their own WhatsApp to actually send the message.
+
+How a task is marked "done":
+  Creating the ScheduledJob row (above) is the "done" signal — it moves the
+  profileId out of pending. There is no explicit "mark done" concept; sending IS done.
+
+Q2 — CAN THE EXISTING MECHANISM TAKE A FESTIVALQUEUE ITEM?
+
+NO — the existing "pending" list is per-customer (one profileId per item). A
+  FestivalQueue WhatsApp item is a broadcast template with body+date, no profileId.
+
+SMALLEST WAY TO FEED IT (without a new endpoint):
+  Extend the existing GET /api/dashboard/:shop/channels/whatsapp/items?status=pending
+  backend handler to merge FestivalQueue channel='whatsapp', status='approved',
+  scheduledAt ≤ end of today (+ overdue items with status='approved') into
+  the same response, alongside the per-customer pending items. Each festival
+  item is returned with:
+    { id: String(item._id), type: 'festival_broadcast', label: 'Campaign message',
+      status: 'pending', time: item.scheduledAt, customer: null,
+      preview: { message: item.body }, title: item.title, isFestivalBroadcast: true }
+  Frontend: DrawerItem already conditionally renders the per-customer "Send" button.
+  Add an `isFestivalBroadcast` branch that shows a "Mark as done" button instead,
+  which calls PATCH /api/queue/:shop/festival/:id { status: 'sent' }.
+  This requires ~15 backend lines and ~20 frontend lines — no new component,
+  no new route, no new state shape.
+
+Q3 — CODE THAT ASSUMES FESTIVALQUEUE IS PUSH-ONLY
+
+1. recent-sends (backend/routes/queue.js:139)
+   Hardcodes `channel: 'push'` for every FestivalQueue sent row.
+   FIX: change to `channel: f.channel || 'push'` (use the stored channel field).
+
+2. processFestivalQueue (backend/server.js:650-747)
+   Calls sendPushToCustomers unconditionally for every approved item.
+   FIX: add a channel branch — push (or absent) → existing push logic;
+   email → call extracted emailBroadcast helper; whatsapp → skip (no auto-send).
+
+3. FestivalDetail.jsx:405 — already handles r.channel ('email' vs fallback '🔔 Push').
+   No change needed.
+
+4. GET /api/queue/:shop/festival/:id/summary (queue.js:649-660)
+   Preview block queries CustomerPushSubscription unconditionally.
+   For email items this returns a push-subscriber count (misleading).
+   Minimal fix: only generate preview when item.channel === 'push' or null.
+   (The summary cards are only shown on the FestivalDetail page, not the queue.)
+
+5. GET /api/queue/:shop/festival (queue.js:383-422)
+   Full list — no push-only assumption. Fine as-is.
+
+6. Dashboard suggestions (POST /api/push/send-store, POST /api/queue/:shop/festival)
+   Dashboard suggestions always create push items (no channel field sent).
+   Default channel='push' on the model means these keep working unchanged. Fine.
+
+Q4 — HOW BROADCAST CHOOSES RECIPIENTS AND UNSUBSCRIBE
+
+Recipients:
+  buildEmailSegmentQuery (emailTemplates.js:53-73) filters:
+    { shopDomain, suppressed: { $ne: true }, $or: [email exists] }
+  Default segment = 'everyone': all non-suppressed profiles with any email.
+  suppressed:true is the opt-out / unsubscribe flag on the Profile document.
+  No separate unsubscribe table — the `suppressed` field is the mechanism.
+
+  Does it skip suppressed/unsubscribed? YES — `suppressed: { $ne: true }` is always
+  in the query.
+
+Unsubscribe link in email:
+  UNSUBSCRIBE_HEADERS (backend/utils/email.js:13-16):
+    'List-Unsubscribe': '<mailto:unsubscribe@shopireachboost.com>'
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'
+  These RFC 8058 headers are added to every email sent through both the
+  /:id/send and /:id/broadcast routes (via the UNSUBSCRIBE_HEADERS constant).
+  No in-body unsubscribe link is rendered in the HTML template.
+  The header gives email clients a one-click unsubscribe UI; the mailto goes
+  to a fixed address and has no automated handler (comment says "no functional
+  unsubscribe flow yet").
+
+Broadcast logic is currently inline in the route handler (emailTemplates.js:597-686).
+  module.exports = router only; no helper is exported.
+  FIX: extract to backend/utils/emailBroadcast.js to reuse from the poller.
+
+═══════════════════════════════════════════════════════════
+FILES READ (no edits)
+═══════════════════════════════════════════════════════════
+
+  backend/models/FestivalQueue.js
+  backend/routes/queue.js
+  backend/server.js (lines 650–764)
+  backend/routes/emailTemplates.js (route declarations only, lines 101–611)
+  frontend/app/admin/queue/QueueScreen.jsx (lines 1–50, grep for components)
+
+═══════════════════════════════════════════════════════════
+STOP — END OF PART 1
+═══════════════════════════════════════════════════════════
+
+A clear implementation path exists using the existing model (with two new
+  nullable fields). Proceeding to Part 2 is valid.

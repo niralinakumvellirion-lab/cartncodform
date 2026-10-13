@@ -23,6 +23,7 @@ jest.mock('../models/Store');
 jest.mock('../models/FestivalQueue');
 jest.mock('../models/ScheduledJob');
 jest.mock('../models/Profile');
+jest.mock('../models/EmailTemplate');
 
 const express = require('express');
 const Store = require('../models/Store');
@@ -72,9 +73,9 @@ function patch(id, body) {
 
 describe('POST /:shop/festival — store-timezone-aware scheduling', () => {
   const CASES = [
-    { tz: 'Asia/Kolkata', expected: '2026-09-29T14:01:00.000Z' },
-    { tz: 'Asia/Kathmandu', expected: '2026-09-29T13:46:00.000Z' },
-    { tz: 'UTC', expected: '2026-09-29T19:31:00.000Z' },
+    { tz: 'Asia/Kolkata', expected: '2099-12-25T14:01:00.000Z' },
+    { tz: 'Asia/Kathmandu', expected: '2099-12-25T13:46:00.000Z' },
+    { tz: 'UTC', expected: '2099-12-25T19:31:00.000Z' },
   ];
 
   test.each(CASES)('19:31 entered for a store in $tz converts to $expected UTC', async ({ tz, expected }) => {
@@ -82,7 +83,7 @@ describe('POST /:shop/festival — store-timezone-aware scheduling', () => {
     FestivalQueue.findOneAndUpdate.mockResolvedValue(null);
     FestivalQueue.create.mockImplementation((fields) => Promise.resolve({ _id: 'new1', ...fields }));
 
-    const res = await post({ title: 'T', scheduledAt: '2026-09-29T19:31' });
+    const res = await post({ title: 'T', scheduledAt: '2099-12-25T19:31' });
     const data = await res.json();
 
     expect(res.status).toBe(200);
@@ -95,10 +96,10 @@ describe('POST /:shop/festival — store-timezone-aware scheduling', () => {
     FestivalQueue.findOneAndUpdate.mockResolvedValue(null);
     FestivalQueue.create.mockImplementation((fields) => Promise.resolve({ _id: 'new1', ...fields }));
 
-    await post({ title: 'T', scheduledAt: '2026-09-29T19:31' });
+    await post({ title: 'T', scheduledAt: '2099-12-25T19:31' });
 
     const [createArg] = FestivalQueue.create.mock.calls[0];
-    expect(createArg.scheduledAt.toISOString()).toBe('2026-09-29T14:01:00.000Z');
+    expect(createArg.scheduledAt.toISOString()).toBe('2099-12-25T14:01:00.000Z');
   });
 
   // A full ISO string (e.g. a festival-suggestion prefill the merchant
@@ -109,11 +110,11 @@ describe('POST /:shop/festival — store-timezone-aware scheduling', () => {
     FestivalQueue.findOneAndUpdate.mockResolvedValue(null);
     FestivalQueue.create.mockImplementation((fields) => Promise.resolve({ _id: 'new1', ...fields }));
 
-    const res = await post({ title: 'T', scheduledAt: '2026-09-29T19:31:00.000Z' });
+    const res = await post({ title: 'T', scheduledAt: '2099-12-25T19:31:00.000Z' });
 
     expect(res.status).toBe(200);
     const [createArg] = FestivalQueue.create.mock.calls[0];
-    expect(createArg.scheduledAt.toISOString()).toBe('2026-09-29T19:31:00.000Z');
+    expect(createArg.scheduledAt.toISOString()).toBe('2099-12-25T19:31:00.000Z');
   });
 
   test('rejects a genuinely unparseable scheduledAt with 400', async () => {

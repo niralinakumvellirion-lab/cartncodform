@@ -24,6 +24,7 @@ jest.mock('../models/Store');
 jest.mock('../models/FestivalQueue');
 jest.mock('../models/ScheduledJob');
 jest.mock('../models/Profile');
+jest.mock('../models/EmailTemplate');
 
 const express = require('express');
 const Store = require('../models/Store');

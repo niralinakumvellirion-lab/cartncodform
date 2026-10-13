@@ -31,6 +31,9 @@ const festivalQueueSchema = new mongoose.Schema({
   // point); capped at FESTIVAL_MAX_FAILED_ATTEMPTS there, past which the
   // item is marked 'cancelled' instead of retrying forever.
   failedAttempts: { type: Number, default: 0 },
+  channel: { type: String, enum: ['push', 'email', 'whatsapp'], default: 'push' },
+  templateId: { type: mongoose.Schema.Types.ObjectId, ref: 'EmailTemplate', default: null },
+  subject: { type: String, default: '' },
 }, { timestamps: true });
 
 module.exports = mongoose.model('FestivalQueue', festivalQueueSchema);

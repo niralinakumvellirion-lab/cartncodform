@@ -136,7 +136,7 @@ router.get('/:shopDomain/recent-sends', requireAuth, requireStoreOwner,
         _id: String(f._id),
         title: f.title,
         recipientCount: f.recipientCount || 0,
-        channel: 'push',
+        channel: f.channel || 'push',
         sentAt: f.sentAt,
       })),
       ...autoJobs.map(j => ({
@@ -234,18 +234,64 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
     const shop = req.shopDomain;
     const { title, body, imageUrl, scheduledAt, festival,
             status, mobileImageUrl, desktopImageUrl,
-            targetType, productId, productHandle, productTitle } = req.body;
+            targetType, productId, productHandle, productTitle,
+            channel, templateId, subject } = req.body;
 
-    if (!title || !scheduledAt) {
-      return res.status(400).json({
-        error: 'title and scheduledAt required'
-      });
+    const resolvedChannel = channel || 'push';
+    if (!['push', 'email', 'whatsapp'].includes(resolvedChannel)) {
+      return res.status(400).json({ error: 'channel must be push, email, or whatsapp' });
+    }
+
+    if (!scheduledAt) {
+      return res.status(400).json({ error: 'scheduledAt required' });
+    }
+
+    // Per-channel required-field validation.
+    if (resolvedChannel === 'push') {
+      if (!title) return res.status(400).json({ error: 'title required for push' });
+      if (title.length > 50) return res.status(400).json({ error: 'push title max 50 chars' });
+      if (body && body.length > 120) return res.status(400).json({ error: 'push body max 120 chars' });
+    } else if (resolvedChannel === 'email') {
+      if (!templateId) return res.status(400).json({ error: 'templateId required for email' });
+      if (!subject) return res.status(400).json({ error: 'subject required for email' });
+      // Verify template belongs to this shop.
+      const EmailTemplate = require('../models/EmailTemplate');
+      const tpl = await EmailTemplate.findOne({ _id: templateId, shopDomain: shop }).select('_id').lean();
+      if (!tpl) return res.status(400).json({ error: 'templateId not found for this shop' });
+    } else if (resolvedChannel === 'whatsapp') {
+      if (!body) return res.status(400).json({ error: 'body required for whatsapp' });
+      if (body.length > 300) return res.status(400).json({ error: 'whatsapp body max 300 chars' });
     }
 
     const FestivalQueue = require('../models/FestivalQueue');
+
+    // Resolve scheduledAt early so we can validate it is not in the past.
+    // For array multi-date, past-date validation runs per entry below.
+    let singleScheduledAtUtc = null;
+    if (!Array.isArray(scheduledAt)) {
+      singleScheduledAtUtc = await resolveScheduledAt(shop, scheduledAt);
+      if (!singleScheduledAtUtc) {
+        return res.status(400).json({
+          error: 'scheduledAt must be a "YYYY-MM-DDTHH:mm" local date-time',
+        });
+      }
+      // Reject dates before the start of today in the store's timezone.
+      const store = await Store.findOne({ shopDomain: shop }).select('timezone').lean();
+      const tz = resolveTz(store?.timezone);
+      const { zonedTimeToUtc: z2u } = require('../utils/timezone');
+      const now = new Date();
+      const todayStr = now.toLocaleDateString('en-CA', { timeZone: tz }); // YYYY-MM-DD
+      const [yr, mo, dy] = todayStr.split('-').map(Number);
+      const todayStartUtc = z2u(yr, mo, dy, 0, 0, tz);
+      if (singleScheduledAtUtc < todayStartUtc) {
+        return res.status(400).json({ error: 'scheduledAt must not be before today' });
+      }
+    }
+
+    const resolvedTitle = resolvedChannel === 'whatsapp' && !title ? 'WhatsApp message' : (title || '');
     const baseFields = {
       shopDomain: shop,
-      title,
+      title: resolvedTitle,
       body: body || '',
       imageUrl: imageUrl || '',
       mobileImageUrl: mobileImageUrl || '',
@@ -256,6 +302,9 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
       productHandle: productHandle || '',
       productTitle: productTitle || '',
       status: status || 'draft',
+      channel: resolvedChannel,
+      templateId: templateId || null,
+      subject: subject || '',
     };
 
     // Multi-date: scheduledAt as an array of local datetime strings —
@@ -326,13 +375,8 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
       return res.json({ success: true, groupId, items });
     }
 
-    const scheduledAtUtc = await resolveScheduledAt(shop, scheduledAt);
-    if (!scheduledAtUtc) {
-      return res.status(400).json({
-        error: 'scheduledAt must be a "YYYY-MM-DDTHH:mm" local date-time',
-      });
-    }
-    const fields = { ...baseFields, scheduledAt: scheduledAtUtc };
+    // singleScheduledAtUtc already resolved and validated above.
+    const fields = { ...baseFields, scheduledAt: singleScheduledAtUtc };
 
     // Idempotent per (festival, date): a repeat Approve/Add-to-Queue for
     // the same shop+festival+date (e.g. re-clicking, or Add-to-Queue
@@ -354,7 +398,7 @@ router.post('/:shopDomain/festival', requireAuth, requireStoreOwner,
     let item = null;
     if (festival) {
       item = await FestivalQueue.findOneAndUpdate(
-        { shopDomain: shop, festival, scheduledAt: scheduledAtUtc, status: { $in: ['draft', 'approved'] } },
+        { shopDomain: shop, festival, scheduledAt: singleScheduledAtUtc, status: { $in: ['draft', 'approved'] } },
         { $set: fields },
         { new: true }
       );
@@ -442,6 +486,7 @@ router.get('/:shopDomain/festival', requireAuth, requireStoreOwner,
 const FESTIVAL_PATCH_FIELDS = [
   'title', 'body', 'mobileImageUrl', 'desktopImageUrl', 'scheduledAt', 'status',
   'targetType', 'productId', 'productHandle', 'productTitle',
+  'templateId', 'subject',
 ];
 // The subset of FESTIVAL_PATCH_FIELDS that a bulk ("all remaining dates")
 // edit is allowed to propagate to sibling documents — deliberately
@@ -620,7 +665,7 @@ router.get('/:shopDomain/festival/:id/summary', requireAuth,
 
     const FestivalQueue = require('../models/FestivalQueue');
     const item = await FestivalQueue.findOne({ _id: req.params.id, shopDomain: shop })
-      .select('status scheduledAt')
+      .select('status scheduledAt channel')
       .lean();
     if (!item) {
       return res.status(404).json({ error: 'Festival item not found' });
@@ -647,7 +692,8 @@ router.get('/:shopDomain/festival/:id/summary', requireAuth,
     });
 
     let preview = null;
-    if (item.status !== 'sent') {
+    // Push-subscriber preview only makes sense for push items; skip for email/whatsapp.
+    if (item.status !== 'sent' && (!item.channel || item.channel === 'push')) {
       const CustomerPushSubscription = require('../models/CustomerPushSubscription');
       const { buildCustomerSubscriptionQuery } = require('../utils/pushNotification');
       const [mobile, desktop] = await Promise.all([

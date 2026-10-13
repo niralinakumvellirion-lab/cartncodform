@@ -254,8 +254,9 @@ router.get('/:shopDomain/channels/:channel/items', requireAuth, requireStoreOwne
 
     const { from, to } = parseDateRange(req);
 
-    // WhatsApp pending — items come from Profile records, not ScheduledJob.
+    // WhatsApp pending — items come from Profile records + FestivalQueue broadcasts.
     if (channel === 'whatsapp' && statusParam === 'pending') {
+      // 1. Per-customer prospects (existing mechanism).
       const optedIn = await Profile.find({
         shopDomain: shop,
         'channels.whatsapp.consentedAt': { $exists: true, $ne: null },
@@ -265,20 +266,18 @@ router.get('/:shopDomain/channels/:channel/items', requireAuth, requireStoreOwne
         .sort({ 'channels.whatsapp.consentedAt': -1 })
         .lean();
 
-      if (!optedIn.length) return res.json({ items: [], total: 0, page, limit });
-
       const optedInIds = optedIn.map((p) => p._id);
-      const contacted = await ScheduledJob.distinct('profileId', {
-        shopDomain: shop,
-        channel: 'whatsapp',
-        profileId: { $in: optedInIds },
-      });
+      const contacted = optedInIds.length
+        ? await ScheduledJob.distinct('profileId', {
+            shopDomain: shop,
+            channel: 'whatsapp',
+            profileId: { $in: optedInIds },
+          })
+        : [];
       const contactedSet = new Set(contacted.map(String));
-      const pending = optedIn.filter((p) => !contactedSet.has(String(p._id)));
-      const total = pending.length;
-      const pageItems = pending.slice(page * limit, (page + 1) * limit);
+      const pendingProfiles = optedIn.filter((p) => !contactedSet.has(String(p._id)));
 
-      const items = pageItems.map((p) => {
+      const profileItems = pendingProfiles.map((p) => {
         const emailAddr = p.channels?.email?.address || p.identifiers?.emails?.[0] || null;
         return {
           id: String(p._id),
@@ -292,6 +291,35 @@ router.get('/:shopDomain/channels/:channel/items', requireAuth, requireStoreOwne
           consentedAt: p.channels.whatsapp.consentedAt,
         };
       });
+
+      // 2. Festival broadcast tasks: approved WhatsApp items due today or overdue.
+      const FestivalQueue = require('../models/FestivalQueue');
+      const endOfToday = new Date();
+      endOfToday.setHours(23, 59, 59, 999);
+      const broadcastTasks = await FestivalQueue.find({
+        shopDomain: shop,
+        channel: 'whatsapp',
+        status: 'approved',
+        scheduledAt: { $lte: endOfToday },
+      }).sort({ scheduledAt: 1 }).lean();
+
+      const broadcastItems = broadcastTasks.map((item) => ({
+        id: String(item._id),
+        type: 'festival_broadcast',
+        label: 'Campaign message',
+        status: 'pending',
+        time: item.scheduledAt,
+        customer: null,
+        preview: { message: item.body || null },
+        title: item.title,
+        isFestivalBroadcast: true,
+        festivalQueueId: String(item._id),
+      }));
+
+      // Broadcast tasks shown first (they have a specific due date).
+      const allItems = [...broadcastItems, ...profileItems];
+      const total = allItems.length;
+      const items = allItems.slice(page * limit, (page + 1) * limit);
 
       return res.json({ items, total, page, limit });
     }

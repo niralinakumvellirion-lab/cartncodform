@@ -21,11 +21,13 @@ jest.mock('../middleware/requireOwner', () => ({
 jest.mock('../models/ScheduledJob');
 jest.mock('../models/Profile');
 jest.mock('../models/AttributedEvent');
+jest.mock('../models/FestivalQueue');
 
 const express = require('express');
 const ScheduledJob = require('../models/ScheduledJob');
 const Profile = require('../models/Profile');
 const AttributedEvent = require('../models/AttributedEvent');
+const FestivalQueue = require('../models/FestivalQueue');
 const dashboardRouter = require('../routes/dashboard');
 
 const SHOP = 'demo.myshopify.com';
@@ -49,6 +51,9 @@ afterAll((done) => { server.close(done); });
 beforeEach(() => {
   jest.clearAllMocks();
   jest.spyOn(console, 'error').mockImplementation(() => {});
+  // Dashboard WhatsApp pending now also queries FestivalQueue for broadcast tasks.
+  // Default to empty so existing per-customer tests are unaffected.
+  FestivalQueue.find.mockReturnValue({ sort: () => ({ lean: () => Promise.resolve([]) }) });
 });
 afterEach(() => jest.restoreAllMocks());
 
