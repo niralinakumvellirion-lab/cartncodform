@@ -190,10 +190,16 @@ function getStatusConfig(status, outcome, revenue) {
   );
 }
 
+const WA_PURPOSE_LABELS = {
+  followup: 'Cart follow-up',
+  order:    'Order message',
+};
+
 const FILTER_TABS = [
-  { key: 'all', label: 'All' },
-  { key: 'push', label: 'Push' },
-  { key: 'email', label: 'Email' },
+  { key: 'all',       label: 'All' },
+  { key: 'push',      label: 'Push' },
+  { key: 'email',     label: 'Email' },
+  { key: 'whatsapp',  label: 'WhatsApp' },
   { key: 'converted', label: 'Led to a sale' },
 ];
 
@@ -219,6 +225,22 @@ function EnvelopeIcon() {
   );
 }
 
+function WhatsAppIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+      stroke="#25D366" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    </svg>
+  );
+}
+
+function ChannelIcon({ channel }) {
+  if (channel === 'email') return <EnvelopeIcon />;
+  if (channel === 'whatsapp') return <WhatsAppIcon />;
+  return <BellIcon />;
+}
+
 export default function Messages({ shop, initialChannel, initialStatus, initialFrom, initialTo }) {
   const [messages, setMessages] = useState([]);
   const [total, setTotal] = useState(0);
@@ -238,7 +260,8 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
   // whatever the server-side channel/status/date filter already
   // narrowed down to.
   const [filter, setFilter] = useState(
-    initialChannel === 'push' || initialChannel === 'email' ? initialChannel : 'all'
+    initialChannel === 'push' || initialChannel === 'email' || initialChannel === 'whatsapp'
+      ? initialChannel : 'all'
   );
   const [statusParam] = useState(initialStatus || '');
   // Date range filter: try to match the incoming from/to against a named preset
@@ -277,7 +300,7 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
         ? { from: initialFrom || null, to: initialTo || null }
         : getDateRange(dateFilter);
       const params = new URLSearchParams({ limit: '50' });
-      if (filter === 'push' || filter === 'email') params.set('channel', filter);
+      if (filter === 'push' || filter === 'email' || filter === 'whatsapp') params.set('channel', filter);
       if (statusParam) params.set('status', statusParam);
       if (rangeFrom) params.set('from', rangeFrom);
       if (rangeTo) params.set('to', rangeTo);
@@ -450,7 +473,7 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
               fontSize: '14px',
             }}
           >
-            No messages yet.
+            {filter === 'whatsapp' ? 'No WhatsApp messages in this period.' : 'No messages yet.'}
           </div>
         ) : (
           filteredMessages.map((m, i) => {
@@ -459,16 +482,23 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
               getCustomerEmail(profile) ||
               profile?.identifiers?.phones?.[0] ||
               `Anonymous #${m.cartToken?.slice(-4) || '????'}`;
-            const signalLabel =
-              SIGNAL_LABELS[m.signalType] || m.reason || '—';
+            const signalLabel = m.channel === 'whatsapp'
+              ? (WA_PURPOSE_LABELS[m.purpose] || 'WhatsApp message')
+              : (SIGNAL_LABELS[m.signalType] || m.reason || '—');
             const timeStr = formatMessageTime(
               m.sentAt || m.createdAt || m.updatedAt
             );
-            const statusCfg = getStatusConfig(
+            let statusCfg = getStatusConfig(
               m.status,
               m.outcome,
               m.recoveredRevenue || 0
             );
+            if (m.channel === 'whatsapp' && statusCfg.label === 'delivered') {
+              statusCfg = { ...statusCfg, label: 'opened in WhatsApp' };
+            }
+            const msgText = m.channel === 'whatsapp'
+              ? (m.messageText || '—')
+              : (m.payload?.body || m.payload?.title || signalLabel || '—');
 
             if (isMobileView) {
               return (
@@ -541,12 +571,12 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
                     style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}
                   >
                     <span style={{ lineHeight: 0, flexShrink: 0 }}>
-                      {m.channel === 'email' ? <EnvelopeIcon /> : <BellIcon />}
+                      <ChannelIcon channel={m.channel} />
                     </span>
                     <span
                       style={{ fontSize: '12px', color: '#6b7280', lineHeight: '1.4' }}
                     >
-                      {m.payload?.body || m.payload?.title || signalLabel || '—'}
+                      {msgText}
                     </span>
                   </div>
                 </div>
@@ -603,7 +633,7 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
 
                 {/* Channel icon */}
                 <div style={{ display: 'flex', alignItems: 'center' }}>
-                  {m.channel === 'email' ? <EnvelopeIcon /> : <BellIcon />}
+                  <ChannelIcon channel={m.channel} />
                 </div>
 
                 {/* Message copy */}
@@ -616,7 +646,7 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {m.payload?.body || m.payload?.title || signalLabel || '—'}
+                  {msgText}
                 </div>
 
                 {/* Status badge */}
@@ -649,10 +679,14 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
           || p?.identifiers?.phones?.[0]
           || `Anonymous #${preview.cartToken?.slice(-4) || '????'}`;
         const modalSignal = SIGNAL_LABELS[preview.signalType] || preview.reason || '';
-        const modalStatus = getStatusConfig(preview.status, preview.outcome, 0);
+        let modalStatus = getStatusConfig(preview.status, preview.outcome, 0);
+        if (preview.channel === 'whatsapp' && modalStatus.label === 'delivered') {
+          modalStatus = { ...modalStatus, label: 'opened in WhatsApp' };
+        }
         const modalTime = formatMessageTime(preview.sentAt || preview.createdAt || preview.updatedAt);
         const hasCopy = Boolean(
           preview.payload?.title || preview.payload?.body || preview.payload?.subject
+          || (preview.channel === 'whatsapp' && preview.messageText)
         );
 
         return (
@@ -700,7 +734,7 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
               <div style={{ fontSize: 12, color: '#6b7280', lineHeight: '1.9', marginBottom: 16 }}>
                 <div><span style={{ color: '#9ca3af' }}>To: </span>{modalId}</div>
                 {modalSignal && <div><span style={{ color: '#9ca3af' }}>Signal: </span>{modalSignal}</div>}
-                <div><span style={{ color: '#9ca3af' }}>Channel: </span>{preview.channel === 'email' ? 'Email' : 'Push'}</div>
+                <div><span style={{ color: '#9ca3af' }}>Channel: </span>{preview.channel === 'email' ? 'Email' : preview.channel === 'whatsapp' ? 'WhatsApp' : 'Push'}</div>
                 <div>
                   <span style={{ color: '#9ca3af' }}>Status: </span>
                   <span style={{ color: modalStatus.color, fontWeight: modalStatus.bold ? 600 : 400 }}>
@@ -717,7 +751,7 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
                 /* Historical automated row — content was never saved */
                 <div style={{ textAlign: 'center', padding: '12px 0' }}>
                   <div style={{ fontSize: 28, marginBottom: 10 }}>
-                    {preview.channel === 'email' ? '✉️' : '🔔'}
+                    {preview.channel === 'email' ? '✉️' : preview.channel === 'whatsapp' ? '💬' : '🔔'}
                   </div>
                   <div style={{ fontSize: 14, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
                     {modalSignal || '(no signal)'}
@@ -740,6 +774,22 @@ export default function Messages({ shop, initialChannel, initialStatus, initialF
                     lineHeight: '1.6', whiteSpace: 'pre-wrap', fontSize: 13,
                   }}>
                     {preview.payload?.body || '(no body)'}
+                  </div>
+                </div>
+              ) : preview.channel === 'whatsapp' ? (
+                /* WhatsApp preview */
+                <div style={{ border: '1px solid #e5e7eb', borderRadius: 10, overflow: 'hidden', fontSize: 13 }}>
+                  <div style={{ background: '#f0fdf4', padding: '10px 14px', borderBottom: '1px solid #e5e7eb' }}>
+                    <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 2 }}>Purpose</div>
+                    <div style={{ fontWeight: 600, color: '#111827' }}>
+                      {WA_PURPOSE_LABELS[preview.purpose] || 'WhatsApp message'}
+                    </div>
+                  </div>
+                  <div style={{
+                    padding: '12px 14px', color: '#374151',
+                    lineHeight: '1.6', whiteSpace: 'pre-wrap', fontSize: 13,
+                  }}>
+                    {preview.messageText || '(no message text recorded)'}
                   </div>
                 </div>
               ) : (
