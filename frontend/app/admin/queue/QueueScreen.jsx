@@ -1000,6 +1000,7 @@ function AddEngagementView({
                 desktopImageUrl={desktopImageUrl}
                 onMobileChange={handleMobileChange}
                 onDesktopChange={handleDesktopChange}
+                defaultInfoOpen={true}
               />
               {photoError && <div style={{ color: '#dc2626', fontSize: 12, marginTop: 4 }}>{photoError}</div>}
             </div>

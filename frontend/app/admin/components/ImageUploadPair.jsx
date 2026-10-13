@@ -15,8 +15,9 @@ export function ImageUploadPair({
   desktopImageUrl,
   onMobileChange,
   onDesktopChange,
+  defaultInfoOpen = false,
 }) {
-  const [showImageInfo, setShowImageInfo] = useState(false);
+  const [showImageInfo, setShowImageInfo] = useState(defaultInfoOpen);
 
   function readFileAsDataUrl(file, onChange) {
     if (!file) return;
