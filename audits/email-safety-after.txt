@@ -1,0 +1,116 @@
+SELF-AUDIT: email-safety
+Commit: f184c67
+Date: 2026-10-13
+Tests: 1078 passed, 52 suites (17 new in emailSafety.test.js, 5 new in
+  addEngagement.test.js; 4 test files patched for new mock requirements)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART A — UNSUBSCRIBE: what was done
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. backend/utils/unsubscribeToken.js (new)
+   - createToken(shopDomain, profileId): HMAC-SHA256 over SHOPIFY_API_SECRET
+     on "shopDomain|profileId", token = base64url(payload) + '.' + hex-sig.
+   - verifyToken(token): splits on first '.', recomputes HMAC, timing-safe
+     compare (crypto.timingSafeEqual). Returns { shopDomain, profileId } or
+     null on any failure.
+   - buildUnsubscribeUrl: ${BACKEND_URL}/api/unsubscribe/${token}
+   - buildUnsubscribeHeaders: per-recipient List-Unsubscribe with https URL +
+     mailto fallback, List-Unsubscribe-Post one-click.
+
+2. backend/routes/unsubscribe.js (new) — PUBLIC, rate-limited (20/min)
+   - GET /:token: renders HTML confirmation page (store name from Store.findOne,
+     graceful fallback to shopDomain). Does NOT call Profile.findOneAndUpdate.
+   - POST /:token: verifies token, sets Profile.suppressed=true ($set is
+     idempotent). Invalid token → 400 generic error page (no customer details).
+   - server.js: app.use('/api/unsubscribe', unsubscribeRouter) before 404 handler.
+
+3. Email sending paths updated (all marketing emails):
+   File                  Path                         What changed
+   ──────────────────────────────────────────────────────────────
+   utils/email.js        sendAbandonedCartEmail        Per-recipient headers +
+                                                        footer if profileId known;
+                                                        falls back to static mailto
+                                                        when profileId not passed
+                                                        (webhooks.js, push.js test-
+                                                        send callers).
+   utils/email.js        sendMarketingEmail            Added profileId 5th param;
+                                                        per-recipient headers +
+                                                        footer when set.
+   server.js             sendMarketingEmail call       Passes job.profileId (5th arg)
+   server.js             sendAbandonedCartEmail call   Passes profileId: job.profileId
+   utils/emailBroadcast.js sendEmailBroadcast loop     Renders HTML inside per-
+                                                        recipient loop; per-recipient
+                                                        unsubscribeUrl + headers.
+   routes/emailTemplates.js /:id/send                  Per-recipient unsubscribeUrl
+                                                        in design + headers.
+   routes/emailTemplates.js /:id/broadcast loop        Renders HTML per-recipient;
+                                                        per-recipient headers.
+   routes/push.js        sendJourneyEmail              buildUnsubscribeUrl passed as
+                                                        unsubscribeUrl to
+                                                        buildEmailHtml; per-recipient
+                                                        headers.
+
+   emailEngine.js already renders the footer link from design.unsubscribeUrl
+   (line 164, 354). No change needed there.
+
+4. sendNewCodOrderEmail (transactional → store owner): unchanged. No headers,
+   no footer. Tested explicitly.
+
+5. Suppressed behaviour unchanged: Profile.suppressed=true continues to block
+   all automation channels (push, email, WhatsApp) via brain.js +
+   signalEngine.js. Documented in pre-audit, not changed here.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART B — DOUBLE-SEND GUARD: what was done
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+6. FestivalQueue.sendClaimedAt: Date, default null (new field, schema-level).
+
+7. processFestivalQueue (server.js):
+   - Pre-query now excludes items where sendClaimedAt is set within the last
+     15 minutes (claimExpiry = now - 15 min).
+   - Per-item atomic claim: findOneAndUpdate({ _id, status:'approved',
+     $or:[{sendClaimedAt:null},{sendClaimedAt:{$lt:claimExpiry}}] },
+     { $set: { sendClaimedAt: now } }). If null → skip (another tick claimed).
+   - Success paths: sendClaimedAt left set (item becomes 'sent', not requeried).
+   - Retry paths (status stays 'approved'): $unset sendClaimedAt so next tick
+     can reclaim.
+   - Catch block: $unset sendClaimedAt with .catch(() => {}) so a DB failure on
+     the release doesn't mask the original error.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DECISIONS / TRADE-OFFS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- No expiry on tokens: SHOPIFY_API_SECRET rotation immediately invalidates all
+  outstanding tokens (which is acceptable since the token only needs to work
+  until the user clicks it — the window is short). If a strict expiry is needed
+  later, a timestamp can be encoded in the payload.
+
+- renderEmailDocument called per-recipient in broadcast and /broadcast: adds
+  ~N ms per recipient for string generation. At the BROADCAST_CAP of 90
+  recipients this is ~90 × <1ms — negligible vs. network calls to Resend.
+  One existing test expected a single render for 2 recipients; updated to
+  expect 2.
+
+- sendAbandonedCartEmail without profileId (webhooks.js, push.js test-send):
+  falls back to static mailto headers + unsubscribe URL. The caller in
+  webhooks.js fires on every Shopify checkout/update event where we may not
+  have a Profile._id yet (the profile upsert is async with .then()). The
+  poller caller in server.js passes job.profileId.
+
+- UNSUBSCRIBE_HEADERS constant kept in email.js exports for backward
+  compatibility (sendAbandonedCartEmail uses it as fallback; test mocks
+  reference it).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WHAT IS NOT DONE (out-of-scope or deferred)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- No functional mailto handler: the mailto link goes to
+  unsubscribe@shopireachboost.com. Receiving / auto-processing that email is
+  not in scope.
+- suppressed only via POST (click or RFC 8058 one-click). Separate "suppress
+  from push" or "suppress from email only" per-channel flags are out of scope.
+- Token expiry: not implemented (see above).
