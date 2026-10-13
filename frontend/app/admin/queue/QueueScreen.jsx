@@ -1605,7 +1605,7 @@ export default function QueueScreen({ shop }) {
           setEmailSegmentCounts(initial);
           Promise.all(
             segs.map(s =>
-              apiGet(`/api/email-templates/${encodeURIComponent(shop)}/count?segment=${s}`)
+              apiGet(`/api/email-templates/count?segment=${encodeURIComponent(s)}`)
                 .then(d => ({ seg: s, count: typeof d.count === 'number' ? d.count : -1 }))
                 .catch(() => ({ seg: s, count: -1 }))
             )
