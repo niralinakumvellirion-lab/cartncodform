@@ -965,24 +965,6 @@ function WaBubble({ messageText, selectedProduct, shop, firstName, phone, contai
   );
 }
 
-function WaDesktopPreview({ messageText, selectedProduct, shop, customer }) {
-  const firstName = resolveWaFirstName(customer);
-  const phone = customer?.profile?.channels?.whatsapp?.phone || customer?.profile?.identifiers?.phones?.[0];
-  return (
-    <div style={{ flex: '1 1 220px', maxWidth: 420 }}>
-      <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
-                    textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
-        Desktop
-      </div>
-      <div style={{ borderRadius: 12, overflow: 'hidden',
-                    border: '1px solid #E2E5EB', minHeight: 160 }}>
-        <WaBubble messageText={messageText || ''} selectedProduct={selectedProduct}
-          shop={shop} firstName={firstName} phone={phone} />
-      </div>
-    </div>
-  );
-}
-
 function WaMobilePreview({ messageText, selectedProduct, shop, customer }) {
   const firstName = resolveWaFirstName(customer);
   const phone = customer?.profile?.channels?.whatsapp?.phone || customer?.profile?.identifiers?.phones?.[0];
@@ -2275,14 +2257,16 @@ function SendSection({
               </>
             )}
             {activeTab === 'whatsapp' && (
-              <>
-                <WaDesktopPreview messageText={waMessageText}
-                  selectedProduct={selectedProduct} shop={shop} customer={customer} />
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
+                              textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+                  Mobile
+                </div>
                 <PhoneFrame>
                   <WaMobilePreview messageText={waMessageText}
                     selectedProduct={selectedProduct} shop={shop} customer={customer} />
                 </PhoneFrame>
-              </>
+              </div>
             )}
           </div>
         </div>
