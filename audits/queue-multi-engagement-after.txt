@@ -1,0 +1,95 @@
+AUDIT: queue-multi-engagement (after)
+Commit: d9bc5e6
+Date: 2026-10-13
+
+=== PART 0 ANSWERS (confirmed from code) ===
+
+1. Entry paths and Add button presence:
+
+   a) Empty day cell click (today/future):
+      handleDayCellClick → addEngMode='list' → AddEngagementView list step
+      Add button: YES (unchanged)
+
+   b) Non-empty day cell click, cell background (today/future):
+      Same handleDayCellClick → AddEngagementView list step, items shown
+      Add button: YES (unchanged; was already working)
+
+   c) Bell icon click → DayDetailsPanel (notifications tab)
+      Add button: ADDED in this commit (bottom of scrollable content)
+
+   d) Festival icon click → DayDetailsPanel (festival tab)
+      Add button: ADDED in this commit (same button, same position)
+
+2. Backend block for multiple items on same date: NONE for manual items.
+   Guard at queue.js:426 runs only when festival is truthy.
+   Manual saveEngagement sends festival:'' → guard skipped → always create().
+   No compound unique Mongo index.
+
+3. Festival date + manual: festival='' is falsy → findOneAndUpdate not called →
+   new doc created independently → festival item untouched. ✓
+
+=== WHAT BLOCKED ADDING ON NON-EMPTY DATES (entry points c and d) ===
+
+File: frontend/app/admin/queue/QueueScreen.jsx
+  - handleFestivalClick (line 1674): sets addEngMode=false → DayDetailsPanel
+  - handleNotificationsClick (line 1684): sets addEngMode=false → DayDetailsPanel
+  - DayDetailsPanel had no Add button at all — the only button was
+    "Back to planning list" in the header.
+
+No backend block existed.
+
+=== WHAT CHANGED ===
+
+frontend/app/admin/queue/QueueScreen.jsx:
+  1. DayDetailsPanel props (line ~574): added onAddEngagement
+  2. DayDetailsPanel body (after notifications tab, before closing </div>):
+       {!isPastDay(dateStr + 'T00:00') && (
+         <button onClick={onAddEngagement} style={{ same style as AddEngagementView }}>
+           + Add engagement
+         </button>
+       )}
+  3. DayDetailsPanel call site (~line 2094): new prop:
+       onAddEngagement={() => {
+         setAddEngMode('list'); setAddEngStep('list');
+         setAddEngBanner(''); setAddEngNewId(null);
+       }}
+
+backend/__tests__/addEngagement.test.js:
+  New describe block "multiple engagements same date" — 3 tests:
+  - Two push items same date/time → FestivalQueue.create ×2, findOneAndUpdate ×0
+  - Push+email+whatsapp same date → FestivalQueue.create ×3, findOneAndUpdate ×0
+  - Manual item (no festival) → FestivalQueue.create ×1, findOneAndUpdate ×0,
+    stored festival field = ''
+
+=== FINAL BEHAVIOUR PER ENTRY POINT ===
+
+  Empty cell click → AddEngagementView list step → Add button → choose → form → save ✓
+  Non-empty cell click → AddEngagementView list step (items shown) → Add button → same flow ✓
+  Bell icon click → DayDetailsPanel (notifications tab) → Add button at bottom → onAddEngagement
+    → addEngMode='list' → AddEngagementView list step for that date → same flow ✓
+  Festival icon click → DayDetailsPanel (festival tab) → Add button at bottom → same flow ✓
+
+  Past dates: isPastDay guard in AddEngagementView (line ~937) and in DayDetailsPanel
+  (new guard) both suppress the Add button. Past cell clicks are blocked at
+  handleDayCellClick (isPastDay guard, line 1695).
+
+  Bell badge: counts all FestivalQueue items for the date (queued.length, built from
+  festivalItems which is refetched via apiGet after saveEngagement). New items are
+  included after save and refetch. ✓
+
+  "Add another" → choose step; "Done" → list step (unchanged). ✓
+
+=== TEST RESULTS ===
+
+addEngagement.test.js: 36/36 passed (33 pre-existing + 3 new)
+Frontend build: ✓ Compiled successfully, ✓ Generating static pages (18/18)
+
+=== NOT VERIFIED WITHOUT A BROWSER ===
+
+- That the Add button appears at the correct vertical position in the DayDetailsPanel
+  (expected: below all items/festival content, above the panel's bottom edge).
+- That clicking "Add engagement" from DayDetailsPanel correctly pre-fills selectedDayStr
+  (it should — selectedDayStr is already set when DayDetailsPanel is open; the callback
+  only changes addEngMode, not selectedDayStr).
+- Bell badge count increment after adding — verified by code (festivalItems refetch
+  in saveEngagement, queued.length reflects the new count).
