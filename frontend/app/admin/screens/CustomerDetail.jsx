@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiGet, apiSend } from '../../../lib/api';
 import { ShimmerBox, ShimmerCard } from '../components/Shimmer';
@@ -715,66 +715,148 @@ function PushMobilePreview({ title, body, shop, productImage }) {
 }
 
 /* ─── Email previews ─── */
-const _PREV_EMPTY = (
-  <div style={{ fontSize: 11, color: '#9ca3af', padding: '24px 16px',
-                textAlign: 'center', background: '#f9fafb',
-                borderRadius: 8, border: '1px solid #e5e7eb' }}>
-    Preview appears as you type
-  </div>
-);
-const _PREV_LOADING = (
-  <div style={{ fontSize: 11, color: '#9ca3af', padding: '24px 16px',
-                textAlign: 'center', background: '#f9fafb',
-                borderRadius: 8, border: '1px solid #e5e7eb' }}>
-    Loading preview…
-  </div>
-);
-const _PREV_UNAVAIL = (
-  <div style={{ fontSize: 11, color: '#9ca3af', padding: '24px 16px',
-                textAlign: 'center', background: '#f9fafb',
-                borderRadius: 8, border: '1px solid #e5e7eb' }}>
-    Preview unavailable
-  </div>
-);
 
-function EmailDesktopPreview({ html, loading }) {
+function _injectMeta(html) {
+  if (!html) return '';
+  return html.includes('<base ')
+    ? html
+    : html.replace(/(<head[^>]*>)/i, '$1\n<base target="_blank">');
+}
+
+function _PreviewPlaceholder({ height, children }) {
   return (
-    <div style={{ flex: '1 1 220px', minWidth: 0, maxWidth: 620 }}>
-      <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af',
-                    textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
-        Desktop
-      </div>
-      {loading ? _PREV_LOADING
-        : html ? (
-          <iframe srcDoc={html} sandbox="allow-same-origin" title="Email preview desktop"
-            style={{ width: '100%', height: 420, border: '1px solid #E2E5EB',
-                     borderRadius: 8, display: 'block' }} />
-        ) : _PREV_EMPTY}
+    <div style={{ height: height || 120, background: '#f9fafb', borderRadius: 8,
+                  border: '1px solid #e5e7eb', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center',
+                  fontSize: 11, color: '#9ca3af', textAlign: 'center', padding: '0 16px' }}>
+      {children}
     </div>
   );
 }
 
-function EmailMobilePreview({ html, loading }) {
-  const scale = 234 / 360;
-  const iframeH = 700;
-  const containerH = Math.round(iframeH * scale);
-  if (loading) return (
-    <div style={{ height: containerH, background: '#111', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center' }}>
-      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>Loading…</span>
-    </div>
-  );
-  if (!html) return (
-    <div style={{ height: containerH, background: '#111', display: 'flex',
-                  alignItems: 'center', justifyContent: 'center' }}>
-      <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.4)' }}>Preview will appear here</span>
-    </div>
-  );
+/* EmailPreviewFrame — shared by desktop and mobile, write and template mode.
+ *
+ * device='desktop': renders email at 640px logical width, scaled to container.
+ *   Wrapper max-height 560px with vertical scroll for tall emails.
+ *   Shows Subject + To header above.
+ *
+ * device='mobile': renders email at 375px logical width inside the phone screen.
+ *   Fills 100% of the phone screen height. No black band.
+ */
+function EmailPreviewFrame({ html, device, loading, templateMode, subject, customerEmail, warnings }) {
+  const wrapperRef = useRef(null);
+  const iframeRef  = useRef(null);
+  const [containerWidth, setContainerWidth]       = useState(0);
+  const [iframeContentHeight, setIframeContentHeight] = useState(0);
+
+  // Read width synchronously so first render already has correct scale.
+  useLayoutEffect(() => {
+    if (wrapperRef.current) setContainerWidth(wrapperRef.current.offsetWidth);
+  }, []);
+
+  useEffect(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) setContainerWidth(e.contentRect.width);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Reset measured height when new HTML arrives.
+  useEffect(() => { setIframeContentHeight(0); }, [html]);
+
+  function handleLoad() {
+    try {
+      const h = iframeRef.current?.contentDocument?.documentElement?.scrollHeight;
+      if (h > 0) setIframeContentHeight(h);
+    } catch { /* cross-origin guard */ }
+  }
+
+  const preparedHtml = _injectMeta(html);
+
+  /* ── MOBILE ─────────────────────────────────────────────────────────── */
+  if (device === 'mobile') {
+    const LOGICAL = 375;
+    const cw    = containerWidth || LOGICAL;
+    const scale = cw / LOGICAL;
+    // Iframe must be at least tall enough to fill the phone screen visually.
+    const minH  = Math.ceil(480 / scale);
+    const naturalH = Math.max(iframeContentHeight || 0, minH);
+
+    return (
+      <div ref={wrapperRef}
+        style={{ height: '100%', background: '#f5f5f5', overflow: 'hidden' }}>
+        {loading ? (
+          <div style={{ height: '100%', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontSize: 10, color: '#9ca3af' }}>Loading…</span>
+          </div>
+        ) : !html ? (
+          <div style={{ height: '100%', display: 'flex',
+                        alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center', padding: '0 12px' }}>
+              Preview will appear here
+            </span>
+          </div>
+        ) : (
+          <iframe ref={iframeRef} srcDoc={preparedHtml}
+            sandbox="allow-same-origin" title="Email preview mobile"
+            onLoad={handleLoad}
+            style={{ width: LOGICAL, height: naturalH, border: 'none', display: 'block',
+                     transform: `scale(${scale})`, transformOrigin: 'top left' }} />
+        )}
+      </div>
+    );
+  }
+
+  /* ── DESKTOP ─────────────────────────────────────────────────────────── */
+  const LOGICAL = 640;
+  const cw      = containerWidth || LOGICAL;
+  const scale   = cw / LOGICAL;
+  const naturalH = iframeContentHeight || 480;
+  const scaledH  = Math.round(naturalH * scale);
+  const wrapperH = Math.min(scaledH, 560);
+  const needsScroll = scaledH > 560;
+
   return (
-    <div style={{ height: containerH, overflow: 'hidden', background: '#fff' }}>
-      <iframe srcDoc={html} sandbox="allow-same-origin" title="Email preview mobile"
-        style={{ width: 360, height: iframeH, border: 'none',
-                 transform: `scale(${scale})`, transformOrigin: 'top left' }} />
+    <div ref={wrapperRef} style={{ flex: '1 1 0', minWidth: 0 }}>
+      {/* Subject / To header */}
+      {(subject || customerEmail) && (
+        <div style={{ fontSize: 11, marginBottom: 6, lineHeight: 1.6 }}>
+          {subject    && <div style={{ fontWeight: 700, color: '#111827' }}>{subject}</div>}
+          {customerEmail && <div style={{ color: '#6b7280' }}>To: {customerEmail}</div>}
+        </div>
+      )}
+
+      {loading ? (
+        <_PreviewPlaceholder height={200}>Loading preview…</_PreviewPlaceholder>
+      ) : !html && templateMode ? (
+        <_PreviewPlaceholder>Select a template to see the preview</_PreviewPlaceholder>
+      ) : !html ? (
+        <_PreviewPlaceholder>Preview appears as you type</_PreviewPlaceholder>
+      ) : (
+        <div style={{ overflowY: needsScroll ? 'scroll' : 'hidden', overflowX: 'hidden',
+                      border: '1px solid #E2E5EB', borderRadius: 8, height: wrapperH }}>
+          {/* Spacer sized to scaled content height so scroll distance is correct. */}
+          <div style={{ position: 'relative', height: scaledH }}>
+            <iframe ref={iframeRef} srcDoc={preparedHtml}
+              sandbox="allow-same-origin" title="Email preview desktop"
+              onLoad={handleLoad}
+              style={{ position: 'absolute', top: 0, left: 0,
+                       width: LOGICAL, height: naturalH,
+                       border: 'none', display: 'block',
+                       transform: `scale(${scale})`, transformOrigin: 'top left' }} />
+          </div>
+        </div>
+      )}
+
+      {warnings?.length > 0 && (
+        <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4 }}>
+          {Array.isArray(warnings) ? warnings.join(' · ') : warnings}
+        </div>
+      )}
     </div>
   );
 }
@@ -1609,7 +1691,11 @@ function NotificationComposer({ customer, shop, onSent, onError, onTitleChange, 
   );
 }
 
-function EmailComposer({ customer, shop, onSent, onError, onPreviewHtmlChange, onPreviewLoadingChange }) {
+function EmailComposer({
+  customer, shop, onSent, onError,
+  onPreviewHtmlChange, onPreviewLoadingChange,
+  onPreviewSubjectChange, onPreviewWarningsChange, onEmailModeChange,
+}) {
   const [emailMode, setEmailMode] = useState('write');
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -1622,7 +1708,8 @@ function EmailComposer({ customer, shop, onSent, onError, onPreviewHtmlChange, o
   const [templateSending, setTemplateSending] = useState(false);
   const [templateLoading, setTemplateLoading] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
-  const previewTimer = useRef(null);
+  const previewTimer  = useRef(null);
+  const reqCountRef   = useRef(0);
 
   useEffect(() => {
     if (!shop) return;
@@ -1657,10 +1744,18 @@ function EmailComposer({ customer, shop, onSent, onError, onPreviewHtmlChange, o
     return () => clearTimeout(previewTimer.current);
   }, [subject, body, customer?.profile?._id, emailMode]);  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Clear preview when switching modes.
+  // Sync subject to parent for the desktop preview header (write mode only).
+  useEffect(() => {
+    if (emailMode === 'write' && onPreviewSubjectChange) onPreviewSubjectChange(subject);
+  }, [subject, emailMode]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Clear preview when switching modes; tell parent which mode is active.
   useEffect(() => {
     if (onPreviewHtmlChange) onPreviewHtmlChange('');
     if (onPreviewLoadingChange) onPreviewLoadingChange(false);
+    if (onPreviewSubjectChange) onPreviewSubjectChange('');
+    if (onPreviewWarningsChange) onPreviewWarningsChange(null);
+    if (onEmailModeChange) onEmailModeChange(emailMode);
     setSelectedTemplateId(null);
   }, [emailMode]);  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1717,17 +1812,25 @@ function EmailComposer({ customer, shop, onSent, onError, onPreviewHtmlChange, o
 
   /* ── template-mode helpers ── */
   async function loadTemplatePreview(id) {
+    const myReq = ++reqCountRef.current;
     setTemplateLoading(true);
     if (onPreviewLoadingChange) onPreviewLoadingChange(true);
     try {
       const res = await apiGet(`/api/email-templates/${encodeURIComponent(id)}/preview`);
+      if (myReq !== reqCountRef.current) return; // stale — a newer request is in flight
       const html = res?.html || '';
+      const warns = res?.warnings || null;
       if (onPreviewHtmlChange) onPreviewHtmlChange(html);
+      if (onPreviewWarningsChange) onPreviewWarningsChange(warns);
     } catch (_) {
+      if (myReq !== reqCountRef.current) return;
       if (onPreviewHtmlChange) onPreviewHtmlChange('');
+      if (onPreviewWarningsChange) onPreviewWarningsChange(null);
     } finally {
-      setTemplateLoading(false);
-      if (onPreviewLoadingChange) onPreviewLoadingChange(false);
+      if (myReq === reqCountRef.current) {
+        setTemplateLoading(false);
+        if (onPreviewLoadingChange) onPreviewLoadingChange(false);
+      }
     }
   }
 
@@ -1748,6 +1851,7 @@ function EmailComposer({ customer, shop, onSent, onError, onPreviewHtmlChange, o
 
   function handleSelectTemplate(t) {
     setSelectedTemplateId(t._id);
+    if (onPreviewSubjectChange) onPreviewSubjectChange(t.subject || '');
     loadTemplatePreview(t._id);
   }
 
@@ -1990,6 +2094,9 @@ function SendSection({
   const [pushBody, setPushBody] = useState('');
   const [emailPreviewHtml, setEmailPreviewHtml] = useState('');
   const [emailPreviewLoading, setEmailPreviewLoading] = useState(false);
+  const [emailPreviewSubject, setEmailPreviewSubject] = useState('');
+  const [emailPreviewWarnings, setEmailPreviewWarnings] = useState(null);
+  const [emailIsTemplateMode, setEmailIsTemplateMode] = useState(false);
   const [waMessageText, setWaMessageText] = useState('');
 
   const pushProductImage = customer?.topProducts?.[0]?.imageUrl || null;
@@ -2081,6 +2188,9 @@ function SendSection({
               customer={customer} shop={shop}
               onPreviewHtmlChange={setEmailPreviewHtml}
               onPreviewLoadingChange={setEmailPreviewLoading}
+              onPreviewSubjectChange={setEmailPreviewSubject}
+              onPreviewWarningsChange={setEmailPreviewWarnings}
+              onEmailModeChange={(mode) => setEmailIsTemplateMode(mode === 'template')}
               onSent={handleSent} onError={handleError}
             />
           )}
@@ -2124,9 +2234,22 @@ function SendSection({
             )}
             {activeTab === 'email' && (
               <>
-                <EmailDesktopPreview html={emailPreviewHtml} loading={emailPreviewLoading} />
+                <EmailPreviewFrame
+                  html={emailPreviewHtml}
+                  device="desktop"
+                  loading={emailPreviewLoading}
+                  templateMode={emailIsTemplateMode}
+                  subject={emailPreviewSubject}
+                  customerEmail={customer?.profile?.channels?.email?.address
+                    || customer?.profile?.identifiers?.emails?.[0]}
+                  warnings={emailPreviewWarnings}
+                />
                 <PhoneFrame>
-                  <EmailMobilePreview html={emailPreviewHtml} loading={emailPreviewLoading} />
+                  <EmailPreviewFrame
+                    html={emailPreviewHtml}
+                    device="mobile"
+                    loading={emailPreviewLoading}
+                  />
                 </PhoneFrame>
               </>
             )}
