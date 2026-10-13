@@ -576,7 +576,7 @@ async function processScheduledJobs() {
               });
             }
 
-            const cartUrl = `https://${job.shopDomain}/cart`;
+            const cartUrl = `https://${job.shopDomain}/cart?ccf_src=email&ccf_job=${job._id}`;
             const sendResult = await sendAbandonedCartEmail(customer, {
               subject: copy.subject || payload.subject || undefined,
               body: copy.body || payload.body || undefined,

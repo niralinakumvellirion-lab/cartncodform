@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const mongoose = require('mongoose');
 const { Resend } = require('resend');
 const rateLimit = require('express-rate-limit');
 
@@ -18,6 +19,14 @@ const { uploadImage } = require('../utils/cloudinary');
 
 // Same safe-fallback pattern as email.js: avoid crashing on load when key absent.
 const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
+
+// Append ccf_src=email&ccf_job=<id> to an https CTA URL for Activity attribution.
+// Non-https, null, or already-tagged URLs are returned unchanged.
+function tagEmailCtaUrl(url, jobId) {
+  if (!url || !/^https:\/\//i.test(url)) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}ccf_src=email&ccf_job=${jobId}`;
+}
 
 const VALID_TYPES = ['special_offer', 'festival', 'normal'];
 const EDITABLE_FIELDS = [
@@ -525,9 +534,14 @@ router.post('/:id/send', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'No email address for this profile' });
     }
 
+    // Pre-generate the ScheduledJob _id so the CTA URL can carry it for
+    // Activity attribution before the email HTML is rendered.
+    const emailJobId = new mongoose.Types.ObjectId();
+
     const { storeName, logoUrl, primaryColor } = await loadBrandData(req.shopDomain);
     const store = { shopName: storeName, logoUrl, primaryColor, shopDomain: req.shopDomain };
     const design = designFromTemplate(template, store, { placeholder: false });
+    design.ctaUrl = tagEmailCtaUrl(design.ctaUrl, emailJobId);
     const html = renderEmailDocument(design);
     const warnings = template.imageUrl ? [] : ['no_photo'];
 
@@ -549,6 +563,7 @@ router.post('/:id/send', requireAuth, async (req, res) => {
     try {
       const ScheduledJob = require('../models/ScheduledJob');
       await ScheduledJob.create({
+        _id: emailJobId,
         shopDomain: req.shopDomain,
         profileId: profile._id,
         signalType: 'manual',
@@ -607,7 +622,11 @@ router.post('/:id/broadcast', requireAuth, async (req, res) => {
     const profiles = await Profile.find(query).select('identifiers channels').lean();
     const { storeName, logoUrl, primaryColor } = await loadBrandData(req.shopDomain);
     const store = { shopName: storeName, logoUrl, primaryColor, shopDomain: req.shopDomain };
+    // Pre-generate one job ID for the whole broadcast so all recipients'
+    // emails carry the same ccf_job attribution param.
+    const broadcastJobId = new mongoose.Types.ObjectId();
     const design = designFromTemplate(template, store, { placeholder: false });
+    design.ctaUrl = tagEmailCtaUrl(design.ctaUrl, broadcastJobId);
     const html = renderEmailDocument(design);
     const warnings = template.imageUrl ? [] : ['no_photo'];
 
