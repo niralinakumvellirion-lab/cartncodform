@@ -1365,7 +1365,7 @@ export default function QueueScreen({ shop }) {
     router.push(`/admin/queue/${id}?shop=${encodeURIComponent(shop)}`);
   };
 
-  const manageTemplatesUrl = '/admin/email-templates';
+  const manageTemplatesUrl = '/admin/email-templates?back=queue';
 
   // One-time style injection — same idempotent pattern DashboardScreen
   // uses for its own keyframes. Only rule here: stack ImageUploadPair's

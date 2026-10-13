@@ -68,6 +68,7 @@ export default function EmailTemplatesScreen() {
   const shopParam     = searchParams ? (searchParams.get('shop')     || '') : '';
   const templateParam = searchParams ? (searchParams.get('template') || '') : '';
   const focusParam    = searchParams ? (searchParams.get('focus')    || '') : '';
+  const backParam     = searchParams ? (searchParams.get('back')     || '') : '';
 
   const photoCardRef        = useRef(null);
   const templateAutoSelected = useRef(false);
@@ -440,6 +441,18 @@ export default function EmailTemplatesScreen() {
       background: '#fff', borderBottom: '1px solid var(--line, #e5e5ea)',
       padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 0, flexShrink: 0,
     }}>
+      {backParam === 'queue' && (
+        <a href="/admin/queue"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4,
+                   fontSize: 12, fontWeight: 600, color: '#6b7280',
+                   textDecoration: 'none', marginBottom: 8 }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+          Back to Queue
+        </a>
+      )}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, flexWrap: 'wrap', rowGap: 6 }}>
         <div style={{ flex: 1, minWidth: 220 }}>
           <TemplatePicker
