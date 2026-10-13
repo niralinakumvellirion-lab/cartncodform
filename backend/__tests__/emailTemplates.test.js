@@ -386,7 +386,12 @@ describe('POST /:id/send', () => {
     // no imageUrl → warnings: ['no_photo']
     expect(res.body).toMatchObject({ ok: true, id: 'email_abc', warnings: ['no_photo'] });
     expect(mockRenderEmailDocument).toHaveBeenCalledWith(
-      expect.objectContaining({ subject: 'Offer', ctaUrl: 'https://shop.com', placeholder: false })
+      expect.objectContaining({
+        subject: 'Offer',
+        // ctaUrl is tagged with ccf_src=email&ccf_job=<id> for Activity attribution.
+        ctaUrl: expect.stringContaining('https://shop.com'),
+        placeholder: false,
+      })
     );
     expect(mockSend).toHaveBeenCalledWith(
       expect.objectContaining({
