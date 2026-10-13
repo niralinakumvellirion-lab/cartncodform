@@ -17,7 +17,8 @@ const { Resend } = require('resend');
 const EmailTemplate = require('../models/EmailTemplate');
 const Profile = require('../models/Profile');
 const Store = require('../models/Store');
-const { FROM, UNSUBSCRIBE_HEADERS } = require('./email');
+const { FROM } = require('./email');
+const { buildUnsubscribeHeaders, buildUnsubscribeUrl } = require('./unsubscribeToken');
 const { logBroadcastSend } = require('../services/sendLogService');
 const { renderEmailDocument } = require('./emailEngine');
 const { designFromTemplate } = require('./emailDesign');
@@ -87,10 +88,9 @@ async function sendEmailBroadcast({
     };
 
     const broadcastJobId = new mongoose.Types.ObjectId();
-    const design = designFromTemplate(template, storeCtx, { placeholder: false });
-    design.ctaUrl = tagEmailCtaUrl(design.ctaUrl, broadcastJobId);
-    if (subjectOverride) design.subject = subjectOverride;
-    const html = renderEmailDocument(design);
+    const baseDesign = designFromTemplate(template, storeCtx, { placeholder: false });
+    baseDesign.ctaUrl = tagEmailCtaUrl(baseDesign.ctaUrl, broadcastJobId);
+    if (subjectOverride) baseDesign.subject = subjectOverride;
     const finalSubject = subjectOverride || template.subject;
 
     let sent = 0;
@@ -100,13 +100,19 @@ async function sendEmailBroadcast({
     for (const profile of profiles) {
       const email = profile.channels?.email?.address || profile.identifiers?.emails?.[0];
       if (!email) { failed++; continue; }
+      const profileId = String(profile._id);
+      const perDesign = Object.assign({}, baseDesign, {
+        unsubscribeUrl: buildUnsubscribeUrl(shopDomain, profileId),
+      });
+      const html = renderEmailDocument(perDesign);
+      const headers = buildUnsubscribeHeaders(shopDomain, profileId);
       try {
         const { error } = await resend.emails.send({
           from: FROM,
           to: email,
           subject: finalSubject,
           html,
-          headers: UNSUBSCRIBE_HEADERS,
+          headers,
         });
         const success = !error;
         if (!success) console.error('[emailBroadcast] Resend error:', error.message);

@@ -8,7 +8,8 @@ const EmailTemplate = require('../models/EmailTemplate');
 const Profile = require('../models/Profile');
 const Store = require('../models/Store');
 const { requireAuth } = require('../middleware/requireOwner');
-const { FROM, UNSUBSCRIBE_HEADERS } = require('../utils/email');
+const { FROM } = require('../utils/email');
+const { buildUnsubscribeHeaders, buildUnsubscribeUrl } = require('../utils/unsubscribeToken');
 const { generateTemplateCopy } = require('../services/aiService');
 const { logBroadcastSend } = require('../services/sendLogService');
 const FESTIVALS = require('../data/festivals.json');
@@ -542,6 +543,7 @@ router.post('/:id/send', requireAuth, async (req, res) => {
     const store = { shopName: storeName, logoUrl, primaryColor, shopDomain: req.shopDomain };
     const design = designFromTemplate(template, store, { placeholder: false });
     design.ctaUrl = tagEmailCtaUrl(design.ctaUrl, emailJobId);
+    design.unsubscribeUrl = buildUnsubscribeUrl(req.shopDomain, String(profile._id));
     const html = renderEmailDocument(design);
     const warnings = template.imageUrl ? [] : ['no_photo'];
 
@@ -550,7 +552,7 @@ router.post('/:id/send', requireAuth, async (req, res) => {
       to: email,
       subject: template.subject,
       html,
-      headers: UNSUBSCRIBE_HEADERS,
+      headers: buildUnsubscribeHeaders(req.shopDomain, String(profile._id)),
     });
 
     if (error) {
@@ -625,9 +627,8 @@ router.post('/:id/broadcast', requireAuth, async (req, res) => {
     // Pre-generate one job ID for the whole broadcast so all recipients'
     // emails carry the same ccf_job attribution param.
     const broadcastJobId = new mongoose.Types.ObjectId();
-    const design = designFromTemplate(template, store, { placeholder: false });
-    design.ctaUrl = tagEmailCtaUrl(design.ctaUrl, broadcastJobId);
-    const html = renderEmailDocument(design);
+    const baseDesign = designFromTemplate(template, store, { placeholder: false });
+    baseDesign.ctaUrl = tagEmailCtaUrl(baseDesign.ctaUrl, broadcastJobId);
     const warnings = template.imageUrl ? [] : ['no_photo'];
 
     let sent = 0;
@@ -640,13 +641,18 @@ router.post('/:id/broadcast', requireAuth, async (req, res) => {
         failed++;
         continue;
       }
+      const profileId = String(profile._id);
+      const perDesign = Object.assign({}, baseDesign, {
+        unsubscribeUrl: buildUnsubscribeUrl(req.shopDomain, profileId),
+      });
+      const html = renderEmailDocument(perDesign);
       try {
         const { data, error } = await resend.emails.send({
           from: FROM,
           to: email,
           subject: template.subject,
           html,
-          headers: UNSUBSCRIBE_HEADERS,
+          headers: buildUnsubscribeHeaders(req.shopDomain, profileId),
         });
         const success = !error;
         if (!success) console.error('[email-templates] broadcast send error:', error.message);

@@ -10,6 +10,13 @@
 jest.mock('../models/Profile', () => ({
   findOne: jest.fn(),
 }));
+jest.mock('../utils/unsubscribeToken', () => ({
+  buildUnsubscribeHeaders: jest.fn().mockReturnValue({
+    'List-Unsubscribe': '<https://example.com/unsub/t>, <mailto:u@example.com>',
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+  }),
+  buildUnsubscribeUrl: jest.fn().mockReturnValue('https://example.com/unsub/t'),
+}));
 
 jest.mock('../models/Store', () => ({
   findOne: jest.fn(),

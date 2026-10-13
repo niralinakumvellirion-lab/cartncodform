@@ -322,6 +322,8 @@ describe('processFestivalQueue poller', () => {
     jest.spyOn(console, 'error').mockImplementation(() => {});
     jest.spyOn(console, 'log').mockImplementation(() => {});
     mockFestivalQueue.findByIdAndUpdate.mockResolvedValue({});
+    // Default: claim succeeds (returns truthy) so each item proceeds as normal.
+    mockFestivalQueue.findOneAndUpdate.mockResolvedValue({ _id: 'claimed' });
   });
 
   afterEach(() => jest.restoreAllMocks());
@@ -412,7 +414,7 @@ describe('processFestivalQueue poller', () => {
 
     expect(mockFestivalQueue.findByIdAndUpdate).toHaveBeenCalledWith(
       'fq5',
-      expect.objectContaining({ failedAttempts: 1 })
+      expect.objectContaining({ $set: { failedAttempts: 1 } })
     );
     // status NOT set to 'sent' or 'cancelled' on first failure
     const calls = mockFestivalQueue.findByIdAndUpdate.mock.calls;
@@ -430,5 +432,24 @@ describe('processFestivalQueue poller', () => {
     expect(mockFestivalQueue.findByIdAndUpdate).toHaveBeenCalledWith(
       'fq6', { status: 'cancelled' }
     );
+  });
+
+  test('two concurrent poller ticks send email only once (atomic claim guard)', async () => {
+    const item = { _id: 'fq-claim', shopDomain: 'demo.myshopify.com', channel: 'email',
+      templateId: 'tpl1', subject: 'S', title: 'T',
+      status: 'approved', scheduledAt: new Date(Date.now() - 1000), failedAttempts: 0 };
+    mockFindItems([item]);
+    mockSendEmailBroadcast.mockResolvedValue({ sent: 5, failed: 0, total: 5 });
+
+    // First findOneAndUpdate (the claim) returns the item for tick 1, null for tick 2.
+    let claimCalls = 0;
+    mockFestivalQueue.findOneAndUpdate.mockImplementation(() => {
+      claimCalls++;
+      return Promise.resolve(claimCalls === 1 ? item : null);
+    });
+
+    await Promise.all([_processFestivalQueue(), _processFestivalQueue()]);
+
+    expect(mockSendEmailBroadcast).toHaveBeenCalledTimes(1);
   });
 });

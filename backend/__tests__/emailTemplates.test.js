@@ -59,6 +59,13 @@ jest.mock('../utils/email', () => ({
   },
   buildEmailHtml: mockBuildEmailHtml,
 }));
+jest.mock('../utils/unsubscribeToken', () => ({
+  buildUnsubscribeHeaders: jest.fn().mockReturnValue({
+    'List-Unsubscribe': '<https://example.com/unsub/t>, <mailto:u@example.com>',
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+  }),
+  buildUnsubscribeUrl: jest.fn().mockReturnValue('https://example.com/unsub/t'),
+}));
 
 const mockRenderEmailDocument = jest.fn().mockReturnValue('<html>rendered</html>');
 jest.mock('../utils/emailEngine', () => ({

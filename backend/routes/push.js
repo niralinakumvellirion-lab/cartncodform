@@ -2,7 +2,8 @@ const express = require('express');
 const PushSubscription = require('../models/PushSubscription');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const { sendPushToStore, sendPushToCustomers, buildClickUrl } = require('../utils/pushNotification');
-const { sendAbandonedCartEmail, FROM, UNSUBSCRIBE_HEADERS, buildEmailHtml } = require('../utils/email');
+const { sendAbandonedCartEmail, FROM, buildEmailHtml } = require('../utils/email');
+const { buildUnsubscribeHeaders, buildUnsubscribeUrl } = require('../utils/unsubscribeToken');
 const { logBroadcastSend } = require('../services/sendLogService');
 const { fetchProductImage } = require('./webhooks');
 const { requireAuth } = require('../middleware/requireOwner');
@@ -569,6 +570,7 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
     primaryColor,
     layout: 'hero',
     showLogo: true,
+    unsubscribeUrl: buildUnsubscribeUrl(shop, String(profile._id)),
   });
 
   const { data, error } = await resend.emails.send({
@@ -576,7 +578,7 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
     to: email,
     subject,
     html,
-    headers: UNSUBSCRIBE_HEADERS,
+    headers: buildUnsubscribeHeaders(shop, String(profile._id)),
   });
 
   const sendOk = !error;

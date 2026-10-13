@@ -557,6 +557,13 @@ describe('email CTA URL attribution', () => {
       UNSUBSCRIBE_HEADERS: { 'List-Unsubscribe': '<mailto:unsub@example.com>' },
       buildEmailHtml: jest.fn().mockReturnValue('<html>email</html>'),
     }));
+    jest.mock('../utils/unsubscribeToken', () => ({
+      buildUnsubscribeHeaders: jest.fn().mockReturnValue({
+        'List-Unsubscribe': '<https://example.com/unsub/t>, <mailto:u@example.com>',
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+      }),
+      buildUnsubscribeUrl: jest.fn().mockReturnValue('https://example.com/unsub/t'),
+    }));
     jest.mock('../services/aiService', () => ({ generateTemplateCopy: jest.fn() }));
     jest.mock('../services/sendLogService', () => ({
       logBroadcastSend: (...a) => mockLogBroadcastSend(...a),
@@ -713,7 +720,8 @@ describe('email CTA URL attribution', () => {
       const req = { shopDomain: SHOP, params: { id: 'tpl1' }, body: { segment: 'everyone' } };
       await handler(req, makeRes());
 
-      expect(mockRenderEmailDocument).toHaveBeenCalledTimes(1);
+      // HTML is now rendered once per recipient (for per-recipient unsubscribe tokens).
+      expect(mockRenderEmailDocument).toHaveBeenCalledTimes(2);
       const [design] = mockRenderEmailDocument.mock.calls[0];
       expect(design.ctaUrl).toMatch(/ccf_src=email/);
       expect(design.ctaUrl).toMatch(/ccf_job=[0-9a-f]{24}/);

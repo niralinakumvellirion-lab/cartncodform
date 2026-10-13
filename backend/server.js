@@ -167,6 +167,9 @@ app.use('/api/whatsapp', whatsappRouter);
 const dashboardRouter = require('./routes/dashboard');
 app.use('/api/dashboard', dashboardRouter);
 app.use('/apps/cartncodform', proxyRouter);
+// Public unsubscribe endpoint — no requireAuth, has its own rate limiter.
+const unsubscribeRouter = require('./routes/unsubscribe');
+app.use('/api/unsubscribe', unsubscribeRouter);
 
 // --- 404 + error handlers ---------------------------------------------------
 app.use((req, res) => {
@@ -491,7 +494,8 @@ async function processScheduledJobs() {
                     emailAddr,
                     subject,
                     body.replace(/\n/g, '<br>'),
-                    job.shopDomain
+                    job.shopDomain,
+                    job.profileId
                   );
 
                   // Field names match the Profile.messages subdocument
@@ -581,6 +585,7 @@ async function processScheduledJobs() {
               subject: copy.subject || payload.subject || undefined,
               body: copy.body || payload.body || undefined,
               cartUrl,
+              profileId: job.profileId || null,
             });
             if (!sendResult.success) {
               await ScheduledJob.findByIdAndUpdate(job._id, {
@@ -650,6 +655,9 @@ const FESTIVAL_MAX_FAILED_ATTEMPTS = 5;
 async function processFestivalQueue() {
   try {
     const now = new Date();
+    // Claim expiry: a sendClaimedAt older than 15 min is considered stale
+    // (the poller that claimed it likely crashed), and may be reclaimed.
+    const claimExpiry = new Date(now.getTime() - 15 * 60 * 1000);
     // Same .limit(20)-per-tick safeguard processScheduledJobs already
     // uses above, for the same reason (bound how much one tick can do).
     // WhatsApp items are never auto-sent — the seller sends manually; they
@@ -658,9 +666,18 @@ async function processFestivalQueue() {
       status: 'approved',
       scheduledAt: { $lte: now },
       channel: { $in: ['push', 'email', null] },
+      $or: [{ sendClaimedAt: null }, { sendClaimedAt: { $lt: claimExpiry } }],
     }).limit(20);
 
     for (const item of dueItems) {
+      // Atomic claim: only one poller tick wins; the other silently skips.
+      const claimed = await FestivalQueue.findOneAndUpdate(
+        { _id: item._id, status: 'approved',
+          $or: [{ sendClaimedAt: null }, { sendClaimedAt: { $lt: claimExpiry } }] },
+        { $set: { sendClaimedAt: now } }
+      );
+      if (!claimed) continue;
+
       try {
         const ch = item.channel || 'push';
 
@@ -704,7 +721,9 @@ async function processFestivalQueue() {
               await FestivalQueue.findByIdAndUpdate(item._id, { status: 'cancelled', failedAttempts });
               console.error(`[festival-queue] email item ${item._id} CANCELLED`);
             } else {
-              await FestivalQueue.findByIdAndUpdate(item._id, { failedAttempts });
+              // Clear claim so the next tick can pick it up.
+              await FestivalQueue.findByIdAndUpdate(item._id,
+                { $set: { failedAttempts }, $unset: { sendClaimedAt: 1 } });
             }
           }
           continue;
@@ -785,12 +804,16 @@ async function processFestivalQueue() {
               `consecutive failed attempts — last error: ${errMsg}`
             );
           } else {
-            // Leave status 'approved' so it retries next tick.
-            await FestivalQueue.findByIdAndUpdate(item._id, { failedAttempts });
+            // Leave status 'approved' so it retries next tick; clear claim.
+            await FestivalQueue.findByIdAndUpdate(item._id,
+              { $set: { failedAttempts }, $unset: { sendClaimedAt: 1 } });
           }
         }
       } catch (itemErr) {
         console.error(`[festival-queue] item ${item._id} error:`, itemErr.message);
+        // Release the claim so the next tick can retry.
+        await FestivalQueue.findByIdAndUpdate(item._id, { $unset: { sendClaimedAt: 1 } })
+          .catch(() => {});
       }
     }
   } catch (err) {

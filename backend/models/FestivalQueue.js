@@ -34,6 +34,10 @@ const festivalQueueSchema = new mongoose.Schema({
   channel: { type: String, enum: ['push', 'email', 'whatsapp'], default: 'push' },
   templateId: { type: mongoose.Schema.Types.ObjectId, ref: 'EmailTemplate', default: null },
   subject: { type: String, default: '' },
+  // Claimed by a poller tick before sending; cleared on retry so the next tick
+  // can pick it up. Null means unclaimed. A claim older than 15 min is stale
+  // (the poller likely crashed) and may be reclaimed by the next tick.
+  sendClaimedAt: { type: Date, default: null },
 }, { timestamps: true });
 
 module.exports = mongoose.model('FestivalQueue', festivalQueueSchema);

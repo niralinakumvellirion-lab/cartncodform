@@ -1,5 +1,6 @@
 const { Resend } = require('resend');
 const { renderEmailDocument } = require('./emailEngine');
+const { buildUnsubscribeHeaders, buildUnsubscribeUrl } = require('./unsubscribeToken');
 
 // The Resend constructor throws if the key is falsy, which would crash server
 // startup when RESEND_API_KEY is unset. Fall back to a placeholder so the app
@@ -140,6 +141,15 @@ async function sendAbandonedCartEmail(customer, options = {}) {
       : '';
     const cta = options.cartUrl || process.env.FRONTEND_URL || '#';
 
+    const shopDomain = customer.shopDomain || '';
+    const profileId = options.profileId ? String(options.profileId) : null;
+    const unsubUrl = (shopDomain && profileId)
+      ? buildUnsubscribeUrl(shopDomain, profileId)
+      : 'mailto:unsubscribe@shopireachboost.com';
+    const headers = (shopDomain && profileId)
+      ? buildUnsubscribeHeaders(shopDomain, profileId)
+      : UNSUBSCRIBE_HEADERS;
+
     const html = shell(
       `<h1 style="font-size:22px;margin:0 0 12px;">You forgot something!</h1>` +
         `<p style="margin:0 0 16px;color:#4b5563;">Here's what's still waiting in your cart:</p>` +
@@ -152,7 +162,9 @@ async function sendAbandonedCartEmail(customer, options = {}) {
         `</table>` +
         `<p style="margin:24px 0;">${button(cta, 'Complete Your Order')}</p>` +
         `<p style="margin:32px 0 0;font-size:12px;color:#9ca3af;">` +
-        `This reminder was sent by ShopiReachBoost AI</p>`
+        `This reminder was sent by ShopiReachBoost AI</p>` +
+        `<p style="margin:6px 0 0;font-size:12px;color:#9ca3af;">` +
+        `Don't want these emails? <a href="${escapeHtml(unsubUrl)}" style="color:#6b7280;">Unsubscribe</a></p>`
     );
 
     const { error } = await resend.emails.send({
@@ -160,6 +172,7 @@ async function sendAbandonedCartEmail(customer, options = {}) {
       to: customer.email,
       subject: subject,
       html,
+      headers,
     });
 
     if (error) throw new Error(error.message || JSON.stringify(error));
@@ -232,7 +245,7 @@ async function sendNewCodOrderEmail(order, ownerEmail) {
 //    subject/body — see backend/services/aiService.js generateEmailCopy())
 // ---------------------------------------------------------------------------
 
-async function sendMarketingEmail(to, subject, htmlBody, shopDomain) {
+async function sendMarketingEmail(to, subject, htmlBody, shopDomain, profileId) {
   if (!process.env.RESEND_API_KEY) {
     console.warn('[email] RESEND_API_KEY not set — skipping');
     return { skipped: true };
@@ -241,6 +254,13 @@ async function sendMarketingEmail(to, subject, htmlBody, shopDomain) {
     console.warn('[email] Invalid email address — skipping');
     return { skipped: true };
   }
+
+  const unsubUrl = (shopDomain && profileId)
+    ? buildUnsubscribeUrl(shopDomain, String(profileId))
+    : 'mailto:unsubscribe@shopireachboost.com';
+  const headers = (shopDomain && profileId)
+    ? buildUnsubscribeHeaders(shopDomain, String(profileId))
+    : UNSUBSCRIBE_HEADERS;
 
   // Reuse the shared client above (already guarded against a missing key)
   // rather than constructing a second Resend SDK instance per call.
@@ -262,12 +282,13 @@ async function sendMarketingEmail(to, subject, htmlBody, shopDomain) {
             border-top:1px solid #f3f4f6">
           <p style="font-size:12px;color:#9ca3af;margin:0">
             You received this because you subscribed to
-            notifications from ${shopDomain || 'this store'}.
-            <br>To unsubscribe, reply with "unsubscribe".
+            notifications from ${escapeHtml(shopDomain || 'this store')}.
+            <br><a href="${escapeHtml(unsubUrl)}" style="color:#9ca3af;">Unsubscribe</a>
           </p>
         </div>
       </div>
     `,
+    headers,
   });
 
   if (error) {
