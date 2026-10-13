@@ -1121,10 +1121,10 @@ function AddEngagementView({
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                             marginBottom: 8, flexWrap: 'wrap', gap: 4 }}>
                 <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Choose a template</span>
-                <a href={manageTemplatesUrl} target="_blank" rel="noopener noreferrer"
+                <a href={manageTemplatesUrl}
                    aria-label="Manage email templates"
                    style={{ fontSize: 11, color: '#2459D6', textDecoration: 'underline', flexShrink: 0 }}>
-                  Manage templates ↗
+                  Manage templates
                 </a>
               </div>
               {emailTemplatesLoading ? (
@@ -1143,7 +1143,7 @@ function AddEngagementView({
               ) : emailTemplates.length === 0 ? (
                 <div style={{ fontSize: 13, color: '#9ca3af', background: '#f9fafb', borderRadius: 8, padding: 12 }}>
                   No saved email templates. Create one in the{' '}
-                  <a href={manageTemplatesUrl} target="_blank" rel="noopener noreferrer"
+                  <a href={manageTemplatesUrl}
                      aria-label="Manage email templates"
                      style={{ color: '#2459D6', textDecoration: 'underline' }}>
                     Email Templates section
