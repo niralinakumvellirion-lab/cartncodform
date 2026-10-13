@@ -1118,7 +1118,15 @@ function AddEngagementView({
         {step === 'email' && (
           <div>
             <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Choose a template</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            marginBottom: 8, flexWrap: 'wrap', gap: 4 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Choose a template</span>
+                <a href="/admin/email-templates" target="_blank" rel="noopener noreferrer"
+                   aria-label="Manage email templates"
+                   style={{ fontSize: 11, color: '#2459D6', textDecoration: 'underline', flexShrink: 0 }}>
+                  Manage templates ↗
+                </a>
+              </div>
               {emailTemplatesLoading ? (
                 <div style={{ fontSize: 13, color: '#9ca3af', background: '#f9fafb', borderRadius: 8, padding: 12 }}>
                   Loading templates…
@@ -1134,7 +1142,13 @@ function AddEngagementView({
                 </div>
               ) : emailTemplates.length === 0 ? (
                 <div style={{ fontSize: 13, color: '#9ca3af', background: '#f9fafb', borderRadius: 8, padding: 12 }}>
-                  No saved email templates. Create one in the Email Templates section first.
+                  No saved email templates. Create one in the{' '}
+                  <a href="/admin/email-templates" target="_blank" rel="noopener noreferrer"
+                     aria-label="Manage email templates"
+                     style={{ color: '#2459D6', textDecoration: 'underline' }}>
+                    Email Templates section
+                  </a>
+                  {' '}first.
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1643,6 +1657,18 @@ export default function QueueScreen({ shop }) {
     }
   }, [selectedDayStr]);
 
+  // Refetch templates when the tab regains focus while the email step is open
+  // (same pattern as CustomerDetail's visibilitychange handler).
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === 'visible' && addEngStep === 'email') {
+        doFetchEmailTemplates();
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [addEngStep]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function handleFestivalClick(dateStr) {
     setAddEngMode(false);
     if (selectedDayStr === dateStr && dayPanelTab === 'festival' && !addEngMode) {
@@ -1679,13 +1705,21 @@ export default function QueueScreen({ shop }) {
     setAddEngNewId(null);
   }
 
-  function retryEmailTemplates() {
+  function doFetchEmailTemplates() {
     setEmailTemplatesLoading(true);
     setEmailTemplatesError('');
     apiGet('/api/email-templates')
-      .then(d => { setEmailTemplates(d?.templates || []); setEmailTemplatesLoading(false); })
+      .then(d => {
+        const fresh = d?.templates || [];
+        setEmailTemplates(fresh);
+        setEmailTemplatesLoading(false);
+        // Deselect if the selected template was removed
+        setAddEngTemplateId(prev => (prev && !fresh.some(t => t._id === prev) ? null : prev));
+      })
       .catch(() => { setEmailTemplatesError('Could not load templates.'); setEmailTemplatesLoading(false); });
   }
+
+  function retryEmailTemplates() { doFetchEmailTemplates(); }
 
   function openAddEngStep(step, channel) {
     setAddEngStep(step);
@@ -1706,11 +1740,7 @@ export default function QueueScreen({ shop }) {
         setAddEngSendTime('18:00');
         setAddEngSegment('everyone');
         // Always refetch when email step opens (never cache a failed/empty result).
-        setEmailTemplatesLoading(true);
-        setEmailTemplatesError('');
-        apiGet('/api/email-templates')
-          .then(d => { setEmailTemplates(d?.templates || []); setEmailTemplatesLoading(false); })
-          .catch(() => { setEmailTemplatesError('Could not load templates.'); setEmailTemplatesLoading(false); });
+        doFetchEmailTemplates();
         // Fetch all segment counts in parallel, cache for session.
         if (!emailSegmentCounts) {
           const segs = ['everyone', 'email_captured', 'has_cart', 'bought_once', 'going_quiet'];
