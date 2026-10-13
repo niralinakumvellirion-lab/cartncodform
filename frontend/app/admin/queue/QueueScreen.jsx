@@ -1062,25 +1062,9 @@ function AddEngagementView({
                   <div style={{ fontSize: 13, fontWeight: 700, color: '#4f46e5' }}>All push subscribers</div>
                   <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>Everyone who allowed notifications on your store</div>
                 </div>
-                {/* Disabled soon cards */}
-                {[
-                  { label: 'Left items in cart', desc: 'Push subscribers with items in cart' },
-                  { label: 'Bought once', desc: 'First-time buyers with push enabled' },
-                  { label: 'Going quiet', desc: 'Push subscribers who haven\'t opened recently' },
-                ].map(opt => (
-                  <div key={opt.label} role="radio" aria-checked={false} aria-disabled="true"
-                    style={{ border: '1px solid #e5e7eb', borderRadius: 8, padding: '10px 12px', marginBottom: 6,
-                      background: '#f9fafb', opacity: 0.6 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{opt.label}</span>
-                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: '#e0e7ff', color: '#4338ca' }}>Soon</span>
-                    </div>
-                    <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>{opt.desc}</div>
-                  </div>
-                ))}
               </div>
               <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 4 }}>
-                Push reaches everyone who allowed notifications. Narrower groups are not available yet.
+                Push reaches everyone who allowed notifications on your store.
               </div>
             </div>
             {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 10 }}>{error}</div>}
