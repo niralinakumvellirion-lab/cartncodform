@@ -737,10 +737,12 @@ function DayDetailsPanel({
                           background: '#4f46e5', color: '#fff', fontSize: 11, fontWeight: 600, cursor: 'pointer',
                         }}>Approve</button>
                       )}
-                      <button onClick={() => openEditModal(item)} style={{
-                        padding: '5px 10px', borderRadius: 6, border: '1px solid #e5e7eb',
-                        background: '#fff', color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                      }}>Edit</button>
+                      {(!item.channel || item.channel === 'push') && (
+                        <button onClick={() => openEditModal(item)} style={{
+                          padding: '5px 10px', borderRadius: 6, border: '1px solid #e5e7eb',
+                          background: '#fff', color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                        }}>Edit</button>
+                      )}
                       <button onClick={async () => {
                         await apiSend(
                           `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
@@ -1846,13 +1848,15 @@ export default function QueueScreen({ shop }) {
                                       fontWeight: 600, cursor: 'pointer',
                                     }}>Approve</button>
                                 )}
-                                <button
-                                  onClick={() => openEditModal(item)}
-                                  style={{
-                                    padding: '5px 10px', borderRadius: 6,
-                                    border: '1px solid #e5e7eb', background: '#fff',
-                                    color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                                  }}>Edit</button>
+                                {(!item.channel || item.channel === 'push') && (
+                                  <button
+                                    onClick={() => openEditModal(item)}
+                                    style={{
+                                      padding: '5px 10px', borderRadius: 6,
+                                      border: '1px solid #e5e7eb', background: '#fff',
+                                      color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                                    }}>Edit</button>
+                                )}
                                 <button
                                   onClick={async () => {
                                     await apiSend(
