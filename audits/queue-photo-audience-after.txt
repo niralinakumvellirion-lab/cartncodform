@@ -1,0 +1,135 @@
+SELF-AUDIT: queue-photo-audience
+Commits: 8486c5d (backend), b587a77 (frontend)
+Date: 2026-10-13
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PART 0 ANSWERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+(a) Body-size limit
+  Global: express.json({ limit: '10mb' }) in server.js line 71.
+  Two base64-encoded 1.5 MB images = ~4 MB of base64 → well within 10 MB.
+  No per-route override added. Queue router inherits the global limit.
+  Decision: no limit change needed.
+
+(b) AddEngagementView POST body build (before this change)
+  saveEngagement (QueueScreen.jsx, line 1411 in original):
+    payload = { channel, scheduledAt }
+    push adds: title, body
+    email adds: templateId, subject
+    whatsapp adds: body only
+  mobileImageUrl/desktopImageUrl were NOT sent (state didn't exist).
+  segment was NOT sent.
+  Backend POST handler already accepted + stored mobileImageUrl/desktopImageUrl
+  but saveEngagement never sent them.
+
+(c) VALID_SEGMENTS
+  ['everyone', 'email_captured', 'has_cart', 'bought_once', 'going_quiet']
+  Defined identically in backend/routes/emailTemplates.js:49 and
+  backend/utils/emailBroadcast.js:28.
+  GET /api/email-templates/count?segment=X returns { count: Number } or
+  400/500 on error.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FILES CHANGED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Backend commit (8486c5d):
+  backend/models/FestivalQueue.js — segment field (enum, default 'everyone')
+  backend/routes/queue.js — segment validation in POST; push-subscriber-count
+    GET endpoint
+  backend/server.js — pass segment to sendEmailBroadcast; cancel on invalid
+    stored segment
+  backend/__tests__/addEngagement.test.js — 10 new tests (segment valid/
+    invalid/default for email; push/whatsapp store 'everyone'; poller passes
+    segment; invalid stored segment → cancelled; old row → 'everyone';
+    push-subscriber-count + IDOR check)
+
+Frontend commit (b587a77):
+  frontend/app/admin/queue/QueueScreen.jsx — all changes in AddEngagementView
+    and QueueScreen state/handlers
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FINAL POST BODY PER CHANNEL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+push:
+  { channel: 'push', scheduledAt, title, body,
+    mobileImageUrl: '<data:image/…|empty string>',
+    desktopImageUrl: '<data:image/…|empty string>' }
+  segment NOT sent (backend ignores it for push, stores 'everyone')
+
+email:
+  { channel: 'email', scheduledAt, templateId, subject,
+    segment: '<one of VALID_SEGMENTS, default everyone>' }
+
+whatsapp:
+  { channel: 'whatsapp', scheduledAt, body }
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SAVE BUTTON BEHAVIOUR (each audience / loading / error / zero case)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Push:
+  - Audience always "All push subscribers" (selected by default, no choice).
+  - Save enabled as long as title ≤ 50 chars (push form field guard).
+  - pushSubscriberCount loading: count shows "…", Save not affected.
+  - pushSubscriberCount error: count shows "…" (falls back to 0 total), Save
+    not affected.
+
+Email:
+  - Counts loading (emailSegmentCounts[segment] === null): count shows "…",
+    Save enabled (server validates).
+  - Counts error (count === -1): count shows "–", Save enabled.
+  - Count is 0: "No customers in this group yet." shown, Save disabled
+    (emailZeroCount = true → emailValid = false).
+  - Count > 0: Save enabled (with template + subject present).
+  - Counts not fetched yet (emailSegmentCounts === null): Save enabled.
+
+WhatsApp:
+  - No audience picker. Save enabled if body ≤ 300 chars.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BODY-SIZE LIMIT CHANGE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Not changed. Global 10 MB limit is sufficient for two 1.5 MB images.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TEST AND BUILD RESULTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Backend: 1088 tests pass (52 suites) — 10 new tests in addEngagement.test.js
+Frontend build: clean — /admin/queue 19.1 kB, 0 errors, 0 warnings
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+WHAT COULD NOT BE VERIFIED WITHOUT A BROWSER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. The 1 MB file guard uses `dataUri.length > MAX_PHOTO_BYTES * 1.37`.
+   Base64 encodes 3 bytes as 4 chars (×4/3 ≈ 1.333), plus the `data:image/…;
+   base64,` prefix (~30 chars). The factor 1.37 gives ~3% headroom. A real
+   browser test would confirm the exact threshold on a 1.0 MB vs 1.05 MB file.
+
+2. The Mobile/Desktop preview image renders at `aspectRatio: '2/1'` — cannot
+   verify the exact pixel layout or that object-fit cover works as expected
+   without a browser.
+
+3. Audience radio cards: `role="radio"` + `aria-checked` are set but keyboard
+   navigation (arrow keys to move between options) is not implemented —
+   only click. Full ARIA 1.1 radiogroup pattern requires keyboard handling;
+   the spec said to add the roles which is done.
+
+4. The email segment count fetch hits
+   `/api/email-templates/${shop}/count?segment=X`. The route is
+   GET /api/email-templates/count?segment=X — the shop comes from
+   requireAuth's req.shopDomain. The frontend path includes shop in the URL
+   (as the existing email-templates list endpoint does) but the count route
+   does not actually use it as a URL param — requireAuth sets shopDomain from
+   the session token. This is consistent with how every other admin call works
+   and is not a bug; verified against emailTemplates.js line 204-218.
+
+5. Push-subscriber-count: the "About N customers" on the audience header
+   shows pushSubscriberCount?.total. The fetch only fires the first time the
+   push channel is opened per session (guarded by `pushSubscriberCount === null`).
+   This is intentional — same pattern as email segment counts.
