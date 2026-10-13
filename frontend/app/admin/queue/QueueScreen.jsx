@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiGet, apiSend, buildShopifyAdminAppUrl } from '../../../lib/api';
+import { apiGet, apiSend } from '../../../lib/api';
 import QuietHoursWarning, { useQuietHoursSettings, formatLocalDateTimeInput } from '../components/QuietHoursWarning';
 import { ShimmerCard } from '../components/Shimmer';
 import { ImageUploadPair } from '../components/ImageUploadPair';
@@ -1365,7 +1365,7 @@ export default function QueueScreen({ shop }) {
     router.push(`/admin/queue/${id}?shop=${encodeURIComponent(shop)}`);
   };
 
-  const manageTemplatesUrl = buildShopifyAdminAppUrl(shop, '/admin/email-templates');
+  const manageTemplatesUrl = '/admin/email-templates';
 
   // One-time style injection — same idempotent pattern DashboardScreen
   // uses for its own keyframes. Only rule here: stack ImageUploadPair's
