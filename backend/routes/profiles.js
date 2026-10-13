@@ -74,7 +74,7 @@ router.get('/:shopDomain/messages', requireAuth, requireStoreOwner, async (req, 
       // a plain visit to this screen is unchanged.
       status: req.query.status || { $in: ['sent', 'skipped', 'failed', 'cancelled'] },
     };
-    if (req.query.channel === 'push' || req.query.channel === 'email') {
+    if (req.query.channel === 'push' || req.query.channel === 'email' || req.query.channel === 'whatsapp') {
       filter.channel = req.query.channel;
     }
     // sentAt range — only applied when actually requested. Doing this
@@ -94,7 +94,7 @@ router.get('/:shopDomain/messages', requireAuth, requireStoreOwner, async (req, 
         .skip(page * limit)
         .limit(limit)
         .select(
-          'profileId signalType channel payload status outcome runAt reason cartToken sentAt createdAt updatedAt'
+          'profileId signalType channel payload messageText purpose status outcome runAt reason cartToken sentAt createdAt updatedAt'
         )
         .populate('profileId', 'identifiers stage'),
       ScheduledJob.countDocuments(filter),
