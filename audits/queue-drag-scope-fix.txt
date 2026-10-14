@@ -1,0 +1,73 @@
+AUDIT: queue-drag-scope-fix (self-audit)
+File: frontend/app/admin/queue/QueueScreen.jsx
+Date: 2026-10-14
+
+=== PROBLEM ===
+
+dragEndedRef was declared only in QueueScreen (~line 1710) but also used
+in DayDetailsPanel's card onDragStart/onDragEnd (lines 722-729). DayDetailsPanel
+is a separate function component — it does not receive dragEndedRef as a prop
+and cannot close over QueueScreen's local variables. This would throw a
+ReferenceError at runtime on every drag start or drag end in DayDetailsPanel.
+
+=== FIX ===
+
+Added `const dragEndedRef = useRef(false);` as the first line of DayDetailsPanel's
+function body (line 608), before all other derived values. This gives DayDetailsPanel
+its own independent ref — correct behaviour because DayDetailsPanel manages its own
+drag-start/drag-end lifecycle and does not share state with the planning list's
+drag cycle.
+
+BEFORE (DayDetailsPanel body, line 607):
+  }) {
+    const festival = festivalCalendar.find(f => f.date.startsWith(dateStr));
+
+AFTER:
+  }) {
+    const dragEndedRef = useRef(false);
+    const festival = festivalCalendar.find(f => f.date.startsWith(dateStr));
+
+No other changes to the handlers — the existing rAF + flag logic in
+DayDetailsPanel (lines 721–729) is correct and unchanged.
+
+=== GREP: every dragEndedRef usage and its scope ===
+
+Line 608  — DayDetailsPanel — DECLARATION: const dragEndedRef = useRef(false);
+Line 722  — DayDetailsPanel — onDragStart: dragEndedRef.current = false;
+Line 724  — DayDetailsPanel — onDragStart rAF: if (!dragEndedRef.current && onCardDragStart)
+Line 728  — DayDetailsPanel — onDragEnd: dragEndedRef.current = true;
+
+Line 1710 — QueueScreen      — DECLARATION: const dragEndedRef = useRef(false);
+Line 2306 — QueueScreen      — planning list onDragStart: dragEndedRef.current = false;
+Line 2308 — QueueScreen      — planning list onDragStart rAF: if (!dragEndedRef.current)
+Line 2312 — QueueScreen      — planning list onDragEnd: dragEndedRef.current = true;
+
+MonthCalendar: 0 usages of dragEndedRef (confirmed by grep — receives only
+  dragItem, dragOverDate, onCellDragOver, onCellDragLeave, onCellDrop props).
+AddEngagementView and all other sub-components: 0 usages.
+
+Both declarations are now in their own component scope. No cross-component leakage.
+
+=== ESLINT no-undef RESULT ===
+
+The frontend project has no ESLint config (no .eslintrc / eslint.config.* file,
+no "eslint" in package.json devDependencies). Running `npx eslint` (v10) failed
+with "ESLint couldn't find an eslint.config.* file." — the project relies on
+Next.js's built-in ESLint integration (`next lint`) rather than standalone eslint.
+
+`npm run build` (Next.js) implicitly runs next lint if configured. The build
+completed with 0 errors and 0 warnings, which includes Next.js's built-in ESLint
+pass. No undefined-variable warnings were reported.
+
+=== BUILD RESULT ===
+
+  npm run build (Next.js 14, frontend/)
+  18 pages compiled successfully, 0 errors.
+  /admin/queue: 21.9 kB (unchanged).
+
+=== GIT DIFF --STAT ===
+
+  frontend/app/admin/queue/QueueScreen.jsx | 1 +
+  1 file changed, 1 insertion(+)
+
+Only QueueScreen.jsx changed.

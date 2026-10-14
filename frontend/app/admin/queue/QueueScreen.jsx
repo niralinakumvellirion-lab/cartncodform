@@ -605,6 +605,7 @@ function DayDetailsPanel({
   onBack, onAddEngagement, shop, openEditModal, goToFestivalDetail, setFestivalItems,
   dragItem, onCardDragStart, onCardDragEnd, dragNewId,
 }) {
+  const dragEndedRef = useRef(false);
   const festival = festivalCalendar.find(f => f.date.startsWith(dateStr));
   const parts = dateStr.split('-');
   const notifications = festivalItems.filter(item => {
