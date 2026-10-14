@@ -348,6 +348,44 @@ function groupFestivalItemsByDay(items) {
   return Array.from(groups.values());
 }
 
+// Returns { y, mo, d } of `date` in the given IANA timezone.
+// Falls back to browser local time if the timezone string is unusable.
+function getDatePartsInTz(date, tz) {
+  try {
+    const s = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(date);
+    const [y, mo, d] = s.split('-').map(Number);
+    return { y, mo, d };
+  } catch {
+    return { y: date.getFullYear(), mo: date.getMonth() + 1, d: date.getDate() };
+  }
+}
+
+// Groups items by calendar date in the store timezone.
+// Returns [{dateStr: 'YYYY-MM-DD', y, mo, d, items}] in scheduledAt ASC order.
+function groupByDayTz(items, tz) {
+  const groups = new Map();
+  items.forEach((item) => {
+    const { y, mo, d } = getDatePartsInTz(new Date(item.scheduledAt), tz);
+    const key = `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    if (!groups.has(key)) groups.set(key, { dateStr: key, y, mo, d, items: [] });
+    groups.get(key).items.push(item);
+  });
+  return Array.from(groups.values());
+}
+
+// Format time "10:30 AM" in store timezone using the same locale as the rest of the UI.
+function formatTimeTz(date, tz) {
+  try {
+    return new Intl.DateTimeFormat('en-IN', {
+      timeZone: tz, hour: 'numeric', minute: '2-digit', hour12: true,
+    }).format(date);
+  } catch {
+    return date.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
+  }
+}
+
 // MonthCalendar — renders one month grid. `festivals` is passed the raw,
 // unfiltered FESTIVAL_CALENDAR array rather than getUpcomingFestivals()'s
 // output: getUpcomingFestivals only returns festivals within a 60-day-
@@ -709,7 +747,7 @@ function DayDetailsPanel({
             </div>
           ) : notifications.map((item, ii) => {
             const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
-            const isDraggable = (item.status === 'draft' || item.status === 'approved') && !item.sendClaimedAt;
+            const isDraggable = (item.status === 'draft' || item.status === 'approved' || item.status === 'sent') && !item.sendClaimedAt;
             const isBeingDragged = dragItem && dragItem._id === item._id;
             const isHighlighted = dragNewId === item._id;
             return (
@@ -754,6 +792,7 @@ function DayDetailsPanel({
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14, fontWeight: 600, color: '#111827', marginBottom: 2 }}>
                       {item.title}
+                      {item.isResend && <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 650, color: '#1d4ed8', background: '#dbeafe', borderRadius: 5, padding: '1px 6px', verticalAlign: 'middle' }}>Resend</span>}
                     </div>
                     {item.body && (
                       <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.4,
@@ -993,7 +1032,7 @@ function AddEngagementView({
                   const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
                   const cc = CHANNEL_CHIP[item.channel || 'push'];
                   const audLine = audienceLineForItem(item);
-                  const isDraggable = (item.status === 'draft' || item.status === 'approved') && !item.sendClaimedAt;
+                  const isDraggable = (item.status === 'draft' || item.status === 'approved' || item.status === 'sent') && !item.sendClaimedAt;
                   const isBeingDragged = dragItem && dragItem._id === item._id;
                   return (
                     <div key={item._id}
@@ -1049,7 +1088,7 @@ function AddEngagementView({
               const cc = CHANNEL_CHIP[item.channel || 'push'];
               const isNew = item._id === newId;
               const audLine = audienceLineForItem(item);
-              const isDraggable = (item.status === 'draft' || item.status === 'approved') && !item.sendClaimedAt;
+              const isDraggable = (item.status === 'draft' || item.status === 'approved' || item.status === 'sent') && !item.sendClaimedAt;
               const isBeingDragged = dragItem && dragItem._id === item._id;
               return (
                 <div key={item._id}
@@ -1466,6 +1505,113 @@ function AddEngagementView({
   );
 }
 
+// Returns { mainLabel, subLabel } for a planning-list group heading.
+// dateStr: 'YYYY-MM-DD' in store timezone. todayStr: same format for today.
+function getPlanGroupHeading(dateStr, todayStr, planTab) {
+  const [y, mo, d] = dateStr.split('-').map(Number);
+  const formatted = new Date(y, mo - 1, d).toLocaleDateString('en-IN', {
+    weekday: 'short', day: 'numeric', month: 'short',
+  });
+  if (dateStr === todayStr) return { mainLabel: 'Today', subLabel: formatted };
+  if (dateStr < todayStr) {
+    return { mainLabel: formatted, subLabel: planTab === 'sent' ? 'Earlier' : 'Date passed' };
+  }
+  const diff = Math.round((new Date(y, mo - 1, d) - new Date(...todayStr.split('-').map(Number).map((v,i) => i===1 ? v-1 : v))) / 86400000);
+  if (diff === 1) return { mainLabel: 'Tomorrow', subLabel: 'In 1 day' };
+  return { mainLabel: formatted, subLabel: `In ${diff} days` };
+}
+
+// Resend confirm dialog — shown when a 'sent' item is dropped on a new date.
+function ResendDialog({ item, targetDateStr, newScheduledAt, tz, confirming, onCancel, onConfirm }) {
+  const cancelRef = useRef(null);
+  const dialogId = 'resend-dialog-title';
+
+  useEffect(() => {
+    cancelRef.current?.focus();
+    function onKey(e) { if (e.key === 'Escape') onCancel(); }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  const [ty, tm, td] = targetDateStr.split('-').map(Number);
+  const targetFormatted = new Date(ty, tm - 1, td).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+
+  const sentDateStr = item.sentAt
+    ? new Date(item.sentAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+    : null;
+
+  let peopleStr = null;
+  if (item.channel === 'whatsapp') peopleStr = 'marked as done';
+  else if (item.recipientCount > 0) peopleStr = `${item.recipientCount} people`;
+
+  const sentTimeStr = item.sentAt ? new Date(item.sentAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz }) : null;
+  const newTimeStr = new Date(item.scheduledAt).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: tz });
+  const channelLabel = item.channel === 'email' ? 'Email' : item.channel === 'whatsapp' ? 'WhatsApp' : 'Push';
+
+  return (
+    <div
+      role="dialog" aria-modal="true" aria-labelledby={dialogId}
+      onClick={onCancel}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 1000, padding: 16,
+      }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: 16, width: '100%', maxWidth: 480,
+        boxShadow: '0 20px 60px rgba(0,0,0,0.2)', overflow: 'hidden',
+      }}>
+        <div style={{ padding: '20px 24px 16px' }}>
+          <div id={dialogId} style={{ fontSize: 16, fontWeight: 700, color: '#111827', marginBottom: 8 }}>
+            Resend this notification?
+          </div>
+          <div style={{ fontSize: 13, color: '#6b7280', lineHeight: 1.5 }}>
+            <strong>"{item.title}"</strong> was already sent. Dropping it on <strong>{targetFormatted}</strong> creates a new draft for that day. Nothing is sent until you approve it.
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, padding: '0 24px 20px' }}>
+          {/* ORIGINAL */}
+          <div style={{ flex: 1, padding: '12px 14px', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', color: '#9ca3af', textTransform: 'uppercase', marginBottom: 8 }}>Original</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>
+              Sent{sentDateStr ? ` · ${sentDateStr}` : ''}
+            </div>
+            {(sentTimeStr || channelLabel || peopleStr) && (
+              <div style={{ fontSize: 11, color: '#6b7280', marginTop: 3 }}>
+                {[sentTimeStr, channelLabel, peopleStr].filter(Boolean).join(' · ')}
+              </div>
+            )}
+            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>Stays in history, unchanged</div>
+          </div>
+          {/* NEW COPY */}
+          <div style={{ flex: 1, padding: '12px 14px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.07em', color: '#60a5fa', textTransform: 'uppercase', marginBottom: 8 }}>New copy</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#1d4ed8' }}>
+              Draft · {targetFormatted}
+            </div>
+            <div style={{ fontSize: 11, color: '#3b82f6', marginTop: 3 }}>
+              {newTimeStr} · {channelLabel} · same audience
+            </div>
+            <div style={{ fontSize: 11, color: '#60a5fa', marginTop: 6 }}>You approve it before it sends</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10, padding: '16px 24px', borderTop: '1px solid #f3f4f6', justifyContent: 'flex-end' }}>
+          <button ref={cancelRef} onClick={onCancel}
+            style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #d1d5db', background: '#fff', fontSize: 14, color: '#374151', cursor: 'pointer', fontWeight: 500 }}>
+            Cancel
+          </button>
+          <button onClick={onConfirm} disabled={confirming}
+            style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: confirming ? '#93c5fd' : '#2563eb', fontSize: 14, color: '#fff', cursor: confirming ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
+            {confirming ? 'Creating…' : 'Create resend draft'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function QueueScreen({ shop }) {
   const router = useRouter();
   const goToFestivalDetail = (id) => {
@@ -1745,6 +1891,18 @@ export default function QueueScreen({ shop }) {
   // Race guard: if dragend fires before the deferred rAF runs, skip setDragItem.
   const dragEndedRef = useRef(false);
 
+  // Pending resend: set when a 'sent' item is dropped on a new date.
+  // { item, targetDateStr, newScheduledAt } — triggers the resend confirm dialog.
+  const [pendingResend, setPendingResend] = useState(null);
+  const [resendConfirming, setResendConfirming] = useState(false);
+
+  // Planning list tab: 'scheduled' (draft+approved) | 'sent' | 'all'
+  const [planTab, setPlanTab] = useState('scheduled');
+
+  // ID of the planning list card whose ⋯ menu is open; null = all closed
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const openMenuRef = useRef(null);
+
   const [emailTemplates, setEmailTemplates] = useState([]);
   const [emailTemplatesLoading, setEmailTemplatesLoading] = useState(false);
   const [emailTemplatesError, setEmailTemplatesError] = useState('');
@@ -1775,6 +1933,18 @@ export default function QueueScreen({ shop }) {
       panelRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
   }, [selectedDayStr]);
+
+  // Close the planning list ⋯ menu when the user clicks outside it.
+  useEffect(() => {
+    if (!openMenuId) return;
+    function handleOutside(e) {
+      if (openMenuRef.current && !openMenuRef.current.contains(e.target)) {
+        setOpenMenuId(null);
+      }
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [openMenuId]);
 
   // Refetch templates when the tab regains focus while the email step is open
   // (same pattern as CustomerDetail's visibilitychange handler).
@@ -1837,6 +2007,20 @@ export default function QueueScreen({ shop }) {
 
     const timeStr = localDt.split('T')[1];
     const newScheduledAt = `${targetDateStr}T${timeStr}`;
+
+    // Sent items: show confirm dialog instead of patching
+    if (item.status === 'sent') {
+      const [ny0, nm0, nd0] = targetDateStr.split('-').map(Number);
+      const todayLocal = new Date();
+      todayLocal.setHours(0, 0, 0, 0);
+      if (new Date(ny0, nm0 - 1, nd0) < todayLocal) {
+        setDragError('Cannot create a resend draft on a past date.');
+        setTimeout(() => setDragError(''), 5000);
+        return;
+      }
+      setPendingResend({ item, targetDateStr, newScheduledAt });
+      return;
+    }
 
     // Optimistic: keep UTC time-of-day, change the date part
     const prevItems = festivalItems;
@@ -2300,42 +2484,80 @@ export default function QueueScreen({ shop }) {
               dragNewId={dragNewId}
             />
           ) : (
-            <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, overflow: 'hidden' }}>
-          <div style={{ overflowY: 'auto', maxHeight: '70vh', padding: '12px 12px 4px' }}>
+            <div>
+              {/* Planning header */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div style={{ fontSize: 18, fontWeight: 650, color: '#111827' }}>Planning</div>
+                <div style={{ display: 'flex', border: '1px solid #e5e7eb', borderRadius: 8, background: '#f9fafb', padding: 2, gap: 2 }}>
+                  {[
+                    { key: 'scheduled', label: 'Scheduled', count: festivalItems.filter(i => i.status === 'draft' || i.status === 'approved').length },
+                    { key: 'sent', label: 'Sent', count: festivalItems.filter(i => i.status === 'sent').length },
+                    { key: 'all', label: 'All', count: festivalItems.length },
+                  ].map(t => (
+                    <button key={t.key} onClick={() => setPlanTab(t.key)} style={{
+                      padding: '4px 11px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer', borderRadius: 6,
+                      background: planTab === t.key ? '#fff' : 'transparent',
+                      color: planTab === t.key ? '#111827' : '#6b7280',
+                      boxShadow: planTab === t.key ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                    }}>
+                      {t.label} <span style={{ fontSize: 11, color: planTab === t.key ? '#6b7280' : '#9ca3af' }}>{t.count}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+          <div style={{ overflowY: 'auto', maxHeight: '70vh' }}>
             {festivalLoading ? (
-              <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 40 }}>
-                Loading...
-              </div>
-            ) : festivalItems.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '48px 20px' }}>
-                <div style={{ fontSize: 32, opacity: 0.4, marginBottom: 8 }}>📋</div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>
-                  Nothing queued yet
-                </div>
-                <div style={{ fontSize: 13, color: '#9ca3af', marginTop: 4 }}>
-                  Head to the Dashboard's Notification Suggestions to plan your first festival notification.
-                </div>
-              </div>
-            ) : (
-              groupFestivalItemsByDay(festivalItems).map((group) => (
-                <div key={`${group.date.getFullYear()}-${group.date.getMonth()}-${group.date.getDate()}`}
+              <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 40 }}>Loading...</div>
+            ) : (() => {
+              const tz = quietSettings.timezone || 'Asia/Kolkata';
+              const { y: ty2, mo: tmo2, d: td2 } = getDatePartsInTz(new Date(), tz);
+              const todayStr = `${ty2}-${String(tmo2).padStart(2,'0')}-${String(td2).padStart(2,'0')}`;
+              const filtered = festivalItems.filter(item => {
+                if (planTab === 'scheduled') return item.status === 'draft' || item.status === 'approved';
+                if (planTab === 'sent') return item.status === 'sent';
+                return true;
+              });
+              if (filtered.length === 0) {
+                return planTab === 'all' ? (
+                  <div style={{ textAlign: 'center', padding: '48px 20px' }}>
+                    <div style={{ fontSize: 32, opacity: 0.4, marginBottom: 8 }}>📋</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#111827' }}>Nothing queued yet</div>
+                    <div style={{ fontSize: 13, color: '#9ca3af', marginTop: 4 }}>Head to the Dashboard's Notification Suggestions to plan your first festival notification.</div>
+                  </div>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '40px 20px', color: '#9ca3af', fontSize: 13 }}>
+                    {planTab === 'sent' ? 'Nothing sent yet.' : 'No scheduled notifications.'}
+                  </div>
+                );
+              }
+              return groupByDayTz(filtered, tz).map((group) => {
+                const { mainLabel, subLabel } = getPlanGroupHeading(group.dateStr, todayStr, planTab);
+                return (
+                <div key={group.dateStr}
                   style={{ marginBottom: 16 }}>
-                  <div style={{
-                    fontSize: 11, fontWeight: 700, color: '#9ca3af',
-                    textTransform: 'uppercase', letterSpacing: '0.06em',
-                    marginBottom: 8, paddingLeft: 2,
-                  }}>
-                    {formatGroupHeading(group.date)}
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8, paddingLeft: 2 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{mainLabel}</span>
+                    <span style={{ fontSize: 11, color: '#9ca3af' }}>{subLabel}</span>
                   </div>
                   <div style={{
                     background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12,
                     overflow: 'hidden',
                   }}>
                     {group.items.map((item, ii) => {
-                      const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
                       const isLastInGroup = ii === group.items.length - 1;
-                      const planIsDraggable = (item.status === 'draft' || item.status === 'approved') && !item.sendClaimedAt;
+                      const planIsDraggable = (item.status === 'draft' || item.status === 'approved' || item.status === 'sent') && !item.sendClaimedAt;
                       const planIsBeingDragged = dragItem && dragItem._id === item._id;
+                      const isHighlighted = dragNewId === item._id;
+                      const isSentOrCancelled = item.status === 'sent' || item.status === 'cancelled';
+                      const isPastDate = group.dateStr < todayStr;
+                      const chTile = isSentOrCancelled
+                        ? { bg: '#f3f4f6', ic: '#9ca3af' }
+                        : item.channel === 'email' ? { bg: '#f5f3ff', ic: '#7c3aed' }
+                        : item.channel === 'whatsapp' ? { bg: '#ecfdf5', ic: '#059669' }
+                        : { bg: '#eff6ff', ic: '#2563eb' };
+                      const statusInfo = ({ draft: { dot: '#d1d5db', label: 'Draft', color: '#4b5563' }, approved: { dot: '#16a34a', label: 'Approved', color: '#15803d' }, sent: { dot: '#9ca3af', label: 'Sent', color: '#6b7280' }, cancelled: { dot: '#dc2626', label: 'Cancelled', color: '#b91c1c' } })[item.status] || { dot: '#d1d5db', label: item.status, color: '#6b7280' };
+                      const rowTimeStr = formatTimeTz(new Date(item.scheduledAt), tz);
+                      const chLabel = item.channel === 'email' ? 'Email' : item.channel === 'whatsapp' ? 'WhatsApp' : 'Push';
                       return (
                         <div key={item._id}
                           draggable={planIsDraggable}
@@ -2352,147 +2574,114 @@ export default function QueueScreen({ shop }) {
                             setDragItem(null);
                             setDragOverDate(null);
                           } : undefined}
-                          onMouseEnter={e => {
-                            e.currentTarget.style.background = '#f9fafb';
-                            const actions = e.currentTarget.querySelector('[data-row-actions]');
-                            if (actions) actions.style.opacity = '1';
-                          }}
-                          onMouseLeave={e => {
-                            e.currentTarget.style.background = '#fff';
-                            const actions = e.currentTarget.querySelector('[data-row-actions]');
-                            if (actions) actions.style.opacity = '0.55';
-                          }}
                           style={{
-                            padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
-                            borderBottom: isLastInGroup ? 'none' : '1px solid #f9fafb',
-                            transition: 'background 0.12s',
+                            display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px',
                             opacity: planIsBeingDragged ? 0.4 : 1,
-                            cursor: planIsDraggable ? 'grab' : undefined,
-                          }}
-                        >
-                          {planIsDraggable && (
-                            <div aria-label="Drag to move to another date" style={{
-                              color: '#d1d5db', flexShrink: 0,
-                              display: 'flex', alignItems: 'center',
-                            }}>
-                              <GripIcon size={14} />
-                            </div>
-                          )}
-                          {(item.mobileImageUrl || item.desktopImageUrl) && (
-                            <img
-                              src={item.mobileImageUrl || item.desktopImageUrl}
-                              alt=""
-                              style={{
-                                width: 32, height: 32, borderRadius: 8,
-                                objectFit: 'cover', flexShrink: 0,
-                              }}
-                              onError={e => { e.target.style.display = 'none'; }}
-                            />
-                          )}
+                            borderBottom: isLastInGroup ? 'none' : '1px solid #f1f2f4',
+                            cursor: planIsDraggable ? 'grab' : 'default',
+                            transition: 'opacity 0.15s',
+                            ...(isHighlighted ? { boxShadow: '0 0 0 3px #dbeafe inset', outline: '1px solid #bfdbfe' } : {}),
+                          }}>
+                          {/* Grip */}
+                          <div style={{ flexShrink: 0, width: 14, display: 'flex', alignItems: 'center', visibility: planIsDraggable ? 'visible' : 'hidden' }}
+                            aria-hidden="true">
+                            <GripIcon size={14} color="#d1d5db" />
+                          </div>
+                          {/* Channel tile */}
+                          <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0, background: chTile.bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            {item.channel === 'email' ? (
+                              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                                <rect x="1.5" y="3.5" width="13" height="9" rx="1.5" stroke={chTile.ic} strokeWidth="1.5"/>
+                                <path d="M1.5 5.5l6.5 4.5 6.5-4.5" stroke={chTile.ic} strokeWidth="1.5" strokeLinejoin="round"/>
+                              </svg>
+                            ) : item.channel === 'whatsapp' ? (
+                              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                                <path d="M8 1.5C4.41 1.5 1.5 4.41 1.5 8c0 1.18.32 2.29.88 3.23L1.5 14.5l3.34-.87A6.47 6.47 0 008 14.5c3.59 0 6.5-2.91 6.5-6.5S11.59 1.5 8 1.5z" stroke={chTile.ic} strokeWidth="1.4" fill="none"/>
+                                <path d="M6.5 6a.5.5 0 01.5-.5h.25c.22 0 .42.14.49.34l.47 1.27a.5.5 0 01-.11.54l-.36.35a3.6 3.6 0 001.81 1.82l.36-.36a.5.5 0 01.54-.11l1.27.47c.2.07.34.27.34.49V10a.5.5 0 01-.5.5C7.4 10.5 5.5 8.6 5.5 6.25V6z" fill={chTile.ic}/>
+                              </svg>
+                            ) : (
+                              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                                <path d="M8 2.5a4.5 4.5 0 00-4.5 4.5c0 2.75-1.2 3.75-1.2 3.75h11.4S12.5 9.75 12.5 7A4.5 4.5 0 008 2.5z" stroke={chTile.ic} strokeWidth="1.4" strokeLinejoin="round" fill="none"/>
+                                <path d="M6.5 10.75a1.5 1.5 0 003 0" stroke={chTile.ic} strokeWidth="1.4"/>
+                              </svg>
+                            )}
+                          </div>
+                          {/* Text column */}
                           <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{
-                              fontSize: 14, fontWeight: 600, color: '#111827',
-                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                            }}>
-                              {item.title}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                              <div style={{ fontSize: 14, fontWeight: 600, color: isSentOrCancelled ? '#6b7280' : '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {item.title}
+                              </div>
+                              {item.isResend && <span style={{ fontSize: 11, fontWeight: 650, color: '#1d4ed8', background: '#dbeafe', borderRadius: 5, padding: '1px 6px', flexShrink: 0 }}>Resend</span>}
                             </div>
-                            <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>
-                              {item.festival ? `${item.festival} · ` : ''}
-                              {new Date(item.scheduledAt).toLocaleTimeString('en-IN', {
-                                hour: 'numeric', minute: '2-digit', hour12: true,
-                              })}
-                            </div>
-                            <div style={{
-                              fontSize: 12, color: '#9ca3af', marginTop: 2,
-                              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                            }}>
-                              {item.targetType === 'product'
-                                ? `→ ${item.productTitle || 'Product'}`
-                                : '→ Storefront home'}
+                            <div style={{ fontSize: 12, color: '#6b7280', display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                              <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusInfo.dot, flexShrink: 0, display: 'inline-block' }} />
+                              <span style={{ color: statusInfo.color }}>{statusInfo.label}</span>
+                              <span>·</span><span>{rowTimeStr}</span>
+                              <span>·</span><span>{chLabel}</span>
                             </div>
                           </div>
-                          {item.channel && item.channel !== 'push' && (() => {
-                            const CHIP = { email: { bg: '#ede9fe', color: '#6d28d9', label: 'Email' }, whatsapp: { bg: '#dcfce7', color: '#15803d', label: 'WhatsApp' } };
-                            const c = CHIP[item.channel];
-                            return c ? <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: c.bg, color: c.color, flexShrink: 0 }}>{c.label}</span> : null;
-                          })()}
-                          <span style={{
-                            fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
-                            background: badge.bg, color: badge.color, flexShrink: 0,
-                            textDecoration: badge.strike ? 'line-through' : 'none',
-                          }}>
-                            {badge.label}
-                          </span>
-                          <div data-row-actions style={{
-                            display: 'flex', gap: 6, flexShrink: 0,
-                            opacity: 0.55, transition: 'opacity 0.15s',
-                          }}>
-                            {/* A 'sent' document is historical fact — never
-                                editable or deletable (the backend now
-                                rejects both with 409 regardless). "View"
-                                is the only action, same detail page a
-                                sent calendar chip already links to. */}
-                            {item.status === 'sent' ? (
-                              <button
-                                onClick={() => goToFestivalDetail(item._id)}
-                                style={{
-                                  padding: '5px 10px', borderRadius: 6,
-                                  border: '1px solid #e5e7eb', background: '#fff',
-                                  color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                                }}>View</button>
-                            ) : (
-                              <>
-                                {item.status === 'draft' && !isPastDay(item.scheduledAt) && (
-                                  <button
-                                    onClick={async () => {
-                                      await apiSend(
-                                        `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
-                                        'PATCH', { status: 'approved' }
-                                      );
-                                      setFestivalItems(prev => prev.map(i =>
-                                        i._id === item._id ? {...i, status: 'approved'} : i
-                                      ));
-                                    }}
-                                    style={{
-                                      padding: '5px 10px', borderRadius: 6, border: 'none',
-                                      background: '#4f46e5', color: '#fff', fontSize: 11,
-                                      fontWeight: 600, cursor: 'pointer',
-                                    }}>Approve</button>
-                                )}
-                                {(!item.channel || item.channel === 'push') && (
-                                  <button
-                                    onClick={() => openEditModal(item)}
-                                    style={{
-                                      padding: '5px 10px', borderRadius: 6,
-                                      border: '1px solid #e5e7eb', background: '#fff',
-                                      color: '#374151', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                                    }}>Edit</button>
-                                )}
-                                <button
-                                  onClick={async () => {
-                                    await apiSend(
-                                      `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
-                                      'DELETE', {}
-                                    );
-                                    setFestivalItems(prev => prev.filter(i => i._id !== item._id));
-                                  }}
-                                  style={{
-                                    padding: '5px 10px', borderRadius: 6,
-                                    border: '1px solid #fee2e2', background: '#fff',
-                                    color: '#dc2626', fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                                  }}>Delete</button>
-                              </>
+                          {/* Right actions */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                            {item.status === 'draft' && !isPastDate && (
+                              <button onClick={async () => {
+                                const prev2 = festivalItems;
+                                setFestivalItems(p => p.map(i => i._id === item._id ? { ...i, status: 'approved' } : i));
+                                try {
+                                  await apiSend(`/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`, 'PATCH', { status: 'approved' });
+                                  const d2 = await apiGet(`/api/queue/${encodeURIComponent(shop)}/festival`);
+                                  setFestivalItems(d2.items || []);
+                                } catch { setFestivalItems(prev2); }
+                              }} style={{ fontSize: 13, fontWeight: 600, padding: '4px 10px', borderRadius: 6, border: '1px solid #bfdbfe', background: '#fff', color: '#1d4ed8', cursor: 'pointer' }}>
+                                Approve
+                              </button>
                             )}
+                            {item.status === 'draft' && isPastDate && (
+                              <span style={{ fontSize: 11, fontWeight: 600, color: '#92400e', background: '#fef3c7', borderRadius: 6, padding: '4px 8px' }}>Date passed</span>
+                            )}
+                            {/* ⋯ menu */}
+                            <div style={{ position: 'relative' }} ref={openMenuId === item._id ? openMenuRef : null}>
+                              <button aria-label="More actions"
+                                onClick={() => setOpenMenuId(openMenuId === item._id ? null : item._id)}
+                                style={{ width: 32, height: 32, borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, color: '#6b7280' }}>
+                                ⋯
+                              </button>
+                              {openMenuId === item._id && (
+                                <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 4, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 10, minWidth: 140 }}>
+                                  <button onClick={() => { setOpenMenuId(null); goToFestivalDetail(item._id); }}
+                                    onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'} onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                                    style={{ display: 'block', width: '100%', padding: '8px 14px', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#111827' }}>View details</button>
+                                  {(item.status === 'draft' || item.status === 'approved') && (!item.channel || item.channel === 'push') && (
+                                    <button onClick={() => { setOpenMenuId(null); openEditModal(item); }}
+                                      onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'} onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                                      style={{ display: 'block', width: '100%', padding: '8px 14px', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#111827' }}>Edit</button>
+                                  )}
+                                  {(item.status === 'draft' || item.status === 'approved') && (
+                                    <button onClick={async () => {
+                                      setOpenMenuId(null);
+                                      const prev2 = festivalItems;
+                                      setFestivalItems(p => p.filter(i => i._id !== item._id));
+                                      try { await apiSend(`/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`, 'DELETE'); }
+                                      catch { setFestivalItems(prev2); }
+                                    }}
+                                      onMouseEnter={e => e.currentTarget.style.background = '#fef2f2'} onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                                      style={{ display: 'block', width: '100%', padding: '8px 14px', textAlign: 'left', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#dc2626' }}>Delete</button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
                     })}
                   </div>
                 </div>
-              ))
-            )}
+                );
+              });
+            })()}
           </div>
             </div>
+
           )}
         </div>
       </div>
@@ -3112,6 +3301,51 @@ export default function QueueScreen({ shop }) {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Resend confirm dialog — rendered when a 'sent' item is dropped on a new date */}
+      {pendingResend && (
+        <ResendDialog
+          item={pendingResend.item}
+          targetDateStr={pendingResend.targetDateStr}
+          newScheduledAt={pendingResend.newScheduledAt}
+          tz={quietSettings.timezone || 'Asia/Kolkata'}
+          confirming={resendConfirming}
+          onCancel={() => {
+            setPendingResend(null);
+            setResendConfirming(false);
+            setDragItem(null);
+            setDragOverDate(null);
+          }}
+          onConfirm={async () => {
+            setResendConfirming(true);
+            try {
+              const result = await apiSend(
+                `/api/queue/${encodeURIComponent(shop)}/festival/${pendingResend.item._id}/reschedule-copy`,
+                'POST',
+                { scheduledAt: pendingResend.newScheduledAt }
+              );
+              const data = await apiGet(`/api/queue/${encodeURIComponent(shop)}/festival`);
+              setFestivalItems(data.items || []);
+              setSelectedDayStr(pendingResend.targetDateStr);
+              setDayPanelTab('notifications');
+              setAddEngMode(false);
+              setDragNewId(result?.id || null);
+              setTimeout(() => setDragNewId(null), 2000);
+              const [ry, rm, rd] = pendingResend.targetDateStr.split('-').map(Number);
+              const labelDate = new Date(ry, rm - 1, rd).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+              setDragConfirm(`Resend draft created for ${labelDate}. Approve it to schedule the send.`);
+              setTimeout(() => setDragConfirm(''), 4000);
+              setPendingResend(null);
+              setResendConfirming(false);
+            } catch (err) {
+              setDragError((err && err.message) || 'Failed to create resend draft.');
+              setTimeout(() => setDragError(''), 5000);
+              setPendingResend(null);
+              setResendConfirming(false);
+            }
+          }}
+        />
       )}
     </div>
   );
