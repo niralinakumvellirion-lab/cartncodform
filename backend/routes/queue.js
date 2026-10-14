@@ -693,9 +693,8 @@ router.post('/:shopDomain/festival/:id/reschedule-copy', requireAuth,
     if (original.status !== 'sent') {
       return res.status(400).json({ error: 'Only sent notifications can be copied for resend' });
     }
-    if (original.sendClaimedAt) {
-      return res.status(409).json({ error: 'This item is currently being sent' });
-    }
+    // sendClaimedAt may be stale for sent items (poller doesn't clear it on success);
+    // status 'sent' is the authoritative proof that the send completed.
 
     const store = await Store.findOne({ shopDomain: shop }).select('timezone').lean();
     const scheduledAtUtc = await resolveScheduledAt(shop, req.body.scheduledAt, resolveTz(store?.timezone));

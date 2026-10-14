@@ -142,15 +142,19 @@ describe('400 — original not sent', () => {
   );
 });
 
-// ── 409 — mid-send ───────────────────────────────────────────────────────────
+// ── 201 — stale sendClaimedAt on a sent item is ignored ─────────────────────
+// The poller does not clear sendClaimedAt on a successful send, so a sent item
+// can have a non-null sendClaimedAt. Status 'sent' is the authoritative signal
+// that the send completed; the stale claim must not block the resend copy.
 
-describe('409 — sendClaimedAt set', () => {
-  test('returns 409 when original has a live claim', async () => {
+describe('201 — sent with stale sendClaimedAt succeeds', () => {
+  test('returns 201 and does not copy sendClaimedAt to the clone', async () => {
     mockFindOnce(makeOriginal({ sendClaimedAt: new Date() }));
+    FestivalQueue.create.mockResolvedValue({ _id: 'cloneId' });
     const res = await post(`/api/queue/${SHOP}/festival/${ITEM_ID}/reschedule-copy`, { scheduledAt: FUTURE_DT });
-    expect(res.status).toBe(409);
-    const data = await res.json();
-    expect(data.error).toMatch(/being sent/i);
+    expect(res.status).toBe(201);
+    const arg = FestivalQueue.create.mock.calls[0][0];
+    expect(arg.sendClaimedAt).toBeUndefined();
   });
 });
 
