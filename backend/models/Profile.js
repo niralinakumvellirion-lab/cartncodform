@@ -89,4 +89,7 @@ profileSchema.index({ shopDomain: 1, 'channels.whatsapp.phone': 1 }, { sparse: t
 // Dashboard "most recently active" listing.
 profileSchema.index({ shopDomain: 1, updatedAt: -1 });
 
+// Platform admin shopper list (sort by lastSeenAt desc) and lastActive aggregate.
+profileSchema.index({ shopDomain: 1, lastSeenAt: 1 });
+
 module.exports = mongoose.model('Profile', profileSchema);

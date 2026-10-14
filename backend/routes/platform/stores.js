@@ -9,14 +9,35 @@
  */
 
 const express       = require('express');
+const rateLimit     = require('express-rate-limit');
+const mongoose      = require('mongoose');
 const Profile       = require('../../models/Profile');
 const ScheduledJob  = require('../../models/ScheduledJob');
 const Store         = require('../../models/Store');
 const { requireStaff, requireRole } = require('../../middleware/requireStaff');
 const { logAudit }  = require('../../utils/auditLog');
 const { suspendStore, unsuspendStore } = require('../../services/storeSuspension');
+const { maskEmail, maskPhone, anonymousLabel } = require('../../utils/maskContact');
+const { safeStr }   = require('../../utils/safeStr');
 
 const router = express.Router();
+
+// ── Reveal rate limiter ───────────────────────────────────────────────────────
+// 30 reveals per hour per staff member, keyed by staff id.
+
+const REVEAL_WINDOW_MS = 60 * 60 * 1000;
+const REVEAL_MAX       = 30;
+const isTest = process.env.NODE_ENV === 'test';
+
+const revealLimiter = rateLimit({
+  windowMs:     REVEAL_WINDOW_MS,
+  max:          REVEAL_MAX,
+  skip:         () => isTest,
+  keyGenerator: (req) => (req.staff && req.staff.id) ? req.staff.id : 'anonymous',
+  message:      { error: 'Too many reveal requests. Try again in an hour.' },
+  standardHeaders: true,
+  legacyHeaders:   false,
+});
 
 const SHOP_DOMAIN_RE  = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/;
 const VALID_REASONS   = ['spam', 'policy', 'payment', 'request', 'other'];
@@ -299,4 +320,278 @@ router.post('/:shopDomain/unsuspend', requireStaff, requireRole('owner', 'admin'
   }
 });
 
+// ── Shopper allow-list projection ─────────────────────────────────────────────
+// Explicitly omit pushTokens, sessionIds, cartTokens, customerId, lastToken.
+
+const SHOPPERS_PROJECTION = [
+  '_id', 'stage', 'orders.count',
+  'channels.email.address', 'channels.push.subscribed', 'channels.whatsapp.phone',
+  'identifiers.emails', 'identifiers.phones',
+  'lastSeenAt',
+].join(' ');
+
+function buildContactLabel(profile) {
+  const email = profile.channels?.email?.address
+    || (profile.identifiers?.emails?.[0]) || null;
+  if (email) return maskEmail(email);
+  const phone = profile.identifiers?.phones?.[0] || null;
+  if (phone) return maskPhone(phone);
+  return anonymousLabel(profile._id);
+}
+
+// ── GET /:shopDomain/shoppers ─────────────────────────────────────────────────
+
+router.get('/:shopDomain/shoppers', requireStaff, async (req, res) => {
+  const { shopDomain } = req.params;
+  if (!SHOP_DOMAIN_RE.test(shopDomain)) {
+    return res.status(400).json({ error: 'Invalid shopDomain' });
+  }
+
+  const { stage } = req.query;
+  const VALID_STAGES = ['anonymous', 'identified', 'customer', 'lapsed'];
+  if (stage !== undefined && !VALID_STAGES.includes(stage)) {
+    return res.status(400).json({ error: 'stage must be anonymous, identified, customer, or lapsed' });
+  }
+
+  const pageNum = Math.max(0, parseInt(req.query.page, 10) || 0);
+  const limit   = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
+  const skip    = pageNum * limit;
+
+  try {
+    const storeExists = await Store.exists({ shopDomain });
+    if (!storeExists) return res.status(404).json({ error: 'Store not found' });
+
+    const filter = { shopDomain };
+    if (stage) filter.stage = stage;
+
+    const [profiles, total] = await Promise.all([
+      Profile.find(filter, SHOPPERS_PROJECTION)
+        .sort({ lastSeenAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      Profile.countDocuments(filter),
+    ]);
+
+    const rows = profiles.map(p => ({
+      id:          String(p._id),
+      contact:     buildContactLabel(p),
+      stage:       p.stage,
+      orders:      p.orders?.count ?? 0,
+      reach: {
+        email:     !!(p.channels?.email?.address),
+        push:      !!(p.channels?.push?.subscribed),
+        whatsapp:  !!(p.channels?.whatsapp?.phone),
+      },
+      lastSeenAt:  p.lastSeenAt,
+    }));
+
+    await logAudit({
+      staff:      req.staff,
+      action:     'shoppers_listed',
+      shopDomain,
+      meta:       { page: pageNum },
+      req,
+    });
+
+    return res.json({ total, page: pageNum, limit, shoppers: rows });
+  } catch (err) {
+    console.error('[platform/shoppers] list error:', err.message);
+    return res.status(500).json({ error: 'Failed to load shoppers' });
+  }
+});
+
+// ── POST /:shopDomain/shoppers/:profileId/reveal ───────────────────────────────
+
+router.post(
+  '/:shopDomain/shoppers/:profileId/reveal',
+  requireStaff,
+  requireRole('owner', 'admin'),
+  revealLimiter,
+  async (req, res) => {
+    const { shopDomain, profileId } = req.params;
+    if (!SHOP_DOMAIN_RE.test(shopDomain)) {
+      return res.status(400).json({ error: 'Invalid shopDomain' });
+    }
+    if (!mongoose.Types.ObjectId.isValid(profileId)) {
+      return res.status(400).json({ error: 'Invalid profileId' });
+    }
+
+    try {
+      // Scope the lookup by BOTH _id and shopDomain — IDOR protection.
+      const profile = await Profile.findOne(
+        { _id: profileId, shopDomain },
+        'channels.email.address channels.whatsapp.phone identifiers.emails identifiers.phones'
+      ).lean();
+
+      if (!profile) return res.status(404).json({ error: 'Profile not found' });
+
+      const email        = profile.channels?.email?.address
+        || (profile.identifiers?.emails?.[0] ?? null);
+      const phone        = profile.identifiers?.phones?.[0] ?? null;
+      const whatsappPhone = profile.channels?.whatsapp?.phone ?? null;
+
+      res.set('Cache-Control', 'no-store');
+
+      // Audit meta: profileId only — no contact data.
+      await logAudit({
+        staff:      req.staff,
+        action:     'shopper_revealed',
+        shopDomain,
+        meta:       { profileId },
+        req,
+      });
+
+      return res.json({ email, phone, whatsappPhone });
+    } catch (err) {
+      console.error('[platform/reveal] error:', err.message);
+      return res.status(500).json({ error: 'Failed to reveal profile' });
+    }
+  }
+);
+
+// ── GET /:shopDomain/report ───────────────────────────────────────────────────
+
+router.get('/:shopDomain/report', requireStaff, requireRole('owner', 'admin'), async (req, res) => {
+  const { shopDomain } = req.params;
+  if (!SHOP_DOMAIN_RE.test(shopDomain)) {
+    return res.status(400).json({ error: 'Invalid shopDomain' });
+  }
+
+  try {
+    const store = await Store.findOne({ shopDomain }, DETAIL_PROJECTION).lean();
+    if (!store) return res.status(404).json({ error: 'Store not found' });
+
+    const cutoff7d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [
+      profileCount,
+      pushSubscribers,
+      emailsCaptured,
+      sent7d,
+      failed7d,
+      failuresDocs,
+      shoppersDocs,
+    ] = await Promise.all([
+      Profile.countDocuments({ shopDomain }),
+      Profile.countDocuments({ shopDomain, 'channels.push.subscribed': true }),
+      Profile.countDocuments({ shopDomain, 'channels.email.address': { $exists: true, $nin: [null, ''] } }),
+      ScheduledJob.countDocuments({ shopDomain, status: 'sent',   runAt: { $gte: cutoff7d } }),
+      ScheduledJob.countDocuments({ shopDomain, status: 'failed', runAt: { $gte: cutoff7d } }),
+      ScheduledJob.find(
+        { shopDomain, status: 'failed' },
+        'runAt channel origin error -_id'
+      ).sort({ _id: -1 }).limit(100).lean(),
+      Profile.find({ shopDomain }, SHOPPERS_PROJECTION)
+        .sort({ lastSeenAt: -1 }).limit(10000).lean(),
+    ]);
+
+    const ExcelJS = require('exceljs');
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'ShopireachBoost Platform';
+
+    // ── Sheet 1: Summary ─────────────────────────────────────────────────────
+    const sumSheet = wb.addWorksheet('Summary');
+    sumSheet.columns = [
+      { header: 'Field', key: 'f', width: 28 },
+      { header: 'Value', key: 'v', width: 52 },
+    ];
+    sumSheet.getRow(1).font = { bold: true };
+    const summaryRows = [
+      ['Shop domain',         shopDomain],
+      ['Shop name',           store.shopName || ''],
+      ['Owner email',         store.ownerEmail || ''],
+      ['Plan',                store.plan || ''],
+      ['Subscription status', store.subscriptionStatus || ''],
+      ['Plan updated at',     store.planUpdatedAt ? new Date(store.planUpdatedAt).toISOString() : ''],
+      ['Timezone',            store.timezone || ''],
+      ['Installed at',        store.installedAt ? new Date(store.installedAt).toISOString() : ''],
+      ['Last signal run',     store.lastSignalRunAt ? new Date(store.lastSignalRunAt).toISOString() : ''],
+      ['Needs reauth',        String(!!store.needsReauth)],
+      ['Suspended',           String(!!store.suspended)],
+      ['Suspended at',        store.suspendedAt ? new Date(store.suspendedAt).toISOString() : ''],
+      ['Suspended reason',    store.suspendedReason || ''],
+      ['Suspended by',        store.suspendedBy || ''],
+      ['Total shoppers',      profileCount],
+      ['Push subscribers',    pushSubscribers],
+      ['Emails captured',     emailsCaptured],
+      ['Sent (last 7d)',      sent7d],
+      ['Failed (last 7d)',    failed7d],
+      ['Push delivery rate',  store.pushStats?.rateLast7d ?? 0],
+      ['Report generated',    new Date().toISOString()],
+    ];
+    for (const [f, v] of summaryRows) {
+      sumSheet.addRow({ f: safeStr(f), v: typeof v === 'number' ? v : safeStr(String(v)) });
+    }
+
+    // ── Sheet 2: Failures ────────────────────────────────────────────────────
+    const failSheet = wb.addWorksheet('Failures');
+    failSheet.columns = [
+      { header: 'At',      key: 'at',      width: 24 },
+      { header: 'Channel', key: 'channel', width: 10 },
+      { header: 'Origin',  key: 'origin',  width: 12 },
+      { header: 'Error',   key: 'error',   width: 60 },
+    ];
+    failSheet.getRow(1).font = { bold: true };
+    for (const f of failuresDocs) {
+      failSheet.addRow({
+        at:      f.runAt ? new Date(f.runAt).toISOString() : '',
+        channel: safeStr(f.channel || ''),
+        origin:  safeStr(f.origin  || ''),
+        error:   safeStr(f.error   || ''),
+      });
+    }
+
+    // ── Sheet 3: Shoppers (masked — no raw PII) ───────────────────────────────
+    const shopSheet = wb.addWorksheet('Shoppers');
+    shopSheet.columns = [
+      { header: 'Contact',      key: 'contact',   width: 28 },
+      { header: 'Stage',        key: 'stage',     width: 14 },
+      { header: 'Orders',       key: 'orders',    width: 8 },
+      { header: 'Email reach',  key: 'email',     width: 12 },
+      { header: 'Push reach',   key: 'push',      width: 12 },
+      { header: 'WA reach',     key: 'whatsapp',  width: 12 },
+      { header: 'Last seen',    key: 'lastSeenAt', width: 24 },
+    ];
+    shopSheet.getRow(1).font = { bold: true };
+    for (const p of shoppersDocs) {
+      shopSheet.addRow({
+        contact:   safeStr(buildContactLabel(p)),
+        stage:     safeStr(p.stage || ''),
+        orders:    p.orders?.count ?? 0,
+        email:     p.channels?.email?.address    ? 'Y' : 'N',
+        push:      p.channels?.push?.subscribed  ? 'Y' : 'N',
+        whatsapp:  p.channels?.whatsapp?.phone   ? 'Y' : 'N',
+        lastSeenAt: p.lastSeenAt ? new Date(p.lastSeenAt).toISOString() : '',
+      });
+    }
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const today = new Date().toISOString().slice(0, 10);
+    const slug = shopDomain.replace('.myshopify.com', '');
+    const filename = `store-report-${slug}-${today}.xlsx`;
+
+    res.set({
+      'Content-Type':        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control':       'no-store',
+    });
+
+    await logAudit({
+      staff:      req.staff,
+      action:     'store_report',
+      shopDomain,
+      meta:       { shoppersRows: shoppersDocs.length, failuresRows: failuresDocs.length },
+      req,
+    });
+
+    return res.send(buffer);
+  } catch (err) {
+    console.error('[platform/report] error:', err.message);
+    return res.status(500).json({ error: 'Failed to generate report' });
+  }
+});
+
 module.exports = router;
+module.exports.REVEAL_WINDOW_MS = REVEAL_WINDOW_MS;
+module.exports.REVEAL_MAX       = REVEAL_MAX;

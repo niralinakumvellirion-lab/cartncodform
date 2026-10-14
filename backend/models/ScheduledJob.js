@@ -62,6 +62,9 @@ const scheduledJobSchema = new mongoose.Schema({
 // Compound index for the sender's poll query.
 scheduledJobSchema.index({ status: 1, runAt: 1 });
 
+// Compound index for platform admin per-shop send stats and failure queries.
+scheduledJobSchema.index({ shopDomain: 1, status: 1, runAt: 1 });
+
 // TTL: auto-delete after 90 days, same retention as StorefrontEvent/
 // AttributedEvent. Keyed on createdAt (set by { timestamps: true } above)
 // rather than sentAt, since pending/cancelled/failed/skipped jobs never get
