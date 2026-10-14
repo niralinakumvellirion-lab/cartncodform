@@ -1,0 +1,155 @@
+PLATFORM STEP 3 — STORES LIST/DETAIL, SUSPEND/UNSUSPEND, AUDIT-LOG READ
+Self-audit (after)
+Date: 2026-10-14
+
+────────────────────────────────────────────────────────────────────────────────
+ROUTE TABLE
+────────────────────────────────────────────────────────────────────────────────
+
+Method  Path                                        Roles allowed   Middleware
+──────  ──────────────────────────────────────────  ─────────────   ──────────────────────────────
+GET     /api/platform/stores/summary                all staff       requireStaff
+GET     /api/platform/stores                        all staff       requireStaff
+GET     /api/platform/stores/:shopDomain            all staff       requireStaff
+POST    /api/platform/stores/:shopDomain/suspend    owner, admin    requireStaff + requireRole('owner','admin')
+POST    /api/platform/stores/:shopDomain/unsuspend  owner, admin    requireStaff + requireRole('owner','admin')
+GET     /api/platform/audit                         owner, admin    requireStaff + requireRole('owner','admin')
+
+None of these routes use requireAuth or requireStoreOwner.
+
+────────────────────────────────────────────────────────────────────────────────
+FIELDS RETURNED BY LIST
+────────────────────────────────────────────────────────────────────────────────
+
+Projection (allow-list): shopDomain, shopName, plan, installedAt, needsReauth, suspended.
+Per-row response:
+  shopDomain, shopName, plan, status (derived: suspended > needs_reconnect > active),
+  installedAt, shoppers (Profile count), sent7d, failed7d, lastActive
+
+NOT returned from Store: accessToken, onlineAccessToken, onlineTokenExpiresAt,
+  accessTokenExpiresAt, ownerEmail, pushStats, subscriptionId, popup, mobilePopup,
+  voice, caps, quietHours, onboarding, logoUrl, primaryColor, timezone,
+  lastSignalRunAt, subscriptionStatus, planUpdatedAt, suspension detail fields.
+
+────────────────────────────────────────────────────────────────────────────────
+FIELDS RETURNED BY DETAIL
+────────────────────────────────────────────────────────────────────────────────
+
+Top-level store fields (allow-list):
+  shopDomain, shopName, ownerEmail, plan, subscriptionStatus, planUpdatedAt,
+  timezone, installedAt, lastSignalRunAt, needsReauth, pushStats,
+  suspended, suspendedAt, suspendedReason, suspendedNote, suspendedBy
+
+Derived stats sub-object:
+  profiles, pushSubscribers, emailsCaptured, sent7d, failed7d,
+  pushDeliveryRate (store.pushStats.rateLast7d), dataWindowDays: 90
+
+recentFailures array (last 20 failed ScheduledJobs):
+  at (runAt), channel, origin, error
+  NOT included: profileId, sessionId, cartToken, subscriptionToken,
+                payload, messageText, _id, recipient
+
+NOT returned from Store: accessToken, onlineAccessToken, onlineTokenExpiresAt,
+  accessTokenExpiresAt, subscriptionId, popup, mobilePopup, voice, caps,
+  quietHours, onboarding, logoUrl, primaryColor.
+
+────────────────────────────────────────────────────────────────────────────────
+INDEX REPORT (item C)
+────────────────────────────────────────────────────────────────────────────────
+
+Aggregation 1: Profile count per shopDomain
+  Query: { shopDomain: { $in: [...] } } → $group _id, count
+  Indexes available: compound { shopDomain, identifiers.customerId } (sparse),
+    { shopDomain, identifiers.emails } (sparse), { shopDomain, updatedAt: -1 }
+  Status: compound prefix is usable. MISSING: standalone { shopDomain: 1 } index.
+    MongoDB will use the leading prefix of any compound sparse index, but
+    a plain { shopDomain: 1 } index would be more efficient for this cardinality.
+
+Aggregation 2: ScheduledJob sent7d per shopDomain
+  Query: { shopDomain: { $in: [...] }, status: 'sent', runAt: { $gte: cutoff } }
+  Indexes available: standalone { shopDomain: 1 }, standalone { status: 1 },
+    standalone { runAt: 1 }
+  Status: MongoDB can use one standalone index then filter; index intersection
+    is possible but costly. MISSING: compound { shopDomain: 1, status: 1, runAt: 1 }.
+    Without this, each store in the $in must scan after index lookup.
+
+Aggregation 3: ScheduledJob failed7d per shopDomain  (same indexes apply)
+  Status: same as aggregation 2. MISSING: same compound index.
+
+Aggregation 4: Profile max(lastSeenAt) per shopDomain
+  Query: { shopDomain: { $in: [...] }, lastSeenAt: { $ne: null } }
+  Indexes available: { shopDomain, updatedAt: -1 }
+  Status: shopDomain prefix filter works; lastSeenAt is unindexed.
+    MISSING: compound { shopDomain: 1, lastSeenAt: 1 } for efficient max() grouping.
+
+None of these missing indexes have been added — this is a report only per the task spec.
+
+────────────────────────────────────────────────────────────────────────────────
+FINDING H — DOES suspended SURVIVE A REINSTALL?
+────────────────────────────────────────────────────────────────────────────────
+
+Uninstall webhook (routes/webhooks.js lines 420-427):
+  Store.findOneAndUpdate({ shopDomain }, { plan: 'free', subscriptionStatus: 'uninstalled',
+    planUpdatedAt: new Date() })
+  → Only three fields are updated. suspended is NOT touched. Stays as-is.
+
+OAuth reinstall callback (routes/auth.js lines 163-166):
+  Store.findOneAndUpdate({ shopDomain }, update, { upsert: true, new: true, ... })
+  where update (lines 134-161) contains: shopDomain, accessToken, accessTokenExpiresAt,
+  installedAt, needsReauth, and optionally ownerEmail, shopName, logoUrl, primaryColor,
+  timezone (new install only).
+  → Mongoose wraps the plain object in $set, so only the listed fields are changed.
+  → suspended is NOT in the update object and is NOT cleared. Stays as-is.
+
+Conclusion: suspended SURVIVES both uninstall and reinstall.
+  This is intentional and correct — a platform suspension must persist regardless
+  of what the merchant does. A suspended merchant cannot escape enforcement by
+  reinstalling.
+  No fix required. The behavior is the desired behavior for a platform-level suspension.
+
+────────────────────────────────────────────────────────────────────────────────
+TEST LIST AND TOTAL
+────────────────────────────────────────────────────────────────────────────────
+
+platformStores.test.js (33 tests):
+  sanitizeMeta (7): key removal, emailDomain exception, email/phone value
+    replacement, e-mail hyphenated, unchanged non-sensitive, non-object passthrough
+  GET /summary (3): 200 response, 401 without token, support role allowed
+  GET / list (7): derived status, forbidden-key scan, 400 on invalid plan/status/
+    search, support role, counts scoped to this page, cross-store isolation
+  GET /:shopDomain detail (8): fields+stats+recentFailures, forbidden-key scan,
+    recentFailures field exclusions, scoped queries, 400 invalid domain, 400 no
+    .myshopify.com, 404, audit log written, support role
+  role enforcement (5): support 403 on suspend/unsuspend/audit, admin/owner 200 on audit
+
+platformSuspend.test.js (29 tests):
+  POST /suspend (9): admin suspends, owner with note, 409 already suspended, 404
+    not found, 400 invalid reason, 400 missing reason, 400 note too long, 400 invalid
+    domain, 403 support, forbidden-key scan
+  POST /unsuspend (6): admin unsuspends, 409 not suspended, 404, 400 invalid domain,
+    403 support, forbidden-key scan
+  Round trip (1): suspend then unsuspend reaches both service functions
+  GET /audit (6): 200 no ip, filter by shopDomain, filter by action, limit clamped,
+    403 support, forbidden-key scan
+  unsuspendStore strengthened (6): past-due FestivalQueue → draft, past-due
+    ScheduledJobs → skipped, future items untouched ($lt: now check), correct
+    counts returned, non-approved festival items not targeted, future jobs have
+    no $gte upper bound
+
+TOTAL SUITE: 1317 tests, 0 failures, 63 suites.
+
+────────────────────────────────────────────────────────────────────────────────
+GIT DIFF --STAT OF EXISTING FILES CHANGED
+────────────────────────────────────────────────────────────────────────────────
+
+Commit 1:
+  backend/utils/auditLog.js         +30 lines  (sanitizeMeta + export)
+  backend/routes/platform/index.js  +35 lines  (stores sub-router mount, audit route,
+                                                AuditLog + requireRole imports)
+  backend/routes/platform/stores.js  NEW       (summary + list + detail + suspend +
+                                                unsuspend routes, ~220 lines)
+  backend/__tests__/platformStores.test.js  NEW  (33 tests)
+
+Commit 2:
+  backend/__tests__/platformSuspend.test.js  NEW  (29 tests)
+  audits/platform-step3-stores-after.txt     NEW
