@@ -162,6 +162,8 @@ const automationRouter = require('./routes/automation');
 app.use('/api/automation', automationRouter);
 const emailTemplatesRouter = require('./routes/emailTemplates');
 app.use('/api/email-templates', emailTemplatesRouter);
+const exportRouter = require('./routes/export');
+app.use('/api/export', exportRouter);
 const whatsappRouter = require('./routes/whatsapp');
 app.use('/api/whatsapp', whatsappRouter);
 const dashboardRouter = require('./routes/dashboard');
