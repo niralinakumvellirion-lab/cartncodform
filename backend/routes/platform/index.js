@@ -10,6 +10,7 @@ const Staff    = require('../../models/Staff');
 const { logAudit } = require('../../utils/auditLog');
 const { requireStaff, requireRole } = require('../../middleware/requireStaff');
 const storesRouter = require('./stores');
+const staffRouter  = require('./staff');
 
 const PLATFORM_ISS = 'shopireachboost-platform';
 const PLATFORM_AUD = 'platform-admin';
@@ -199,6 +200,10 @@ router.get('/audit', requireStaff, requireRole('owner', 'admin'), async (req, re
 // ── /api/platform/stores (sub-router) ────────────────────────────────────────
 
 router.use('/stores', storesRouter);
+
+// ── /api/platform/staff (sub-router) ─────────────────────────────────────────
+
+router.use('/staff', staffRouter);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
