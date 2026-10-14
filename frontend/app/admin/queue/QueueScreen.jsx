@@ -747,7 +747,7 @@ function DayDetailsPanel({
             </div>
           ) : notifications.map((item, ii) => {
             const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
-            const isDraggable = (item.status === 'draft' || item.status === 'approved' || item.status === 'sent') && !item.sendClaimedAt;
+            const isDraggable = item.status === 'sent' || ((item.status === 'draft' || item.status === 'approved') && !item.sendClaimedAt);
             const isBeingDragged = dragItem && dragItem._id === item._id;
             const isHighlighted = dragNewId === item._id;
             return (
@@ -1032,7 +1032,7 @@ function AddEngagementView({
                   const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
                   const cc = CHANNEL_CHIP[item.channel || 'push'];
                   const audLine = audienceLineForItem(item);
-                  const isDraggable = (item.status === 'draft' || item.status === 'approved' || item.status === 'sent') && !item.sendClaimedAt;
+                  const isDraggable = item.status === 'sent' || ((item.status === 'draft' || item.status === 'approved') && !item.sendClaimedAt);
                   const isBeingDragged = dragItem && dragItem._id === item._id;
                   return (
                     <div key={item._id}
@@ -1088,7 +1088,7 @@ function AddEngagementView({
               const cc = CHANNEL_CHIP[item.channel || 'push'];
               const isNew = item._id === newId;
               const audLine = audienceLineForItem(item);
-              const isDraggable = (item.status === 'draft' || item.status === 'approved' || item.status === 'sent') && !item.sendClaimedAt;
+              const isDraggable = item.status === 'sent' || ((item.status === 'draft' || item.status === 'approved') && !item.sendClaimedAt);
               const isBeingDragged = dragItem && dragItem._id === item._id;
               return (
                 <div key={item._id}
@@ -2545,7 +2545,7 @@ export default function QueueScreen({ shop }) {
                   }}>
                     {group.items.map((item, ii) => {
                       const isLastInGroup = ii === group.items.length - 1;
-                      const planIsDraggable = (item.status === 'draft' || item.status === 'approved' || item.status === 'sent') && !item.sendClaimedAt;
+                      const planIsDraggable = item.status === 'sent' || ((item.status === 'draft' || item.status === 'approved') && !item.sendClaimedAt);
                       const planIsBeingDragged = dragItem && dragItem._id === item._id;
                       const isHighlighted = dragNewId === item._id;
                       const isSentOrCancelled = item.status === 'sent' || item.status === 'cancelled';
