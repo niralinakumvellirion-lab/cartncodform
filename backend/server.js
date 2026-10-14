@@ -41,6 +41,7 @@ const allowedOrigins = [
   process.env.FRONTEND_URL,
   process.env.STOREFRONT_URL,   // custom storefront domain, e.g. https://www.example.com
   'https://app.shopireachboost.com',
+  'https://admin.shopireachboost.com', // platform admin panel
   'https://admin.shopify.com',
   'https://cartncod-form.myshopify.com',
   'http://localhost:3000',
@@ -172,6 +173,11 @@ app.use('/apps/cartncodform', proxyRouter);
 // Public unsubscribe endpoint — no requireAuth, has its own rate limiter.
 const unsubscribeRouter = require('./routes/unsubscribe');
 app.use('/api/unsubscribe', unsubscribeRouter);
+// Platform admin panel — uses its own JWT auth (NOT Shopify session tokens).
+// Mounted last so it never intercepts merchant routes. Has its own rate
+// limiters and a 503 guard when PLATFORM_JWT_SECRET is not configured.
+const platformRouter = require('./routes/platform/index');
+app.use('/api/platform', platformRouter);
 
 // --- 404 + error handlers ---------------------------------------------------
 app.use((req, res) => {
