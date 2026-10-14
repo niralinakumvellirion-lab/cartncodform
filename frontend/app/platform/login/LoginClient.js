@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Script from 'next/script';
 import { loginWithGoogle, getMe } from '../../../lib/platformApi';
+import { platformHref } from '../../../lib/platformPaths';
 
 const CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
 
@@ -28,7 +29,7 @@ export default function LoginClient() {
   // If already signed in, skip the login page.
   useEffect(() => {
     getMe()
-      .then(() => router.replace('/'))
+      .then(() => router.replace(platformHref('/')))
       .catch(() => setLoading(false)); // not signed in — show form
   }, [router]);
 
@@ -55,7 +56,7 @@ export default function LoginClient() {
     setMsg('');
     try {
       await loginWithGoogle(response.credential);
-      router.push('/');
+      router.push(platformHref('/'));
     } catch (err) {
       setMsg(errorMessage(err));
     }

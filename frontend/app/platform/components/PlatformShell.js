@@ -3,11 +3,15 @@
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { getMe, signOut } from '../../../lib/platformApi';
+import { platformHref } from '../../../lib/platformPaths';
 
+// NAV stores clean paths; hrefs are computed at render time by platformHref
+// so they work correctly on both admin.* (clean URLs) and localhost / app.*
+// (/platform prefix).
 const NAV = [
-  { label: 'Stores',          href: '/platform',       roles: ['owner', 'admin', 'support'] },
-  { label: 'Staff and roles', href: '/platform/staff', roles: ['owner'] },
-  { label: 'Audit log',       href: '/platform/audit', roles: ['owner', 'admin'] },
+  { label: 'Stores',          path: '/',       roles: ['owner', 'admin', 'support'] },
+  { label: 'Staff and roles', path: '/staff',  roles: ['owner'] },
+  { label: 'Audit log',       path: '/audit',  roles: ['owner', 'admin'] },
 ];
 
 function NavLink({ href, label, current }) {
@@ -29,7 +33,6 @@ function NavLink({ href, label, current }) {
 function Skeleton() {
   return (
     <div className="flex min-h-screen bg-[#12151C]">
-      {/* Sidebar skeleton */}
       <div className="hidden w-56 flex-shrink-0 border-r border-white/10 p-4 sm:block">
         <div className="mb-8 h-6 w-32 rounded bg-white/10" />
         <div className="space-y-2">
@@ -38,7 +41,6 @@ function Skeleton() {
           ))}
         </div>
       </div>
-      {/* Content skeleton */}
       <div className="flex-1 p-8">
         <div className="h-8 w-48 rounded bg-white/10" />
       </div>
@@ -78,8 +80,7 @@ export default function PlatformShell({ children }) {
           setSessionEnded(true);
           setLoading(false);
         } else {
-          // Any other error (no token, 403, network): go to login
-          router.push('/platform/login');
+          router.push(platformHref('/login'));
         }
       });
   }, [router]);
@@ -87,12 +88,15 @@ export default function PlatformShell({ children }) {
   if (loading) return <Skeleton />;
 
   if (sessionEnded) {
-    return <SessionEnded onSignIn={() => router.push('/platform/login')} />;
+    return <SessionEnded onSignIn={() => router.push(platformHref('/login'))} />;
   }
 
   if (!staff) return null;
 
-  const visibleNav = NAV.filter(item => item.roles.includes(staff.role));
+  const storesHref   = platformHref('/');
+  const visibleNav   = NAV
+    .filter(item => item.roles.includes(staff.role))
+    .map(item => ({ ...item, href: platformHref(item.path) }));
 
   return (
     <div className="flex min-h-screen bg-[#12151C]">
@@ -108,10 +112,13 @@ export default function PlatformShell({ children }) {
         <nav className="flex flex-row gap-1 sm:flex-col sm:flex-1">
           {visibleNav.map(item => (
             <NavLink
-              key={item.href}
+              key={item.path}
               href={item.href}
               label={item.label}
-              current={pathname === item.href || (item.href !== '/platform' && pathname.startsWith(item.href))}
+              current={
+                pathname === item.href ||
+                (item.href !== storesHref && pathname.startsWith(item.href + '/'))
+              }
             />
           ))}
         </nav>

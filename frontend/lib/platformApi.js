@@ -5,6 +5,7 @@
  */
 
 import { BACKEND_URL } from './api';
+import { platformHref } from './platformPaths';
 
 const TOKEN_KEY = 'ccf_platform_token';
 
@@ -20,13 +21,6 @@ function storeToken(t) {
 
 function clearToken() {
   try { sessionStorage.removeItem(TOKEN_KEY); } catch {}
-}
-
-function loginPath() {
-  if (typeof window === 'undefined') return '/platform/login';
-  return window.location.pathname.startsWith('/platform')
-    ? '/platform/login'
-    : '/login';
 }
 
 // ── Core fetch ────────────────────────────────────────────────────────────────
@@ -57,7 +51,7 @@ export async function platformFetch(path, options = {}) {
   if (res.status === 401) {
     clearToken();
     if (typeof window !== 'undefined') {
-      window.location.href = loginPath();
+      window.location.href = platformHref('/login');
     }
     throw Object.assign(new Error('Session expired'), { status: 401 });
   }
@@ -114,6 +108,6 @@ export function getMe() {
 export function signOut() {
   clearToken();
   if (typeof window !== 'undefined') {
-    window.location.href = loginPath();
+    window.location.href = platformHref('/login');
   }
 }

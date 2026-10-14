@@ -5,17 +5,20 @@
  * Rules
  * ──────
  * admin.shopireachboost.com:
- *   /               → rewrite to /platform
- *   /platform/*     → next  (already prefixed, no double-prefix)
- *   everything else → notFound  (/admin/*, /cod-form/*, etc. must not leak)
+ *   /platform/*                 → next (already prefixed, no double-prefix)
+ *   /admin, /admin/*            → notFound
+ *   /cod-form, /cod-form/*      → notFound
+ *   /api, /api/*                → notFound
+ *   everything else             → rewrite to /platform + path
+ *     '/' → '/platform', '/login' → '/platform/login', etc.
+ *     Unknown paths then 404 inside Next.js, which is fine.
  *
  * Every other host, production:
  *   /platform/*     → notFound  (platform admin not reachable on app/marketing domain)
  *   all other paths → next
  *
  * Not production (local dev):
- *   /platform/*     → next  (reachable directly on localhost for dev convenience)
- *   all other paths → next
+ *   all paths → next
  *
  * Port numbers are stripped before comparing; comparison is case-insensitive.
  *
@@ -27,11 +30,22 @@ export function resolveHostRoute({ host = '', pathname = '/', isProduction = tru
   const isAdminHost = cleanHost === 'admin.shopireachboost.com';
 
   if (isAdminHost) {
-    if (pathname === '/') return { action: 'rewrite', to: '/platform' };
+    // Already under /platform — pass through unchanged.
     if (pathname.startsWith('/platform')) return { action: 'next' };
-    // All other paths (/admin/*, /cod-form/*, etc.) are not valid on the
-    // platform admin host.
-    return { action: 'notFound' };
+
+    // Block paths that belong to the merchant admin, COD form, or backend API.
+    if (
+      pathname === '/admin'    || pathname.startsWith('/admin/') ||
+      pathname === '/cod-form' || pathname.startsWith('/cod-form/') ||
+      pathname === '/api'      || pathname.startsWith('/api/')
+    ) {
+      return { action: 'notFound' };
+    }
+
+    // Every other path (including /, /login, /staff, /audit, /stores/...) rewrites
+    // to /platform + path.  Unknown paths then 404 inside Next.js.
+    const to = pathname === '/' ? '/platform' : '/platform' + pathname;
+    return { action: 'rewrite', to };
   }
 
   // Non-admin host in production: block the /platform subtree.
