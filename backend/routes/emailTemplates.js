@@ -17,6 +17,7 @@ const { upcomingFestival, storeTodayYmd } = require('../utils/festivals');
 const { renderEmailDocument } = require('../utils/emailEngine');
 const { sanitizeDesignInput, designFromTemplate, pickStarterDesign } = require('../utils/emailDesign');
 const { uploadImage } = require('../utils/cloudinary');
+const { buildSegmentQuery } = require('../utils/segmentQuery');
 
 // Same safe-fallback pattern as email.js: avoid crashing on load when key absent.
 const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
@@ -48,30 +49,6 @@ const photoRateLimiter = rateLimit({
 
 const VALID_SEGMENTS = ['everyone', 'email_captured', 'has_cart', 'bought_once', 'going_quiet'];
 const BROADCAST_CAP = 90;
-
-// Translate a segment key into a MongoDB query (mirrors profiles.js filter logic).
-// Always includes shopDomain, suppressed guard, and email-presence guard.
-function buildEmailSegmentQuery(shopDomain, segment) {
-  const query = {
-    shopDomain,
-    suppressed: { $ne: true },
-    $or: [
-      { 'channels.email.address': { $exists: true, $ne: null } },
-      { 'identifiers.emails.0': { $exists: true } },
-    ],
-  };
-  if (segment === 'email_captured') {
-    query['channels.email.capturedAt'] = { $exists: true };
-  } else if (segment === 'has_cart') {
-    query['identifiers.cartTokens.0'] = { $exists: true };
-    query['orders.count'] = 0;
-  } else if (segment === 'bought_once') {
-    query['orders.count'] = 1;
-  } else if (segment === 'going_quiet') {
-    query['lastSeenAt'] = { $lt: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000) };
-  }
-  return query;
-}
 
 // Returns the name of the next upcoming festival, or 'festive season' if the
 // calendar is exhausted.
@@ -208,7 +185,7 @@ router.get('/count', requireAuth, async (req, res) => {
     if (!VALID_SEGMENTS.includes(segment)) {
       return res.status(400).json({ error: `segment must be one of ${VALID_SEGMENTS.join(', ')}` });
     }
-    const query = buildEmailSegmentQuery(req.shopDomain, segment);
+    const query = buildSegmentQuery(req.shopDomain, segment, { requireEmail: true });
     const count = await Profile.countDocuments(query);
     return res.json({ count });
   } catch (err) {
@@ -608,7 +585,7 @@ router.post('/:id/broadcast', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Template not found' });
     }
 
-    const query = buildEmailSegmentQuery(req.shopDomain, segment);
+    const query = buildSegmentQuery(req.shopDomain, segment, { requireEmail: true });
     const total = await Profile.countDocuments(query);
 
     if (total === 0) {

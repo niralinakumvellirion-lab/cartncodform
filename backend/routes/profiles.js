@@ -9,6 +9,7 @@ const Store = require('../models/Store');
 const ScheduledJob = require('../models/ScheduledJob');
 const ShopWeights = require('../models/ShopWeights');
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
+const { buildSegmentQuery } = require('../utils/segmentQuery');
 const { computeWeeklyStats, computeInsights } = require('../services/analyticsService');
 const { generateWeeklyNarrative, generateInsights } = require('../services/aiService');
 const { computeWeights } = require('../services/weightsService');
@@ -142,37 +143,11 @@ router.get('/:shopDomain/profiles', requireAuth, requireStoreOwner, async (req, 
     let page = parseInt(req.query.page, 10);
     if (!Number.isFinite(page) || page < 0) page = 0;
 
-    const query = { shopDomain: shop };
-
     const rangeFrom = req.query.from ? new Date(req.query.from) : null;
     const rangeTo = req.query.to ? new Date(req.query.to) : null;
-
     const filter = req.query.filter;
-    if (filter === 'has_cart') {
-      query['identifiers.cartTokens.0'] = { $exists: true };
-      query['orders.count'] = 0;
-    } else if (filter === 'bought_once') {
-      query['orders.count'] = 1;
-    } else if (filter === 'repeat_buyer') {
-      query['orders.count'] = { $gte: 2 };
-    } else if (filter === 'going_quiet') {
-      const twentyOneDaysAgo = new Date(Date.now() - 21 * 24 * 60 * 60 * 1000);
-      query['lastSeenAt'] = { $lt: twentyOneDaysAgo };
-    } else if (filter === 'email_captured') {
-      query['channels.email.capturedAt'] = (rangeFrom || rangeTo)
-        ? { $exists: true, ...(rangeFrom ? { $gte: rangeFrom } : {}), ...(rangeTo ? { $lte: rangeTo } : {}) }
-        : { $exists: true };
-    } else if (filter === 'push_subscribed') {
-      query['channels.push.subscribed'] = true;
-      if (rangeFrom || rangeTo) {
-        query['channels.push.subscribedAt'] = {};
-        if (rangeFrom) query['channels.push.subscribedAt'].$gte = rangeFrom;
-        if (rangeTo) query['channels.push.subscribedAt'].$lte = rangeTo;
-      }
-    } else if (filter === 'whatsapp_captured') {
-      query['channels.whatsapp.consentedAt'] = { $exists: true, $ne: null };
-      query['channels.whatsapp.optedOutAt'] = null;
-    }
+
+    const query = buildSegmentQuery(shop, filter || 'everyone', { from: rangeFrom, to: rangeTo });
 
     const signalType = typeof req.query.signal === 'string' ? req.query.signal.trim() : '';
     if (signalType) {

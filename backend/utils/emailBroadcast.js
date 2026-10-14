@@ -22,6 +22,7 @@ const { buildUnsubscribeHeaders, buildUnsubscribeUrl } = require('./unsubscribeT
 const { logBroadcastSend } = require('../services/sendLogService');
 const { renderEmailDocument } = require('./emailEngine');
 const { designFromTemplate } = require('./emailDesign');
+const { buildSegmentQuery } = require('./segmentQuery');
 
 const resend = new Resend(process.env.RESEND_API_KEY || 're_placeholder_no_key');
 
@@ -32,28 +33,6 @@ function tagEmailCtaUrl(url, jobId) {
   if (!url || !/^https:\/\//i.test(url)) return url;
   const sep = url.includes('?') ? '&' : '?';
   return `${url}${sep}ccf_src=email&ccf_job=${jobId}`;
-}
-
-function buildEmailSegmentQuery(shopDomain, segment) {
-  const query = {
-    shopDomain,
-    suppressed: { $ne: true },
-    $or: [
-      { 'channels.email.address': { $exists: true, $ne: null } },
-      { 'identifiers.emails.0': { $exists: true } },
-    ],
-  };
-  if (segment === 'email_captured') {
-    query['channels.email.capturedAt'] = { $exists: true };
-  } else if (segment === 'has_cart') {
-    query['identifiers.cartTokens.0'] = { $exists: true };
-    query['orders.count'] = 0;
-  } else if (segment === 'bought_once') {
-    query['orders.count'] = 1;
-  } else if (segment === 'going_quiet') {
-    query['lastSeenAt'] = { $lt: new Date(Date.now() - 21 * 24 * 60 * 60 * 1000) };
-  }
-  return query;
 }
 
 async function sendEmailBroadcast({
@@ -70,7 +49,7 @@ async function sendEmailBroadcast({
     const template = await EmailTemplate.findOne({ _id: templateId, shopDomain });
     if (!template) return { sent: 0, failed: 0, total: 0, error: 'Template not found' };
 
-    const query = buildEmailSegmentQuery(shopDomain, segment);
+    const query = buildSegmentQuery(shopDomain, segment, { requireEmail: true });
     const total = await Profile.countDocuments(query);
     if (total === 0) return { sent: 0, failed: 0, total: 0, error: 'No recipients in segment' };
     if (total > BROADCAST_CAP) {
