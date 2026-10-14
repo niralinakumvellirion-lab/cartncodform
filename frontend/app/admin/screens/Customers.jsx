@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiGet } from '../../../lib/api';
+import { apiGet, BACKEND_URL } from '../../../lib/api';
 import { ShimmerTable } from '../components/Shimmer';
 import { DS, StageBadge, ReachIcons, useWhatsapp, getCustomerEmail } from './customerShared';
 import DateRangeFilter, { getDateRange, matchDatePreset } from '../components/DateRangeFilter';
@@ -75,6 +75,519 @@ const SIGNAL_LABELS = {
   winback: 'Win back',
 };
 
+// ── Export panel chip styles ──────────────────────────────────────────────────
+const chipSelected   = { background: '#eef2ff', color: '#3730a3', border: '1px solid #818cf8', borderRadius: 20, padding: '6px 14px', fontSize: 13, fontWeight: 500, cursor: 'pointer', minHeight: 36, lineHeight: '1.4' };
+const chipUnselected = { background: '#fff',    color: '#374151', border: '1px solid #d1d5db', borderRadius: 20, padding: '6px 14px', fontSize: 13, fontWeight: 500, cursor: 'pointer', minHeight: 36, lineHeight: '1.4' };
+const chipStyle = (selected) => selected ? chipSelected : chipUnselected;
+
+const PANEL_SEGMENTS = [
+  { key: 'everyone', label: 'Everyone' },
+  { key: 'has_cart', label: 'Has a cart' },
+  { key: 'bought_once', label: 'Bought once' },
+  { key: 'repeat_buyer', label: 'Repeat buyer' },
+  { key: 'going_quiet', label: 'Going quiet' },
+  { key: 'push_subscribed', label: 'Push subscribers' },
+  { key: 'email_captured', label: 'Email captured' },
+  { key: 'whatsapp_captured', label: 'WhatsApp' },
+];
+
+function SectionLabel({ children }) {
+  return <div style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>{children}</div>;
+}
+
+function Divider() {
+  return <div style={{ height: 1, background: '#eef0f3', margin: '20px 0' }} />;
+}
+
+function ChipGroup({ options, value, onChange, multi = false, label }) {
+  return (
+    <div role="group" aria-label={label} style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      {options.map(opt => {
+        const selected = multi ? (Array.isArray(value) ? value.includes(opt.key) : false) : value === opt.key;
+        return (
+          <button
+            key={opt.key}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => {
+              if (multi) {
+                const arr = Array.isArray(value) ? value : [];
+                onChange(selected ? arr.filter(k => k !== opt.key) : [...arr, opt.key]);
+              } else {
+                onChange(opt.key);
+              }
+            }}
+            style={chipStyle(selected)}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function NumberInput({ value, onChange, placeholder, min = 0 }) {
+  return (
+    <input
+      type="number"
+      min={min}
+      placeholder={placeholder}
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      style={{ width: 100, padding: '7px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 8, outline: 'none' }}
+      onFocus={e => { e.target.style.borderColor = '#818cf8'; }}
+      onBlur={e => { e.target.style.borderColor = '#d1d5db'; }}
+    />
+  );
+}
+
+// ── ExportPanel component ────────────────────────────────────────────────────
+function ExportPanel({ shop, initialSegment, initialSearch, onClose, isMobile }) {
+  const [segment,      setSegment]      = useState(initialSegment || 'everyone');
+  const [custType,     setCustType]     = useState('all');
+  const [reach,        setReach]        = useState([]); // ['push','email','phone']
+  const [search,       setSearch]       = useState(initialSearch || '');
+  const [lastSeen,     setLastSeen]     = useState('any');
+  const [lastSeenFrom, setLastSeenFrom] = useState('');
+  const [lastSeenTo,   setLastSeenTo]   = useState('');
+  const [firstSeen,    setFirstSeen]    = useState('any');
+  const [ordersMin,    setOrdersMin]    = useState('');
+  const [ordersMax,    setOrdersMax]    = useState('');
+  const [spentMin,     setSpentMin]     = useState('');
+  const [spentMax,     setSpentMax]     = useState('');
+  const [payment,      setPayment]      = useState('any');
+  const [lastOrder,    setLastOrder]    = useState('any');
+  const [messaged,     setMessaged]     = useState('any');
+  const [emailStatus,  setEmailStatus]  = useState('any');
+  const [inclActivity, setInclActivity] = useState(false);
+  const [actDays,      setActDays]      = useState('30');
+
+  const [countResult,  setCountResult]  = useState(null); // {count, overLimit}
+  const [counting,     setCounting]     = useState(false);
+  const [countError,   setCountError]   = useState('');
+  const [downloading,  setDownloading]  = useState(false);
+  const [dlError,      setDlError]      = useState('');
+
+  // Build URL params from current panel state
+  function buildParams(extra = {}) {
+    const p = new URLSearchParams();
+    if (segment !== 'everyone') p.set('segment', segment);
+    if (custType !== 'all') p.set('type', custType);
+    if (reach.includes('push'))  p.set('reachPush', 'true');
+    if (reach.includes('email')) p.set('reachEmail', 'true');
+    if (reach.includes('phone')) p.set('reachPhone', 'true');
+    if (search.trim()) p.set('search', search.trim());
+    if (lastSeen !== 'any') {
+      p.set('lastSeen', lastSeen);
+      if (lastSeen === 'custom') {
+        if (lastSeenFrom) p.set('lastSeenFrom', lastSeenFrom);
+        if (lastSeenTo)   p.set('lastSeenTo', lastSeenTo);
+      }
+    }
+    if (firstSeen !== 'any') p.set('firstSeen', firstSeen);
+    if (ordersMin !== '') p.set('ordersMin', ordersMin);
+    if (ordersMax !== '') p.set('ordersMax', ordersMax);
+    if (spentMin !== '') p.set('spentMin', spentMin);
+    if (spentMax !== '') p.set('spentMax', spentMax);
+    if (payment !== 'any') p.set('payment', payment);
+    if (lastOrder !== 'any') p.set('lastOrder', lastOrder);
+    if (messaged !== 'any') p.set('messaged', messaged);
+    if (emailStatus !== 'any') p.set('emailStatus', emailStatus);
+    if (inclActivity) { p.set('includeActivity', 'true'); p.set('activityDays', actDays); }
+    for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    return p.toString();
+  }
+
+  // Count debounce
+  useEffect(() => {
+    if (!shop) return;
+    setCounting(true);
+    setCountError('');
+    const controller = { aborted: false };
+    const tid = setTimeout(async () => {
+      try {
+        const token = await window.shopify.idToken();
+        const qs = buildParams();
+        const res = await fetch(`${BACKEND_URL}/api/export/${encodeURIComponent(shop)}/customers/count?${qs}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (controller.aborted) return;
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          setCountError(body.error || 'Couldn\'t count customers');
+          setCountResult(null);
+        } else {
+          const data = await res.json();
+          setCountResult(data);
+        }
+      } catch {
+        if (!controller.aborted) setCountError('Couldn\'t count customers');
+      } finally {
+        if (!controller.aborted) setCounting(false);
+      }
+    }, 300);
+    return () => { controller.aborted = true; clearTimeout(tid); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shop, segment, custType, reach, search, lastSeen, lastSeenFrom, lastSeenTo, firstSeen, ordersMin, ordersMax, spentMin, spentMax, payment, lastOrder, messaged, emailStatus, inclActivity, actDays]);
+
+  // Focus close button on open; return focus on close
+  const closeRef = useRef(null);
+  const triggerRef = useRef(null);
+  useEffect(() => {
+    if (closeRef.current) closeRef.current.focus();
+    return () => { if (triggerRef.current) triggerRef.current.focus(); };
+  }, []);
+
+  // Esc key closes
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // Count banner props
+  const overLimit = countResult?.overLimit;
+  const ct = countResult?.count ?? 0;
+  const activeFilters = [segment !== 'everyone', custType !== 'all', reach.length > 0, search.trim(), lastSeen !== 'any', firstSeen !== 'any', ordersMin || ordersMax, spentMin || spentMax, payment !== 'any', lastOrder !== 'any', messaged !== 'any', emailStatus !== 'any'].filter(Boolean).length;
+
+  function resetAll() {
+    setSegment('everyone'); setCustType('all'); setReach([]); setSearch('');
+    setLastSeen('any'); setLastSeenFrom(''); setLastSeenTo(''); setFirstSeen('any');
+    setOrdersMin(''); setOrdersMax(''); setSpentMin(''); setSpentMax('');
+    setPayment('any'); setLastOrder('any'); setMessaged('any'); setEmailStatus('any');
+    setInclActivity(false); setActDays('30');
+  }
+
+  async function handleDownloadAll() {
+    setDownloading(true);
+    setDlError('');
+    let objectUrl = null;
+    try {
+      const token = await window.shopify.idToken();
+      const qs = buildParams();
+      const res = await fetch(`${BACKEND_URL}/api/export/${encodeURIComponent(shop)}/customers?${qs}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setDlError(body.error || 'Couldn\'t prepare the file. Please try again.');
+        return;
+      }
+      const blob = await res.blob();
+      const cd = res.headers.get('content-disposition') || '';
+      const match = cd.match(/filename="([^"]+)"/);
+      const filename = match ? match[1] : 'customers.xlsx';
+      objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl; a.download = filename; a.style.display = 'none';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    } catch {
+      setDlError('Couldn\'t prepare the file. Please try again.');
+    } finally {
+      setDownloading(false);
+      if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    }
+  }
+
+  const dlDisabled = downloading || counting || ct === 0 || overLimit;
+  const bannerBg = overLimit ? '#fffbeb' : (ct === 0 && !counting ? '#f9fafb' : '#eef2ff');
+  const bannerBorder = overLimit ? '#fcd34d' : (ct === 0 && !counting ? '#e5e7eb' : '#c7d2fe');
+  const bannerColor = overLimit ? '#92400e' : (ct === 0 && !counting ? '#6b7280' : '#312e81');
+
+  const panelWidth = isMobile ? '100%' : 560;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        onClick={onClose}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 999 }}
+        aria-hidden="true"
+      />
+
+      {/* Panel */}
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="export-panel-title"
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: 0,
+          bottom: 0,
+          width: panelWidth,
+          background: '#fff',
+          boxShadow: '-4px 0 24px rgba(0,0,0,0.12)',
+          zIndex: 1000,
+          display: 'flex',
+          flexDirection: 'column',
+          overflowY: 'auto',
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px 12px', borderBottom: '1px solid #f3f4f6', flexShrink: 0 }}>
+          <div>
+            <div id="export-panel-title" style={{ fontSize: 15, fontWeight: 700, color: '#111827' }}>Export customers</div>
+            <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>Download a filtered Excel file. Up to 10,000 customers per file.</div>
+          </div>
+          <button
+            ref={closeRef}
+            type="button"
+            aria-label="Close export panel"
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#9ca3af', lineHeight: 1, padding: 4 }}
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 20px 0' }}>
+
+          {/* Count banner */}
+          <div style={{ background: bannerBg, border: `1px solid ${bannerBorder}`, borderRadius: 10, padding: '12px 16px', marginBottom: 20, minHeight: 52 }}>
+            {counting ? (
+              <div style={{ fontSize: 13, color: '#9ca3af' }}>Counting…</div>
+            ) : countError ? (
+              <div style={{ fontSize: 13, color: '#b91c1c' }}>{countError}</div>
+            ) : overLimit ? (
+              <div style={{ color: bannerColor }}>
+                <span style={{ fontSize: 22, fontWeight: 700 }}>{ct.toLocaleString()}</span>
+                <span style={{ fontSize: 13, marginLeft: 8 }}>customers match. A file holds up to 10,000, so add a filter to narrow it down.</span>
+              </div>
+            ) : ct === 0 ? (
+              <div style={{ fontSize: 13, color: bannerColor }}>No customers match. Loosen a filter to include more people.
+                {activeFilters > 0 && <> <button type="button" onClick={resetAll} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4f46e5', fontSize: 13, padding: 0, textDecoration: 'underline' }}>Reset all filters</button></>}
+              </div>
+            ) : (
+              <div style={{ color: bannerColor }}>
+                <span style={{ fontSize: 22, fontWeight: 700 }}>{ct.toLocaleString()}</span>
+                <span style={{ fontSize: 13, marginLeft: 8 }}>
+                  {activeFilters > 0 ? `customer${ct !== 1 ? 's' : ''} match your ${activeFilters} filter${activeFilters !== 1 ? 's' : ''}` : `customer${ct !== 1 ? 's' : ''} in your store`}
+                </span>
+                {activeFilters > 0 && (
+                  <> · <button type="button" onClick={resetAll} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#4f46e5', fontSize: 13, padding: 0, textDecoration: 'underline' }}>Reset all filters</button></>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* GROUP */}
+          <SectionLabel>Group</SectionLabel>
+          <ChipGroup options={PANEL_SEGMENTS} value={segment} onChange={setSegment} label="Customer segment" />
+
+          <Divider />
+
+          {/* WHO */}
+          <SectionLabel>Who</SectionLabel>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>Customer type</div>
+            <ChipGroup
+              label="Customer type"
+              value={custType}
+              onChange={setCustType}
+              options={[{ key: 'all', label: 'All customers' }, { key: 'identified', label: 'Identified (has email or phone)' }, { key: 'anonymous', label: 'Anonymous visitors' }]}
+            />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>Can be reached by <span style={{ color: '#9ca3af', fontStyle: 'italic' }}>(must have all you pick)</span></div>
+            <ChipGroup
+              label="Reach channels"
+              value={reach}
+              onChange={setReach}
+              multi={true}
+              options={[{ key: 'push', label: 'Push' }, { key: 'email', label: 'Email' }, { key: 'phone', label: 'Phone' }]}
+            />
+          </div>
+          <div>
+            <label htmlFor="ep-search" style={{ fontSize: 12, color: '#6b7280', display: 'block', marginBottom: 4 }}>Email or phone contains</label>
+            <input
+              id="ep-search"
+              type="text"
+              value={search}
+              maxLength={100}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="e.g. @gmail.com"
+              style={{ width: '100%', boxSizing: 'border-box', padding: '8px 12px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 8, outline: 'none' }}
+              onFocus={e => { e.target.style.borderColor = '#818cf8'; }}
+              onBlur={e => { e.target.style.borderColor = '#d1d5db'; }}
+            />
+          </div>
+
+          <Divider />
+
+          {/* DATES */}
+          <SectionLabel>Dates</SectionLabel>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>Last seen</div>
+            <ChipGroup
+              label="Last seen"
+              value={lastSeen}
+              onChange={setLastSeen}
+              options={[
+                { key: 'any', label: 'Any time' },
+                { key: 'today', label: 'Today' },
+                { key: '7d', label: 'Last 7 days' },
+                { key: '30d', label: 'Last 30 days' },
+                { key: 'custom', label: 'Custom range' },
+              ]}
+            />
+            {lastSeen === 'custom' && (
+              <div style={{ display: 'flex', gap: 12, marginTop: 10, alignItems: 'center' }}>
+                <div>
+                  <label style={{ fontSize: 11, color: '#6b7280', display: 'block', marginBottom: 4 }}>From</label>
+                  <input type="date" value={lastSeenFrom} max={lastSeenTo || undefined} onChange={e => setLastSeenFrom(e.target.value)}
+                    style={{ padding: '7px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 8 }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 11, color: '#6b7280', display: 'block', marginBottom: 4 }}>To</label>
+                  <input type="date" value={lastSeenTo} min={lastSeenFrom || undefined} onChange={e => setLastSeenTo(e.target.value)}
+                    style={{ padding: '7px 10px', fontSize: 13, border: '1px solid #d1d5db', borderRadius: 8 }} />
+                </div>
+              </div>
+            )}
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>First seen</div>
+            <ChipGroup
+              label="First seen"
+              value={firstSeen}
+              onChange={setFirstSeen}
+              options={[{ key: 'any', label: 'Any time' }, { key: '30d', label: 'Last 30 days' }, { key: '90d', label: 'Last 90 days' }]}
+            />
+          </div>
+
+          <Divider />
+
+          {/* ORDERS AND VALUE */}
+          <SectionLabel>Orders and value</SectionLabel>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>Number of orders</div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <NumberInput value={ordersMin} onChange={setOrdersMin} placeholder="Min" />
+              <span style={{ color: '#9ca3af', fontSize: 13 }}>–</span>
+              <NumberInput value={ordersMax} onChange={setOrdersMax} placeholder="Max" />
+            </div>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>Total spent (₹)</div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <NumberInput value={spentMin} onChange={setSpentMin} placeholder="Min" />
+              <span style={{ color: '#9ca3af', fontSize: 13 }}>–</span>
+              <NumberInput value={spentMax} onChange={setSpentMax} placeholder="Max" />
+            </div>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>Payment type</div>
+            <ChipGroup
+              label="Payment type"
+              value={payment}
+              onChange={setPayment}
+              options={[{ key: 'any', label: 'Any payment' }, { key: 'cod', label: 'Has COD orders' }, { key: 'prepaid', label: 'Has prepaid orders' }]}
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>Last order</div>
+            <ChipGroup
+              label="Last order"
+              value={lastOrder}
+              onChange={setLastOrder}
+              options={[{ key: 'any', label: 'Any time' }, { key: '30d', label: 'Within 30 days' }, { key: '90d', label: 'Within 90 days' }]}
+            />
+          </div>
+
+          <Divider />
+
+          {/* MESSAGES */}
+          <SectionLabel>Messages</SectionLabel>
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>Messages sent to them</div>
+            <ChipGroup
+              label="Messaging state"
+              value={messaged}
+              onChange={setMessaged}
+              options={[{ key: 'any', label: 'Any' }, { key: 'never', label: 'Never messaged' }, { key: 'before', label: 'Messaged before' }]}
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>Email status</div>
+            <ChipGroup
+              label="Email status"
+              value={emailStatus}
+              onChange={setEmailStatus}
+              options={[{ key: 'any', label: 'Any status' }, { key: 'subscribed', label: 'Subscribed' }, { key: 'unsubscribed', label: 'Unsubscribed' }]}
+            />
+          </div>
+
+          <Divider />
+
+          {/* ACTIVITY SHEET */}
+          <SectionLabel>Add browsing activity</SectionLabel>
+          <label style={{ display: 'flex', gap: 12, alignItems: 'flex-start', cursor: 'pointer', padding: '12px 14px', border: `1px solid ${inclActivity ? '#818cf8' : '#e5e7eb'}`, borderRadius: 10, background: inclActivity ? '#f5f3ff' : '#fafafa' }}>
+            <input
+              type="checkbox"
+              checked={inclActivity}
+              onChange={e => setInclActivity(e.target.checked)}
+              style={{ marginTop: 2, flexShrink: 0, accentColor: '#4f46e5' }}
+            />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>Include an "Activity" sheet</div>
+              <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 2 }}>Every page, product and cart visit of the selected customers, in a second sheet. Up to 200,000 rows.</div>
+            </div>
+          </label>
+          {inclActivity && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 8 }}>Activity period</div>
+              <ChipGroup
+                label="Activity period"
+                value={actDays}
+                onChange={setActDays}
+                options={[{ key: '7', label: 'Last 7 days' }, { key: '30', label: 'Last 30 days' }, { key: '90', label: 'Last 90 days' }]}
+              />
+            </div>
+          )}
+
+          <div style={{ height: 24 }} />
+        </div>
+
+        {/* Sticky footer */}
+        <div style={{ borderTop: '1px solid #f3f4f6', padding: '14px 20px', flexShrink: 0, background: '#fff' }}>
+          <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 10, lineHeight: 1.5 }}>
+            Up to 10,000 customers per file. Push tokens and internal IDs are never included. Unsubscribed customers are included and marked.
+          </div>
+          {dlError && (
+            <div style={{ fontSize: 12, color: '#b91c1c', marginBottom: 8 }}>{dlError}</div>
+          )}
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button type="button" onClick={resetAll} style={{ flex: 'none', background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: 9, padding: '10px 18px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              Reset
+            </button>
+            <button
+              type="button"
+              onClick={handleDownloadAll}
+              disabled={dlDisabled}
+              style={{
+                flex: 1,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                background: dlDisabled ? '#e5e7eb' : '#4f46e5',
+                color: dlDisabled ? '#6b7280' : '#fff',
+                border: 'none', borderRadius: 10, padding: '0 18px', height: 44,
+                fontSize: 13, fontWeight: 600, cursor: dlDisabled ? 'not-allowed' : 'pointer',
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+              </svg>
+              {downloading ? 'Preparing…' : `Download Excel${countResult && !overLimit && ct > 0 ? ` · ${ct.toLocaleString()} customers` : ''}`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 export default function Customers({ shop, initialFilter, initialSignal, initialFrom, initialTo }) {
   const router = useRouter();
   // Carries `shop` forward on client-side nav (every admin/*/page.js
@@ -104,6 +617,9 @@ export default function Customers({ shop, initialFilter, initialSignal, initialF
   );
   const [search, setSearch] = useState('');
   const [activeSignalType, setActiveSignalType] = useState(initialSignal || '');
+
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportBtnRef = useRef(null);
 
   const [isMobileView, setIsMobileView] = useState(false);
   useEffect(() => {
@@ -184,7 +700,35 @@ export default function Customers({ shop, initialFilter, initialSignal, initialF
       <PageHeader
         title="Customers"
         subtitle="All push notification subscribers"
+        action={
+          <button
+            ref={exportBtnRef}
+            type="button"
+            onClick={() => setExportOpen(true)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              background: '#fff', color: '#374151',
+              border: '1px solid #d1d5db', borderRadius: 9,
+              padding: '8px 14px', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Export
+          </button>
+        }
       />
+
+      {exportOpen && (
+        <ExportPanel
+          shop={shop}
+          initialSegment={filter !== 'everyone' ? filter : 'everyone'}
+          initialSearch={search}
+          onClose={() => { setExportOpen(false); exportBtnRef.current?.focus(); }}
+          isMobile={isMobileView}
+        />
+      )}
 
       {error && (
         <div
