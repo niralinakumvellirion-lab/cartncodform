@@ -503,6 +503,7 @@ function MonthCalendar({ month, items, festivals, selectedDayStr, selectedDayTyp
                 className="ccf-day-cell-btn"
                 aria-label={`Add engagement on ${cellDateLabel}`}
                 onClick={e => { e.stopPropagation(); onDayCellClick(dateStr); }}
+                onDragOver={e => { if (dragItem) e.preventDefault(); }}
                 style={{ zIndex: 0 }}
               />
             )}
@@ -716,9 +717,16 @@ function DayDetailsPanel({
                 draggable={isDraggable}
                 onDragStart={isDraggable ? e => {
                   e.dataTransfer.effectAllowed = 'move';
-                  if (onCardDragStart) onCardDragStart(item);
+                  e.dataTransfer.setData('text/plain', item._id);
+                  dragEndedRef.current = false;
+                  requestAnimationFrame(() => {
+                    if (!dragEndedRef.current && onCardDragStart) onCardDragStart(item);
+                  });
                 } : undefined}
-                onDragEnd={isDraggable ? () => { if (onCardDragEnd) onCardDragEnd(); } : undefined}
+                onDragEnd={isDraggable ? () => {
+                  dragEndedRef.current = true;
+                  if (onCardDragEnd) onCardDragEnd();
+                } : undefined}
                 style={{
                   background: '#f9fafb', border: isHighlighted ? '2px solid #2563eb' : '1px solid #e5e7eb',
                   borderRadius: 10, padding: '12px 14px',
@@ -1697,6 +1705,8 @@ export default function QueueScreen({ shop }) {
   const [dragError, setDragError] = useState('');
   const [dragConfirm, setDragConfirm] = useState('');
   const [dragNewId, setDragNewId] = useState(null);
+  // Race guard: if dragend fires before the deferred rAF runs, skip setDragItem.
+  const dragEndedRef = useRef(false);
 
   const [emailTemplates, setEmailTemplates] = useState([]);
   const [emailTemplatesLoading, setEmailTemplatesLoading] = useState(false);
@@ -2291,9 +2301,17 @@ export default function QueueScreen({ shop }) {
                           draggable={planIsDraggable}
                           onDragStart={planIsDraggable ? e => {
                             e.dataTransfer.effectAllowed = 'move';
-                            setDragItem(item);
+                            e.dataTransfer.setData('text/plain', item._id);
+                            dragEndedRef.current = false;
+                            requestAnimationFrame(() => {
+                              if (!dragEndedRef.current) setDragItem(item);
+                            });
                           } : undefined}
-                          onDragEnd={planIsDraggable ? () => { setDragItem(null); setDragOverDate(null); } : undefined}
+                          onDragEnd={planIsDraggable ? () => {
+                            dragEndedRef.current = true;
+                            setDragItem(null);
+                            setDragOverDate(null);
+                          } : undefined}
                           onMouseEnter={e => {
                             e.currentTarget.style.background = '#f9fafb';
                             const actions = e.currentTarget.querySelector('[data-row-actions]');
