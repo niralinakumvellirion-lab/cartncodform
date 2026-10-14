@@ -222,7 +222,14 @@ describe('array scheduledAt — multi-date creation', () => {
 });
 
 describe('bulk edit — applyToGroup', () => {
+  function mockDraftTarget() {
+    FestivalQueue.findOne.mockReturnValue({
+      select: () => Promise.resolve({ _id: 'fq1', status: 'draft', sendClaimedAt: null, festival: '', scheduledAt: new Date() }),
+    });
+  }
+
   test('propagates content fields to sibling draft/approved documents, never scheduledAt/status, never sent docs', async () => {
+    mockDraftTarget();
     FestivalQueue.findOneAndUpdate.mockResolvedValue({
       _id: 'fq1', groupId: 'g1', title: 'New title', status: 'approved',
     });
@@ -232,7 +239,7 @@ describe('bulk edit — applyToGroup', () => {
     });
 
     const res = await patch('fq1', {
-      title: 'New title', scheduledAt: '2026-10-02T09:00', applyToGroup: true,
+      title: 'New title', scheduledAt: '2026-12-02T09:00', applyToGroup: true,
     });
     const data = await res.json();
 
@@ -251,6 +258,7 @@ describe('bulk edit — applyToGroup', () => {
   });
 
   test('without applyToGroup, only the target document is updated (default, unchanged behaviour)', async () => {
+    mockDraftTarget();
     FestivalQueue.findOneAndUpdate.mockResolvedValue({ _id: 'fq1', groupId: 'g1' });
 
     const res = await patch('fq1', { title: 'New title' });
@@ -262,6 +270,7 @@ describe('bulk edit — applyToGroup', () => {
   });
 
   test('applyToGroup on an ungrouped item (no groupId) is a no-op beyond the single update', async () => {
+    mockDraftTarget();
     FestivalQueue.findOneAndUpdate.mockResolvedValue({ _id: 'fq1', groupId: null });
 
     const res = await patch('fq1', { title: 'New title', applyToGroup: true });

@@ -127,16 +127,24 @@ describe('POST /:shop/festival — store-timezone-aware scheduling', () => {
 });
 
 describe('PATCH /:shop/festival/:id — store-timezone-aware scheduling', () => {
+  // Helper: mock the pre-fetch findOne for a draft item (no festival, no claim).
+  function mockDraftTarget() {
+    FestivalQueue.findOne.mockReturnValue({
+      select: () => Promise.resolve({ _id: 'fq1', status: 'draft', sendClaimedAt: null, festival: '', scheduledAt: new Date() }),
+    });
+  }
+
   test('19:31 entered for a Asia/Kathmandu store converts to 13:46 UTC', async () => {
     mockStoreTimezone('Asia/Kathmandu');
+    mockDraftTarget();
     FestivalQueue.findOneAndUpdate.mockImplementation((_q, update) => Promise.resolve({ _id: 'fq1', ...update.$set }));
 
-    const res = await patch('fq1', { scheduledAt: '2026-09-29T19:31' });
+    const res = await patch('fq1', { scheduledAt: '2026-12-29T19:31' });
     const data = await res.json();
 
     expect(res.status).toBe(200);
     const [, updateArg] = FestivalQueue.findOneAndUpdate.mock.calls[0];
-    expect(updateArg.$set.scheduledAt.toISOString()).toBe('2026-09-29T13:46:00.000Z');
+    expect(updateArg.$set.scheduledAt.toISOString()).toBe('2026-12-29T13:46:00.000Z');
   });
 
   // Regression: the Edit modal's Save button always sends `scheduledAt`,
@@ -147,20 +155,23 @@ describe('PATCH /:shop/festival/:id — store-timezone-aware scheduling', () => 
   // accepted the "YYYY-MM-DDTHH:mm" shape and silently 400'd on this
   // (commit 60c2010's regression) — this must pass straight through
   // unchanged instead, since it's already an unambiguous instant.
+  // ISO strings bypass the past-date check (the date field was not changed).
   test('a full ISO scheduledAt (date field untouched this edit) passes through unchanged', async () => {
     mockStoreTimezone('Asia/Kolkata');
+    mockDraftTarget();
     FestivalQueue.findOneAndUpdate.mockImplementation((_q, update) => Promise.resolve({ _id: 'fq1', ...update.$set }));
 
-    const res = await patch('fq1', { title: 'New title', scheduledAt: '2026-09-29T14:01:00.000Z' });
+    const res = await patch('fq1', { title: 'New title', scheduledAt: '2099-12-29T14:01:00.000Z' });
 
     expect(res.status).toBe(200);
     const [, updateArg] = FestivalQueue.findOneAndUpdate.mock.calls[0];
-    expect(updateArg.$set.scheduledAt.toISOString()).toBe('2026-09-29T14:01:00.000Z');
+    expect(updateArg.$set.scheduledAt.toISOString()).toBe('2099-12-29T14:01:00.000Z');
     expect(updateArg.$set.title).toBe('New title');
   });
 
   test('rejects a genuinely unparseable scheduledAt with 400 and does not touch other fields', async () => {
     mockStoreTimezone('Asia/Kolkata');
+    mockDraftTarget();
 
     const res = await patch('fq1', { title: 'New title', scheduledAt: 'not-a-date' });
     expect(res.status).toBe(400);
@@ -192,49 +203,57 @@ function formatLocalDateTimeInput(value, tz) {
 }
 
 describe('Full round trip — store, read back, resave, repeated 3x', () => {
+  function mockDraftTarget() {
+    FestivalQueue.findOne.mockReturnValue({
+      select: () => Promise.resolve({ _id: 'fq1', status: 'draft', sendClaimedAt: null, festival: '', scheduledAt: new Date() }),
+    });
+  }
+
   test('re-picking the displayed value every reopen never drifts (Asia/Kolkata)', async () => {
     mockStoreTimezone('Asia/Kolkata');
+    mockDraftTarget();
     let stored = null;
     FestivalQueue.findOneAndUpdate.mockImplementation((_q, update) => {
       stored = { _id: 'fq1', ...update.$set };
       return Promise.resolve(stored);
     });
 
-    // Cycle 1: merchant types 28/09/2026 12:00 IST for the first time.
-    let res = await patch('fq1', { scheduledAt: '2026-09-28T12:00' });
+    // Cycle 1: merchant types 28/12/2026 12:00 IST for the first time.
+    let res = await patch('fq1', { scheduledAt: '2026-12-28T12:00' });
     expect(res.status).toBe(200);
-    expect(stored.scheduledAt.toISOString()).toBe('2026-09-28T06:30:00.000Z');
+    expect(stored.scheduledAt.toISOString()).toBe('2026-12-28T06:30:00.000Z');
 
     for (let cycle = 2; cycle <= 3; cycle++) {
       // Reopen: the input displays formatLocalDateTimeInput of whatever's
       // now stored. Merchant re-touches it (worst case — re-selects the
       // exact same date/time shown) and saves again.
       const displayed = formatLocalDateTimeInput(stored.scheduledAt.toISOString(), 'Asia/Kolkata');
-      expect(displayed).toBe('2026-09-28T12:00');
+      expect(displayed).toBe('2026-12-28T12:00');
       res = await patch('fq1', { scheduledAt: displayed });
       expect(res.status).toBe(200);
-      expect(stored.scheduledAt.toISOString()).toBe('2026-09-28T06:30:00.000Z');
+      expect(stored.scheduledAt.toISOString()).toBe('2026-12-28T06:30:00.000Z');
     }
   });
 
   test('leaving the date field untouched every reopen (Save resends the stored ISO) never drifts', async () => {
     mockStoreTimezone('Asia/Kolkata');
+    mockDraftTarget();
     let stored = null;
     FestivalQueue.findOneAndUpdate.mockImplementation((_q, update) => {
       stored = { _id: 'fq1', ...update.$set };
       return Promise.resolve(stored);
     });
 
-    let res = await patch('fq1', { scheduledAt: '2026-09-28T12:00' });
+    let res = await patch('fq1', { scheduledAt: '2026-12-28T12:00' });
     expect(res.status).toBe(200);
-    expect(stored.scheduledAt.toISOString()).toBe('2026-09-28T06:30:00.000Z');
+    expect(stored.scheduledAt.toISOString()).toBe('2026-12-28T06:30:00.000Z');
 
     for (let cycle = 2; cycle <= 3; cycle++) {
       // openEditModal set editScheduledAt to the full ISO from the DB;
       // the merchant edits something else and Save resends it unchanged.
       res = await patch('fq1', { title: `edit #${cycle}`, scheduledAt: stored.scheduledAt.toISOString() });
       expect(res.status).toBe(200);
-      expect(stored.scheduledAt.toISOString()).toBe('2026-09-28T06:30:00.000Z');
+      expect(stored.scheduledAt.toISOString()).toBe('2026-12-28T06:30:00.000Z');
     }
   });
 });

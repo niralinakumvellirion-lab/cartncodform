@@ -65,43 +65,53 @@ function del(id) {
 }
 
 describe('PATCH — a sent document is never edited', () => {
-  test('scopes the update match to status != sent, so a sent doc is never matched', async () => {
-    FestivalQueue.findOneAndUpdate.mockResolvedValue(null);
-    FestivalQueue.findOne.mockReturnValue({ select: () => Promise.resolve({ status: 'sent' }) });
+  test('a sent document is caught in the pre-fetch (never reaches findOneAndUpdate)', async () => {
+    FestivalQueue.findOne.mockReturnValue({
+      select: () => Promise.resolve({ _id: 'fq1', status: 'sent', sendClaimedAt: null, festival: '', scheduledAt: new Date() }),
+    });
 
     const res = await patch('fq1', { title: 'New title' });
     const data = await res.json();
 
     expect(res.status).toBe(409);
     expect(data.error).toMatch(/already been sent/i);
-    const [matchArg] = FestivalQueue.findOneAndUpdate.mock.calls[0];
-    expect(matchArg).toMatchObject({ _id: 'fq1', shopDomain: SHOP, status: { $ne: 'sent' } });
+    // Pre-fetch catches it — findOneAndUpdate is never called.
+    expect(FestivalQueue.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  test('changing scheduledAt on a sent document is rejected the same way (the exact bug: a future date + Sent badge)', async () => {
-    FestivalQueue.findOneAndUpdate.mockResolvedValue(null);
-    FestivalQueue.findOne.mockReturnValue({ select: () => Promise.resolve({ status: 'sent' }) });
+  test('changing scheduledAt on a sent document is rejected in the pre-fetch', async () => {
+    FestivalQueue.findOne.mockReturnValue({
+      select: () => Promise.resolve({ _id: 'fq1', status: 'sent', sendClaimedAt: null, festival: '', scheduledAt: new Date() }),
+    });
 
-    const res = await patch('fq1', { scheduledAt: '2026-10-02T09:00' });
+    const res = await patch('fq1', { scheduledAt: '2026-12-02T09:00' });
     expect(res.status).toBe(409);
+    expect(FestivalQueue.findOneAndUpdate).not.toHaveBeenCalled();
   });
 
-  test('a genuinely missing document still returns success:true, item:null (unchanged behaviour)', async () => {
-    FestivalQueue.findOneAndUpdate.mockResolvedValue(null);
-    FestivalQueue.findOne.mockReturnValue({ select: () => Promise.resolve(null) });
+  test('a genuinely missing document returns 404', async () => {
+    FestivalQueue.findOne.mockReturnValue({
+      select: () => Promise.resolve(null),
+    });
 
     const res = await patch('missing', { title: 'New title' });
     const data = await res.json();
 
-    expect(res.status).toBe(200);
-    expect(data).toEqual({ success: true, item: null });
+    expect(res.status).toBe(404);
+    expect(data.error).toMatch(/not found/i);
   });
 
   test('a draft/approved document still edits normally', async () => {
-    FestivalQueue.findOneAndUpdate.mockResolvedValue({ _id: 'fq1', status: 'approved', groupId: null });
+    FestivalQueue.findOne.mockReturnValue({
+      select: () => Promise.resolve({ _id: 'fq1', status: 'draft', sendClaimedAt: null, festival: '', scheduledAt: new Date() }),
+    });
+    FestivalQueue.findOneAndUpdate.mockResolvedValue({ _id: 'fq1', status: 'draft', groupId: null });
 
     const res = await patch('fq1', { title: 'New title' });
     expect(res.status).toBe(200);
+    // Confirm findOneAndUpdate is now scoped to draft/approved.
+    const [matchArg] = FestivalQueue.findOneAndUpdate.mock.calls[0];
+    expect(matchArg).toMatchObject({ status: { $in: ['draft', 'approved'] } });
   });
 });
 

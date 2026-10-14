@@ -5,7 +5,7 @@ const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner')
 const ScheduledJob = require('../models/ScheduledJob');
 const Profile = require('../models/Profile');
 const Store = require('../models/Store');
-const { zonedTimeToUtc, resolveTz } = require('../utils/timezone');
+const { zonedTimeToUtc, resolveTz, zonedParts } = require('../utils/timezone');
 
 const LOCAL_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
 
@@ -530,12 +530,33 @@ router.patch('/:shopDomain/festival/:id', requireAuth,
     const shop = req.params.shopDomain.trim().toLowerCase();
     const FestivalQueue = require('../models/FestivalQueue');
 
+    // Pre-fetch: check existence, status, and sendClaimedAt before doing any
+    // work. A 'sent' document is historical fact and must never be edited.
+    // A 'cancelled' document is also ineligible. A claimed document is
+    // mid-send and cannot be rescheduled safely.
+    const target = await FestivalQueue.findOne(
+      { _id: req.params.id, shopDomain: shop }
+    ).select('status sendClaimedAt festival scheduledAt');
+    if (!target) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    if (target.sendClaimedAt) {
+      return res.status(409).json({ error: 'This item is currently being sent and cannot be rescheduled.' });
+    }
+    if (!['draft', 'approved'].includes(target.status)) {
+      const msg = target.status === 'sent'
+        ? 'Cannot edit a notification that has already been sent'
+        : 'Cannot edit a cancelled notification';
+      return res.status(409).json({ error: msg });
+    }
+
     // Diagnostic — added after a 400 here went completely silent (no
     // console.error, since it was an explicit `return res.status(400)`,
     // not a thrown error) and looked from the server logs like the
     // handler hung. Cheap enough to leave in permanently.
+    let store = null;
     if (req.body.scheduledAt !== undefined) {
-      const store = await Store.findOne({ shopDomain: shop }).select('timezone').lean();
+      store = await Store.findOne({ shopDomain: shop }).select('timezone').lean();
       console.log(
         `[queue] festival PATCH ${req.params.id} — received scheduledAt: ${JSON.stringify(req.body.scheduledAt)}, ` +
         `resolved store timezone: ${resolveTz(store?.timezone)}`
@@ -546,11 +567,27 @@ router.patch('/:shopDomain/festival/:id', requireAuth,
     for (const key of FESTIVAL_PATCH_FIELDS) {
       if (req.body[key] === undefined) continue;
       if (key === 'scheduledAt') {
-        const scheduledAtUtc = await resolveScheduledAt(shop, req.body[key]);
+        const raw = req.body[key];
+        const scheduledAtUtc = await resolveScheduledAt(shop, raw);
         if (!scheduledAtUtc) {
           return res.status(400).json({
             error: 'scheduledAt must be a "YYYY-MM-DDTHH:mm" local date-time',
           });
+        }
+        // Reject past dates only for newly typed local datetimes
+        // ("YYYY-MM-DDTHH:mm" shape). An ISO string means the date field
+        // was not changed (edit modal resends the existing value) — allow it.
+        if (LOCAL_DATETIME_RE.test(String(raw).trim())) {
+          const tz = resolveTz(store?.timezone);
+          const now = new Date();
+          const { y, mo, d } = zonedParts(now, tz);
+          const todayStartUtc = zonedTimeToUtc(y, mo, d, 0, 0, tz);
+          if (scheduledAtUtc < todayStartUtc) {
+            return res.status(400).json({ error: 'scheduledAt must not be before today' });
+          }
+          if (scheduledAtUtc <= now) {
+            return res.status(400).json({ error: 'That time has already passed today.' });
+          }
         }
         updates.scheduledAt = scheduledAtUtc;
       } else {
@@ -558,28 +595,40 @@ router.patch('/:shopDomain/festival/:id', requireAuth,
       }
     }
 
-    // A 'sent' document is historical fact — the bulk-propagation guard
-    // below already refuses to rewrite a sent SIBLING, but until now
-    // nothing stopped this same PATCH from rewriting the TARGET document
-    // itself when it's the one that's already sent (e.g. changing its
-    // own scheduledAt to a future date while status stays 'sent' —
-    // exactly how a document ends up showing a "Sent" badge next to a
-    // future date, see audits/queue-detail-picker-bugs-audit.txt). The
-    // match is scoped to status != 'sent' so a sent document simply
-    // isn't found; findOneAndUpdate returning null is disambiguated
-    // below into "not found" vs "found but sent" for a clear error.
+    // Festival collision check: if moving to a new date and the item has a
+    // named festival, reject rather than create two items for the same
+    // festival on the same date.
+    if (updates.scheduledAt && target.festival) {
+      const tz = resolveTz(store?.timezone);
+      const { y: ny, mo: nmo, d: nd } = zonedParts(updates.scheduledAt, tz);
+      const dayStart = zonedTimeToUtc(ny, nmo, nd, 0, 0, tz);
+      const dayEnd = zonedTimeToUtc(ny, nmo, nd + 1, 0, 0, tz);
+      const collision = await FestivalQueue.findOne({
+        shopDomain: shop,
+        festival: target.festival,
+        _id: { $ne: target._id },
+        status: { $in: ['draft', 'approved'] },
+        scheduledAt: { $gte: dayStart, $lt: dayEnd },
+      });
+      if (collision) {
+        return res.status(409).json({
+          error: `A "${target.festival}" item is already scheduled on that date.`,
+        });
+      }
+    }
+
+    // Scoped to draft/approved only (was $ne: 'sent') — the pre-fetch
+    // already verified status, but we scope the query too so a concurrent
+    // status change cannot slip through.
     const item = await FestivalQueue.findOneAndUpdate(
-      { _id: req.params.id, shopDomain: shop, status: { $ne: 'sent' } },
+      { _id: req.params.id, shopDomain: shop, status: { $in: ['draft', 'approved'] } },
       { $set: updates },
       { new: true }
     );
 
     if (!item) {
-      const existing = await FestivalQueue.findOne({ _id: req.params.id, shopDomain: shop }).select('status');
-      if (existing && existing.status === 'sent') {
-        return res.status(409).json({ error: 'Cannot edit a notification that has already been sent' });
-      }
-      return res.json({ success: true, item: null });
+      // Race condition — status changed between pre-fetch and update.
+      return res.status(409).json({ error: 'Item was modified concurrently, please retry.' });
     }
 
     // Bulk propagation to the rest of the group — opt-in via
