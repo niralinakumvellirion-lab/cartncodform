@@ -255,7 +255,7 @@ async function processScheduledJobs() {
     try {
       const shopsToCheck = await Store.find(
         {},
-        'shopDomain lastSignalRunAt timezone'
+        'shopDomain lastSignalRunAt timezone suspended'
       ).lean();
       for (const s of shopsToCheck) {
         const tz = s.timezone || 'Asia/Kolkata';
@@ -294,6 +294,14 @@ async function processScheduledJobs() {
             { shopDomain: s.shopDomain },
             { lastSignalRunAt: nowD }
           );
+
+          // Platform-level suspension: skip signals+brain for suspended stores.
+          // lastSignalRunAt was already claimed above so a suspended shop
+          // isn't re-evaluated on every tick for the rest of the day.
+          if (s.suspended) {
+            console.log(`[signals] store ${s.shopDomain} is suspended — skipping nightly run`);
+            continue;
+          }
 
           // Master switch — "When off, no automated notifications will be
           // sent" (Automation screen, Section 1). Still claims
@@ -340,7 +348,20 @@ async function processScheduledJobs() {
       // (quiet hours) or skip it permanently (frequency cap).
       const Store = require('./models/Store');
       const store = await Store.findOne({ shopDomain: job.shopDomain })
-        .select('timezone quietHours').lean();
+        .select('timezone quietHours suspended').lean();
+
+      // Platform suspension: mark this job skipped immediately so it never
+      // fires as a burst when the store is unsuspended. Unsuspend cleanup
+      // (storeSuspension.unsuspendStore) handles past-due pending jobs, but
+      // a job queued after suspension must also be caught here on every tick.
+      if (store && store.suspended) {
+        await ScheduledJob.findOneAndUpdate(
+          { _id: job._id, status: 'pending' },
+          { status: 'skipped', error: 'store_suspended' }
+        );
+        console.log(`[automation] Job ${job._id} skipped — store suspended`);
+        continue;
+      }
 
       // Same window + wrap-past-midnight logic the Brain schedules against
       // (utils/timezone.js), read from the store's saved quietHours (default
@@ -677,7 +698,26 @@ async function processFestivalQueue() {
       $or: [{ sendClaimedAt: null }, { sendClaimedAt: { $lt: claimExpiry } }],
     }).limit(20);
 
+    // Build a Set of suspended shop domains once per tick — one DB query
+    // for all items instead of one per item (avoids N+1 reads).
+    const shopDomainsInBatch = [...new Set(dueItems.map((i) => i.shopDomain))];
+    const suspendedStores = shopDomainsInBatch.length
+      ? await Store.find(
+          { shopDomain: { $in: shopDomainsInBatch }, suspended: true },
+          'shopDomain'
+        ).lean()
+      : [];
+    const suspendedSet = new Set(suspendedStores.map((s) => s.shopDomain));
+
     for (const item of dueItems) {
+      // Skip items for suspended stores without claiming or modifying them.
+      // Items stay 'approved' so they can be sent once the store is unsuspended
+      // (or moved to 'draft' by unsuspendStore's cleanup if past-due at that time).
+      if (suspendedSet.has(item.shopDomain)) {
+        console.log(`[festival-queue] item ${item._id} skipped — store ${item.shopDomain} is suspended`);
+        continue;
+      }
+
       // Atomic claim: only one poller tick wins; the other silently skips.
       const claimed = await FestivalQueue.findOneAndUpdate(
         { _id: item._id, status: 'approved',

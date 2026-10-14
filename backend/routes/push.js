@@ -6,7 +6,7 @@ const { sendAbandonedCartEmail, FROM, buildEmailHtml } = require('../utils/email
 const { buildUnsubscribeHeaders, buildUnsubscribeUrl } = require('../utils/unsubscribeToken');
 const { logBroadcastSend } = require('../services/sendLogService');
 const { fetchProductImage } = require('./webhooks');
-const { requireAuth } = require('../middleware/requireOwner');
+const { requireAuth, requireNotSuspended } = require('../middleware/requireOwner');
 const { upsertProfile } = require('../services/profileService');
 const { Resend } = require('resend');
 const { uploadToCloudinary } = require('../utils/cloudinary');
@@ -51,7 +51,7 @@ router.post('/subscribe', async (req, res) => {
  * Body: { shopDomain, title, body }
  * Sends a notification to every token registered for the store.
  */
-router.post('/send', requireAuth, async (req, res) => {
+router.post('/send', requireAuth, requireNotSuspended, async (req, res) => {
   try {
     const { shopDomain, title, body } = req.body;
 
@@ -166,7 +166,7 @@ router.post('/subscribe-customer', async (req, res) => {
  * Body: { shopDomain, title, body, url, imageUrl }
  * Sends a notification to every storefront customer subscribed for the shop.
  */
-router.post('/send-customer', requireAuth, async (req, res) => {
+router.post('/send-customer', requireAuth, requireNotSuspended, async (req, res) => {
   try {
     const { shopDomain, title, body, url, imageUrl, cartToken, productId } = req.body;
 
@@ -318,7 +318,7 @@ router.post('/cart-activity', async (req, res) => {
  * Sends a one-off abandoned-cart email to the customer on file for a cart,
  * so the merchant can preview the email content from the dashboard.
  */
-router.post('/send-email-test', requireAuth, async (req, res) => {
+router.post('/send-email-test', requireAuth, requireNotSuspended, async (req, res) => {
   try {
     const { shopDomain, cartToken, subject, body } = req.body;
     const shop = shopDomain?.trim().toLowerCase();
@@ -418,7 +418,7 @@ async function sendJourneyPush(shopDomain, { profileId, title, body, url, imageU
   return { status: 200, payload: result };
 }
 
-router.post('/send-journey', requireAuth, async (req, res) => {
+router.post('/send-journey', requireAuth, requireNotSuspended, async (req, res) => {
   try {
     const { profileId, title, body, url, imageUrl } = req.body;
     const { status, payload } = await sendJourneyPush(req.shopDomain, { profileId, title, body, url, imageUrl: normalizeImageUrl(imageUrl) });
@@ -439,7 +439,7 @@ router.post('/send-journey', requireAuth, async (req, res) => {
  * this reuses the same claim/send/outcome-tracking path every other
  * job goes through instead of a separate one-off code path.
  */
-router.post('/send-now', requireAuth, async (req, res) => {
+router.post('/send-now', requireAuth, requireNotSuspended, async (req, res) => {
   try {
     const { profileId } = req.body;
     const shop = req.shopDomain;
@@ -612,7 +612,7 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
   return { status: 200, payload: { success: true, id: data?.id } };
 }
 
-router.post('/send-journey-email', requireAuth, async (req, res) => {
+router.post('/send-journey-email', requireAuth, requireNotSuspended, async (req, res) => {
   try {
     const { profileId, subject, body, imageUrl } = req.body;
     const { status, payload } = await sendJourneyEmail(req.shopDomain, { profileId, subject, body, imageUrl: normalizeImageUrl(imageUrl) });
@@ -718,7 +718,7 @@ router.post('/preview-journey-email', requireAuth, async (req, res) => {
  * CustomerPushSubscription row for the shop, i.e. exactly "all
  * subscribers" — so no change to utils/pushNotification.js was needed.
  */
-router.post('/send-store', requireAuth, async (req, res) => {
+router.post('/send-store', requireAuth, requireNotSuspended, async (req, res) => {
   try {
     const { title, body, mobileImageUrl, desktopImageUrl, targetType, productHandle } = req.body;
     const shop = req.shopDomain;

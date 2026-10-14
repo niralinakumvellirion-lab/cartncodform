@@ -7,7 +7,7 @@ const rateLimit = require('express-rate-limit');
 const EmailTemplate = require('../models/EmailTemplate');
 const Profile = require('../models/Profile');
 const Store = require('../models/Store');
-const { requireAuth } = require('../middleware/requireOwner');
+const { requireAuth, requireNotSuspended } = require('../middleware/requireOwner');
 const { FROM } = require('../utils/email');
 const { buildUnsubscribeHeaders, buildUnsubscribeUrl } = require('../utils/unsubscribeToken');
 const { generateTemplateCopy } = require('../services/aiService');
@@ -471,7 +471,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 // POST /api/email-templates/:id/send
 // Body: { email } — looks up the profile by email address (preferred)
 //       { profileId } — looks up by MongoDB _id (backward-compat)
-router.post('/:id/send', requireAuth, async (req, res) => {
+router.post('/:id/send', requireAuth, requireNotSuspended, async (req, res) => {
   try {
     const { profileId, email: rawEmail } = req.body;
     if (!profileId && !rawEmail) {
@@ -573,7 +573,7 @@ router.post('/:id/send', requireAuth, async (req, res) => {
 });
 
 // POST /api/email-templates/:id/broadcast { segment }
-router.post('/:id/broadcast', requireAuth, async (req, res) => {
+router.post('/:id/broadcast', requireAuth, requireNotSuspended, async (req, res) => {
   try {
     const { segment = 'everyone' } = req.body;
     if (!VALID_SEGMENTS.includes(segment)) {

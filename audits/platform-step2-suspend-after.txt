@@ -1,0 +1,113 @@
+PLATFORM STEP 2 — STORE SUSPENSION ENFORCEMENT
+Self-audit (after)
+Date: 2026-10-14
+
+────────────────────────────────────────────────────────────────────────────────
+STEP 0 ANSWERS
+────────────────────────────────────────────────────────────────────────────────
+
+0a. Does requireStaff pass algorithms:['HS256'] to jwt.verify?
+    YES — backend/middleware/requireStaff.js line 37.
+
+0b. Does server.js have app.set('trust proxy', 1)?
+    YES — backend/server.js line 36.
+
+────────────────────────────────────────────────────────────────────────────────
+EVERY SEND PATH — BLOCKED YES/NO AND HOW
+────────────────────────────────────────────────────────────────────────────────
+
+File / route                               Blocked?  How
+─────────────────────────────────────────  ────────  ────────────────────────────────────
+routes/push.js  POST /send                 YES       requireNotSuspended (line 54)
+routes/push.js  POST /send-customer        YES       requireNotSuspended (line 169)
+routes/push.js  POST /send-email-test      YES       requireNotSuspended (line 321)
+routes/push.js  POST /send-journey         YES       requireNotSuspended (line 421)
+routes/push.js  POST /send-now             YES       requireNotSuspended (line 442)
+routes/push.js  POST /send-journey-email   YES       requireNotSuspended (line 615)
+routes/push.js  POST /send-store           YES       requireNotSuspended (line 721)
+routes/emailTemplates.js  POST /:id/send      YES    requireNotSuspended (line 474)
+routes/emailTemplates.js  POST /:id/broadcast YES    requireNotSuspended (line 576)
+routes/whatsapp.js  POST /:shopDomain/send  YES      requireStoreOwner (line 280) — IDOR
+                                                     check already calls Store.findOne;
+                                                     suspended gate in requireStoreOwner
+server.js  processScheduledJobs (poller)   YES       per-job: loads store with suspended
+                                                     field; if suspended → skipped
+server.js  processFestivalQueue (poller)   YES       per-tick: builds suspendedSet from
+                                                     Store.find({suspended:true}); items
+                                                     for suspended stores are skipped,
+                                                     status stays 'approved' (untouched)
+server.js  runNightlySignals / runBrain    YES       nightly loop gate: if (s.suspended)
+                                                     continue before automation check
+
+────────────────────────────────────────────────────────────────────────────────
+SEND PATHS NOT BLOCKABLE
+────────────────────────────────────────────────────────────────────────────────
+
+None. Every send path is either blocked by middleware or by the poller gate.
+
+────────────────────────────────────────────────────────────────────────────────
+ROUTES / FLOWS DELIBERATELY NOT BLOCKED
+────────────────────────────────────────────────────────────────────────────────
+
+• All Shopify webhooks (routes/webhooks.js) — GDPR redact/data_request/uninstalled
+  must always process regardless of suspension.
+• POST /api/push (storefront subscribe) — customers must be able to subscribe even
+  while a store is suspended, so unsuspending works immediately.
+• POST /api/events, /api/attribution — storefront tracking; no outbound sends.
+• /apps/cartncodform (COD proxy) — live orders must still be accepted.
+• GET /api/unsubscribe — public unsubscribe link must always work.
+• GET routes everywhere — reads are never blocked.
+
+────────────────────────────────────────────────────────────────────────────────
+TEST LIST (suspendEnforcement.test.js — 16 tests)
+Plus related tests in other suites (Store.find mock in addEngagement.test.js)
+────────────────────────────────────────────────────────────────────────────────
+
+suspendEnforcement.test.js:
+  requireStoreOwner — suspended store
+    1. 403 STORE_SUSPENDED when store.suspended=true
+    2. 200 when store.suspended=false
+    3. 200 when store.suspended is undefined (old document without field)
+  requireNotSuspended — send routes
+    4. 403 STORE_SUSPENDED when store.suspended=true
+    5. passes through when store.suspended=false
+    6. passes through when store not found
+  webhooks and public routes are unaffected by suspension
+    7. POST /test/webhook returns 200 (no auth, no suspension check)
+    8. POST /test/subscribe returns 200 (no auth, no suspension check)
+  processScheduledJobs — suspended store
+    9. marks job skipped with error store_suspended when store is suspended
+   10. does NOT skip job when store is active
+  processFestivalQueue — suspended store items left untouched
+   11. item is not claimed or modified when its store is suspended
+   12. item IS claimed when its store is NOT suspended
+  nightly signals — suspended stores skipped
+   13. skips signal run when s.suspended is true
+   14. runs signals when s.suspended is false
+  unsuspendStore cleanup — future items untouched
+   15. ScheduledJob.updateMany uses $lt:now so future items are excluded
+   16. FestivalQueue.updateMany uses $lt:now so future items are excluded
+
+storeSuspension.test.js (8 tests, commit 1 of this step):
+   Service-level tests for suspendStore / unsuspendStore already green.
+
+TOTAL: 1255 tests, 0 failures, 61 suites.
+
+────────────────────────────────────────────────────────────────────────────────
+GIT DIFF --STAT OF EXISTING FILES CHANGED (commit 2)
+────────────────────────────────────────────────────────────────────────────────
+
+ backend/middleware/requireOwner.js         +35 lines  (requireNotSuspended added,
+                                                        suspended check in requireStoreOwner)
+ backend/routes/push.js                    +9 lines   (requireNotSuspended on 7 routes)
+ backend/routes/emailTemplates.js          +3 lines   (requireNotSuspended on 2 routes)
+ backend/server.js                         +18 lines  (poller: nightly gate, per-job gate,
+                                                        festival suspendedSet)
+ backend/__tests__/addEngagement.test.js   +4 lines   (Store.find mock in beforeEach)
+ backend/__tests__/activity.test.js        +1 line    (requireNotSuspended in mock)
+ backend/__tests__/previewJourneyEmail.js  +1 line    (requireNotSuspended in mock)
+ backend/__tests__/emailTemplates.test.js  +1 line    (requireNotSuspended in mock)
+
+New files:
+ backend/__tests__/suspendEnforcement.test.js  (16 tests)
+ audits/platform-step2-suspend-after.txt

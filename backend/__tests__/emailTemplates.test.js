@@ -27,6 +27,7 @@ jest.mock('../models/Store', () => ({
 jest.mock('../middleware/requireOwner', () => ({
   requireAuth: jest.fn(),
   requireStoreOwner: jest.fn(),
+  requireNotSuspended: jest.fn(),
 }));
 
 const mockUpcomingFestival = jest.fn();

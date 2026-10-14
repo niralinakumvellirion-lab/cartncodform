@@ -18,6 +18,7 @@ jest.mock('../middleware/requireOwner', () => ({
     next();
   },
   requireStoreOwner: (_req, _res, next) => next(),
+  requireNotSuspended: (_req, _res, next) => next(),
 }));
 
 const Profile = require('../models/Profile');

@@ -90,6 +90,7 @@ function requireAuth(req, res, next) {
  * Loads the Store for that shop and asserts the token's shop matches the
  * shop named in the request path (IDOR protection). Attaches the loaded
  * store to req.store for downstream handlers to reuse.
+ * Also blocks suspended stores — merchants see a 403 with code STORE_SUSPENDED.
  */
 async function requireStoreOwner(req, res, next) {
   try {
@@ -102,10 +103,41 @@ async function requireStoreOwner(req, res, next) {
       return res.status(403).json({ error: 'Not authorized for this store' });
     }
 
+    if (store.suspended) {
+      return res.status(403).json({
+        error: 'Your account is paused. Contact support.',
+        code: 'STORE_SUSPENDED',
+      });
+    }
+
     req.store = store;
     next();
   } catch (err) {
     console.error('[auth] requireStoreOwner error:', err.message);
+    return res.status(500).json({ error: 'Authorization check failed' });
+  }
+}
+
+/**
+ * For routes that use requireAuth only (no requireStoreOwner / no :shopDomain
+ * param), load the store by req.shopDomain and block if suspended.
+ * Must run after requireAuth.
+ */
+async function requireNotSuspended(req, res, next) {
+  try {
+    const store = await Store.findOne(
+      { shopDomain: req.shopDomain },
+      'suspended'
+    ).lean();
+    if (store && store.suspended) {
+      return res.status(403).json({
+        error: 'Your account is paused. Contact support.',
+        code: 'STORE_SUSPENDED',
+      });
+    }
+    next();
+  } catch (err) {
+    console.error('[auth] requireNotSuspended error:', err.message);
     return res.status(500).json({ error: 'Authorization check failed' });
   }
 }
@@ -127,4 +159,4 @@ function requirePaidPlan(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireStoreOwner, requirePaidPlan };
+module.exports = { requireAuth, requireStoreOwner, requirePaidPlan, requireNotSuspended };

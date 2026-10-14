@@ -439,6 +439,10 @@ describe('processFestivalQueue poller', () => {
     mockFestivalQueue.findByIdAndUpdate.mockResolvedValue({});
     // Default: claim succeeds (returns truthy) so each item proceeds as normal.
     mockFestivalQueue.findOneAndUpdate.mockResolvedValue({ _id: 'claimed' });
+    // Default: no stores are suspended — the suspension check at the top of
+    // processFestivalQueue calls Store.find().lean() once per tick.
+    const mockStore = require('../models/Store');
+    mockStore.find.mockReturnValue({ lean: () => Promise.resolve([]) });
   });
 
   afterEach(() => jest.restoreAllMocks());

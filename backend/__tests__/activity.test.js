@@ -11,6 +11,7 @@
 jest.mock('../middleware/requireOwner', () => ({
   requireAuth: jest.fn((req, _res, next) => next()),
   requireStoreOwner: jest.fn((_req, _res, next) => next()),
+  requireNotSuspended: jest.fn((_req, _res, next) => next()),
 }));
 
 // ─── Fix 4a: GET /api/activity ───────────────────────────────────────────────
