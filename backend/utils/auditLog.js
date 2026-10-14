@@ -2,6 +2,34 @@
 
 const AuditLog = require('../models/AuditLog');
 
+// Keys whose names match this pattern are removed from meta before saving.
+// Exception: the exact key 'emailDomain' is always kept.
+const KEY_DENY_RE = /(e-?mail|phone|token|session|cart|password|secret)/i;
+
+// String values that look like email addresses or E.164 phone numbers are
+// replaced with '[removed]' so callers cannot accidentally leak PII via meta.
+const EMAIL_VALUE_RE  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_VALUE_RE  = /^\+[1-9]\d{6,14}$/;
+
+/**
+ * Strip dangerous keys and values from a meta object before persisting.
+ * Only shallow — nested objects are passed through as-is since our audit
+ * meta is always flat by convention.
+ */
+function sanitizeMeta(meta) {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return meta;
+  const out = {};
+  for (const [k, v] of Object.entries(meta)) {
+    if (k !== 'emailDomain' && KEY_DENY_RE.test(k)) continue;
+    if (typeof v === 'string' && (EMAIL_VALUE_RE.test(v) || PHONE_VALUE_RE.test(v))) {
+      out[k] = '[removed]';
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
 /**
  * Create an audit log entry. Never throws — failures are logged to stderr
  * without any PII.
@@ -23,7 +51,7 @@ async function logAudit({ staff, action, shopDomain, meta, req }) {
       staffRole:  staff?.role  || '',
       action,
       shopDomain: shopDomain || null,
-      meta:       meta       || null,
+      meta:       sanitizeMeta(meta) ?? null,
       ip:         typeof ip === 'string' ? ip.split(',')[0].trim() : null,
     });
   } catch (err) {
@@ -32,4 +60,4 @@ async function logAudit({ staff, action, shopDomain, meta, req }) {
   }
 }
 
-module.exports = { logAudit };
+module.exports = { logAudit, sanitizeMeta };

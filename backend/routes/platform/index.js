@@ -5,9 +5,11 @@ const rateLimit  = require('express-rate-limit');
 const jwt        = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 
+const AuditLog = require('../../models/AuditLog');
 const Staff    = require('../../models/Staff');
 const { logAudit } = require('../../utils/auditLog');
-const { requireStaff } = require('../../middleware/requireStaff');
+const { requireStaff, requireRole } = require('../../middleware/requireStaff');
+const storesRouter = require('./stores');
 
 const PLATFORM_ISS = 'shopireachboost-platform';
 const PLATFORM_AUD = 'platform-admin';
@@ -163,6 +165,40 @@ router.get('/me', requireStaff, (req, res) => {
   const { email, name, role } = req.staff;
   return res.json({ email, name, role });
 });
+
+// ── GET /api/platform/audit ───────────────────────────────────────────────────
+
+router.get('/audit', requireStaff, requireRole('owner', 'admin'), async (req, res) => {
+  try {
+    const { shopDomain, action } = req.query;
+    const pageNum = Math.max(0, parseInt(req.query.page, 10) || 0);
+    const limit   = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+    const skip    = pageNum * limit;
+
+    const filter = {};
+    if (shopDomain) filter.shopDomain = shopDomain;
+    if (action)     filter.action     = action;
+
+    // Allow-list projection: never return ip.
+    const [logs, total] = await Promise.all([
+      AuditLog.find(filter, 'at staffEmail staffRole action shopDomain meta -_id')
+        .sort({ at: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      AuditLog.countDocuments(filter),
+    ]);
+
+    return res.json({ total, page: pageNum, limit, logs });
+  } catch (err) {
+    console.error('[platform/audit] error:', err.message);
+    return res.status(500).json({ error: 'Failed to load audit log' });
+  }
+});
+
+// ── /api/platform/stores (sub-router) ────────────────────────────────────────
+
+router.use('/stores', storesRouter);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
