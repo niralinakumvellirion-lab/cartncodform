@@ -142,6 +142,9 @@ function NumberInput({ value, onChange, placeholder, min = 0 }) {
   );
 }
 
+// Shopify Sidekick floats ~64px above the page bottom; 80px keeps the footer clear.
+const SIDEKICK_CLEARANCE = 80;
+
 // ── ExportPanel component ────────────────────────────────────────────────────
 function ExportPanel({ shop, initialSegment, initialSearch, onClose, isMobile }) {
   const [segment,      setSegment]      = useState(initialSegment || 'everyone');
@@ -551,8 +554,8 @@ function ExportPanel({ shop, initialSegment, initialSearch, onClose, isMobile })
           <div style={{ height: 24 }} />
         </div>
 
-        {/* Sticky footer */}
-        <div style={{ borderTop: '1px solid #f3f4f6', padding: '14px 20px', flexShrink: 0, background: '#fff' }}>
+        {/* Sticky footer — extra bottom padding lifts content above the Shopify Sidekick bar */}
+        <div style={{ borderTop: '1px solid #f3f4f6', padding: `14px 20px ${SIDEKICK_CLEARANCE}px`, flexShrink: 0, background: '#fff' }}>
           <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 10, lineHeight: 1.5 }}>
             Up to 10,000 customers per file. Push tokens and internal IDs are never included. Unsubscribed customers are included and marked.
           </div>
