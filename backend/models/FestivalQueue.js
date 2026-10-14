@@ -43,6 +43,10 @@ const festivalQueueSchema = new mongoose.Schema({
   // can pick it up. Null means unclaimed. A claim older than 15 min is stale
   // (the poller likely crashed) and may be reclaimed by the next tick.
   sendClaimedAt: { type: Date, default: null },
+  // True when this doc was created by the reschedule-copy endpoint (a merchant
+  // chose to resend a previously-sent notification on a new date). The original
+  // sent doc is never modified; this is a fresh draft copy of its content.
+  isResend: { type: Boolean, default: false },
 }, { timestamps: true });
 
 module.exports = mongoose.model('FestivalQueue', festivalQueueSchema);

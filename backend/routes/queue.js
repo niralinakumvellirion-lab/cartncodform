@@ -659,6 +659,111 @@ router.patch('/:shopDomain/festival/:id', requireAuth,
   }
 });
 
+// POST /api/queue/:shopDomain/festival/:id/reschedule-copy
+// Creates a new draft FestivalQueue document on a different date, copying
+// the content of a previously-sent item. The original document is never
+// modified — it remains status='sent' as an immutable historical record.
+// See audits/queue-drag-sent-reschedule.txt (Design B recommendation).
+//
+// Body: { scheduledAt: "YYYY-MM-DDTHH:mm" } — store timezone, same
+// parsing as the PATCH handler (LOCAL_DATETIME_RE → zonedTimeToUtc).
+//
+// Guards (in order):
+//   404  — not found for this shop
+//   400  — original.status !== 'sent'
+//   409  — original.sendClaimedAt set (mid-send, should not happen for sent
+//          items but guard defensively)
+//   400  — scheduledAt shape invalid / past date / time already passed today
+//   409  — festival collision (only when original.festival is set)
+//
+// On success: returns { success: true, id: <clone._id> }.
+router.post('/:shopDomain/festival/:id/reschedule-copy', requireAuth,
+  requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const FestivalQueue = require('../models/FestivalQueue');
+
+    const original = await FestivalQueue.findOne(
+      { _id: req.params.id, shopDomain: shop }
+    ).select('status sendClaimedAt festival scheduledAt channel title body mobileImageUrl desktopImageUrl targetType productId productHandle productTitle templateId subject segment');
+
+    if (!original) {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    if (original.status !== 'sent') {
+      return res.status(400).json({ error: 'Only sent notifications can be copied for resend' });
+    }
+    if (original.sendClaimedAt) {
+      return res.status(409).json({ error: 'This item is currently being sent' });
+    }
+
+    const store = await Store.findOne({ shopDomain: shop }).select('timezone').lean();
+    const scheduledAtUtc = await resolveScheduledAt(shop, req.body.scheduledAt, resolveTz(store?.timezone));
+    if (!scheduledAtUtc) {
+      return res.status(400).json({ error: 'scheduledAt must be a "YYYY-MM-DDTHH:mm" local date-time' });
+    }
+
+    const raw = req.body.scheduledAt;
+    if (LOCAL_DATETIME_RE.test(String(raw || '').trim())) {
+      const tz = resolveTz(store?.timezone);
+      const now = new Date();
+      const { y, mo, d } = zonedParts(now, tz);
+      const todayStartUtc = zonedTimeToUtc(y, mo, d, 0, 0, tz);
+      if (scheduledAtUtc < todayStartUtc) {
+        return res.status(400).json({ error: 'scheduledAt must not be before today' });
+      }
+      if (scheduledAtUtc <= now) {
+        return res.status(400).json({ error: 'That time has already passed today.' });
+      }
+    }
+
+    if (original.festival) {
+      const tz = resolveTz(store?.timezone);
+      const { y: ny, mo: nmo, d: nd } = zonedParts(scheduledAtUtc, tz);
+      const dayStart = zonedTimeToUtc(ny, nmo, nd, 0, 0, tz);
+      const dayEnd = zonedTimeToUtc(ny, nmo, nd + 1, 0, 0, tz);
+      const collision = await FestivalQueue.findOne({
+        shopDomain: shop,
+        festival: original.festival,
+        _id: { $ne: original._id },
+        status: { $in: ['draft', 'approved'] },
+        scheduledAt: { $gte: dayStart, $lt: dayEnd },
+      });
+      if (collision) {
+        return res.status(409).json({
+          error: `A "${original.festival}" item is already scheduled on that date.`,
+        });
+      }
+    }
+
+    const clone = await FestivalQueue.create({
+      shopDomain: shop,
+      channel: original.channel,
+      title: original.title,
+      body: original.body,
+      mobileImageUrl: original.mobileImageUrl,
+      desktopImageUrl: original.desktopImageUrl,
+      festival: original.festival,
+      targetType: original.targetType,
+      productId: original.productId,
+      productHandle: original.productHandle,
+      productTitle: original.productTitle,
+      templateId: original.templateId || null,
+      subject: original.subject,
+      segment: original.segment,
+      scheduledAt: scheduledAtUtc,
+      status: 'draft',
+      isResend: true,
+      groupId: null,
+    });
+
+    return res.status(201).json({ success: true, id: clone._id });
+  } catch (err) {
+    console.error('[queue] reschedule-copy error:', err.message);
+    return res.status(500).json({ error: 'Failed to create resend copy' });
+  }
+});
+
 // DELETE /api/queue/:shopDomain/festival/:id
 // ?group=true deletes every OTHER document in the target's group that is
 // still 'draft' or 'approved' (same guard as bulk edit — a 'sent'
