@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiGet, apiSend } from '../../../lib/api';
+import { apiGet, apiSend, BACKEND_URL } from '../../../lib/api';
 import { ShimmerBox, ShimmerCard } from '../components/Shimmer';
 import { DS, StageBadge, ReachIcons, useWhatsapp, getCustomerEmail } from './customerShared';
 import { EmailPreviewFrame } from '../components/EmailPreviewFrame';
@@ -2227,6 +2227,9 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
   const [whatTheyWantOpen, setWhatTheyWantOpen] = useState(false);
   const [whatsHappenedOpen, setWhatsHappenedOpen] = useState(false);
 
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState('');
+
   const [waProfile, setWaProfile] = useState(null);
   const [waProfileLoading, setWaProfileLoading] = useState(false);
   const [showWaOptOutConfirm, setShowWaOptOutConfirm] = useState(false);
@@ -2466,6 +2469,37 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
 
   const canWa = !!(waProfile && (waProfile.canFollowup || waProfile.canOrder));
 
+  async function handleDownload() {
+    setDownloading(true);
+    setDownloadError('');
+    let objectUrl = null;
+    try {
+      const token = await window.shopify.idToken();
+      const url = `${BACKEND_URL}/api/export/${encodeURIComponent(shop)}/customer/${encodeURIComponent(profileId)}`;
+      const res = await fetch(url, {
+        cache: 'no-store',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const cd = res.headers.get('Content-Disposition') || '';
+      const fnMatch = cd.match(/filename="([^"]+)"/);
+      const filename = fnMatch ? fnMatch[1] : 'customer-activity.xlsx';
+      objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (_) {
+      setDownloadError("Couldn't prepare the file. Please try again.");
+    } finally {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      setDownloading(false);
+    }
+  }
+
   async function optOutWhatsapp() {
     setWaOptingOut(true);
     try {
@@ -2529,7 +2563,35 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
 
   return (
     <div style={{ ...DS.page, maxWidth: 1200, overflowX: 'hidden', width: '100%' }}>
-      {backButton}
+      {/* Header: back button left, download button right */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+        <button
+          onClick={from === 'queue' && fid ? () => navigate(`/admin/queue/${fid}`) : () => navigate('/admin/customers')}
+          style={DS.btnSecondary}
+        >
+          {from === 'queue' && fid ? '← Back to notification' : '← Back to customers'}
+        </button>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+          <button
+            onClick={handleDownload}
+            disabled={downloading}
+            aria-label="Download customer activity as Excel"
+            style={{ ...DS.btnSecondary, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            {downloading ? 'Preparing…' : 'Download activity (Excel)'}
+          </button>
+          <span style={{ fontSize: 11, color: '#9ca3af' }}>Includes visits from the last 90 days.</span>
+          {downloadError && (
+            <span style={{ fontSize: 11, color: '#b91c1c' }}>{downloadError}</span>
+          )}
+        </div>
+      </div>
 
       {/* === 1. User card === */}
       <div style={{
