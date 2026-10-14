@@ -16,5 +16,7 @@ const storefrontEventSchema = new mongoose.Schema({
 storefrontEventSchema.index({ ts: 1 }, { expireAfterSeconds: 90 * 24 * 60 * 60 });
 // Supports the popups-shown subscribed-tagging query (one extra find per page load).
 storefrontEventSchema.index({ shopDomain: 1, type: 1, sessionId: 1 });
+// Supports the all-customers export event-count aggregation (shopDomain + ts filter).
+storefrontEventSchema.index({ shopDomain: 1, ts: 1 });
 
 module.exports = mongoose.model('StorefrontEvent', storefrontEventSchema);
