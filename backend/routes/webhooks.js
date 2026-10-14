@@ -556,10 +556,27 @@ async function handleCustomersRedact(req, res) {
     const cartTokens = [...new Set(
       profiles.flatMap((p) => (p.identifiers && p.identifiers.cartTokens) || [])
     )];
+    const sessionIds = [...new Set(
+      profiles.flatMap((p) => (p.identifiers && p.identifiers.sessionIds) || [])
+    )];
+    const pushTokens = [...new Set(
+      profiles.flatMap((p) => (p.identifiers && p.identifiers.pushTokens) || [])
+    )];
 
     const cartResult = await AbandonedCustomer.deleteMany({ shopDomain, $or: orClauses });
-    const eventResult = customerId
-      ? await StorefrontEvent.deleteMany({ shopDomain, customerId })
+
+    // Build a comprehensive deletion query covering every identifier type
+    // that a StorefrontEvent row might carry: customerId (logged-in sessions),
+    // ccfSessionIds (stable localStorage UUID, stored in sessionId column),
+    // cartTokens (also stored in sessionId column per buildJourneyEntry),
+    // and FCM push tokens (stored in the token column).
+    const seOrClauses = [];
+    if (customerId) seOrClauses.push({ customerId });
+    if (sessionIds.length) seOrClauses.push({ sessionId: { $in: sessionIds } });
+    if (cartTokens.length) seOrClauses.push({ sessionId: { $in: cartTokens } });
+    if (pushTokens.length) seOrClauses.push({ token: { $in: pushTokens } });
+    const eventResult = seOrClauses.length
+      ? await StorefrontEvent.deleteMany({ shopDomain, $or: seOrClauses })
       : { deletedCount: 0 };
     const subResult = customerId
       ? await CustomerPushSubscription.deleteMany({ shopDomain, customerId })

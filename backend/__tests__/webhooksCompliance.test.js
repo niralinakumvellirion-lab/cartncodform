@@ -110,7 +110,15 @@ describe('customers/redact', () => {
       shopDomain: SHOP,
       $or: [{ customerId: '555' }, { email: 'shopper@example.com' }],
     });
-    expect(StorefrontEvent.deleteMany).toHaveBeenCalledWith({ shopDomain: SHOP, customerId: '555' });
+    // StorefrontEvent: comprehensive sweep — customerId + profile's cartTokens
+    // (sessionIds and pushTokens are absent from this mock profile).
+    expect(StorefrontEvent.deleteMany).toHaveBeenCalledWith({
+      shopDomain: SHOP,
+      $or: [
+        { customerId: '555' },
+        { sessionId: { $in: ['cart-abc', 'cart-def'] } },
+      ],
+    });
     expect(CustomerPushSubscription.deleteMany).toHaveBeenCalledWith({ shopDomain: SHOP, customerId: '555' });
 
     // ScheduledJob: matched by customerId, the profile's own cartTokens, and its _id — never deleted.
@@ -168,6 +176,42 @@ describe('customers/redact', () => {
     expect(AbandonedCustomer.deleteMany).not.toHaveBeenCalled();
     expect(Profile.deleteMany).not.toHaveBeenCalled();
     expect(ScheduledJob.updateMany).not.toHaveBeenCalled();
+  });
+
+  test('deletes StorefrontEvents by sessionIds from profile', async () => {
+    Profile.find.mockReturnValue({
+      lean: () => Promise.resolve([
+        { _id: 'p3', identifiers: { sessionIds: ['uuid-aaa', 'uuid-bbb'], cartTokens: [] } },
+      ]),
+    });
+
+    await postCompliance('customers/redact', { customer: { id: 789, email: 'a@b.com' } });
+
+    const [seArg] = StorefrontEvent.deleteMany.mock.calls[0];
+    expect(seArg.$or).toContainEqual({ sessionId: { $in: ['uuid-aaa', 'uuid-bbb'] } });
+  });
+
+  test('deletes StorefrontEvents by pushTokens from profile', async () => {
+    Profile.find.mockReturnValue({
+      lean: () => Promise.resolve([
+        { _id: 'p4', identifiers: { pushTokens: ['fcm-tok-1', 'fcm-tok-2'], cartTokens: [], sessionIds: [] } },
+      ]),
+    });
+
+    await postCompliance('customers/redact', { customer: { id: 101, email: 'b@b.com' } });
+
+    const [seArg] = StorefrontEvent.deleteMany.mock.calls[0];
+    expect(seArg.$or).toContainEqual({ token: { $in: ['fcm-tok-1', 'fcm-tok-2'] } });
+  });
+
+  test('no profile found — still deletes StorefrontEvents by payload customerId', async () => {
+    // Profile.find returns empty (default mock)
+    await postCompliance('customers/redact', { customer: { id: 999 } });
+
+    expect(StorefrontEvent.deleteMany).toHaveBeenCalledWith({
+      shopDomain: SHOP,
+      $or: [{ customerId: '999' }],
+    });
   });
 });
 
