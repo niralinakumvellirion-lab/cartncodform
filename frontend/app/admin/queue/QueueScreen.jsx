@@ -900,7 +900,9 @@ function AddEngagementView({
   emailSegmentCounts,
   pushSubscriberCount,
   onBack, onOpenStep, onSave, onAddAnother, onDone,
+  dragItem, onCardDragStart, onCardDragEnd,
 }) {
+  const dragEndedRef = useRef(false);
   const parts = dateStr.split('-');
   const dayDate = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
   const dayLabel = dayDate.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -991,9 +993,26 @@ function AddEngagementView({
                   const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
                   const cc = CHANNEL_CHIP[item.channel || 'push'];
                   const audLine = audienceLineForItem(item);
+                  const isDraggable = (item.status === 'draft' || item.status === 'approved') && !item.sendClaimedAt;
+                  const isBeingDragged = dragItem && dragItem._id === item._id;
                   return (
-                    <div key={item._id} style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
+                    <div key={item._id}
+                      draggable={isDraggable}
+                      onDragStart={isDraggable ? e => {
+                        e.dataTransfer.effectAllowed = 'move';
+                        e.dataTransfer.setData('text/plain', item._id);
+                        dragEndedRef.current = false;
+                        requestAnimationFrame(() => {
+                          if (!dragEndedRef.current && onCardDragStart) onCardDragStart(item);
+                        });
+                      } : undefined}
+                      onDragEnd={isDraggable ? () => {
+                        dragEndedRef.current = true;
+                        if (onCardDragEnd) onCardDragEnd();
+                      } : undefined}
+                      style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', marginBottom: 8, opacity: isBeingDragged ? 0.4 : 1, cursor: isDraggable ? 'grab' : undefined, transition: 'opacity 0.15s' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                        {isDraggable && <div aria-label="Drag to move to another date" style={{ color: '#d1d5db', flexShrink: 0, display: 'flex', alignItems: 'center' }}><GripIcon size={14} /></div>}
                         {cc && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: cc.bg, color: cc.color }}>{cc.label}</span>}
                         <span style={{ fontSize: 13, fontWeight: 600, color: '#111827', flex: 1 }}>{item.title || item.subject || '(no title)'}</span>
                         <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: badge.bg, color: badge.color }}>{badge.label}</span>
@@ -1030,9 +1049,26 @@ function AddEngagementView({
               const cc = CHANNEL_CHIP[item.channel || 'push'];
               const isNew = item._id === newId;
               const audLine = audienceLineForItem(item);
+              const isDraggable = (item.status === 'draft' || item.status === 'approved') && !item.sendClaimedAt;
+              const isBeingDragged = dragItem && dragItem._id === item._id;
               return (
-                <div key={item._id} style={{ background: isNew ? '#eef2ff' : '#f9fafb', border: isNew ? '1.5px solid #a5b4fc' : '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', marginBottom: 8 }}>
+                <div key={item._id}
+                  draggable={isDraggable}
+                  onDragStart={isDraggable ? e => {
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', item._id);
+                    dragEndedRef.current = false;
+                    requestAnimationFrame(() => {
+                      if (!dragEndedRef.current && onCardDragStart) onCardDragStart(item);
+                    });
+                  } : undefined}
+                  onDragEnd={isDraggable ? () => {
+                    dragEndedRef.current = true;
+                    if (onCardDragEnd) onCardDragEnd();
+                  } : undefined}
+                  style={{ background: isNew ? '#eef2ff' : '#f9fafb', border: isNew ? '1.5px solid #a5b4fc' : '1px solid #e5e7eb', borderRadius: 10, padding: '10px 12px', marginBottom: 8, opacity: isBeingDragged ? 0.4 : 1, cursor: isDraggable ? 'grab' : undefined, transition: 'opacity 0.15s' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                    {isDraggable && <div aria-label="Drag to move to another date" style={{ color: '#d1d5db', flexShrink: 0, display: 'flex', alignItems: 'center' }}><GripIcon size={14} /></div>}
                     {cc && <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 20, background: cc.bg, color: cc.color }}>{cc.label}</span>}
                     <span style={{ fontSize: 13, fontWeight: 600, color: '#111827', flex: 1 }}>{item.title || item.subject || '(no title)'}</span>
                     <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: badge.bg, color: badge.color }}>{badge.label}</span>
@@ -2226,6 +2262,9 @@ export default function QueueScreen({ shop }) {
               segment={addEngSegment} setSegment={setAddEngSegment}
               emailSegmentCounts={emailSegmentCounts}
               pushSubscriberCount={pushSubscriberCount}
+              dragItem={dragItem}
+              onCardDragStart={setDragItem}
+              onCardDragEnd={() => { setDragItem(null); setDragOverDate(null); }}
               onBack={() => { setAddEngMode(false); setSelectedDayStr(null); }}
               onOpenStep={openAddEngStep}
               onSave={saveEngagement}
