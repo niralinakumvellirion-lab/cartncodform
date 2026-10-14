@@ -10,6 +10,16 @@ import { EmailPreviewFrame } from '../components/EmailPreviewFrame';
 import { ProductPicker } from '../components/ProductPicker';
 import MultiDateScheduler from '../components/MultiDateScheduler';
 
+function GripIcon({ size = 14, color = '#9ca3af' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 14 14" fill={color} aria-hidden="true">
+      <circle cx="4" cy="3" r="1.25"/><circle cx="10" cy="3" r="1.25"/>
+      <circle cx="4" cy="7" r="1.25"/><circle cx="10" cy="7" r="1.25"/>
+      <circle cx="4" cy="11" r="1.25"/><circle cx="10" cy="11" r="1.25"/>
+    </svg>
+  );
+}
+
 const STATUS_FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'pending', label: 'Pending' },
@@ -381,7 +391,8 @@ function BellIcon({ size, color }) {
 //   selectedDayStr / selectedDayType — highlight the active icon.
 //   onFestivalClick(dateStr, festivalObj) / onNotificationsClick(dateStr)
 //   isNarrow — true when viewport ≤ 600px (passed from QueueScreen).
-function MonthCalendar({ month, items, festivals, selectedDayStr, selectedDayType, onFestivalClick, onNotificationsClick, onDayCellClick, isNarrow }) {
+function MonthCalendar({ month, items, festivals, selectedDayStr, selectedDayType, onFestivalClick, onNotificationsClick, onDayCellClick, isNarrow,
+  dragItem, dragOverDate, onCellDragOver, onCellDragLeave, onCellDrop }) {
   const year = month.getFullYear();
   const mon = month.getMonth();
   const firstDay = new Date(year, mon, 1).getDay();
@@ -454,20 +465,36 @@ function MonthCalendar({ month, items, festivals, selectedDayStr, selectedDayTyp
         const isFutureOrToday = !isPast;
         const emptyAndFuture = isFutureOrToday && !festival && queued.length === 0;
         const cellDateLabel = new Date(year, mon, day).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+        const isValidDropTarget = !!dragItem && isFutureOrToday;
+        const isDragOver = dragOverDate === dateStr;
 
         return (
           <div key={i}
+            onDragOver={e => {
+              if (!isValidDropTarget) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+              if (dragOverDate !== dateStr && onCellDragOver) onCellDragOver(dateStr);
+            }}
+            onDragLeave={() => { if (isDragOver && onCellDragLeave) onCellDragLeave(); }}
+            onDrop={e => {
+              e.preventDefault();
+              if (!isValidDropTarget) return;
+              if (onCellDrop) onCellDrop(dateStr);
+            }}
             style={{
-              background: isSelected ? '#F5F8FE' : isToday ? '#eef2ff' : '#fff',
+              background: isDragOver ? '#eff6ff' : isSelected ? '#F5F8FE' : isToday ? '#eef2ff' : '#fff',
               aspectRatio: '1 / 1',
               padding: cellPad,
-              boxShadow: isSelected
-                ? 'inset 0 0 0 2px #4f46e5'
+              boxShadow: isDragOver
+                ? 'inset 0 0 0 2px #2563eb'
+                : isSelected ? 'inset 0 0 0 2px #4f46e5'
                 : isToday ? 'inset 0 0 0 1.5px #4f46e5' : 'none',
               transition: 'background 0.12s',
               overflow: 'hidden',
               display: 'flex', flexDirection: 'column',
               position: 'relative',
+              cursor: dragItem && !isValidDropTarget ? 'not-allowed' : undefined,
             }}
           >
             {/* Transparent full-cell click target for today/future */}
@@ -575,6 +602,7 @@ function DayDetailsPanel({
   dateStr, dayPanelTab, setDayPanelTab,
   festivalCalendar, festivalItems,
   onBack, onAddEngagement, shop, openEditModal, goToFestivalDetail, setFestivalItems,
+  dragItem, onCardDragStart, onCardDragEnd, dragNewId,
 }) {
   const festival = festivalCalendar.find(f => f.date.startsWith(dateStr));
   const parts = dateStr.split('-');
@@ -679,12 +707,36 @@ function DayDetailsPanel({
             </div>
           ) : notifications.map((item, ii) => {
             const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
+            const isDraggable = (item.status === 'draft' || item.status === 'approved') && !item.sendClaimedAt;
+            const isBeingDragged = dragItem && dragItem._id === item._id;
+            const isHighlighted = dragNewId === item._id;
             return (
-              <div key={item._id} style={{
-                background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10,
-                padding: '12px 14px', marginBottom: ii < notifications.length - 1 ? 10 : 0,
-              }}>
+              <div
+                key={item._id}
+                draggable={isDraggable}
+                onDragStart={isDraggable ? e => {
+                  e.dataTransfer.effectAllowed = 'move';
+                  if (onCardDragStart) onCardDragStart(item);
+                } : undefined}
+                onDragEnd={isDraggable ? () => { if (onCardDragEnd) onCardDragEnd(); } : undefined}
+                style={{
+                  background: '#f9fafb', border: isHighlighted ? '2px solid #2563eb' : '1px solid #e5e7eb',
+                  borderRadius: 10, padding: '12px 14px',
+                  marginBottom: ii < notifications.length - 1 ? 10 : 0,
+                  opacity: isBeingDragged ? 0.4 : 1,
+                  cursor: isDraggable ? 'grab' : undefined,
+                  transition: 'opacity 0.15s',
+                }}
+              >
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 6 }}>
+                  {isDraggable && (
+                    <div aria-label="Drag to move to another date" style={{
+                      color: '#d1d5db', flexShrink: 0, marginTop: 2,
+                      display: 'flex', alignItems: 'center',
+                    }}>
+                      <GripIcon size={14} />
+                    </div>
+                  )}
                   {(item.mobileImageUrl || item.desktopImageUrl) && (
                     <img src={item.mobileImageUrl || item.desktopImageUrl} alt=""
                       style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover', flexShrink: 0 }}
@@ -1638,6 +1690,14 @@ export default function QueueScreen({ shop }) {
   const [addEngError, setAddEngError] = useState('');
   const [addEngBanner, setAddEngBanner] = useState('');
   const [addEngNewId, setAddEngNewId] = useState(null);
+
+  // Drag-and-drop rescheduling state
+  const [dragItem, setDragItem] = useState(null);
+  const [dragOverDate, setDragOverDate] = useState(null);
+  const [dragError, setDragError] = useState('');
+  const [dragConfirm, setDragConfirm] = useState('');
+  const [dragNewId, setDragNewId] = useState(null);
+
   const [emailTemplates, setEmailTemplates] = useState([]);
   const [emailTemplatesLoading, setEmailTemplatesLoading] = useState(false);
   const [emailTemplatesError, setEmailTemplatesError] = useState('');
@@ -1715,6 +1775,55 @@ export default function QueueScreen({ shop }) {
     setAddEngStep('list');
     setAddEngBanner('');
     setAddEngNewId(null);
+  }
+
+  async function handleDrop(targetDateStr) {
+    const item = dragItem;
+    setDragItem(null);
+    setDragOverDate(null);
+    if (!item) return;
+
+    const tz = quietSettings.timezone || 'Asia/Kolkata';
+    const localDt = formatLocalDateTimeInput(item.scheduledAt, tz); // "YYYY-MM-DDTHH:mm"
+    const sourceDateStr = localDt.split('T')[0];
+    if (targetDateStr === sourceDateStr) return;
+
+    const timeStr = localDt.split('T')[1];
+    const newScheduledAt = `${targetDateStr}T${timeStr}`;
+
+    // Optimistic: keep UTC time-of-day, change the date part
+    const prevItems = festivalItems;
+    const srcUtc = new Date(item.scheduledAt);
+    const [ny, nm, nd] = targetDateStr.split('-').map(Number);
+    const newUtcApprox = new Date(Date.UTC(ny, nm - 1, nd, srcUtc.getUTCHours(), srcUtc.getUTCMinutes(), srcUtc.getUTCSeconds()));
+    setFestivalItems(prev => prev.map(i =>
+      i._id === item._id ? { ...i, scheduledAt: newUtcApprox.toISOString() } : i
+    ));
+    setSelectedDayStr(targetDateStr);
+    setDayPanelTab('notifications');
+    setAddEngMode(false);
+
+    try {
+      await apiSend(
+        `/api/queue/${encodeURIComponent(shop)}/festival/${item._id}`,
+        'PATCH',
+        { scheduledAt: newScheduledAt }
+      );
+      const data = await apiGet(`/api/queue/${encodeURIComponent(shop)}/festival`);
+      setFestivalItems(data.items || []);
+      setDragNewId(item._id);
+      setTimeout(() => setDragNewId(null), 2000);
+      const labelDate = new Date(ny, nm - 1, nd).toLocaleDateString('en-IN', {
+        weekday: 'short', day: 'numeric', month: 'short',
+      });
+      setDragConfirm(`Moved to ${labelDate}`);
+      setTimeout(() => setDragConfirm(''), 3000);
+    } catch (e) {
+      setFestivalItems(prevItems);
+      setSelectedDayStr(null);
+      setDragError(e.message || 'Could not reschedule. Please try again.');
+      setTimeout(() => setDragError(''), 5000);
+    }
   }
 
   function doFetchEmailTemplates() {
@@ -2028,6 +2137,18 @@ export default function QueueScreen({ shop }) {
             </div>
           </div>
           {/* CALENDAR */}
+          {dragError && (
+            <div style={{
+              marginBottom: 8, padding: '8px 12px', borderRadius: 8,
+              background: '#fee2e2', color: '#dc2626', fontSize: 12, fontWeight: 500,
+            }}>{dragError}</div>
+          )}
+          {dragConfirm && (
+            <div style={{
+              marginBottom: 8, padding: '8px 12px', borderRadius: 8,
+              background: '#dcfce7', color: '#15803d', fontSize: 12, fontWeight: 500,
+            }}>{dragConfirm}</div>
+          )}
           {festivalLoading ? (
             <div style={{ color: '#9ca3af', fontSize: 13, textAlign: 'center', padding: 40 }}>
               Loading...
@@ -2043,6 +2164,11 @@ export default function QueueScreen({ shop }) {
               onNotificationsClick={handleNotificationsClick}
               onDayCellClick={handleDayCellClick}
               isNarrow={isNarrowCal}
+              dragItem={dragItem}
+              dragOverDate={dragOverDate}
+              onCellDragOver={setDragOverDate}
+              onCellDragLeave={() => setDragOverDate(null)}
+              onCellDrop={handleDrop}
             />
           )}
           {/* Legend */}
@@ -2118,6 +2244,10 @@ export default function QueueScreen({ shop }) {
               openEditModal={openEditModal}
               goToFestivalDetail={goToFestivalDetail}
               setFestivalItems={setFestivalItems}
+              dragItem={dragItem}
+              onCardDragStart={setDragItem}
+              onCardDragEnd={() => { setDragItem(null); setDragOverDate(null); }}
+              dragNewId={dragNewId}
             />
           ) : (
             <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14, overflow: 'hidden' }}>
@@ -2154,8 +2284,16 @@ export default function QueueScreen({ shop }) {
                     {group.items.map((item, ii) => {
                       const badge = FESTIVAL_STATUS_BADGE[item.status] || FESTIVAL_STATUS_BADGE.draft;
                       const isLastInGroup = ii === group.items.length - 1;
+                      const planIsDraggable = (item.status === 'draft' || item.status === 'approved') && !item.sendClaimedAt;
+                      const planIsBeingDragged = dragItem && dragItem._id === item._id;
                       return (
                         <div key={item._id}
+                          draggable={planIsDraggable}
+                          onDragStart={planIsDraggable ? e => {
+                            e.dataTransfer.effectAllowed = 'move';
+                            setDragItem(item);
+                          } : undefined}
+                          onDragEnd={planIsDraggable ? () => { setDragItem(null); setDragOverDate(null); } : undefined}
                           onMouseEnter={e => {
                             e.currentTarget.style.background = '#f9fafb';
                             const actions = e.currentTarget.querySelector('[data-row-actions]');
@@ -2170,8 +2308,18 @@ export default function QueueScreen({ shop }) {
                             padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
                             borderBottom: isLastInGroup ? 'none' : '1px solid #f9fafb',
                             transition: 'background 0.12s',
+                            opacity: planIsBeingDragged ? 0.4 : 1,
+                            cursor: planIsDraggable ? 'grab' : undefined,
                           }}
                         >
+                          {planIsDraggable && (
+                            <div aria-label="Drag to move to another date" style={{
+                              color: '#d1d5db', flexShrink: 0,
+                              display: 'flex', alignItems: 'center',
+                            }}>
+                              <GripIcon size={14} />
+                            </div>
+                          )}
                           {(item.mobileImageUrl || item.desktopImageUrl) && (
                             <img
                               src={item.mobileImageUrl || item.desktopImageUrl}
