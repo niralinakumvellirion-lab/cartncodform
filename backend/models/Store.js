@@ -243,6 +243,13 @@ const storeSchema = new mongoose.Schema({
   shopName: { type: String },
   logoUrl: { type: String },
   primaryColor: { type: String },
+
+  // --- Platform admin: store suspension ---
+  suspended:       { type: Boolean, default: false, index: true },
+  suspendedAt:     { type: Date,    default: null },
+  suspendedReason: { type: String,  default: null },
+  suspendedNote:   { type: String,  default: null, maxlength: 500 },
+  suspendedBy:     { type: String,  default: null }, // staff email
 });
 
 module.exports = mongoose.model('Store', storeSchema);
