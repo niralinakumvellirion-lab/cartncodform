@@ -2,7 +2,8 @@
 export const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
 
-export { checkSuspended } from './checkSuspended';
+import { checkSuspended } from './checkSuspended';
+export { checkSuspended };
 
 // fetch() rejects with a bare "TypeError: Failed to fetch" for any network-level
 // failure (backend down, wrong port, CORS blocked, DNS). Turn that into a
