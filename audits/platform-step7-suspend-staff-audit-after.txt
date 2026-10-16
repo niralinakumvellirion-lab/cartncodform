@@ -1,0 +1,138 @@
+PLATFORM STEP 7 — SUSPEND/TURN-ON DIALOGS, STAFF SCREEN, AUDIT SCREEN
+Self-audit (after)
+Date: 2026-10-16
+
+════════════════════════════════════════════════════════════════════════════════
+FIXES IN COMMIT 1
+════════════════════════════════════════════════════════════════════════════════
+
+Fix 0a — fmtDeliveryRate (frontend/lib/platformFmt.js)
+  BEFORE: guarded with `Number(n) <= 1` heuristic; multiplied by 100 only if <= 1
+  AFTER:  unconditional `Math.round(Number(n) * 100) + '%'`
+  WHY:    Backend (pushHygiene.js:132) always stores rateLast7d as
+          deliveredLast7d / attemptedLast7d — always a 0-1 float.
+          The heuristic was never needed.
+
+Fix 0b — suspended banner overflow-wrap (StoreDetail.js)
+  Added `style={{ overflowWrap: 'anywhere' }}` to the banner <div>
+  so a long freetext note can't blow out the layout.
+
+════════════════════════════════════════════════════════════════════════════════
+NEW API CALLS WIRED IN STOREDETAIL
+════════════════════════════════════════════════════════════════════════════════
+
+POST /api/platform/stores/:shopDomain/suspend
+  Body: { reason: 'spam'|'policy'|'payment'|'request'|'other', note?: string }
+  Success: dialog closes, store refetched, green banner "Store suspended."
+  409 already suspended: dialog stays open with error, store refetched
+  403: dialog stays open with "Your role cannot do this."
+  404/400/network: dialog stays open with error message
+
+POST /api/platform/stores/:shopDomain/unsuspend
+  Body: (none)
+  Success: dialog closes, store refetched, green banner with festivalDrafted and
+           jobsSkipped counts from the response
+  409 not suspended: dialog stays open with error, store refetched
+  403/404/network: dialog stays open with error message
+
+════════════════════════════════════════════════════════════════════════════════
+ROLE GATING — STOREDETAIL ADDITIONS
+════════════════════════════════════════════════════════════════════════════════
+
+Feature                       owner   admin   support
+─────────────────────────────  ──────  ──────  ───────
+Suspend store button           ✓       ✓       ✗ (button not rendered)
+Turn store on button           ✓       ✓       ✗ (button not rendered)
+Suspend dialog confirm         ✓       ✓       ✗ (button not present)
+
+Both buttons check `staff?.role === 'owner' || 'admin'` using the same `getMe()`
+call already made for the report and history buttons.
+
+════════════════════════════════════════════════════════════════════════════════
+SUSPEND DIALOG — DESIGN NOTES
+════════════════════════════════════════════════════════════════════════════════
+
+Focus trap: Modal component queries focusable elements on every Tab keypress,
+  so the trap adapts when the Confirm button becomes enabled (after reason is
+  selected and domain is confirmed). First focusable element receives focus
+  16ms after open (one RAF delay to let React paint).
+
+Focus return: on close, the opener button (suspendBtnRef or unsuspendBtnRef)
+  receives focus via setTimeout(0). Works because the buttons are stable DOM
+  nodes (conditional render based on store.suspended, not on dialogOpen).
+
+Domain confirm: comparison is exact (`confirm === store.shopDomain`).
+  The confirm input has spellCheck={false} and autoComplete="off".
+
+Form reset: state is reset when `open` changes to true (useEffect on open).
+  This means cancelling and reopening gives a fresh form, not leftover data.
+
+Footer attribution note is hard-coded, not fetched from the backend.
+
+════════════════════════════════════════════════════════════════════════════════
+STAFF SCREEN — API CALLS
+════════════════════════════════════════════════════════════════════════════════
+
+GET  /api/platform/staff          owner only   table rows
+POST /api/platform/staff          owner only   add form submit
+PATCH /api/platform/staff/:id     owner only   change role or toggle active
+
+Non-owner sees "Only the owner can manage staff." without any API calls.
+Loading waits for getMe() (meLoaded flag) so non-owner users never see a
+brief flash of the role message while the me request is in-flight.
+
+Identify "you": compare member.email === me.email (getMe returns email).
+Cannot-change guard: own row shows "Cannot be changed", no buttons rendered.
+Inline role editing: select appears in the Role cell; Save/Cancel in Actions.
+Turn off / Turn on: PATCH /:id with { active: false | true }.
+Row errors isolated: { [id]: string } — never bleed between rows.
+
+════════════════════════════════════════════════════════════════════════════════
+AUDIT SCREEN — API CALLS
+════════════════════════════════════════════════════════════════════════════════
+
+GET /api/platform/audit?shopDomain=&action=&page=&limit=50
+
+Owner and admin only. Support sees "Your role cannot read the audit log."
+Same meLoaded guard as StaffScreen — no flash for non-support roles.
+
+Filters:
+  Domain: text input + Filter button (also fires on Enter). Clear button (✕)
+    appears when a domain filter is active.
+  Action: select with all 13 known action codes.
+  Both filters reset page to 0 when changed.
+
+Audit action display: auditActionLabel output is first-letter capitalised in
+  the display (not in the helper itself — the helper stays lowercase so the
+  History tab in StoreDetail can still read "john@acme.com signed in").
+
+store_suspended rows: show meta.reason in parentheses if present.
+  Other actions: meta is not displayed.
+
+════════════════════════════════════════════════════════════════════════════════
+BUILD RESULT
+════════════════════════════════════════════════════════════════════════════════
+
+npm run build → ✓ Compiled successfully, 0 errors.
+
+Route sizes after this step:
+  /platform                      2.78 kB  (unchanged)
+  /platform/audit                2.58 kB  (was placeholder ~0.2 kB)
+  /platform/staff                3.16 kB  (was placeholder ~0.2 kB)
+  /platform/stores/[shopDomain]  7.68 kB  (was 5.28 kB; dialogs + state added)
+
+════════════════════════════════════════════════════════════════════════════════
+WHAT CANNOT BE VERIFIED WITHOUT A BROWSER
+════════════════════════════════════════════════════════════════════════════════
+
+1. Focus trap — the Modal's Tab/Shift-Tab cycle is code-correct per ARIA APG
+   but cannot be tested without a real browser session.
+2. Focus return after dialog close — setTimeout(0) should run after React
+   removes the modal; not verifiable by build.
+3. Domain confirm UX — pasting a domain with trailing whitespace would fail
+   the exact match. Users must type or paste clean. Noted.
+4. Unsuspend banner counts — the festivalDrafted and jobsSkipped counts come
+   verbatim from the API response. Zero counts produce "0 festival items moved
+   to draft and 0 queued sends skipped." which is correct and clear.
+5. Staff getMe() race — the loadStaff effect waits for meLoaded before firing,
+   so there is no race where staff is fetched before the role is known.

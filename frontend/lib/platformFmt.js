@@ -5,12 +5,13 @@ export function fmtNumber(n) {
   return new Intl.NumberFormat('en-IN').format(Number(n));
 }
 
-// Push delivery rate. The backend stores it as rateLast7d; assume 0-1 float,
-// but guard against a pre-multiplied value (>1 means it is already 0-100).
+// Push delivery rate.
+// rateLast7d is computed in backend/services/pushHygiene.js as
+//   deliveredLast7d / attemptedLast7d
+// It is always a 0-1 float (or 0 when no attempts). Multiply by 100 to display.
 export function fmtDeliveryRate(n) {
   if (n == null || isNaN(Number(n))) return '—';
-  const pct = Number(n) <= 1 ? Number(n) * 100 : Number(n);
-  return `${Math.round(pct)}%`;
+  return `${Math.round(Number(n) * 100)}%`;
 }
 
 // Relative time without an external library.
