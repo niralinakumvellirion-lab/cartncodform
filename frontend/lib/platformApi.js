@@ -4,14 +4,14 @@
  * All functions are safe to call from client components only.
  */
 
-import { BACKEND_URL } from './api';
-import { platformHref } from './platformPaths';
+import { BACKEND_URL } from './api.js';
+import { platformHref } from './platformPaths.js';
 
 const TOKEN_KEY = 'ccf_platform_token';
 
 // ── Token helpers ─────────────────────────────────────────────────────────────
 
-function getToken() {
+export function getToken() {
   try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
 
@@ -31,16 +31,17 @@ function clearToken() {
  * On network error: throws with a human-readable message.
  */
 export async function platformFetch(path, options = {}) {
+  const { noRedirectOn401, ...fetchOptions } = options;
   const token = getToken();
   const url   = `${BACKEND_URL}${path}`;
 
   let res;
   try {
     res = await fetch(url, {
-      ...options,
+      ...fetchOptions,
       headers: {
         'Content-Type': 'application/json',
-        ...(options.headers || {}),
+        ...(fetchOptions.headers || {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     });
@@ -50,7 +51,7 @@ export async function platformFetch(path, options = {}) {
 
   if (res.status === 401) {
     clearToken();
-    if (typeof window !== 'undefined') {
+    if (!noRedirectOn401 && typeof window !== 'undefined') {
       window.location.href = platformHref('/login');
     }
     throw Object.assign(new Error('Session expired'), { status: 401 });
@@ -101,8 +102,8 @@ export async function loginWithGoogle(idToken) {
   return data.staff;
 }
 
-export function getMe() {
-  return platformFetch('/api/platform/me');
+export function getMe(options) {
+  return platformFetch('/api/platform/me', options);
 }
 
 export function signOut() {

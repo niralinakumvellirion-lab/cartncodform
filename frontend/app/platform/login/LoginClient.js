@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Script from 'next/script';
-import { loginWithGoogle, getMe } from '../../../lib/platformApi';
+import { loginWithGoogle, getMe, getToken } from '../../../lib/platformApi';
 import { platformHref } from '../../../lib/platformPaths';
 
 const CLIENT_ID = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || '';
@@ -28,9 +28,13 @@ export default function LoginClient() {
 
   // If already signed in, skip the login page.
   useEffect(() => {
-    getMe()
+    if (!getToken()) { setLoading(false); return; }
+    getMe({ noRedirectOn401: true })
       .then(() => router.replace(platformHref('/')))
-      .catch(() => setLoading(false)); // not signed in — show form
+      .catch(err => {
+        if (err?.status === 429) setMsg(ERRORS[429]);
+        setLoading(false);
+      });
   }, [router]);
 
   function onGoogleScript() {
