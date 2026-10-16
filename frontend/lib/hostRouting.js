@@ -31,7 +31,7 @@ export function resolveHostRoute({ host = '', pathname = '/', isProduction = tru
 
   if (isAdminHost) {
     // Already under /platform — pass through unchanged.
-    if (pathname.startsWith('/platform')) return { action: 'next' };
+    if (pathname === '/platform' || pathname.startsWith('/platform/')) return { action: 'next' };
 
     // Block paths that belong to the merchant admin, COD form, or backend API.
     if (
@@ -49,7 +49,7 @@ export function resolveHostRoute({ host = '', pathname = '/', isProduction = tru
   }
 
   // Non-admin host in production: block the /platform subtree.
-  if (isProduction && pathname.startsWith('/platform')) {
+  if (isProduction && (pathname === '/platform' || pathname.startsWith('/platform/'))) {
     return { action: 'notFound' };
   }
 

@@ -2,9 +2,7 @@
  * Plain-node ESM tests for frontend/lib/hostRouting.js + platformPaths.js.
  * Run: node frontend/lib/hostRouting.test.mjs
  *
- * Expected results come from the documented routing RULES, not from what the
- * code currently returns. Tests that expose a rule/code mismatch are kept;
- * the mismatch is reported in the summary.
+ * Expected results come from the documented routing RULES.
  */
 
 import assert from 'node:assert/strict';
@@ -127,17 +125,19 @@ check('ADMIN uppercase + port, blocked path → notFound',
   resolveHostRoute({ host: 'ADMIN.SHOPIREACHBOOST.COM:443', pathname: '/api/x' }),
   { action: 'notFound' });
 
-// ── /platformX boundary: rule vs code ────────────────────────────────────────
-// Rule: only /platform (exact) and /platform/* (with a slash) pass through.
-// /platformX is neither — it should be rewritten per "every other path" rule.
-// Code: startsWith('/platform') also matches /platformX → returns { action:'next' }.
-// This test is EXPECTED TO FAIL against the current code and is kept to document
-// the rule/code mismatch.
-console.log('\nresolveHostRoute — admin host: /platformX boundary (rule vs code mismatch)');
+// ── /platform path boundary ───────────────────────────────────────────────────
+// Only /platform (exact) and /platform/* (slash-prefixed) pass through on the
+// admin host. Paths that merely start with the letters "/platform" (no slash)
+// are treated as "every other path" and get rewritten.
+console.log('\nresolveHostRoute — admin host: /platform path boundary');
 
-check('/platformX → rewrite /platform/platformX (by rule; code returns next)',
+check('/platformX → rewrite /platform/platformX',
   resolveHostRoute({ host: ADMIN, pathname: '/platformX' }),
   { action: 'rewrite', to: '/platform/platformX' });
+
+check('/platform-pricing → rewrite /platform/platform-pricing',
+  resolveHostRoute({ host: ADMIN, pathname: '/platform-pricing' }),
+  { action: 'rewrite', to: '/platform/platform-pricing' });
 
 // ── resolveHostRoute: non-admin host, production ──────────────────────────────
 console.log('\nresolveHostRoute — non-admin host, production: /platform blocked');
@@ -187,6 +187,28 @@ check('www.* /admin → next',
 check('vercel preview /api/x → next',
   resolveHostRoute({ host: 'cartncodform-git-main.vercel.app', pathname: '/api/x' }),
   { action: 'next' });
+
+console.log('\nresolveHostRoute — non-admin host, production: /platform boundary (not-prefix)');
+
+check('app.* /platformX → next (not blocked — not the /platform subtree)',
+  resolveHostRoute({ host: APP, pathname: '/platformX' }),
+  { action: 'next' });
+
+check('app.* /platform-pricing → next',
+  resolveHostRoute({ host: APP, pathname: '/platform-pricing' }),
+  { action: 'next' });
+
+check('app.* /platforms → next',
+  resolveHostRoute({ host: APP, pathname: '/platforms' }),
+  { action: 'next' });
+
+check('app.* /platform → still notFound (exact match)',
+  resolveHostRoute({ host: APP, pathname: '/platform' }),
+  { action: 'notFound' });
+
+check('app.* /platform/login → still notFound (slash sub-path)',
+  resolveHostRoute({ host: APP, pathname: '/platform/login' }),
+  { action: 'notFound' });
 
 // ── resolveHostRoute: non-production ─────────────────────────────────────────
 console.log('\nresolveHostRoute — non-production: /platform reachable on any host');
@@ -309,8 +331,8 @@ console.log('\nplatformHref — client, localhost (prefixed)');
 // ── Summary ───────────────────────────────────────────────────────────────────
 console.log(`\n  ${passed} tests passed, ${failed} failed`);
 
-if (mismatches.length) {
-  console.log('\nKNOWN RULE/CODE MISMATCHES (tests kept, code NOT changed):');
+if (failed > 0) {
+  console.log('\nFAILURES:');
   mismatches.forEach(({ label, reason }) => {
     console.log(`  ✗ ${label}`);
     console.log(`    ${reason}`);
