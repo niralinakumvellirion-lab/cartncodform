@@ -29,6 +29,7 @@ const storeSchema = new mongoose.Schema({
   subscriptionId: { type: String },
   subscriptionStatus: { type: String },
   planUpdatedAt: { type: Date },
+  isTest: { type: Boolean, default: false },
 
   // --- Phase C: brain configuration ---
   voice: {
