@@ -1,5 +1,4 @@
-import PlatformShell from '../../components/PlatformShell';
-import StoreDetail from './StoreDetail';
+import StoreDetail from '../../../stores/[shopDomain]/StoreDetail';
 
 export const metadata = {
   title: 'Store – ShopiReachBoost Platform',
@@ -8,9 +7,5 @@ export const metadata = {
 
 export default function StoreDetailPage({ params }) {
   const shopDomain = decodeURIComponent(params.shopDomain);
-  return (
-    <PlatformShell>
-      <StoreDetail shopDomain={shopDomain} />
-    </PlatformShell>
-  );
+  return <StoreDetail shopDomain={shopDomain} />;
 }

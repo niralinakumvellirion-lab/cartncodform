@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { platformFetch } from '../../lib/platformApi';
+import Link from 'next/link';
 import { platformHref } from '../../lib/platformPaths';
 import { fmtNumber, relativeTime, fmtDate, statusLabel, statusDotClass } from '../../lib/platformFmt';
 
@@ -237,12 +238,12 @@ export default function StoresList() {
                     {relativeTime(s.lastActive)}
                   </td>
                   <td className="px-4 py-3">
-                    <a
+                    <Link
                       href={platformHref('/stores/' + encodeURIComponent(s.shopDomain))}
                       className="rounded text-xs font-semibold text-[#4F46E5] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5]"
                     >
                       View →
-                    </a>
+                    </Link>
                   </td>
                 </tr>
               ))}

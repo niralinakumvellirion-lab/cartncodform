@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { platformFetch, getMe } from '../../../lib/platformApi';
+import { platformFetch } from '../../../lib/platformApi';
 import { relativeTime, fmtDate, auditActionLabel } from '../../../lib/platformFmt';
+import { usePlatformStaff } from '../../../lib/platformContext';
 
 const AUDIT_LIMIT = 50;
 
@@ -30,8 +31,7 @@ const ROLE_CHIP = {
 const ROLE_LABEL = { owner: 'Owner', admin: 'Admin', support: 'Support' };
 
 export default function AuditScreen() {
-  const [me,       setMe]       = useState(null);
-  const [meLoaded, setMeLoaded] = useState(false);
+  const me = usePlatformStaff();
   const [data,     setData]     = useState(null);
   const [loading,  setLoading]  = useState(true);
   const [error,    setError]    = useState(null);
@@ -42,16 +42,9 @@ export default function AuditScreen() {
   const [filterDomain,  setFilterDomain]  = useState('');
   const [filterAction,  setFilterAction]  = useState('');
 
-  useEffect(() => {
-    getMe()
-      .then(d  => { setMe(d);  setMeLoaded(true); })
-      .catch(() => setMeLoaded(true));
-  }, []);
-
   const isAllowed = me?.role === 'owner' || me?.role === 'admin';
 
   const load = useCallback(() => {
-    if (!meLoaded) return;
     if (!isAllowed) { setLoading(false); return; }
     setLoading(true);
     setError(null);
@@ -64,7 +57,7 @@ export default function AuditScreen() {
     platformFetch(`/api/platform/audit?${params}`)
       .then(d  => { setData(d); setLoading(false); })
       .catch(e => { setError(e.message || 'Failed to load audit log.'); setLoading(false); });
-  }, [meLoaded, isAllowed, page, filterDomain, filterAction]);
+  }, [isAllowed, page, filterDomain, filterAction]);
 
   useEffect(() => { load(); }, [load]);
 

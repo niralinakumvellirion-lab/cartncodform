@@ -1,9 +1,11 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { getMe, signOut } from '../../../lib/platformApi';
 import { platformHref } from '../../../lib/platformPaths';
+import { PlatformStaffContext } from '../../../lib/platformContext';
 
 // NAV stores clean paths; hrefs are computed at render time by platformHref
 // so they work correctly on both admin.* (clean URLs) and localhost / app.*
@@ -16,7 +18,7 @@ const NAV = [
 
 function NavLink({ href, label, current }) {
   return (
-    <a
+    <Link
       href={href}
       className={[
         'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
@@ -26,7 +28,7 @@ function NavLink({ href, label, current }) {
       ].join(' ')}
     >
       {label}
-    </a>
+    </Link>
   );
 }
 
@@ -99,6 +101,7 @@ export default function PlatformShell({ children }) {
     .map(item => ({ ...item, href: platformHref(item.path) }));
 
   return (
+    <PlatformStaffContext.Provider value={staff}>
     <div className="flex min-h-screen bg-[#F6F7F9]">
       {/* ── Sidebar ───────────────────────────────────────────────────────── */}
       <aside className="flex w-full flex-col border-b border-[#E1E4EA] bg-white p-4 sm:h-screen sm:w-56 sm:flex-shrink-0 sm:border-b-0 sm:border-r sm:sticky sm:top-0">
@@ -141,5 +144,6 @@ export default function PlatformShell({ children }) {
         {children}
       </main>
     </div>
+    </PlatformStaffContext.Provider>
   );
 }

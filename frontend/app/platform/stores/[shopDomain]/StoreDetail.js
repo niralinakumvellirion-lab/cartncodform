@@ -1,8 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { platformFetch, platformFetchBlob, getMe } from '../../../../lib/platformApi';
+import { platformFetch, platformFetchBlob } from '../../../../lib/platformApi';
 import { platformHref } from '../../../../lib/platformPaths';
+import { usePlatformStaff } from '../../../../lib/platformContext';
 import {
   fmtNumber, fmtDeliveryRate, relativeTime, fmtDate,
   statusLabel, statusDotClass, auditActionLabel,
@@ -730,7 +732,7 @@ function HistoryTab({ shopDomain }) {
 // ── Store detail root ─────────────────────────────────────────────────────────
 
 export default function StoreDetail({ shopDomain }) {
-  const [staff,         setStaff]         = useState(null);
+  const staff = usePlatformStaff();
   const [store,         setStore]         = useState(null);
   const [loading,       setLoading]       = useState(true);
   const [storeError,    setStoreError]    = useState(null);
@@ -742,8 +744,6 @@ export default function StoreDetail({ shopDomain }) {
 
   const suspendBtnRef   = useRef(null);
   const unsuspendBtnRef = useRef(null);
-
-  useEffect(() => { getMe().then(setStaff).catch(() => {}); }, []);
 
   const refetchStore = useCallback(async () => {
     try {
@@ -845,10 +845,10 @@ export default function StoreDetail({ shopDomain }) {
         <p className="mb-4 text-lg font-semibold text-[#171A22]">
           {is404 ? 'Store not found.' : is403 ? 'Your role cannot do this.' : (storeError.message || 'Something went wrong.')}
         </p>
-        <a href={platformHref('/')}
+        <Link href={platformHref('/')}
           className="text-sm font-semibold text-[#4F46E5] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5] rounded">
           ← Back to all stores
-        </a>
+        </Link>
       </div>
     );
   }
@@ -862,10 +862,10 @@ export default function StoreDetail({ shopDomain }) {
   return (
     <div>
       {/* Back link */}
-      <a href={platformHref('/')}
+      <Link href={platformHref('/')}
         className="mb-4 inline-flex items-center text-xs font-semibold text-[#5A6070] hover:text-[#4F46E5] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4F46E5] rounded">
         ← All stores
-      </a>
+      </Link>
 
       {/* Dismissible success banner */}
       {successMsg && (

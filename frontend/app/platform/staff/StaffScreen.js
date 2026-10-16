@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { platformFetch, getMe } from '../../../lib/platformApi';
+import { platformFetch } from '../../../lib/platformApi';
+import { usePlatformStaff } from '../../../lib/platformContext';
 import { relativeTime, fmtDate } from '../../../lib/platformFmt';
 
 const ROLE_CHIP = {
@@ -37,8 +38,7 @@ function SkeletonRow() {
 }
 
 export default function StaffScreen() {
-  const [me,       setMe]       = useState(null);
-  const [meLoaded, setMeLoaded] = useState(false);
+  const me = usePlatformStaff();
   const [staffList,  setStaffList]  = useState(null);
   const [listLoading, setListLoading] = useState(true);
   const [loadError,   setLoadError]   = useState(null);
@@ -57,12 +57,6 @@ export default function StaffScreen() {
   const [rowLoading,    setRowLoading]    = useState(null); // id currently mutating
   const [rowErrors,     setRowErrors]     = useState({});   // { [id]: string }
 
-  useEffect(() => {
-    getMe()
-      .then(d  => { setMe(d);  setMeLoaded(true); })
-      .catch(() => setMeLoaded(true));
-  }, []);
-
   const isOwner = me?.role === 'owner';
 
   const loadStaff = useCallback(async () => {
@@ -79,10 +73,10 @@ export default function StaffScreen() {
   }, []);
 
   useEffect(() => {
-    if (!meLoaded) return;
+    if (!me) return;
     if (!isOwner) { setListLoading(false); return; }
     loadStaff();
-  }, [meLoaded, isOwner, loadStaff]);
+  }, [me, isOwner, loadStaff]);
 
   async function handleAdd(e) {
     e.preventDefault();
