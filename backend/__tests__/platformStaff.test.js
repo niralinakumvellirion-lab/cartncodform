@@ -66,6 +66,7 @@ beforeAll((done) => {
   app.use('/api/platform', require('../routes/platform/index'));
   server = app.listen(0, () => {
     base = `http://127.0.0.1:${server.address().port}`;
+    server.unref();
     done();
   });
 });
