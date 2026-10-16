@@ -1,0 +1,117 @@
+AUDIT — platform-finance-step3-verify
+Date: 2026-10-16
+Scope: verification of commit e2e3487 (Finance frontend Step 3)
+
+═══════════════════════════════════════════════════════════
+1. REAL ESLINT
+═══════════════════════════════════════════════════════════
+
+Toolchain (temporary install, outside repo — no package.json changed):
+  Dir:     C:\...\scratchpad\ccf-lint\
+  Packages: eslint@8, eslint-plugin-react (latest)
+  Config (scratchpad — not in repo):
+    {
+      "env": { "browser": true, "es2022": true },
+      "parserOptions": { "ecmaVersion": 2022, "sourceType": "module",
+                         "ecmaFeatures": { "jsx": true } },
+      "plugins": ["react"],
+      "rules": { "no-undef": "error", "react/jsx-no-undef": "error",
+                 "react/react-in-jsx-scope": "off" },
+      "settings": { "react": { "version": "18" } },
+      "globals": { "process": "readonly", "module": "readonly",
+                   "require": "readonly", "exports": "readonly" }
+    }
+
+Scope: 28 files — frontend/app/platform/**/*.js + frontend/lib/**/*.{js,mjs}
+
+Full output (errors only, eslint --format json parsed):
+
+  File                 Line  Col  Rule      Message
+  frontend/lib/api.js   73    7   no-undef  'checkSuspended' is not defined.
+  frontend/lib/api.js   86    5   no-undef  'checkSuspended' is not defined.
+  frontend/lib/api.js  147    7   no-undef  'checkSuspended' is not defined.
+  frontend/lib/api.js  155    5   no-undef  'checkSuspended' is not defined.
+
+Files from e2e3487 — all CLEAN:
+  frontend/app/platform/components/PlatformShell.js  — 0 issues
+  frontend/app/platform/finance/FinanceScreen.js     — 0 issues
+  frontend/app/platform/(app)/finance/page.js        — 0 issues
+  frontend/lib/platformApi.js                        — 0 issues
+  frontend/lib/financeFormat.js                      — 0 issues
+  frontend/lib/financeFormat.test.mjs                — 0 issues
+
+Pre-existing issue — NOT in e2e3487, NOT fixed:
+  frontend/lib/api.js: 4× no-undef 'checkSuspended'.
+  api.js uses checkSuspended on lines 73/86/147/155 but never imports it.
+  checkSuspended.js exists in lib/ but the import statement is absent from api.js.
+  This is a pre-existing defect; per scope, reporting only, not fixing.
+
+═══════════════════════════════════════════════════════════
+2. RENDER CHECK
+═══════════════════════════════════════════════════════════
+
+Toolchain (temporary install, outside repo):
+  Dir:     C:\...\scratchpad\ccf-render\
+  Packages: react@18, react-dom@18, jsdom@24, @babel/core@7,
+            @babel/register@7, @babel/preset-env@7, @babel/preset-react@7
+  Strategy:
+    - jsdom@24 JSDOM instance as DOM environment (global.window/document)
+    - @babel/register with absolute preset paths transforms JSX + ESM→CJS
+    - Module._load intercept: react/jsx-runtime/* → single scratchpad instance
+      (prevents dual-React "mismatching versions" / hooks crash)
+    - next/link → mock <a> component; next/navigation → mock hooks
+    - require.cache injection for platformApi, platformContext, platformPaths
+    - react-dom/client createRoot + act for rendering; async act + setTimeout
+      drain for state settling after Promises resolve
+
+  Components tested:
+    FinanceScreen (D:\cartncodform\frontend\app\platform\finance\FinanceScreen.js)
+    PlatformShell (D:\cartncodform\frontend\app\platform\components\PlatformShell.js)
+
+  Test cases and results:
+    ✓ Non-owner (me.role='support'): shows "owner only" message; no API calls
+    ✓ Loading state (API Promises pending): animate-pulse skeletons in DOM
+    ✓ Loaded state (full data): "$99.90" MRR, "Paying" tab, "Store 1" row
+    ✓ Empty data (events=[], rows=[]): "No plan changes" / "No stores" messages
+    ✓ Error state (API rejects): "Retry" button + error message in DOM
+    ✓ Range chips: clicking "Last 7 days" calls getFinanceActivity("week");
+                   clicking "Last 30 days" calls getFinanceActivity("month")
+    ✓ Tab switching: "In trial" → getFinanceStores("trial");
+                     "Lapsed" → getFinanceStores("lapsed");
+                     "Left out" → getFinanceStores("excluded")
+    ✓ PlatformShell, owner (role='owner'): "Finance" nav item in DOM
+    ✓ PlatformShell, non-owner (role='support'): "Finance" nav item absent
+
+  Result: 9/9 passed, 0 failed.
+
+  Notes:
+    - React 18 act() deprecation warnings (react-dom/test-utils.act → React.act)
+      appeared throughout. These are informational-only; no tests failed because
+      of them. Filtered from pass/fail evaluation.
+    - The FinanceScreen component stack appeared in those warnings (line 212
+      = the usePlatformStaff hook call site); this is normal warning context,
+      not a real error.
+
+═══════════════════════════════════════════════════════════
+3. BACKEND TEST SUITE
+═══════════════════════════════════════════════════════════
+
+Command: Set-Location D:\cartncodform\backend; npx jest --no-coverage --forceExit
+
+Result:
+  Test Suites: 69 passed, 69 total
+  Tests:       1490 passed, 1490 total
+  Snapshots:   0 total
+  Time:        ~52.8 s
+
+Expected count 1490 ✓ — no regressions.
+
+═══════════════════════════════════════════════════════════
+4. FIXES MADE
+═══════════════════════════════════════════════════════════
+
+None. All files in e2e3487 passed eslint (no-undef, react/jsx-no-undef) and
+all 9 render scenarios passed without a thrown error or unhandled console.error.
+
+The only issue found — checkSuspended not imported in lib/api.js — is pre-existing
+(not in e2e3487) and was reported without fixing per scope.
