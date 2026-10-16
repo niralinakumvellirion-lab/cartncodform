@@ -9,9 +9,14 @@ const { PLAN_PRICE, TRIAL_DAYS } = require('./billing');
  * State-change dedupe: if the shop's most-recent event has the same
  * eventType + toPlan + shopifyStatus, the insert is skipped.
  */
+function normaliseStatus(s) {
+  return s != null ? String(s).trim().toUpperCase() : null;
+}
+
 async function recordSubscriptionEvent(data) {
   try {
-    const { shopDomain, eventType, toPlan, shopifyStatus } = data;
+    const { shopDomain, eventType, toPlan } = data;
+    const shopifyStatus = normaliseStatus(data.shopifyStatus);
 
     // Dedupe: skip if latest event for this shop has identical state.
     const latest = await SubscriptionEvent.findOne(
@@ -23,13 +28,13 @@ async function recordSubscriptionEvent(data) {
       latest &&
       latest.eventType === eventType &&
       latest.toPlan === toPlan &&
-      latest.shopifyStatus === shopifyStatus
+      normaliseStatus(latest.shopifyStatus) === shopifyStatus
     ) {
       return null;
     }
 
     const occurredAt = data.occurredAt || new Date();
-    const doc = { ...data, occurredAt };
+    const doc = { ...data, shopifyStatus, occurredAt };
 
     if (eventType === 'activated') {
       doc.priceUsd  = PLAN_PRICE;

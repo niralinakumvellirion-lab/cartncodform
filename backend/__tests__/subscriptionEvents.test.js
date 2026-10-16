@@ -199,6 +199,55 @@ describe('recordSubscriptionEvent', () => {
 
     expect(SubscriptionEvent.create).toHaveBeenCalledTimes(1);
   });
+
+  test('normalise: latest shopifyStatus ACTIVE + incoming "active" => skipped (case-insensitive dedupe)', async () => {
+    mockLatest({ eventType: 'activated', toPlan: 'pro', shopifyStatus: 'ACTIVE' });
+
+    const result = await recordSubscriptionEvent({
+      shopDomain:    'case.myshopify.com',
+      eventType:     'activated',
+      toPlan:        'pro',
+      shopifyStatus: 'active',
+      source:        'webhook',
+    });
+
+    expect(result).toBeNull();
+    expect(SubscriptionEvent.create).not.toHaveBeenCalled();
+  });
+
+  test('normalise: shopifyStatus stored as uppercase when called with lowercase', async () => {
+    mockNoLatest();
+    SubscriptionEvent.create.mockResolvedValue({});
+
+    await recordSubscriptionEvent({
+      shopDomain:    'upper.myshopify.com',
+      eventType:     'activated',
+      toPlan:        'pro',
+      shopifyStatus: 'active',
+      source:        'webhook',
+    });
+
+    const [doc] = SubscriptionEvent.create.mock.calls[0];
+    expect(doc.shopifyStatus).toBe('ACTIVE');
+  });
+
+  test('normalise: null shopifyStatus works and does not throw', async () => {
+    mockNoLatest();
+    SubscriptionEvent.create.mockResolvedValue({});
+
+    await expect(
+      recordSubscriptionEvent({
+        shopDomain:    'nullstatus.myshopify.com',
+        eventType:     'ended',
+        toPlan:        'free',
+        shopifyStatus: null,
+        source:        'webhook',
+      })
+    ).resolves.toBe(true);
+
+    const [doc] = SubscriptionEvent.create.mock.calls[0];
+    expect(doc.shopifyStatus).toBeNull();
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -357,7 +406,7 @@ describe('webhooks: app/uninstalled → "uninstalled" event', () => {
     expect(doc.eventType).toBe('uninstalled');
     expect(doc.fromPlan).toBe('pro');
     expect(doc.toPlan).toBe('free');
-    expect(doc.shopifyStatus).toBe('uninstalled');
+    expect(doc.shopifyStatus).toBe('UNINSTALLED');
     expect(doc.source).toBe('webhook');
   });
 
