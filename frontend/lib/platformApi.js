@@ -111,3 +111,40 @@ export function signOut() {
     window.location.href = platformHref('/login');
   }
 }
+
+/**
+ * Like platformFetch but returns the raw Response (for blob downloads).
+ * Applies Authorization header; handles 401 the same way as platformFetch.
+ * Caller reads res.blob() and res.headers.get('Content-Disposition').
+ */
+export async function platformFetchBlob(path) {
+  const token = getToken();
+  const url   = `${BACKEND_URL}${path}`;
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+  } catch {
+    throw Object.assign(new Error('Could not reach the server. Try again.'), { status: 0 });
+  }
+
+  if (res.status === 401) {
+    clearToken();
+    if (typeof window !== 'undefined') {
+      window.location.href = platformHref('/login');
+    }
+    throw Object.assign(new Error('Session expired'), { status: 401 });
+  }
+
+  if (!res.ok) {
+    let data = {};
+    try { data = await res.json(); } catch {}
+    throw Object.assign(
+      new Error(data.error || `Request failed (${res.status})`),
+      { status: res.status }
+    );
+  }
+
+  return res;
+}

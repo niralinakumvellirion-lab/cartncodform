@@ -1,4 +1,5 @@
 import PlatformShell from './components/PlatformShell';
+import StoresList from './StoresList';
 
 export const metadata = {
   title: 'Stores – ShopiReachBoost Platform',
@@ -8,8 +9,7 @@ export const metadata = {
 export default function StoresPage() {
   return (
     <PlatformShell>
-      <h1 className="text-xl font-bold text-white mb-2">Stores</h1>
-      <p className="text-white/50 text-sm">Coming in the next step.</p>
+      <StoresList />
     </PlatformShell>
   );
 }
