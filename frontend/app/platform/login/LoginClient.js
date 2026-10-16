@@ -64,8 +64,8 @@ export default function LoginClient() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#12151C]">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+      <div className="flex min-h-screen items-center justify-center bg-[#F6F7F9]">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-[#E1E4EA] border-t-[#4F46E5]" />
       </div>
     );
   }
@@ -80,9 +80,9 @@ export default function LoginClient() {
         />
       )}
 
-      <div className="flex min-h-screen flex-col items-center justify-center bg-[#12151C] px-4">
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[#F6F7F9] px-4">
         {/* Card */}
-        <div className="w-full max-w-sm rounded-2xl bg-white px-8 py-10 shadow-2xl text-gray-900">
+        <div className="w-full max-w-sm rounded-2xl bg-white px-8 py-10 shadow-sm border border-[#E1E4EA] text-gray-900">
 
           {/* Brand + chip */}
           <div className="mb-6 flex flex-col items-center gap-2">
@@ -124,7 +124,7 @@ export default function LoginClient() {
         </div>
 
         {/* Footer */}
-        <p className="mt-6 text-xs text-white/30">admin.shopireachboost.com</p>
+        <p className="mt-6 text-xs text-[#5A6070]">admin.shopireachboost.com</p>
       </div>
     </>
   );

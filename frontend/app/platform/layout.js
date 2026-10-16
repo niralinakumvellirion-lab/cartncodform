@@ -20,7 +20,7 @@ export default function PlatformLayout({ children }) {
         .platform-root { font-family: 'Manrope', sans-serif; }
         .platform-mono  { font-family: 'JetBrains Mono', monospace; }
       `}</style>
-      <div className="platform-root min-h-screen bg-[#12151C] text-white">
+      <div className="platform-root min-h-screen bg-[#F6F7F9] text-[#171A22]">
         {children}
       </div>
     </>
