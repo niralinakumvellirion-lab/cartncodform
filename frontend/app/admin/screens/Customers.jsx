@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiGet, BACKEND_URL } from '../../../lib/api';
+import { apiGet, BACKEND_URL, checkSuspended } from '../../../lib/api';
 import { ShimmerTable } from '../components/Shimmer';
 import { DS, StageBadge, ReachIcons, useWhatsapp, getCustomerEmail } from './customerShared';
 import DateRangeFilter, { getDateRange, matchDatePreset } from '../components/DateRangeFilter';
@@ -218,6 +218,7 @@ function ExportPanel({ shop, initialSegment, initialSearch, onClose, isMobile })
         if (controller.aborted) return;
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
+          checkSuspended(res.status, body);
           setCountError(body.error || 'Couldn\'t count customers');
           setCountResult(null);
         } else {
@@ -274,6 +275,7 @@ function ExportPanel({ shop, initialSegment, initialSearch, onClose, isMobile })
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
+        checkSuspended(res.status, body);
         setDlError(body.error || 'Couldn\'t prepare the file. Please try again.');
         return;
       }

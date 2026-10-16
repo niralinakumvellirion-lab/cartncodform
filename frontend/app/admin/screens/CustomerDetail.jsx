@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiGet, apiSend, BACKEND_URL } from '../../../lib/api';
+import { apiGet, apiSend, BACKEND_URL, checkSuspended } from '../../../lib/api';
 import { ShimmerBox, ShimmerCard } from '../components/Shimmer';
 import { DS, StageBadge, ReachIcons, useWhatsapp, getCustomerEmail } from './customerShared';
 import { EmailPreviewFrame } from '../components/EmailPreviewFrame';
@@ -2480,7 +2480,11 @@ export default function CustomerDetail({ shop, profileId, from, fid }) {
         cache: 'no-store',
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error('Export failed');
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        checkSuspended(res.status, body);
+        throw new Error('Export failed');
+      }
       const blob = await res.blob();
       const cd = res.headers.get('Content-Disposition') || '';
       const fnMatch = cd.match(/filename="([^"]+)"/);

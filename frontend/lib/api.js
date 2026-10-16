@@ -37,6 +37,25 @@ async function getAuthToken() {
   return await window.shopify.idToken();
 }
 
+// Detect the backend's "store is suspended" sentinel. Called on every response
+// so callers do not need to think about it. Fires 'ccf:store-suspended' on
+// window at most once per page load (idempotent). All other status codes and
+// all other 403 bodies are left completely untouched.
+//
+// Exported so direct-fetch() call sites in the codebase can use it, and so
+// the algorithm can be tested independently.
+let _suspendedFired = false;
+
+export function checkSuspended(status, body) {
+  if (status !== 403) return;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return;
+  if (body.code !== 'STORE_SUSPENDED') return;
+  if (typeof window === 'undefined') return;
+  if (_suspendedFired) return;
+  _suspendedFired = true;
+  window.dispatchEvent(new Event('ccf:store-suspended'));
+}
+
 export async function apiGet(path) {
   const url = `${BACKEND_URL}${path}`;
   const token = await getAuthToken();
@@ -68,14 +87,21 @@ export async function apiGet(path) {
     }
     if (!retryRes.ok) {
       const err = await retryRes.json().catch(() => ({}));
+      checkSuspended(retryRes.status, err);
       throw new Error(err.error || `${path} failed (${retryRes.status})`);
     }
     return retryRes.json();
   }
 
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`GET ${path} failed (${res.status}): ${body}`);
+    let bodyText = '';
+    let bodyJson = {};
+    try {
+      bodyText = await res.text();
+      bodyJson = JSON.parse(bodyText);
+    } catch {}
+    checkSuspended(res.status, bodyJson);
+    throw new Error(`GET ${path} failed (${res.status}): ${bodyText}`);
   }
   return res.json();
 }
@@ -135,6 +161,7 @@ export async function apiSend(path, method, body) {
     }, method);
     if (!retryRes.ok) {
       const err = await retryRes.json().catch(() => ({}));
+      checkSuspended(retryRes.status, err);
       throw new Error(err.error || `${method} ${path} failed (${retryRes.status})`);
     }
     return retryRes.json().catch(() => ({}));
@@ -142,6 +169,7 @@ export async function apiSend(path, method, body) {
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    checkSuspended(res.status, data);
     const err = new Error(data.error || `${method} ${path} failed (${res.status})`);
     if (data.field) err.field = data.field;
     throw err;
