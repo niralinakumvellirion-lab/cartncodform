@@ -78,7 +78,7 @@ export default function AuditScreen() {
 
   // ── Loading ───────────────────────────────────────────────────────────────
 
-  if (!meLoaded) {
+  if (!me) {
     return (
       <div>
         <div className="animate-pulse mb-6 space-y-2">

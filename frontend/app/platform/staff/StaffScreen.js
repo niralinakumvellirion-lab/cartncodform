@@ -138,7 +138,7 @@ export default function StaffScreen() {
 
   // ── Loading ───────────────────────────────────────────────────────────────
 
-  if (!meLoaded || (isOwner && listLoading)) {
+  if (!me || (isOwner && listLoading)) {
     return (
       <div>
         <div className="mb-6 flex items-start gap-4">
