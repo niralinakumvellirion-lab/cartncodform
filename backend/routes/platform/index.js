@@ -9,8 +9,9 @@ const AuditLog = require('../../models/AuditLog');
 const Staff    = require('../../models/Staff');
 const { logAudit } = require('../../utils/auditLog');
 const { requireStaff, requireRole } = require('../../middleware/requireStaff');
-const storesRouter = require('./stores');
-const staffRouter  = require('./staff');
+const storesRouter  = require('./stores');
+const staffRouter   = require('./staff');
+const financeRouter = require('./finance');
 
 const PLATFORM_ISS = 'shopireachboost-platform';
 const PLATFORM_AUD = 'platform-admin';
@@ -204,6 +205,10 @@ router.use('/stores', storesRouter);
 // ── /api/platform/staff (sub-router) ─────────────────────────────────────────
 
 router.use('/staff', staffRouter);
+
+// ── /api/platform/finance (sub-router) ───────────────────────────────────────
+
+router.use('/finance', financeRouter);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
