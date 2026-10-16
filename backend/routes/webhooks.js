@@ -12,6 +12,7 @@ const { upsertProfile } = require('../services/profileService');
 const { computeSignalsForProfile } = require('../services/signalEngine');
 const Profile = require('../models/Profile');
 const ScheduledJob = require('../models/ScheduledJob');
+const { recordSubscriptionEvent } = require('../utils/subscriptionEvents');
 
 const router = express.Router();
 
@@ -381,6 +382,13 @@ async function handleAppSubscriptionUpdate(req, res) {
 
     const isActive = status === 'ACTIVE' || status === 'active';
 
+    // Read current plan before update so we can record fromPlan accurately.
+    let fromPlan = null;
+    try {
+      const current = await Store.findOne({ shopDomain }, { plan: 1 }).lean();
+      fromPlan = current?.plan ?? null;
+    } catch { /* non-fatal */ }
+
     await Store.findOneAndUpdate(
       { shopDomain },
       {
@@ -392,6 +400,16 @@ async function handleAppSubscriptionUpdate(req, res) {
     );
 
     console.log(`[billing] Store ${shopDomain} plan updated to: ${isActive ? 'pro' : 'free'}`);
+
+    await recordSubscriptionEvent({
+      shopDomain,
+      eventType:     isActive ? 'activated' : 'ended',
+      fromPlan,
+      toPlan:        isActive ? 'pro' : 'free',
+      shopifyStatus: status || null,
+      source:        'webhook',
+    });
+
     return res.status(200).json({ received: true });
   } catch (err) {
     console.error('[billing] app_subscriptions/update error:', err.message);
@@ -417,6 +435,13 @@ async function handleAppUninstalled(req, res) {
 
     console.log(`[billing] app/uninstalled for ${shopDomain} — downgrading to free`);
 
+    // Read current plan before update so we can record fromPlan accurately.
+    let fromPlan = null;
+    try {
+      const current = await Store.findOne({ shopDomain }, { plan: 1 }).lean();
+      fromPlan = current?.plan ?? null;
+    } catch { /* non-fatal */ }
+
     await Store.findOneAndUpdate(
       { shopDomain },
       {
@@ -425,6 +450,15 @@ async function handleAppUninstalled(req, res) {
         planUpdatedAt: new Date(),
       }
     );
+
+    await recordSubscriptionEvent({
+      shopDomain,
+      eventType:     'uninstalled',
+      fromPlan,
+      toPlan:        'free',
+      shopifyStatus: 'uninstalled',
+      source:        'webhook',
+    });
 
     return res.status(200).json({ received: true });
   } catch (err) {
@@ -668,6 +702,9 @@ async function handleShopRedact(req, res) {
     const CodOrder = require('../models/CodOrder');
     const PushSubscription = require('../models/PushSubscription');
 
+    // SubscriptionEvent is intentionally NOT deleted here. It contains only
+    // shopDomain + plan/event-type/date — no personal data (no emails, names,
+    // or shopper identifiers) — and is required for billing analytics.
     const results = await Promise.all([
       AbandonedCustomer.deleteMany({ shopDomain }),
       StorefrontEvent.deleteMany({ shopDomain }),

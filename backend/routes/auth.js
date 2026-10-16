@@ -15,6 +15,7 @@ const {
 } = require('../utils/shopify');
 const { requireAuth } = require('../middleware/requireOwner');
 const { getActiveSubscription, createSubscription } = require('../utils/billing');
+const { recordSubscriptionEvent } = require('../utils/subscriptionEvents');
 
 const router = express.Router();
 
@@ -186,6 +187,7 @@ router.get('/callback', async (req, res) => {
     try {
       const activeSub = await getActiveSubscription(shopDomain, accessToken);
       if (activeSub) {
+        const prevPlan = store?.plan ?? null;
         await Store.findOneAndUpdate(
           { shopDomain },
           {
@@ -193,8 +195,18 @@ router.get('/callback', async (req, res) => {
             subscriptionId: activeSub.id,
             subscriptionStatus: activeSub.status,
             planUpdatedAt: new Date(),
+            isTest: !!activeSub.test,
           }
         );
+        await recordSubscriptionEvent({
+          shopDomain,
+          eventType:     'activated',
+          fromPlan:      prevPlan,
+          toPlan:        'pro',
+          shopifyStatus: activeSub.status,
+          source:        'oauth_sync',
+          isTest:        !!activeSub.test,
+        });
         console.log(`[auth] Active subscription found for ${shopDomain} — redirecting to dashboard`);
         return res.redirect(dashboardUrl);
       }
@@ -311,6 +323,7 @@ router.get('/billing/callback', async (req, res) => {
 
     const activeSub = await getActiveSubscription(shop, store.accessToken);
     if (activeSub) {
+      const prevPlan = store?.plan ?? null;
       await Store.findOneAndUpdate(
         { shopDomain: shop },
         {
@@ -318,8 +331,18 @@ router.get('/billing/callback', async (req, res) => {
           subscriptionId: activeSub.id,
           subscriptionStatus: activeSub.status,
           planUpdatedAt: new Date(),
+          isTest: !!activeSub.test,
         }
       );
+      await recordSubscriptionEvent({
+        shopDomain:    shop,
+        eventType:     'activated',
+        fromPlan:      prevPlan,
+        toPlan:        'pro',
+        shopifyStatus: activeSub.status,
+        source:        'billing_callback',
+        isTest:        !!activeSub.test,
+      });
       console.log(`[auth] Subscription confirmed for ${shop}`);
     } else {
       console.log(`[auth] No active subscription after billing callback for ${shop} (declined?)`);
