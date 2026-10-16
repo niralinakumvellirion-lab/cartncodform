@@ -11,9 +11,10 @@ import { PlatformStaffContext } from '../../../lib/platformContext';
 // so they work correctly on both admin.* (clean URLs) and localhost / app.*
 // (/platform prefix).
 const NAV = [
-  { label: 'Stores',          path: '/',       roles: ['owner', 'admin', 'support'] },
-  { label: 'Staff and roles', path: '/staff',  roles: ['owner'] },
-  { label: 'Audit log',       path: '/audit',  roles: ['owner', 'admin'] },
+  { label: 'Stores',          path: '/',         roles: ['owner', 'admin', 'support'] },
+  { label: 'Finance',         path: '/finance',  roles: ['owner'] },
+  { label: 'Staff and roles', path: '/staff',    roles: ['owner'] },
+  { label: 'Audit log',       path: '/audit',    roles: ['owner', 'admin'] },
 ];
 
 function NavLink({ href, label, current }) {

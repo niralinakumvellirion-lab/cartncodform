@@ -13,8 +13,7 @@
  * being internal — even if they were previously marked internal.
  */
 
-const { PLAN_PRICE, TRIAL_DAYS } = require('./billing');
-const PLAN_CURRENCY = 'USD';
+const { PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS } = require('./billing');
 
 const MS_PER_DAY = 86400000;
 const TRIAL_MS   = TRIAL_DAYS * MS_PER_DAY;

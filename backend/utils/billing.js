@@ -89,4 +89,4 @@ async function createSubscription(shop, accessToken, returnUrl, isTest) {
   };
 }
 
-module.exports = { getActiveSubscription, createSubscription, PLAN_NAME, PLAN_PRICE, TRIAL_DAYS };
+module.exports = { getActiveSubscription, createSubscription, PLAN_NAME, PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS };

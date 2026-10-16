@@ -149,3 +149,24 @@ export async function platformFetchBlob(path) {
 
   return res;
 }
+
+// ── Finance ───────────────────────────────────────────────────────────────────
+
+export function getFinanceSummary(tzOffsetMinutes) {
+  return platformFetch(`/api/platform/finance/summary?tzOffsetMinutes=${tzOffsetMinutes}`);
+}
+
+export function getFinanceActivity(range, tzOffsetMinutes) {
+  return platformFetch(`/api/platform/finance/activity?range=${range}&tzOffsetMinutes=${tzOffsetMinutes}`);
+}
+
+export function getFinanceStores(group, page, limit) {
+  return platformFetch(`/api/platform/finance/stores?group=${group}&page=${page}&limit=${limit}`);
+}
+
+export function patchFinanceInternal(shopDomain, internal) {
+  return platformFetch(`/api/platform/finance/stores/${encodeURIComponent(shopDomain)}/internal`, {
+    method: 'PATCH',
+    body: JSON.stringify({ internal }),
+  });
+}
