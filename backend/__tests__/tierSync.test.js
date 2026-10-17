@@ -196,6 +196,34 @@ test('create userErrors → throws', async () => {
   await expect(syncTiers(SHOP)).rejects.toThrow('Invalid function id');
 });
 
+// ── shop metafield uses $app reserved namespace ───────────────────────────────
+
+test('shop metafield uses $app namespace (no write_metafields scope)', async () => {
+  Store.findOne.mockReturnValue(storeResult());
+  DiscountConfig.findOne.mockReturnValue(cfgResult({ discountId: '' }));
+
+  let capturedMetafieldInput = null;
+  global.fetch = jest.fn((url, opts) => {
+    const body = JSON.parse(opts.body);
+    if (body.query && body.query.includes('metafieldsSet')) {
+      capturedMetafieldInput = body.variables && body.variables.metafields && body.variables.metafields[0];
+      return shopifyJson({ data: { metafieldsSet: { userErrors: [] } } });
+    }
+    return shopifyJson({
+      data: {
+        shop: { id: 'gid://shopify/Shop/1' },
+        shopifyFunctions: { nodes: [{ id: FN_ID, apiType: 'product_discounts', title: 'Quantity Tier Discount' }] },
+        discountAutomaticAppCreate: { automaticAppDiscount: { discountId: DISCOUNT_GID }, userErrors: [] },
+      },
+    });
+  });
+
+  await syncTiers(SHOP);
+  expect(capturedMetafieldInput).not.toBeNull();
+  expect(capturedMetafieldInput.namespace).toBe('$app');
+  expect(capturedMetafieldInput.key).toBe('quantity_tiers');
+});
+
 // ── shop metafield failure is non-fatal ──────────────────────────────────────
 
 test('shop metafield write failure is non-fatal', async () => {
@@ -204,7 +232,7 @@ test('shop metafield write failure is non-fatal', async () => {
 
   global.fetch = makeFetch([
     // shop id query throws
-    () => { throw new Error('write_metafields scope missing'); },
+    () => { throw new Error('metafield write rejected'); },
     // getFunctionId
     { data: { shopifyFunctions: { nodes: [{ id: FN_ID, apiType: 'product_discounts', title: 'Quantity Tier Discount' }] } } },
     // createDiscount

@@ -51,6 +51,10 @@ const codOrderSchema = new mongoose.Schema({
     enum: ['pending', 'confirmed', 'cancelled'],
     default: 'pending',
   },
+  tierDiscount: {
+    percent: { type: Number, default: 0 },
+    amount:  { type: Number, default: 0 },
+  },
   createdAt: {
     type: Date,
     default: Date.now,

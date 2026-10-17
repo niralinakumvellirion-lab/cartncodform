@@ -3,14 +3,13 @@
 /**
  * tierSync — idempotently creates/updates/deactivates the automatic
  * quantity-tier discount on Shopify and writes the discount-node metafield
- * that the Shopify Function reads.
+ * that the Shopify Function reads, plus a shop metafield the theme block reads.
  *
  * A sync failure must NOT fail the config save: callers receive
  * { synced: false, error } and store lastSyncError on DiscountConfig.
  *
- * Shop metafield (for 4b theme block) requires write_metafields scope,
- * which is not in the current app scopes. The write is attempted and a
- * warning is logged on failure; the rest of the sync proceeds normally.
+ * Shop metafield uses namespace "$app" (app-reserved) — no write_metafields
+ * scope required. In Liquid: shop.metafields.$app.quantity_tiers
  */
 
 const Store = require('../models/Store');
@@ -151,18 +150,19 @@ async function deactivateDiscount(shopDomain, token, discountId) {
   }
 }
 
-// ── Shop metafield write (4b) ────────────────────────────────────────────────
+// ── Shop metafield write ────────────────────────────────────────────────────
 
 async function writeShopMetafield(shopDomain, token, value) {
-  // Requires write_metafields scope (not present in 4a scopes).
-  // Attempt anyway; failure is non-fatal and is logged as a warning.
-  const data = await gql(shopDomain, token, `
+  // Uses the app-reserved namespace ($app). No write_metafields scope needed —
+  // Shopify allows apps to write to their own reserved namespace.
+  // In Liquid the block reads this as: shop.metafields.$app.quantity_tiers
+  const shopData = await gql(shopDomain, token, `
     query { shop { id } }
   `);
-  const shopId = data && data.data && data.data.shop && data.data.shop.id;
+  const shopId = shopData && shopData.data && shopData.data.shop && shopData.data.shop.id;
   if (!shopId) return;
 
-  await gql(shopDomain, token, `
+  const result = await gql(shopDomain, token, `
     mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
       metafieldsSet(metafields: $metafields) {
         userErrors { field message code }
@@ -170,13 +170,18 @@ async function writeShopMetafield(shopDomain, token, value) {
     }
   `, {
     metafields: [{
-      namespace: 'cartncodform',
+      namespace: '$app',
       key: 'quantity_tiers',
       type: 'json',
       value,
       ownerId: shopId,
     }],
   });
+
+  const errs = result && result.data && result.data.metafieldsSet && result.data.metafieldsSet.userErrors;
+  if (errs && errs.length) {
+    throw new Error(errs[0].message);
+  }
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -207,11 +212,11 @@ async function syncTiers(shopDomain) {
     tiers: Array.isArray(qt.tiers) ? qt.tiers : [],
   });
 
-  // ── Shop metafield (4b) — non-fatal ──────────────────────────────────────
+  // ── Shop metafield — non-fatal ───────────────────────────────────────────
   try {
     await writeShopMetafield(shopDomain, token, configJson);
   } catch (mfErr) {
-    console.warn('[tierSync] shop metafield write failed (needs write_metafields scope):', mfErr.message);
+    console.warn('[tierSync] shop metafield write failed:', mfErr.message);
   }
 
   // ── Deactivate when disabled ──────────────────────────────────────────────

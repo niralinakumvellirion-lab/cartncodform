@@ -317,27 +317,43 @@ router.get('/cod-form', async (req, res) => {
   const productName = String(req.query.productName || '');
   const price = String(req.query.price || '');
   const productId = String(req.query.productId || '');
+  const quantityParam = Math.max(1, parseInt(req.query.quantity || '1', 10) || 1);
 
   const priceNum = Number(price);
   const priceLabel = price && !Number.isNaN(priceNum) ? priceNum.toFixed(2) : '—';
 
-  // Birthday post-order ask config — load silently, failure falls back to disabled.
+  // Load discount config — birthday flags + quantity tiers. Single query, both features.
   let postOrderEnabled = false;
   let birthdayPct = 15;
   let consentText = "We'll use your birthday only to send you a birthday offer.";
+  let qtBoot = { enabled: false, tiers: [], heading: 'Buy more, save more', accentColor: '#4F46E5', layout: 'cards' };
   try {
-    const bdCfg = await DiscountConfig.findOne({ shopDomain: shop }).lean();
-    if (bdCfg) {
-      postOrderEnabled = !!(bdCfg.birthdayCapture && bdCfg.birthdayCapture.postOrder && bdCfg.birthdayCapture.postOrder.enabled);
-      birthdayPct = (bdCfg.birthdayDiscount && bdCfg.birthdayDiscount.percentage) || 15;
-      consentText = String((bdCfg.birthdayDiscount && bdCfg.birthdayDiscount.consentText) || consentText).slice(0, 200);
+    const cfg = await DiscountConfig.findOne({ shopDomain: shop }).lean();
+    if (cfg) {
+      postOrderEnabled = !!(cfg.birthdayCapture && cfg.birthdayCapture.postOrder && cfg.birthdayCapture.postOrder.enabled);
+      birthdayPct = (cfg.birthdayDiscount && cfg.birthdayDiscount.percentage) || 15;
+      consentText = String((cfg.birthdayDiscount && cfg.birthdayDiscount.consentText) || consentText).slice(0, 200);
+      const qt = cfg.quantityTiers;
+      if (qt && qt.enabled && Array.isArray(qt.tiers) && qt.tiers.length > 0) {
+        qtBoot = {
+          enabled: true,
+          tiers: qt.tiers.map((t) => ({ minQty: t.minQty, percent: t.percent, badge: String(t.badge || '') })),
+          heading: String(qt.heading || 'Buy more, save more').slice(0, 60),
+          accentColor: qt.accentColor || '#4F46E5',
+          layout: qt.layout || 'cards',
+        };
+      }
     }
   } catch (_) { /* keep defaults */ }
 
   // Values handed to the inline script — JSON-encoded, with "<" neutralised so
   // the payload can never break out of the <script> element.
-  const bootJson = JSON.stringify({ shop, productName, price, productId, postOrderEnabled, birthdayPct, consentText })
-    .replace(/</g, '\\u003c');
+  const bootJson = JSON.stringify({
+    shop, productName, price, productId,
+    quantity: quantityParam,
+    postOrderEnabled, birthdayPct, consentText,
+    quantityTiers: qtBoot,
+  }).replace(/</g, '\\u003c');
 
   const html = `<!doctype html>
 <html lang="en">
@@ -422,9 +438,9 @@ router.get('/cod-form', async (req, res) => {
     <h1>Cash on Delivery Order</h1>
     <p class="shop">${escapeHtml(shop)}</p>
 
-    <div class="summary">
+    <div class="summary" id="ccf-summary">
       <div class="p-name">${escapeHtml(productName || 'Product')}</div>
-      <div class="p-price">Price: <strong>${escapeHtml(priceLabel)}</strong></div>
+      <div class="p-price" id="ccf-price-line">Price: <strong>${escapeHtml(priceLabel)}</strong></div>
     </div>
 
     <form id="cod-form" novalidate>
@@ -452,7 +468,7 @@ router.get('/cod-form', async (req, res) => {
       </div>
 
       <label>Quantity</label>
-      <input type="number" name="quantity" min="1" value="1" inputmode="numeric" />
+      <input type="number" name="quantity" min="1" value="${escapeHtml(String(quantityParam))}" inputmode="numeric" />
 
       <div class="msg err" id="err" style="display:none"></div>
 
@@ -468,11 +484,69 @@ router.get('/cod-form', async (req, res) => {
   var btn = document.getElementById('submit-btn');
   var errBox = document.getElementById('err');
   var card = document.getElementById('card');
+  var priceLine = document.getElementById('ccf-price-line');
+  var QT = BOOT.quantityTiers || {};
 
   function showError(text) {
     errBox.textContent = text;
     errBox.style.display = 'block';
   }
+
+  // ── Tier discount helpers (must match backend/utils/quantityTiers.js) ──────
+  function qtPickTier(tiers, qty) {
+    if (!Array.isArray(tiers) || !tiers.length) return null;
+    if (typeof qty !== 'number' || qty < 1) return null;
+    var best = null;
+    for (var i = 0; i < tiers.length; i++) {
+      if (tiers[i].minQty <= qty) best = tiers[i];
+    }
+    return best;
+  }
+  function qtDiscountedUnit(price, pct) {
+    var raw = price * (1 - pct / 100);
+    return Math.round((raw + 1e-10) * 100) / 100;
+  }
+  function qtFmtRs(n) { return '\\u20b9' + n.toFixed(2); }
+
+  function updateSummary() {
+    if (!priceLine) return;
+    var qtyInput = form.querySelector('input[name="quantity"]');
+    var qty = qtyInput ? (Number(qtyInput.value) || 1) : 1;
+    var price = Number(BOOT.price) || 0;
+    var tier = QT.enabled ? qtPickTier(QT.tiers, qty) : null;
+    if (tier) {
+      var discUnit = qtDiscountedUnit(price, tier.percent);
+      var total = Math.round(discUnit * qty * 100) / 100;
+      var orig = Math.round(price * qty * 100) / 100;
+      var saving = Math.round((orig - total) * 100) / 100;
+      priceLine.innerHTML = '';
+      var t = document.createTextNode(
+        qty + ' × ' + qtFmtRs(discUnit) + ' = ' + qtFmtRs(total) +
+        ' — ' + tier.percent + '% off'
+      );
+      priceLine.appendChild(t);
+      var s = document.createElement('span');
+      s.style.cssText = 'display:block;font-size:12px;color:#16a34a;margin-top:2px;';
+      s.textContent = 'You save ' + qtFmtRs(saving);
+      priceLine.appendChild(s);
+    } else {
+      priceLine.innerHTML = '';
+      var label = document.createElement('span');
+      label.textContent = 'Price: ';
+      var strong = document.createElement('strong');
+      strong.textContent = qtFmtRs(price) + (qty > 1 ? ' × ' + qty + ' = ' + qtFmtRs(price * qty) : '');
+      priceLine.appendChild(label);
+      priceLine.appendChild(strong);
+    }
+  }
+
+  // Update summary on quantity change
+  var qtyInputEl = form.querySelector('input[name="quantity"]');
+  if (qtyInputEl) {
+    qtyInputEl.addEventListener('input', updateSummary);
+    qtyInputEl.addEventListener('change', updateSummary);
+  }
+  updateSummary();
 
   form.addEventListener('submit', function (e) {
     e.preventDefault();
@@ -673,6 +747,24 @@ router.post('/cod-order', async (req, res) => {
     }
 
     const cleanEmail = String(email || '').trim();
+    const cleanQty = Math.max(1, Number(quantity) || 1);
+    const cleanPrice = Number(productPrice) || 0;
+
+    // Compute tier discount server-side from saved config — never trust client values.
+    let tierDiscount = { percent: 0, amount: 0 };
+    try {
+      const { pickTier, discountedUnitPrice } = require('../utils/quantityTiers');
+      const cfg = await DiscountConfig.findOne({ shopDomain: shop }).lean();
+      const qt = cfg && cfg.quantityTiers;
+      if (qt && qt.enabled && Array.isArray(qt.tiers) && qt.tiers.length > 0) {
+        const tier = pickTier(qt.tiers, cleanQty);
+        if (tier) {
+          const discUnit = discountedUnitPrice(cleanPrice, tier.percent);
+          const saving = Math.round((cleanPrice - discUnit) * cleanQty * 100) / 100;
+          tierDiscount = { percent: tier.percent, amount: saving };
+        }
+      }
+    } catch (_) {}
 
     const order = await CodOrder.create({
       shopDomain: shop,
@@ -683,8 +775,9 @@ router.post('/cod-order', async (req, res) => {
       city: String(city || '').trim(),
       pincode: String(pincode || '').trim(),
       productName: String(productName || '').trim(),
-      productPrice: Number(productPrice) || 0,
-      quantity: Number(quantity) || 1,
+      productPrice: cleanPrice,
+      quantity: cleanQty,
+      tierDiscount,
       status: 'pending',
     });
 

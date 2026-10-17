@@ -1,0 +1,46 @@
+{%- liquid
+  assign qt_mf = shop.metafields.$app.quantity_tiers
+  assign qt_config = nil
+  if qt_mf != blank
+    assign qt_config = qt_mf.value
+  endif
+  assign qt_enabled = false
+  if qt_config != nil and qt_config.enabled
+    assign qt_enabled = true
+  endif
+-%}
+
+{%- if request.design_mode -%}
+  <div style="border:2px dashed #d4d4d8;border-radius:12px;padding:24px;text-align:center;color:#71717a;font-size:13px;font-family:sans-serif;line-height:1.5;">
+    <strong style="display:block;margin-bottom:4px;color:#18181b;">Quantity Tiers</strong>
+    CartnCodForm &mdash; configure in the admin app to show tier discount cards here
+  </div>
+{%- else -%}
+  <div
+    id="ccf-qt-root"
+    data-shop="{{ shop.permanent_domain | escape }}"
+    data-handle="{{ product.handle | escape }}"
+    data-variant-id="{{ product.selected_or_first_available_variant.id | escape }}"
+  >
+    {%- if qt_config != nil -%}
+      <script type="application/json" id="ccf-qt-config">
+        {{ qt_config | json }}
+      </script>
+    {%- endif -%}
+  </div>
+  <script src="{{ 'ccf-tiers.js' | asset_url }}" defer></script>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Quantity Tiers",
+  "target": "section",
+  "templates": ["product"],
+  "presets": [
+    {
+      "name": "Quantity Tiers"
+    }
+  ],
+  "settings": []
+}
+{% endschema %}
