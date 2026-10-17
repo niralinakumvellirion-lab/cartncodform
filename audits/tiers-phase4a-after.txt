@@ -182,13 +182,79 @@ frontend/app/admin/screens/QuantityTiers.jsx (new file)
   amber note, live preview, save+sync button with sync status.
 
 ═══════════════════════════════════════════════════════════
-STEP 6 — VERIFICATION RESULTS (filled after build)
+STEP 6 — VERIFICATION RESULTS
 ═══════════════════════════════════════════════════════════
 
-[6a] ESLint — see below
-[6b] renderToString — see below
-[6c] next build — see below
-[6d] test counts — see below
+[6a] ESLint
+
+Command:
+  eslint --no-eslintrc -c .eslintrc-ccf.json \
+    backend/utils/quantityTiers.js \
+    backend/services/tierSync.js \
+    backend/routes/discounts.js \
+    backend/routes/proxy.js \
+    extensions/quantity-tier-discount/src/run.js
+  EXIT: 0
+
+  eslint --no-eslintrc -c .eslintrc-ccf.json \
+    frontend/app/admin/screens/QuantityTiers.jsx \
+    frontend/app/admin/screens/Discounts.jsx
+  EXIT: 0
+
+Note: curly-quote string delimiters (U+2018/U+2019) appeared in discounts.js
+and proxy.js after Edit operations. Detected by test failures; fixed with
+a Node.js replaceAll pass before commit. Content apostrophes in "We'll" are
+ASCII ' in the final file.
+
+[6b] renderToString — QuantityTiers.jsx
+
+Script: C:/Users/Intel/AppData/Local/Temp/claude/render-qty-tiers.js
+Method: @babel/core (preset-react), vm.runInContext, react-dom/server.renderToString.
+Lazy useState initializers called correctly (typeof initial === 'function').
+
+Results (15/15):
+  PASS (a) no throw
+  PASS (a) role=switch present
+  PASS (a) aria-checked present
+  PASS (a) tier rows rendered
+  PASS (a) All products radio
+  PASS (a) Selected collections disabled
+  PASS (a) amber note present
+  PASS (a) Preview section present
+  PASS (a) Save and sync button
+  PASS (b) no throw
+  PASS (b) Most popular badge present
+  PASS (b) Buy more heading
+  PASS (c) preview shows percentages
+  PASS (c) no throw when quantityTiers absent
+  PASS (c) still shows tier table
+
+[6c] next build
+
+cd frontend && npx next build
+  ✓ Compiled successfully
+  ✓ Generating static pages (23/23)
+No errors, no warnings.
+
+[6d] Test counts
+
+Before Phase 4a (main after Phase 3 verify): 72 suites, 1568 tests.
+After Phase 4a:                              75 suites, 1631 tests (+63).
+
+New test files:
+  backend/__tests__/quantityTiers.test.js      — 36 tests (sanitizeTiers, pickTier,
+                                                  discountedUnitPrice, sanitizeAccentColor)
+  backend/__tests__/quantityTiersFunction.test.js — 20 tests (run() — no-discount paths,
+                                                  single product tiers, multi-variant,
+                                                  multiple products, non-ProductVariant lines)
+  backend/__tests__/tierSync.test.js           — 9 tests (no config, not connected,
+                                                  deactivate, create, update, function not
+                                                  deployed, create error, metafield non-fatal,
+                                                  idempotent re-run)
+
+Curly-quote fix note: two test suites (discountConfigRoutes, birthday.test) failed
+initially due to curly-quote string delimiters in discounts.js and proxy.js
+introduced by Edit tool. Fixed before final suite run.
 
 ═══════════════════════════════════════════════════════════
 COMMANDS TO DEPLOY THE FUNCTION (do not run now)
@@ -209,7 +275,49 @@ shopify app deploy
 # 3. Merchants must re-approve via the install URL
 
 ═══════════════════════════════════════════════════════════
-FILES CHANGED (filled after build)
+FILES CHANGED
 ═══════════════════════════════════════════════════════════
 
-[see post-build section below]
+NEW:
+  backend/utils/quantityTiers.js         — pure helpers: sanitizeTiers, pickTier,
+                                           discountedUnitPrice, sanitizeAccentColor
+  backend/services/tierSync.js           — Shopify sync: create/update/deactivate
+                                           automatic discount + discount-node metafield
+  backend/scripts/syncQuantityTiers.js   — dry-run/apply CLI script
+  backend/__tests__/quantityTiers.test.js
+  backend/__tests__/quantityTiersFunction.test.js
+  backend/__tests__/tierSync.test.js
+  extensions/quantity-tier-discount/
+    shopify.extension.toml               — type=function, target=purchase.product-discount.run
+    src/run.js                           — function logic (CJS, esbuild bundles)
+    src/run.graphql                      — input query (cart lines + discount metafield)
+    package.json                         — esbuild build script
+    esbuild.config.mjs                   — bundle src/run.js → dist/index.js
+  frontend/app/admin/screens/QuantityTiers.jsx — full admin UI component
+  audits/tiers-phase4a-after.txt
+
+MODIFIED:
+  backend/models/DiscountConfig.js       — added quantityTiers subdoc
+  backend/routes/discounts.js            — defaultConfig + PATCH validation + sync-on-save
+                                           + POST sync-tiers route
+  backend/routes/proxy.js               — GET /discount-config returns quantityTiers
+  frontend/app/admin/screens/Discounts.jsx — import + render QuantityTiers section
+
+═══════════════════════════════════════════════════════════
+ANYTHING SKIPPED OR UNCERTAIN
+═══════════════════════════════════════════════════════════
+
+- Shop metafield write (for 4b theme block): not supported until write_metafields
+  scope is added. syncTiers() attempts it and warns on failure; the discount-node
+  metafield (for the Function) still works. 4b requires adding write_metafields
+  to shopify.app.toml scopes, which triggers merchant re-consent.
+
+- Shopify Function not deployable offline: run `shopify app deploy` after
+  adding the merchant's store. The function ID is queried at runtime.
+
+- extensions/quantity-tier-discount/__tests__/ directory was created but no
+  toml-specific test runner is available offline. All function logic tests live
+  in backend/__tests__/quantityTiersFunction.test.js (imports run.js directly).
+
+- Function extension toml uid field: Shopify CLI assigns a uid on first deploy;
+  the toml does not need one before deployment.
