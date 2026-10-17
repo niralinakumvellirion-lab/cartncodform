@@ -7,8 +7,8 @@ const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner')
 const { verifyProxySignature, API_VERSION } = require('../utils/shopify');
 
 // The four storefront actions that can earn a discount code, and the
-// DiscountConfig sub-doc key each maps to.
-const ACTIONS = ['push', 'email', 'phone', 'both', 'whatsapp'];
+// DiscountConfig sub-doc key each maps to. 'birthday' is poller-only.
+const ACTIONS = ['push', 'email', 'phone', 'both', 'whatsapp', 'birthday'];
 
 // In-memory rate limiter for the 'whatsapp' action.
 // Key: ip|shop|sessionId — sessionId differentiates visitors sharing a
@@ -47,7 +47,7 @@ function defaultConfig(shop) {
     offerHeadline: 'Get a discount on your first order!',
     whatsappCapture: { enabled: false },
     birthdayCapture: { popup: { enabled: false } },
-    birthdayDiscount: { enabled: false, percentage: 15, expiryDays: 7, prefix: 'BDAY', offerText: '' },
+    birthdayDiscount: { enabled: false, percentage: 15, expiryDays: 7, leadDays: 3, prefix: 'BDAY', offerText: '' },
   };
 }
 
@@ -91,6 +91,75 @@ async function generateDiscount(shopDomain, body = {}, opts = {}) {
 
   if (!shop || ACTIONS.indexOf(action) === -1) {
     return { code: null, error: 'Invalid action' };
+  }
+
+  // Birthday action: unique-use (limit 1) code from birthdayDiscount config.
+  // Called by the poller at send time — never from the storefront directly.
+  if (action === 'birthday') {
+    const [bdConfig, bdStore] = await Promise.all([
+      DiscountConfig.findOne({ shopDomain: shop }),
+      Store.findOne({ shopDomain: shop }).select('accessToken onlineAccessToken onlineTokenExpiresAt'),
+    ]);
+    if (!bdStore || !bdStore.accessToken) return { code: null, error: 'Store not connected' };
+    const bdCfg = bdConfig && bdConfig.birthdayDiscount;
+    if (!bdCfg || !bdCfg.enabled) return { code: null, error: 'Birthday discount not enabled' };
+
+    let bdToken = bdStore.onlineAccessToken || bdStore.accessToken;
+    if (bdStore.onlineAccessToken && bdStore.onlineTokenExpiresAt && new Date() > bdStore.onlineTokenExpiresAt) {
+      bdToken = bdStore.accessToken;
+    }
+
+    const bdPrefix = String(bdCfg.prefix || 'BDAY').toUpperCase().replace(/[^A-Z0-9]/g, '') || 'BDAY';
+    const bdCode = bdPrefix + '_' + Math.random().toString(36).slice(2, 8).toUpperCase();
+    const bdStartsAt = new Date(Date.now() - 60 * 1000);
+    const bdEndsAt = new Date();
+    bdEndsAt.setDate(bdEndsAt.getDate() + (bdCfg.expiryDays || 7));
+
+    const bdMutation = `
+      mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
+        discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
+          codeDiscountNode { id }
+          userErrors { field message }
+        }
+      }
+    `;
+    const bdVariables = {
+      basicCodeDiscount: {
+        title: bdCode, code: bdCode,
+        startsAt: bdStartsAt.toISOString(), endsAt: bdEndsAt.toISOString(),
+        customerGets: { value: { percentage: (bdCfg.percentage || 15) / 100 }, items: { all: true } },
+        appliesOncePerCustomer: true,
+        usageLimit: 1,
+        context: { all: 'ALL' },
+      },
+    };
+    let bdData;
+    try {
+      const bdRes = await fetch(`https://${shop}/admin/api/${API_VERSION}/graphql.json`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': bdToken },
+        body: JSON.stringify({ query: bdMutation, variables: bdVariables }),
+      });
+      bdData = await bdRes.json();
+    } catch (err) {
+      console.error('[discounts] birthday Shopify API error:', err.message);
+      return { code: null, error: 'Discount service unavailable' };
+    }
+    if (Array.isArray(bdData && bdData.errors) && bdData.errors.length) {
+      console.error('[discounts] birthday GraphQL error:', bdData.errors[0].message);
+      return { code: null, error: 'Discount creation failed' };
+    }
+    const bdErrors = bdData && bdData.data && bdData.data.discountCodeBasicCreate && bdData.data.discountCodeBasicCreate.userErrors;
+    if (bdErrors && bdErrors.length) {
+      console.error('[discounts] birthday discountCodeBasicCreate userErrors:', bdErrors[0].message);
+      return { code: null, error: bdErrors[0].message };
+    }
+    const bdNode = bdData && bdData.data && bdData.data.discountCodeBasicCreate && bdData.data.discountCodeBasicCreate.codeDiscountNode;
+    if (!bdNode || !bdNode.id) {
+      console.error('[discounts] birthday discountCodeBasicCreate returned no node.id');
+      return { code: null, error: 'Discount creation failed' };
+    }
+    return { code: bdCode, percentage: bdCfg.percentage, expiryDays: bdCfg.expiryDays, shop };
   }
 
   // WhatsApp-capture action: no discount minted — profile upsert only.
@@ -411,6 +480,8 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
       if (typeof bd.offerText === 'string') {
         set['birthdayDiscount.offerText'] = bd.offerText.trim().slice(0, OFFER_TEXT_MAX);
       }
+      const bdLead = Number(bd.leadDays);
+      if (Number.isFinite(bdLead)) set['birthdayDiscount.leadDays'] = Math.min(7, Math.max(0, Math.round(bdLead)));
     }
 
     const config = await DiscountConfig.findOneAndUpdate(

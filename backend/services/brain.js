@@ -21,7 +21,7 @@ const DAY = 24 * HOUR;
 
 // Signal-type channel defaults (SignalConfig.channelOverride wins over these).
 const EMAIL_FIRST = new Set([
-  'lapsing', 'winback', 'post_purchase_d3', 'email_capture', 'cod_to_prepaid',
+  'lapsing', 'winback', 'post_purchase_d3', 'email_capture', 'cod_to_prepaid', 'birthday',
 ]);
 // Everything else (cart_abandon, checkout_abandon, browse_abandon, high_intent,
 // price_hesitation, price_drop, back_in_stock) prefers push — time-sensitive.
@@ -40,6 +40,7 @@ const BASE_VALUE = {
   lapsing: 0.5,
   winback: 0.4,
   email_capture: 0.3,
+  birthday: 1.5, // highest — personal, time-bound, high-conversion
 };
 
 // Read a `.rate` from a Map (ShopWeights.signalRates / .hourRates) or a plain

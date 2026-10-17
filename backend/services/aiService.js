@@ -30,6 +30,14 @@ const FALLBACK_EMAIL = {
   subject: 'We saved your cart',
   body: 'Hi,\n\nYou left items in your cart. Come back anytime.\n\nThanks',
 };
+const BIRTHDAY_FALLBACK_PUSH = {
+  title: 'Happy Birthday! 🎂',
+  body: 'Celebrate with a personal discount just for you.',
+};
+const BIRTHDAY_FALLBACK_EMAIL = {
+  subject: 'Happy Birthday from us! 🎂',
+  body: 'Wishing you a wonderful birthday!\n\nWe have a personal discount code just for you — use it on your next order.\n\nEnjoy your day!',
+};
 
 function hasKey() {
   return Boolean(process.env.LLM_API_KEY);
@@ -70,7 +78,9 @@ function parseJsonBlock(text) {
 // generateCopy
 // ---------------------------------------------------------------------------
 async function generateCopy(store, signalType, product, channel) {
-  const fallback = channel === 'email' ? FALLBACK_EMAIL : FALLBACK_PUSH;
+  const fallback = signalType === 'birthday'
+    ? (channel === 'email' ? BIRTHDAY_FALLBACK_EMAIL : BIRTHDAY_FALLBACK_PUSH)
+    : (channel === 'email' ? FALLBACK_EMAIL : FALLBACK_PUSH);
   const shopDomain = (store && store.shopDomain) || '';
   const voice = (store && store.voice) || {};
   const productId = product && product.productId ? String(product.productId) : null;
@@ -205,6 +215,10 @@ const SIGNAL_EMAIL_TEMPLATES = {
   email_capture: {
     subject: 'Thank you for subscribing',
     body: "Welcome! You're now part of our community. Enjoy exclusive updates and offers.",
+  },
+  birthday: {
+    subject: 'Happy Birthday! A gift from us 🎂',
+    body: 'Wishing you a wonderful birthday! We have a personal discount code just for you — use it on your next order.',
   },
 };
 

@@ -69,11 +69,12 @@ const discountConfigSchema = new mongoose.Schema({
     },
   },
 
-  // Birthday discount settings (sending deferred to a later release).
+  // Birthday discount settings.
   birthdayDiscount: {
     enabled: { type: Boolean, default: false },
     percentage: { type: Number, default: 15, min: 0, max: 100 },
     expiryDays: { type: Number, default: 7, min: 1, max: 30 },
+    leadDays: { type: Number, default: 3, min: 0, max: 7 },
     prefix: { type: String, default: 'BDAY' },
     offerText: { type: String, default: '' },
   },

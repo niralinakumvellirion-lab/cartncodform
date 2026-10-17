@@ -74,6 +74,7 @@ const profileSchema = new Schema({
     day: { type: Number, min: 1, max: 31, default: null },
     capturedAt: { type: Date, default: null },
     source: { type: String, default: null },
+    lastOfferYear: { type: Number, default: null },
   },
 
   suppressed: { type: Boolean, default: false },

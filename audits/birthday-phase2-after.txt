@@ -1,0 +1,57 @@
+SELF-AUDIT — Birthday Phase 2 (send birthday offer)
+Date: 2026-10-17
+Branch: main
+
+=== SCOPE ===
+Send the birthday offer: daily sweep, code generation at send time, push+email channels,
+leadDays config, SIGNAL_LABELS, dry-run script, privacy guards.
+NOT in scope: banner, post-order popup, quantity tiers, Shopify Functions, new extensions.
+
+=== FILES CHANGED ===
+backend/models/Profile.js          — added birthday.lastOfferYear (Number, default null)
+backend/models/DiscountConfig.js   — added birthdayDiscount.leadDays (Number, default 3, min 0 max 7)
+backend/routes/discounts.js        — 'birthday' in ACTIONS; generateDiscount birthday branch
+                                     (Promise.all DiscountConfig + Store.findOne().select);
+                                     usageLimit:1, appliesOncePerCustomer:true;
+                                     leadDays in defaultConfig + PATCH (clamped 0-7, rounded)
+backend/services/brain.js          — birthday:1.5 in BASE_VALUE; 'birthday' in EMAIL_FIRST
+backend/services/aiService.js      — BIRTHDAY_FALLBACK_PUSH/EMAIL; birthday branch in generateCopy;
+                                     birthday entry in SIGNAL_EMAIL_TEMPLATES
+backend/server.js                  — runBirthdaySweepForShop: daily sweep per shop (9am local,
+                                     quiet-hour skip, feb-29 leap guard, 11000 idempotent);
+                                     hooked into nightly chain; birthday code-gen block in poller
+                                     before channel dispatch; birthday email branch; lastOfferYear
+                                     update after successful send
+frontend/app/admin/screens/Journey.jsx  — birthday:'Birthday offer' in SIGNAL_LABELS
+frontend/app/admin/screens/Messages.jsx — birthday:'Birthday offer' in SIGNAL_LABELS
+frontend/app/admin/screens/Discounts.jsx — leadDays in buildPayload; send-birthday-discount toggle;
+                                           dynamic helper text; removed old "next release" warning
+
+NEW FILES
+backend/scripts/runBirthdaySweep.js         — dry-run script (--apply to write); no PII in output
+backend/__tests__/birthday-phase2.test.js   — 24 new tests
+
+=== TEST RESULTS ===
+Backend: 71 suites, 1540 tests — all passing
+Frontend node tests: 107 tests (hostRouting 66, checkSuspended 14, financeFormat 20, api 7) — all passing
+next build: clean, no errors
+ESLint: not installed in project; brace-balance check on changed JSX files — all OK
+
+=== PRIVACY ===
+No birthday month/day in logs, payloads, analytics events, or platform responses.
+lastOfferYear update uses new Date().getFullYear() — no birthday date logged.
+Script prints profile IDs and channel only, never month/day/email/phone.
+console.error in discounts.js birthday branch prints err.message only, not values.
+
+=== DESIGN DECISIONS ===
+- Promise.all in generateDiscount birthday branch runs DiscountConfig + Store.findOne in parallel
+  (Store.findOne returns chainable query; .select() needed — test mock fixed accordingly)
+- Birthday jobs bypass frequency cap by design (no cartToken/customerId → orClauses empty);
+  lastOfferYear is the actual annual rate limit
+- Email preferred over push for birthday (personal channel); brain.js EMAIL_FIRST set
+- Feb-29 guard: when target is Feb 28 in non-leap year, also match profiles with day=29
+- Retry reuse: birthdayCode stored in payload before channel dispatch; retry skips re-generation
+
+=== WHAT WAS NOT DONE ===
+- No Shopify Functions, no new scopes, no shopify.app.toml changes (out of scope)
+- No banner, post-order popup, quantity tiers (out of scope)

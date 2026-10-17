@@ -199,10 +199,12 @@ function buildPayload(config) {
   const bd = config.birthdayDiscount || {};
   const bdPct = Number(bd.percentage ?? 15);
   const bdDays = Number(bd.expiryDays ?? 7);
+  const bdLead = Number(bd.leadDays ?? 3);
   out.birthdayDiscount = {
     enabled: !!(bd.enabled),
     percentage: Number.isFinite(bdPct) ? Math.min(100, Math.max(0, bdPct)) : 15,
     expiryDays: Number.isFinite(bdDays) ? Math.min(30, Math.max(1, Math.round(bdDays))) : 7,
+    leadDays: Number.isFinite(bdLead) ? Math.min(7, Math.max(0, Math.round(bdLead))) : 3,
     prefix: (String(bd.prefix || 'BDAY').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10)) || 'BDAY',
     offerText: (bd.offerText || '').slice(0, OFFER_TEXT_MAX),
   };
@@ -590,10 +592,7 @@ export default function Discounts({ shop }) {
                     Birthday offer
                   </div>
                   <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2, lineHeight: 1.5 }}>
-                    Ask for birthday in the popup.{' '}
-                    <span style={{ color: DS.warning, fontWeight: 500 }}>
-                      Birthdays are collected and stored now. Offers are sent starting in the next release.
-                    </span>
+                    Ask for birthday in the popup.
                   </div>
                 </div>
                 <div
@@ -638,90 +637,148 @@ export default function Discounts({ shop }) {
 
             {config.birthdayCapture?.popup?.enabled && (
               <div style={{ borderTop: `1px solid ${DS.gray200}`, paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {/* Offer text */}
-                <div>
-                  <div style={{ ...labelRowStyle }}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Offer text</span>
-                    <span style={counterStyle}>
-                      {(config.birthdayDiscount?.offerText || '').length} / {OFFER_TEXT_MAX}
-                    </span>
+                {/* Send birthday offer toggle */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900 }}>Send birthday discount</div>
+                    <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2, lineHeight: 1.4 }}>
+                      {config.birthdayDiscount?.enabled
+                        ? `Customers who shared their birthday get a personal code ${config.birthdayDiscount?.leadDays ?? 3} day(s) before. The code is valid for ${config.birthdayDiscount?.expiryDays ?? 7} days.`
+                        : 'Enable to automatically send a personal discount code around each customer\'s birthday.'}
+                    </div>
                   </div>
-                  <input
-                    className="disc-input"
-                    type="text"
-                    value={config.birthdayDiscount?.offerText || ''}
-                    maxLength={OFFER_TEXT_MAX}
-                    onChange={(e) =>
+                  <div
+                    role="switch"
+                    aria-checked={!!(config.birthdayDiscount?.enabled)}
+                    onClick={() =>
                       setConfig((c) => ({
                         ...c,
-                        birthdayDiscount: { ...(c.birthdayDiscount || {}), offerText: e.target.value },
+                        birthdayDiscount: { ...(c.birthdayDiscount || {}), enabled: !(c.birthdayDiscount?.enabled) },
                       }))
                     }
-                    placeholder="Get a birthday gift"
-                    style={{ ...fieldStyle, width: '100%' }}
-                  />
-                  <div style={helperStyle}>Shown as the heading in the birthday popup step.</div>
+                    style={{
+                      width: '36px', height: '20px', borderRadius: '10px', cursor: 'pointer',
+                      background: config.birthdayDiscount?.enabled ? '#16a34a' : '#d1d5db',
+                      position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginLeft: 12,
+                    }}
+                  >
+                    <div style={{
+                      position: 'absolute', top: '2px',
+                      left: config.birthdayDiscount?.enabled ? '18px' : '2px',
+                      width: '16px', height: '16px', borderRadius: '50%',
+                      background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                    }} />
+                  </div>
                 </div>
 
-                {/* Percentage, expiry, prefix row */}
-                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                  <div>
-                    <div style={fieldLabelStyle}>Discount %</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {config.birthdayDiscount?.enabled && (
+                  <>
+                    {/* Offer text */}
+                    <div>
+                      <div style={{ ...labelRowStyle }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Offer text</span>
+                        <span style={counterStyle}>
+                          {(config.birthdayDiscount?.offerText || '').length} / {OFFER_TEXT_MAX}
+                        </span>
+                      </div>
                       <input
                         className="disc-input"
-                        type="number"
-                        min={0}
-                        max={100}
-                        value={config.birthdayDiscount?.percentage ?? 15}
+                        type="text"
+                        value={config.birthdayDiscount?.offerText || ''}
+                        maxLength={OFFER_TEXT_MAX}
                         onChange={(e) =>
                           setConfig((c) => ({
                             ...c,
-                            birthdayDiscount: { ...(c.birthdayDiscount || {}), percentage: e.target.value },
+                            birthdayDiscount: { ...(c.birthdayDiscount || {}), offerText: e.target.value },
                           }))
                         }
-                        style={{ ...fieldStyle, width: 60 }}
+                        placeholder="Get a birthday gift"
+                        style={{ ...fieldStyle, width: '100%' }}
                       />
-                      <span style={unitStyle}>%</span>
+                      <div style={helperStyle}>Shown as the heading in the birthday popup step.</div>
                     </div>
-                  </div>
-                  <div>
-                    <div style={fieldLabelStyle}>Valid for</div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <input
-                        className="disc-input"
-                        type="number"
-                        min={1}
-                        max={30}
-                        value={config.birthdayDiscount?.expiryDays ?? 7}
-                        onChange={(e) =>
-                          setConfig((c) => ({
-                            ...c,
-                            birthdayDiscount: { ...(c.birthdayDiscount || {}), expiryDays: e.target.value },
-                          }))
-                        }
-                        style={{ ...fieldStyle, width: 60 }}
-                      />
-                      <span style={unitStyle}>days</span>
+
+                    {/* Lead days, percentage, expiry, prefix row */}
+                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                      <div>
+                        <div style={fieldLabelStyle}>Days before</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <input
+                            className="disc-input"
+                            type="number"
+                            min={0}
+                            max={7}
+                            value={config.birthdayDiscount?.leadDays ?? 3}
+                            onChange={(e) =>
+                              setConfig((c) => ({
+                                ...c,
+                                birthdayDiscount: { ...(c.birthdayDiscount || {}), leadDays: e.target.value },
+                              }))
+                            }
+                            style={{ ...fieldStyle, width: 60 }}
+                          />
+                          <span style={unitStyle}>days</span>
+                        </div>
+                      </div>
+                      <div>
+                        <div style={fieldLabelStyle}>Discount %</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <input
+                            className="disc-input"
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={config.birthdayDiscount?.percentage ?? 15}
+                            onChange={(e) =>
+                              setConfig((c) => ({
+                                ...c,
+                                birthdayDiscount: { ...(c.birthdayDiscount || {}), percentage: e.target.value },
+                              }))
+                            }
+                            style={{ ...fieldStyle, width: 60 }}
+                          />
+                          <span style={unitStyle}>%</span>
+                        </div>
+                      </div>
+                      <div>
+                        <div style={fieldLabelStyle}>Valid for</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <input
+                            className="disc-input"
+                            type="number"
+                            min={1}
+                            max={30}
+                            value={config.birthdayDiscount?.expiryDays ?? 7}
+                            onChange={(e) =>
+                              setConfig((c) => ({
+                                ...c,
+                                birthdayDiscount: { ...(c.birthdayDiscount || {}), expiryDays: e.target.value },
+                              }))
+                            }
+                            style={{ ...fieldStyle, width: 60 }}
+                          />
+                          <span style={unitStyle}>days</span>
+                        </div>
+                      </div>
+                      <div>
+                        <div style={fieldLabelStyle}>Code prefix</div>
+                        <input
+                          className="disc-input"
+                          type="text"
+                          value={config.birthdayDiscount?.prefix ?? 'BDAY'}
+                          maxLength={10}
+                          onChange={(e) =>
+                            setConfig((c) => ({
+                              ...c,
+                              birthdayDiscount: { ...(c.birthdayDiscount || {}), prefix: e.target.value },
+                            }))
+                          }
+                          style={{ ...fieldStyle, width: 90 }}
+                        />
+                      </div>
                     </div>
-                  </div>
-                  <div>
-                    <div style={fieldLabelStyle}>Code prefix</div>
-                    <input
-                      className="disc-input"
-                      type="text"
-                      value={config.birthdayDiscount?.prefix ?? 'BDAY'}
-                      maxLength={10}
-                      onChange={(e) =>
-                        setConfig((c) => ({
-                          ...c,
-                          birthdayDiscount: { ...(c.birthdayDiscount || {}), prefix: e.target.value },
-                        }))
-                      }
-                      style={{ ...fieldStyle, width: 90 }}
-                    />
-                  </div>
-                </div>
+                  </>
+                )}
               </div>
             )}
           </div>

@@ -311,6 +311,7 @@ async function processScheduledJobs() {
           if (automationEnabled) {
             runNightlySignals(s.shopDomain)
               .then(() => runBrainForShop(s.shopDomain))
+              .then(() => runBirthdaySweepForShop(s.shopDomain, s))
               .then(() => computeWeights(s.shopDomain)) // Phase H — refresh weights for tomorrow
               .catch((err) => console.error('[signals] nightly error:', err.message));
           } else {
@@ -410,6 +411,30 @@ async function processScheduledJobs() {
           productId: (payload.url && payload.url.split('/products/')[1]) || null,
         };
 
+        // Birthday jobs: generate (or reuse from a retry) the discount code
+        // before channel dispatch. Never send a birthday message without a code.
+        if (job.signalType === 'birthday') {
+          if (!payload.birthdayCode) {
+            const bdResult = await generateDiscount(job.shopDomain, { action: 'birthday' }, {});
+            if (!bdResult || !bdResult.code) {
+              await ScheduledJob.findByIdAndUpdate(job._id, {
+                status: 'failed',
+                error: (bdResult && bdResult.error) || 'Birthday code creation failed',
+              });
+              console.log(`[automation] Birthday job ${job._id} failed: code creation failed`);
+              continue;
+            }
+            payload.birthdayCode = bdResult.code;
+            payload.birthdayPercentage = bdResult.percentage;
+            await ScheduledJob.findByIdAndUpdate(job._id, {
+              $set: {
+                'payload.birthdayCode': bdResult.code,
+                'payload.birthdayPercentage': bdResult.percentage,
+              },
+            });
+          }
+        }
+
         if (channel === 'push') {
           // Only brain-scheduled jobs (job.profileId set) get AI copy.
           // Legacy rule-scheduled jobs (profileId unset) keep their frozen payload.
@@ -425,6 +450,11 @@ async function processScheduledJobs() {
             }));
             payload.title = copy.title || payload.title;
             payload.body = copy.body || payload.body;
+            // Birthday: append code to body
+            if (job.signalType === 'birthday' && payload.birthdayCode) {
+              const codeAppend = ' Use code: ' + payload.birthdayCode;
+              payload.body = (payload.body + codeAppend).slice(0, 200);
+            }
             await ScheduledJob.findByIdAndUpdate(job._id, {
               $set: { 'payload.title': payload.title, 'payload.body': payload.body },
             });
@@ -474,6 +504,13 @@ async function processScheduledJobs() {
             }).catch((e) =>
               console.error('[brain] message log error:', e.message)
             );
+
+            // Birthday: mark offer sent for this year so the sweep skips next time.
+            if (job.signalType === 'birthday' && job.profileId) {
+              Profile.findByIdAndUpdate(job.profileId, {
+                'birthday.lastOfferYear': new Date().getFullYear(),
+              }).catch((e) => console.error('[birthday] lastOfferYear update error:', e.message));
+            }
 
             // Phase F — push hygiene after a successful send.
             if (job.profileId) {
@@ -574,6 +611,69 @@ async function processScheduledJobs() {
             } catch (emailErr) {
               // Email errors never block push delivery.
               console.error('[poller] email send error:', emailErr.message);
+            }
+          }
+        } else if (channel === 'email' && job.signalType === 'birthday') {
+          // Birthday email — profile email, not an AbandonedCustomer record.
+          const bdProfile = await Profile.findById(job.profileId)
+            .select('channels identifiers').lean();
+          const bdEmail = bdProfile && (
+            (bdProfile.channels && bdProfile.channels.email && bdProfile.channels.email.address) ||
+            (bdProfile.identifiers && bdProfile.identifiers.emails && bdProfile.identifiers.emails[0])
+          );
+          if (!bdEmail) {
+            await ScheduledJob.findByIdAndUpdate(job._id, {
+              status: 'skipped',
+              error: 'No email address on profile',
+            });
+            console.log(`[automation] Birthday job ${job._id} skipped — no email`);
+          } else {
+            const bdCopy = await generateCopy(
+              { ...(jobStore && jobStore.toObject ? jobStore.toObject() : {}), voice },
+              'birthday',
+              null,
+              'email'
+            ).catch(() => ({
+              subject: 'Happy Birthday! A gift from us 🎂',
+              body: 'Wishing you a wonderful birthday! We have a personal discount code just for you.',
+            }));
+            let bdBody = bdCopy.body || '';
+            if (payload.birthdayCode) {
+              bdBody = bdBody + '\n\nYour personal birthday code: ' + payload.birthdayCode;
+              if (payload.birthdayPercentage) {
+                bdBody = bdBody + ' (' + payload.birthdayPercentage + '% off)';
+              }
+            }
+            await ScheduledJob.findByIdAndUpdate(job._id, {
+              $set: {
+                'payload.subject': bdCopy.subject || '',
+                'payload.body': bdBody,
+              },
+            });
+            const bdSendResult = await sendMarketingEmail(
+              bdEmail,
+              bdCopy.subject || '',
+              bdBody.replace(/\n/g, '<br>'),
+              job.shopDomain,
+              job.profileId
+            );
+            if (!bdSendResult || !bdSendResult.success) {
+              await ScheduledJob.findByIdAndUpdate(job._id, {
+                status: 'failed',
+                error: (bdSendResult && bdSendResult.error) || 'Birthday email send failed',
+              });
+              console.log(`[automation] Birthday job ${job._id} email failed`);
+            } else {
+              console.log(`[automation] Birthday job ${job._id} email sent successfully`);
+              await recordProfileMessage({
+                profileId: job.profileId,
+                channel: 'email',
+                signalType: 'birthday',
+                _id: job._id,
+              }).catch((e) => console.error('[brain] message log error:', e.message));
+              Profile.findByIdAndUpdate(job.profileId, {
+                'birthday.lastOfferYear': new Date().getFullYear(),
+              }).catch((e) => console.error('[birthday] lastOfferYear update error:', e.message));
             }
           }
         } else if (channel === 'email') {
@@ -874,6 +974,120 @@ async function processFestivalQueue() {
     }
   } catch (err) {
     console.error('[festival-queue] processFestivalQueue error:', err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Birthday sweep — run once per shop per nightly loop.
+// Finds profiles whose (birthday.month, birthday.day) matches today + leadDays,
+// skips those already sent this year, schedules one ScheduledJob(birthday) each.
+// ---------------------------------------------------------------------------
+const {
+  resolveTz: _bday_resolveTz,
+  zonedParts: _bday_zonedParts,
+  zonedTimeToUtc: _bday_zonedTimeToUtc,
+  resolveQuietWindow: _bday_resolveQuietWindow,
+  isQuietHour: _bday_isQuietHour,
+} = require('./utils/timezone');
+const DiscountConfig = require('./models/DiscountConfig');
+const { generateDiscount } = require('./routes/discounts');
+
+function _bdayRunAt(tz, quietStart, quietEnd) {
+  const resolved = _bday_resolveTz(tz);
+  const now = new Date();
+  const cur = _bday_zonedParts(now, resolved);
+  const TARGET = 9; // 9 am store-local
+  let h = TARGET;
+  if (_bday_isQuietHour(h, quietStart, quietEnd)) {
+    for (let i = 1; i <= 24; i++) {
+      const next = (TARGET + i) % 24;
+      if (!_bday_isQuietHour(next, quietStart, quietEnd)) { h = next; break; }
+    }
+  }
+  let runAt = _bday_zonedTimeToUtc(cur.y, cur.mo, cur.d, h, 0, resolved);
+  if (runAt.getTime() <= now.getTime()) {
+    const tomorrow = new Date(Date.UTC(cur.y, cur.mo - 1, cur.d + 1));
+    runAt = _bday_zonedTimeToUtc(
+      tomorrow.getUTCFullYear(), tomorrow.getUTCMonth() + 1, tomorrow.getUTCDate(), h, 0, resolved
+    );
+  }
+  return runAt;
+}
+
+async function runBirthdaySweepForShop(shopDomain, storeDoc) {
+  try {
+    const shop = String(shopDomain || '').trim().toLowerCase();
+    const config = await DiscountConfig.findOne({ shopDomain: shop }).lean();
+    if (!config || !config.birthdayDiscount || !config.birthdayDiscount.enabled) return;
+
+    const leadDays = (config.birthdayDiscount.leadDays != null) ? config.birthdayDiscount.leadDays : 3;
+    const tz = (storeDoc && storeDoc.timezone) || 'Asia/Kolkata';
+    const resolved = _bday_resolveTz(tz);
+    const nowD = new Date();
+    const cur = _bday_zonedParts(nowD, resolved);
+    const currentYear = cur.y;
+
+    // today + leadDays using UTC date arithmetic — handles month/year rollover
+    const targetDate = new Date(Date.UTC(cur.y, cur.mo - 1, cur.d + leadDays));
+    const targetMonth = targetDate.getUTCMonth() + 1;
+    const targetDay = targetDate.getUTCDate();
+
+    // Feb 29 in a non-leap year: profiles with birthday Feb 29 match on Feb 28
+    const isLeap = (currentYear % 4 === 0 && currentYear % 100 !== 0) || (currentYear % 400 === 0);
+    const monthDayFilter = [{ 'birthday.month': targetMonth, 'birthday.day': targetDay }];
+    if (targetMonth === 2 && targetDay === 28 && !isLeap) {
+      monthDayFilter.push({ 'birthday.month': 2, 'birthday.day': 29 });
+    }
+
+    const profiles = await Profile.find({
+      shopDomain: shop,
+      suppressed: { $ne: true },
+      'birthday.lastOfferYear': { $ne: currentYear },
+      $and: [
+        { $or: monthDayFilter },
+        { $or: [
+          { 'channels.push.subscribed': true },
+          { 'channels.email.address': { $exists: true, $ne: '' } },
+        ]},
+      ],
+    }).select('_id channels').lean();
+
+    if (!profiles.length) return;
+
+    const { start: quietStart, end: quietEnd } = _bday_resolveQuietWindow(storeDoc && storeDoc.quietHours);
+    const runAt = _bdayRunAt(tz, quietStart, quietEnd);
+
+    let scheduled = 0;
+    for (const p of profiles) {
+      // Channel: prefer email (birthday is personal), fall back to push
+      const hasEmail = !!(p.channels && p.channels.email && p.channels.email.address);
+      const hasPush = !!(p.channels && p.channels.push && p.channels.push.subscribed);
+      const channel = hasEmail ? 'email' : (hasPush ? 'push' : null);
+      if (!channel) continue;
+
+      try {
+        await ScheduledJob.create({
+          shopDomain: shop,
+          profileId: p._id,
+          signalType: 'birthday',
+          channel,
+          reason: 'birthday sweep',
+          payload: { title: '', body: '' },
+          status: 'pending',
+          runAt,
+          origin: 'automated',
+        });
+        scheduled += 1;
+      } catch (err) {
+        if (err && err.code === 11000) continue; // already pending — idempotent
+        console.error('[birthday-sweep] create job error:', err.message);
+      }
+    }
+    if (scheduled > 0) {
+      console.log(`[birthday-sweep] ${shop}: scheduled ${scheduled} birthday job(s) for month=${targetMonth} day=${targetDay}`);
+    }
+  } catch (err) {
+    console.error('[birthday-sweep] error for', shopDomain, ':', err.message);
   }
 }
 

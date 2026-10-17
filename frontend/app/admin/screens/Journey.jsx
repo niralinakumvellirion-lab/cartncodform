@@ -118,6 +118,7 @@ const SIGNAL_LABELS = {
   email_capture: 'Ask for an email',
   cod_to_prepaid: 'Offer prepaid on COD',
   winback: 'Been a while',
+  birthday: 'Birthday offer',
 };
 
 const EVENT_LABELS = {
