@@ -4,7 +4,7 @@ await esbuild.build({
   entryPoints: ['src/run.js'],
   bundle: true,
   outfile: 'dist/index.js',
-  format: 'cjs',
-  platform: 'node',
+  format: 'esm',
+  platform: 'neutral',
   target: 'es2022',
 });

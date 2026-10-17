@@ -31,19 +31,22 @@ function computeCodTierDiscount(qtConfig, qty, unitPrice) {
   return { percent: tier.percent, amount: saving };
 }
 
-// Build a Function cart input for a single product with given qty+price (minor units)
+// Build a Function cart input for a single product with given qty+price (minor units).
+// Uses new Discount Function API shape: discount.metafield.jsonValue + cart line id.
 function makeCart(qty, pricePaise, productId) {
   const pid = productId || 'gid://shopify/Product/1';
+  const lineId = 'gid://shopify/CartLine/1';
   const vid = 'gid://shopify/ProductVariant/1';
   return {
-    discountNode: {
+    discount: {
       metafield: {
-        value: JSON.stringify(ENABLED_CONFIG),
+        jsonValue: ENABLED_CONFIG,
       },
     },
     cart: {
       lines: [
         {
+          id: lineId,
           quantity: qty,
           merchandise: {
             __typename: 'ProductVariant',
@@ -169,12 +172,20 @@ describe('parity: Function run() vs COD helper', () => {
     { qty: 10, pricePaise:  50000, desc: 'above max tier',  expectedPercent: 25 },
   ];
 
+  // Helper: extract product discount candidates from the new operations array
+  function fnCandidates(result) {
+    const ops = result.operations || [];
+    const op = ops.find((o) => o.productDiscountsAdd);
+    return op ? op.productDiscountsAdd.candidates : [];
+  }
+
   cases.forEach(function (c) {
     test('qty ' + c.qty + ' — ' + c.desc, () => {
       // Function output
       const fnInput = makeCart(c.qty, c.pricePaise);
       const fnOut = run(fnInput);
-      const fnDiscount = fnOut.discounts[0];
+      const cands = fnCandidates(fnOut);
+      const fnDiscount = cands[0];
 
       // COD helper output (unit price in major units = paise / 100)
       const unitPriceMajor = c.pricePaise / 100;
@@ -182,7 +193,7 @@ describe('parity: Function run() vs COD helper', () => {
 
       if (c.expectedPercent === null) {
         // No tier for this qty
-        expect(fnOut.discounts).toHaveLength(0);
+        expect(fnOut.operations).toHaveLength(0);
         expect(cod.percent).toBe(0);
       } else {
         // Both pick the same tier

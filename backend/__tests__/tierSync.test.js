@@ -247,6 +247,33 @@ test('shop metafield write failure is non-fatal', async () => {
   );
 });
 
+// ── discountClasses: ['PRODUCT'] sent in create/update ───────────────────────
+
+test('create sends discountClasses: [PRODUCT]', async () => {
+  Store.findOne.mockReturnValue(storeResult());
+  DiscountConfig.findOne.mockReturnValue(cfgResult({ discountId: '' }));
+
+  let capturedCreateBody = null;
+  global.fetch = jest.fn((url, opts) => {
+    const body = JSON.parse(opts.body);
+    if (body.query && body.query.includes('discountAutomaticAppCreate')) {
+      capturedCreateBody = body.variables && body.variables.discount;
+    }
+    return shopifyJson({
+      data: {
+        shop: { id: 'gid://shopify/Shop/1' },
+        metafieldsSet: { userErrors: [] },
+        shopifyFunctions: { nodes: [{ id: FN_ID, title: 'Quantity Tier Discount' }] },
+        discountAutomaticAppCreate: { automaticAppDiscount: { discountId: DISCOUNT_GID }, userErrors: [] },
+      },
+    });
+  });
+
+  await syncTiers(SHOP);
+  expect(capturedCreateBody).not.toBeNull();
+  expect(capturedCreateBody.discountClasses).toEqual(['PRODUCT']);
+});
+
 // ── idempotent re-run ────────────────────────────────────────────────────────
 
 test('idempotent re-run with same discountId → updates (not creates)', async () => {

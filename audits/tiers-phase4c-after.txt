@@ -1,0 +1,431 @@
+PHASE 4c AUDIT — Discount Function API migration + Liquid metafield fix
+Date: 2026-10-17
+Branch: main
+
+═══════════════════════════════════════════════════════════
+STEP 1 — DOCS: Discount Function API
+═══════════════════════════════════════════════════════════
+
+Sources fetched:
+  https://shopify.dev/docs/api/functions/2026-10/discount
+  https://shopify.dev/docs/apps/build/discounts/migrate-discount-api
+  https://shopify.dev/docs/apps/build/discounts/build-discount-function
+
+── Target name ──────────────────────────────────────────────
+
+  NEW:  cart.lines.discounts.generate.run
+  OLD:  purchase.product-discount.run (deprecated)
+
+  Deprecation notice (https://shopify.dev/docs/api/functions/2026-07/product-discount):
+  "This is a deprecated API. You should migrate to the Discount Function API"
+
+── api_version for the extension TOML ────────────────────────
+
+  "api_version: 2026-10" (from page frontmatter, https://shopify.dev/docs/api/functions/2026-10/discount)
+  Updated: shopify.extension.toml api_version = "2026-10" (both top-level and extension block).
+  The app-level api_version in shopify.app.toml is unchanged per spec.
+
+── Output schema ─────────────────────────────────────────────
+
+  Return type: CartLinesDiscountsGenerateRunResult
+
+  Old shape:
+    { discountApplicationStrategy: 'MAXIMUM', discounts: [{...}] }
+
+  New shape:
+    { operations: [{ productDiscountsAdd: { candidates, selectionStrategy } }] }
+
+  Documented example (https://shopify.dev/docs/api/functions/2026-10/discount, excerpt):
+  {
+    "operations": [
+      {
+        "productDiscountsAdd": {
+          "candidates": [
+            {
+              "message": "20% OFF PRODUCT",
+              "targets": [
+                { "cartLine": { "id": "gid://shopify/CartLine/0" } }
+              ],
+              "value": { "percentage": { "value": "20.0" } }
+            }
+          ],
+          "selectionStrategy": "FIRST"
+        }
+      }
+    ]
+  }
+
+  Key field: targets now use cartLine.id (cart line GID), NOT productVariant.id.
+  selectionStrategy for product discounts: FIRST or ALL (MAXIMUM is order-discount only).
+
+── Input query changes ───────────────────────────────────────
+
+  Old: discountNode { metafield(namespace: "...", key: "...") { value } }
+  New: discount { metafield(namespace: "...", key: "...") { jsonValue } }
+
+  - Root key changes from discountNode → discount
+  - Value field changes from value (JSON string) → jsonValue (already-parsed object)
+  - cart.lines must include id (the cart line GID) for the targets
+
+  Inferred from page input types (confirmed: the input field is cart.lines.id):
+  query RunInput {
+    cart {
+      lines {
+        id         ← NEW (needed for targets)
+        quantity
+        merchandise { __typename ... on ProductVariant { id product { id } } }
+      }
+    }
+    discount {
+      metafield(namespace: "cartncodform", key: "function-configuration") {
+        jsonValue  ← replaces value (string) with a parsed JSON value
+      }
+    }
+  }
+
+── discountAutomaticAppCreate / Update changes ───────────────
+
+  From build guide: "The discount's discountClasses field determines which
+  Function targets will be executed during checkout."
+
+  discountClasses: [PRODUCT, ORDER, SHIPPING] shown in build guide example.
+  Our function only applies product discounts → using discountClasses: ['PRODUCT'].
+
+── apiType from shopifyFunctions Admin API query ─────────────
+
+  OLD filter (removed): n.apiType === 'product_discounts'
+  NEW behavior: title-only lookup — n.title === 'Quantity Tier Discount'
+
+  REASON: The exact apiType value for the new cart.lines.discounts.generate.run
+  target was NOT stated in any fetched documentation page. The page frontmatter
+  lists api_type: functions and api_name: discount — these are page metadata,
+  not the shopifyFunctions query response field. Rather than guess, the apiType
+  filter was removed; title-only lookup is safe since the title is unique.
+  If the title ever changes, both approaches would break equally.
+
+── Minimum CLI version ───────────────────────────────────────
+
+  Docs say: "use the latest version of Shopify CLI" (no specific version number).
+  Our installed CLI: 4.9.0. Available: 4.9.4 (flagged by CLI itself at runtime).
+  Node.js requirement per build guide: 22 or higher. Our Node: v24.16.0 ✓.
+
+  CLI upgrade command (per CLI output): npm install -g @shopify/cli@latest
+  (Do NOT run during this phase — report only.)
+
+═══════════════════════════════════════════════════════════
+STEP 2 — Function rewrite
+═══════════════════════════════════════════════════════════
+
+Files changed:
+  extensions/quantity-tier-discount/src/run.js
+  extensions/quantity-tier-discount/src/run.graphql
+  extensions/quantity-tier-discount/shopify.extension.toml
+
+Business logic unchanged: group lines by product GID, sum quantities,
+highest matching tier, percentage off each line of that product.
+
+Key code changes in run.js:
+  - Config read: input.discount.metafield.jsonValue (no JSON.parse — already parsed)
+  - Defensive fallback: if typeof config === 'string' → JSON.parse (handles stubs)
+  - noDiscount() now returns { operations: [] }
+  - Targets: { cartLine: { id: l.id } } instead of { productVariant: { id: l.merchandise.id } }
+  - Return: { operations: [{ productDiscountsAdd: { candidates, selectionStrategy: 'FIRST' } }] }
+  - All candidates for the current shop config go into a single productDiscountsAdd operation
+
+Tests updated (quantityTiersFunction.test.js — same 16 tests, new assertions):
+  - makeInput() now sets discount.metafield.jsonValue = { enabled, tiers }
+  - Added getCandidates(result) helper: finds productDiscountsAdd in operations
+  - All result.discounts checks → result.operations (empty) or getCandidates(result)
+  - Target id check: t.cartLine.id instead of t.productVariant.id
+  - 'discountApplicationStrategy is MAXIMUM' → 'operations[0].productDiscountsAdd defined, selectionStrategy FIRST'
+
+Tests updated (codTierDiscount.test.js — parity section):
+  - makeCart() now uses discount.metafield.jsonValue = ENABLED_CONFIG (object, not string)
+  - Added fnCandidates(result) helper (same pattern as getCandidates)
+  - fnOut.discounts → fnOut.operations for the no-discount case
+  - fnDiscount = cands[0] from productDiscountsAdd.candidates
+
+═══════════════════════════════════════════════════════════
+STEP 3 — tierSync.js
+═══════════════════════════════════════════════════════════
+
+Changes:
+  1. getFunctionId() — removed apiType filter; title-only lookup (see Step 1).
+     Comment added explaining why apiType filter was removed.
+  2. createDiscount() — added discountClasses: ['PRODUCT'] to mutation input.
+  3. updateDiscount() — added discountClasses: ['PRODUCT'] to mutation input.
+  4. writeShopMetafield comment — removed the incorrect Liquid access claim.
+
+New test (tierSync.test.js, now 12 tests, was 11):
+  'create sends discountClasses: [PRODUCT]'
+  — captures the discountAutomaticAppCreate mutation body and asserts
+    discount.discountClasses equals ['PRODUCT'].
+
+Existing tests: the mock data still has apiType: 'product_discounts' in the
+shopifyFunctions nodes. Since the filter is now title-only, these tests still
+pass — the mock node matches by title regardless of the apiType field value.
+
+═══════════════════════════════════════════════════════════
+STEP 4 — BUILD
+═══════════════════════════════════════════════════════════
+
+── esbuild.config.mjs changes ───────────────────────────────
+
+  format: 'cjs' → 'esm'  (ESM output, named exports visible to javy)
+  platform: 'node' → 'neutral'  (no Node.js builtins; javy is not Node)
+
+── shopify app build reproduction ───────────────────────────
+
+  Command: cd D:/cartncodform && shopify app build
+
+  EXACT ERROR (reproduced):
+  ───────────────────────────────────────────────────────────────
+  Installing dependencies ...
+
+  ── external error ──────────────────────────────────────────────
+  Error coming from `unknown install`
+  Command failed with exit code 1: unknown install
+  'unknown' is not recognized as an internal or external command,
+  operable program or batch file.
+  ───────────────────────────────────────────────────────────────
+
+── Root cause analysis ──────────────────────────────────────
+
+  The Shopify CLI (v4.9.0) detects which package manager to use by looking for
+  a lock file in the app root (yarn.lock, pnpm-lock.yaml, package-lock.json).
+  D:\cartncodform\ has NO package.json or lock file at the root level. The CLI
+  cannot detect npm/yarn/pnpm and falls back to the literal string "unknown" as
+  the package manager name, then tries to run "unknown install" — a command
+  that does not exist.
+
+  This is a TWO-part cause:
+  A. Root-level: no package.json at D:\cartncodform\ → CLI can't detect PM.
+     (This is a project structure issue — the project has backend/ and frontend/
+     as separate npm projects but no app-level root package.json.)
+  B. Extension-level: extensions/quantity-tier-discount/ had no node_modules or
+     package-lock.json before this phase (npm install was never run there).
+
+── Fix applied in the repo ──────────────────────────────────
+
+  Extension-level fix (in repo — committed):
+    Ran npm install in extensions/quantity-tier-discount/.
+    Created: extensions/quantity-tier-discount/package-lock.json
+    Created: extensions/quantity-tier-discount/node_modules/ (esbuild)
+
+  After fix: npm run build (esbuild step) runs successfully:
+    > node esbuild.config.mjs
+    EXIT: 0
+    Output: extensions/quantity-tier-discount/dist/index.js (ESM bundle)
+
+  Root-level fix needed on your machine:
+    The CLI still fails with "unknown install" because D:\cartncodform\ has
+    no package.json. To allow shopify app build to complete the Install step,
+    create a minimal root package.json:
+
+      cd D:\cartncodform
+      echo {} > package.json
+      (or: npm init -y)
+
+    After that, the CLI will detect npm (from package-lock.json in extension).
+    The javy compilation step may still fail if shopify-specific tools are not
+    in PATH — that is a separate environment issue, not a repo issue.
+
+    Alternatively, upgrade the CLI:
+      npm install -g @shopify/cli@latest   (upgrades to 4.9.4 or later)
+
+═══════════════════════════════════════════════════════════
+STEP 5 — Liquid metafield syntax
+═══════════════════════════════════════════════════════════
+
+── Research findings ─────────────────────────────────────────
+
+  Page fetched: https://shopify.dev/docs/apps/build/online-store/theme-app-extensions/configuration
+  Result: The page shows two reserved-prefix patterns:
+
+    Product metafields via block settings:
+      block.settings.product.metafields["$app:custom"].my_key.value
+
+    Metaobjects via shop object:
+      shop.metaobjects["$app:custom"]["my_handle"].my_key.value
+
+  Neither of these is: shop.metafields.$app.key (dot notation with $ prefix)
+  Neither documents: shop.metafields["$app"]["key"] (bracket notation for namespace)
+
+  Page fetched: https://shopify.dev/docs/api/liquid/objects/metafield
+  Result: Only shows dot notation resource.metafields.namespace.key.
+  No example with $app. No bracket notation for namespaces.
+
+  Community forums (https://community.shopify.com/... multiple threads):
+  Field reports suggest shop.metafields['$app:namespace']['key'].value using
+  a colon-separated format. But:
+    1. These are community posts, not official documentation.
+    2. The format $app:namespace implies the $app PREFIX plus a custom namespace
+       SUFFIX — not just $app alone as the full namespace.
+    3. Metafields written with namespace='$app' (no suffix) may be resolved to
+       the app's full namespace at write time and may not be readable via
+       $app alone in Liquid.
+    4. Metafields must have a PUBLIC_READ storefront access definition to be
+       readable in Liquid — our metafield has no definition (written without one).
+
+── Decision ─────────────────────────────────────────────────
+
+  Cannot confirm a documented Liquid syntax for reading a shop-level metafield
+  in the bare $app namespace inside a theme app extension block. The app proxy
+  fetch (/apps/cartncodform/discount-config) is the primary and confirmed path.
+
+  The ccf-tiers.js already falls back to the App Proxy when no inline config
+  element is found. Removing the Liquid metafield read makes App Proxy the
+  exclusive config path — simpler and confirmed to work.
+
+── Changes made ─────────────────────────────────────────────
+
+  extensions/cartncodform-embed/blocks/quantity-tiers.liquid:
+    REMOVED:
+      {%- liquid
+        assign qt_mf = shop.metafields.$app.quantity_tiers
+        ... (8 lines of metafield read + enabled check)
+      -%}
+      {%- if qt_config != nil -%}
+        <script type="application/json" id="ccf-qt-config">...</script>
+      {%- endif -%}
+
+    RESULT: Block renders only the #ccf-qt-root div (no inline config).
+    ccf-tiers.js always fetches config from App Proxy on load.
+
+    Comment added in the Liquid explaining why the metafield read was removed.
+
+  No changes to ccf-tiers.js — the App Proxy fallback was already in place.
+
+═══════════════════════════════════════════════════════════
+STEP 6 — Backend Admin GraphQL api_version (REPORT ONLY)
+═══════════════════════════════════════════════════════════
+
+  File: backend/utils/shopify.js, line 9
+  Constant: const API_VERSION = '2025-01';
+
+  Supported window per https://shopify.dev/docs/api/usage/versioning:
+    "Each stable version is supported for a minimum of 12 months."
+    Current supported stable versions: 2026-01, 2026-04, 2026-07, 2026-10
+    Listed as unsupported: 2025-04 (accessible until April 16, 2026 UTC),
+                           2025-07 (accessible until ~July 2026),
+                           2025-10 (accessible until ~October 2026)
+    2025-01 is NOT listed at all — it is past its accessible-until date
+    (would have been ~January 16, 2026 UTC).
+
+  VERDICT: 2025-01 is OUTSIDE the supported window as of October 2026.
+  Shopify "falls forward" — Admin API calls using 2025-01 are served by
+  the oldest accessible stable version (currently 2026-01).
+  Calls still succeed but may include schema changes not accounted for in code.
+
+  NO CODE CHANGE in this phase (report only per spec).
+  RECOMMENDATION: Update API_VERSION to '2026-10' in backend/utils/shopify.js
+  in a future phase to stay on a supported version.
+
+═══════════════════════════════════════════════════════════
+VERIFICATION
+═══════════════════════════════════════════════════════════
+
+[V1] ESLint (no-undef) on all changed JS files
+
+  Config: C:/Users/Intel/AppData/Local/Temp/claude/eslint-tmp/.eslintrc-ccf.json
+
+  Command:
+    cd C:/Users/Intel/AppData/Local/Temp/claude/eslint-tmp
+    node_modules/.bin/eslint --no-eslintrc -c .eslintrc-ccf.json \
+      D:/cartncodform/extensions/quantity-tier-discount/src/run.js \
+      D:/cartncodform/backend/services/tierSync.js \
+      D:/cartncodform/backend/__tests__/quantityTiersFunction.test.js \
+      D:/cartncodform/backend/__tests__/codTierDiscount.test.js \
+      D:/cartncodform/backend/__tests__/tierSync.test.js
+  EXIT: 0
+
+[V2] Function tests + parity test
+
+  Command: cd D:/cartncodform/backend && npx jest --no-coverage "quantityTiersFunction|codTierDiscount|tierSync"
+  Result:  Test Suites: 3 passed, 3 total
+           Tests:       44 passed, 44 total
+           Time:        0.966s
+
+  Breakdown:
+    quantityTiersFunction.test.js: 16 tests (input/output format updated)
+    codTierDiscount.test.js:       16 tests (makeCart + parity assertions updated)
+    tierSync.test.js:              12 tests (11 before + 1 discountClasses test)
+
+[V3] jsdom block test (ccf-tiers.js)
+
+  Command: node C:/Users/Intel/.../scratchpad/test-ccf-tiers.js
+  Result:  20 passed, 0 failed
+  Note: Block no longer renders inline config; JS always uses App Proxy.
+  All test cases use the in-test config element directly, so they are
+  unaffected by the Liquid change.
+
+[V4] Full backend suite
+
+  Before Phase 4c: 76 suites, 1648 tests, 0 failures
+  After Phase 4c:  76 suites, 1649 tests, 0 failures (+1 discountClasses test)
+
+[V5] Extension esbuild build
+
+  Command: cd extensions/quantity-tier-discount && npm run build
+  Result:  EXIT: 0  (dist/index.js produced, ESM format)
+
+[V6] shopify app build (CLI-level)
+
+  Still fails with "unknown install" — root cause is no package.json at
+  D:\cartncodform\ (see Step 4 for exact commands to fix on the machine).
+  This is unchanged from Phase 4b; not a code regression.
+
+═══════════════════════════════════════════════════════════
+FILES CHANGED
+═══════════════════════════════════════════════════════════
+
+MODIFIED:
+  extensions/quantity-tier-discount/src/run.js
+    — New output format (operations/productDiscountsAdd/candidates),
+      cartLine targets, discount.metafield.jsonValue config read
+
+  extensions/quantity-tier-discount/src/run.graphql
+    — discountNode → discount, value → jsonValue, keep namespace/key
+
+  extensions/quantity-tier-discount/shopify.extension.toml
+    — api_version: 2025-01 → 2026-10, target: new cart.lines.discounts.generate.run
+
+  extensions/quantity-tier-discount/esbuild.config.mjs
+    — format: cjs → esm, platform: node → neutral
+
+  backend/services/tierSync.js
+    — getFunctionId: removed apiType filter (title-only)
+    — createDiscount + updateDiscount: added discountClasses: ['PRODUCT']
+    — writeShopMetafield comment: removed incorrect Liquid claim
+
+  backend/__tests__/quantityTiersFunction.test.js
+    — makeInput() uses discount.metafield.jsonValue
+    — getCandidates() helper added
+    — All assertions use new operations/candidates structure
+
+  backend/__tests__/codTierDiscount.test.js
+    — makeCart() uses discount.metafield.jsonValue
+    — parity assertions use fnCandidates() helper + fnOut.operations
+
+  backend/__tests__/tierSync.test.js
+    — Added: 'create sends discountClasses: [PRODUCT]' test
+
+  extensions/cartncodform-embed/blocks/quantity-tiers.liquid
+    — Removed $app metafield read; App Proxy is now the primary config path
+
+NEW:
+  extensions/quantity-tier-discount/package-lock.json  (from npm install)
+  extensions/quantity-tier-discount/node_modules/      (esbuild, gitignored)
+  audits/tiers-phase4c-after.txt
+
+ANYTHING SKIPPED OR UNCERTAIN:
+  - apiType value from shopifyFunctions query for new API: not in any fetched
+    doc. Used title-only lookup as safe fallback. The admin GraphQL page for
+    shopifyFunctions did not list apiType enum values.
+  - $app Liquid syntax: no official doc found. App Proxy is primary path.
+  - shopify app build root-level fix: requires creating D:\cartncodform\package.json
+    on the user's machine (not done — would affect project root structure).
+  - CLI upgrade to 4.9.4: not done — this is a machine-level change.
+  - discountClasses values: docs example showed [PRODUCT, ORDER, SHIPPING]; we
+    use [PRODUCT] only since this function only issues product discounts. This
+    matches the spec ("a product discount needs discountClasses containing PRODUCT").

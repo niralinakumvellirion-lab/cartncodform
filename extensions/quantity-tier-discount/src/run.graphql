@@ -14,9 +14,9 @@ query RunInput {
       }
     }
   }
-  discountNode {
+  discount {
     metafield(namespace: "cartncodform", key: "function-configuration") {
-      value
+      jsonValue
     }
   }
 }

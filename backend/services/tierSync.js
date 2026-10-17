@@ -9,7 +9,7 @@
  * { synced: false, error } and store lastSyncError on DiscountConfig.
  *
  * Shop metafield uses namespace "$app" (app-reserved) — no write_metafields
- * scope required. In Liquid: shop.metafields.$app.quantity_tiers
+ * scope required.
  */
 
 const Store = require('../models/Store');
@@ -58,8 +58,10 @@ async function getFunctionId(shopDomain, token) {
     }
   `);
   const nodes = (data && data.data && data.data.shopifyFunctions && data.data.shopifyFunctions.nodes) || [];
+  // apiType changed from 'product_discounts' (old API) with the Discount Function migration;
+  // exact new value is undocumented in the query response — match by title only.
   const fn = nodes.find(
-    (n) => n.apiType === 'product_discounts' && n.title === 'Quantity Tier Discount'
+    (n) => n.title === 'Quantity Tier Discount'
   );
   if (!fn) throw new Error('Quantity Tier Discount function not deployed — run: shopify app deploy');
   return fn.id;
@@ -81,6 +83,7 @@ async function createDiscount(shopDomain, token, functionId, configJson) {
     discount: {
       title: 'Quantity Tier Discount',
       functionId,
+      discountClasses: ['PRODUCT'],
       startsAt: new Date(Date.now() - 60000).toISOString(),
       combinesWith: COMBINES_WITH,
       metafields: [{
@@ -113,6 +116,7 @@ async function updateDiscount(shopDomain, token, discountId, functionId, configJ
     discount: {
       title: 'Quantity Tier Discount',
       functionId,
+      discountClasses: ['PRODUCT'],
       combinesWith: COMBINES_WITH,
       metafields: [{
         namespace: 'cartncodform',
@@ -155,7 +159,7 @@ async function deactivateDiscount(shopDomain, token, discountId) {
 async function writeShopMetafield(shopDomain, token, value) {
   // Uses the app-reserved namespace ($app). No write_metafields scope needed —
   // Shopify allows apps to write to their own reserved namespace.
-  // In Liquid the block reads this as: shop.metafields.$app.quantity_tiers
+  // Theme block reads via App Proxy (Liquid $app metafield syntax unconfirmed in docs).
   const shopData = await gql(shopDomain, token, `
     query { shop { id } }
   `);

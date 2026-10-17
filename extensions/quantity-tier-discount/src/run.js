@@ -14,25 +14,26 @@ function pickTier(tiers, qty) {
 }
 
 function noDiscount() {
-  return { discountApplicationStrategy: 'FIRST', discounts: [] };
+  return { operations: [] };
 }
 
 /**
- * Shopify Function entry point for purchase.product-discount.run.
+ * Shopify Function entry point for cart.lines.discounts.generate.run.
  * Groups cart lines by product, applies the highest qualifying tier
- * to every variant of that product.
+ * to every line of that product.
  */
 function run(input) {
-  // ── Parse config from discount node metafield ─────────────────────────────
+  // ── Read config from discount metafield (jsonValue is already parsed) ─────
   let config;
   try {
-    const raw =
+    config =
       input &&
-      input.discountNode &&
-      input.discountNode.metafield &&
-      input.discountNode.metafield.value;
-    if (!raw) return noDiscount();
-    config = JSON.parse(raw);
+      input.discount &&
+      input.discount.metafield &&
+      input.discount.metafield.jsonValue;
+    if (!config) return noDiscount();
+    // Defensive: tolerate a JSON string in case schema or stub changes
+    if (typeof config === 'string') config = JSON.parse(config);
   } catch (_) {
     return noDiscount();
   }
@@ -54,23 +55,29 @@ function run(input) {
     linesByProduct[pid].push(line);
   }
 
-  // ── Build discount entries ────────────────────────────────────────────────
-  const discounts = [];
+  // ── Build candidates — one per qualifying product ─────────────────────────
+  const candidates = [];
   for (const pid of Object.keys(productQty)) {
     const tier = pickTier(config.tiers, productQty[pid]);
     if (!tier) continue;
-    discounts.push({
-      value: { percentage: { value: String(tier.percent) } },
+    candidates.push({
       targets: linesByProduct[pid].map((l) => ({
-        productVariant: { id: l.merchandise.id },
+        cartLine: { id: l.id },
       })),
+      value: { percentage: { value: String(tier.percent) } },
       message: `Buy ${tier.minQty}+, save ${tier.percent}%`,
     });
   }
 
+  if (candidates.length === 0) return noDiscount();
+
   return {
-    discountApplicationStrategy: 'MAXIMUM',
-    discounts,
+    operations: [{
+      productDiscountsAdd: {
+        candidates,
+        selectionStrategy: 'FIRST',
+      },
+    }],
   };
 }
 

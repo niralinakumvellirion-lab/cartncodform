@@ -1,16 +1,16 @@
-api_version = "2025-01"
+api_version = "2026-10"
 
 [[extensions]]
 type = "function"
 name = "Quantity Tier Discount"
 handle = "quantity-tier-discount"
-api_version = "2025-01"
+api_version = "2026-10"
 
 [extensions.build]
 command = "npm run build"
 path = "dist/index.js"
 
 [[extensions.targeting]]
-target = "purchase.product-discount.run"
+target = "cart.lines.discounts.generate.run"
 input_query = "src/run.graphql"
 export = "run"
