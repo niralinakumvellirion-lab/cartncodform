@@ -204,6 +204,17 @@ describe('POST /birthday proxy route', () => {
     );
   });
 
+  test('3a: resubmit does NOT include birthday.lastOfferYear → year guard is preserved', async () => {
+    // birthday.lastOfferYear must never be sent in a POST /birthday update.
+    // upsertProfile uses $set, so only the specified fields are touched.
+    withConfig(enabledConfig());
+    const res = mockRes();
+    await post(req({ month: 6, day: 10 }), res);
+    expect(res.statusCode).toBe(200);
+    const updateArg = upsertProfile.mock.calls[upsertProfile.mock.calls.length - 1][2];
+    expect(Object.keys(updateArg)).not.toContain('birthday.lastOfferYear');
+  });
+
   test('Feb 29 is valid (leap-year birthday)', async () => {
     withConfig(enabledConfig());
     const res = mockRes();

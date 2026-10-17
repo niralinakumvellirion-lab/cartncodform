@@ -460,6 +460,31 @@ async function processScheduledJobs() {
             });
           }
 
+          // Birthday push: re-check suppression and consent at send time, and
+          // resolve a specific cartToken. Without one, sendPushToCustomers
+          // queries all store subscribers instead of the target profile.
+          if (job.signalType === 'birthday' && job.profileId && !job.cartToken) {
+            const bdPushProf = await Profile.findById(job.profileId)
+              .select('suppressed channels identifiers').lean();
+            const stillSubscribed = bdPushProf &&
+              !bdPushProf.suppressed &&
+              bdPushProf.channels && bdPushProf.channels.push && bdPushProf.channels.push.subscribed;
+            if (!stillSubscribed) {
+              await ScheduledJob.findByIdAndUpdate(job._id, {
+                status: 'skipped',
+                error: bdPushProf && bdPushProf.suppressed ? 'profile_suppressed' : 'push_consent_withdrawn',
+              });
+              continue;
+            }
+            const bdCartToken = (bdPushProf.identifiers && bdPushProf.identifiers.cartTokens &&
+              bdPushProf.identifiers.cartTokens[0]) || null;
+            if (!bdCartToken) {
+              await ScheduledJob.findByIdAndUpdate(job._id, { status: 'skipped', error: 'no_push_token' });
+              continue;
+            }
+            job.cartToken = bdCartToken;
+          }
+
           // Phase 1 attribution — tag the click URL with ccf_src/ccf_job so
           // the storefront (getAttributionJob() in push-notifications.liquid)
           // can attribute subsequent revisit/cart/checkout/purchase events
@@ -616,64 +641,72 @@ async function processScheduledJobs() {
         } else if (channel === 'email' && job.signalType === 'birthday') {
           // Birthday email — profile email, not an AbandonedCustomer record.
           const bdProfile = await Profile.findById(job.profileId)
-            .select('channels identifiers').lean();
-          const bdEmail = bdProfile && (
-            (bdProfile.channels && bdProfile.channels.email && bdProfile.channels.email.address) ||
-            (bdProfile.identifiers && bdProfile.identifiers.emails && bdProfile.identifiers.emails[0])
-          );
-          if (!bdEmail) {
+            .select('suppressed channels identifiers').lean();
+          if (bdProfile && bdProfile.suppressed) {
             await ScheduledJob.findByIdAndUpdate(job._id, {
               status: 'skipped',
-              error: 'No email address on profile',
+              error: 'profile_suppressed',
             });
-            console.log(`[automation] Birthday job ${job._id} skipped — no email`);
+            console.log(`[automation] Birthday job ${job._id} skipped — profile suppressed`);
           } else {
-            const bdCopy = await generateCopy(
-              { ...(jobStore && jobStore.toObject ? jobStore.toObject() : {}), voice },
-              'birthday',
-              null,
-              'email'
-            ).catch(() => ({
-              subject: 'Happy Birthday! A gift from us 🎂',
-              body: 'Wishing you a wonderful birthday! We have a personal discount code just for you.',
-            }));
-            let bdBody = bdCopy.body || '';
-            if (payload.birthdayCode) {
-              bdBody = bdBody + '\n\nYour personal birthday code: ' + payload.birthdayCode;
-              if (payload.birthdayPercentage) {
-                bdBody = bdBody + ' (' + payload.birthdayPercentage + '% off)';
-              }
-            }
-            await ScheduledJob.findByIdAndUpdate(job._id, {
-              $set: {
-                'payload.subject': bdCopy.subject || '',
-                'payload.body': bdBody,
-              },
-            });
-            const bdSendResult = await sendMarketingEmail(
-              bdEmail,
-              bdCopy.subject || '',
-              bdBody.replace(/\n/g, '<br>'),
-              job.shopDomain,
-              job.profileId
+            const bdEmail = bdProfile && (
+              (bdProfile.channels && bdProfile.channels.email && bdProfile.channels.email.address) ||
+              (bdProfile.identifiers && bdProfile.identifiers.emails && bdProfile.identifiers.emails[0])
             );
-            if (!bdSendResult || !bdSendResult.success) {
+            if (!bdEmail) {
               await ScheduledJob.findByIdAndUpdate(job._id, {
-                status: 'failed',
-                error: (bdSendResult && bdSendResult.error) || 'Birthday email send failed',
+                status: 'skipped',
+                error: 'No email address on profile',
               });
-              console.log(`[automation] Birthday job ${job._id} email failed`);
+              console.log(`[automation] Birthday job ${job._id} skipped — no email`);
             } else {
-              console.log(`[automation] Birthday job ${job._id} email sent successfully`);
-              await recordProfileMessage({
-                profileId: job.profileId,
-                channel: 'email',
-                signalType: 'birthday',
-                _id: job._id,
-              }).catch((e) => console.error('[brain] message log error:', e.message));
-              Profile.findByIdAndUpdate(job.profileId, {
-                'birthday.lastOfferYear': new Date().getFullYear(),
-              }).catch((e) => console.error('[birthday] lastOfferYear update error:', e.message));
+              const bdCopy = await generateCopy(
+                { ...(jobStore && jobStore.toObject ? jobStore.toObject() : {}), voice },
+                'birthday',
+                null,
+                'email'
+              ).catch(() => ({
+                subject: 'Happy Birthday! A gift from us 🎂',
+                body: 'Wishing you a wonderful birthday! We have a personal discount code just for you.',
+              }));
+              let bdBody = bdCopy.body || '';
+              if (payload.birthdayCode) {
+                bdBody = bdBody + '\n\nYour personal birthday code: ' + payload.birthdayCode;
+                if (payload.birthdayPercentage) {
+                  bdBody = bdBody + ' (' + payload.birthdayPercentage + '% off)';
+                }
+              }
+              await ScheduledJob.findByIdAndUpdate(job._id, {
+                $set: {
+                  'payload.subject': bdCopy.subject || '',
+                  'payload.body': bdBody,
+                },
+              });
+              const bdSendResult = await sendMarketingEmail(
+                bdEmail,
+                bdCopy.subject || '',
+                bdBody.replace(/\n/g, '<br>'),
+                job.shopDomain,
+                job.profileId
+              );
+              if (!bdSendResult || !bdSendResult.success) {
+                await ScheduledJob.findByIdAndUpdate(job._id, {
+                  status: 'failed',
+                  error: (bdSendResult && bdSendResult.error) || 'Birthday email send failed',
+                });
+                console.log(`[automation] Birthday job ${job._id} email failed`);
+              } else {
+                console.log(`[automation] Birthday job ${job._id} email sent successfully`);
+                await recordProfileMessage({
+                  profileId: job.profileId,
+                  channel: 'email',
+                  signalType: 'birthday',
+                  _id: job._id,
+                }).catch((e) => console.error('[brain] message log error:', e.message));
+                Profile.findByIdAndUpdate(job.profileId, {
+                  'birthday.lastOfferYear': new Date().getFullYear(),
+                }).catch((e) => console.error('[birthday] lastOfferYear update error:', e.message));
+              }
             }
           }
         } else if (channel === 'email') {
