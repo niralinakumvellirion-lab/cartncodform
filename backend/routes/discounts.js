@@ -46,8 +46,12 @@ function defaultConfig(shop) {
     bothDiscount: { enabled: false, percentage: 20, maxUses: 100, expiryDays: 7, prefix: 'VIP', offerText: '' },
     offerHeadline: 'Get a discount on your first order!',
     whatsappCapture: { enabled: false },
-    birthdayCapture: { popup: { enabled: false } },
-    birthdayDiscount: { enabled: false, percentage: 15, expiryDays: 7, leadDays: 3, prefix: 'BDAY', offerText: '' },
+    birthdayCapture: {
+      popup: { enabled: false },
+      banner: { enabled: false, text: '', buttonText: 'Get my gift', dismissDays: 7 },
+      postOrder: { enabled: false },
+    },
+    birthdayDiscount: { enabled: false, percentage: 15, expiryDays: 7, leadDays: 3, prefix: 'BDAY', offerText: '', consentText: "We’ll use your birthday only to send you a birthday offer." },
   };
 }
 
@@ -462,10 +466,22 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
     if (req.body.whatsappCapture && typeof req.body.whatsappCapture.enabled === 'boolean') {
       set['whatsappCapture.enabled'] = req.body.whatsappCapture.enabled;
     }
-    if (req.body.birthdayCapture &&
-        req.body.birthdayCapture.popup &&
-        typeof req.body.birthdayCapture.popup.enabled === 'boolean') {
-      set['birthdayCapture.popup.enabled'] = req.body.birthdayCapture.popup.enabled;
+    if (req.body.birthdayCapture && typeof req.body.birthdayCapture === 'object') {
+      const bc = req.body.birthdayCapture;
+      if (bc.popup && typeof bc.popup.enabled === 'boolean') {
+        set['birthdayCapture.popup.enabled'] = bc.popup.enabled;
+      }
+      if (bc.postOrder && typeof bc.postOrder.enabled === 'boolean') {
+        set['birthdayCapture.postOrder.enabled'] = bc.postOrder.enabled;
+      }
+      if (bc.banner && typeof bc.banner === 'object') {
+        const bn = bc.banner;
+        if (typeof bn.enabled === 'boolean') set['birthdayCapture.banner.enabled'] = bn.enabled;
+        if (typeof bn.text === 'string') set['birthdayCapture.banner.text'] = bn.text.trim().slice(0, 120);
+        if (typeof bn.buttonText === 'string') set['birthdayCapture.banner.buttonText'] = bn.buttonText.trim().slice(0, 40) || 'Get my gift';
+        const dismissDays = Number(bn.dismissDays);
+        if (Number.isFinite(dismissDays)) set['birthdayCapture.banner.dismissDays'] = Math.min(30, Math.max(1, Math.round(dismissDays)));
+      }
     }
     if (req.body.birthdayDiscount && typeof req.body.birthdayDiscount === 'object') {
       const bd = req.body.birthdayDiscount;
@@ -479,6 +495,9 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
       }
       if (typeof bd.offerText === 'string') {
         set['birthdayDiscount.offerText'] = bd.offerText.trim().slice(0, OFFER_TEXT_MAX);
+      }
+      if (typeof bd.consentText === 'string') {
+        set['birthdayDiscount.consentText'] = bd.consentText.trim().slice(0, 200);
       }
       const bdLead = Number(bd.leadDays);
       if (Number.isFinite(bdLead)) set['birthdayDiscount.leadDays'] = Math.min(7, Math.max(0, Math.round(bdLead)));

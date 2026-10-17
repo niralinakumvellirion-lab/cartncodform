@@ -876,47 +876,38 @@
     renderDiscountCode(d, action, productHandle, style);
   }
 
-  // Birthday capture — optional second step shown after the main popup flow
-  // succeeds. Replaces the popup's #ccf-content-section with a brief form.
-  // Any error calls onDone() immediately so it never blocks or breaks the
-  // existing flow.
+  // Birthday capture — shared form renderer and entry-point wrappers.
+  // ccfRenderBirthdayForm: renders month/day selects + consent + Save/Skip
+  //   into `container`, POSTs to /birthday with `source`, calls onDone(saved).
+  // ccfShowBirthdayStep: popup entry point (checks enabled + localStorage).
+  // ccfInitBirthdayBanner: announcement-bar entry point.
   var CCF_BDAY_KEY = 'ccf_bday_' + SHOP_DOMAIN;
-  function ccfShowBirthdayStep(wrap, accentColor, onDone) {
+  var CCF_BDAY_DISMISS_KEY = 'ccf_bday_dismiss_' + SHOP_DOMAIN;
+
+  function ccfRenderBirthdayForm(container, opts, onDone) {
     try {
-      var bdEnabled = !!(discountConfig &&
-        discountConfig.birthdayCapture &&
-        discountConfig.birthdayCapture.popup &&
-        discountConfig.birthdayCapture.popup.enabled);
-      if (!bdEnabled) { onDone(); return; }
-      try { if (localStorage.getItem(CCF_BDAY_KEY)) { onDone(); return; } } catch (e) {}
+      var accentColor = (opts && opts.accentColor) || '#4f46e5';
+      var source = (opts && opts.source) || 'popup';
+      var consentText = (opts && opts.consentText) || 'We’ll use your birthday only to send you a birthday offer.';
 
-      var section = wrap ? wrap.querySelector('#ccf-content-section') : null;
-      if (!section) { onDone(); return; }
+      container.innerHTML = '';
 
-      var offerText = (discountConfig.birthdayDiscount && discountConfig.birthdayDiscount.offerText)
-        || 'Get a birthday gift';
+      if (opts && opts.offerText) {
+        var head = document.createElement('div');
+        head.style.cssText = 'font-size:16px;font-weight:700;color:#111827;margin-bottom:4px;';
+        head.textContent = opts.offerText;
+        container.appendChild(head);
+      }
 
-      // Clear existing content, preserving the element so renderDiscountCode
-      // can still find and swap #ccf-content-section if needed.
-      section.innerHTML = '';
-      section.style.textAlign = 'center';
-      section.style.padding = '8px 0 4px';
-
-      var head = document.createElement('div');
-      head.style.cssText = 'font-size:16px;font-weight:700;color:#111827;margin-bottom:4px;';
-      head.textContent = offerText;
-      section.appendChild(head);
-
-      var sub = document.createElement('div');
-      sub.style.cssText = 'font-size:11px;color:#6b7280;margin-bottom:14px;line-height:1.4;';
-      sub.textContent = 'We’ll use your birthday only to send you a birthday offer.';
-      section.appendChild(sub);
+      var consentEl = document.createElement('div');
+      consentEl.style.cssText = 'font-size:11px;color:#6b7280;margin-bottom:14px;line-height:1.4;';
+      consentEl.textContent = consentText;
+      container.appendChild(consentEl);
 
       var fieldRow = document.createElement('div');
       fieldRow.style.cssText = 'display:flex;gap:8px;margin-bottom:12px;';
 
       var monthSel = document.createElement('select');
-      monthSel.id = 'ccf-bday-month';
       monthSel.setAttribute('aria-label', 'Birthday month');
       monthSel.style.cssText = 'flex:1;height:36px;font-size:13px;padding:0 8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#111827;box-sizing:border-box;';
       var MONTHS = ['Month','January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -929,7 +920,6 @@
       fieldRow.appendChild(monthSel);
 
       var daySel = document.createElement('select');
-      daySel.id = 'ccf-bday-day';
       daySel.setAttribute('aria-label', 'Birthday day');
       daySel.style.cssText = 'width:84px;height:36px;font-size:13px;padding:0 8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#111827;box-sizing:border-box;';
       var dopt0 = document.createElement('option');
@@ -939,30 +929,25 @@
         dopt.value = String(di); dopt.textContent = String(di); daySel.appendChild(dopt);
       }
       fieldRow.appendChild(daySel);
-      section.appendChild(fieldRow);
+      container.appendChild(fieldRow);
 
       var saveBtn = document.createElement('button');
       saveBtn.type = 'button';
       saveBtn.textContent = 'Save my birthday';
-      saveBtn.style.cssText = 'width:100%;padding:10px;background:' + accentColor + ';color:#fff;border:none;border-radius:9px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:8px;';
-      section.appendChild(saveBtn);
+      saveBtn.style.cssText = 'width:100%;padding:10px;background:' + accentColor + ';color:#fff;border:none;border-radius:9px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:8px;min-height:44px;';
+      container.appendChild(saveBtn);
 
       var skipBtn = document.createElement('button');
       skipBtn.type = 'button';
       skipBtn.textContent = 'Skip';
-      skipBtn.style.cssText = 'width:100%;background:none;border:none;color:#9ca3af;font-size:12px;cursor:pointer;padding:4px;';
-      section.appendChild(skipBtn);
+      skipBtn.style.cssText = 'width:100%;background:none;border:none;color:#9ca3af;font-size:12px;cursor:pointer;padding:8px;min-height:44px;';
+      container.appendChild(skipBtn);
 
       var errEl = document.createElement('div');
       errEl.style.cssText = 'font-size:11px;color:#dc2626;margin-top:4px;display:none;';
-      section.appendChild(errEl);
+      container.appendChild(errEl);
 
-      function markDone(saved) {
-        try { localStorage.setItem(CCF_BDAY_KEY, saved ? '1' : 'skip'); } catch (e) {}
-        onDone();
-      }
-
-      skipBtn.addEventListener('click', function() { markDone(false); });
+      skipBtn.addEventListener('click', function() { onDone(false); });
 
       saveBtn.addEventListener('click', function() {
         var month = parseInt(monthSel.value, 10);
@@ -980,15 +965,181 @@
         fetch(window.location.origin + '/apps/cartncodform/birthday?shop=' + encodeURIComponent(SHOP_DOMAIN), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ month: month, day: day, sessionId: sid })
+          body: JSON.stringify({ month: month, day: day, sessionId: sid, source: source })
         })
-          .then(function() { markDone(true); })
-          .catch(function() { markDone(true); }); // failure never blocks
+          .then(function() { onDone(true); })
+          .catch(function() { onDone(false); }); // failure never blocks
       });
     } catch (e) {
-      // Any unexpected error: proceed without the birthday step.
+      try { onDone(false); } catch (_) {}
+    }
+  }
+
+  function ccfShowBirthdayStep(wrap, accentColor, onDone) {
+    try {
+      var bdEnabled = !!(discountConfig &&
+        discountConfig.birthdayCapture &&
+        discountConfig.birthdayCapture.popup &&
+        discountConfig.birthdayCapture.popup.enabled);
+      if (!bdEnabled) { onDone(); return; }
+      try { if (localStorage.getItem(CCF_BDAY_KEY)) { onDone(); return; } } catch (e) {}
+
+      var section = wrap ? wrap.querySelector('#ccf-content-section') : null;
+      if (!section) { onDone(); return; }
+
+      var offerText = (discountConfig.birthdayDiscount && discountConfig.birthdayDiscount.offerText)
+        || 'Get a birthday gift';
+      var consentText = (discountConfig.birthdayDiscount && discountConfig.birthdayDiscount.consentText)
+        || 'We’ll use your birthday only to send you a birthday offer.';
+
+      section.style.textAlign = 'center';
+      section.style.padding = '8px 0 4px';
+
+      ccfRenderBirthdayForm(section, {
+        accentColor: accentColor,
+        offerText: offerText,
+        consentText: consentText,
+        source: 'popup',
+      }, function(saved) {
+        try { localStorage.setItem(CCF_BDAY_KEY, saved ? '1' : 'skip'); } catch (e) {}
+        onDone();
+      });
+    } catch (e) {
       try { onDone(); } catch (_) {}
     }
+  }
+
+  // Top announcement banner — shown when banner.enabled AND no birthday saved
+  // AND not dismissed within dismissDays. Normal-flow bar (not fixed), inserted
+  // as the first child of <body>. Admin-configured text via textContent only.
+  function ccfInitBirthdayBanner() {
+    try {
+      var bc = discountConfig && discountConfig.birthdayCapture && discountConfig.birthdayCapture.banner;
+      if (!bc || !bc.enabled) return;
+      try { if (localStorage.getItem(CCF_BDAY_KEY)) return; } catch (e) {}
+      var dismissDays = Number(bc.dismissDays) || 7;
+      try {
+        var dismissTs = localStorage.getItem(CCF_BDAY_DISMISS_KEY);
+        if (dismissTs && Date.now() - Number(dismissTs) < dismissDays * 86400000) return;
+      } catch (e) {}
+
+      var pct = (discountConfig.birthdayDiscount && discountConfig.birthdayDiscount.percentage) || 15;
+      var barText = bc.text || ('Tell us your birthday and get ' + pct + '% off everything');
+      var btnText = bc.buttonText || 'Get my gift';
+      var consentText = (discountConfig.birthdayDiscount && discountConfig.birthdayDiscount.consentText)
+        || 'We’ll use your birthday only to send you a birthday offer.';
+      var accent = (popupConfig && popupConfig.accentColor) || '#4f46e5';
+
+      var bar = document.createElement('div');
+      bar.id = 'ccf-bday-bar';
+      bar.style.cssText = 'background:#3730a3;color:#fff;display:flex;align-items:center;justify-content:center;gap:10px;padding:0 12px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;box-sizing:border-box;width:100%;min-height:44px;';
+
+      var textEl = document.createElement('span');
+      textEl.textContent = barText;
+      textEl.style.cssText = 'flex:1;text-align:center;line-height:1.3;';
+      bar.appendChild(textEl);
+
+      var triggerBtn = document.createElement('button');
+      triggerBtn.type = 'button';
+      triggerBtn.textContent = btnText;
+      triggerBtn.setAttribute('aria-expanded', 'false');
+      triggerBtn.style.cssText = 'background:#fff;color:#3730a3;border:none;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;min-height:32px;';
+      bar.appendChild(triggerBtn);
+
+      var dismissBtn = document.createElement('button');
+      dismissBtn.type = 'button';
+      dismissBtn.setAttribute('aria-label', 'Dismiss birthday offer');
+      dismissBtn.textContent = '×';
+      dismissBtn.style.cssText = 'background:none;border:none;color:#fff;font-size:20px;cursor:pointer;flex-shrink:0;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;';
+      bar.appendChild(dismissBtn);
+
+      // Wrap gives the dropdown an anchor for absolute positioning on desktop.
+      var barWrap = document.createElement('div');
+      barWrap.style.cssText = 'position:relative;';
+      barWrap.appendChild(bar);
+      document.body.insertBefore(barWrap, document.body.firstChild);
+
+      var panel = null;
+      var panelOpen = false;
+      var escHandler = null;
+
+      function isMobile() { return window.innerWidth < 640; }
+
+      function closePanel() {
+        if (!panel) return;
+        if (isMobile()) {
+          var ov = document.getElementById('ccf-bday-overlay');
+          if (ov && ov.parentNode) ov.parentNode.removeChild(ov);
+        }
+        if (panel.parentNode) panel.parentNode.removeChild(panel);
+        panel = null;
+        panelOpen = false;
+        triggerBtn.setAttribute('aria-expanded', 'false');
+        if (escHandler) { document.removeEventListener('keydown', escHandler); escHandler = null; }
+        triggerBtn.focus();
+      }
+
+      function openPanel() {
+        if (panelOpen) { closePanel(); return; }
+        panelOpen = true;
+        triggerBtn.setAttribute('aria-expanded', 'true');
+
+        var formContainer = document.createElement('div');
+        formContainer.style.cssText = 'padding:16px;';
+
+        panel = document.createElement('div');
+        panel.setAttribute('role', 'dialog');
+        panel.setAttribute('aria-modal', 'false');
+
+        if (isMobile()) {
+          var overlay = document.createElement('div');
+          overlay.id = 'ccf-bday-overlay';
+          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9998;';
+          overlay.addEventListener('click', closePanel);
+          document.body.appendChild(overlay);
+          panel.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#fff;border-radius:16px 16px 0 0;z-index:9999;box-shadow:0 -4px 24px rgba(0,0,0,0.15);max-height:80vh;overflow-y:auto;';
+          panel.appendChild(formContainer);
+          document.body.appendChild(panel);
+        } else {
+          panel.style.cssText = 'position:absolute;top:100%;right:0;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.12);z-index:9999;min-width:280px;max-width:340px;';
+          panel.appendChild(formContainer);
+          barWrap.appendChild(panel);
+        }
+
+        ccfRenderBirthdayForm(formContainer, {
+          accentColor: accent,
+          consentText: consentText,
+          source: 'banner',
+        }, function(saved) {
+          if (saved) {
+            try { localStorage.setItem(CCF_BDAY_KEY, '1'); } catch (e) {}
+            closePanel();
+            textEl.textContent = 'Birthday saved! Your gift is on its way.';
+            setTimeout(function() {
+              try { if (barWrap.parentNode) barWrap.parentNode.removeChild(barWrap); } catch (_) {}
+            }, 3000);
+          } else {
+            closePanel();
+          }
+        });
+
+        setTimeout(function() {
+          var first = panel && panel.querySelector('select,input,button');
+          if (first) first.focus();
+        }, 50);
+
+        escHandler = function(e) { if (e.key === 'Escape') closePanel(); };
+        document.addEventListener('keydown', escHandler);
+      }
+
+      triggerBtn.addEventListener('click', openPanel);
+
+      dismissBtn.addEventListener('click', function() {
+        try { localStorage.setItem(CCF_BDAY_DISMISS_KEY, String(Date.now())); } catch (e) {}
+        try { if (barWrap.parentNode) barWrap.parentNode.removeChild(barWrap); } catch (_) {}
+      });
+
+    } catch (e) { /* never block page */ }
   }
 
   // Inject a discount CTA directly under the product page's Buy Now / Add to
@@ -3944,6 +4095,7 @@
     // backend and silently never show the nudge).
     Promise.all([fetchPopupConfig(), fetchDiscountConfig()]).then(function () {
       initIntentTriggers();
+      ccfInitBirthdayBanner();
 
       // Inject product page discount nudge.
       setTimeout(function() {

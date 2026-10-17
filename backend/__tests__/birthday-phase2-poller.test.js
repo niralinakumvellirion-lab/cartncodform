@@ -219,24 +219,48 @@ describe('3b — birthday push: suppression/consent re-check at send time', () =
     expect(callArgs[6]).toBe('cart-tok-xyz');
   });
 
-  test('birthday push with pre-set cartToken (retry) skips profile load', async () => {
-    // If job.cartToken is already set (retry), the profile check is skipped
+  test('birthday push retry with valid profile — fires with job existing cartToken', async () => {
+    // Step 0a: suppression check now runs on retries too (cartToken already set).
+    // Profile must be unsuppressed and subscribed; cartToken stays the job's value.
     ScheduledJob.find.mockReturnValue({ limit: () => Promise.resolve([
       birthdayPushJob({ cartToken: 'existing-cart-tok' }),
     ]) });
-    // Profile.findById should NOT be called for the suppression check
-    const findByIdSpy = jest.spyOn(Profile, 'findById');
+    Profile.findById.mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve({
+        _id: PROF_ID, suppressed: false,
+        channels: { push: { subscribed: true } },
+        identifiers: { cartTokens: ['other-tok'] }, // profile token is ignored on retry
+      }) }),
+    });
 
     await _processScheduledJobs();
 
-    // Profile may be called for other reasons (recordProfileMessage etc) but
-    // the select('suppressed channels identifiers') path skips when cartToken is set.
-    // The important assertion: sendPushToCustomers still fires with existing cartToken.
     expect(sendPushToCustomers).toHaveBeenCalled();
     const callArgs = sendPushToCustomers.mock.calls[0];
+    // Must use the job's pre-set cartToken, not the profile's
     expect(callArgs[6]).toBe('existing-cart-tok');
+  });
 
-    findByIdSpy.mockRestore();
+  test('birthday push retry with suppressed profile — skipped even with pre-set cartToken', async () => {
+    ScheduledJob.find.mockReturnValue({ limit: () => Promise.resolve([
+      birthdayPushJob({ cartToken: 'existing-cart-tok' }),
+    ]) });
+    Profile.findById.mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve({
+        _id: PROF_ID, suppressed: true,
+        channels: { push: { subscribed: true } },
+        identifiers: { cartTokens: ['existing-cart-tok'] },
+      }) }),
+    });
+
+    await _processScheduledJobs();
+
+    expect(sendPushToCustomers).not.toHaveBeenCalled();
+    const skipCall = ScheduledJob.findByIdAndUpdate.mock.calls.find(
+      ([, upd]) => upd && upd.status === 'skipped'
+    );
+    expect(skipCall).toBeDefined();
+    expect(skipCall[1].error).toBe('profile_suppressed');
   });
 });
 

@@ -132,10 +132,20 @@ router.get('/discount-config', async (req, res) => {
       bothDiscount: off(doc.bothDiscount),
       offerHeadline: doc.offerHeadline || 'Get a discount on your first order!',
       whatsappCapture: { enabled: !!(doc.whatsappCapture && doc.whatsappCapture.enabled) },
-      birthdayCapture: { popup: { enabled: !!(doc.birthdayCapture && doc.birthdayCapture.popup && doc.birthdayCapture.popup.enabled) } },
+      birthdayCapture: {
+        popup: { enabled: !!(doc.birthdayCapture && doc.birthdayCapture.popup && doc.birthdayCapture.popup.enabled) },
+        banner: {
+          enabled: !!(doc.birthdayCapture && doc.birthdayCapture.banner && doc.birthdayCapture.banner.enabled),
+          text: String((doc.birthdayCapture && doc.birthdayCapture.banner && doc.birthdayCapture.banner.text) || '').slice(0, 120),
+          buttonText: String((doc.birthdayCapture && doc.birthdayCapture.banner && doc.birthdayCapture.banner.buttonText) || 'Get my gift').slice(0, 40),
+          dismissDays: Math.max(1, Math.min(30, Number((doc.birthdayCapture && doc.birthdayCapture.banner && doc.birthdayCapture.banner.dismissDays) || 7))),
+        },
+        postOrder: { enabled: !!(doc.birthdayCapture && doc.birthdayCapture.postOrder && doc.birthdayCapture.postOrder.enabled) },
+      },
       birthdayDiscount: {
         percentage: (doc.birthdayDiscount && doc.birthdayDiscount.percentage) || 15,
         offerText: String((doc.birthdayDiscount && doc.birthdayDiscount.offerText) || '').trim().slice(0, 120),
+        consentText: String((doc.birthdayDiscount && doc.birthdayDiscount.consentText) || "We’ll use your birthday only to send you a birthday offer.").slice(0, 200),
       },
     });
   } catch (err) {
@@ -219,6 +229,8 @@ function _isValidBirthday(month, day) {
   return day <= _BDAY_MAX_DAY[month - 1];
 }
 
+const _BDAY_SOURCES = ['popup', 'banner', 'post_order', 'thank_you'];
+
 router.post('/birthday', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 'no-store');
@@ -237,11 +249,17 @@ router.post('/birthday', async (req, res) => {
       return res.status(429).json({ ok: false, error: 'Too many requests' });
     }
 
+    // Whitelist source; anything unknown maps to 'popup'.
+    const rawSource = req.body && req.body.source ? String(req.body.source) : '';
+    const source = _BDAY_SOURCES.includes(rawSource) ? rawSource : 'popup';
+
     const config = await DiscountConfig.findOne({ shopDomain: shop }).lean();
-    if (!config ||
-        !config.birthdayCapture ||
-        !config.birthdayCapture.popup ||
-        !config.birthdayCapture.popup.enabled) {
+    // Gate: at least one birthday capture method must be enabled.
+    const anyEnabled = !!(config &&
+      ((config.birthdayCapture && config.birthdayCapture.popup && config.birthdayCapture.popup.enabled) ||
+       (config.birthdayCapture && config.birthdayCapture.banner && config.birthdayCapture.banner.enabled) ||
+       (config.birthdayCapture && config.birthdayCapture.postOrder && config.birthdayCapture.postOrder.enabled)));
+    if (!anyEnabled) {
       return res.status(403).json({ ok: false, error: 'Birthday capture not enabled' });
     }
 
@@ -259,7 +277,7 @@ router.post('/birthday', async (req, res) => {
         'birthday.month': month,
         'birthday.day': day,
         'birthday.capturedAt': new Date(),
-        'birthday.source': 'popup',
+        'birthday.source': source,
         lastSeenAt: new Date(),
       }
     ).catch(() => {});
@@ -276,7 +294,7 @@ router.post('/birthday', async (req, res) => {
 // App Proxy:  https://{shop}/apps/cartncodform/cod-form?productName=..&price=..
 // Customer-facing HTML, so the App Proxy signature is HARD-enforced here.
 // ---------------------------------------------------------------------------
-router.get('/cod-form', (req, res) => {
+router.get('/cod-form', async (req, res) => {
   if (!verifyProxySignature(req.query)) {
     console.warn('[proxy] Invalid or missing App Proxy signature on /cod-form — rejecting');
     return res.status(403).send('Invalid signature');
@@ -290,9 +308,22 @@ router.get('/cod-form', (req, res) => {
   const priceNum = Number(price);
   const priceLabel = price && !Number.isNaN(priceNum) ? priceNum.toFixed(2) : '—';
 
+  // Birthday post-order ask config — load silently, failure falls back to disabled.
+  let postOrderEnabled = false;
+  let birthdayPct = 15;
+  let consentText = "We’ll use your birthday only to send you a birthday offer.";
+  try {
+    const bdCfg = await DiscountConfig.findOne({ shopDomain: shop }).lean();
+    if (bdCfg) {
+      postOrderEnabled = !!(bdCfg.birthdayCapture && bdCfg.birthdayCapture.postOrder && bdCfg.birthdayCapture.postOrder.enabled);
+      birthdayPct = (bdCfg.birthdayDiscount && bdCfg.birthdayDiscount.percentage) || 15;
+      consentText = String((bdCfg.birthdayDiscount && bdCfg.birthdayDiscount.consentText) || consentText).slice(0, 200);
+    }
+  } catch (_) { /* keep defaults */ }
+
   // Values handed to the inline script — JSON-encoded, with "<" neutralised so
   // the payload can never break out of the <script> element.
-  const bootJson = JSON.stringify({ shop, productName, price, productId })
+  const bootJson = JSON.stringify({ shop, productName, price, productId, postOrderEnabled, birthdayPct, consentText })
     .replace(/</g, '\\u003c');
 
   const html = `<!doctype html>
@@ -362,6 +393,14 @@ router.get('/cod-form', (req, res) => {
   .ok .tick { font-size: 40px; }
   .ok h2 { font-size: 17px; margin: 10px 0 6px; }
   .ok p { font-size: 13px; color: #52525b; margin: 0; }
+  .bday-ask { border-top: 1px solid #e4e4e7; margin-top: 16px; padding-top: 16px; }
+  .bday-ask p { font-size: 13px; font-weight: 600; color: #18181b; margin: 0 0 12px; }
+  .bday-consent { font-size: 11px; color: #71717a; margin-bottom: 12px; line-height: 1.4; }
+  .bday-row { display: flex; gap: 8px; margin-bottom: 12px; }
+  .bday-row select { flex: 1; height: 36px; font-size: 13px; padding: 0 8px; border: 1px solid #d4d4d8; border-radius: 8px; background: #fff; color: #18181b; }
+  .bday-btn { width: 100%; padding: 10px; background: #4f46e5; color: #fff; border: none; border-radius: 9px; font-size: 14px; font-weight: 700; cursor: pointer; min-height: 44px; margin-bottom: 8px; }
+  .bday-skip { width: 100%; background: none; border: none; color: #a1a1aa; font-size: 12px; cursor: pointer; padding: 8px; min-height: 44px; }
+  .bday-err { font-size: 11px; color: #dc2626; margin-top: 4px; display: none; }
 </style>
 </head>
 <body>
@@ -465,12 +504,112 @@ router.get('/cod-form', (req, res) => {
         if (!result.ok || !result.body.success) {
           throw new Error((result.body && result.body.error) || 'Order failed. Please try again.');
         }
-        card.innerHTML =
-          '<div class="ok">' +
-          '<div class="tick">✅</div>' +
-          '<h2>Order placed!</h2>' +
-          '<p>We&rsquo;ll confirm via WhatsApp/call soon.</p>' +
-          '</div>';
+        card.innerHTML = '';
+        var ok = document.createElement('div');
+        ok.className = 'ok';
+        var tick = document.createElement('div');
+        tick.className = 'tick';
+        tick.textContent = '✅';
+        var h2 = document.createElement('h2');
+        h2.textContent = 'Order placed!';
+        var p = document.createElement('p');
+        p.textContent = 'We’ll confirm via WhatsApp/call soon.';
+        ok.appendChild(tick);
+        ok.appendChild(h2);
+        ok.appendChild(p);
+        card.appendChild(ok);
+
+        // Post-order birthday ask: shown on first COD order when enabled.
+        if (BOOT.postOrderEnabled && result.body.isFirstOrder) {
+          var bdKey = 'ccf_bday_' + BOOT.shop;
+          var bdSaved = false;
+          try { bdSaved = !!localStorage.getItem(bdKey); } catch (e) {}
+          if (!bdSaved) {
+            var bdAsk = document.createElement('div');
+            bdAsk.className = 'bday-ask';
+
+            var bdP = document.createElement('p');
+            bdP.textContent = 'One more thing — Share your birthday for ' + BOOT.birthdayPct + '% off on the day.';
+            bdAsk.appendChild(bdP);
+
+            var bdConsent = document.createElement('div');
+            bdConsent.className = 'bday-consent';
+            bdConsent.textContent = BOOT.consentText;
+            bdAsk.appendChild(bdConsent);
+
+            var bdRow = document.createElement('div');
+            bdRow.className = 'bday-row';
+            var MONTHS = ['Month','January','February','March','April','May','June','July','August','September','October','November','December'];
+            var bdMonth = document.createElement('select');
+            bdMonth.setAttribute('aria-label', 'Birthday month');
+            for (var bmi = 0; bmi < MONTHS.length; bmi++) {
+              var bmo = document.createElement('option');
+              bmo.value = String(bmi);
+              bmo.textContent = MONTHS[bmi];
+              bdMonth.appendChild(bmo);
+            }
+            bdRow.appendChild(bdMonth);
+            var bdDay = document.createElement('select');
+            bdDay.setAttribute('aria-label', 'Birthday day');
+            bdDay.style.width = '84px';
+            var bdo0 = document.createElement('option');
+            bdo0.value = '0'; bdo0.textContent = 'Day'; bdDay.appendChild(bdo0);
+            for (var bdi = 1; bdi <= 31; bdi++) {
+              var bdo = document.createElement('option');
+              bdo.value = String(bdi); bdo.textContent = String(bdi); bdDay.appendChild(bdo);
+            }
+            bdRow.appendChild(bdDay);
+            bdAsk.appendChild(bdRow);
+
+            var bdBtn = document.createElement('button');
+            bdBtn.type = 'button'; bdBtn.className = 'bday-btn';
+            bdBtn.textContent = 'Save my birthday';
+            bdAsk.appendChild(bdBtn);
+
+            var bdSkip = document.createElement('button');
+            bdSkip.type = 'button'; bdSkip.className = 'bday-skip';
+            bdSkip.textContent = 'Skip';
+            bdAsk.appendChild(bdSkip);
+
+            var bdErr = document.createElement('div');
+            bdErr.className = 'bday-err';
+            bdAsk.appendChild(bdErr);
+
+            card.appendChild(bdAsk);
+
+            bdSkip.addEventListener('click', function() {
+              try { bdAsk.parentNode.removeChild(bdAsk); } catch (_) {}
+            });
+
+            bdBtn.addEventListener('click', function() {
+              var m = parseInt(bdMonth.value, 10);
+              var d = parseInt(bdDay.value, 10);
+              if (!m || !d) {
+                bdErr.textContent = 'Please select a month and day.';
+                bdErr.style.display = '';
+                return;
+              }
+              bdErr.style.display = 'none';
+              bdBtn.disabled = true; bdBtn.textContent = 'Saving…';
+              fetch(window.location.origin + '/apps/cartncodform/birthday?shop=' + encodeURIComponent(BOOT.shop), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ month: m, day: d, source: 'post_order' })
+              })
+                .then(function() {
+                  try { localStorage.setItem(bdKey, '1'); } catch (e) {}
+                  bdAsk.innerHTML = '';
+                  var thanks = document.createElement('p');
+                  thanks.style.cssText = 'text-align:center;font-size:13px;color:#16a34a;margin:8px 0 0;';
+                  thanks.textContent = 'Birthday saved! Your offer will arrive on your birthday.';
+                  bdAsk.appendChild(thanks);
+                })
+                .catch(function() {
+                  bdBtn.disabled = false; bdBtn.textContent = 'Save my birthday';
+                });
+            });
+          }
+        }
       })
       .catch(function (err) {
         btn.disabled = false;
@@ -567,7 +706,14 @@ router.post('/cod-order', async (req, res) => {
       `${order.name} placed a COD order for ${order.productName}`
     );
 
-    return res.status(201).json({ success: true, orderId: order._id });
+    // Determine if this is the customer's first COD order (for the post-order birthday ask).
+    let isFirstOrder = false;
+    try {
+      const orderCount = await CodOrder.countDocuments({ shopDomain: shop, phone: String(phone).trim() });
+      isFirstOrder = orderCount === 1;
+    } catch (_) {}
+
+    return res.status(201).json({ success: true, orderId: order._id, isFirstOrder });
   } catch (err) {
     console.error('[proxy] POST /cod-order error:', err.message);
     return res.status(500).json({ success: false, error: 'Failed to save COD order' });

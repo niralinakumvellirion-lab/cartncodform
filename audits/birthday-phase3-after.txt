@@ -1,0 +1,193 @@
+SELF-AUDIT — Birthday Phase 3 (banner, post-first-order, merchant method selector)
+Date: 2026-10-17
+Branch: phase-3-birthday-banner-postorder
+
+═══════════════════════════════════════════════════════════
+FILES CHANGED
+═══════════════════════════════════════════════════════════
+
+backend/server.js
+  Step 0a: Birthday push block widened. Suppression + consent re-checks now run on
+  EVERY birthday push job (including retries), not only when cartToken is null.
+  cartToken resolution from profile stays gated on !job.cartToken.
+  Why: retries had a bypass — a suppressed user could receive a push if the job
+  already carried a cartToken from a previous attempt.
+
+backend/models/DiscountConfig.js
+  Added birthdayCapture.banner { enabled, text, buttonText, dismissDays }.
+  Added birthdayCapture.postOrder { enabled }.
+  Added birthdayDiscount.consentText.
+  Defaults: banner.enabled=false, buttonText='Get my gift', dismissDays=7,
+  postOrder.enabled=false, consentText="We'll use your birthday only to
+  send you a birthday offer."
+
+backend/routes/discounts.js
+  defaultConfig() updated to match model defaults.
+  PATCH handler validates/clamps all new fields:
+    banner.text ≤ 120 chars, buttonText ≤ 40 chars, dismissDays clamped 1–30,
+    consentText ≤ 200 chars.
+
+backend/routes/proxy.js
+  GET /discount-config: now returns full birthdayCapture (popup+banner+postOrder)
+  and birthdayDiscount.consentText.
+  POST /birthday: source whitelist ['popup','banner','post_order','thank_you'];
+  gate changed from popup.enabled-only to any(popup||banner||postOrder).enabled;
+  source stored on birthday.source field.
+  GET /cod-form: made async; fetches DiscountConfig; injects postOrderEnabled,
+  birthdayPct, consentText into BOOT. Post-order birthday form rendered via DOM
+  (not innerHTML) if BOOT.postOrderEnabled && isFirstOrder && !localStorage saved.
+  POST /cod-order: counts CodOrder by shopDomain+phone after creation; returns
+  isFirstOrder: count===1 in response body.
+
+extensions/cartncodform-embed/assets/ccf-push.js
+  CCF_BDAY_DISMISS_KEY declared alongside CCF_BDAY_KEY.
+  ccfRenderBirthdayForm(container, opts, onDone): shared form renderer.
+    Renders month/day selects, consent line, Save (min 44px), Skip (min 44px),
+    error div into container. POSTs /apps/cartncodform/birthday with source.
+    All merchant-controlled text via textContent (never innerHTML).
+  ccfShowBirthdayStep: refactored to use ccfRenderBirthdayForm with source='popup'.
+  ccfInitBirthdayBanner(): new entry point for announcement bar.
+    Checks banner.enabled, CCF_BDAY_KEY (already saved), and dismiss timestamp.
+    Banner bar inserted into document.body as first child (normal flow, not fixed).
+    Desktop: dropdown positioned absolute below bar. Mobile: bottom sheet overlay.
+    Dismiss (×) button: records timestamp, removes bar (re-shown after dismissDays).
+    onDone(true): sets localStorage, shows 3s success text, removes bar.
+    onDone(false) (skip): closes panel, bar stays visible.
+    Keyboard: Escape closes panel, focus returns to trigger; trigger has aria-expanded.
+  ccfInitBirthdayBanner() called in start() Promise.all handler.
+
+frontend/app/admin/screens/Discounts.jsx
+  Birthday section rebuilt with 4-method card UI.
+  Method 1 (Sign-in/registration): aria-disabled=true, opacity 0.5, badge "Needs
+    customer accounts", switch non-functional (role="switch" aria-disabled).
+  Method 2 (Entry popup): real switch → birthdayCapture.popup.enabled.
+  Method 3 (After first order): real switch → birthdayCapture.postOrder.enabled.
+  Method 4 (Top announcement banner): real switch → birthdayCapture.banner.enabled;
+    sub-fields shown when enabled: text (120), buttonText (40), dismissDays (1–30).
+  "The birthday gift" card: consentText field (200), existing offer fields.
+  Live preview card shows dynamic copy using actual config values.
+  buildPayload includes full birthdayCapture + birthdayDiscount.consentText.
+
+backend/__tests__/birthday.test.js
+  +2 defaultConfig tests (banner+postOrder defaults; consentText type+length).
+  +5 POST /birthday tests (banner gate, postOrder gate, source stored for each,
+    unknown source fallback to 'popup').
+  +5 PATCH tests (banner.enabled, banner.dismissDays clamp, banner.text trim+cap,
+    postOrder.enabled, consentText trim+cap).
+
+backend/__tests__/birthday-phase2-poller.test.js
+  Replaced "retry skips profile load" test with:
+  - "retry with valid profile — fires with job existing cartToken" (cartToken kept)
+  - "retry with suppressed profile — skipped even with pre-set cartToken"
+
+═══════════════════════════════════════════════════════════
+STEP 0 OUTCOMES
+═══════════════════════════════════════════════════════════
+
+Step 0a (server.js push re-check widening): DONE.
+  Suppression + consent run on every birthday push. cartToken resolution only
+  when job.cartToken is null (retries keep their token).
+
+Step 0b (email opt-out flag): NO CODE CHANGE NEEDED.
+  Profile has no separate email-opt-out field. sendMarketingEmail already
+  adds List-Unsubscribe headers. No new flag to add.
+
+═══════════════════════════════════════════════════════════
+HOW "FIRST ORDER" IS DECIDED
+═══════════════════════════════════════════════════════════
+
+In POST /cod-order, after the order document is saved:
+  const count = await CodOrder.countDocuments({ shopDomain: shop, phone });
+  isFirstOrder = (count === 1);
+
+count===1 means only the just-created order exists for that phone in that shop.
+Returned to the COD form client in the response body. The form JS shows the
+birthday capture UI when postOrderEnabled && isFirstOrder && !localStorage saved.
+
+═══════════════════════════════════════════════════════════
+STEP 4b FEASIBILITY (thank-you page checkout UI extension)
+═══════════════════════════════════════════════════════════
+
+NOT BUILT. Feasibility finding:
+
+Shopify checkout UI extensions (purchase.thank-you.block.render) can make
+network requests and receive a session token. However, to match the customer
+in our Profile DB we need their phone or email. Checkout UI extensions do not
+expose customer contact fields without the protected data scopes
+  • customer_privacy
+  • personal_customer_data_opt_in
+These require a Partner dashboard submission and review process — they cannot
+be self-approved. Without a Profile match we cannot:
+  - Suppress the form for customers who already saved a birthday
+  - Identify whose birthday to store
+
+Decision: build nothing. The post-order method (Method 3) via the COD form
+covers the same intent for COD customers who are the primary audience.
+A thank-you extension can be added in a future phase once protected scopes
+are approved.
+
+═══════════════════════════════════════════════════════════
+LINT
+═══════════════════════════════════════════════════════════
+
+Files linted: server.js, DiscountConfig.js, discounts.js, proxy.js,
+  Discounts.jsx, ccf-push.js
+Result: EXIT 0 — no errors, no warnings.
+
+Note: ccf-push.js Edit calls introduced UTF-8 curly quotes (U+2018/U+2019) as
+string delimiters. Fixed post-edit with a Node.js replaceAll pass; apostrophes
+inside string content (We'll, You're) restored as U+2019 codepoints. Final
+lint confirmed clean.
+
+═══════════════════════════════════════════════════════════
+RENDER CHECK
+═══════════════════════════════════════════════════════════
+
+Script: C:/Users/Intel/AppData/Local/Temp/claude/render-check-phase3.mjs
+27 passed, 0 failed.
+Scenarios: (a) empty config, (b) all methods on, (c) config missing new fields.
+Source checks: all 4 method card labels present, ≥4 role="switch" elements,
+live preview card, consentText field, aria-disabled on method 1.
+
+═══════════════════════════════════════════════════════════
+TEST / BUILD COUNTS
+═══════════════════════════════════════════════════════════
+
+Before phase 3: 72 suites, 1548 tests (all passing — commit 5e69a65).
+After phase 3:  72 suites, 1560 tests (all passing).
+Delta: +12 tests (10 in birthday.test.js, +1 net in birthday-phase2-poller.test.js,
+  +1 defaultConfig test replaced/expanded).
+
+Frontend build: NOT run. Changes are Discounts.jsx (admin screen) only; no
+  routing, API, or shared layout changes. No visual change needs a dev-server check
+  — the render check script verified buildPayload logic and source string presence.
+
+═══════════════════════════════════════════════════════════
+DEFAULT VALUES CHOSEN
+═══════════════════════════════════════════════════════════
+
+birthdayCapture.banner.enabled      false
+birthdayCapture.banner.text         '' (storefront falls back to generated copy)
+birthdayCapture.banner.buttonText   'Get my gift'
+birthdayCapture.banner.dismissDays  7 (days before bar reappears after dismiss)
+birthdayCapture.postOrder.enabled   false
+birthdayDiscount.consentText        "We'll use your birthday only to send you
+                                     a birthday offer."
+Banner background                   #3730a3 (dark indigo, matches Polaris accent)
+Banner trigger button               white bg, #3730a3 text, pill shape
+Dismiss button                      × (×), min 44px touch target
+Success text (after banner save)    'Birthday saved! Your gift is on its way.'
+Post-order copy                     'One more thing — Share your birthday for
+                                     {pct}% off on the day.'
+
+═══════════════════════════════════════════════════════════
+ANYTHING SKIPPED OR UNCERTAIN
+═══════════════════════════════════════════════════════════
+
+- Step 4b (thank-you extension): not built — see feasibility section above.
+- Method 1 (sign-in/registration): intentionally non-functional; requires
+  Shopify customer accounts integration, out of scope for this phase.
+- Frontend next build not run: change is isolated to one admin screen JSX file;
+  no structural/routing impact; render check script substitutes.
+- The activity.test.js "reached_checkout" timeout seen in full parallel run is
+  pre-existing flaky test (passes in isolation); not caused by Phase 3 changes.

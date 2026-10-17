@@ -460,29 +460,34 @@ async function processScheduledJobs() {
             });
           }
 
-          // Birthday push: re-check suppression and consent at send time, and
-          // resolve a specific cartToken. Without one, sendPushToCustomers
-          // queries all store subscribers instead of the target profile.
-          if (job.signalType === 'birthday' && job.profileId && !job.cartToken) {
+          // Birthday push: re-check suppression and consent on every send
+          // (first try AND retries). Without this, a profile that opts out
+          // between sweep scheduling and delivery would still receive the push.
+          // CartToken resolution only runs on first try — retries already carry one.
+          if (job.signalType === 'birthday' && job.profileId) {
             const bdPushProf = await Profile.findById(job.profileId)
               .select('suppressed channels identifiers').lean();
-            const stillSubscribed = bdPushProf &&
-              !bdPushProf.suppressed &&
-              bdPushProf.channels && bdPushProf.channels.push && bdPushProf.channels.push.subscribed;
-            if (!stillSubscribed) {
+            if (!bdPushProf || bdPushProf.suppressed) {
               await ScheduledJob.findByIdAndUpdate(job._id, {
-                status: 'skipped',
-                error: bdPushProf && bdPushProf.suppressed ? 'profile_suppressed' : 'push_consent_withdrawn',
+                status: 'skipped', error: 'profile_suppressed',
               });
               continue;
             }
-            const bdCartToken = (bdPushProf.identifiers && bdPushProf.identifiers.cartTokens &&
-              bdPushProf.identifiers.cartTokens[0]) || null;
-            if (!bdCartToken) {
-              await ScheduledJob.findByIdAndUpdate(job._id, { status: 'skipped', error: 'no_push_token' });
+            if (!(bdPushProf.channels && bdPushProf.channels.push && bdPushProf.channels.push.subscribed)) {
+              await ScheduledJob.findByIdAndUpdate(job._id, {
+                status: 'skipped', error: 'push_consent_withdrawn',
+              });
               continue;
             }
-            job.cartToken = bdCartToken;
+            if (!job.cartToken) {
+              const bdCartToken = (bdPushProf.identifiers && bdPushProf.identifiers.cartTokens &&
+                bdPushProf.identifiers.cartTokens[0]) || null;
+              if (!bdCartToken) {
+                await ScheduledJob.findByIdAndUpdate(job._id, { status: 'skipped', error: 'no_push_token' });
+                continue;
+              }
+              job.cartToken = bdCartToken;
+            }
           }
 
           // Phase 1 attribution — tag the click URL with ccf_src/ccf_job so

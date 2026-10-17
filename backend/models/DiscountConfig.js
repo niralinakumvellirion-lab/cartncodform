@@ -62,9 +62,18 @@ const discountConfigSchema = new mongoose.Schema({
     enabled: { type: Boolean, default: false },
   },
 
-  // Birthday capture: show an optional second step after the main popup.
+  // Birthday capture: show a birthday form via different entry points.
   birthdayCapture: {
     popup: {
+      enabled: { type: Boolean, default: false },
+    },
+    banner: {
+      enabled: { type: Boolean, default: false },
+      text: { type: String, default: '' },
+      buttonText: { type: String, default: 'Get my gift' },
+      dismissDays: { type: Number, default: 7, min: 1, max: 30 },
+    },
+    postOrder: {
       enabled: { type: Boolean, default: false },
     },
   },
@@ -77,6 +86,7 @@ const discountConfigSchema = new mongoose.Schema({
     leadDays: { type: Number, default: 3, min: 0, max: 7 },
     prefix: { type: String, default: 'BDAY' },
     offerText: { type: String, default: '' },
+    consentText: { type: String, default: "We’ll use your birthday only to send you a birthday offer." },
   },
 
   // Popup text customization — shown above the email/phone fields.

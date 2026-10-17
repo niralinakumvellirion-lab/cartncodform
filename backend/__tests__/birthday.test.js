@@ -76,7 +76,15 @@ describe('defaultConfig back-compat', () => {
     expect(cfg.birthdayCapture.popup.enabled).toBe(false);
   });
 
-  test('contains birthdayDiscount with correct defaults', () => {
+  test('contains birthdayCapture.banner and postOrder with correct defaults', () => {
+    const cfg = defaultConfig(SHOP);
+    expect(cfg.birthdayCapture.banner.enabled).toBe(false);
+    expect(cfg.birthdayCapture.banner.dismissDays).toBe(7);
+    expect(cfg.birthdayCapture.banner.buttonText).toBe('Get my gift');
+    expect(cfg.birthdayCapture.postOrder.enabled).toBe(false);
+  });
+
+  test('contains birthdayDiscount with correct defaults including consentText', () => {
     const cfg = defaultConfig(SHOP);
     expect(cfg.birthdayDiscount).toBeDefined();
     expect(cfg.birthdayDiscount.enabled).toBe(false);
@@ -84,6 +92,8 @@ describe('defaultConfig back-compat', () => {
     expect(cfg.birthdayDiscount.expiryDays).toBe(7);
     expect(cfg.birthdayDiscount.prefix).toBe('BDAY');
     expect(cfg.birthdayDiscount.offerText).toBe('');
+    expect(typeof cfg.birthdayDiscount.consentText).toBe('string');
+    expect(cfg.birthdayDiscount.consentText.length).toBeGreaterThan(0);
   });
 });
 
@@ -161,6 +171,40 @@ describe('PATCH /:shopDomain/config — birthday fields', () => {
     await run({ birthdayDiscount: { offerText: '  ' + long + '  ' } });
     const [, { $set }] = DiscountConfig.findOneAndUpdate.mock.calls[0];
     expect($set['birthdayDiscount.offerText'].length).toBe(120);
+  });
+
+  test('birthdayCapture.banner.enabled true forwarded', async () => {
+    await run({ birthdayCapture: { banner: { enabled: true } } });
+    const [, { $set }] = DiscountConfig.findOneAndUpdate.mock.calls[0];
+    expect($set['birthdayCapture.banner.enabled']).toBe(true);
+  });
+
+  test('birthdayCapture.banner.dismissDays clamped 1–30', async () => {
+    await run({ birthdayCapture: { banner: { dismissDays: 0 } } });
+    const [, { $set: s1 }] = DiscountConfig.findOneAndUpdate.mock.calls[0];
+    expect(s1['birthdayCapture.banner.dismissDays']).toBe(1);
+    await run({ birthdayCapture: { banner: { dismissDays: 999 } } });
+    const [, { $set: s2 }] = DiscountConfig.findOneAndUpdate.mock.calls[1];
+    expect(s2['birthdayCapture.banner.dismissDays']).toBe(30);
+  });
+
+  test('birthdayCapture.banner.text trimmed and capped at 120', async () => {
+    await run({ birthdayCapture: { banner: { text: 'x'.repeat(150) } } });
+    const [, { $set }] = DiscountConfig.findOneAndUpdate.mock.calls[0];
+    expect($set['birthdayCapture.banner.text'].length).toBe(120);
+  });
+
+  test('birthdayCapture.postOrder.enabled true forwarded', async () => {
+    await run({ birthdayCapture: { postOrder: { enabled: true } } });
+    const [, { $set }] = DiscountConfig.findOneAndUpdate.mock.calls[0];
+    expect($set['birthdayCapture.postOrder.enabled']).toBe(true);
+  });
+
+  test('birthdayDiscount.consentText trimmed and capped at 200', async () => {
+    const long = 'c'.repeat(250);
+    await run({ birthdayDiscount: { consentText: long } });
+    const [, { $set }] = DiscountConfig.findOneAndUpdate.mock.calls[0];
+    expect($set['birthdayDiscount.consentText'].length).toBe(200);
   });
 });
 
@@ -273,6 +317,49 @@ describe('POST /birthday proxy route', () => {
     expect(res.statusCode).toBe(403);
     expect(res.body.ok).toBe(false);
     expect(upsertProfile).not.toHaveBeenCalled();
+  });
+
+  test('banner.enabled=true allows request even when popup.enabled=false', async () => {
+    withConfig({ birthdayCapture: { popup: { enabled: false }, banner: { enabled: true } } });
+    const res = mockRes();
+    await post(req({ month: 5, day: 10 }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+
+  test('postOrder.enabled=true allows request even when popup.enabled=false', async () => {
+    withConfig({ birthdayCapture: { popup: { enabled: false }, postOrder: { enabled: true } } });
+    const res = mockRes();
+    await post(req({ month: 3, day: 20 }), res);
+    expect(res.statusCode).toBe(200);
+    expect(res.body.ok).toBe(true);
+  });
+
+  test('source "banner" is stored when sent', async () => {
+    withConfig({ birthdayCapture: { banner: { enabled: true } } });
+    const res = mockRes();
+    await post(req({ month: 4, day: 12, source: 'banner' }), res);
+    expect(res.statusCode).toBe(200);
+    const updateArg = upsertProfile.mock.calls[upsertProfile.mock.calls.length - 1][2];
+    expect(updateArg['birthday.source']).toBe('banner');
+  });
+
+  test('source "post_order" is stored when sent', async () => {
+    withConfig({ birthdayCapture: { postOrder: { enabled: true } } });
+    const res = mockRes();
+    await post(req({ month: 7, day: 4, source: 'post_order' }), res);
+    expect(res.statusCode).toBe(200);
+    const updateArg = upsertProfile.mock.calls[upsertProfile.mock.calls.length - 1][2];
+    expect(updateArg['birthday.source']).toBe('post_order');
+  });
+
+  test('unknown source falls back to "popup"', async () => {
+    withConfig(enabledConfig());
+    const res = mockRes();
+    await post(req({ month: 2, day: 14, source: 'hacked_source' }), res);
+    expect(res.statusCode).toBe(200);
+    const updateArg = upsertProfile.mock.calls[upsertProfile.mock.calls.length - 1][2];
+    expect(updateArg['birthday.source']).toBe('popup');
   });
 
   test('null config (no row) returns 403', async () => {

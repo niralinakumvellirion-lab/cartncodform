@@ -195,7 +195,19 @@ function buildPayload(config) {
     };
   }
   out.whatsappCapture = { enabled: !!(config.whatsappCapture && config.whatsappCapture.enabled) };
-  out.birthdayCapture = { popup: { enabled: !!(config.birthdayCapture?.popup?.enabled) } };
+  const bcap = config.birthdayCapture || {};
+  const bn = bcap.banner || {};
+  const bnDismiss = Math.min(30, Math.max(1, Math.round(Number(bn.dismissDays ?? 7)) || 7));
+  out.birthdayCapture = {
+    popup: { enabled: !!(bcap.popup?.enabled) },
+    postOrder: { enabled: !!(bcap.postOrder?.enabled) },
+    banner: {
+      enabled: !!(bn.enabled),
+      text: (bn.text || '').trim().slice(0, 120),
+      buttonText: (bn.buttonText || 'Get my gift').trim().slice(0, 40) || 'Get my gift',
+      dismissDays: bnDismiss,
+    },
+  };
   const bd = config.birthdayDiscount || {};
   const bdPct = Number(bd.percentage ?? 15);
   const bdDays = Number(bd.expiryDays ?? 7);
@@ -207,6 +219,7 @@ function buildPayload(config) {
     leadDays: Number.isFinite(bdLead) ? Math.min(7, Math.max(0, Math.round(bdLead))) : 3,
     prefix: (String(bd.prefix || 'BDAY').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10)) || 'BDAY',
     offerText: (bd.offerText || '').slice(0, OFFER_TEXT_MAX),
+    consentText: (bd.consentText || '').slice(0, 200),
   };
   return out;
 }
@@ -579,208 +592,261 @@ export default function Discounts({ shop }) {
             </div>
           </div>
 
-          {/* Birthday offer card */}
+          {/* Birthday collection methods */}
           <div style={{ ...DS.card, marginBottom: 0 }}>
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <Svg size={20} style={{ color: '#ec4899', flexShrink: 0 }}>
-                  <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
-                  <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
-                </Svg>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: DS.gray900 }}>
-                    Birthday offer
-                  </div>
-                  <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2, lineHeight: 1.5 }}>
-                    Ask for birthday in the popup.
-                  </div>
-                </div>
-                <div
-                  role="switch"
-                  aria-checked={!!(config.birthdayCapture?.popup?.enabled)}
-                  onClick={() =>
-                    setConfig((c) => ({
-                      ...c,
-                      birthdayCapture: {
-                        popup: { enabled: !(c.birthdayCapture?.popup?.enabled) },
-                      },
-                    }))
-                  }
-                  style={{
-                    width: '36px',
-                    height: '20px',
-                    borderRadius: '10px',
-                    cursor: 'pointer',
-                    background: config.birthdayCapture?.popup?.enabled ? '#16a34a' : '#d1d5db',
-                    position: 'relative',
-                    transition: 'background 0.2s',
-                    flexShrink: 0,
-                    marginLeft: '2px',
-                  }}
-                >
-                  <div
-                    style={{
-                      position: 'absolute',
-                      top: '2px',
-                      left: config.birthdayCapture?.popup?.enabled ? '18px' : '2px',
-                      width: '16px',
-                      height: '16px',
-                      borderRadius: '50%',
-                      background: '#fff',
-                      transition: 'left 0.2s',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                    }}
-                  />
-                </div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: DS.gray900, marginBottom: 4 }}>
+              How do you collect birthdays?
+            </div>
+            <div style={{ fontSize: 12, color: DS.gray400, marginBottom: 16 }}>
+              Enable the methods you want to use. Day and month only — year is never collected.
+            </div>
+
+            {/* Method 1: Sign-in / registration — not supported without customer accounts */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: `1px solid ${DS.gray200}`, opacity: 0.5 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900 }}>Sign-in and registration form</div>
+                <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2 }}>Collects birthday when a customer creates an account.</div>
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, color: DS.warning, background: DS.warningLight, borderRadius: 6, padding: '2px 8px', flexShrink: 0 }}>
+                Needs customer accounts
+              </span>
+              <div
+                role="switch"
+                aria-checked="false"
+                aria-disabled="true"
+                style={{ width: 36, height: 20, borderRadius: 10, background: '#d1d5db', position: 'relative', flexShrink: 0 }}
+              >
+                <div style={{ position: 'absolute', top: 2, left: 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
               </div>
             </div>
 
-            {config.birthdayCapture?.popup?.enabled && (
-              <div style={{ borderTop: `1px solid ${DS.gray200}`, paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {/* Send birthday offer toggle */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900 }}>Send birthday discount</div>
-                    <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2, lineHeight: 1.4 }}>
-                      {config.birthdayDiscount?.enabled
-                        ? `Customers who shared their birthday get a personal code ${config.birthdayDiscount?.leadDays ?? 3} day(s) before. The code is valid for ${config.birthdayDiscount?.expiryDays ?? 7} days.`
-                        : 'Enable to automatically send a personal discount code around each customer\'s birthday.'}
-                    </div>
-                  </div>
-                  <div
-                    role="switch"
-                    aria-checked={!!(config.birthdayDiscount?.enabled)}
-                    onClick={() =>
-                      setConfig((c) => ({
-                        ...c,
-                        birthdayDiscount: { ...(c.birthdayDiscount || {}), enabled: !(c.birthdayDiscount?.enabled) },
-                      }))
-                    }
-                    style={{
-                      width: '36px', height: '20px', borderRadius: '10px', cursor: 'pointer',
-                      background: config.birthdayDiscount?.enabled ? '#16a34a' : '#d1d5db',
-                      position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginLeft: 12,
-                    }}
-                  >
-                    <div style={{
-                      position: 'absolute', top: '2px',
-                      left: config.birthdayDiscount?.enabled ? '18px' : '2px',
-                      width: '16px', height: '16px', borderRadius: '50%',
-                      background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-                    }} />
-                  </div>
-                </div>
+            {/* Method 2: Entry popup */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: `1px solid ${DS.gray200}` }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900 }}>Entry popup</div>
+                <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2 }}>Shows a birthday step after the subscriber or email capture step.</div>
+              </div>
+              <div
+                role="switch"
+                aria-checked={!!(config.birthdayCapture?.popup?.enabled)}
+                tabIndex={0}
+                onClick={() => setConfig((c) => ({
+                  ...c,
+                  birthdayCapture: { ...(c.birthdayCapture || {}), popup: { enabled: !(c.birthdayCapture?.popup?.enabled) } },
+                }))}
+                onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setConfig((c) => ({ ...c, birthdayCapture: { ...(c.birthdayCapture || {}), popup: { enabled: !(c.birthdayCapture?.popup?.enabled) } } })); } }}
+                style={{ width: 36, height: 20, borderRadius: 10, cursor: 'pointer', background: config.birthdayCapture?.popup?.enabled ? '#16a34a' : '#d1d5db', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
+              >
+                <div style={{ position: 'absolute', top: 2, left: config.birthdayCapture?.popup?.enabled ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+              </div>
+            </div>
 
-                {config.birthdayDiscount?.enabled && (
-                  <>
-                    {/* Offer text */}
-                    <div>
-                      <div style={{ ...labelRowStyle }}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Offer text</span>
-                        <span style={counterStyle}>
-                          {(config.birthdayDiscount?.offerText || '').length} / {OFFER_TEXT_MAX}
-                        </span>
-                      </div>
+            {/* Method 3: After first order */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: `1px solid ${DS.gray200}` }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900 }}>After the first order</div>
+                <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2 }}>Shows a compact birthday ask on the COD order success screen.</div>
+              </div>
+              <div
+                role="switch"
+                aria-checked={!!(config.birthdayCapture?.postOrder?.enabled)}
+                tabIndex={0}
+                onClick={() => setConfig((c) => ({
+                  ...c,
+                  birthdayCapture: { ...(c.birthdayCapture || {}), postOrder: { enabled: !(c.birthdayCapture?.postOrder?.enabled) } },
+                }))}
+                onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setConfig((c) => ({ ...c, birthdayCapture: { ...(c.birthdayCapture || {}), postOrder: { enabled: !(c.birthdayCapture?.postOrder?.enabled) } } })); } }}
+                style={{ width: 36, height: 20, borderRadius: 10, cursor: 'pointer', background: config.birthdayCapture?.postOrder?.enabled ? '#16a34a' : '#d1d5db', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
+              >
+                <div style={{ position: 'absolute', top: 2, left: config.birthdayCapture?.postOrder?.enabled ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+              </div>
+            </div>
+
+            {/* Method 4: Top announcement banner */}
+            <div style={{ padding: '12px 0' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900 }}>Top announcement banner</div>
+                  <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2 }}>A slim bar at the top of every storefront page. Dismissible.</div>
+                </div>
+                <div
+                  role="switch"
+                  aria-checked={!!(config.birthdayCapture?.banner?.enabled)}
+                  tabIndex={0}
+                  onClick={() => setConfig((c) => ({
+                    ...c,
+                    birthdayCapture: { ...(c.birthdayCapture || {}), banner: { ...(c.birthdayCapture?.banner || {}), enabled: !(c.birthdayCapture?.banner?.enabled) } },
+                  }))}
+                  onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setConfig((c) => ({ ...c, birthdayCapture: { ...(c.birthdayCapture || {}), banner: { ...(c.birthdayCapture?.banner || {}), enabled: !(c.birthdayCapture?.banner?.enabled) } } })); } }}
+                  style={{ width: 36, height: 20, borderRadius: 10, cursor: 'pointer', background: config.birthdayCapture?.banner?.enabled ? '#16a34a' : '#d1d5db', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
+                >
+                  <div style={{ position: 'absolute', top: 2, left: config.birthdayCapture?.banner?.enabled ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+                </div>
+              </div>
+              {config.birthdayCapture?.banner?.enabled && (
+                <div style={{ borderTop: `1px solid ${DS.gray200}`, marginTop: 12, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div>
+                    <div style={fieldLabelStyle}>Banner text</div>
+                    <input
+                      className="disc-input"
+                      type="text"
+                      value={config.birthdayCapture?.banner?.text || ''}
+                      maxLength={120}
+                      placeholder={`Tell us your birthday and get ${config.birthdayDiscount?.percentage ?? 15}% off everything`}
+                      onChange={(e) => setConfig((c) => ({ ...c, birthdayCapture: { ...(c.birthdayCapture || {}), banner: { ...(c.birthdayCapture?.banner || {}), text: e.target.value } } }))}
+                      style={{ ...fieldStyle, width: '100%' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      <div style={fieldLabelStyle}>Button text</div>
                       <input
                         className="disc-input"
                         type="text"
-                        value={config.birthdayDiscount?.offerText || ''}
-                        maxLength={OFFER_TEXT_MAX}
-                        onChange={(e) =>
-                          setConfig((c) => ({
-                            ...c,
-                            birthdayDiscount: { ...(c.birthdayDiscount || {}), offerText: e.target.value },
-                          }))
-                        }
-                        placeholder="Get a birthday gift"
+                        value={config.birthdayCapture?.banner?.buttonText || 'Get my gift'}
+                        maxLength={40}
+                        onChange={(e) => setConfig((c) => ({ ...c, birthdayCapture: { ...(c.birthdayCapture || {}), banner: { ...(c.birthdayCapture?.banner || {}), buttonText: e.target.value } } }))}
                         style={{ ...fieldStyle, width: '100%' }}
                       />
-                      <div style={helperStyle}>Shown as the heading in the birthday popup step.</div>
                     </div>
-
-                    {/* Lead days, percentage, expiry, prefix row */}
-                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                      <div>
-                        <div style={fieldLabelStyle}>Days before</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <input
-                            className="disc-input"
-                            type="number"
-                            min={0}
-                            max={7}
-                            value={config.birthdayDiscount?.leadDays ?? 3}
-                            onChange={(e) =>
-                              setConfig((c) => ({
-                                ...c,
-                                birthdayDiscount: { ...(c.birthdayDiscount || {}), leadDays: e.target.value },
-                              }))
-                            }
-                            style={{ ...fieldStyle, width: 60 }}
-                          />
-                          <span style={unitStyle}>days</span>
-                        </div>
-                      </div>
-                      <div>
-                        <div style={fieldLabelStyle}>Discount %</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <input
-                            className="disc-input"
-                            type="number"
-                            min={0}
-                            max={100}
-                            value={config.birthdayDiscount?.percentage ?? 15}
-                            onChange={(e) =>
-                              setConfig((c) => ({
-                                ...c,
-                                birthdayDiscount: { ...(c.birthdayDiscount || {}), percentage: e.target.value },
-                              }))
-                            }
-                            style={{ ...fieldStyle, width: 60 }}
-                          />
-                          <span style={unitStyle}>%</span>
-                        </div>
-                      </div>
-                      <div>
-                        <div style={fieldLabelStyle}>Valid for</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <input
-                            className="disc-input"
-                            type="number"
-                            min={1}
-                            max={30}
-                            value={config.birthdayDiscount?.expiryDays ?? 7}
-                            onChange={(e) =>
-                              setConfig((c) => ({
-                                ...c,
-                                birthdayDiscount: { ...(c.birthdayDiscount || {}), expiryDays: e.target.value },
-                              }))
-                            }
-                            style={{ ...fieldStyle, width: 60 }}
-                          />
-                          <span style={unitStyle}>days</span>
-                        </div>
-                      </div>
-                      <div>
-                        <div style={fieldLabelStyle}>Code prefix</div>
+                    <div>
+                      <div style={fieldLabelStyle}>Hide after dismiss</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <input
                           className="disc-input"
-                          type="text"
-                          value={config.birthdayDiscount?.prefix ?? 'BDAY'}
-                          maxLength={10}
-                          onChange={(e) =>
-                            setConfig((c) => ({
-                              ...c,
-                              birthdayDiscount: { ...(c.birthdayDiscount || {}), prefix: e.target.value },
-                            }))
-                          }
-                          style={{ ...fieldStyle, width: 90 }}
+                          type="number"
+                          min={1}
+                          max={30}
+                          value={config.birthdayCapture?.banner?.dismissDays ?? 7}
+                          onChange={(e) => setConfig((c) => ({ ...c, birthdayCapture: { ...(c.birthdayCapture || {}), banner: { ...(c.birthdayCapture?.banner || {}), dismissDays: e.target.value } } }))}
+                          style={{ ...fieldStyle, width: 60 }}
                         />
+                        <span style={unitStyle}>days</span>
                       </div>
                     </div>
-                  </>
-                )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Birthday gift card */}
+          <div style={{ ...DS.card, marginBottom: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: DS.gray900, marginBottom: 16 }}>The birthday gift</div>
+
+            {/* Send birthday discount toggle */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900 }}>Send birthday discount</div>
+                <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2, lineHeight: 1.4 }}>
+                  {config.birthdayDiscount?.enabled
+                    ? `Customers who shared their birthday get a personal code ${config.birthdayDiscount?.leadDays ?? 3} day(s) before. The code is valid for ${config.birthdayDiscount?.expiryDays ?? 7} days.`
+                    : 'Enable to automatically send a personal discount code around each birthday.'}
+                </div>
+              </div>
+              <div
+                role="switch"
+                aria-checked={!!(config.birthdayDiscount?.enabled)}
+                tabIndex={0}
+                onClick={() => setConfig((c) => ({ ...c, birthdayDiscount: { ...(c.birthdayDiscount || {}), enabled: !(c.birthdayDiscount?.enabled) } }))}
+                onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setConfig((c) => ({ ...c, birthdayDiscount: { ...(c.birthdayDiscount || {}), enabled: !(c.birthdayDiscount?.enabled) } })); } }}
+                style={{ width: 36, height: 20, borderRadius: 10, cursor: 'pointer', background: config.birthdayDiscount?.enabled ? '#16a34a' : '#d1d5db', position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginLeft: 12 }}
+              >
+                <div style={{ position: 'absolute', top: 2, left: config.birthdayDiscount?.enabled ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+              </div>
+            </div>
+
+            {config.birthdayDiscount?.enabled && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {/* Offer text */}
+                <div>
+                  <div style={labelRowStyle}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Offer text</span>
+                    <span style={counterStyle}>{(config.birthdayDiscount?.offerText || '').length} / {OFFER_TEXT_MAX}</span>
+                  </div>
+                  <input
+                    className="disc-input"
+                    type="text"
+                    value={config.birthdayDiscount?.offerText || ''}
+                    maxLength={OFFER_TEXT_MAX}
+                    placeholder="Get a birthday gift"
+                    onChange={(e) => setConfig((c) => ({ ...c, birthdayDiscount: { ...(c.birthdayDiscount || {}), offerText: e.target.value } }))}
+                    style={{ ...fieldStyle, width: '100%' }}
+                  />
+                  <div style={helperStyle}>Shown as the heading in the birthday popup step.</div>
+                </div>
+
+                {/* Consent text */}
+                <div>
+                  <div style={labelRowStyle}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>Consent line</span>
+                    <span style={counterStyle}>{(config.birthdayDiscount?.consentText || '').length} / 200</span>
+                  </div>
+                  <input
+                    className="disc-input"
+                    type="text"
+                    value={config.birthdayDiscount?.consentText || ''}
+                    maxLength={200}
+                    placeholder="We'll use your birthday only to send you a birthday offer."
+                    onChange={(e) => setConfig((c) => ({ ...c, birthdayDiscount: { ...(c.birthdayDiscount || {}), consentText: e.target.value } }))}
+                    style={{ ...fieldStyle, width: '100%' }}
+                  />
+                  <div style={helperStyle}>Shown under every birthday form (popup, banner, post-order).</div>
+                </div>
+
+                {/* Lead days, percentage, expiry, prefix */}
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={fieldLabelStyle}>Days before</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input className="disc-input" type="number" min={0} max={7}
+                        value={config.birthdayDiscount?.leadDays ?? 3}
+                        onChange={(e) => setConfig((c) => ({ ...c, birthdayDiscount: { ...(c.birthdayDiscount || {}), leadDays: e.target.value } }))}
+                        style={{ ...fieldStyle, width: 60 }} />
+                      <span style={unitStyle}>days</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={fieldLabelStyle}>Discount %</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input className="disc-input" type="number" min={0} max={100}
+                        value={config.birthdayDiscount?.percentage ?? 15}
+                        onChange={(e) => setConfig((c) => ({ ...c, birthdayDiscount: { ...(c.birthdayDiscount || {}), percentage: e.target.value } }))}
+                        style={{ ...fieldStyle, width: 60 }} />
+                      <span style={unitStyle}>%</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={fieldLabelStyle}>Valid for</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <input className="disc-input" type="number" min={1} max={30}
+                        value={config.birthdayDiscount?.expiryDays ?? 7}
+                        onChange={(e) => setConfig((c) => ({ ...c, birthdayDiscount: { ...(c.birthdayDiscount || {}), expiryDays: e.target.value } }))}
+                        style={{ ...fieldStyle, width: 60 }} />
+                      <span style={unitStyle}>days</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={fieldLabelStyle}>Code prefix</div>
+                    <input className="disc-input" type="text"
+                      value={config.birthdayDiscount?.prefix ?? 'BDAY'}
+                      maxLength={10}
+                      onChange={(e) => setConfig((c) => ({ ...c, birthdayDiscount: { ...(c.birthdayDiscount || {}), prefix: e.target.value } }))}
+                      style={{ ...fieldStyle, width: 90 }} />
+                  </div>
+                </div>
               </div>
             )}
+
+            {/* Live preview */}
+            <div style={{ background: DS.gray50, borderRadius: 10, padding: '12px 14px', marginTop: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: DS.gray400, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Preview</div>
+              <div style={{ fontSize: 13, color: DS.gray900 }}>
+                {config.birthdayDiscount?.enabled
+                  ? `Customers who shared their birthday receive a ${config.birthdayDiscount?.percentage ?? 15}% off code ${config.birthdayDiscount?.leadDays ?? 3} day(s) before their birthday, valid for ${config.birthdayDiscount?.expiryDays ?? 7} days.`
+                  : 'Birthday discount is off. Enable it above to automatically reward customers on their birthday.'}
+              </div>
+            </div>
           </div>
 
           {/* Save button — right aligned, status text to its left */}
