@@ -876,6 +876,121 @@
     renderDiscountCode(d, action, productHandle, style);
   }
 
+  // Birthday capture — optional second step shown after the main popup flow
+  // succeeds. Replaces the popup's #ccf-content-section with a brief form.
+  // Any error calls onDone() immediately so it never blocks or breaks the
+  // existing flow.
+  var CCF_BDAY_KEY = 'ccf_bday_' + SHOP_DOMAIN;
+  function ccfShowBirthdayStep(wrap, accentColor, onDone) {
+    try {
+      var bdEnabled = !!(discountConfig &&
+        discountConfig.birthdayCapture &&
+        discountConfig.birthdayCapture.popup &&
+        discountConfig.birthdayCapture.popup.enabled);
+      if (!bdEnabled) { onDone(); return; }
+      try { if (localStorage.getItem(CCF_BDAY_KEY)) { onDone(); return; } } catch (e) {}
+
+      var section = wrap ? wrap.querySelector('#ccf-content-section') : null;
+      if (!section) { onDone(); return; }
+
+      var offerText = (discountConfig.birthdayDiscount && discountConfig.birthdayDiscount.offerText)
+        || 'Get a birthday gift';
+
+      // Clear existing content, preserving the element so renderDiscountCode
+      // can still find and swap #ccf-content-section if needed.
+      section.innerHTML = '';
+      section.style.textAlign = 'center';
+      section.style.padding = '8px 0 4px';
+
+      var head = document.createElement('div');
+      head.style.cssText = 'font-size:16px;font-weight:700;color:#111827;margin-bottom:4px;';
+      head.textContent = offerText;
+      section.appendChild(head);
+
+      var sub = document.createElement('div');
+      sub.style.cssText = 'font-size:11px;color:#6b7280;margin-bottom:14px;line-height:1.4;';
+      sub.textContent = 'We’ll use your birthday only to send you a birthday offer.';
+      section.appendChild(sub);
+
+      var fieldRow = document.createElement('div');
+      fieldRow.style.cssText = 'display:flex;gap:8px;margin-bottom:12px;';
+
+      var monthSel = document.createElement('select');
+      monthSel.id = 'ccf-bday-month';
+      monthSel.setAttribute('aria-label', 'Birthday month');
+      monthSel.style.cssText = 'flex:1;height:36px;font-size:13px;padding:0 8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#111827;box-sizing:border-box;';
+      var MONTHS = ['Month','January','February','March','April','May','June','July','August','September','October','November','December'];
+      for (var mi = 0; mi < MONTHS.length; mi++) {
+        var mopt = document.createElement('option');
+        mopt.value = String(mi);
+        mopt.textContent = MONTHS[mi];
+        monthSel.appendChild(mopt);
+      }
+      fieldRow.appendChild(monthSel);
+
+      var daySel = document.createElement('select');
+      daySel.id = 'ccf-bday-day';
+      daySel.setAttribute('aria-label', 'Birthday day');
+      daySel.style.cssText = 'width:84px;height:36px;font-size:13px;padding:0 8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#111827;box-sizing:border-box;';
+      var dopt0 = document.createElement('option');
+      dopt0.value = '0'; dopt0.textContent = 'Day'; daySel.appendChild(dopt0);
+      for (var di = 1; di <= 31; di++) {
+        var dopt = document.createElement('option');
+        dopt.value = String(di); dopt.textContent = String(di); daySel.appendChild(dopt);
+      }
+      fieldRow.appendChild(daySel);
+      section.appendChild(fieldRow);
+
+      var saveBtn = document.createElement('button');
+      saveBtn.type = 'button';
+      saveBtn.textContent = 'Save my birthday';
+      saveBtn.style.cssText = 'width:100%;padding:10px;background:' + accentColor + ';color:#fff;border:none;border-radius:9px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:8px;';
+      section.appendChild(saveBtn);
+
+      var skipBtn = document.createElement('button');
+      skipBtn.type = 'button';
+      skipBtn.textContent = 'Skip';
+      skipBtn.style.cssText = 'width:100%;background:none;border:none;color:#9ca3af;font-size:12px;cursor:pointer;padding:4px;';
+      section.appendChild(skipBtn);
+
+      var errEl = document.createElement('div');
+      errEl.style.cssText = 'font-size:11px;color:#dc2626;margin-top:4px;display:none;';
+      section.appendChild(errEl);
+
+      function markDone(saved) {
+        try { localStorage.setItem(CCF_BDAY_KEY, saved ? '1' : 'skip'); } catch (e) {}
+        onDone();
+      }
+
+      skipBtn.addEventListener('click', function() { markDone(false); });
+
+      saveBtn.addEventListener('click', function() {
+        var month = parseInt(monthSel.value, 10);
+        var day = parseInt(daySel.value, 10);
+        if (!month || !day) {
+          errEl.textContent = 'Please select a month and day.';
+          errEl.style.display = '';
+          return;
+        }
+        errEl.style.display = 'none';
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Saving…';
+        var sid = '';
+        try { sid = getSessionId(); } catch (e) {}
+        fetch(window.location.origin + '/apps/cartncodform/birthday?shop=' + encodeURIComponent(SHOP_DOMAIN), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ month: month, day: day, sessionId: sid })
+        })
+          .then(function() { markDone(true); })
+          .catch(function() { markDone(true); }); // failure never blocks
+      });
+    } catch (e) {
+      // Any unexpected error: proceed without the birthday step.
+      try { onDone(); } catch (_) {}
+    }
+  }
+
   // Inject a discount CTA directly under the product page's Buy Now / Add to
   // Cart button. Links to Shopify's /discount/<code> apply URL, which sets the
   // cart discount and then bounces back to the product.
@@ -2585,7 +2700,7 @@
               })
               .then(function (r) { return r.json(); })
               .then(function (d) {
-                finishDiscount(d, capAction);
+                ccfShowBirthdayStep(wrap, accent, function() { finishDiscount(d, capAction); });
               });
           })
           .catch(function () { resetButton(); });
@@ -2624,7 +2739,7 @@
             showBusyCard('subscribed');
 
             if (!wantsDiscount) {
-              setTimeout(cleanup, 900);
+              ccfShowBirthdayStep(wrap, accent, cleanup);
               return;
             }
             var action = 'push';
@@ -2643,9 +2758,9 @@
               })
               .then(function (r) { return r.json(); })
               .then(function (d) {
-                // Stage 3: discount generated — renderDiscountCode swaps the
-                // content section right after this, via finishDiscount().
-                finishDiscount(d, action);
+                // Stage 3: discount generated — show birthday step first
+                // (if enabled), then renderDiscountCode via finishDiscount().
+                ccfShowBirthdayStep(wrap, accent, function() { finishDiscount(d, action); });
               })
               .catch(function () {
                 // Stage 4: error — reset so the customer can retry, rather
@@ -2761,7 +2876,7 @@
                   }
                   setTimeout(cleanup, 2500);
                 } else if (ofAction === 'email') {
-                  finishDiscount(d, 'email');
+                  ccfShowBirthdayStep(wrap, accent, function() { finishDiscount(d, 'email'); });
                 } else {
                   resetOfferBtn();
                 }

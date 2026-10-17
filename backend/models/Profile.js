@@ -69,6 +69,13 @@ const profileSchema = new Schema({
     },
   ],
 
+  birthday: {
+    month: { type: Number, min: 1, max: 12, default: null },
+    day: { type: Number, min: 1, max: 31, default: null },
+    capturedAt: { type: Date, default: null },
+    source: { type: String, default: null },
+  },
+
   suppressed: { type: Boolean, default: false },
   lastSeenAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },

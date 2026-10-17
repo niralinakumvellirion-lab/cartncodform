@@ -654,8 +654,8 @@ async function handleCustomersRedact(req, res) {
         )
       : { modifiedCount: 0 };
 
-    // Profile IS the customer record — channels.whatsapp (phone, consentedAt,
-    // optedOutAt) is deleted with it since it's a subdocument.
+    // Profile IS the customer record — channels.whatsapp, birthday, and all
+    // sub-documents are deleted with it since they live inside the same doc.
     const profileResult = profileOr.length
       ? await Profile.deleteMany({ shopDomain, $or: profileOr })
       : { deletedCount: 0 };
@@ -663,7 +663,7 @@ async function handleCustomersRedact(req, res) {
     // ScheduledJob anonymisation covers whatsapp jobs too (they carry profileId).
     console.log(
       `[gdpr] Redacted — carts: ${cartResult.deletedCount}, events: ${eventResult.deletedCount}, ` +
-      `subscriptions: ${subResult.deletedCount}, profiles (incl. WhatsApp): ${profileResult.deletedCount}, ` +
+      `subscriptions: ${subResult.deletedCount}, profiles (incl. birthday/WhatsApp): ${profileResult.deletedCount}, ` +
       `jobs anonymised (incl. WhatsApp): ${jobResult.modifiedCount}, ` +
       `cod orders anonymised: ${codResult.modifiedCount}`
     );

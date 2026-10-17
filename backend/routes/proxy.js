@@ -132,6 +132,11 @@ router.get('/discount-config', async (req, res) => {
       bothDiscount: off(doc.bothDiscount),
       offerHeadline: doc.offerHeadline || 'Get a discount on your first order!',
       whatsappCapture: { enabled: !!(doc.whatsappCapture && doc.whatsappCapture.enabled) },
+      birthdayCapture: { popup: { enabled: !!(doc.birthdayCapture && doc.birthdayCapture.popup && doc.birthdayCapture.popup.enabled) } },
+      birthdayDiscount: {
+        percentage: (doc.birthdayDiscount && doc.birthdayDiscount.percentage) || 15,
+        offerText: String((doc.birthdayDiscount && doc.birthdayDiscount.offerText) || '').trim().slice(0, 120),
+      },
     });
   } catch (err) {
     console.error('[proxy] GET /discount-config error:', err.message);
@@ -182,6 +187,87 @@ router.post('/generate-discount', async (req, res) => {
   } catch (err) {
     console.error('[proxy] POST /generate-discount error:', err.message);
     return res.status(500).json({ code: null, error: 'Failed to generate discount' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Birthday capture — storefront popup POSTs here after the visitor submits
+// their birthday in the optional second step.
+//   https://{shop}/apps/cartncodform/birthday?shop={shop}
+// Body: { month: 1-12, day: 1-31, sessionId }
+// Public — App Proxy signature hard-enforced.
+// ---------------------------------------------------------------------------
+const _bdayRateMap = {};
+const _BDAY_RATE_WINDOW = 60 * 1000;
+const _BDAY_RATE_LIMIT = 5;
+function _bdayRateCheck(ip, shop, sessionId) {
+  const key = (ip || '') + '|' + (shop || '') + '|' + (sessionId || '');
+  const now = Date.now();
+  if (!_bdayRateMap[key]) _bdayRateMap[key] = [];
+  _bdayRateMap[key] = _bdayRateMap[key].filter((t) => now - t < _BDAY_RATE_WINDOW);
+  if (_bdayRateMap[key].length >= _BDAY_RATE_LIMIT) return false;
+  _bdayRateMap[key].push(now);
+  return true;
+}
+
+// Days-in-month (Feb 29 allowed for leap-year birthdays).
+const _BDAY_MAX_DAY = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+function _isValidBirthday(month, day) {
+  if (!Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (month < 1 || month > 12) return false;
+  if (day < 1) return false;
+  return day <= _BDAY_MAX_DAY[month - 1];
+}
+
+router.post('/birthday', async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'no-store');
+  if (!verifyProxySignature(req.query)) {
+    console.warn('[proxy] Invalid or missing App Proxy signature on /birthday — rejecting');
+    return res.status(403).json({ ok: false, error: 'Invalid signature' });
+  }
+  try {
+    const shop = String(req.query.shop || (req.body && req.body.shop) || '').trim().toLowerCase();
+    const ip = req.headers && req.headers['x-forwarded-for']
+      ? String(req.headers['x-forwarded-for']).split(',')[0].trim()
+      : (req.socket && req.socket.remoteAddress) || '';
+    const sessionId = req.body && req.body.sessionId ? String(req.body.sessionId).trim() : '';
+
+    if (!_bdayRateCheck(ip, shop, sessionId)) {
+      return res.status(429).json({ ok: false, error: 'Too many requests' });
+    }
+
+    const config = await DiscountConfig.findOne({ shopDomain: shop }).lean();
+    if (!config ||
+        !config.birthdayCapture ||
+        !config.birthdayCapture.popup ||
+        !config.birthdayCapture.popup.enabled) {
+      return res.status(403).json({ ok: false, error: 'Birthday capture not enabled' });
+    }
+
+    const month = parseInt(req.body && req.body.month, 10);
+    const day = parseInt(req.body && req.body.day, 10);
+    if (!_isValidBirthday(month, day)) {
+      return res.status(400).json({ ok: false, error: 'Invalid birthday' });
+    }
+
+    const { upsertProfile } = require('../services/profileService');
+    upsertProfile(
+      shop,
+      { sessionId: sessionId || null },
+      {
+        'birthday.month': month,
+        'birthday.day': day,
+        'birthday.capturedAt': new Date(),
+        'birthday.source': 'popup',
+        lastSeenAt: new Date(),
+      }
+    ).catch(() => {});
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[proxy] POST /birthday error:', err.message);
+    return res.status(500).json({ ok: false, error: 'Failed to save birthday' });
   }
 });
 

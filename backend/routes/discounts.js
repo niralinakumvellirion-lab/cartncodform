@@ -46,6 +46,8 @@ function defaultConfig(shop) {
     bothDiscount: { enabled: false, percentage: 20, maxUses: 100, expiryDays: 7, prefix: 'VIP', offerText: '' },
     offerHeadline: 'Get a discount on your first order!',
     whatsappCapture: { enabled: false },
+    birthdayCapture: { popup: { enabled: false } },
+    birthdayDiscount: { enabled: false, percentage: 15, expiryDays: 7, prefix: 'BDAY', offerText: '' },
   };
 }
 
@@ -390,6 +392,25 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
     }
     if (req.body.whatsappCapture && typeof req.body.whatsappCapture.enabled === 'boolean') {
       set['whatsappCapture.enabled'] = req.body.whatsappCapture.enabled;
+    }
+    if (req.body.birthdayCapture &&
+        req.body.birthdayCapture.popup &&
+        typeof req.body.birthdayCapture.popup.enabled === 'boolean') {
+      set['birthdayCapture.popup.enabled'] = req.body.birthdayCapture.popup.enabled;
+    }
+    if (req.body.birthdayDiscount && typeof req.body.birthdayDiscount === 'object') {
+      const bd = req.body.birthdayDiscount;
+      if (typeof bd.enabled === 'boolean') set['birthdayDiscount.enabled'] = bd.enabled;
+      const bdPct = Number(bd.percentage);
+      if (Number.isFinite(bdPct)) set['birthdayDiscount.percentage'] = Math.min(100, Math.max(0, bdPct));
+      const bdDays = Number(bd.expiryDays);
+      if (Number.isFinite(bdDays)) set['birthdayDiscount.expiryDays'] = Math.min(30, Math.max(1, Math.round(bdDays)));
+      if (typeof bd.prefix === 'string') {
+        set['birthdayDiscount.prefix'] = (String(bd.prefix).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10)) || 'BDAY';
+      }
+      if (typeof bd.offerText === 'string') {
+        set['birthdayDiscount.offerText'] = bd.offerText.trim().slice(0, OFFER_TEXT_MAX);
+      }
     }
 
     const config = await DiscountConfig.findOneAndUpdate(

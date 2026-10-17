@@ -62,6 +62,22 @@ const discountConfigSchema = new mongoose.Schema({
     enabled: { type: Boolean, default: false },
   },
 
+  // Birthday capture: show an optional second step after the main popup.
+  birthdayCapture: {
+    popup: {
+      enabled: { type: Boolean, default: false },
+    },
+  },
+
+  // Birthday discount settings (sending deferred to a later release).
+  birthdayDiscount: {
+    enabled: { type: Boolean, default: false },
+    percentage: { type: Number, default: 15, min: 0, max: 100 },
+    expiryDays: { type: Number, default: 7, min: 1, max: 30 },
+    prefix: { type: String, default: 'BDAY' },
+    offerText: { type: String, default: '' },
+  },
+
   // Popup text customization — shown above the email/phone fields.
   offerHeadline: {
     type: String,
