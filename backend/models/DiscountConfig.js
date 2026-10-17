@@ -89,6 +89,31 @@ const discountConfigSchema = new mongoose.Schema({
     consentText: { type: String, default: "We’ll use your birthday only to send you a birthday offer." },
   },
 
+  // Quantity-tier automatic discount (Shopify Function based).
+  quantityTiers: {
+    enabled:     { type: Boolean, default: false },
+    heading:     { type: String,  default: 'Buy more, save more' },
+    accentColor: { type: String,  default: '#4F46E5' },
+    layout:      { type: String,  default: 'cards', enum: ['cards', 'list'] },
+    scope:       { type: String,  default: 'all' },
+    tiers: {
+      type: [{
+        minQty:  { type: Number, required: true },
+        percent: { type: Number, required: true },
+        badge:   { type: String, default: '' },
+        _id: false,
+      }],
+      default: [
+        { minQty: 2, percent: 10, badge: '' },
+        { minQty: 3, percent: 15, badge: 'Most popular' },
+        { minQty: 4, percent: 25, badge: 'Best value' },
+      ],
+    },
+    discountId:    { type: String, default: '' },
+    lastSyncAt:    { type: Date,   default: null },
+    lastSyncError: { type: String, default: '' },
+  },
+
   // Popup text customization — shown above the email/phone fields.
   offerHeadline: {
     type: String,

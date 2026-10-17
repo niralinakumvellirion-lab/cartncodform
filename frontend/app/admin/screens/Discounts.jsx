@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
+import QuantityTiers from './QuantityTiers';
 
 const DS = {
   page: {
@@ -889,6 +890,15 @@ export default function Discounts({ shop }) {
             </button>
           </div>
         </div>
+      )}
+
+      {/* ── Quantity tiers section (self-contained, own save+sync) ── */}
+      {!loading && (
+        <QuantityTiers
+          config={config}
+          shopDomain={shop}
+          onSaveComplete={(updatedConfig) => setConfig(updatedConfig)}
+        />
       )}
     </div>
   );

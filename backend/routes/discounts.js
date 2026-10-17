@@ -5,6 +5,8 @@ const Store = require('../models/Store');
 const DiscountConfig = require('../models/DiscountConfig');
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
 const { verifyProxySignature, API_VERSION } = require('../utils/shopify');
+const { sanitizeTiers, sanitizeAccentColor, DEFAULT_ACCENT } = require('../utils/quantityTiers');
+const tierSync = require('../services/tierSync');
 
 // The four storefront actions that can earn a discount code, and the
 // DiscountConfig sub-doc key each maps to. 'birthday' is poller-only.
@@ -51,7 +53,22 @@ function defaultConfig(shop) {
       banner: { enabled: false, text: '', buttonText: 'Get my gift', dismissDays: 7 },
       postOrder: { enabled: false },
     },
-    birthdayDiscount: { enabled: false, percentage: 15, expiryDays: 7, leadDays: 3, prefix: 'BDAY', offerText: '', consentText: "We’ll use your birthday only to send you a birthday offer." },
+    birthdayDiscount: { enabled: false, percentage: 15, expiryDays: 7, leadDays: 3, prefix: 'BDAY', offerText: '', consentText: "We'll use your birthday only to send you a birthday offer." },
+    quantityTiers: {
+      enabled: false,
+      heading: 'Buy more, save more',
+      accentColor: DEFAULT_ACCENT,
+      layout: 'cards',
+      scope: 'all',
+      tiers: [
+        { minQty: 2, percent: 10, badge: '' },
+        { minQty: 3, percent: 15, badge: 'Most popular' },
+        { minQty: 4, percent: 25, badge: 'Best value' },
+      ],
+      discountId: '',
+      lastSyncAt: null,
+      lastSyncError: '',
+    },
   };
 }
 
@@ -503,16 +520,97 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
       if (Number.isFinite(bdLead)) set['birthdayDiscount.leadDays'] = Math.min(7, Math.max(0, Math.round(bdLead)));
     }
 
+    // ── quantityTiers validation ───────────────────────────────────────────
+    let doTierSync = false;
+    if (req.body.quantityTiers && typeof req.body.quantityTiers === 'object') {
+      const qt = req.body.quantityTiers;
+
+      if (typeof qt.enabled === 'boolean') {
+        set['quantityTiers.enabled'] = qt.enabled;
+        doTierSync = true;
+      }
+      if (typeof qt.heading === 'string') {
+        const h = qt.heading.trim().slice(0, 60);
+        if (!h) return res.status(400).json({ error: 'quantityTiers.heading must not be empty' });
+        set['quantityTiers.heading'] = h;
+      }
+      if (qt.accentColor !== undefined) {
+        set['quantityTiers.accentColor'] = sanitizeAccentColor(qt.accentColor);
+      }
+      if (qt.layout !== undefined) {
+        if (qt.layout !== 'cards' && qt.layout !== 'list')
+          return res.status(400).json({ error: 'quantityTiers.layout must be "cards" or "list"' });
+        set['quantityTiers.layout'] = qt.layout;
+      }
+      if (qt.tiers !== undefined) {
+        let validated;
+        try {
+          validated = sanitizeTiers(qt.tiers);
+        } catch (e) {
+          return res.status(400).json({ error: `quantityTiers.tiers: ${e.message}` });
+        }
+        set['quantityTiers.tiers'] = validated;
+        doTierSync = true;
+      }
+    }
+
     const config = await DiscountConfig.findOneAndUpdate(
       { shopDomain: shop },
       { $set: set, $setOnInsert: { shopDomain: shop } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     ).lean();
 
-    return res.json({ updated: true, config });
+    // Sync to Shopify after save — failure must not fail the HTTP response.
+    let syncResult = null;
+    if (doTierSync) {
+      try {
+        syncResult = await tierSync.syncTiers(shop);
+        if (syncResult && !syncResult.synced) {
+          await DiscountConfig.updateOne(
+            { shopDomain: shop },
+            { $set: { 'quantityTiers.lastSyncError': syncResult.error || 'Sync failed' } }
+          );
+        }
+      } catch (syncErr) {
+        console.error('[discounts] tier sync error (non-fatal):', syncErr.message);
+        syncResult = { synced: false, error: syncErr.message };
+        await DiscountConfig.updateOne(
+          { shopDomain: shop },
+          { $set: { 'quantityTiers.lastSyncError': syncErr.message } }
+        ).catch(() => {});
+      }
+    }
+
+    return res.json({
+      updated: true,
+      config,
+      ...(syncResult !== null ? { synced: syncResult.synced, syncError: syncResult.error || null } : {}),
+    });
   } catch (err) {
     console.error('[discounts] PATCH config error:', err.message);
     return res.status(500).json({ error: 'Failed to update discount config' });
+  }
+});
+
+/**
+ * POST /api/discounts/:shopDomain/sync-tiers
+ * Admin only. Re-triggers the Shopify sync for quantity tiers independently.
+ * -> { synced: bool, syncError? }
+ */
+router.post('/:shopDomain/sync-tiers', requireAuth, requireStoreOwner, async (req, res) => {
+  try {
+    const shop = req.params.shopDomain.trim().toLowerCase();
+    const result = await tierSync.syncTiers(shop);
+    if (!result.synced) {
+      await DiscountConfig.updateOne(
+        { shopDomain: shop },
+        { $set: { 'quantityTiers.lastSyncError': result.error || 'Sync failed' } }
+      ).catch(() => {});
+    }
+    return res.json({ synced: result.synced, syncError: result.error || null });
+  } catch (err) {
+    console.error('[discounts] sync-tiers error:', err.message);
+    return res.status(500).json({ synced: false, syncError: err.message });
   }
 });
 

@@ -1,0 +1,11 @@
+{
+  "name": "quantity-tier-discount",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node esbuild.config.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.20.2"
+  }
+}

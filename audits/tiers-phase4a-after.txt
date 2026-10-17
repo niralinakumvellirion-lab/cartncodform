@@ -1,0 +1,215 @@
+PHASE 4a AUDIT — Quantity Tiers: config, admin editor, Function, sync
+Date: 2026-10-17
+Branch: main (merged from phase-3-birthday-banner-postorder at 314dd2e)
+
+═══════════════════════════════════════════════════════════
+STEP 1 — PRE-BUILD FINDINGS
+═══════════════════════════════════════════════════════════
+
+── shopify.app.toml ────────────────────────────────────────
+
+api_version (webhooks): 2025-01
+CLI version: 4.9.0
+scopes: read_orders, read_customers, write_customers, read_products,
+        write_discounts, read_discounts
+
+write_discounts: PRESENT ✓ — covers discountAutomaticAppCreate / Update,
+                 and writing metafields on the discount node itself.
+write_metafields: ABSENT ✗ — would be required to write a shop-level
+                 metafield (for the 4b theme block to read tiers config).
+                 CANNOT add scopes here (forces merchant re-consent).
+                 IMPACT: syncTiers() skips the shop metafield write in 4a;
+                 documented in the sync service and in the 4b ticket.
+
+Existing extensions layout:
+  extensions/
+    cartncodform-embed/   ← theme type (registered in app.toml [[extensions.theme]])
+      assets/, blocks/, locales/, package.json, shopify.extension.toml
+
+No function extension exists yet.
+
+── Recommended Function target for API 2025-01 / CLI 4.9.0 ───
+
+Target: purchase.product-discount.run
+  Reason: Shopify's canonical target for automatic percentage-off product
+  discounts in the 2024-10+ and 2025-01 API. Applies per-product, not
+  per-order, so it is the correct scope for quantity breaks.
+
+Language: JavaScript (CJS, bundled via esbuild by the CLI).
+  Shopify CLI 4.x compiles JS functions to WebAssembly via Javy during
+  `shopify app build` / `shopify app deploy`. The developer writes plain JS;
+  the CLI handles the Wasm compilation step.
+
+── How to get the deployed Function ID ─────────────────────
+
+At sync time, backend/services/tierSync.js queries the Shopify Admin API:
+
+  query { shopifyFunctions(first: 25) { nodes { id apiType title } } }
+
+Filter: apiType === 'product_discounts' AND title === 'Quantity Tier Discount'.
+The `id` (GID: gid://shopify/ShopifyFunction/…) is passed to
+discountAutomaticAppCreate.
+Scope needed: read_discounts (already present ✓). No extra scope required.
+
+── Shop metafield for 4b storefront block ──────────────────
+
+Plan: write an app-owned SHOP metafield.
+Namespace: cartncodform
+Key:       quantity_tiers
+Type:      json
+
+BLOCKED in 4a: writing to the shop resource (via metafieldsSet or
+shopUpdate) with a non-app-reserved namespace requires write_metafields
+scope, which is not in the current scopes list.
+Resolution for 4b: merchant must re-consent when write_metafields is added.
+In 4a, syncTiers() attempts the write and logs a warning on failure;
+the rest of the sync (discount create/update) is not affected.
+
+Discount node metafield (for the Function to read its config):
+Namespace: cartncodform
+Key:       function-configuration
+Type:      json
+This metafield is on the automatic discount node, covered by write_discounts ✓.
+
+── Stacking / combinesWith ─────────────────────────────────
+
+Shopify docs (https://shopify.dev/docs/apps/build/discounts/combine-discounts):
+"If the automatic discount and the discount code can't be combined, then the
+discount with the higher value is applied to the order."
+
+Birthday code (discountCodeBasicCreate in backend/routes/discounts.js):
+  No combinesWith field in the mutation input (lines 131-138). Shopify
+  default when combinesWith is omitted on a code discount:
+    orderDiscounts:  false
+    productDiscounts: false
+    shippingDiscounts: false
+  → birthday codes cannot stack with other discounts.
+
+Quantity tier automatic discount (discountAutomaticAppCreate in tierSync.js):
+  combinesWith: { orderDiscounts: false, productDiscounts: false,
+                  shippingDiscounts: false } — all false, explicitly set.
+
+RESULT: A customer who has both an automatic tier discount and uses a
+birthday code will get whichever gives the higher value — Shopify decides.
+They cannot stack. Birthday code NOT changed.
+
+═══════════════════════════════════════════════════════════
+STEP 2 — CONFIG + PURE HELPER
+═══════════════════════════════════════════════════════════
+
+DiscountConfig.quantityTiers schema added:
+  enabled: false
+  heading: 'Buy more, save more'
+  accentColor: '#4F46E5'
+  layout: 'cards'    ('cards' | 'list')
+  scope: 'all'       ('all' only; 'collections' shown disabled in UI)
+  tiers: [
+    { minQty: 2, percent: 10, badge: '' },
+    { minQty: 3, percent: 15, badge: 'Most popular' },
+    { minQty: 4, percent: 25, badge: 'Best value' },
+  ]
+  discountId: ''     (Shopify automatic discount GID — not exposed via proxy)
+  lastSyncAt: null
+  lastSyncError: ''
+
+Validation rules (PATCH discounts.js):
+  - tiers: 1–4 items (400 if outside)
+  - minQty: integer 2–99, strictly ascending across tiers (400 if violated)
+  - percent: integer 1–80, strictly ascending across tiers (400 if violated)
+  - badge: ≤ 20 chars
+  - heading: ≤ 60 chars (trimmed)
+  - accentColor: must match /^#[0-9A-Fa-f]{6}$/ — else default '#4F46E5'
+  - unknown keys ignored
+  - NO silent clamping — any violation returns 400 with a clear message
+
+GET /discount-config (proxy) exposes:
+  quantityTiers: { enabled, heading, accentColor, layout, tiers }
+  NOT discountId, lastSyncAt, lastSyncError.
+
+backend/utils/quantityTiers.js (pure, no dependencies):
+  sanitizeTiers(raw)          — validates + normalises, throws on error
+  pickTier(tiers, qty)        — highest tier whose minQty <= qty, or null
+  discountedUnitPrice(p, pct) — round half-up 2 decimals
+
+═══════════════════════════════════════════════════════════
+STEP 3 — SHOPIFY FUNCTION
+═══════════════════════════════════════════════════════════
+
+Extension directory: extensions/quantity-tier-discount/
+  shopify.extension.toml
+  src/run.js         — function logic (CJS; esbuild bundles to dist/index.js)
+  src/run.graphql    — input query
+  package.json
+
+Function target: purchase.product-discount.run (api_version 2025-01)
+
+Logic:
+  1. Parse config from discountNode.metafield(namespace:"cartncodform",
+     key:"function-configuration").value — invalid JSON → no discount.
+  2. If !config.enabled or no tiers → empty discounts.
+  3. Group cart lines by product GID (sum quantities across variants).
+  4. For each product: pickTier(config.tiers, totalQty) → highest qualifying tier.
+  5. If tier found: one discount entry per product, targets = all variant lines,
+     percentage = tier.percent, message = "Buy N+, save X%".
+  6. Return { discountApplicationStrategy: 'MAXIMUM', discounts }.
+
+═══════════════════════════════════════════════════════════
+STEP 4 — SYNC SERVICE
+═══════════════════════════════════════════════════════════
+
+backend/services/tierSync.js:
+  syncTiers(shopDomain) → { synced: bool, discountId?, error? }
+  - Attempts shop metafield write (warns on failure — needs write_metafields).
+  - On enabled=false: deactivates / deletes existing automatic discount.
+  - On enabled=true: getFunctionId → discountAutomaticAppCreate (create) or
+    discountAutomaticAppUpdate (update); sets discount node metafield.
+  - Stores discountId, lastSyncAt, lastSyncError on DiscountConfig.
+  - Sync failure does NOT fail the config save.
+
+combinesWith: { orderDiscounts: false, productDiscounts: false,
+                shippingDiscounts: false }
+
+backend/scripts/syncQuantityTiers.js:
+  Dry-run by default; --apply to execute.
+
+═══════════════════════════════════════════════════════════
+STEP 5 — ADMIN UI
+═══════════════════════════════════════════════════════════
+
+frontend/app/admin/screens/QuantityTiers.jsx (new file)
+  Rendered inside Discounts.jsx.
+  Sections: header (on/off switch), tiers table, look/wording, scope selector,
+  amber note, live preview, save+sync button with sync status.
+
+═══════════════════════════════════════════════════════════
+STEP 6 — VERIFICATION RESULTS (filled after build)
+═══════════════════════════════════════════════════════════
+
+[6a] ESLint — see below
+[6b] renderToString — see below
+[6c] next build — see below
+[6d] test counts — see below
+
+═══════════════════════════════════════════════════════════
+COMMANDS TO DEPLOY THE FUNCTION (do not run now)
+═══════════════════════════════════════════════════════════
+
+# 1. Authenticate with a merchant store
+shopify auth login --store <your-store>.myshopify.com
+
+# 2. Deploy (uploads the function; creates the automatic discount via the admin)
+shopify app deploy
+
+# 3. After deploy, the backend's syncTiers() will call shopifyFunctions query
+#    to locate the function GID automatically on first save from the admin.
+
+# If write_metafields scope is needed for 4b:
+# 1. Add write_metafields to scopes in shopify.app.toml
+# 2. shopify app deploy  (triggers merchant re-consent prompt)
+# 3. Merchants must re-approve via the install URL
+
+═══════════════════════════════════════════════════════════
+FILES CHANGED (filled after build)
+═══════════════════════════════════════════════════════════
+
+[see post-build section below]

@@ -1,0 +1,22 @@
+query RunInput {
+  cart {
+    lines {
+      id
+      quantity
+      merchandise {
+        __typename
+        ... on ProductVariant {
+          id
+          product {
+            id
+          }
+        }
+      }
+    }
+  }
+  discountNode {
+    metafield(namespace: "cartncodform", key: "function-configuration") {
+      value
+    }
+  }
+}

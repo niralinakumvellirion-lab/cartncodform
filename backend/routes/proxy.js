@@ -145,8 +145,20 @@ router.get('/discount-config', async (req, res) => {
       birthdayDiscount: {
         percentage: (doc.birthdayDiscount && doc.birthdayDiscount.percentage) || 15,
         offerText: String((doc.birthdayDiscount && doc.birthdayDiscount.offerText) || '').trim().slice(0, 120),
-        consentText: String((doc.birthdayDiscount && doc.birthdayDiscount.consentText) || "We’ll use your birthday only to send you a birthday offer.").slice(0, 200),
+        consentText: String((doc.birthdayDiscount && doc.birthdayDiscount.consentText) || "We'll use your birthday only to send you a birthday offer.").slice(0, 200),
       },
+      quantityTiers: (function () {
+        const qt = doc.quantityTiers || {};
+        return {
+          enabled: !!qt.enabled,
+          heading: String(qt.heading || 'Buy more, save more').slice(0, 60),
+          accentColor: /^#[0-9A-Fa-f]{6}$/.test(String(qt.accentColor || '')) ? qt.accentColor : '#4F46E5',
+          layout: qt.layout === 'list' ? 'list' : 'cards',
+          tiers: Array.isArray(qt.tiers)
+            ? qt.tiers.map((t) => ({ minQty: t.minQty, percent: t.percent, badge: String(t.badge || '') }))
+            : [],
+        };
+      }()),
     });
   } catch (err) {
     console.error('[proxy] GET /discount-config error:', err.message);
@@ -312,7 +324,7 @@ router.get('/cod-form', async (req, res) => {
   // Birthday post-order ask config — load silently, failure falls back to disabled.
   let postOrderEnabled = false;
   let birthdayPct = 15;
-  let consentText = "We’ll use your birthday only to send you a birthday offer.";
+  let consentText = "We'll use your birthday only to send you a birthday offer.";
   try {
     const bdCfg = await DiscountConfig.findOne({ shopDomain: shop }).lean();
     if (bdCfg) {
@@ -514,7 +526,7 @@ router.get('/cod-form', async (req, res) => {
         var h2 = document.createElement('h2');
         h2.textContent = 'Order placed!';
         var p = document.createElement('p');
-        p.textContent = 'We’ll confirm via WhatsApp/call soon.';
+        p.textContent = 'We'll confirm via WhatsApp/call soon.';
         ok.appendChild(tick);
         ok.appendChild(h2);
         ok.appendChild(p);
