@@ -1,0 +1,262 @@
+VERIFICATION AUDIT — Birthday Phase 3
+Date: 2026-10-17
+Commit: 3465c6f (Phase 3 original) + verification changes (uncommitted at audit time)
+
+═══════════════════════════════════════════════════════════
+1. BRANCH CHECK
+═══════════════════════════════════════════════════════════
+
+git log --oneline -5:
+  3465c6f feat(birthday): Phase 3 — banner, post-first-order ask, merchant method selector
+  5e69a65 fix(birthday): verify phase 1+2 — fix 3 poller defects, add 8 tests
+  6a6cdce feat(birthday): Phase 2 — send birthday offer via daily sweep + poller
+  4060281 feat(birthday): Phase 1 — collect optional birthday in popup + merchant setting
+  f09feff fix(api): add missing import for checkSuspended in api.js
+
+git branch --show-current: phase-3-birthday-banner-postorder
+git merge-base phase-3-birthday-banner-postorder main: 5e69a65
+
+RESULT: Phase 3 IS correctly based on 5e69a65 (that IS main's tip).
+Phase 3 is one commit ahead of main as a clean fast-forward.
+
+To merge onto main:
+  git checkout main
+  git merge --ff-only phase-3-birthday-banner-postorder
+
+═══════════════════════════════════════════════════════════
+2. COD FORM POST — AUTH ANALYSIS
+═══════════════════════════════════════════════════════════
+
+Route mount (server.js:172):
+  app.use('/apps/cartncodform', proxyRouter);
+
+GET /cod-form is served at /apps/cartncodform/cod-form (proxy.js:297).
+The entire proxyRouter is mounted under /apps/cartncodform, which Shopify's
+App Proxy forwards with an HMAC-signed query string.
+
+The birthday POST from the cod-form inline JS (proxy.js:594):
+  fetch(window.location.origin + '/apps/cartncodform/birthday?shop=' + encodeURIComponent(BOOT.shop), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ month: m, day: d, source: 'post_order', phone: phone })
+  })
+
+window.location.origin is the Shopify store URL (e.g. https://mystore.myshopify.com).
+The fetch goes to /apps/cartncodform/birthday on the storefront. Shopify's App Proxy
+intercepts it and adds HMAC signature before forwarding to our backend.
+
+POST /birthday validation (proxy.js:237):
+  if (!verifyProxySignature(req.query)) { return 403; }
+  (verifyProxySignature = require('../utils/shopify').verifyProxySignature)
+
+AUTH IS CORRECT — request goes through App Proxy and signature is verified.
+
+BUG FOUND + FIXED: The original Phase 3 birthday POST body was:
+  JSON.stringify({ month: m, day: d, source: 'post_order' })
+  — no `phone`, no `sessionId`.
+
+The /birthday route resolved identity via:
+  upsertProfile(shop, { sessionId: sessionId || null }, ...)
+  — with sessionId empty string → null → profile not found.
+
+FIX: phone is now included in the POST body. The /birthday route uses:
+  upsertProfile(shop, { phone: phone || null, sessionId: sessionId || null }, ...)
+Phone has higher merge priority than sessionId (profileService PRIORITY order:
+customerId > email > phone > cartToken > sessionId > pushToken).
+
+═══════════════════════════════════════════════════════════
+3. FIRST ORDER — PHONE NORMALISATION + CANCELLED EXCLUSION
+═══════════════════════════════════════════════════════════
+
+Phone format:
+  Saved to CodOrder (proxy.js:666):   phone: String(phone).trim()
+  countDocuments query (proxy.js:712): phone: String(phone).trim()
+
+Both use the same raw-trimmed format → count is consistent for the same
+input. Different national-number formats ("+919876543210" vs "9876543210")
+from the same person would be counted separately — pre-existing limitation.
+
+CodOrder model status enum: ['pending', 'confirmed', 'cancelled']
+
+BUG FOUND + FIXED: Original countDocuments did not exclude cancelled orders:
+  CodOrder.countDocuments({ shopDomain: shop, phone: String(phone).trim() })
+
+If the only order was cancelled, isFirstOrder would be true and the birthday
+form would show — incorrect.
+
+FIX (proxy.js:712-714):
+  const orderCount = await CodOrder.countDocuments({
+    shopDomain: shop,
+    phone: rawPhone,
+    status: { $ne: 'cancelled' },
+  });
+
+SERVER-SIDE BIRTHDAY DEDUP also added: after confirming isFirstOrder, the
+cod-order route now queries Profile to check if a birthday is already saved
+(proxy.js:716-725):
+  const e164 = normalizePhone(rawPhone, 'IN') || rawPhone;
+  const bdProf = await Profile.findOne({
+    shopDomain: shop,
+    'identifiers.phones': { $in: [e164, rawPhone] },
+    'birthday.month': { $exists: true, $ne: null },
+    'birthday.day': { $exists: true, $ne: null },
+  }).select('_id').lean();
+  hasBirthday = !!bdProf;
+
+Returned in response:
+  { success: true, orderId: order._id, isFirstOrder, hasBirthday }
+
+Cod-form JS condition updated (proxy.js:523):
+  if (BOOT.postOrderEnabled && result.body.isFirstOrder && !result.body.hasBirthday) {
+  // (was: if (BOOT.postOrderEnabled && result.body.isFirstOrder) {)
+
+═══════════════════════════════════════════════════════════
+4. EMAIL 0b — UNSUBSCRIBE HANDLER
+═══════════════════════════════════════════════════════════
+
+Unsubscribe route: backend/routes/unsubscribe.js
+  POST /:token (line 57-74)
+  Reads parsed.profileId + parsed.shopDomain from JWT token.
+  Sets on Profile:
+    { $set: { suppressed: true } }
+  (unsubscribe.js:64)
+
+Birthday email eligibility check (server.js:650):
+  if (bdProfile && bdProfile.suppressed) {
+    await ScheduledJob.findByIdAndUpdate(job._id, { status: 'skipped', error: 'profile_suppressed' });
+    continue;
+  }
+
+An unsubscribed profile has suppressed: true → birthday email is SKIPPED.
+NO BUG. No fix needed.
+
+There is no separate email-specific unsubscribe field. The unsubscribe flow
+sets the global suppressed flag which the birthday email path reads correctly.
+
+═══════════════════════════════════════════════════════════
+5. ccf-push.js CURLY QUOTES
+═══════════════════════════════════════════════════════════
+
+Command run:
+  git diff 5e69a65 -- extensions/cartncodform-embed/assets/ccf-push.js |
+    grep -P "^[+-].*[U+2018/U+2019/U+201C/U+201D]"
+
+Result: 4 lines with curly quotes. All are U+2019 (RIGHT SINGLE QUOTATION MARK)
+used as apostrophe CONTENT inside ASCII-delimited single-quoted strings:
+  + 'We\u2019ll use your birthday only to send you a birthday offer.' (×3)
+  - 'We\u2019ll use your birthday only to send you a birthday offer.' (removed line)
+
+These are valid JS — string delimiters are ASCII U+0027 ('). The apostrophe
+character U+2019 inside a single-quoted string is not the same code point.
+ESLint passes (EXIT 0). Node parses correctly.
+
+No curly quotes were introduced as string DELIMITERS. Mass replacement during
+Phase 3 session was net-neutral: all pre-existing apostrophes (You're, We'll)
+were restored correctly to U+2019 as content characters.
+
+Non-apostrophe curly quote diff outside Phase 3 lines: 0 lines.
+
+BANNER.TEXT FALLBACK (ccf-push.js:1027):
+  var barText = bc.text || ('Tell us your birthday and get ' + pct + '% off everything');
+
+This is a STATIC string concatenation. NOT AI-generated. Confirmed.
+
+═══════════════════════════════════════════════════════════
+6a. NEXT.JS BUILD
+═══════════════════════════════════════════════════════════
+
+Command: cd frontend && npx next build
+Result:
+  ✓ Compiled successfully
+  ✓ Generating static pages (23/23)
+  No errors. All routes including /admin/settings-page compiled successfully.
+
+═══════════════════════════════════════════════════════════
+6b. REAL renderToString — Discounts.jsx
+═══════════════════════════════════════════════════════════
+
+Script: C:/Users/Intel/AppData/Local/Temp/claude/render-discounts-verify4.js
+Method: @babel/core (preset-react) to compile JSX; vm.runInContext to evaluate;
+  react-dom/server.renderToString for HTML. useState patched (call 2, loading,
+  forced to false) so the birthday section renders past the loading guard.
+
+Results (13/13):
+  PASS (a) no throw
+  PASS (a) Sign-in and registration
+  PASS (a) Entry popup
+  PASS (a) After the first order
+  PASS (a) Top announcement banner
+  PASS (a) >=4 role="switch"
+  PASS (a) aria-disabled on method 1
+  PASS (a) Preview section present
+  PASS (b) no throw
+  PASS (b) percentage 20 in output
+  PASS (b) consentText field present
+  PASS (c) no throw
+  PASS (c) banner card present despite absent banner fields
+
+Note: Discounts.jsx uses loading:true initial useState (SSR shows spinner by
+default). The check patches useState call #2 (loading) → false to expose the
+full birthday section. This is a standard SSR test pattern.
+
+═══════════════════════════════════════════════════════════
+6c. ESLINT
+═══════════════════════════════════════════════════════════
+
+Command + output:
+
+  $ eslint --no-eslintrc -c .eslintrc-ccf.json "backend/routes/proxy.js"
+  EXIT: 0  (no problems)
+
+  $ eslint --no-eslintrc -c .eslintrc-ccf.json --env jest "backend/__tests__/birthday.test.js"
+  EXIT: 0  (no problems with jest env enabled)
+
+Note: birthday.test.js without --env jest emits 177 no-undef errors for Jest
+globals (describe, test, expect, jest, beforeEach). These are pre-existing in
+ALL test files — the eslintrc-ccf.json was not configured with env:jest.
+With --env jest added, exit is 0.
+
+═══════════════════════════════════════════════════════════
+6d. TEST COUNTS
+═══════════════════════════════════════════════════════════
+
+Before Phase 3 verify (Phase 3 commit 3465c6f): 72 suites, 1560 tests.
+After Phase 3 verify:                           72 suites, 1568 tests (+8).
+
+New tests added in verification:
+  birthday.test.js — "POST /birthday — phone identifier (Phase 3 verify)":
+    + phone present, no sessionId — upsertProfile called with phone identifier
+    + neither phone nor sessionId — upsertProfile still called (no-op identity)
+  birthday.test.js — "POST /cod-order — first-order and hasBirthday (Phase 3 verify)":
+    + first order (count=1) → isFirstOrder true + status.$ne:cancelled in query
+    + second order (count=2) → isFirstOrder false
+    + cancelled orders excluded from count
+    + profile has birthday → hasBirthday true
+    + profile has no birthday → hasBirthday false
+    + hasBirthday not checked for repeat orders
+
+Frontend tests: no frontend test suite exists (no jest config in frontend/).
+
+═══════════════════════════════════════════════════════════
+7. STOREFRONT ccf-push.js JSDOM PATTERN
+═══════════════════════════════════════════════════════════
+
+No jsdom pattern exists for ccf-push.js in the repo. No storefront test added.
+Evidence: grep -rn "jsdom|ccf-push|storefront" backend/__tests__/ found only
+one hit (suspendEnforcement.test.js for a different route), no pattern for the
+extensions/ storefront JS.
+
+═══════════════════════════════════════════════════════════
+FILES CHANGED IN VERIFICATION
+═══════════════════════════════════════════════════════════
+
+backend/routes/proxy.js:
+  /birthday: added `phone` extraction; upsertProfile now uses { phone || null, sessionId || null }
+  /cod-order: countDocuments excludes status:cancelled; added hasBirthday Profile lookup;
+    response now includes hasBirthday
+  cod-form inline JS: birthday POST body now includes `phone`; condition gates on !hasBirthday
+
+backend/__tests__/birthday.test.js:
+  Mocks updated: CodOrder gains create+countDocuments; Profile gains findOne;
+    utils/phone mock added (normalizePhone stub)
+  +2 POST /birthday phone-identifier tests
+  +6 POST /cod-order isFirstOrder+hasBirthday tests

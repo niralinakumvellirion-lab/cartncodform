@@ -12,12 +12,22 @@ jest.mock('../models/DiscountConfig', () => ({
 }));
 jest.mock('../models/Profile', () => ({
   find: jest.fn(),
+  findOne: jest.fn(),
   deleteMany: jest.fn(),
 }));
-jest.mock('../models/CodOrder', () => ({ findOne: jest.fn(), deleteMany: jest.fn() }));
+jest.mock('../models/CodOrder', () => ({
+  findOne: jest.fn(),
+  create: jest.fn(),
+  countDocuments: jest.fn(),
+  deleteMany: jest.fn(),
+}));
 jest.mock('../models/Store', () => ({ findOne: jest.fn(), updateOne: jest.fn() }));
 jest.mock('../utils/email', () => ({ sendNewCodOrderEmail: jest.fn() }));
 jest.mock('../utils/pushNotification', () => ({ sendPushToStore: jest.fn() }));
+jest.mock('../utils/phone', () => ({
+  normalizePhone: jest.fn((raw) => '+91' + raw.replace(/\D/g, '').slice(-10)),
+  getNationalNumber: jest.fn((e164) => e164.replace('+91', '')),
+}));
 jest.mock('../middleware/requireOwner', () => ({
   requireAuth: jest.fn(),
   requireStoreOwner: jest.fn(),
@@ -31,6 +41,8 @@ jest.mock('../services/profileService', () => ({
 }));
 
 const DiscountConfig = require('../models/DiscountConfig');
+const CodOrder = require('../models/CodOrder');
+const Profile = require('../models/Profile');
 const { upsertProfile } = require('../services/profileService');
 const { verifyProxySignature } = require('../utils/shopify');
 const { defaultConfig } = require('../routes/discounts');
@@ -427,5 +439,137 @@ describe('Compliance: birthday covered by Profile.deleteMany', () => {
     expect(schema.path('birthday.day')).toBeDefined();
     expect(schema.path('birthday.capturedAt')).toBeDefined();
     expect(schema.path('birthday.source')).toBeDefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. Phase 3 verify — POST /birthday with phone identifier (no sessionId)
+// ---------------------------------------------------------------------------
+describe('POST /birthday — phone identifier (Phase 3 verify)', () => {
+  const post = handlerFor(proxyRouter, '/birthday', 'post');
+  let ipCounter = 200;
+  function req(body = {}) {
+    const ip = '10.1.' + (ipCounter++) + '.1';
+    return {
+      query: { shop: SHOP },
+      body,
+      headers: { 'x-forwarded-for': ip },
+      socket: { remoteAddress: ip },
+    };
+  }
+
+  beforeEach(() => {
+    DiscountConfig.findOne.mockReturnValue({
+      lean: () => Promise.resolve({ birthdayCapture: { postOrder: { enabled: true } } }),
+    });
+  });
+
+  test('phone present, no sessionId — upsertProfile called with phone identifier', async () => {
+    const res = mockRes();
+    await post(req({ month: 6, day: 20, source: 'post_order', phone: '9876543210' }), res);
+    expect(res.statusCode).toBe(200);
+    expect(upsertProfile).toHaveBeenCalled();
+    const idArg = upsertProfile.mock.calls[upsertProfile.mock.calls.length - 1][1];
+    expect(idArg.phone).toBe('9876543210');
+    expect(idArg.sessionId).toBeFalsy();
+  });
+
+  test('neither phone nor sessionId — upsertProfile still called (no-op identity)', async () => {
+    const res = mockRes();
+    await post(req({ month: 3, day: 5, source: 'post_order' }), res);
+    expect(res.statusCode).toBe(200);
+    expect(upsertProfile).toHaveBeenCalled();
+    const idArg = upsertProfile.mock.calls[upsertProfile.mock.calls.length - 1][1];
+    expect(idArg.phone).toBeFalsy();
+    expect(idArg.sessionId).toBeFalsy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. Phase 3 verify — POST /cod-order: cancelled exclusion + hasBirthday
+// ---------------------------------------------------------------------------
+describe('POST /cod-order — first-order and hasBirthday (Phase 3 verify)', () => {
+  const codOrder = handlerFor(proxyRouter, '/cod-order', 'post');
+
+  function orderReq(over = {}) {
+    return {
+      query: { shop: SHOP },
+      body: {
+        shopDomain: SHOP, name: 'Test User', phone: '9876543210',
+        address: '1 MG Rd', email: '', city: '', pincode: '', quantity: 1,
+        productName: 'Widget', productPrice: 500, productId: 'pid1',
+        ...over,
+      },
+      headers: {},
+      socket: { remoteAddress: '10.0.0.1' },
+    };
+  }
+
+  const fakeOrder = {
+    _id: 'order1',
+    shopDomain: SHOP,
+    name: 'Test User',
+    phone: '9876543210',
+    productName: 'Widget',
+  };
+
+  beforeEach(() => {
+    CodOrder.create.mockResolvedValue(fakeOrder);
+    require('../models/Store').findOne.mockResolvedValue(null);
+    Profile.findOne.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
+  });
+
+  test('first order (count=1, no cancelled filter bypass) → isFirstOrder true', async () => {
+    CodOrder.countDocuments.mockResolvedValue(1);
+    const res = mockRes();
+    await codOrder(orderReq(), res);
+    expect(res.statusCode).toBe(201);
+    expect(res.body.isFirstOrder).toBe(true);
+    const countCall = CodOrder.countDocuments.mock.calls[0][0];
+    expect(countCall.status).toEqual({ $ne: 'cancelled' });
+  });
+
+  test('second order (count=2) → isFirstOrder false', async () => {
+    CodOrder.countDocuments.mockResolvedValue(2);
+    const res = mockRes();
+    await codOrder(orderReq(), res);
+    expect(res.body.isFirstOrder).toBe(false);
+  });
+
+  test('cancelled orders excluded from count — query has status.$ne:cancelled', async () => {
+    CodOrder.countDocuments.mockResolvedValue(1);
+    const res = mockRes();
+    await codOrder(orderReq(), res);
+    const query = CodOrder.countDocuments.mock.calls[0][0];
+    expect(query).toMatchObject({ status: { $ne: 'cancelled' } });
+  });
+
+  test('profile has birthday → hasBirthday true', async () => {
+    CodOrder.countDocuments.mockResolvedValue(1);
+    Profile.findOne.mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve({ _id: 'prof1' }) }),
+    });
+    const res = mockRes();
+    await codOrder(orderReq(), res);
+    expect(res.body.hasBirthday).toBe(true);
+  });
+
+  test('profile has no birthday → hasBirthday false', async () => {
+    CodOrder.countDocuments.mockResolvedValue(1);
+    Profile.findOne.mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve(null) }),
+    });
+    const res = mockRes();
+    await codOrder(orderReq(), res);
+    expect(res.body.hasBirthday).toBe(false);
+  });
+
+  test('hasBirthday not checked for repeat orders (isFirstOrder false)', async () => {
+    CodOrder.countDocuments.mockResolvedValue(2);
+    const res = mockRes();
+    await codOrder(orderReq(), res);
+    expect(res.body.hasBirthday).toBe(false);
+    // Profile.findOne must NOT be called when it's not the first order.
+    expect(Profile.findOne).not.toHaveBeenCalled();
   });
 });

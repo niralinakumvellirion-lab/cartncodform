@@ -244,8 +244,9 @@ router.post('/birthday', async (req, res) => {
       ? String(req.headers['x-forwarded-for']).split(',')[0].trim()
       : (req.socket && req.socket.remoteAddress) || '';
     const sessionId = req.body && req.body.sessionId ? String(req.body.sessionId).trim() : '';
+    const phone     = req.body && req.body.phone     ? String(req.body.phone).trim()     : '';
 
-    if (!_bdayRateCheck(ip, shop, sessionId)) {
+    if (!_bdayRateCheck(ip, shop, sessionId || phone)) {
       return res.status(429).json({ ok: false, error: 'Too many requests' });
     }
 
@@ -272,7 +273,7 @@ router.post('/birthday', async (req, res) => {
     const { upsertProfile } = require('../services/profileService');
     upsertProfile(
       shop,
-      { sessionId: sessionId || null },
+      { phone: phone || null, sessionId: sessionId || null },
       {
         'birthday.month': month,
         'birthday.day': day,
@@ -519,8 +520,9 @@ router.get('/cod-form', async (req, res) => {
         ok.appendChild(p);
         card.appendChild(ok);
 
-        // Post-order birthday ask: shown on first COD order when enabled.
-        if (BOOT.postOrderEnabled && result.body.isFirstOrder) {
+        // Post-order birthday ask: shown on first COD order when enabled and
+        // the customer has not already provided their birthday (server + localStorage).
+        if (BOOT.postOrderEnabled && result.body.isFirstOrder && !result.body.hasBirthday) {
           var bdKey = 'ccf_bday_' + BOOT.shop;
           var bdSaved = false;
           try { bdSaved = !!localStorage.getItem(bdKey); } catch (e) {}
@@ -594,7 +596,7 @@ router.get('/cod-form', async (req, res) => {
               fetch(window.location.origin + '/apps/cartncodform/birthday?shop=' + encodeURIComponent(BOOT.shop), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ month: m, day: d, source: 'post_order' })
+                body: JSON.stringify({ month: m, day: d, source: 'post_order', phone: phone })
               })
                 .then(function() {
                   try { localStorage.setItem(bdKey, '1'); } catch (e) {}
@@ -707,13 +709,33 @@ router.post('/cod-order', async (req, res) => {
     );
 
     // Determine if this is the customer's first COD order (for the post-order birthday ask).
+    // Cancelled orders are excluded — they never materialised.
     let isFirstOrder = false;
+    let hasBirthday = false;
     try {
-      const orderCount = await CodOrder.countDocuments({ shopDomain: shop, phone: String(phone).trim() });
+      const rawPhone = String(phone).trim();
+      const orderCount = await CodOrder.countDocuments({
+        shopDomain: shop,
+        phone: rawPhone,
+        status: { $ne: 'cancelled' },
+      });
       isFirstOrder = orderCount === 1;
+
+      if (isFirstOrder) {
+        const { normalizePhone } = require('../utils/phone');
+        const Profile = require('../models/Profile');
+        const e164 = normalizePhone(rawPhone, 'IN') || rawPhone;
+        const bdProf = await Profile.findOne({
+          shopDomain: shop,
+          'identifiers.phones': { $in: [e164, rawPhone] },
+          'birthday.month': { $exists: true, $ne: null },
+          'birthday.day':   { $exists: true, $ne: null },
+        }).select('_id').lean();
+        hasBirthday = !!bdProf;
+      }
     } catch (_) {}
 
-    return res.status(201).json({ success: true, orderId: order._id, isFirstOrder });
+    return res.status(201).json({ success: true, orderId: order._id, isFirstOrder, hasBirthday });
   } catch (err) {
     console.error('[proxy] POST /cod-order error:', err.message);
     return res.status(500).json({ success: false, error: 'Failed to save COD order' });
