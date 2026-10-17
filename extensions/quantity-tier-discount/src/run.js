@@ -81,4 +81,5 @@ function run(input) {
   };
 }
 
-module.exports = { run };
+// Export both names: 'run' for Jest tests, 'cartLinesDiscountsGenerateRun' for CLI entry
+module.exports = { run, cartLinesDiscountsGenerateRun: run };

@@ -3,9 +3,23 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "build": "node esbuild.config.mjs"
+    "build": "npm exec -- shopify app function build",
+    "preview": "npm exec -- shopify app function run",
+    "typegen": "npm exec -- shopify app function typegen"
   },
-  "devDependencies": {
-    "esbuild": "^0.20.2"
+  "dependencies": {
+    "@shopify/shopify_function": "~1.0.0"
+  },
+  "codegen": {
+    "schema": "schema.graphql",
+    "documents": "src/*.graphql",
+    "generates": {
+      "./generated/api.ts": {
+        "plugins": [
+          "typescript",
+          "typescript-operations"
+        ]
+      }
+    }
   }
 }

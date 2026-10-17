@@ -4,13 +4,14 @@ api_version = "2026-10"
 type = "function"
 name = "Quantity Tier Discount"
 handle = "quantity-tier-discount"
+uid = "2e7686c9-cfea-758e-d39f-cae34f26f71ab4af18cb"
 api_version = "2026-10"
 
 [extensions.build]
-command = "npm run build"
-path = "dist/index.js"
+command = ""
+path = "dist/function.wasm"
 
 [[extensions.targeting]]
 target = "cart.lines.discounts.generate.run"
-input_query = "src/run.graphql"
-export = "run"
+input_query = "src/cart_lines_discounts_generate_run.graphql"
+export = "cart-lines-discounts-generate-run"
