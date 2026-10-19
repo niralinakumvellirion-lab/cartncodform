@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import { apiSend } from '../../../lib/api';
+import { TierPreview } from './QuantityTiersPreview';
 
 // ── Defaults matching board 2 of the "Birthday and Tier Offers" canvas ──────
 const DEFAULT_TIERS = [
@@ -160,7 +161,17 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   const accent = ACCENT_RE.test(accentColor) ? accentColor : DEFAULT_ACCENT;
-  const preview = previewTiers();
+
+  // Build a config-shaped object from live state for the preview component
+  const previewConfig = {
+    quantityTiers: {
+      tiers: previewTiers(),
+      heading,
+      accentColor: accent,
+      layout,
+      enabled: true,
+    },
+  };
 
   return (
     <section style={styles.section} aria-label="Quantity tiers">
@@ -319,37 +330,7 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
 
       {/* ── Live preview ── */}
       <div style={styles.card}>
-        <p style={styles.sectionLabel}>Preview</p>
-        <p style={{ ...styles.cardSub, marginBottom: 12 }}>
-          Example: item priced at ₹{EXAMPLE_PRICE.toLocaleString('en-IN')}
-        </p>
-        <p style={{ ...styles.previewHeading, color: accent }}>{heading || DEFAULT_HEADING}</p>
-        <div style={layout === 'cards' ? styles.previewCards : styles.previewList}>
-          {preview.length === 0 && (
-            <p style={styles.cardSub}>Add at least one tier to see the preview.</p>
-          )}
-          {preview.map((t, i) => {
-            const discounted = Math.round(EXAMPLE_PRICE * (1 - t.percent / 100));
-            return (
-              <div
-                key={i}
-                style={{
-                  ...styles.previewCard,
-                  border: `2px solid ${accent}`,
-                  ...(layout === 'list' ? styles.previewCardList : {}),
-                }}
-              >
-                {t.badge ? <span style={{ ...styles.badge, background: accent }}>{t.badge}</span> : null}
-                <p style={styles.previewQty}>Buy {t.minQty}+</p>
-                <p style={{ ...styles.previewPct, color: accent }}>Save {t.percent}%</p>
-                <p style={styles.previewPrice}>
-                  <s style={{ color: '#9CA3AF' }}>₹{EXAMPLE_PRICE}</s>{' '}
-                  <strong>₹{discounted}</strong>
-                </p>
-              </div>
-            );
-          })}
-        </div>
+        <TierPreview config={previewConfig} price={EXAMPLE_PRICE} currencySymbol="₹" />
       </div>
 
       {/* ── Save + sync status ── */}
@@ -423,15 +404,6 @@ const styles = {
     padding: '12px 16px', fontSize: 13, color: '#92400E', display: 'flex', gap: 8, alignItems: 'flex-start',
   },
   amberIcon: { flexShrink: 0, fontSize: 16 },
-  previewHeading: { fontWeight: 700, fontSize: 16, marginBottom: 12 },
-  previewCards: { display: 'flex', gap: 12, flexWrap: 'wrap' },
-  previewList: { display: 'flex', flexDirection: 'column', gap: 8 },
-  previewCard: { borderRadius: 8, padding: 16, minWidth: 110, position: 'relative' },
-  previewCardList: { display: 'flex', alignItems: 'center', gap: 16, minWidth: 0 },
-  badge: { display: 'inline-block', color: '#fff', fontSize: 10, fontWeight: 600, borderRadius: 4, padding: '2px 6px', marginBottom: 8 },
-  previewQty: { fontSize: 13, color: '#374151', margin: '0 0 2px' },
-  previewPct: { fontWeight: 700, fontSize: 18, margin: '0 0 4px' },
-  previewPrice: { fontSize: 12, color: '#6B7280', margin: 0 },
   saveRow: { display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' },
   saveBtn: {
     background: '#4F46E5', color: '#fff', border: 'none', borderRadius: 6,
