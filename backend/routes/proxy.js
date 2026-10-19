@@ -143,6 +143,7 @@ router.get('/discount-config', async (req, res) => {
         postOrder: { enabled: !!(doc.birthdayCapture && doc.birthdayCapture.postOrder && doc.birthdayCapture.postOrder.enabled) },
       },
       birthdayDiscount: {
+        enabled: !!(doc.birthdayDiscount && doc.birthdayDiscount.enabled),
         percentage: (doc.birthdayDiscount && doc.birthdayDiscount.percentage) || 15,
         offerText: String((doc.birthdayDiscount && doc.birthdayDiscount.offerText) || '').trim().slice(0, 120),
         consentText: String((doc.birthdayDiscount && doc.birthdayDiscount.consentText) || "We'll use your birthday only to send you a birthday offer.").slice(0, 200),
@@ -170,6 +171,14 @@ router.get('/discount-config', async (req, res) => {
       phoneDiscount: { enabled: false, percentage: 0 },
       bothDiscount: { enabled: false, percentage: 0 },
       offerHeadline: 'Get a discount on your first order!',
+      whatsappCapture: { enabled: false },
+      birthdayCapture: {
+        popup: { enabled: false },
+        banner: { enabled: false, text: '', buttonText: 'Get my gift', dismissDays: 7 },
+        postOrder: { enabled: false },
+      },
+      birthdayDiscount: { enabled: false, percentage: 15, offerText: '', consentText: "We'll use your birthday only to send you a birthday offer." },
+      quantityTiers: { enabled: false, tiers: [], heading: 'Buy more, save more', accentColor: '#4F46E5', layout: 'cards' },
     });
   }
 });

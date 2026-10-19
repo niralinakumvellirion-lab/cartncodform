@@ -1,4 +1,4 @@
-(function() {
+﻿(function() {
   'use strict';
 
   var BACKEND_URL = 'https://api.shopireachboost.com';
@@ -985,12 +985,23 @@
       try { if (localStorage.getItem(CCF_BDAY_KEY)) { onDone(); return; } } catch (e) {}
 
       var section = wrap ? wrap.querySelector('#ccf-content-section') : null;
-      if (!section) { onDone(); return; }
+      var bdOverlay = null;
+      if (!section) {
+        // top_bar and other styles without #ccf-content-section (e.g. mobile slim bar):
+        // create a bottom-sheet overlay so the birthday form is still reachable.
+        bdOverlay = document.createElement('div');
+        bdOverlay.style.cssText = 'position:fixed;left:0;right:0;top:0;bottom:0;z-index:2147483647;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,0.45);padding:16px;box-sizing:border-box;';
+        var bdCard = document.createElement('div');
+        bdCard.style.cssText = 'background:#fff;border-radius:16px;padding:20px;width:100%;max-width:420px;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,sans-serif;';
+        bdOverlay.appendChild(bdCard);
+        document.body.appendChild(bdOverlay);
+        section = bdCard;
+      }
 
       var offerText = (discountConfig.birthdayDiscount && discountConfig.birthdayDiscount.offerText)
         || 'Get a birthday gift';
       var consentText = (discountConfig.birthdayDiscount && discountConfig.birthdayDiscount.consentText)
-        || 'We’ll use your birthday only to send you a birthday offer.';
+        || 'We\u2019ll use your birthday only to send you a birthday offer.';
 
       section.style.textAlign = 'center';
       section.style.padding = '8px 0 4px';
@@ -1002,6 +1013,7 @@
         source: 'popup',
       }, function(saved) {
         try { localStorage.setItem(CCF_BDAY_KEY, saved ? '1' : 'skip'); } catch (e) {}
+        if (bdOverlay && bdOverlay.parentNode) bdOverlay.parentNode.removeChild(bdOverlay);
         onDone();
       });
     } catch (e) {
@@ -2854,7 +2866,18 @@
                 ccfShowBirthdayStep(wrap, accent, function() { finishDiscount(d, capAction); });
               });
           })
-          .catch(function () { resetButton(); });
+          .catch(function () {
+            // Discount generation failed; birthday capture is independent —
+            // run it if enabled, then close. If disabled, close directly.
+            var bdOn = !!(discountConfig && discountConfig.birthdayCapture &&
+              discountConfig.birthdayCapture.popup &&
+              discountConfig.birthdayCapture.popup.enabled);
+            if (bdOn) {
+              ccfShowBirthdayStep(wrap, accent, cleanup);
+            } else {
+              resetButton();
+            }
+          });
         return;
       }
 
@@ -2914,9 +2937,17 @@
                 ccfShowBirthdayStep(wrap, accent, function() { finishDiscount(d, action); });
               })
               .catch(function () {
-                // Stage 4: error — reset so the customer can retry, rather
-                // than silently closing the popup.
-                resetButton();
+                // Stage 4: discount generation failed — birthday capture is
+                // independent; run it if enabled, then close. If disabled,
+                // reset so the customer can retry.
+                var bdOn = !!(discountConfig && discountConfig.birthdayCapture &&
+                  discountConfig.birthdayCapture.popup &&
+                  discountConfig.birthdayCapture.popup.enabled);
+                if (bdOn) {
+                  ccfShowBirthdayStep(wrap, accent, cleanup);
+                } else {
+                  resetButton();
+                }
               });
           })
           .catch(function (err) {
@@ -3072,8 +3103,8 @@
   function fetchDiscountConfig() {
     var url = window.location.origin + '/apps/cartncodform/discount-config?shop=' +
       encodeURIComponent(SHOP_DOMAIN);
-    return fetchWithTimeout(url, 3000)
-      .then(function (r) { return r.ok ? r.json() : null; })
+    return fetchWithTimeout(url, 5000)
+      .then(function (r) { return r && r.ok ? r.json() : null; })
       .then(function (data) {
         if (data && typeof data === 'object') discountConfig = data;
       })
@@ -4108,6 +4139,15 @@
     if (('Notification' in window) && Notification.permission === 'granted') {
       setupForegroundMessages();
     }
+  }
+
+  // test-only hook: exposed when window.__ccf_test is set BEFORE script load
+  if (typeof window !== 'undefined' && window.__ccf_test) {
+    window.__ccf_test.showBirthdayStep = ccfShowBirthdayStep;
+    window.__ccf_test.getDiscountConfig = function() { return discountConfig; };
+    window.__ccf_test.setDiscountConfig = function(v) { discountConfig = v; };
+    window.__ccf_test.CCF_BDAY_KEY = CCF_BDAY_KEY;
+    window.__ccf_test.renderBirthdayForm = ccfRenderBirthdayForm;
   }
 
   if (document.readyState === 'loading') {

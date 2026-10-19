@@ -1,0 +1,58 @@
+AUDIT — entry popup birthday / discount fix
+============================================
+
+── PRE-AUDIT (before edits) ─────────────────────────────────────────────────
+
+Files in scope: backend/routes/proxy.js, extensions/cartncodform-embed/assets/ccf-push.js
+
+BUGS FOUND (root-cause analysis):
+
+Bug 1 — proxy.js:145  birthdayDiscount.enabled never returned by /discount-config
+  The proxy builds birthdayDiscount: { percentage, offerText, consentText } but
+  omits `enabled`. Admin saves it correctly (PATCH sets `birthdayDiscount.enabled`)
+  and defaultConfig has it, but the storefront proxy strips it.
+  Consequence: discountConfig.birthdayDiscount.enabled is always undefined on the
+  storefront. Not the gate for ccfShowBirthdayStep itself, but a data correctness
+  issue and a gate for any future storefront feature that reads it.
+
+Bug 2 — proxy.js:167  500 error fallback drops birthday/whatsapp/quantityTiers
+  The catch block returns only pushDiscount/emailDiscount/phoneDiscount/bothDiscount/
+  offerHeadline. A transient DB error would leave the storefront with discountConfig
+  that has no birthdayCapture → birthday step always skipped until next page load.
+
+Bug 3 — ccf-push.js:987  Birthday step silently skipped for top_bar popup (mobile)
+  ccfShowBirthdayStep checks `wrap.querySelector('#ccf-content-section')`. The
+  top_bar style (mobile) builds wrap → tbText + allow + closeBtn with NO
+  #ccf-content-section (documented at line 2712-2717 and confirmed at lines
+  2066-2101). So section = null → onDone() called immediately → birthday form
+  never shown. wantsDiscount = false for top_bar so the !wantsDiscount path DOES
+  call ccfShowBirthdayStep, but it immediately returns without rendering anything.
+  Affects ALL mobile visitors on the default top_bar popup style.
+
+Bug 4 — ccf-push.js:2916  Inner catch (new-subscriber path) calls resetButton()
+  When wantsDiscount = true and the generate-discount POST fails (network/timeout),
+  the inner .catch calls resetButton() instead of ccfShowBirthdayStep. User granted
+  push permission, may have entered email — birthday capture should still run.
+
+Bug 5 — ccf-push.js:2857  Outer catch (already-subscribed path) calls resetButton()
+  Same issue: when the generate-discount call fails in the already-subscribed flow,
+  the outer .catch calls resetButton(). Birthday step is not attempted.
+
+Bug 6 — ccf-push.js:3075  fetchDiscountConfig timeout 3000 ms too short for cold start
+  fetchWithTimeout(url, 3000) races a 3 s timer. On Render free tier cold starts
+  (commonly 5-15 s), the timer resolves first with null. Then `r.ok` throws TypeError
+  → catch fires → discountConfig stays {}. Result: birthdayCapture.popup.enabled is
+  undefined, ccfShowBirthdayStep sets bdEnabled=false, birthday step never shows.
+  Also: `r && r.ok` guard is missing so the TypeError is the only signal that r=null.
+
+FIXES PLANNED:
+  proxy.js    → add enabled to birthdayDiscount; fix 500 fallback
+  ccf-push.js → overlay for top_bar; fix inner/outer catch; increase timeout;
+                add r && r.ok guard; add test hook
+
+TEST PLAN:
+  backend/__tests__/ccfPushBirthday.test.js (new, @jest-environment jsdom)
+  Tests: birthday form renders in #ccf-content-section; overlay created when no
+  section; onDone immediate when disabled; localStorage set on skip; overlay
+  removed on completion.
+
