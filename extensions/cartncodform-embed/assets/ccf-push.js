@@ -2694,28 +2694,33 @@
     if (overlay) document.body.appendChild(overlay);
     document.body.appendChild(wrap);
 
-    // discount-feature: the split layout still uses the shared field-builder,
-    // inserted right after the deny control. Card builds its own inline
-    // fields above (see the card branch).
-    // popup-style: Flash Sale/Gift Reveal build their own inline email
-    // field too (same as card) — gating on ccfStyle.id === 'classic' here
-    // stops this from ALSO firing when the layout field left over from an
-    // earlier Classic session still happens to read 'split' while a style
-    // is active (popup.layout is deliberately left untouched while a
-    // non-classic style is selected — see ccfResolveStyle()/Settings.jsx).
+    // discount-feature: the split layout uses the shared field-builder.
+    // Inserted BEFORE the allow button so the DOM order is:
+    //   offer-headline → email → WA → primary CTA → deny → branding.
+    // popup-style: gating on ccfStyle.id === 'classic' stops this from
+    // firing when a non-classic style is active (popup.layout is left
+    // untouched while a non-classic style is selected — see
+    // ccfResolveStyle()/Settings.jsx).
     if (ccfStyle.id === 'classic' && layout === 'split') {
       var discountFields = ccfBuildDiscountFields();
-      if (discountFields && deny && deny.parentNode) {
-        if (deny.nextSibling) deny.parentNode.insertBefore(discountFields, deny.nextSibling);
-        else deny.parentNode.appendChild(discountFields);
+      if (discountFields) {
+        if (allow && allow.parentNode) {
+          allow.parentNode.insertBefore(discountFields, allow);
+        } else if (deny && deny.parentNode) {
+          deny.parentNode.insertBefore(discountFields, deny);
+        }
       }
     }
     // In capture-only mode (push unavailable or already denied) the Allow
     // button cannot do anything useful — hide it so offerBtn becomes the CTA.
     // Promote offerBtn to primary style by mirroring allow's inline style.
+    // IMPORTANT: read allowStyleStr BEFORE setting display:none on allow;
+    // allow.getAttribute('style') reads the live attribute, so setting
+    // allow.style.display first would include "display: none" in the string
+    // and copy it onto offerBtn, hiding it too.
     if (isCaptureOnly && allow && offerBtn) {
-      allow.style.display = 'none';
       var allowStyleStr = allow.getAttribute('style') || '';
+      allow.style.display = 'none';
       offerBtn.setAttribute('style', allowStyleStr);
     } else if (isCaptureOnly && allow) {
       allow.style.display = 'none';
@@ -4148,6 +4153,8 @@
     window.__ccf_test.setDiscountConfig = function(v) { discountConfig = v; };
     window.__ccf_test.CCF_BDAY_KEY = CCF_BDAY_KEY;
     window.__ccf_test.renderBirthdayForm = ccfRenderBirthdayForm;
+    window.__ccf_test.showSoftPrompt = showSoftPrompt;
+    window.__ccf_test.setPopupConfig = function(v) { popupConfig = v; };
   }
 
   if (document.readyState === 'loading') {

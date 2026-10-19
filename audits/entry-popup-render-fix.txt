@@ -1,0 +1,110 @@
+AUDIT — entry popup render fix
+==============================
+
+── PRE-AUDIT (before edits) ─────────────────────────────────────────────────
+
+Symptom (Chrome Incognito, desktop, split layout):
+  headline → subline → "No thanks" → "Get a discount on your first order!"
+  → email field → country/WA → WA consent → "Powered by ShopiReachBoost AI"
+  NO primary action button visible anywhere.
+
+Scope: extensions/cartncodform-embed/assets/ccf-push.js (classic/split layout
+  branch of showSoftPrompt). No other files.
+
+TRACE:
+
+In Chrome Incognito, Notification.permission === 'denied':
+  isDiscountCapture = false (permission !== 'granted')
+  canPrompt()       = false (permission !== 'default')
+  isCaptureOnly     = canCaptureOnly() = true
+    — because: denied=true, ccfCaptureMode()=true (email discount on),
+               not already shown
+
+Split layout DOM is built (lines 2615–2680):
+  rightPanel children, in append order:
+    1. [splitBrand]        (if cfg.brandName)
+    2. splitHead           headline          line 2653
+    3. splitSub            subtext           line 2659
+    4. allow               buildAllowBtn()   line 2663
+    5. offerBtn            buildOfferBtn()   line 2664  (only if ccfCaptureMode())
+    6. deny                buildDenyBtn()    line 2667
+    7. [branding]          buildBranding()   line 2670  (if cfg.showBranding)
+
+After wrap appended to body:
+  Step 1 (lines 2706–2711): discountFields inserted AFTER deny:
+    if deny.nextSibling (= branding): insertBefore(discountFields, branding)
+    else: deny.parentNode.appendChild(discountFields)
+  → DOM order becomes: allow, offerBtn, deny, discountFields, branding
+      i.e. "No thanks" appears BEFORE offer headline / email / WA.
+
+  Step 2 (lines 2716–2719): capture-only → promote offerBtn:
+    allow.style.display = 'none';                  ← Step A: mutates style attr
+    var allowStyleStr = allow.getAttribute('style'); ← Step B: reads the MODIFIED
+                                                       attr → includes "display: none;"
+    offerBtn.setAttribute('style', allowStyleStr);  ← Step C: copies display:none
+                                                       onto offerBtn → it's invisible
+
+BUG A — Wrong DOM order (ccf-push.js lines 2706–2711):
+  discountFields (offer headline + email + WA) inserted AFTER deny ("No thanks")
+  regardless of push availability.
+  Expected: discountFields BEFORE the action buttons so the visitor sees the
+  form before clicking any button (headline → email → WA → CTA → "No thanks").
+
+BUG B — offerBtn hidden in capture-only mode (ccf-push.js lines 2716–2719):
+  allow.style.display = 'none' modifies allow's inline style attribute before
+  allowStyleStr = allow.getAttribute('style') reads it. So allowStyleStr
+  contains "display: none;" which is then applied verbatim to offerBtn,
+  hiding it too. Result: NO visible primary button.
+
+  Condition table:
+  Notification.permission  | push avail | isCaptureOnly | offerBtn visible?
+  'default'                | yes        | false         | yes (no style swap)
+  'denied' (incognito)     | yes API    | true          | NO (Bug B)
+  unavailable (old browser)| no API     | true          | NO (Bug B)
+  'granted' (subscribed)   | yes        | false         | yes (isDiscountCapture)
+
+FIXES PLANNED:
+  Bug A: insert discountFields BEFORE allow (not after deny)
+         → always correct order regardless of isCaptureOnly
+  Bug B: read allowStyleStr BEFORE calling allow.style.display = 'none'
+
+TEST PLAN:
+  backend/__tests__/ccfPushRender.test.js (new, @jest-environment jsdom)
+  Tests that FAIL before fix, PASS after:
+    — Notification.permission=denied: offerBtn not display:none
+    — Notification.permission=denied: discountFields before deny in DOM
+    — No Notification API: offerBtn not display:none
+    — No Notification API: discountFields before deny in DOM
+    — Notification.permission=default: allow button visible
+    — Notification.permission=default: discountFields before deny in DOM
+
+── SELF-AUDIT (after edits) ─────────────────────────────────────────────────
+
+FILES CHANGED:
+  extensions/cartncodform-embed/assets/ccf-push.js    +18/-10
+  backend/__tests__/ccfPushRender.test.js              new (187 lines)
+  audits/entry-popup-render-fix.txt                    new (this file)
+
+BUGS FIXED:
+  Bug A ✓  ccf-push.js lines 2706-2711: discountFields insertion point changed
+           from "after deny" to "before allow", so DOM order is always:
+           offer-headline → email → WA → primary CTA → No thanks → branding.
+  Bug B ✓  ccf-push.js lines 2716-2719: moved allowStyleStr = allow.getAttribute('style')
+           to BEFORE allow.style.display = 'none', so the style string does not
+           contain "display: none" when applied to offerBtn.
+
+TEST RESULTS:
+  new: backend/__tests__/ccfPushRender.test.js — 7 tests, all passing
+    ✓ capture-only (denied): offerBtn not display:none
+    ✓ capture-only (denied): discountFields before deny
+    ✓ capture-only (denied): allow button hidden (sanity)
+    ✓ capture-only (no Notification API): offerBtn visible
+    ✓ capture-only (no Notification API): discountFields before deny
+    ✓ push available: allow button visible
+    ✓ push available: discountFields before deny
+  full suite: 79 suites, 1697 tests, 0 failures (7 tests added)
+  shopify app build: success (exit 0)
+
+SCOPE COMPLIANCE: two bug fixes only. No layout redesign, no new features,
+  no changes outside the classic/split branch of showSoftPrompt.
+
