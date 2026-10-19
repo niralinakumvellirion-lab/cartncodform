@@ -33,7 +33,7 @@
         maximumFractionDigits: 2,
       }).format(minorUnits / 100);
     } catch (e) {
-      return currency + ' ' + (minorUnits / 100).toFixed(2);
+      return currency + ' ' + (minorUnits / 100).toFixed(2);
     }
   }
 
@@ -52,6 +52,35 @@
   function discountedUnitPricePaise(pricePaise, percent) {
     var raw = pricePaise * (1 - percent / 100);
     return Math.round((raw + Number.EPSILON) * 100) / 100;
+  }
+
+  // ── Colour accessibility ───────────────────────────────────────────────────
+
+  var ACCENT_RE = /^#[0-9A-Fa-f]{6}$/;
+
+  function hexLuminance(hex) {
+    var r = parseInt(hex.slice(1, 3), 16) / 255;
+    var g = parseInt(hex.slice(3, 5), 16) / 255;
+    var b = parseInt(hex.slice(5, 7), 16) / 255;
+    function lin(c) { return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  }
+
+  // Returns '#ffffff' or '#171A22', whichever meets >= 4.5:1 on bgHex.
+  function pickReadableText(bgHex) {
+    if (!ACCENT_RE.test(bgHex)) return '#ffffff';
+    var lum = hexLuminance(bgHex);
+    return 1.05 / (lum + 0.05) >= 4.5 ? '#ffffff' : '#171A22';
+  }
+
+  // Returns the chip text colour (accent or #171A22) for chip on tint background.
+  function chipTextOnTint(accentHex) {
+    if (!ACCENT_RE.test(accentHex)) return '#171A22';
+    var L = hexLuminance(accentHex);
+    var tintL = 0.9 + 0.1 * L;
+    var lighter = Math.max(L, tintL) + 0.05;
+    var darker = Math.min(L, tintL) + 0.05;
+    return lighter / darker >= 4.5 ? accentHex : '#171A22';
   }
 
   // ── Variant price fetch ────────────────────────────────────────────────────
@@ -78,25 +107,63 @@
 
   function injectStyles(accentColor) {
     if (document.getElementById('ccf-qt-styles')) return;
+    var tint = accentColor + '1A';
+    var badgeText = pickReadableText(accentColor);
+    var chipUnselText = chipTextOnTint(accentColor);
+    var chipSelText = pickReadableText(accentColor);
+    var accentHover = accentColor + '99'; // accent at ~60% opacity on white
     var style = document.createElement('style');
     style.id = 'ccf-qt-styles';
     style.textContent = [
-      '.ccf-qt-wrap{margin:16px 0;font-family:inherit}',
-      '.ccf-qt-heading{font-size:14px;font-weight:600;margin-bottom:10px;color:inherit}',
-      '.ccf-qt-cards{display:flex;gap:10px;flex-wrap:wrap}',
-      '.ccf-qt-layout-list .ccf-qt-card{flex:1 1 100%}',
-      '.ccf-qt-layout-cards .ccf-qt-card{flex:1 1 0;min-width:80px}',
-      '@media(max-width:479px){.ccf-qt-card{flex:1 1 100%!important}}',
-      '.ccf-qt-card{position:relative;border:1px solid #e4e4e7;border-radius:10px;padding:14px 10px 10px;text-align:center;cursor:pointer;background:#fff;transition:border-color .15s;display:flex;flex-direction:column;align-items:center;gap:4px}',
+      // ── Box-sizing reset ──
+      '.ccf-qt-wrap *,.ccf-qt-wrap *::before,.ccf-qt-wrap *::after{box-sizing:border-box}',
+      // ── Wrapper ──
+      '.ccf-qt-wrap{margin:16px 0;font-family:inherit;container-type:inline-size;container-name:ccf-qt}',
+      // ── Heading row ──
+      '.ccf-qt-heading-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:12px}',
+      '.ccf-qt-heading{font-size:16px;font-weight:800;color:#171A22;font-family:inherit;margin:0}',
+      '.ccf-qt-checkout-note{font-size:12px;color:#4A5062;white-space:nowrap;flex-shrink:0}',
+      // ── Cards grid ──
+      '.ccf-qt-cards{display:grid;gap:12px;padding-top:12px}',
+      '.ccf-qt-cards-n1{grid-template-columns:minmax(0,1fr)}',
+      '.ccf-qt-cards-n2{grid-template-columns:repeat(2,minmax(0,1fr))}',
+      '.ccf-qt-cards-n3{grid-template-columns:repeat(3,minmax(0,1fr))}',
+      '.ccf-qt-cards-n4{grid-template-columns:repeat(4,minmax(0,1fr))}',
+      // narrow: 3 or 4 cols collapse to 2
+      '@container ccf-qt (max-width:480px){.ccf-qt-cards-n3,.ccf-qt-cards-n4{grid-template-columns:repeat(2,minmax(0,1fr))}}',
+      // ── Card button (cards layout) ──
+      '.ccf-qt-card{position:relative;background:#fff;border:none;box-shadow:inset 0 0 0 1px #C7CBD6;border-radius:12px;padding:20px 8px 14px;display:flex;flex-direction:column;align-items:center;text-align:center;cursor:pointer;color:#171A22;font-family:inherit;gap:6px;appearance:none !important;text-transform:none !important;letter-spacing:normal !important;min-height:0 !important;line-height:1.4}',
+      // hover on unselected
+      '.ccf-qt-card:not(.ccf-qt-card--active):hover{box-shadow:inset 0 0 0 1px ' + accentHover + '}',
+      // focus-visible
       '.ccf-qt-card:focus-visible{outline:2px solid ' + accentColor + ';outline-offset:2px}',
-      '.ccf-qt-card--active{border-color:' + accentColor + ';border-width:2px}',
-      '.ccf-qt-badge{position:absolute;top:-10px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:700;color:#fff;padding:2px 8px;border-radius:20px;white-space:nowrap;background:' + accentColor + '}',
-      '.ccf-qt-qty{font-size:14px;font-weight:700;color:inherit}',
-      '.ccf-qt-chip{font-size:11px;font-weight:700;color:#fff;padding:2px 8px;border-radius:20px;background:' + accentColor + '}',
-      '.ccf-qt-price{font-size:12px;color:#52525b}',
-      '.ccf-qt-note{font-size:11px;color:#71717a;margin-top:8px}',
-      '.ccf-qt-savings{font-size:13px;font-weight:600;color:#16a34a;margin-top:6px;display:none}',
+      // selected card
+      '.ccf-qt-card--active{box-shadow:inset 0 0 0 2px ' + accentColor + ';background:' + tint + '}',
+      // ── Badge ──
+      '.ccf-qt-badge{position:absolute;top:0;left:50%;transform:translate(-50%,-50%);background:' + accentColor + ';color:' + badgeText + ';font-size:11px;font-weight:700;border-radius:999px;padding:3px 10px;white-space:nowrap;max-width:calc(100% - 8px);overflow:hidden;text-overflow:ellipsis;pointer-events:none}',
+      // ── Qty label ──
+      '.ccf-qt-qty{font-size:15px;font-weight:800;color:#171A22}',
+      // ── Chip (unselected) ──
+      '.ccf-qt-chip{font-size:13px;font-weight:800;color:' + chipUnselText + ';background:' + tint + ';border-radius:6px;padding:3px 9px;display:inline-block}',
+      // chip on selected card — accent bg, readable text
+      '.ccf-qt-card--active .ccf-qt-chip{background:' + accentColor + ';color:' + chipSelText + '}',
+      // ── Price ──
+      '.ccf-qt-price{font-size:12px;color:#4A5062}',
+      // ── List layout ──
+      '.ccf-qt-layout-list{display:flex;flex-direction:column;gap:8px;padding-top:0}',
+      '.ccf-qt-layout-list .ccf-qt-card{flex-direction:row;justify-content:space-between;align-items:center;text-align:left;border-radius:10px;padding:12px 14px;box-shadow:inset 0 0 0 1px #E1E4EA;gap:12px}',
+      '.ccf-qt-layout-list .ccf-qt-card:not(.ccf-qt-card--active):hover{box-shadow:inset 0 0 0 1px ' + accentHover + '}',
+      '.ccf-qt-layout-list .ccf-qt-card--active{box-shadow:inset 0 0 0 2px ' + accentColor + '}',
+      '.ccf-qt-list-left{display:flex;flex-direction:column;gap:2px;min-width:0}',
+      '.ccf-qt-list-qty{font-size:14px;font-weight:800;color:#171A22;display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
+      '.ccf-qt-list-price{font-size:12px;color:#4A5062}',
+      '.ccf-qt-badge-inline{display:inline-flex;align-items:center;background:' + accentColor + ';color:' + badgeText + ';font-size:11px;font-weight:700;border-radius:999px;padding:2px 8px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}',
+      // ── Savings ──
+      '.ccf-qt-savings{font-size:13px;font-weight:700;color:#0F766E;background:#E0F5F1;border-radius:8px;padding:8px 12px;margin-top:8px;display:none}',
+      // ── Placeholder ──
       '.ccf-qt-placeholder{border:2px dashed #d4d4d8;border-radius:12px;padding:24px;text-align:center;color:#71717a;font-size:13px;font-family:inherit}',
+      // ── Reduced motion ──
+      '@media (prefers-reduced-motion:no-preference){.ccf-qt-card{transition:box-shadow .15s,background .15s}}',
     ].join('');
     document.head.appendChild(style);
   }
@@ -128,7 +195,7 @@
     }
 
     var tiers = config.tiers;
-    var accentColor = /^#[0-9A-Fa-f]{6}$/.test(config.accentColor || '') ? config.accentColor : '#4F46E5';
+    var accentColor = ACCENT_RE.test(config.accentColor || '') ? config.accentColor : '#4F46E5';
     var heading = String(config.heading || 'Buy more, save more');
     var layout = config.layout === 'list' ? 'list' : 'cards';
     var handle = String(wrap.getAttribute('data-handle') || '');
@@ -148,7 +215,6 @@
     }
 
     // ── COD link sync ────────────────────────────────────────────────────────
-    // Update any static COD form links on the page to include the current qty.
 
     function syncCodLinks(qty) {
       try {
@@ -172,15 +238,30 @@
       wrap.className = 'ccf-qt-wrap';
       cardEls = [];
 
-      // Heading
+      // Heading row: heading + "Discount applied at checkout" note
+      var headingRow = document.createElement('div');
+      headingRow.className = 'ccf-qt-heading-row';
+
       var h = document.createElement('div');
       h.className = 'ccf-qt-heading';
       h.textContent = heading;
-      wrap.appendChild(h);
+      headingRow.appendChild(h);
 
-      // Cards container
+      var note = document.createElement('div');
+      note.className = 'ccf-qt-checkout-note';
+      note.textContent = 'Discount applied at checkout';
+      headingRow.appendChild(note);
+
+      wrap.appendChild(headingRow);
+
+      // Cards / list container
       var container = document.createElement('div');
-      container.className = 'ccf-qt-cards ccf-qt-layout-' + layout;
+      if (layout === 'list') {
+        container.className = 'ccf-qt-cards ccf-qt-layout-list';
+      } else {
+        var n = Math.min(tiers.length, 4);
+        container.className = 'ccf-qt-cards ccf-qt-cards-n' + n;
+      }
       wrap.appendChild(container);
 
       var activeTier = pickTier(tiers, currentQty);
@@ -196,29 +277,63 @@
         btn.setAttribute('data-percent', String(tier.percent));
         cardEls.push(btn);
 
-        if (tier.badge) {
-          var badge = document.createElement('span');
-          badge.className = 'ccf-qt-badge';
-          badge.textContent = tier.badge;
-          btn.appendChild(badge);
-        }
+        if (layout === 'cards') {
+          // Floating badge
+          if (tier.badge) {
+            var badge = document.createElement('span');
+            badge.className = 'ccf-qt-badge';
+            badge.textContent = String(tier.badge).slice(0, 20);
+            btn.appendChild(badge);
+          }
 
-        var qtyLabel = document.createElement('div');
-        qtyLabel.className = 'ccf-qt-qty';
-        qtyLabel.textContent = 'Buy ' + tier.minQty;
-        btn.appendChild(qtyLabel);
+          var qtyLabel = document.createElement('div');
+          qtyLabel.className = 'ccf-qt-qty';
+          qtyLabel.textContent = 'Buy ' + tier.minQty;
+          btn.appendChild(qtyLabel);
 
-        var chip = document.createElement('div');
-        chip.className = 'ccf-qt-chip';
-        chip.textContent = tier.percent + '% off';
-        btn.appendChild(chip);
+          var chip = document.createElement('div');
+          chip.className = 'ccf-qt-chip';
+          chip.textContent = tier.percent + '% off';
+          btn.appendChild(chip);
 
-        if (variantPricePaise !== null) {
-          var discPaise = discountedUnitPricePaise(variantPricePaise, tier.percent);
-          var priceEl = document.createElement('div');
-          priceEl.className = 'ccf-qt-price';
-          priceEl.textContent = formatMoney(Math.round(discPaise)) + '/item';
-          btn.appendChild(priceEl);
+          if (variantPricePaise !== null) {
+            var discPaise = discountedUnitPricePaise(variantPricePaise, tier.percent);
+            var priceEl = document.createElement('div');
+            priceEl.className = 'ccf-qt-price';
+            priceEl.textContent = formatMoney(Math.round(discPaise)) + ' each';
+            btn.appendChild(priceEl);
+          }
+        } else {
+          // List layout: left side
+          var left = document.createElement('div');
+          left.className = 'ccf-qt-list-left';
+
+          var qtyRow = document.createElement('div');
+          qtyRow.className = 'ccf-qt-list-qty';
+          qtyRow.textContent = 'Buy ' + tier.minQty;
+
+          if (tier.badge) {
+            var inlineBadge = document.createElement('span');
+            inlineBadge.className = 'ccf-qt-badge-inline';
+            inlineBadge.textContent = String(tier.badge).slice(0, 20);
+            qtyRow.appendChild(inlineBadge);
+          }
+          left.appendChild(qtyRow);
+
+          if (variantPricePaise !== null) {
+            var discPaiseL = discountedUnitPricePaise(variantPricePaise, tier.percent);
+            var priceElL = document.createElement('div');
+            priceElL.className = 'ccf-qt-list-price';
+            priceElL.textContent = formatMoney(Math.round(discPaiseL)) + ' each';
+            left.appendChild(priceElL);
+          }
+          btn.appendChild(left);
+
+          // Right side: chip
+          var chipL = document.createElement('div');
+          chipL.className = 'ccf-qt-chip';
+          chipL.textContent = tier.percent + '% off';
+          btn.appendChild(chipL);
         }
 
         btn.addEventListener('click', function () {
@@ -240,11 +355,6 @@
 
         container.appendChild(btn);
       });
-
-      var note = document.createElement('div');
-      note.className = 'ccf-qt-note';
-      note.textContent = 'Discount applied at checkout';
-      wrap.appendChild(note);
 
       savingsEl = document.createElement('div');
       savingsEl.className = 'ccf-qt-savings';
@@ -274,7 +384,6 @@
       if (typeof newQty !== 'number' || !isFinite(newQty) || newQty < 1) return;
       currentQty = Math.floor(newQty);
       syncCodLinks(currentQty);
-      // Update active card without full re-render for performance
       var activeTier = pickTier(tiers, currentQty);
       cardEls.forEach(function (btn) {
         var isActive = activeTier && parseInt(btn.getAttribute('data-min-qty'), 10) === activeTier.minQty;
@@ -334,7 +443,7 @@
 
     // ── Initial render ────────────────────────────────────────────────────────
 
-    render(); // Render immediately (without prices) for fast display
+    render();
 
     if (handle) {
       getVariantPrice(handle, initialVariantId).then(function (price) {
@@ -358,7 +467,6 @@
       return;
     }
 
-    // Fallback: fetch from App Proxy (Shopify adds signature automatically)
     var shopDomain = wrap.getAttribute('data-shop') || '';
     if (!shopDomain) return;
     fetchConfig(shopDomain).then(init);

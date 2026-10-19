@@ -123,16 +123,16 @@ export function TierPreview({ config, price = 999, currencySymbol = '₹' }) {
     outlineOffset: 2,
   });
 
-  const chipStyle = {
+  const chipStyle = (selected) => ({
     fontSize: 13,
     fontWeight: 800,
-    color: chipText,
-    background: tint,
+    color: selected ? pickReadableText(accent) : chipText,
+    background: selected ? accent : tint,
     borderRadius: 6,
     padding: '3px 9px',
     display: 'inline-block',
     marginBottom: 8,
-  };
+  });
 
   const floatingBadgeStyle = {
     position: 'absolute',
@@ -232,7 +232,7 @@ export function TierPreview({ config, price = 999, currencySymbol = '₹' }) {
                   >
                     Buy {t.minQty}
                   </span>
-                  <span style={chipStyle}>{t.percent}% off</span>
+                  <span style={chipStyle(i === sel)}>{t.percent}% off</span>
                   <span style={{ fontSize: 12, color: '#4A5062', display: 'block' }}>
                     {currencySymbol}{unitPrice.toLocaleString('en-IN')} each
                   </span>
@@ -300,7 +300,7 @@ export function TierPreview({ config, price = 999, currencySymbol = '₹' }) {
                   </div>
                   <span
                     style={{
-                      ...chipStyle,
+                      ...chipStyle(i === sel),
                       marginBottom: 0,
                       flexShrink: 0,
                       marginLeft: 12,
