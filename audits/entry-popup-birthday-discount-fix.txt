@@ -56,3 +56,51 @@ TEST PLAN:
   section; onDone immediate when disabled; localStorage set on skip; overlay
   removed on completion.
 
+── SELF-AUDIT (after edits) ─────────────────────────────────────────────────
+
+Commit: 9976f9c   Date: 2026-10-19
+
+FILES CHANGED:
+  backend/routes/proxy.js                               +7/-1
+  extensions/cartncodform-embed/assets/ccf-push.js      +42/-7
+  backend/__tests__/ccfPushBirthday.test.js              new (170 lines)
+  backend/scripts/inspectDiscountConfig.js               new (37 lines)
+  audits/entry-popup-birthday-discount-fix.txt           new (this file)
+
+BUGS FIXED vs. PLAN:
+  Bug 1 ✓  proxy.js: added enabled field to birthdayDiscount response
+  Bug 2 ✓  proxy.js: fixed 500 fallback to include all config fields
+  Bug 3 ✓  ccf-push.js: ccfShowBirthdayStep creates bottom-sheet overlay when
+           #ccf-content-section absent (top_bar / mobile)
+  Bug 4 ✓  ccf-push.js: inner catch now calls ccfShowBirthdayStep instead of resetButton
+  Bug 5 ✓  ccf-push.js: already-subscribed outer catch same fix
+  Bug 6 ✓  ccf-push.js: fetchDiscountConfig timeout 3000→5000 ms + r && r.ok guard
+
+ISSUE ENCOUNTERED:
+  Edit tool introduced smart/curly Unicode quotes (U+2018 / U+2019) as JS string
+  delimiters in the ccf-push.js edits, causing a SyntaxError in new Function(SCRIPT).
+  Fixed with a targeted PowerShell replacement of U+2018→U+0027 and U+2019→U+0027
+  in the edited regions, while preserving the pre-existing U+2019 apostrophe in
+  'We’ll' on line 891 by using the ’ escape sequence.
+
+TESTS:
+  new: backend/__tests__/ccfPushBirthday.test.js — 7 tests, all passing
+    ✓ ccfRenderBirthdayForm: renders selects and Skip button directly
+    ✓ ccfShowBirthdayStep no-section: creates overlay (top_bar fix)
+    ✓ ccfShowBirthdayStep no-section: overlay removed on skip
+    ✓ ccfShowBirthdayStep with section: renders form into #ccf-content-section
+    ✓ ccfShowBirthdayStep with section: onDone immediate when birthday disabled
+    ✓ ccfShowBirthdayStep with section: onDone immediate when localStorage already set
+    ✓ ccfShowBirthdayStep with section: localStorage set to 'skip' after Skip click
+  full suite: 78 suites, 1690 tests, 0 failures (7 tests added)
+
+PRODUCT PAGE DISCOUNT:
+  Not a fixable code bug. injectProductDiscountButton is dead code (action==='both'
+  never true). Product discount shows via checkActiveDiscount() price badges after
+  the auto-redirect to /discount/<code>?redirect=<page>. Theme CSS may hide badges
+  depending on store theme — not within scope of this fix.
+
+SCOPE COMPLIANCE: bug fixes only. No new features, no UI changes beyond the
+overlay introduced by Bug 3 fix (which restores existing intended behaviour on
+mobile). No changes outside the six confirmed bugs.
+
