@@ -144,62 +144,102 @@ test('CTA pill: dark fg → ctaBg=#171A22 ctaFg=#FFFFFF', () => {
   expect(ctaFg).toBe('#FFFFFF');
 });
 
-// ─── 7. Highlight on/off — text class ────────────────────────────────────────
-test('highlight:true adds ccf-bn-txt-on class to text span', () => {
+// ─── 7. Highlight on/off — both shine + txt-on ───────────────────────────────
+test('highlight:true creates .ccf-bn-shine AND adds .ccf-bn-txt-on', () => {
   const hook = loadScript();
   hook.bannerCreate(enabledCfg({ highlight: true }));
+  const bar = document.querySelector('.ccf-bn-bar');
+  expect(bar).not.toBeNull();
+  expect(bar.querySelector('.ccf-bn-shine')).not.toBeNull();
   const textEl = document.querySelector('.ccf-bn-text');
-  expect(textEl).not.toBeNull();
   expect(textEl.classList.contains('ccf-bn-txt-on')).toBe(true);
 });
 
-test('highlight:false does not add ccf-bn-txt-on class', () => {
+test('highlight:false omits .ccf-bn-shine AND omits .ccf-bn-txt-on', () => {
   const hook = loadScript();
   hook.bannerCreate(enabledCfg({ highlight: false }));
+  const bar = document.querySelector('.ccf-bn-bar');
+  expect(bar.querySelector('.ccf-bn-shine')).toBeNull();
   const textEl = document.querySelector('.ccf-bn-text');
-  expect(textEl).not.toBeNull();
   expect(textEl.classList.contains('ccf-bn-txt-on')).toBe(false);
 });
 
-test('bannerApplyConfig in-place toggles ccf-bn-txt-on without recreating textEl', () => {
+test('bannerApplyConfig in-place toggles both layers without recreating bar', () => {
   const hook = loadScript();
   hook.bannerCreate(enabledCfg({ highlight: true }));
+  const bar1 = document.querySelector('.ccf-bn-bar');
   const textEl1 = document.querySelector('.ccf-bn-text');
+  expect(bar1.querySelector('.ccf-bn-shine')).not.toBeNull();
   expect(textEl1.classList.contains('ccf-bn-txt-on')).toBe(true);
 
   hook.bannerApplyConfig(enabledCfg({ highlight: false }));
+  const bar2 = document.querySelector('.ccf-bn-bar');
   const textEl2 = document.querySelector('.ccf-bn-text');
-  expect(textEl2).toBe(textEl1); // same DOM node
+  expect(bar2).toBe(bar1);         // same bar node
+  expect(textEl2).toBe(textEl1);   // same text node
+  expect(bar2.querySelector('.ccf-bn-shine')).toBeNull();
   expect(textEl2.classList.contains('ccf-bn-txt-on')).toBe(false);
 
   hook.bannerApplyConfig(enabledCfg({ highlight: true }));
-  expect(document.querySelector('.ccf-bn-text')).toBe(textEl1);
-  expect(textEl1.classList.contains('ccf-bn-txt-on')).toBe(true);
+  expect(document.querySelector('.ccf-bn-bar')).toBe(bar1);
+  expect(document.querySelector('.ccf-bn-bar').querySelector('.ccf-bn-shine')).not.toBeNull();
+  expect(document.querySelector('.ccf-bn-text').classList.contains('ccf-bn-txt-on')).toBe(true);
 });
 
-// ─── 8. CSS — @supports, txtsweep keyframes, reduced-motion ─────────────────
-test('injected CSS contains prefers-reduced-motion rule', () => {
+test('shine has pointer-events:none and sits below content (z-index:0)', () => {
   const hook = loadScript();
   hook.injectBannerStyles();
   const styleEl = document.getElementById('ccf-bn-styles');
-  expect(styleEl).not.toBeNull();
-  expect(styleEl.textContent).toContain('prefers-reduced-motion');
+  // Both pointer-events and z-index for shine layer are in injected CSS
+  expect(styleEl.textContent).toContain('pointer-events:none');
+  expect(styleEl.textContent).toMatch(/\.ccf-bn-shine\{[^}]*z-index:0/);
+  // Content layer has position:relative and z-index:1 so it paints above shine
+  expect(styleEl.textContent).toMatch(/\.ccf-bn-content\{[^}]*z-index:1/);
 });
 
-test('injected CSS uses background-position for text sweep animation', () => {
+// ─── 8. CSS — both animations, @supports, reduced-motion, paused ─────────────
+test('injected CSS contains prefers-reduced-motion rule for both animations', () => {
   const hook = loadScript();
   hook.injectBannerStyles();
-  const styleEl = document.getElementById('ccf-bn-styles');
-  expect(styleEl.textContent).toContain('ccf-bn-txtsweep');
-  expect(styleEl.textContent).toContain('background-position');
+  const css = document.getElementById('ccf-bn-styles').textContent;
+  expect(css).toContain('prefers-reduced-motion');
+  // reduced-motion hides shine layer
+  expect(css).toMatch(/prefers-reduced-motion[^}]+\.ccf-bn-shine\{display:none/);
+  // reduced-motion resets txt-on fill
+  expect(css).toContain('-webkit-text-fill-color:currentColor');
+});
+
+test('injected CSS has ccf-bn-sweep (bar) and ccf-bn-txtsweep (text) at 3.8s', () => {
+  const hook = loadScript();
+  hook.injectBannerStyles();
+  const css = document.getElementById('ccf-bn-styles').textContent;
+  expect(css).toContain('@keyframes ccf-bn-sweep');
+  expect(css).toContain('@keyframes ccf-bn-txtsweep');
+  // Both 3.8s
+  const sweepMatches = css.match(/3\.8s/g) || [];
+  expect(sweepMatches.length).toBeGreaterThanOrEqual(2);
+  // Same 55% active window in both keyframe blocks
+  const at55 = css.match(/55%/g) || [];
+  expect(at55.length).toBeGreaterThanOrEqual(2);
 });
 
 test('injected CSS wraps txt-on in @supports background-clip:text', () => {
   const hook = loadScript();
   hook.injectBannerStyles();
-  const styleEl = document.getElementById('ccf-bn-styles');
-  expect(styleEl.textContent).toContain('@supports');
-  expect(styleEl.textContent).toContain('background-clip');
+  const css = document.getElementById('ccf-bn-styles').textContent;
+  expect(css).toContain('@supports');
+  expect(css).toContain('background-clip');
+  expect(css).toContain('ccf-bn-txtsweep');
+  expect(css).toContain('background-position');
+});
+
+test('hidden-tab paused class applies to both animations', () => {
+  const hook = loadScript();
+  hook.injectBannerStyles();
+  const css = document.getElementById('ccf-bn-styles').textContent;
+  // paused selector covers shine ::before
+  expect(css).toContain('ccf-bn-paused');
+  expect(css).toContain('animation-play-state:paused');
 });
 
 // ─── 8b. resolveBannerColors hl field ────────────────────────────────────────

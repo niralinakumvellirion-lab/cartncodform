@@ -117,7 +117,7 @@ function resolveBannerColors(cfg) {
   } else {
     const fgR = 0x17, fgG = 0x1A, fgB = 0x22;
     const bgR = parseInt(bg.slice(1,3),16), bgG = parseInt(bg.slice(3,5),16), bgB = parseInt(bg.slice(5,7),16);
-    const hlR = Math.round(fgR*0.35+bgR*0.65), hlG = Math.round(fgG*0.35+bgG*0.65), hlB = Math.round(fgB*0.35+bgB*0.65);
+    const hlR = Math.round(fgR*0.65+bgR*0.35), hlG = Math.round(fgG*0.65+bgG*0.35), hlB = Math.round(fgB*0.65+bgB*0.35);
     hl = '#'+('00'+hlR.toString(16)).slice(-2)+('00'+hlG.toString(16)).slice(-2)+('00'+hlB.toString(16)).slice(-2);
   }
   return { bg, fg, ctaBg, ctaFg, hl, lowContrast: bnContrast(bg,fg) < 4.5 };
@@ -130,7 +130,13 @@ function BannerPreview({ banner, pct }) {
   const btnText = banner.buttonText || 'Get my gift';
   const highlight = banner.highlight !== false;
 
+  const shineStrong = bnContrast(colors.bg, '#FFFFFF') < 2;
   const previewCss = `
+    .ccf-bn-shine{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:0;}
+    .ccf-bn-shine::before{content:"";position:absolute;top:0;bottom:0;width:45%;background:linear-gradient(100deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.34) 50%,rgba(255,255,255,0) 100%);transform:translateX(-120%) skewX(-18deg);animation:ccf-bn-sweep 3.8s ease-in-out infinite;}
+    .ccf-bn-bar-ss .ccf-bn-shine::before{background:linear-gradient(100deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.55) 50%,rgba(255,255,255,0) 100%);}
+    @keyframes ccf-bn-sweep{0%{transform:translateX(-120%) skewX(-18deg);}55%{transform:translateX(320%) skewX(-18deg);}100%{transform:translateX(320%) skewX(-18deg);}}
+    @media (prefers-reduced-motion: reduce) { .ccf-bn-shine { display: none; } }
     @supports ((-webkit-background-clip: text) or (background-clip: text)) {
       .ccf-bn-txt-on {
         background-image: linear-gradient(100deg, var(--ccf-bn-fg) 0%, var(--ccf-bn-fg) 36%, var(--ccf-bn-hl, #FFE08A) 50%, var(--ccf-bn-fg) 64%, var(--ccf-bn-fg) 100%);
@@ -155,6 +161,7 @@ function BannerPreview({ banner, pct }) {
   const lblStyle = { fontSize: 11, color: DS.gray400, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 };
   const barCssProps = { '--ccf-bn-fg': colors.fg, '--ccf-bn-hl': colors.hl };
   const txtCls = highlight ? 'ccf-bn-text ccf-bn-txt-on' : 'ccf-bn-text';
+  const barExtraCls = shineStrong ? ' ccf-bn-bar-ss' : '';
 
   return (
     <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -162,19 +169,25 @@ function BannerPreview({ banner, pct }) {
       {/* desktop strip */}
       <div style={{ flex: '1 1 280px' }}>
         <div style={lblStyle}>Desktop</div>
-        <div style={{ position: 'relative', overflow: 'hidden', background: colors.bg, color: colors.fg, borderRadius: 8, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '0 44px 0 12px', ...barCssProps }}>
-          <span className={txtCls} style={{ fontSize: 14, fontWeight: 600 }}>{text}</span>
-          <button type="button" style={{ height: 30, padding: '0 16px', fontSize: 13, fontWeight: 800, borderRadius: 999, border: 'none', background: colors.ctaBg, color: colors.ctaFg, cursor: 'default', whiteSpace: 'nowrap', flexShrink: 0 }}>{btnText}</button>
-          <span style={{ position: 'absolute', right: 8, top: 0, bottom: 0, display: 'flex', alignItems: 'center', color: colors.fg, fontSize: 16, opacity: 0.7 }}>✕</span>
+        <div className={'ccf-bn-preview-bar' + barExtraCls} style={{ position: 'relative', overflow: 'hidden', background: colors.bg, color: colors.fg, borderRadius: 8, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '0 44px 0 12px', ...barCssProps }}>
+          {highlight && <div className="ccf-bn-shine" aria-hidden="true" />}
+          <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <span className={txtCls} style={{ fontSize: 14, fontWeight: 600 }}>{text}</span>
+            <button type="button" style={{ height: 30, padding: '0 16px', fontSize: 13, fontWeight: 800, borderRadius: 999, border: 'none', background: colors.ctaBg, color: colors.ctaFg, cursor: 'default', whiteSpace: 'nowrap', flexShrink: 0 }}>{btnText}</button>
+          </div>
+          <span style={{ position: 'absolute', right: 8, top: 0, bottom: 0, zIndex: 2, display: 'flex', alignItems: 'center', color: colors.fg, fontSize: 16, opacity: 0.7 }}>✕</span>
         </div>
       </div>
       {/* phone strip (340px) */}
       <div style={{ width: 340, flexShrink: 0 }}>
         <div style={lblStyle}>Phone (340px)</div>
-        <div style={{ position: 'relative', overflow: 'hidden', background: colors.bg, color: colors.fg, borderRadius: 8, minHeight: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '6px 40px 6px 10px', flexWrap: 'wrap', ...barCssProps }}>
-          <span className={txtCls} style={{ fontSize: 12.5, fontWeight: 600 }}>{text}</span>
-          <button type="button" style={{ height: 32, padding: '0 14px', fontSize: 13, fontWeight: 800, borderRadius: 999, border: 'none', background: colors.ctaBg, color: colors.ctaFg, cursor: 'default', whiteSpace: 'nowrap', flexShrink: 0 }}>{btnText}</button>
-          <span style={{ position: 'absolute', right: 6, top: 0, bottom: 0, display: 'flex', alignItems: 'center', color: colors.fg, fontSize: 14, opacity: 0.7 }}>✕</span>
+        <div className={'ccf-bn-preview-bar' + barExtraCls} style={{ position: 'relative', overflow: 'hidden', background: colors.bg, color: colors.fg, borderRadius: 8, minHeight: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '6px 40px 6px 10px', flexWrap: 'wrap', ...barCssProps }}>
+          {highlight && <div className="ccf-bn-shine" aria-hidden="true" />}
+          <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+            <span className={txtCls} style={{ fontSize: 12.5, fontWeight: 600 }}>{text}</span>
+            <button type="button" style={{ height: 32, padding: '0 14px', fontSize: 13, fontWeight: 800, borderRadius: 999, border: 'none', background: colors.ctaBg, color: colors.ctaFg, cursor: 'default', whiteSpace: 'nowrap', flexShrink: 0 }}>{btnText}</button>
+          </div>
+          <span style={{ position: 'absolute', right: 6, top: 0, bottom: 0, zIndex: 2, display: 'flex', alignItems: 'center', color: colors.fg, fontSize: 14, opacity: 0.7 }}>✕</span>
         </div>
       </div>
     </div>

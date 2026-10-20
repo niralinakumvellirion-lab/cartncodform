@@ -1440,7 +1440,7 @@
     var css = [
       '#ccf-bday-bar-wrap{position:relative;}',
       '.ccf-bn-bar{position:relative;overflow:hidden;background:var(--ccf-bn-bg,#3730A3);color:var(--ccf-bn-fg,#fff);display:flex;align-items:center;justify-content:center;min-height:44px;padding:0 52px 0 12px;box-sizing:border-box;width:100%;font-family:inherit;}',
-      '.ccf-bn-content{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;}',
+      '.ccf-bn-content{position:relative;z-index:1;display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;}',
       '.ccf-bn-icon{flex-shrink:0;display:flex;align-items:center;color:inherit;}',
       '.ccf-bn-text{font-size:14px!important;font-weight:600!important;letter-spacing:.005em!important;line-height:1.35!important;text-align:center;font-family:inherit!important;margin:0!important;padding:0!important;text-decoration:none!important;text-transform:none!important;}',
       '.ccf-bn-pct{font-weight:800!important;}',
@@ -1448,6 +1448,12 @@
       '.ccf-bn-cta:focus{outline:2px solid var(--ccf-bn-fg,#fff);outline-offset:2px;}',
       '.ccf-bn-dismiss{position:absolute!important;top:0;right:0;bottom:0;width:44px!important;display:flex!important;align-items:center;justify-content:center;background:none!important;border:none!important;cursor:pointer!important;color:inherit;appearance:none!important;-webkit-appearance:none!important;margin:0!important;padding:0!important;min-height:44px!important;}',
       '.ccf-bn-dismiss:focus{outline:2px solid var(--ccf-bn-fg,#fff);outline-offset:-2px;}',
+      '.ccf-bn-shine{position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:0;}',
+      '.ccf-bn-shine::before{content:"";position:absolute;top:0;bottom:0;width:45%;background:linear-gradient(100deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.34) 50%,rgba(255,255,255,0) 100%);transform:translateX(-120%) skewX(-18deg);animation:ccf-bn-sweep 3.8s ease-in-out infinite;}',
+      '.ccf-bn-bar.ccf-bn-shine-strong .ccf-bn-shine::before{background:linear-gradient(100deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.55) 50%,rgba(255,255,255,0) 100%);}',
+      '@keyframes ccf-bn-sweep{0%{transform:translateX(-120%) skewX(-18deg);}55%{transform:translateX(320%) skewX(-18deg);}100%{transform:translateX(320%) skewX(-18deg);}}',
+      '.ccf-bn-bar.ccf-bn-paused .ccf-bn-shine::before{animation-play-state:paused;}',
+      '@media(prefers-reduced-motion:reduce){.ccf-bn-shine{display:none;}}',
       '@supports((-webkit-background-clip:text) or (background-clip:text)){.ccf-bn-txt-on{background-image:linear-gradient(100deg,var(--ccf-bn-fg) 0%,var(--ccf-bn-fg) 36%,var(--ccf-bn-hl,#FFE08A) 50%,var(--ccf-bn-fg) 64%,var(--ccf-bn-fg) 100%);background-size:300% 100%;background-position:100% 0;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;animation:ccf-bn-txtsweep 3.8s ease-in-out infinite;}@keyframes ccf-bn-txtsweep{0%{background-position:100% 0}55%{background-position:0% 0}100%{background-position:0% 0}}.ccf-bn-bar.ccf-bn-paused .ccf-bn-txt-on{animation-play-state:paused;}@media(prefers-reduced-motion:reduce){.ccf-bn-txt-on{animation:none;background-image:none;-webkit-text-fill-color:currentColor;color:inherit;}}}',
       '@media(max-width:639px){.ccf-bn-bar{min-height:48px!important;padding:6px 44px 6px 10px!important;}.ccf-bn-text{font-size:12.5px!important;line-height:1.35!important;}.ccf-bn-cta{height:32px!important;min-height:32px!important;font-size:13px!important;}.ccf-bn-dismiss{width:36px!important;min-height:48px!important;}}',
     ].join('');
@@ -1477,14 +1483,23 @@
       var barText = bc.text || ('Tell us your birthday and get ' + pct + '% off everything');
       var btnText = bc.buttonText || 'Get my gift';
       var highlight = bc.highlight !== false;
+      var shineStrong = ccfContrastRatio(colors.bg, '#FFFFFF') < 2;
 
       var bar = document.createElement('div');
-      bar.className = 'ccf-bn-bar';
+      bar.className = 'ccf-bn-bar' + (shineStrong ? ' ccf-bn-shine-strong' : '');
       bar.style.setProperty('--ccf-bn-bg', colors.bg);
       bar.style.setProperty('--ccf-bn-fg', colors.fg);
       bar.style.setProperty('--ccf-bn-cta-bg', colors.ctaBg);
       bar.style.setProperty('--ccf-bn-cta-fg', colors.ctaFg);
       bar.style.setProperty('--ccf-bn-hl', colors.hl);
+
+      var shineEl = null;
+      if (highlight) {
+        shineEl = document.createElement('div');
+        shineEl.className = 'ccf-bn-shine';
+        shineEl.setAttribute('aria-hidden', 'true');
+        bar.appendChild(shineEl);
+      }
 
       var content = document.createElement('div');
       content.className = 'ccf-bn-content';
@@ -1526,7 +1541,7 @@
       ccfBannerBar     = bar;
       ccfBannerTextEl  = textEl;
       ccfBannerCtaBtn  = triggerBtn;
-      ccfBannerShineEl = null;
+      ccfBannerShineEl = shineEl;
 
       var consentText = (data.birthdayDiscount && data.birthdayDiscount.consentText)
         || 'We\u2019ll use your birthday only to send you a birthday offer.';
@@ -1648,6 +1663,21 @@
       if (ccfBannerCtaBtn) ccfBannerCtaBtn.textContent = bc.buttonText || 'Get my gift';
 
       var highlight = bc.highlight !== false;
+      var shineStrong = ccfContrastRatio(colors.bg, '#FFFFFF') < 2;
+      if (shineStrong) { ccfBannerBar.classList.add('ccf-bn-shine-strong'); }
+      else { ccfBannerBar.classList.remove('ccf-bn-shine-strong'); }
+
+      if (highlight && !ccfBannerShineEl) {
+        var newShine = document.createElement('div');
+        newShine.className = 'ccf-bn-shine';
+        newShine.setAttribute('aria-hidden', 'true');
+        ccfBannerBar.insertBefore(newShine, ccfBannerBar.firstChild);
+        ccfBannerShineEl = newShine;
+      } else if (!highlight && ccfBannerShineEl) {
+        if (ccfBannerShineEl.parentNode) ccfBannerShineEl.parentNode.removeChild(ccfBannerShineEl);
+        ccfBannerShineEl = null;
+      }
+
       if (ccfBannerTextEl) {
         if (highlight) { ccfBannerTextEl.classList.add('ccf-bn-txt-on'); }
         else { ccfBannerTextEl.classList.remove('ccf-bn-txt-on'); }
