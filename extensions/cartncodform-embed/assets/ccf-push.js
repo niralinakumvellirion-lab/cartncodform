@@ -880,9 +880,17 @@
   // ccfRenderBirthdayForm: renders month/day selects + consent + Save/Skip
   //   into `container`, POSTs to /birthday with `source`, calls onDone(saved).
   // ccfShowBirthdayStep: popup entry point (checks enabled + localStorage).
-  // ccfInitBirthdayBanner: announcement-bar entry point.
+  // ccfInitBirthdayBanner: announcement-bar entry point (instant display via SWR).
   var CCF_BDAY_KEY = 'ccf_bday_' + SHOP_DOMAIN;
   var CCF_BDAY_DISMISS_KEY = 'ccf_bday_dismiss_' + SHOP_DOMAIN;
+  var CCF_BN_CACHE_KEY = 'ccf_bn_cfg_v1';
+
+  // Module-level refs so ccfBannerApplyConfig can update the bar in-place.
+  var ccfBannerWrap    = null;
+  var ccfBannerBar     = null;
+  var ccfBannerTextEl  = null;
+  var ccfBannerCtaBtn  = null;
+  var ccfBannerShineEl = null;
 
   // ─── Birthday dialog CSS (injected once per page) ────────────────────────
   function ccfInjectBirthdayStyles() {
@@ -1029,7 +1037,7 @@
       var accentColor = (opts && opts.accentColor) || '#4f46e5';
       var source      = (opts && opts.source) || 'popup';
       var consentText = (opts && opts.consentText) ||
-        'We’ll use your birthday only to send you a birthday offer.';
+        'We\u2019ll use your birthday only to send you a birthday offer.';
       var isDark = ccfIsDarkColor(accentColor);
       var btnFg  = isDark ? '#fff' : '#1a1a2e';
 
@@ -1157,9 +1165,9 @@
               discountConfig.birthdayDiscount.leadDays > 0)
               ? discountConfig.birthdayDiscount.leadDays : null;
             var subLine = leadDays
-              ? ('We’ll send your gift code ' + leadDays +
+              ? ('We\u2019ll send your gift code ' + leadDays +
                  ' days before your birthday.')
-              : 'We’ll send your gift code a few days before your birthday.';
+              : 'We\u2019ll send your gift code a few days before your birthday.';
             container.innerHTML = '';
             var succ = document.createElement('div');
             succ.className = 'ccf-bd-success';
@@ -1172,7 +1180,7 @@
               ' aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
             var succTitle = document.createElement('p');
             succTitle.className = 'ccf-bd-success-title';
-            succTitle.textContent = 'You’re all set';
+            succTitle.textContent = 'You\u2019re all set';
             var succSub = document.createElement('p');
             succSub.className = 'ccf-bd-success-sub';
             succSub.textContent = subLine;
@@ -1208,7 +1216,7 @@
         discountConfig.birthdayDiscount.offerText) || 'Get a birthday gift';
       var consentText = (discountConfig.birthdayDiscount &&
         discountConfig.birthdayDiscount.consentText) ||
-        'We’ll use your birthday only to send you a birthday offer.';
+        'We\u2019ll use your birthday only to send you a birthday offer.';
       var leadDays = (discountConfig.birthdayDiscount &&
         discountConfig.birthdayDiscount.leadDays > 0)
         ? discountConfig.birthdayDiscount.leadDays : null;
@@ -1380,53 +1388,147 @@
     // Top announcement banner — shown when banner.enabled AND no birthday saved
   // AND not dismissed within dismissDays. Normal-flow bar (not fixed), inserted
   // as the first child of <body>. Admin-configured text via textContent only.
-  function ccfInitBirthdayBanner() {
+  // ─── Banner colour helpers (copy of backend/utils/bannerColors.js) ───────────
+  function ccfRelativeLuminance(hex) {
+    var raw = String(hex || '').trim().replace(/^#/, '');
+    if (raw.length === 3) { raw = raw[0]+raw[0]+raw[1]+raw[1]+raw[2]+raw[2]; }
+    if (!/^[0-9a-fA-F]{6}$/.test(raw)) return 0;
+    var r = parseInt(raw.slice(0,2), 16) / 255;
+    var g = parseInt(raw.slice(2,4), 16) / 255;
+    var b = parseInt(raw.slice(4,6), 16) / 255;
+    function lin(c) { return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  }
+  function ccfContrastRatio(hexA, hexB) {
+    var l1 = ccfRelativeLuminance(hexA), l2 = ccfRelativeLuminance(hexB);
+    var hi = Math.max(l1, l2), lo = Math.min(l1, l2);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+  function ccfResolveBannerColors(cfg) {
+    var HEX_RE = /^#[0-9a-fA-F]{6}$/;
+    var rawBg = String((cfg && cfg.bgColor) || '').trim();
+    var bg = HEX_RE.test(rawBg) ? rawBg : '#3730A3';
+    var mode = (cfg && cfg.textColor) || 'auto';
+    var fg = mode === 'white' ? '#FFFFFF'
+           : mode === 'dark'  ? '#171A22'
+           : (ccfContrastRatio(bg, '#FFFFFF') >= 4.5 ? '#FFFFFF' : '#171A22');
+    var ctaBg, ctaFg;
+    if (fg === '#FFFFFF') { ctaBg = '#FFFFFF'; ctaFg = bg; }
+    else                  { ctaBg = '#171A22'; ctaFg = '#FFFFFF'; }
+    return { bg: bg, fg: fg, ctaBg: ctaBg, ctaFg: ctaFg, lowContrast: ccfContrastRatio(bg, fg) < 4.5 };
+  }
+
+  // ─── Banner CSS (injected once per page) ──────────────────────────────────
+  function ccfInjectBannerStyles() {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('ccf-bn-styles')) return;
+    var css = [
+      '#ccf-bday-bar-wrap{position:relative;}',
+      '.ccf-bn-bar{position:relative;overflow:hidden;background:var(--ccf-bn-bg,#3730A3);color:var(--ccf-bn-fg,#fff);display:flex;align-items:center;justify-content:center;min-height:44px;padding:0 52px 0 12px;box-sizing:border-box;width:100%;font-family:inherit;}',
+      '.ccf-bn-content{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;}',
+      '.ccf-bn-icon{flex-shrink:0;display:flex;align-items:center;color:inherit;}',
+      '.ccf-bn-text{font-size:14px!important;font-weight:600!important;letter-spacing:.005em!important;line-height:1.35!important;text-align:center;font-family:inherit!important;margin:0!important;padding:0!important;text-decoration:none!important;text-transform:none!important;}',
+      '.ccf-bn-pct{font-weight:800!important;}',
+      '.ccf-bn-cta{display:inline-flex!important;align-items:center;height:30px!important;padding:0 16px!important;font-size:13px!important;font-weight:800!important;border-radius:999px!important;border:none!important;cursor:pointer!important;white-space:nowrap;flex-shrink:0;background:var(--ccf-bn-cta-bg,#fff)!important;color:var(--ccf-bn-cta-fg,#3730A3)!important;font-family:inherit!important;appearance:none!important;-webkit-appearance:none!important;letter-spacing:0!important;text-transform:none!important;text-decoration:none!important;min-height:30px!important;margin:0!important;}',
+      '.ccf-bn-cta:focus{outline:2px solid var(--ccf-bn-fg,#fff);outline-offset:2px;}',
+      '.ccf-bn-dismiss{position:absolute!important;top:0;right:0;bottom:0;width:44px!important;display:flex!important;align-items:center;justify-content:center;background:none!important;border:none!important;cursor:pointer!important;color:inherit;appearance:none!important;-webkit-appearance:none!important;margin:0!important;padding:0!important;min-height:44px!important;}',
+      '.ccf-bn-dismiss:focus{outline:2px solid var(--ccf-bn-fg,#fff);outline-offset:-2px;}',
+      '.ccf-bn-shine{position:absolute;inset:0;pointer-events:none;overflow:hidden;}',
+      '.ccf-bn-shine::before{content:"";position:absolute;top:0;bottom:0;width:45%;background:linear-gradient(100deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.34) 50%,rgba(255,255,255,0) 100%);transform:translateX(-120%) skewX(-18deg);animation:ccf-bn-sweep 3.8s ease-in-out infinite;}',
+      '.ccf-bn-bar.ccf-bn-shine-strong .ccf-bn-shine::before{background:linear-gradient(100deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.55) 50%,rgba(255,255,255,0) 100%);}',
+      '@keyframes ccf-bn-sweep{0%{transform:translateX(-120%) skewX(-18deg);}55%{transform:translateX(320%) skewX(-18deg);}100%{transform:translateX(320%) skewX(-18deg);}}',
+      '.ccf-bn-bar.ccf-bn-paused .ccf-bn-shine::before{animation-play-state:paused;}',
+      '@media(prefers-reduced-motion:reduce){.ccf-bn-shine{display:none;}}',
+      '@media(max-width:639px){.ccf-bn-bar{min-height:48px!important;padding:6px 44px 6px 10px!important;}.ccf-bn-text{font-size:12.5px!important;line-height:1.35!important;}.ccf-bn-cta{height:32px!important;min-height:32px!important;font-size:13px!important;}.ccf-bn-dismiss{width:36px!important;min-height:48px!important;}}',
+    ].join('');
+    var s = document.createElement('style');
+    s.id = 'ccf-bn-styles';
+    s.textContent = css;
+    document.head.appendChild(s);
+  }
+
+  // Build banner DOM and insert as first child of <body>. Returns true if created.
+  function ccfBannerCreate(data) {
     try {
-      var bc = discountConfig && discountConfig.birthdayCapture && discountConfig.birthdayCapture.banner;
-      if (!bc || !bc.enabled) return;
-      try { if (localStorage.getItem(CCF_BDAY_KEY)) return; } catch (e) {}
+      var bc = data && data.birthdayCapture && data.birthdayCapture.banner;
+      if (!bc || !bc.enabled) return false;
+      try { if (localStorage.getItem(CCF_BDAY_KEY)) return false; } catch (e) {}
       var dismissDays = Number(bc.dismissDays) || 7;
       try {
         var dismissTs = localStorage.getItem(CCF_BDAY_DISMISS_KEY);
-        if (dismissTs && Date.now() - Number(dismissTs) < dismissDays * 86400000) return;
+        if (dismissTs && Date.now() - Number(dismissTs) < dismissDays * 86400000) return false;
       } catch (e) {}
+      if (document.getElementById('ccf-bday-bar-wrap')) return false;
 
-      var pct = (discountConfig.birthdayDiscount && discountConfig.birthdayDiscount.percentage) || 15;
+      ccfInjectBannerStyles();
+
+      var colors = ccfResolveBannerColors(bc);
+      var pct = (data.birthdayDiscount && data.birthdayDiscount.percentage) || 15;
       var barText = bc.text || ('Tell us your birthday and get ' + pct + '% off everything');
       var btnText = bc.buttonText || 'Get my gift';
-      var consentText = (discountConfig.birthdayDiscount && discountConfig.birthdayDiscount.consentText)
-        || 'We’ll use your birthday only to send you a birthday offer.';
-      var accent = (popupConfig && popupConfig.accentColor) || '#4f46e5';
+      var highlight = bc.highlight !== false;
+      var shineStrong = ccfContrastRatio(colors.bg, '#FFFFFF') < 2;
 
       var bar = document.createElement('div');
-      bar.id = 'ccf-bday-bar';
-      bar.style.cssText = 'background:#3730a3;color:#fff;display:flex;align-items:center;justify-content:center;gap:10px;padding:0 12px;font-size:13px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;box-sizing:border-box;width:100%;min-height:44px;';
+      bar.className = 'ccf-bn-bar' + (shineStrong ? ' ccf-bn-shine-strong' : '');
+      bar.style.setProperty('--ccf-bn-bg', colors.bg);
+      bar.style.setProperty('--ccf-bn-fg', colors.fg);
+      bar.style.setProperty('--ccf-bn-cta-bg', colors.ctaBg);
+      bar.style.setProperty('--ccf-bn-cta-fg', colors.ctaFg);
+
+      var shineEl = null;
+      if (highlight) {
+        shineEl = document.createElement('div');
+        shineEl.className = 'ccf-bn-shine';
+        shineEl.setAttribute('aria-hidden', 'true');
+        bar.appendChild(shineEl);
+      }
+
+      var content = document.createElement('div');
+      content.className = 'ccf-bn-content';
+
+      var iconEl = document.createElement('span');
+      iconEl.className = 'ccf-bn-icon';
+      iconEl.setAttribute('aria-hidden', 'true');
+      iconEl.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13"/><path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5"/></svg>';
+      content.appendChild(iconEl);
 
       var textEl = document.createElement('span');
+      textEl.className = 'ccf-bn-text';
       textEl.textContent = barText;
-      textEl.style.cssText = 'flex:1;text-align:center;line-height:1.3;';
-      bar.appendChild(textEl);
+      content.appendChild(textEl);
 
       var triggerBtn = document.createElement('button');
       triggerBtn.type = 'button';
+      triggerBtn.className = 'ccf-bn-cta';
       triggerBtn.textContent = btnText;
       triggerBtn.setAttribute('aria-expanded', 'false');
-      triggerBtn.style.cssText = 'background:#fff;color:#3730a3;border:none;border-radius:999px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;flex-shrink:0;min-height:32px;';
-      bar.appendChild(triggerBtn);
+      content.appendChild(triggerBtn);
+
+      bar.appendChild(content);
 
       var dismissBtn = document.createElement('button');
       dismissBtn.type = 'button';
-      dismissBtn.setAttribute('aria-label', 'Dismiss birthday offer');
-      dismissBtn.textContent = '×';
-      dismissBtn.style.cssText = 'background:none;border:none;color:#fff;font-size:20px;cursor:pointer;flex-shrink:0;min-width:44px;min-height:44px;display:flex;align-items:center;justify-content:center;';
+      dismissBtn.className = 'ccf-bn-dismiss';
+      dismissBtn.setAttribute('aria-label', 'Dismiss banner');
+      dismissBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
       bar.appendChild(dismissBtn);
 
-      // Wrap gives the dropdown an anchor for absolute positioning on desktop.
       var barWrap = document.createElement('div');
-      barWrap.style.cssText = 'position:relative;';
+      barWrap.id = 'ccf-bday-bar-wrap';
+      barWrap.style.position = 'relative';
       barWrap.appendChild(bar);
       document.body.insertBefore(barWrap, document.body.firstChild);
 
+      ccfBannerWrap    = barWrap;
+      ccfBannerBar     = bar;
+      ccfBannerTextEl  = textEl;
+      ccfBannerCtaBtn  = triggerBtn;
+      ccfBannerShineEl = shineEl;
+
+      var consentText = (data.birthdayDiscount && data.birthdayDiscount.consentText)
+        || 'We\u2019ll use your birthday only to send you a birthday offer.';
+      var accent = (popupConfig && popupConfig.accentColor) || '#4f46e5';
       var panel = null;
       var panelOpen = false;
       var escHandler = null;
@@ -1507,6 +1609,82 @@
         try { if (barWrap.parentNode) barWrap.parentNode.removeChild(barWrap); } catch (_) {}
       });
 
+      document.addEventListener('visibilitychange', function() {
+        if (!ccfBannerBar) return;
+        if (document.hidden) { ccfBannerBar.classList.add('ccf-bn-paused'); }
+        else { ccfBannerBar.classList.remove('ccf-bn-paused'); }
+      });
+
+      return true;
+    } catch (e) { return false; }
+  }
+
+  // Update an existing bar in-place after fresh config arrives.
+  function ccfBannerApplyConfig(data) {
+    try {
+      var bc = data && data.birthdayCapture && data.birthdayCapture.banner;
+      var bw = document.getElementById('ccf-bday-bar-wrap');
+
+      if (!bc || !bc.enabled) {
+        if (bw && bw.parentNode) bw.parentNode.removeChild(bw);
+        ccfBannerWrap = ccfBannerBar = ccfBannerTextEl = ccfBannerCtaBtn = ccfBannerShineEl = null;
+        return;
+      }
+
+      if (!bw) { ccfBannerCreate(data); return; }
+      if (!ccfBannerBar) return;
+
+      var colors = ccfResolveBannerColors(bc);
+      ccfBannerBar.style.setProperty('--ccf-bn-bg', colors.bg);
+      ccfBannerBar.style.setProperty('--ccf-bn-fg', colors.fg);
+      ccfBannerBar.style.setProperty('--ccf-bn-cta-bg', colors.ctaBg);
+      ccfBannerBar.style.setProperty('--ccf-bn-cta-fg', colors.ctaFg);
+
+      var pct = (data.birthdayDiscount && data.birthdayDiscount.percentage) || 15;
+      if (ccfBannerTextEl) ccfBannerTextEl.textContent = bc.text || ('Tell us your birthday and get ' + pct + '% off everything');
+      if (ccfBannerCtaBtn) ccfBannerCtaBtn.textContent = bc.buttonText || 'Get my gift';
+
+      var highlight = bc.highlight !== false;
+      var shineStrong = ccfContrastRatio(colors.bg, '#FFFFFF') < 2;
+      if (shineStrong) { ccfBannerBar.classList.add('ccf-bn-shine-strong'); }
+      else { ccfBannerBar.classList.remove('ccf-bn-shine-strong'); }
+
+      if (highlight && !ccfBannerShineEl) {
+        var newShine = document.createElement('div');
+        newShine.className = 'ccf-bn-shine';
+        newShine.setAttribute('aria-hidden', 'true');
+        ccfBannerBar.insertBefore(newShine, ccfBannerBar.firstChild);
+        ccfBannerShineEl = newShine;
+      } else if (!highlight && ccfBannerShineEl) {
+        if (ccfBannerShineEl.parentNode) ccfBannerShineEl.parentNode.removeChild(ccfBannerShineEl);
+        ccfBannerShineEl = null;
+      }
+    } catch (e) { /* never block page */ }
+  }
+
+  // Instant-display banner: render from localStorage cache, then revalidate.
+  // Called BEFORE Promise.all so the cached bar appears without waiting for fetches.
+  function ccfInitBirthdayBanner() {
+    try {
+      var cached = null;
+      try {
+        var raw = localStorage.getItem(CCF_BN_CACHE_KEY);
+        if (raw) cached = JSON.parse(raw);
+      } catch (e) {}
+
+      if (cached && cached.cfg) ccfBannerCreate(cached.cfg);
+
+      var url = window.location.origin + '/apps/cartncodform/discount-config?shop=' +
+        encodeURIComponent(SHOP_DOMAIN);
+      fetchWithTimeout(url, 8000)
+        .then(function(r) { return r && r.ok ? r.json() : null; })
+        .then(function(data) {
+          if (!data || typeof data !== 'object') return;
+          discountConfig = data;
+          try { localStorage.setItem(CCF_BN_CACHE_KEY, JSON.stringify({ cfg: data, at: Date.now() })); } catch (e) {}
+          ccfBannerApplyConfig(data);
+        })
+        .catch(function() {});
     } catch (e) { /* never block page */ }
   }
 
@@ -3404,7 +3582,7 @@
                   if (isCaptureOnly && _ofCard) {
                     // Capture-only: replace the saving card with a success card in-place.
                     var successCard = ccfBuildStatusCard('subscribed', accent, font,
-                      'You’re all set!', 'We’ll message you on WhatsApp');
+                      'You\u2019re all set!', 'We\u2019ll message you on WhatsApp');
                     if (_ofCard.parentNode) {
                       _ofCard.parentNode.insertBefore(successCard, _ofCard);
                       _ofCard.parentNode.removeChild(_ofCard);
@@ -4479,6 +4657,10 @@
     // badge every product price on this page (collection / home / search / PDP).
     checkActiveDiscount();
 
+    // Banner uses stale-while-revalidate so it renders from cache instantly,
+    // before waiting for the full config fetch below.
+    ccfInitBirthdayBanner();
+
     // popup-customizer + discount-feature: load appearance + discount config
     // first, then wire the intent triggers (which is where the dwell timer
     // starts) and the product-page nudge — both read popupConfig/
@@ -4487,7 +4669,6 @@
     // backend and silently never show the nudge).
     Promise.all([fetchPopupConfig(), fetchDiscountConfig()]).then(function () {
       initIntentTriggers();
-      ccfInitBirthdayBanner();
 
       // Inject product page discount nudge.
       setTimeout(function() {
@@ -4512,6 +4693,14 @@
     window.__ccf_test.injectBirthdayStyles = ccfInjectBirthdayStyles;
     window.__ccf_test.showSoftPrompt = showSoftPrompt;
     window.__ccf_test.setPopupConfig = function(v) { popupConfig = v; };
+    window.__ccf_test.bannerCreate = ccfBannerCreate;
+    window.__ccf_test.bannerApplyConfig = ccfBannerApplyConfig;
+    window.__ccf_test.resolveBannerColors = ccfResolveBannerColors;
+    window.__ccf_test.injectBannerStyles = ccfInjectBannerStyles;
+    window.__ccf_test.CCF_BN_CACHE_KEY = CCF_BN_CACHE_KEY;
+    window.__ccf_test.getBannerRefs = function() {
+      return { wrap: ccfBannerWrap, bar: ccfBannerBar, text: ccfBannerTextEl, cta: ccfBannerCtaBtn, shine: ccfBannerShineEl };
+    };
   }
 
   if (document.readyState === 'loading') {

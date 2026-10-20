@@ -1,0 +1,70 @@
+AUDIT — Banner look: merchant colours, text colour, highlight sweep, instant display
+===================================================================================
+
+── PRE-AUDIT (before edits) ─────────────────────────────────────────────────
+
+Scope: birthdayCapture.banner look fields (bgColor, textColor, highlight) across:
+  backend/models/DiscountConfig.js
+  backend/routes/discounts.js (PATCH validation)
+  backend/routes/proxy.js (GET /discount-config)
+  backend/utils/bannerColors.js (NEW — shared colour logic)
+  extensions/cartncodform-embed/assets/ccf-push.js (banner redesign + instant display)
+  frontend/app/admin/screens/Discounts.jsx (banner look sub-section)
+
+CURRENT STATE:
+
+  Model (DiscountConfig.js):
+    birthdayCapture.banner has: enabled, text, buttonText, dismissDays
+    Missing: bgColor, textColor, highlight
+
+  PATCH validation (discounts.js):
+    bn.bgColor  — not accepted, silently ignored
+    bn.textColor — not accepted, silently ignored
+    bn.highlight — not accepted, silently ignored
+    No colour validation in existing code
+
+  GET /discount-config (proxy.js):
+    Cache-Control: no-store  ← already <= 60s (no-store is immediate, fine)
+    banner response: { enabled, text, buttonText, dismissDays }
+    Missing: bgColor, textColor, highlight
+
+  Storefront banner (ccf-push.js):
+    - Hardcoded background:#3730a3;color:#fff; (inline style)
+    - No CSS injection, no .ccf-bn-* classes, no CSS custom properties
+    - No highlight effect
+    - Init: inside Promise.all([fetchPopupConfig(), fetchDiscountConfig()])
+      → no instant display; banner only appears after both fetches complete
+    - No localStorage cache for banner config
+    - No in-place update path
+
+  Admin Discounts.jsx:
+    - banner sub-section shows: banner text, button text, dismiss days
+    - Missing: bgColor swatches + custom hex, textColor segmented, highlight switch,
+      low-contrast warning, live preview
+
+  Shared colour logic:
+    - ccfIsDarkColor(hex) exists in ccf-push.js (uses YIQ formula, threshold 0.45)
+    - No relativeLuminance / contrastRatio / resolveBannerColors anywhere
+
+CHANGES PLANNED:
+  1  Model: add bgColor (default '#3730A3'), textColor (enum auto|white|dark,
+       default 'auto'), highlight (boolean, default true) to birthdayCapture.banner
+  2  PATCH: validate bgColor (#RRGGBB regex), textColor (enum check), highlight (coerce bool)
+  3  Proxy GET: expose all three with fallbacks for legacy docs
+  4  New backend/utils/bannerColors.js: relativeLuminance, contrastRatio, resolveBannerColors
+  5  ccf-push.js:
+     - ccfInjectBannerStyles() — <style id="ccf-bn-styles"> with .ccf-bn-* selectors,
+       CSS custom properties, sweep animation (transform, not left), reduced-motion,
+       tab-hidden pause class, phone overrides
+     - ccfRelativeLuminance, ccfContrastRatio, ccfResolveBannerColors — colour helpers
+     - ccfBannerCreate(data) — builds DOM (bar, shine, icon, text, CTA, dismiss)
+     - ccfBannerApplyConfig(data) — in-place update of colours/text/highlight
+     - ccfBannerInit() — synchronous render from ccf_bn_cfg_v1 cache; then fires
+       background /discount-config fetch (8s timeout), updates cache, updates bar
+     - ccfInitBirthdayBanner() becomes ccfBannerInit() alias
+     - Start: ccfBannerInit() called BEFORE Promise.all; banner in-place updated
+       by ccfBannerApplyConfig after Promise.all resolves
+  6  Discounts.jsx banner look sub-section: 5 swatches + custom hex + color picker,
+     textColor segmented, highlight switch, low-contrast warning, live preview (desktop
+     strip + 360px phone strip with same sweep animation)
+

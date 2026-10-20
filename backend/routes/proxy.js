@@ -134,12 +134,19 @@ router.get('/discount-config', async (req, res) => {
       whatsappCapture: { enabled: !!(doc.whatsappCapture && doc.whatsappCapture.enabled) },
       birthdayCapture: {
         popup: { enabled: !!(doc.birthdayCapture && doc.birthdayCapture.popup && doc.birthdayCapture.popup.enabled) },
-        banner: {
-          enabled: !!(doc.birthdayCapture && doc.birthdayCapture.banner && doc.birthdayCapture.banner.enabled),
-          text: String((doc.birthdayCapture && doc.birthdayCapture.banner && doc.birthdayCapture.banner.text) || '').slice(0, 120),
-          buttonText: String((doc.birthdayCapture && doc.birthdayCapture.banner && doc.birthdayCapture.banner.buttonText) || 'Get my gift').slice(0, 40),
-          dismissDays: Math.max(1, Math.min(30, Number((doc.birthdayCapture && doc.birthdayCapture.banner && doc.birthdayCapture.banner.dismissDays) || 7))),
-        },
+        banner: (function() {
+          var bc = (doc.birthdayCapture && doc.birthdayCapture.banner) || {};
+          var rawBg = String(bc.bgColor || '');
+          return {
+            enabled: !!bc.enabled,
+            text: String(bc.text || '').slice(0, 120),
+            buttonText: String(bc.buttonText || 'Get my gift').slice(0, 40),
+            dismissDays: Math.max(1, Math.min(30, Number(bc.dismissDays || 7))),
+            bgColor: /^#[0-9A-Fa-f]{6}$/.test(rawBg) ? rawBg : '#3730A3',
+            textColor: ['auto', 'white', 'dark'].includes(bc.textColor) ? bc.textColor : 'auto',
+            highlight: bc.highlight !== false,
+          };
+        }()),
         postOrder: { enabled: !!(doc.birthdayCapture && doc.birthdayCapture.postOrder && doc.birthdayCapture.postOrder.enabled) },
       },
       birthdayDiscount: {
@@ -174,7 +181,7 @@ router.get('/discount-config', async (req, res) => {
       whatsappCapture: { enabled: false },
       birthdayCapture: {
         popup: { enabled: false },
-        banner: { enabled: false, text: '', buttonText: 'Get my gift', dismissDays: 7 },
+        banner: { enabled: false, text: '', buttonText: 'Get my gift', dismissDays: 7, bgColor: '#3730A3', textColor: 'auto', highlight: true },
         postOrder: { enabled: false },
       },
       birthdayDiscount: { enabled: false, percentage: 15, offerText: '', consentText: "We'll use your birthday only to send you a birthday offer." },

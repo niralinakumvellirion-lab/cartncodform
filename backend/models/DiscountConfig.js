@@ -72,6 +72,9 @@ const discountConfigSchema = new mongoose.Schema({
       text: { type: String, default: '' },
       buttonText: { type: String, default: 'Get my gift' },
       dismissDays: { type: Number, default: 7, min: 1, max: 30 },
+      bgColor: { type: String, default: '#3730A3' },
+      textColor: { type: String, default: 'auto', enum: ['auto', 'white', 'dark'] },
+      highlight: { type: Boolean, default: true },
     },
     postOrder: {
       enabled: { type: Boolean, default: false },

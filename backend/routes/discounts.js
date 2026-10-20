@@ -50,7 +50,7 @@ function defaultConfig(shop) {
     whatsappCapture: { enabled: false },
     birthdayCapture: {
       popup: { enabled: false },
-      banner: { enabled: false, text: '', buttonText: 'Get my gift', dismissDays: 7 },
+      banner: { enabled: false, text: '', buttonText: 'Get my gift', dismissDays: 7, bgColor: '#3730A3', textColor: 'auto', highlight: true },
       postOrder: { enabled: false },
     },
     birthdayDiscount: { enabled: false, percentage: 15, expiryDays: 7, leadDays: 3, prefix: 'BDAY', offerText: '', consentText: "We'll use your birthday only to send you a birthday offer." },
@@ -498,6 +498,19 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
         if (typeof bn.buttonText === 'string') set['birthdayCapture.banner.buttonText'] = bn.buttonText.trim().slice(0, 40) || 'Get my gift';
         const dismissDays = Number(bn.dismissDays);
         if (Number.isFinite(dismissDays)) set['birthdayCapture.banner.dismissDays'] = Math.min(30, Math.max(1, Math.round(dismissDays)));
+        if (bn.bgColor !== undefined) {
+          if (!/^#[0-9a-fA-F]{6}$/.test(String(bn.bgColor || ''))) {
+            return res.status(400).json({ error: 'birthdayCapture.banner.bgColor must be a 6-digit hex colour (e.g. #3730A3)' });
+          }
+          set['birthdayCapture.banner.bgColor'] = bn.bgColor;
+        }
+        if (bn.textColor !== undefined) {
+          if (!['auto', 'white', 'dark'].includes(bn.textColor)) {
+            return res.status(400).json({ error: 'birthdayCapture.banner.textColor must be one of: auto, white, dark' });
+          }
+          set['birthdayCapture.banner.textColor'] = bn.textColor;
+        }
+        if (bn.highlight !== undefined) set['birthdayCapture.banner.highlight'] = !!bn.highlight;
       }
     }
     if (req.body.birthdayDiscount && typeof req.body.birthdayDiscount === 'object') {
