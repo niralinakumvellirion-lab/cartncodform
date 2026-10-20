@@ -102,12 +102,13 @@ describe('resolveBannerColors', () => {
     expect(hl).not.toBe(bg);
   });
 
-  test('Gold (dark fg) → hl matches mix(#171A22 35%, #F5C542 65%)', () => {
+  test('Gold (dark fg) → hl matches mix(#171A22, bg, 0.35) = 65% fg + 35% bg', () => {
     const { hl } = resolveBannerColors({ bgColor: '#F5C542', textColor: 'auto' });
-    // fgR=23 bgR=245: 23*0.35+245*0.65=167.3→167=0xa7
-    // fgG=26 bgG=197: 26*0.35+197*0.65=137.15→137=0x89
-    // fgB=34 bgB=66:  34*0.35+66*0.65=54.8→55=0x37
-    expect(hl).toBe('#a78937');
+    // 65% #171A22 + 35% #F5C542:
+    // hlR = round(23*0.65 + 245*0.35) = round(14.95+85.75) = 101 = 0x65
+    // hlG = round(26*0.65 + 197*0.35) = round(16.90+68.95) =  86 = 0x56
+    // hlB = round(34*0.65 +  66*0.35) = round(22.10+23.10) =  45 = 0x2d
+    expect(hl).toBe('#65562d');
   });
 
   test('forced white on Gold → hl is #FFE08A', () => {

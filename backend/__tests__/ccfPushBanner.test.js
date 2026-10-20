@@ -209,10 +209,10 @@ test('resolveBannerColors: Indigo → hl is #FFE08A', () => {
   expect(hl).toBe('#FFE08A');
 });
 
-test('resolveBannerColors: Gold (dark fg) → hl matches mix formula', () => {
+test('resolveBannerColors: Gold (dark fg) → hl matches mix(#171A22, bg, 0.35) = 65% fg + 35% bg', () => {
   const hook = loadScript();
   const { hl } = hook.resolveBannerColors({ bgColor: '#F5C542', textColor: 'auto' });
-  expect(hl).toBe('#a78937');
+  expect(hl).toBe('#65562d');
 });
 
 test('resolveBannerColors: hl parity with backend bannerColors.js', () => {

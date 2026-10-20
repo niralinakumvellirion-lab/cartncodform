@@ -1423,9 +1423,9 @@
       var bgR = parseInt(bg.slice(1, 3), 16);
       var bgG = parseInt(bg.slice(3, 5), 16);
       var bgB = parseInt(bg.slice(5, 7), 16);
-      var hlR = Math.round(fgR * 0.35 + bgR * 0.65);
-      var hlG = Math.round(fgG * 0.35 + bgG * 0.65);
-      var hlB = Math.round(fgB * 0.35 + bgB * 0.65);
+      var hlR = Math.round(fgR * 0.65 + bgR * 0.35);
+      var hlG = Math.round(fgG * 0.65 + bgG * 0.35);
+      var hlB = Math.round(fgB * 0.65 + bgB * 0.35);
       hl = '#' + ('00' + hlR.toString(16)).slice(-2)
                + ('00' + hlG.toString(16)).slice(-2)
                + ('00' + hlB.toString(16)).slice(-2);
