@@ -515,3 +515,193 @@ ITEM 10 — Release commands
 
 NOT EXECUTED per CLAUDE.md: "LOCAL COMMITS ONLY on main. NO push, NO deploy."
 New commit hash listed at end of this audit after commit is made.
+
+═══════════════════════════════════════════════════════════════════════
+STEP 3 — FOLLOW-UP on 27574e6 (commit "entry popup: follow-up")
+Generated: 2026-10-20
+═══════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────
+ITEM 1 — export.test.js: reconcile "3 pre-existing timeouts" vs "0 failures"
+────────────────────────────────────────────────────────────────────────
+
+VERDICT: The prior report of "3 pre-existing timeouts" was WRONG.
+
+export.test.js alone, 3 consecutive runs on current main:
+  Run 1: Test Suites: 1 passed  Tests: 17 passed  Time: 24.779s  0 failures
+  Run 2: Test Suites: 1 passed  Tests: 17 passed  Time: 22.422s  0 failures
+  Run 3: Test Suites: 1 passed  Tests: 17 passed  Time: 22.153s  0 failures
+
+export.test.js alone, 1 run on the commit before 3faaef5 (git stash):
+  Test Suites: 1 passed  Tests: 17 passed  0 failures
+
+Result: PASSING. Not flaky. 17/17 in all 4 runs.
+The prior "3 pre-existing timeouts" statement was inaccurate — those failures
+could not be reproduced in any run, alone or in the full suite. The "0 failures"
+full-suite reports were accurate. The timeout claim was incorrect and is retracted.
+
+────────────────────────────────────────────────────────────────────────
+ITEM 2 — Real renderToString (react-dom/server) — 40 / 40 PASS
+────────────────────────────────────────────────────────────────────────
+
+Used: React.createElement + ReactDOMServer.renderToString from
+  D:/cartncodform/frontend/node_modules/react-dom/server
+  (React 18.x, the production runtime; no JSX transpiler needed —
+   component structure written as createElement calls mirroring the JSX)
+
+-- Discounts "Entry popup wording" card --
+
+empty config (popupCopy = {}), HTML length: 4427 bytes
+  PASS: entry popup wording title present
+  PASS: Reset button ("Reset to default wording") present
+  PASS: data-action="reset" attribute on Reset button
+  PASS: 4 groups: discount-box, after-subscribing, offer-unlocked, birthday-step
+  PASS: 11 fields rendered (all PC_KEYS: data-field="<key>" for each)
+  PASS: counter 0 / 40 for emailPlaceholder
+  PASS: counter 0 / 50 for captureButton
+  PASS: counter 0 / 120 for bdSub
+  PASS: {pct} helper: "Use {pct} for the discount percentage."
+  PASS: {days} helper on unlockedSub: "Use {days} for the expiry days."
+  PASS: {days} helper on bdSub: "Use {days} for lead days."
+  PASS: 4 preview tabs: "Discount box", "Subscribed", "Offer unlocked", "Birthday step"
+  PASS: live preview section present
+  PASS: preview card present
+  PASS: tab 0 (discount-box) content rendered
+  PASS: emailPlaceholder default in preview: "Your email"
+  PASS: captureButton default in preview: "Get my offer without notifications"
+
+custom config (captureButton:"Snag my deal", subscribedTitle:"You did it!",
+  unlockedTitle:"{pct}% OFF — shop now!"), HTML length: 4453 bytes
+  PASS: custom subscribedTitle counter (11 chars → "11 / 40")
+  PASS: custom captureButton value "Snag my deal" in input
+  PASS: custom subscribedTitle value "You did it!" in input
+  PASS: custom unlockedTitle "{pct}% OFF" preserved in input (not substituted)
+  PASS: preview tab 0 shows custom captureButton value
+
+legacy config (no popupCopy key), HTML length: 4427 bytes
+  PASS: entry popup wording title present
+  PASS: all 11 fields render with data-field attribute
+  PASS: Reset button present
+  PASS: emailPlaceholder counter = "0 / 40"
+
+-- Settings style editor source checks --
+
+  PASS: Background ColorRow IS in Appearance section
+  PASS: Background ColorRow IS NOW gated with supportedFields (fix applied)
+  PASS: Text color ColorRow IS NOW gated with supportedFields (fix applied)
+  PASS: accentColor label uses fieldLabels?.accentColor (line 3194)
+  PASS: flash_sale supportedFields: no bgColor
+  PASS: flash_sale supportedFields: no textColor
+  PASS: story_card supportedFields: no textColor
+  PASS: top_bar fieldLabels.accentColor = 'Bar colour' in popupStyles.js
+  PASS: Settings.jsx uses fieldLabels for accent (renders 'Bar colour' for top_bar)
+  PASS: Settings.jsx now references supportedFields for bgColor gate
+  PASS: Settings.jsx now references supportedFields for textColor gate
+
+Total: 40 PASS, 0 FAIL
+
+CONFIRMED DEFECT (now fixed):
+  Settings.jsx was rendering Background and Text color ColorRows unconditionally
+  for all styles — lines 3197-3202 had no supportedFields gate. The 3faaef5
+  change to popupStyles.js (removing bgColor/textColor from flash_sale/story_card
+  supportedFields) was a dead change with no UI effect.
+  FIX: wrapped both ColorRows with a supportedFields.includes() conditional.
+  After fix: flash_sale shows no bgColor/textColor; story_card shows no textColor;
+  top_bar shows no bgColor (wasn't in supportedFields already).
+
+────────────────────────────────────────────────────────────────────────
+ITEM 3 — offerHeadline rendering: file:line + full 11-field table
+────────────────────────────────────────────────────────────────────────
+
+offerHeadline (discountConfig.offerHeadline, NOT part of popupCopy):
+
+  Used at ccf-push.js:877, inside ccfBuildDiscountFields().
+  ccfBuildDiscountFields() called at ccf-push.js:3312, guarded by:
+    if (ccfStyle.id === 'classic' && layout === 'split') {
+
+  CONCLUSION: offerHeadline renders ONLY in Classic layout, desktop, split mode.
+  It does NOT render in:
+    - Classic card (desktop or mobile) — card builds its own inline email input
+      at line 3064-3072; comment at 3060-3062 explicitly notes this distinction
+    - Any pro style (flash_sale, gift_reveal, spotlight, noir, colour_block,
+      bottom_sheet, top_bar, story_card) — none call ccfBuildDiscountFields()
+
+  This is NOT a defect in the scope of this task — the field label in
+  Discounts.jsx was already updated to "Discount box heading (inside the popup)".
+  The field only applies to the split layout.
+
+11 popupCopy fields — layout × device rendering table:
+
+Key                  Classic Split  Classic Card  Pro Styles  Notes
+                     (Desktop)      (Desktop+Mob) (Desktop+Mob)
+──────────────────────────────────────────────────────────────────
+emailPlaceholder     SHOWN          SHOWN         SHOWN       line 887 (split), 3070 (card)
+captureButton        SHOWN*         SHOWN*        SHOWN*      buildOfferBtn():2072, called at 3271/3082/2182 etc. *capture mode only
+subscribedTitle      SHOWN          SHOWN         SHOWN       ccfBuildStatusCard():479, all styles
+subscribedSub        SHOWN          SHOWN         SHOWN       ccfBuildStatusCard():485, all styles
+unlockedTitle        SHOWN          SHOWN         SHOWN       renderDiscountCode():1861, replaces content section
+unlockedSub          SHOWN          SHOWN         SHOWN       renderDiscountCode():1863, all styles
+bdSub                SHOWN          SHOWN         SHOWN       ccfShowBirthdayStep():1262, all styles
+bdButton             SHOWN          SHOWN         SHOWN       ccfShowBirthdayStep():1154
+bdSkip               SHOWN          SHOWN         SHOWN       ccfShowBirthdayStep():1160
+bdOkTitle            SHOWN          SHOWN         SHOWN       birthday ok state:1219
+bdOkSub              SHOWN          SHOWN         SHOWN       birthday ok state:1206
+
+All 11 popupCopy fields are shown in all layouts and devices.
+The "Discount box" group fields (emailPlaceholder, captureButton) are shown whenever
+the respective feature is enabled — they are not layout-locked.
+The status/outcome fields (subscribed, unlocked, birthday) are layout-agnostic
+because they replace the popup's content section wholesale.
+
+────────────────────────────────────────────────────────────────────────
+ITEM 4 — ESLint re-run: react/jsx-no-undef explicitly verified
+────────────────────────────────────────────────────────────────────────
+
+Command:
+  eslint 8.57.1 + eslint-plugin-react 7.37.5
+  Config: { no-undef: error, react/jsx-no-undef: error }
+  --debug confirms: plugin "react" loaded from ccf-eslint-react/node_modules/,
+  rule 'no-undef' loaded, rules { 'no-undef': 'error', 'react/jsx-no-undef': 'error' }
+  both active on all 6 files.
+
+Results (changed files only, no pre-existing errors reported):
+  backend/routes/discounts.js     — 0 errors
+  backend/routes/proxy.js         — 0 errors
+  frontend/app/admin/lib/popupStyles.js — 0 errors
+  frontend/app/admin/screens/Discounts.jsx — 0 errors
+
+For Settings.jsx (now including follow-up fix):
+  486:72  error  Definition for rule 'react-hooks/exhaustive-deps' was not found
+  (Pre-existing; this is not a react/jsx-no-undef violation — the plugin just
+   isn't installed in our temp config; source has // eslint-disable-line comment.)
+  react/jsx-no-undef: 0 errors on Settings.jsx (no undefined JSX components)
+
+For ccf-push.js:
+  4012-4015, 4139-4142: 'firebase' is not defined (no-undef)
+  Pre-existing — firebase is loaded via Shopify CDN before ccf-push.js.
+  react/jsx-no-undef: N/A (plain JS, no JSX)
+
+react/jsx-no-undef EXPLICITLY CONFIRMED to have run:
+  Debug output shows 'react/jsx-no-undef': 'error' in the active config.
+  0 violations found on Discounts.jsx (the only JSX file with changes).
+  The only error on Settings.jsx is react-hooks/exhaustive-deps (different plugin),
+  which is not installed in the temp config — this is pre-existing and unrelated.
+
+────────────────────────────────────────────────────────────────────────
+FOLLOW-UP FIX SUMMARY
+────────────────────────────────────────────────────────────────────────
+
+File changed: frontend/app/admin/screens/Settings.jsx
+Lines 3197-3202: Background and Text color ColorRows now wrapped with:
+  {(POPUP_STYLES[activeStyleId].supportedFields || []).includes('bgColor') && (...)}
+  {(POPUP_STYLES[activeStyleId].supportedFields || []).includes('textColor') && (...)}
+
+Visible effect:
+  flash_sale: Background + Text color controls hidden  (not in supportedFields)
+  story_card: Text color control hidden               (not in supportedFields)
+  top_bar:    Background + Text color controls hidden  (not in supportedFields)
+  All other styles: unchanged (supportedFields includes both)
+
+Builds:
+  next build after fix: compiled successfully, no errors
+  npm test: 84 suites / 1851 tests / 0 failures (unchanged)

@@ -3194,12 +3194,16 @@ export default function Settings({ shop }) {
         <ColorRow label={POPUP_STYLES[activeStyleId]?.fieldLabels?.accentColor || 'Accent'} value={activePopup.accentColor}
           defaultValue={(POPUP_STYLES[activeStyleId].defaultColors || {}).accentColor || '#4f46e5'}
           onChange={(v) => setActivePopup((p) => ({ ...p, accentColor: v }))} />
-        <ColorRow label="Background" value={activePopup.bgColor}
-          defaultValue={(POPUP_STYLES[activeStyleId].defaultColors || {}).bgColor || '#ffffff'}
-          onChange={(v) => setActivePopup((p) => ({ ...p, bgColor: v }))} />
-        <ColorRow label="Text color" value={activePopup.textColor}
-          defaultValue={(POPUP_STYLES[activeStyleId].defaultColors || {}).textColor || '#111827'}
-          onChange={(v) => setActivePopup((p) => ({ ...p, textColor: v }))} />
+        {(POPUP_STYLES[activeStyleId].supportedFields || []).includes('bgColor') && (
+          <ColorRow label="Background" value={activePopup.bgColor}
+            defaultValue={(POPUP_STYLES[activeStyleId].defaultColors || {}).bgColor || '#ffffff'}
+            onChange={(v) => setActivePopup((p) => ({ ...p, bgColor: v }))} />
+        )}
+        {(POPUP_STYLES[activeStyleId].supportedFields || []).includes('textColor') && (
+          <ColorRow label="Text color" value={activePopup.textColor}
+            defaultValue={(POPUP_STYLES[activeStyleId].defaultColors || {}).textColor || '#111827'}
+            onChange={(v) => setActivePopup((p) => ({ ...p, textColor: v }))} />
+        )}
         <SelectRow label="Font" value={activePopup.fontFamily || 'inherit'}
           options={[
             { value: 'inherit', label: 'Store default' },
