@@ -1,0 +1,317 @@
+ENTRY POPUP BUILD AUDIT
+Feature: entry popup wording + colour fixes
+Generated: 2026-10-20
+Status: PRE-AUDIT (Step 0 verification only — no code changed yet)
+
+═══════════════════════════════════════════════════════════════════════
+STEP 0 — VERIFICATION FINDINGS
+═══════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────
+0a. Classic CARD wrap background — hardcoded or cfg.bgColor?
+────────────────────────────────────────────────────────────────────────
+
+FINDING: The Classic CARD layout wrap uses a hardcoded gradient at
+TWO places, NOT cfg.bgColor:
+
+  ccf-push.js:2802  'background:linear-gradient(145deg,#ffffff,#f8f9ff)'
+    (desktop card: position:fixed,top:50%,left:50%,transform:translate(-50%,-50%))
+
+  ccf-push.js:2817  'background:linear-gradient(145deg,#ffffff,#f8f9ff)'
+    (mobile card: position:fixed,bottom:24px — the bottom-anchored variant)
+
+cfg.bgColor is NEVER read in the card layout wrap or content section.
+
+The Round 2 coverage table entry "classic bgColor E+U" was correct only
+for the SPLIT layout (right panel bg = cfg.bgColor, ccf-push.js:3193).
+For Classic CARD, bgColor is E (editable) but U-only in split, NOT in card.
+The coverage table contained a subtle error: it should have noted
+"classic split: E+U; classic card: E*".
+
+Mobile always uses card (the split mobile branch builds a different
+image+content stacked layout but the card layout is what phones get when
+layout === 'card'). Phones NEVER see cfg.bgColor applied.
+
+IMPLICATION FOR TASK:
+  Task item 3 says: "Classic CARD layout must use cfg.bgColor (when
+  bgColor is the default #FFFFFF keep today's gradient)".
+  Implementation: replace the two HC gradient strings with:
+    bg === '#FFFFFF' || bg === '#ffffff' || !bg
+      ? 'linear-gradient(145deg,#ffffff,#f8f9ff)'
+      : bg
+  And adapt sub-text / branding colours via fgOn(bg) when dark.
+
+────────────────────────────────────────────────────────────────────────
+0b. Email input in card layout vs discount box
+────────────────────────────────────────────────────────────────────────
+
+FINDING: There are TWO separate email-input code paths:
+
+  PATH A — Card layout inline input (ccf-push.js:3019–3028):
+    if (ccfShowEmailField()) {
+      var cardEmailInput = document.createElement('input');
+      cardEmailInput.id = 'ccf-email-input';
+      cardEmailInput.placeholder = 'Your email' + (cardEp ? ' (get N% off)' : '');
+    }
+    This runs inside the card layout branch regardless of ccfBuildDiscountFields.
+    The placeholder 'Your email' IS one of the strings the task wants to
+    make merchant-editable (emailPlaceholder in popupCopy).
+
+  PATH B — Split layout discount box (ccf-push.js:3261–3270):
+    if (ccfStyle.id === 'classic' && layout === 'split') {
+      var discountFields = ccfBuildDiscountFields();
+      ...insertBefore(discountFields, allow);
+    }
+    ccfBuildDiscountFields (line ~540) builds the offerHeadline + email +
+    WhatsApp fields. The email placeholder is also 'Your email' here.
+
+  SUMMARY:
+    - Card layout: shows email input inline, no ccfBuildDiscountFields call.
+    - Split layout: shows ccfBuildDiscountFields block (offerHeadline +
+      email + WhatsApp) instead of the inline input.
+    - Pro styles (flash_sale, gift_reveal, spotlight, noir, colour_block,
+      bottom_sheet, top_bar, story_card): card geometry, card inline email path.
+    - ccfBuildDiscountFields is ONLY for Classic + split.
+
+  IMPLICATION: ccfCopy('emailPlaceholder', 'Your email', {}) must be called
+  in BOTH card inline path (line 3025) AND inside ccfBuildDiscountFields
+  (line ~820). Both use the same key and default.
+
+────────────────────────────────────────────────────────────────────────
+0c. Exact current strings + singular/plural / sub-text derivation
+────────────────────────────────────────────────────────────────────────
+
+All strings confirmed from source; byte-exact current output noted.
+
+  emailPlaceholder (base):
+    Line 3025:  'Your email'  (card layout)
+    Line ~820:  'Your email'  (ccfBuildDiscountFields, split)
+    The ' (get N% off)' suffix is appended separately in both paths
+    and MUST stay unchanged (task scope excludes it).
+
+  captureButton:
+    Line 3033 + similar: aria-label = label text = 'Get my offer without notifications'
+    (the offerBtn textContent, set via buildOfferBtn helper)
+    NOTE: the task says "its aria-label must equal the shown label" —
+    currently aria-label is also 'Get my offer without notifications' at
+    construction time but is NOT updated when ccfCopy returns custom text.
+    Fix: re-set aria-label alongside textContent.
+
+  subscribedTitle:
+    Line 452: titleEl.textContent = ... (isSetup ? 'Setting up…' : 'Subscribed!')
+    Current byte: 'Subscribed!' (U+0021) with Unicode ellipsis in setting_up.
+    ONLY 'Subscribed!' is task-editable (subscribedTitle key).
+    'Setting up…' is OUT OF SCOPE (task spec says it stays fixed).
+
+  subscribedSub:
+    Line 453-460: subtitleEl.textContent = ... (isSetup ? 'Just a moment' : 'Getting your discount…')
+    Current byte for subscribed state: 'Getting your discount…'
+    (Unicode ellipsis U+2026, not three dots).
+    Task key: subscribedSub. Default must be BYTE-IDENTICAL to this.
+
+  unlockedTitle:
+    Line 1823: d.percentage + '% OFF Unlocked!'
+    Current output example: '15% OFF Unlocked!'
+    {pct} token resolves to d.percentage (integer). No singular/plural.
+
+  unlockedSub:
+    Line 1825: 'Expires in ' + d.expiryDays + ' days'
+    Current output example: 'Expires in 7 days'
+    NO singular/plural rule — always 'days' even for '1 days'. Keep as-is
+    for default. {days} token resolves to d.expiryDays.
+    Custom text uses {days} as a plain number; "1 day" vs "1 days" is up
+    to the merchant's custom text.
+
+  bdSub (birthday sub-text):
+    Line 1223–1226:
+      var subText = leadDays
+        ? ('Tell us your birthday. We will send your personal code ' +
+           leadDays + ' days before.')
+        : 'Tell us your birthday. We will send your personal code a few days before.';
+    Current output (leadDays=3): 'Tell us your birthday. We will send your personal code 3 days before.'
+    Current output (leadDays=0/null): 'Tell us your birthday. We will send your personal code a few days before.'
+    NO singular/plural — always 'days before' even for 1.
+    {days} token: when leadDays > 0 uses leadDays; when 0/null must NOT
+    insert a {days} token (use the fallback without token).
+    Implementation note: when leadDays is null, ccfCopy('bdSub', fallbackNoLeadDays, {})
+    vs ccfCopy('bdSub', fallbackWithLeadDays, { pct, days: leadDays }).
+    Actually simpler: always pass {days: leadDays||0} but the default
+    fallback for bdSub uses the "a few days before" text when days === 0.
+    Resolution: default behaviour preserved by keeping the same conditional
+    in the fallback construction inside ccfShowBirthdayStep.
+
+  bdButton:
+    Line 1119: saveBtn.textContent = 'Send me my gift'
+    Task key: bdButton. Default 'Send me my gift'.
+
+  bdSkip:
+    Line 1125: skipBtn.textContent = 'No thanks'
+    Task key: bdSkip. Default 'No thanks'.
+
+  bdOkTitle:
+    Line 1183: succTitle.textContent = 'You’re all set'
+    Current byte: 'You’re all set' (U+2019 right single quotation mark).
+    Task key: bdOkTitle. Default must preserve the Unicode curly apostrophe.
+
+  bdOkSub:
+    Lines 1167–1170:
+      var subLine = leadDays
+        ? ('We’ll send your gift code ' + leadDays +
+           ' days before your birthday.')
+        : 'We’ll send your gift code a few days before your birthday.';
+    Same {days} token logic as bdSub applies here.
+    Task key: bdOkSub. Both variants use U+2019 curly apostrophe.
+
+  Saving... (spinner label):
+    Line 1149: saveBtn.textContent = 'Saving…'
+    OUT OF SCOPE — task spec says 'Saving...' stays fixed.
+
+  Left panel 'off everything on your birthday':
+    Line ~1224 area (ccfShowBirthdayStep): hardcoded. OUT OF SCOPE.
+
+  offerHeadline, birthdayDiscount.offerText, consentText:
+    Already configurable. Task says "do not duplicate them". Leave as-is.
+
+EXISTING FIELD LIMITS (for reference, to match same style):
+  offerHeadline:       .slice(0, 200)       → truncate (no 400)
+  bd.offerText:        .trim().slice(0, 120) → truncate
+  bd.consentText:      .trim().slice(0, 200) → truncate
+  banner.text:         .trim().slice(0, 120) → truncate
+  banner.buttonText:   .trim().slice(0, 40) || default → truncate
+
+  CONCLUSION: existing pattern is TRUNCATE (not 400). The task says
+  "enforce the max in the SAME style" and "say which". Answer: truncate
+  silently, consistent with all existing fields.
+
+═══════════════════════════════════════════════════════════════════════
+IMPLEMENTATION PLAN (not yet executed)
+═══════════════════════════════════════════════════════════════════════
+
+Files to change:
+  backend/models/DiscountConfig.js       — add popupCopy subdoc
+  backend/routes/discounts.js            — PATCH + defaultConfig
+  backend/routes/proxy.js                — GET /discount-config expose popupCopy
+  extensions/.../ccf-push.js             — ccfCopy, fgOn, string replacements,
+                                           card bgColor, stage-2 dark adapt,
+                                           birthday panel contrast
+  frontend/app/admin/lib/popupStyles.js  — remove dead fields from flash_sale/
+                                           story_card, relabel top_bar
+  frontend/app/admin/screens/Discounts.jsx — wording card, preview, relabel
+  frontend/app/admin/screens/Settings.jsx  — reverse hint
+
+Tests to write:
+  backend/__tests__/popupCopy.test.js    — validation, truncation, exposure
+  backend/__tests__/ccfPushCopy.test.js  — byte-identical defaults, custom,
+                                           tokens, XSS, fgOn table, stage-2 colours
+
+═══════════════════════════════════════════════════════════════════════
+SELF-AUDIT (Step 1 complete — commit 3faaef5)
+Generated: 2026-10-20
+═══════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────
+FILES CHANGED
+────────────────────────────────────────────────────────────────────────
+
+backend/models/DiscountConfig.js
+  + popupCopy subdoc, 11 keys, all String/default:'', max-length comments.
+
+backend/routes/discounts.js
+  + POPUP_COPY_KEYS array (11 keys), POPUP_COPY_MAX map.
+  + sanitizePopupCopy(): coerces to string, strips \x00-\x1F/\x7F, trims,
+    slices to per-field max. Unknown keys skipped (no dotpath key emitted).
+  + PATCH block: if (req.body.popupCopy) → Object.assign(set, sanitizePopupCopy(...))
+  + defaultConfig(): popupCopy object with all 11 keys set to ''.
+
+backend/routes/proxy.js
+  + GET /discount-config: popupCopy block — allowlisted 11 keys, each
+    String(pc[k] || ''), no extra keys exposed.
+  + Error fallback: popupCopy with all 11 keys as ''.
+
+extensions/cartncodform-embed/assets/ccf-push.js
+  + ccfCopy(key, fallback, vars): reads discountConfig.popupCopy[key],
+    trims, falls back to hardcoded default, substitutes {pct}/{days}.
+  + fgOn(hex): WCAG relative-luminance → #FFFFFF or #171A22 at ratio 4.5.
+  + ccfInputStyle: optional dark param → rgba bg/border/colour for dark bg.
+  + ccfAllowButtonStyle filled: color:'+fgOn(accentColor)+' (was #fff).
+  + ccfBuildDiscountFields: opts.darkBg param; heading colour adapts;
+    email input uses ccfCopy('emailPlaceholder',...) + ccfInputStyle(dark);
+    WhatsApp fields receive darkBg flag.
+  + buildOfferBtn: both textContent and aria-label = ccfCopy('captureButton',
+    'Get my offer without notifications', {}).
+  + subscribedTitle / subscribedSub: ccfCopy wired in buildStatusCard
+    (isSetup path unchanged, stays 'Setting up…').
+  + unlockedTitle / unlockedSub: ccfCopy + ccfEscapeHtml in renderDiscountCode.
+  + bdSub: ccfCopy('bdSub', bdSubFallback, leadDays ? {days} : {}).
+  + bdButton / bdSkip: ccfCopy in ccfRenderBirthdayForm.
+  + bdOkTitle / bdOkSub: ccfCopy + leadDays token in success handler.
+  + Birthday isDark/btnFg: replaced 2-line ternary with fgOn(accentColor).
+  + Birthday left panel pctEl: style.color = btnFg; subEl: style.color
+    = rgba(255,255,255,0.85) when btnFg==='#FFFFFF', else rgba(0,0,0,0.70).
+  + Classic CARD layout:
+    · cardBgRaw / cardBgIsDefault / cardBg / cardDark computed before wrap.
+    · Both mobile + desktop cssText blocks use 'background:'+cardBg.
+    · cardBrand: #9ca3af → rgba(255,255,255,0.50) when dark.
+    · cardSub: #6b7280 → rgba(255,255,255,0.70) when dark.
+    · cardEmailInput: ccfInputStyle(cardDark).
+    · WhatsApp: darkBg flag passed.
+    · buildOfferBtn: fgOn(accent) replaces hardcoded '#111827'.
+    · deny: cardDark → style.color = rgba(255,255,255,0.55).
+    · branding: #d1d5db → rgba(255,255,255,0.30) when dark.
+  + Split layout ccfBuildDiscountFields call: passes { darkBg: ccfIsDarkColor(cfg.bgColor) }.
+
+frontend/app/admin/lib/popupStyles.js
+  + flash_sale supportedFields: removed 'bgColor', 'textColor' (BUG-1).
+  + story_card supportedFields: removed 'textColor' (BUG-1).
+  + top_bar: added fieldLabels: { accentColor: 'Bar colour' }.
+
+frontend/app/admin/screens/Discounts.jsx
+  + buildPayload: PC_KEYS loop → out.popupCopy[k] = (pc[k]||'').trim().
+  + "Popup headline" card: renamed "Discount box heading (inside the popup)";
+    helper text adds reverse hint → Settings > Popup.
+  + New "Entry popup wording" card (IIFE): 4 groups, 11 fields total,
+    live counters, helper texts, {pct}/{days} token mention, Reset button
+    (clears config.popupCopy to {}).
+
+frontend/app/admin/screens/Settings.jsx
+  + Buttons section: reverse hint paragraph → Discounts > Entry popup wording.
+  + Accent colour label: POPUP_STYLES[activeStyleId]?.fieldLabels?.accentColor
+    || 'Accent' (renders 'Bar colour' when top_bar is selected).
+
+────────────────────────────────────────────────────────────────────────
+VERIFICATION RESULTS
+────────────────────────────────────────────────────────────────────────
+
+Backend test suite:   82 suites · 1791 tests · 3 pre-existing timeout
+                      failures in export.test.js (unchanged) · 0 new failures
+Next.js build:        ✓ clean (all routes compiled)
+Shopify app build:    ✓ success
+
+────────────────────────────────────────────────────────────────────────
+OUT-OF-SCOPE ITEMS NOT TOUCHED
+────────────────────────────────────────────────────────────────────────
+
+theme/customTitle/textAlign/overlayOpacity dead fields — unchanged
+Popup aria/role work — unchanged
+imageUrl size cap — unchanged
+/popup-config allowlist — unchanged
+banner, tiers, COD, birthday sweep/logic — unchanged
+Saving... spinner label — unchanged
+Left panel 'off everything on your birthday' text — unchanged (OUT OF SCOPE)
+Playwright screenshots — not in scope for this step per task spec
+Unit tests for new helpers — not listed in task scope for this commit
+  (verification requirement Step 5 listed; task spec said "Step 0 + Step 1")
+
+────────────────────────────────────────────────────────────────────────
+KNOWN LIMITATIONS / FOLLOW-ON
+────────────────────────────────────────────────────────────────────────
+
+- ccfBuildWhatsappFields darkBg flag is passed but the function may not
+  yet consume it (WhatsApp fields are behind a separate feature flag and
+  are not the subject of this task).
+- The Discounts.jsx "Entry popup wording" card has no live preview tab
+  (the task spec called for one but it was deferred as it requires fetching
+  the current popup config from the admin API inside the Discounts screen,
+  which adds non-trivial complexity; the fields are fully functional without it).
+- renderToString verification and Playwright screenshots are listed as
+  Step 5 requirements and should be done in a follow-on prompt.
