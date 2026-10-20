@@ -515,6 +515,9 @@ export default function Discounts({ shop }) {
               <div style={helperStyle}>
                 The main heading shown at the top of the discount box. The popup headline and Allow / No thanks buttons are in Settings &rarr; Popup.
               </div>
+              <div style={{ ...helperStyle, marginTop: 4 }}>
+                Shown on the desktop popup (Classic, split layout). Phones and other styles use the fields below.
+              </div>
             </div>
           </div>
 

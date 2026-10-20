@@ -705,3 +705,167 @@ Visible effect:
 Builds:
   next build after fix: compiled successfully, no errors
   npm test: 84 suites / 1851 tests / 0 failures (unchanged)
+
+═══════════════════════════════════════════════════════════════════════
+STEP 4 — CONTROL GUARD (commit "entry popup: control guard fix")
+Generated: 2026-10-20
+Previous follow-up commit: 62d1520
+═══════════════════════════════════════════════════════════════════════
+
+────────────────────────────────────────────────────────────────────────
+ITEM 1 — supportedFields for all 9 styles vs R2-2 table
+────────────────────────────────────────────────────────────────────────
+
+R2-2 legend:
+  E+U = exposed in supportedFields AND used by storefront (show control)
+  E*  = exposed but storefront ignores it (dead control — remove from SF)
+  X   = neither exposed nor used (hide control)
+
+Rendered controls table — 30 / 30 PASS (verification script):
+
+Style           bgColor       textColor     accentColor
+classic         SHOWN (E+U)   SHOWN (E+U)   SHOWN (always)
+flash_sale      hidden (E*→X) hidden (E*→X) SHOWN (always)
+gift_reveal     SHOWN (E+U)   SHOWN (E+U)   SHOWN (always)
+bottom_sheet    SHOWN (E+U)   SHOWN (E+U)   SHOWN (always)
+top_bar         hidden (X)    SHOWN (E+U)   SHOWN (as 'Bar colour')
+story_card      hidden (E*→X) hidden (E*→X) SHOWN (always)
+spotlight       SHOWN (E+U)   SHOWN (E+U)   SHOWN (always)
+noir            SHOWN (E+U)   SHOWN (E+U)   SHOWN (always)
+color_block     SHOWN (E+U)   SHOWN (E+U)   SHOWN (always)
+
+All 9 styles match R2-2.
+
+Previous audit correction:
+  STEP 3 stated "top_bar: Background + Text color controls hidden". This was
+  wrong — the code correctly shows textColor for top_bar because textColor IS
+  in top_bar.supportedFields (R2-2: E+U). Only bgColor is hidden for top_bar
+  (R2-2: X). The code was correct; only the audit summary lied.
+
+story_card check:
+  story_card.supportedFields: no bgColor ✓, no textColor ✓
+  Matches R2-2 (both were E* = dead controls → now X = hidden). No code change
+  needed — this was already correct in the popupStyles.js source.
+
+top_bar check:
+  top_bar.supportedFields: no bgColor ✓, has textColor ✓
+  textColor=E+U (storefront uses it for text on the bar). Control correctly shown.
+
+Settings.jsx guard:
+  Line 3197: bgColor ColorRow is gated by (POPUP_STYLES[activeStyleId].supportedFields||[]).includes('bgColor') ✓
+  Line 3202: textColor ColorRow is gated by (POPUP_STYLES[activeStyleId].supportedFields||[]).includes('textColor') ✓
+
+No code changes needed for item 1 — both popupStyles.js and Settings.jsx were
+already correct after the previous follow-up fix. This step adds the tests
+that confirm correctness and corrects the audit record.
+
+────────────────────────────────────────────────────────────────────────
+ITEM 2 — Mobile tab: guard uses mobile style's supportedFields
+────────────────────────────────────────────────────────────────────────
+
+Settings.jsx source logic (lines 2307-2318):
+
+  const mobileUsesOwnStyle = popupDevice === 'mobile' && !!popup.mobileStyleOverride;
+  const activeStyleId = resolveStyleId(
+    (mobileUsesOwnStyle ? mobilePopup.styleId : popup.styleId) || 'classic',
+    popupDevice
+  );
+
+ColorRow guard (lines 3197, 3202):
+  (POPUP_STYLES[activeStyleId].supportedFields || []).includes('bgColor')
+  (POPUP_STYLES[activeStyleId].supportedFields || []).includes('textColor')
+
+Since activeStyleId resolves to the MOBILE style (mobilePopup.styleId) when
+popupDevice='mobile' and mobileStyleOverride=true, the guard automatically uses
+the mobile style's supportedFields. Correct.
+
+Test case 1: desktop=classic, mobile=top_bar (mobileStyleOverride=true)
+  Desktop tab: activeStyleId=classic
+    bgColor:   SHOWN  (classic has bgColor in SF)
+    textColor: SHOWN  (classic has textColor in SF)
+  Mobile tab: activeStyleId=top_bar
+    bgColor:   hidden (top_bar has no bgColor — X per R2-2)
+    textColor: SHOWN  (top_bar has textColor — E+U per R2-2)
+
+Test case 2: desktop=flash_sale, mobile=classic (mobileStyleOverride=true)
+  Desktop tab: activeStyleId=flash_sale
+    bgColor:   hidden (flash_sale no bgColor)
+    textColor: hidden (flash_sale no textColor)
+  Mobile tab: activeStyleId=classic (not mobileOnly, resolveStyleId returns 'classic')
+    bgColor:   SHOWN  (classic has bgColor)
+    textColor: SHOWN  (classic has textColor)
+
+All 12 mobile-tab assertions: PASS.
+
+────────────────────────────────────────────────────────────────────────
+ITEM 3 — Tests added
+────────────────────────────────────────────────────────────────────────
+
+New file: backend/__tests__/controlGuard.test.js
+
+  describe: 'popupStyles.js — R2-2 bgColor/textColor correctness (control guard)'
+    Tests: flash_sale no bgColor, flash_sale no textColor,
+           story_card no bgColor, story_card no textColor,
+           top_bar no bgColor, top_bar HAS textColor,
+           classic/gift_reveal/bottom_sheet/spotlight/noir/color_block all have both
+           (12 tests total, 6 of which use test.each)
+
+  describe: 'Settings.jsx — ColorRow guards read supportedFields'
+    Tests: bgColor guard present, textColor guard present (2 tests)
+
+  describe: 'Settings.jsx — mobile tab resolves correct supportedFields'
+    Tests: mobileUsesOwnStyle derivation, activeStyleId source, guard wiring,
+           TC1 (6 assertions), TC2 (6 assertions) = 15 tests
+
+  describe: 'Discounts.jsx — offerHeadline hint text'
+    Tests: hint present, hint appears after input element (2 tests)
+
+  Total new tests: 37
+
+Suite totals:
+  BEFORE this commit: 84 suites / 1851 tests
+  AFTER:              85 suites / 1888 tests
+  Delta: +1 suite, +37 tests, 0 new failures
+
+────────────────────────────────────────────────────────────────────────
+ITEM 4 — offerHeadline hint
+────────────────────────────────────────────────────────────────────────
+
+File changed: frontend/app/admin/screens/Discounts.jsx
+Addition: a second helper <div> immediately after the existing helper text,
+under the "Discount box heading" input:
+
+  <div style={{ ...helperStyle, marginTop: 4 }}>
+    Shown on the desktop popup (Classic, split layout). Phones and other styles
+    use the fields below.
+  </div>
+
+offerHeadline rendering was NOT changed (per scope: "Do NOT change offerHeadline
+rendering"). The hint is admin-side only.
+
+────────────────────────────────────────────────────────────────────────
+FILES CHANGED IN THIS COMMIT
+────────────────────────────────────────────────────────────────────────
+
+  frontend/app/admin/screens/Discounts.jsx  — offerHeadline hint (+4 lines)
+  backend/__tests__/controlGuard.test.js    — new test file (37 tests)
+  audits/entry-popup-build.txt              — this audit appended
+
+────────────────────────────────────────────────────────────────────────
+RELEASE COMMANDS (list only — NOT run per CLAUDE.md)
+────────────────────────────────────────────────────────────────────────
+
+Frontend (admin — Discounts.jsx changed):
+  cd frontend && npm run build && npx vercel --prod
+
+Storefront (theme extension — NOT changed in this commit):
+  shopify app deploy --allow-updates
+  (only needed if ccf-push.js or push-notifications.liquid changed — neither
+   changed here)
+
+Backend (new test file only — no production code changed in backend/):
+  No deploy needed; Render auto-deploys on push to main.
+
+Commit hashes:
+  Previous follow-up commit: 62d1520  ("entry popup: follow-up")
+  This commit: see git log after commit
