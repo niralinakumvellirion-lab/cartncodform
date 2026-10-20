@@ -871,7 +871,7 @@ export default function Discounts({ shop }) {
                       <div style={{ background: accent, borderRadius: 8, padding: '8px 12px', textAlign: 'center', fontSize: '12.5px', fontWeight: 700, color: btnFg, marginBottom: 6 }}>
                         Allow push notifications
                       </div>
-                      <div style={{ background: accent + '22', border: '1px solid ' + accent + '55', borderRadius: 8, padding: '7px 12px', textAlign: 'center', fontSize: 12, fontWeight: 600, color: accent }}>
+                      <div style={{ background: 'transparent', border: '2px solid ' + accent, borderRadius: 8, padding: '7px 12px', textAlign: 'center', fontSize: 12, fontWeight: 600, color: cardDark ? '#F4F4F5' : '#171A22' }}>
                         {copyVal('captureButton', 'Get my offer without notifications', {})}
                       </div>
                     </div>
@@ -890,7 +890,7 @@ export default function Discounts({ shop }) {
                   /* 2 -- Offer unlocked */
                   () => (
                     <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: accent, marginBottom: 4 }}>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: fgText, marginBottom: 4 }}>
                         {copyVal('unlockedTitle', samplePct + '% OFF Unlocked!', { pct: samplePct })}
                       </div>
                       <div style={{ fontSize: 12, color: fgSub }}>

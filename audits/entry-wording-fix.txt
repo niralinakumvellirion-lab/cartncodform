@@ -147,7 +147,7 @@ a) ESLint (eslint 8.57.1 + eslint-plugin-react 7.37.5, --resolve-
    plugins-relative-to temp config, no-undef + react/jsx-no-undef):
    Discounts.jsx — EXIT 0, 0 errors.
 
-b) renderToString (source-regex checks, 51 assertions):
+b) Source-regex checks (51 assertions, via standalone renderToStringWording.js script):
    51 PASS, 0 FAIL. Checked:
    - Placement (panel inside birthday-methods, gated, before Save btn)
    - 4 tabs with tablist/tab/aria-selected roles, hasDot function
@@ -186,5 +186,218 @@ Storefront (ccf-push.js): no changes — no shopify app deploy needed.
 
 Git: git push origin main  (no force-push; branch is main)
 
-Commit hash: see git log after commit.
+Commit hash: 233bd26
+=======================================================================
+
+
+=======================================================================
+ENTRY POPUP: PREVIEW PARITY AND CHECKS
+Commit: entry popup: preview parity and checks
+Date:   2026-10-20
+Follows: 233bd26 (entry popup: wording panel -- placement + preview fix)
+=======================================================================
+
+-----------------------------------------------------------------------
+ITEM 1 -- PREVIEW COLOUR PARITY (Discounts.jsx)
+-----------------------------------------------------------------------
+
+STOREFRONT SOURCES for classic-card layout (ccf-push.js):
+  buildOfferBtn(accent, fgColor) -- line 2068-2082:
+    background: transparent
+    border:     2px solid accentColor
+    color:      fgColor (passed as fgOn(accent) for classic card, line 3082)
+
+MISMATCHES FOUND (all checked against storefront; only preview colours fixed):
+
+R2-1a -- captureButton FIXED:
+  Was:   background: accent+'22', border: '1px solid '+accent+'55', color: accent
+  Now:   background: 'transparent', border: '2px solid '+accent,
+         color: cardDark ? '#F4F4F5' : '#171A22'
+  Why the preview differs from raw fgOn(accent): the storefront renders
+  fgOn(accent) against the popup background (where it is always readable).
+  In the admin preview the button sits on white/light admin chrome, so
+  'transparent' text must be readable against the popup bg colour, not
+  the accent. cardDark-based choice is identical to the logic used for all
+  other preview text elements.
+
+R2-1f -- unlockedTitle FIXED:
+  Was:   color: accent  (18px/800 "15% OFF Unlocked!" title)
+  Now:   color: fgText  (= cardDark ? '#ffffff' : '#111827')
+  Storefront (renderDiscountCode, line 1860): titleColor = '#111827' for
+  classic/light theme -- not accent colour.
+
+LISTED BUT NOT FIXED (minor / preview is more correct than storefront):
+
+  bdSkip link:
+    Preview: color: fgSub -- '#6b7280' light, 'rgba(255,255,255,0.70)' dark
+    Storefront CSS: color: #4A5062 (hardcoded, same for all bg)
+    Impact: slight shade difference on light bg (both readable); preview is
+    actually better on dark bg since '#4A5062' would be low-contrast there.
+    Decision: do not change -- preview's adaptive version is safer.
+
+  Allow button gradient:
+    Preview:    background: accent (solid)
+    Storefront: background: linear-gradient(135deg, accent, accent+'dd')
+    Impact: minor visual difference (simplified gradient vs full gradient).
+    Decision: do not change -- colour logic is identical.
+
+  Email input border-width:
+    Preview:    border: 1px solid (light) / 1px solid (dark)
+    Storefront: border: 1.5px solid (all bg)
+    Impact: 0.5px difference, imperceptible in the admin preview.
+    Decision: do not change.
+
+FILES CHANGED (Item 1):
+  frontend/app/admin/screens/Discounts.jsx
+    Line 874: captureButton -- transparent bg, 2px solid border, dark/light text
+    Line 893: unlockedTitle -- color: fgText instead of accent
+
+-----------------------------------------------------------------------
+ITEM 2 -- REAL JEST TEST (renderToStaticMarkup)
+-----------------------------------------------------------------------
+
+New file: backend/__tests__/discountsWordingPanel.test.js
+
+Setup required to run the test:
+  - react@18 + react-dom@18 installed as devDeps in backend
+  - @babel/preset-react + @babel/plugin-transform-modules-commonjs installed
+  - backend/babel.config.js added (overrides for .jsx only -- does not affect
+    existing CJS backend tests)
+  - backend/jest.config.js updated:
+      transformIgnorePatterns: ['/node_modules/']
+      moduleNameMapper: react/* -> backend node_modules (single copy);
+                        '../../../lib/api' -> __mocks__/lib-api.js;
+                        './QuantityTiers'  -> __mocks__/QuantityTiers.js
+  - backend/__mocks__/lib-api.js (apiGet/apiSend no-ops)
+  - backend/__mocks__/QuantityTiers.js (renders null)
+
+The test mocks React.useState via jest.mock('react', factory) so initial
+state can be set per render (loading=false, popup.enabled on/off,
+wordingTab=0..3). useEffect is a no-op (effects never fire in SSR).
+
+Assertions (13 tests, all pass):
+  - OFF: 'Entry popup wording' absent from HTML
+  - ON: 'Entry popup wording' present
+  - ON: panel is inside birthday card and after Entry popup row
+  - ON: exactly 4 role="tab" elements
+  - ON: all 4 tab labels present
+  - wordingTab=0: exactly 2 inputs in panel (emailPlaceholder, captureButton)
+  - wordingTab=3: exactly 5 inputs in panel (bdSub, bdButton, bdSkip,
+                  bdOkTitle, bdOkSub)
+  - Custom emailPlaceholder value appears in HTML
+  - Custom bdButton value appears in HTML
+  - buildPayload popupCopy unconditional (source check)
+  - captureButton preview has background:transparent (regression for R2-1a)
+  - captureButton preview has 2px solid border (not 1px opacity)
+  - Offer unlocked title uses fgText (#111827) not accent colour
+
+Suite totals:
+  BEFORE: 85 suites / 1888 tests
+  AFTER:  86 suites / 1901 tests
+  Delta:  +1 suite, +13 tests, 0 new failures
+
+-----------------------------------------------------------------------
+ITEM 3 -- VISUAL PROOF (Playwright screenshots)
+-----------------------------------------------------------------------
+
+Method: standalone Node.js script (screenshotWording.js in scratchpad).
+  - Uses @babel/core programmatic transform (preset-react + plugin-transform-
+    modules-commonjs) to transpile Discounts.jsx on the fly.
+  - Mocks lib/api, QuantityTiers, and useState (with __esModule:true so
+    _interopRequireDefault does not double-wrap).
+  - Renders each state with react-dom/server renderToStaticMarkup.
+  - Saves to temp HTML file; Playwright (file:// URL, no dev server) screenshots.
+
+Output files in D:\cartncodform\audits\ (390px width, full-page):
+  entry-wording-off.png           -- popup OFF (panel absent)
+  entry-wording-on-tab0.png       -- Discount box (light, indigo)
+  entry-wording-on-tab1.png       -- Subscribed
+  entry-wording-on-tab2.png       -- Offer unlocked
+  entry-wording-on-tab3.png       -- Birthday step
+  entry-wording-on-tab0-gold.png  -- Discount box, Gold accent (#F5C542)
+  entry-wording-on-tab0-dark.png  -- Discount box, dark bg (#1a1a2e)
+
+Screenshots confirm:
+  - OFF:  wording panel not rendered
+  - ON:   panel visible below Entry popup toggle
+  - tab0: captureButton renders with transparent bg + indigo border + dark
+          text (#171A22). The 'Allow push notifications' button is solid
+          indigo with white text. Correct contrast on both elements.
+  - dark: captureButton text is light (#F4F4F5) -- readable on dark card.
+  - gold: captureButton border in Gold (#F5C542) -- text dark (#171A22) --
+          readable (not gold-on-gold-tint as before).
+
+-----------------------------------------------------------------------
+ITEM 4 -- ENCODING + STASH
+-----------------------------------------------------------------------
+
+git stash list:
+  stash@{0}: WIP on main: e72062c entry popup: control guard fix
+  --> Pre-dates commit 233bd26. Changes are already committed. NOT dropped.
+
+BOM check on Discounts.jsx:  No BOM -- OK
+Mojibake check (search for 'ae20', 'ae95', 'c3', 'c2a0', replacement char):
+  None found -- OK
+
+git diff 233bd26 HEAD -- Discounts.jsx:
+  Exactly 2 hunks, both intended:
+  +874: captureButton style (transparent bg, 2px border, text by cardDark)
+  +893: unlockedTitle color (fgText instead of accent)
+  No other changes in this file.
+
+-----------------------------------------------------------------------
+ITEM 5 -- AUDIT WORDING CORRECTION
+-----------------------------------------------------------------------
+
+Previous audit (233bd26 section, item b) read:
+  "b) renderToString (source-regex checks, 51 assertions):"
+Corrected to:
+  "b) Source-regex checks (51 assertions, via standalone renderToStringWording.js script):"
+The 51 checks were always source-regex (not a real renderToString render);
+the heading was misleading. Fixed in this append.
+
+-----------------------------------------------------------------------
+FILES CHANGED IN THIS COMMIT
+-----------------------------------------------------------------------
+
+  frontend/app/admin/screens/Discounts.jsx
+    -- captureButton preview: transparent bg, 2px solid border, fgText
+    -- unlockedTitle preview: fgText instead of accent colour
+
+  backend/__tests__/discountsWordingPanel.test.js  -- new (13 tests)
+  backend/babel.config.js                          -- new (JSX transform)
+  backend/jest.config.js                           -- moduleNameMapper + transformIgnorePatterns
+  backend/__mocks__/lib-api.js                     -- new (apiGet/apiSend no-ops)
+  backend/__mocks__/QuantityTiers.js               -- new (null component)
+  backend/package.json                             -- devDeps: react@18, react-dom@18,
+                                                      @babel/preset-react,
+                                                      @babel/plugin-transform-modules-commonjs
+  audits/entry-wording-fix.txt                     -- 233bd26 hash filled;
+                                                      item-b wording corrected;
+                                                      this section appended
+  audits/entry-wording-*.png (7 files)             -- Playwright screenshots
+
+-----------------------------------------------------------------------
+RELEASE COMMANDS (list only -- NOT run per CLAUDE.md)
+-----------------------------------------------------------------------
+
+Frontend (Discounts.jsx changed):
+  cd frontend && npm run build && npx vercel --prod
+Backend (new devDeps + test file -- no production code change):
+  No deploy needed.
+Storefront: no changes -- no shopify app deploy.
+
+-----------------------------------------------------------------------
+VERIFICATION
+-----------------------------------------------------------------------
+
+a) ESLint: not re-run (only 2-line style change, same attribute patterns
+   already verified clean in 233bd26).
+b) Source-regex F5 (captureButton) now asserts transparent background:
+   UPDATED in renderToStringWording.js is noted as a known delta --
+   the old assertion checked 'background: accent + 22' which now fails.
+   The new Jest test (discountsWordingPanel) asserts the correct behaviour.
+c) next build: not re-run (no JSX structure change, only 2 inline-style
+   property values changed).
+d) npm test: 86 suites / 1901 tests / 0 failures.
 =======================================================================
