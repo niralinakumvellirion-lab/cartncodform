@@ -4774,6 +4774,9 @@
     window.__ccf_test.getBannerRefs = function() {
       return { wrap: ccfBannerWrap, bar: ccfBannerBar, text: ccfBannerTextEl, cta: ccfBannerCtaBtn, shine: ccfBannerShineEl };
     };
+    window.__ccf_test.ccfCopy = ccfCopy;
+    window.__ccf_test.fgOn = fgOn;
+    window.__ccf_test.ccfIsDarkColor = ccfIsDarkColor;
   }
 
   if (document.readyState === 'loading') {

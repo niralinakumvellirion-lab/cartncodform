@@ -382,12 +382,27 @@ const counterStyle = { fontSize: 11, color: '#9ca3af' };
 
 const helperStyle = { fontSize: 11, color: '#9ca3af', marginTop: 4 };
 
+// WCAG fgOn: same formula as ccf-push.js fgOn and bannerColors.js.
+function fgOn(hex) {
+  if (!hex || !/^#[0-9a-fA-F]{6}$/.test(hex)) return '#FFFFFF';
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  function lin(v) { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  return (1.05 / (L + 0.05)) >= 4.5 ? '#FFFFFF' : '#171A22';
+}
+
+const PREVIEW_TABS = ['Discount box', 'Subscribed', 'Offer unlocked', 'Birthday step'];
+
 export default function Discounts({ shop }) {
   const [config, setConfig] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
+  const [previewColors, setPreviewColors] = useState({ accentColor: '#4f46e5', bgColor: '#ffffff' });
+  const [previewTab, setPreviewTab] = useState(0);
 
   useEffect(() => {
     if (!shop) return;
@@ -413,6 +428,24 @@ export default function Discounts({ shop }) {
     return () => {
       cancelled = true;
     };
+  }, [shop]);
+
+  // Fetch popup accentColor + bgColor for the live preview. Best-effort — falls back
+  // to defaults if the request fails or the admin is not yet connected.
+  useEffect(() => {
+    if (!shop) return;
+    let cancelled = false;
+    apiGet(`/api/profiles/${encodeURIComponent(shop)}/popup`)
+      .then((data) => {
+        if (cancelled) return;
+        const p = data?.popup || {};
+        setPreviewColors({
+          accentColor: /^#[0-9a-fA-F]{6}$/.test(p.accentColor || '') ? p.accentColor : '#4f46e5',
+          bgColor: /^#[0-9a-fA-F]{6}$/.test(p.bgColor || '') ? p.bgColor : '#ffffff',
+        });
+      })
+      .catch(() => {}); // silent — preview uses defaults
+    return () => { cancelled = true; };
   }, [shop]);
 
   function updateRule(key, patch) {
@@ -1165,6 +1198,123 @@ export default function Discounts({ shop }) {
                 <CopyField fieldKey="bdSkip" label="Skip link" placeholder="No thanks" />
                 <CopyField fieldKey="bdOkTitle" label="Saved title" placeholder="You're all set" />
                 <CopyField fieldKey="bdOkSub" label="Saved sub-text" placeholder="We'll send your gift code {days} days before your birthday." helper="Use {days} for lead days." />
+
+                {/* Live preview with 4 tabs */}
+                {(() => {
+                  const accent = previewColors.accentColor;
+                  const bg     = previewColors.bgColor;
+                  const isBgDefault = /^#fff(fff)?$/i.test(bg);
+                  const cardBg = isBgDefault ? 'linear-gradient(145deg,#ffffff,#f8f9ff)' : bg;
+                  const cardDark = !isBgDefault && (fgOn(bg) === '#FFFFFF');
+                  const fgText   = cardDark ? '#ffffff' : '#111827';
+                  const fgSub    = cardDark ? 'rgba(255,255,255,0.70)' : '#6b7280';
+                  const btnFg    = fgOn(accent);
+                  const samplePct  = config.emailDiscount?.percentage || config.pushDiscount?.percentage || 15;
+                  const sampleDays = config.emailDiscount?.expiryDays || 7;
+                  const bdLeadDays = config.birthdayDiscount?.leadDays ?? 3;
+
+                  function copyVal(key, fallback, vars = {}) {
+                    const raw = (pc[key] || '').trim();
+                    let text = raw || fallback;
+                    if (vars.pct !== undefined) text = text.split('{pct}').join(String(vars.pct));
+                    if (vars.days !== undefined) text = text.split('{days}').join(String(vars.days));
+                    return text;
+                  }
+
+                  const tabs = [
+                    () => (
+                      <div>
+                        <div style={{ fontSize: 12, color: fgSub, marginBottom: 8, textAlign: 'center' }}>
+                          {(config.offerHeadline || '') || 'Get a discount on your first order!'}
+                        </div>
+                        <div style={{ background: cardDark ? 'rgba(255,255,255,0.10)' : '#f9fafb', border: `1px solid ${cardDark ? 'rgba(255,255,255,0.22)' : '#e5e7eb'}`, borderRadius: 10, padding: '8px 12px', fontSize: 12, color: cardDark ? '#ffffff' : '#111827', marginBottom: 8 }}>
+                          {copyVal('emailPlaceholder', 'Your email', {})}
+                          <span style={{ color: fgSub }}>{samplePct ? ` (get ${samplePct}% off)` : ''}</span>
+                        </div>
+                        <div style={{ background: accent, borderRadius: 10, padding: '9px 0', textAlign: 'center', fontSize: 13, fontWeight: 700, color: btnFg }}>
+                          Allow
+                        </div>
+                        <div style={{ marginTop: 6, padding: '7px 0', textAlign: 'center', fontSize: 12, color: cardDark ? 'rgba(255,255,255,0.55)' : '#9ca3af', borderTop: `1px solid ${cardDark ? 'rgba(255,255,255,0.12)' : '#f0f0f0'}` }}>
+                          {copyVal('captureButton', 'Get my offer without notifications', {})}
+                        </div>
+                      </div>
+                    ),
+                    () => (
+                      <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: fgText, marginBottom: 4 }}>
+                          {copyVal('subscribedTitle', 'Subscribed!', {})}
+                        </div>
+                        <div style={{ fontSize: 12, color: fgSub }}>
+                          {copyVal('subscribedSub', 'Getting your discount…', {})}
+                        </div>
+                      </div>
+                    ),
+                    () => (
+                      <div style={{ textAlign: 'center', padding: '8px 0' }}>
+                        <div style={{ fontSize: 15, fontWeight: 800, color: fgText, marginBottom: 2 }}>
+                          {copyVal('unlockedTitle', `${samplePct}% OFF Unlocked!`, { pct: samplePct })}
+                        </div>
+                        <div style={{ fontSize: 11, color: fgSub }}>
+                          {copyVal('unlockedSub', `Expires in ${sampleDays} days`, { days: sampleDays })}
+                        </div>
+                      </div>
+                    ),
+                    () => {
+                      const bdSubFallback = bdLeadDays
+                        ? `Tell us your birthday. We will send your personal code ${bdLeadDays} days before.`
+                        : 'Tell us your birthday. We will send your personal code a few days before.';
+                      const bdOkSubFallback = bdLeadDays
+                        ? `We’ll send your gift code ${bdLeadDays} days before your birthday.`
+                        : 'We’ll send your gift code a few days before your birthday.';
+                      return (
+                        <div>
+                          <div style={{ fontSize: 12, color: fgSub, marginBottom: 10, lineHeight: 1.4 }}>
+                            {copyVal('bdSub', bdSubFallback, bdLeadDays ? { days: bdLeadDays } : {})}
+                          </div>
+                          <div style={{ background: accent, borderRadius: 10, padding: '8px 0', textAlign: 'center', fontSize: 12, fontWeight: 700, color: btnFg, marginBottom: 6 }}>
+                            {copyVal('bdButton', 'Send me my gift', {})}
+                          </div>
+                          <div style={{ textAlign: 'center', fontSize: 11, color: fgSub }}>
+                            {copyVal('bdSkip', 'No thanks', {})}
+                          </div>
+                        </div>
+                      );
+                    },
+                  ];
+
+                  return (
+                    <div style={{ borderTop: `1px solid ${DS.gray200}`, marginTop: 20, paddingTop: 16 }}>
+                      <div style={fieldLabelStyle}>Live preview</div>
+                      {/* Tab row */}
+                      <div style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap' }}>
+                        {PREVIEW_TABS.map((label, i) => (
+                          <button
+                            key={label}
+                            type="button"
+                            onClick={() => setPreviewTab(i)}
+                            style={{
+                              fontSize: 11, padding: '4px 10px', borderRadius: 6,
+                              border: `1px solid ${previewTab === i ? accent : '#e5e7eb'}`,
+                              background: previewTab === i ? accent + '18' : 'transparent',
+                              color: previewTab === i ? accent : '#6b7280',
+                              cursor: 'pointer', fontWeight: previewTab === i ? 700 : 400,
+                            }}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                      {/* Preview card */}
+                      <div style={{ background: cardBg, borderRadius: 14, padding: '16px 18px', boxShadow: '0 4px 16px rgba(0,0,0,0.10)', maxWidth: 300, margin: '0 auto' }}>
+                        <div style={{ height: 3, background: `linear-gradient(90deg,${accent},${accent}88,transparent)`, borderRadius: 2, marginBottom: 12, marginInline: -18, marginTop: -16 }} />
+                        {tabs[previewTab]?.()}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center', marginTop: 6 }}>
+                        Uses your current popup accent and background colours.
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             );
           })()}
