@@ -78,4 +78,40 @@ describe('resolveBannerColors', () => {
     expect(result.bg).toBe('#3730A3');
     expect(result.fg).toBe('#FFFFFF');
   });
+
+  // hl field — highlight colour for text sweep
+  test('Indigo (white fg) → hl is #FFE08A', () => {
+    const { hl } = resolveBannerColors({ bgColor: '#3730A3', textColor: 'auto' });
+    expect(hl).toBe('#FFE08A');
+  });
+
+  test('Charcoal (white fg) → hl is #FFE08A', () => {
+    const { hl } = resolveBannerColors({ bgColor: '#171A22', textColor: 'auto' });
+    expect(hl).toBe('#FFE08A');
+  });
+
+  test('Terracotta (white fg) → hl is #FFE08A', () => {
+    const { hl } = resolveBannerColors({ bgColor: '#B4472B', textColor: 'auto' });
+    expect(hl).toBe('#FFE08A');
+  });
+
+  test('Gold (dark fg) → hl is a valid hex, distinct from fg and bg', () => {
+    const { hl, fg, bg } = resolveBannerColors({ bgColor: '#F5C542', textColor: 'auto' });
+    expect(hl).toMatch(/^#[0-9a-f]{6}$/);
+    expect(hl).not.toBe(fg);
+    expect(hl).not.toBe(bg);
+  });
+
+  test('Gold (dark fg) → hl matches mix(#171A22 35%, #F5C542 65%)', () => {
+    const { hl } = resolveBannerColors({ bgColor: '#F5C542', textColor: 'auto' });
+    // fgR=23 bgR=245: 23*0.35+245*0.65=167.3→167=0xa7
+    // fgG=26 bgG=197: 26*0.35+197*0.65=137.15→137=0x89
+    // fgB=34 bgB=66:  34*0.35+66*0.65=54.8→55=0x37
+    expect(hl).toBe('#a78937');
+  });
+
+  test('forced white on Gold → hl is #FFE08A', () => {
+    const { hl } = resolveBannerColors({ bgColor: '#F5C542', textColor: 'white' });
+    expect(hl).toBe('#FFE08A');
+  });
 });

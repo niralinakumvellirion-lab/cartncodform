@@ -144,24 +144,40 @@ test('CTA pill: dark fg → ctaBg=#171A22 ctaFg=#FFFFFF', () => {
   expect(ctaFg).toBe('#FFFFFF');
 });
 
-// ─── 7. Highlight on/off ──────────────────────────────────────────────────────
-test('highlight:true creates .ccf-bn-shine element', () => {
+// ─── 7. Highlight on/off — text class ────────────────────────────────────────
+test('highlight:true adds ccf-bn-txt-on class to text span', () => {
   const hook = loadScript();
   hook.bannerCreate(enabledCfg({ highlight: true }));
-  const bar = document.querySelector('.ccf-bn-bar');
-  expect(bar).not.toBeNull();
-  expect(bar.querySelector('.ccf-bn-shine')).not.toBeNull();
+  const textEl = document.querySelector('.ccf-bn-text');
+  expect(textEl).not.toBeNull();
+  expect(textEl.classList.contains('ccf-bn-txt-on')).toBe(true);
 });
 
-test('highlight:false omits .ccf-bn-shine element', () => {
+test('highlight:false does not add ccf-bn-txt-on class', () => {
   const hook = loadScript();
   hook.bannerCreate(enabledCfg({ highlight: false }));
-  const bar = document.querySelector('.ccf-bn-bar');
-  expect(bar).not.toBeNull();
-  expect(bar.querySelector('.ccf-bn-shine')).toBeNull();
+  const textEl = document.querySelector('.ccf-bn-text');
+  expect(textEl).not.toBeNull();
+  expect(textEl.classList.contains('ccf-bn-txt-on')).toBe(false);
 });
 
-// ─── 8. CSS contains prefers-reduced-motion and transform animation ───────────
+test('bannerApplyConfig in-place toggles ccf-bn-txt-on without recreating textEl', () => {
+  const hook = loadScript();
+  hook.bannerCreate(enabledCfg({ highlight: true }));
+  const textEl1 = document.querySelector('.ccf-bn-text');
+  expect(textEl1.classList.contains('ccf-bn-txt-on')).toBe(true);
+
+  hook.bannerApplyConfig(enabledCfg({ highlight: false }));
+  const textEl2 = document.querySelector('.ccf-bn-text');
+  expect(textEl2).toBe(textEl1); // same DOM node
+  expect(textEl2.classList.contains('ccf-bn-txt-on')).toBe(false);
+
+  hook.bannerApplyConfig(enabledCfg({ highlight: true }));
+  expect(document.querySelector('.ccf-bn-text')).toBe(textEl1);
+  expect(textEl1.classList.contains('ccf-bn-txt-on')).toBe(true);
+});
+
+// ─── 8. CSS — @supports, txtsweep keyframes, reduced-motion ─────────────────
 test('injected CSS contains prefers-reduced-motion rule', () => {
   const hook = loadScript();
   hook.injectBannerStyles();
@@ -170,12 +186,44 @@ test('injected CSS contains prefers-reduced-motion rule', () => {
   expect(styleEl.textContent).toContain('prefers-reduced-motion');
 });
 
-test('injected CSS uses transform: translateX for sweep animation', () => {
+test('injected CSS uses background-position for text sweep animation', () => {
   const hook = loadScript();
   hook.injectBannerStyles();
   const styleEl = document.getElementById('ccf-bn-styles');
-  expect(styleEl.textContent).toContain('translateX');
-  expect(styleEl.textContent).not.toContain('left:');
+  expect(styleEl.textContent).toContain('ccf-bn-txtsweep');
+  expect(styleEl.textContent).toContain('background-position');
+});
+
+test('injected CSS wraps txt-on in @supports background-clip:text', () => {
+  const hook = loadScript();
+  hook.injectBannerStyles();
+  const styleEl = document.getElementById('ccf-bn-styles');
+  expect(styleEl.textContent).toContain('@supports');
+  expect(styleEl.textContent).toContain('background-clip');
+});
+
+// ─── 8b. resolveBannerColors hl field ────────────────────────────────────────
+test('resolveBannerColors: Indigo → hl is #FFE08A', () => {
+  const hook = loadScript();
+  const { hl } = hook.resolveBannerColors({ bgColor: '#3730A3', textColor: 'auto' });
+  expect(hl).toBe('#FFE08A');
+});
+
+test('resolveBannerColors: Gold (dark fg) → hl matches mix formula', () => {
+  const hook = loadScript();
+  const { hl } = hook.resolveBannerColors({ bgColor: '#F5C542', textColor: 'auto' });
+  expect(hl).toBe('#a78937');
+});
+
+test('resolveBannerColors: hl parity with backend bannerColors.js', () => {
+  const { resolveBannerColors: backendResolve } = require('../utils/bannerColors');
+  const hook = loadScript();
+  const CASES = ['#3730A3','#171A22','#0F5132','#B4472B','#F5C542'];
+  for (const bg of CASES) {
+    const storefront = hook.resolveBannerColors({ bgColor: bg, textColor: 'auto' });
+    const backend = backendResolve({ bgColor: bg, textColor: 'auto' });
+    expect(storefront.hl).toBe(backend.hl);
+  }
 });
 
 // ─── 9. Dismiss: sets dismiss key and removes bar ─────────────────────────────

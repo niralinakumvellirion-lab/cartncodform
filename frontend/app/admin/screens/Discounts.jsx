@@ -111,7 +111,16 @@ function resolveBannerColors(cfg) {
            : (bnContrast(bg,'#FFFFFF') >= 4.5 ? '#FFFFFF' : '#171A22');
   const ctaBg = fg === '#FFFFFF' ? '#FFFFFF' : '#171A22';
   const ctaFg = fg === '#FFFFFF' ? bg : '#FFFFFF';
-  return { bg, fg, ctaBg, ctaFg, lowContrast: bnContrast(bg,fg) < 4.5 };
+  let hl;
+  if (fg === '#FFFFFF') {
+    hl = '#FFE08A';
+  } else {
+    const fgR = 0x17, fgG = 0x1A, fgB = 0x22;
+    const bgR = parseInt(bg.slice(1,3),16), bgG = parseInt(bg.slice(3,5),16), bgB = parseInt(bg.slice(5,7),16);
+    const hlR = Math.round(fgR*0.35+bgR*0.65), hlG = Math.round(fgG*0.35+bgG*0.65), hlB = Math.round(fgB*0.35+bgB*0.65);
+    hl = '#'+('00'+hlR.toString(16)).slice(-2)+('00'+hlG.toString(16)).slice(-2)+('00'+hlB.toString(16)).slice(-2);
+  }
+  return { bg, fg, ctaBg, ctaFg, hl, lowContrast: bnContrast(bg,fg) < 4.5 };
 }
 
 // ─── Banner preview component ─────────────────────────────────────────────────
@@ -121,41 +130,52 @@ function BannerPreview({ banner, pct }) {
   const btnText = banner.buttonText || 'Get my gift';
   const highlight = banner.highlight !== false;
 
-  const shineKeyframes = `
-    @keyframes ccf-adm-sweep {
-      0%   { transform: translateX(-120%) skewX(-18deg); }
-      55%  { transform: translateX(320%)  skewX(-18deg); }
-      100% { transform: translateX(320%)  skewX(-18deg); }
+  const previewCss = `
+    @supports ((-webkit-background-clip: text) or (background-clip: text)) {
+      .ccf-bn-txt-on {
+        background-image: linear-gradient(100deg, var(--ccf-bn-fg) 0%, var(--ccf-bn-fg) 36%, var(--ccf-bn-hl, #FFE08A) 50%, var(--ccf-bn-fg) 64%, var(--ccf-bn-fg) 100%);
+        background-size: 300% 100%;
+        background-position: 100% 0;
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        color: transparent;
+        animation: ccf-bn-txtsweep 3.8s ease-in-out infinite;
+      }
+      @keyframes ccf-bn-txtsweep {
+        0%   { background-position: 100% 0; }
+        55%  { background-position: 0% 0; }
+        100% { background-position: 0% 0; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .ccf-bn-txt-on { animation: none; background-image: none; -webkit-text-fill-color: currentColor; color: inherit; }
+      }
     }
-    @media (prefers-reduced-motion: reduce) { .ccf-adm-shine { display: none !important; } }
   `;
+  const lblStyle = { fontSize: 11, color: DS.gray400, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 };
+  const barCssProps = { '--ccf-bn-fg': colors.fg, '--ccf-bn-hl': colors.hl };
+  const txtCls = highlight ? 'ccf-bn-text ccf-bn-txt-on' : 'ccf-bn-text';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      <style>{previewCss}</style>
       {/* desktop strip */}
-      <div style={{ fontSize: 11, color: DS.gray400, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Desktop</div>
-      <div style={{ position: 'relative', overflow: 'hidden', background: colors.bg, color: colors.fg, borderRadius: 8, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '0 44px 0 12px' }}>
-        <style>{shineKeyframes}</style>
-        {highlight && (
-          <div className="ccf-adm-shine" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-            <div style={{ position: 'absolute', top: 0, bottom: 0, width: '45%', background: 'linear-gradient(100deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.34) 50%,rgba(255,255,255,0) 100%)', transform: 'translateX(-120%) skewX(-18deg)', animation: 'ccf-adm-sweep 3.8s ease-in-out infinite' }} />
-          </div>
-        )}
-        <span style={{ fontSize: 14, fontWeight: 600 }}>{text}</span>
-        <button type="button" style={{ height: 30, padding: '0 16px', fontSize: 13, fontWeight: 800, borderRadius: 999, border: 'none', background: colors.ctaBg, color: colors.ctaFg, cursor: 'default', whiteSpace: 'nowrap', flexShrink: 0 }}>{btnText}</button>
-        <span style={{ position: 'absolute', right: 8, top: 0, bottom: 0, display: 'flex', alignItems: 'center', color: colors.fg, fontSize: 16, opacity: 0.7 }}>✕</span>
+      <div style={{ flex: '1 1 280px' }}>
+        <div style={lblStyle}>Desktop</div>
+        <div style={{ position: 'relative', overflow: 'hidden', background: colors.bg, color: colors.fg, borderRadius: 8, minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '0 44px 0 12px', ...barCssProps }}>
+          <span className={txtCls} style={{ fontSize: 14, fontWeight: 600 }}>{text}</span>
+          <button type="button" style={{ height: 30, padding: '0 16px', fontSize: 13, fontWeight: 800, borderRadius: 999, border: 'none', background: colors.ctaBg, color: colors.ctaFg, cursor: 'default', whiteSpace: 'nowrap', flexShrink: 0 }}>{btnText}</button>
+          <span style={{ position: 'absolute', right: 8, top: 0, bottom: 0, display: 'flex', alignItems: 'center', color: colors.fg, fontSize: 16, opacity: 0.7 }}>✕</span>
+        </div>
       </div>
-      {/* phone strip (360px) */}
-      <div style={{ fontSize: 11, color: DS.gray400, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginTop: 4, marginBottom: 2 }}>Phone (360px)</div>
-      <div style={{ maxWidth: 360, position: 'relative', overflow: 'hidden', background: colors.bg, color: colors.fg, borderRadius: 8, minHeight: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '6px 40px 6px 10px', flexWrap: 'wrap' }}>
-        {highlight && (
-          <div className="ccf-adm-shine" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-            <div style={{ position: 'absolute', top: 0, bottom: 0, width: '45%', background: 'linear-gradient(100deg,rgba(255,255,255,0) 0%,rgba(255,255,255,0.34) 50%,rgba(255,255,255,0) 100%)', transform: 'translateX(-120%) skewX(-18deg)', animation: 'ccf-adm-sweep 3.8s ease-in-out infinite' }} />
-          </div>
-        )}
-        <span style={{ fontSize: 12.5, fontWeight: 600 }}>{text}</span>
-        <button type="button" style={{ height: 32, padding: '0 14px', fontSize: 13, fontWeight: 800, borderRadius: 999, border: 'none', background: colors.ctaBg, color: colors.ctaFg, cursor: 'default', whiteSpace: 'nowrap', flexShrink: 0 }}>{btnText}</button>
-        <span style={{ position: 'absolute', right: 6, top: 0, bottom: 0, display: 'flex', alignItems: 'center', color: colors.fg, fontSize: 14, opacity: 0.7 }}>✕</span>
+      {/* phone strip (340px) */}
+      <div style={{ width: 340, flexShrink: 0 }}>
+        <div style={lblStyle}>Phone (340px)</div>
+        <div style={{ position: 'relative', overflow: 'hidden', background: colors.bg, color: colors.fg, borderRadius: 8, minHeight: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '6px 40px 6px 10px', flexWrap: 'wrap', ...barCssProps }}>
+          <span className={txtCls} style={{ fontSize: 12.5, fontWeight: 600 }}>{text}</span>
+          <button type="button" style={{ height: 32, padding: '0 14px', fontSize: 13, fontWeight: 800, borderRadius: 999, border: 'none', background: colors.ctaBg, color: colors.ctaFg, cursor: 'default', whiteSpace: 'nowrap', flexShrink: 0 }}>{btnText}</button>
+          <span style={{ position: 'absolute', right: 6, top: 0, bottom: 0, display: 'flex', alignItems: 'center', color: colors.fg, fontSize: 14, opacity: 0.7 }}>✕</span>
+        </div>
       </div>
     </div>
   );
@@ -765,8 +785,9 @@ export default function Discounts({ shop }) {
                   <div style={{ position: 'absolute', top: 2, left: config.birthdayCapture?.banner?.enabled ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
                 </div>
               </div>
-              {config.birthdayCapture?.banner?.enabled && (() => {
+              {(() => {
                 const bn = config.birthdayCapture?.banner || {};
+                const bannerEnabled = !!bn.enabled;
                 const setBn = (patch) => setConfig((c) => ({
                   ...c,
                   birthdayCapture: { ...(c.birthdayCapture || {}), banner: { ...(c.birthdayCapture?.banner || {}), ...patch } },
@@ -775,152 +796,163 @@ export default function Discounts({ shop }) {
                 const rawHex = bn.bgColor || '#3730A3';
                 const hexValid = /^#[0-9a-fA-F]{6}$/.test(rawHex);
                 return (
-                  <div style={{ borderTop: `1px solid ${DS.gray200}`, marginTop: 12, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
-                    {/* Banner text */}
-                    <div>
-                      <div style={fieldLabelStyle}>Banner text</div>
-                      <input
-                        className="disc-input"
-                        type="text"
-                        value={bn.text || ''}
-                        maxLength={120}
-                        placeholder={`Tell us your birthday and get ${config.birthdayDiscount?.percentage ?? 15}% off everything`}
-                        onChange={(e) => setBn({ text: e.target.value })}
-                        style={{ ...fieldStyle, width: '100%' }}
-                      />
-                    </div>
-                    {/* Button text + dismiss days */}
-                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                      <div style={{ flex: 1, minWidth: 160 }}>
-                        <div style={fieldLabelStyle}>Button text</div>
-                        <input
-                          className="disc-input"
-                          type="text"
-                          value={bn.buttonText || 'Get my gift'}
-                          maxLength={40}
-                          onChange={(e) => setBn({ buttonText: e.target.value })}
-                          style={{ ...fieldStyle, width: '100%' }}
-                        />
-                      </div>
-                      <div>
-                        <div style={fieldLabelStyle}>Hide after dismiss</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div>
+                    {/* Controls — only when banner enabled */}
+                    {bannerEnabled && (
+                      <div style={{ borderTop: `1px solid ${DS.gray200}`, marginTop: 12, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        {/* Banner text */}
+                        <div>
+                          <div style={fieldLabelStyle}>Banner text</div>
                           <input
                             className="disc-input"
-                            type="number"
-                            min={1}
-                            max={30}
-                            value={bn.dismissDays ?? 7}
-                            onChange={(e) => setBn({ dismissDays: e.target.value })}
-                            style={{ ...fieldStyle, width: 60 }}
+                            type="text"
+                            value={bn.text || ''}
+                            maxLength={120}
+                            placeholder={`Tell us your birthday and get ${config.birthdayDiscount?.percentage ?? 15}% off everything`}
+                            onChange={(e) => setBn({ text: e.target.value })}
+                            style={{ ...fieldStyle, width: '100%' }}
                           />
-                          <span style={unitStyle}>days</span>
                         </div>
-                      </div>
-                    </div>
-                    {/* Background colour */}
-                    <div>
-                      <div style={fieldLabelStyle}>Background colour</div>
-                      {/* 5 preset swatches */}
-                      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-                        {BN_PRESETS.map((p) => {
-                          const selected = bn.bgColor === p.hex;
-                          return (
-                            <button
-                              key={p.hex}
-                              type="button"
-                              aria-pressed={selected}
-                              aria-label={p.name}
-                              onClick={() => setBn({ bgColor: p.hex })}
-                              style={{
-                                width: 44, height: 44, borderRadius: 8, border: 'none', cursor: 'pointer',
-                                background: p.hex, flexShrink: 0,
-                                outline: selected ? `2px solid ${DS.primary}` : 'none',
-                                outlineOffset: selected ? 2 : 0,
-                                boxShadow: selected ? `0 0 0 3px #fff, 0 0 0 5px ${DS.primary}` : '0 1px 3px rgba(0,0,0,0.18)',
-                              }}
+                        {/* Button text + dismiss days */}
+                        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                          <div style={{ flex: 1, minWidth: 160 }}>
+                            <div style={fieldLabelStyle}>Button text</div>
+                            <input
+                              className="disc-input"
+                              type="text"
+                              value={bn.buttonText || 'Get my gift'}
+                              maxLength={40}
+                              onChange={(e) => setBn({ buttonText: e.target.value })}
+                              style={{ ...fieldStyle, width: '100%' }}
                             />
-                          );
-                        })}
-                      </div>
-                      {/* Custom row: chip + hex input + native colour picker */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 28, height: 28, borderRadius: 6, background: hexValid ? rawHex : '#3730A3', border: '1px solid #e5e7eb', flexShrink: 0 }} />
-                        <input
-                          className="disc-input"
-                          type="text"
-                          value={rawHex}
-                          maxLength={7}
-                          placeholder="#3730A3"
-                          onChange={(e) => setBn({ bgColor: e.target.value })}
-                          style={{ ...fieldStyle, width: 100, fontFamily: 'monospace' }}
-                        />
-                        <input
-                          type="color"
-                          value={hexValid ? rawHex : '#3730A3'}
-                          onChange={(e) => setBn({ bgColor: e.target.value })}
-                          style={{ width: 36, height: 28, borderRadius: 4, border: '1px solid #e5e7eb', cursor: 'pointer', padding: 2 }}
-                          aria-label="Pick custom colour"
-                        />
-                        {!hexValid && (
-                          <span style={{ fontSize: 12, color: DS.danger }}>Must be #RRGGBB</span>
+                          </div>
+                          <div>
+                            <div style={fieldLabelStyle}>Hide after dismiss</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <input
+                                className="disc-input"
+                                type="number"
+                                min={1}
+                                max={30}
+                                value={bn.dismissDays ?? 7}
+                                onChange={(e) => setBn({ dismissDays: e.target.value })}
+                                style={{ ...fieldStyle, width: 60 }}
+                              />
+                              <span style={unitStyle}>days</span>
+                            </div>
+                          </div>
+                        </div>
+                        {/* 3-column: Background colour / Text colour / Highlight effect */}
+                        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                          {/* Column 1: Background colour */}
+                          <div style={{ flex: '1 1 200px' }}>
+                            <div style={fieldLabelStyle}>Background colour</div>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+                              {BN_PRESETS.map((p) => {
+                                const selected = bn.bgColor === p.hex;
+                                return (
+                                  <button
+                                    key={p.hex}
+                                    type="button"
+                                    aria-pressed={selected}
+                                    aria-label={p.name}
+                                    onClick={() => setBn({ bgColor: p.hex })}
+                                    style={{
+                                      width: 44, height: 44, borderRadius: 8, border: 'none', cursor: 'pointer',
+                                      background: p.hex, flexShrink: 0,
+                                      outline: selected ? `2px solid ${DS.primary}` : 'none',
+                                      outlineOffset: selected ? 2 : 0,
+                                      boxShadow: selected ? `0 0 0 3px #fff, 0 0 0 5px ${DS.primary}` : '0 1px 3px rgba(0,0,0,0.18)',
+                                    }}
+                                  />
+                                );
+                              })}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div style={{ width: 28, height: 28, borderRadius: 6, background: hexValid ? rawHex : '#3730A3', border: '1px solid #e5e7eb', flexShrink: 0 }} />
+                              <input
+                                className="disc-input"
+                                type="text"
+                                value={rawHex}
+                                maxLength={7}
+                                placeholder="#3730A3"
+                                onChange={(e) => setBn({ bgColor: e.target.value })}
+                                style={{ ...fieldStyle, width: 100, fontFamily: 'monospace' }}
+                              />
+                              <input
+                                type="color"
+                                value={hexValid ? rawHex : '#3730A3'}
+                                onChange={(e) => setBn({ bgColor: e.target.value })}
+                                style={{ width: 36, height: 28, borderRadius: 4, border: '1px solid #e5e7eb', cursor: 'pointer', padding: 2 }}
+                                aria-label="Pick custom colour"
+                              />
+                              {!hexValid && (
+                                <span style={{ fontSize: 12, color: DS.danger }}>Must be #RRGGBB</span>
+                              )}
+                            </div>
+                          </div>
+                          {/* Column 2: Text colour */}
+                          <div style={{ flex: '0 0 auto' }}>
+                            <div style={fieldLabelStyle}>Text colour</div>
+                            <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: `1px solid ${DS.gray200}`, width: 'fit-content' }}>
+                              {['auto', 'white', 'dark'].map((mode, i) => {
+                                const pressed = (bn.textColor || 'auto') === mode;
+                                return (
+                                  <button
+                                    key={mode}
+                                    type="button"
+                                    aria-pressed={pressed}
+                                    onClick={() => setBn({ textColor: mode })}
+                                    style={{
+                                      padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none',
+                                      borderLeft: i > 0 ? `1px solid ${DS.gray200}` : 'none',
+                                      background: pressed ? DS.primary : '#fff',
+                                      color: pressed ? '#fff' : DS.gray600,
+                                      transition: 'background 0.15s, color 0.15s',
+                                    }}
+                                  >
+                                    {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            <div style={{ fontSize: 12, color: DS.gray400, marginTop: 4 }}>Auto picks white or dark for best contrast.</div>
+                          </div>
+                          {/* Column 3: Highlight effect */}
+                          <div style={{ flex: '0 0 auto', maxWidth: 200 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900, marginBottom: 4 }}>Highlight effect</div>
+                            <div style={{ fontSize: 12, color: DS.gray400, lineHeight: 1.45, marginBottom: 8 }}>A soft light sweeps across the banner and lights up the letters as it passes. It pauses for visitors who turned on reduced motion.</div>
+                            <div
+                              role="switch"
+                              aria-checked={bn.highlight !== false}
+                              tabIndex={0}
+                              onClick={() => setBn({ highlight: bn.highlight === false ? true : false })}
+                              onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setBn({ highlight: bn.highlight === false ? true : false }); } }}
+                              style={{ width: 36, height: 20, borderRadius: 10, cursor: 'pointer', background: bn.highlight !== false ? '#16a34a' : '#d1d5db', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
+                            >
+                              <div style={{ position: 'absolute', top: 2, left: bn.highlight !== false ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+                            </div>
+                          </div>
+                        </div>
+                        {/* Low-contrast warning */}
+                        {colors.lowContrast && (
+                          <div style={{ background: DS.warningLight, border: `1px solid #fbbf24`, borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#92400e' }}>
+                            ⚠ Low contrast — the text may be hard to read on this background. Try a darker or lighter colour, or switch text colour to Auto.
+                          </div>
                         )}
                       </div>
-                    </div>
-                    {/* Text colour */}
-                    <div>
-                      <div style={fieldLabelStyle}>Text colour</div>
-                      <div style={{ display: 'flex', gap: 0, borderRadius: 8, overflow: 'hidden', border: `1px solid ${DS.gray200}`, width: 'fit-content' }}>
-                        {['auto', 'white', 'dark'].map((mode, i) => {
-                          const pressed = (bn.textColor || 'auto') === mode;
-                          return (
-                            <button
-                              key={mode}
-                              type="button"
-                              aria-pressed={pressed}
-                              onClick={() => setBn({ textColor: mode })}
-                              style={{
-                                padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none',
-                                borderLeft: i > 0 ? `1px solid ${DS.gray200}` : 'none',
-                                background: pressed ? DS.primary : '#fff',
-                                color: pressed ? '#fff' : DS.gray600,
-                                transition: 'background 0.15s, color 0.15s',
-                              }}
-                            >
-                              {mode.charAt(0).toUpperCase() + mode.slice(1)}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <div style={{ fontSize: 12, color: DS.gray400, marginTop: 4 }}>Auto picks white or dark for best contrast.</div>
-                    </div>
-                    {/* Highlight sweep */}
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                      <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900 }}>Highlight sweep</div>
-                        <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2 }}>Subtle light-streak animation on the bar. Disabled by prefers-reduced-motion.</div>
-                      </div>
-                      <div
-                        role="switch"
-                        aria-checked={bn.highlight !== false}
-                        tabIndex={0}
-                        onClick={() => setBn({ highlight: bn.highlight === false ? true : false })}
-                        onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setBn({ highlight: bn.highlight === false ? true : false }); } }}
-                        style={{ width: 36, height: 20, borderRadius: 10, cursor: 'pointer', background: bn.highlight !== false ? '#16a34a' : '#d1d5db', position: 'relative', transition: 'background 0.2s', flexShrink: 0, marginTop: 2 }}
-                      >
-                        <div style={{ position: 'absolute', top: 2, left: bn.highlight !== false ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
-                      </div>
-                    </div>
-                    {/* Low-contrast warning */}
-                    {colors.lowContrast && (
-                      <div style={{ background: DS.warningLight, border: `1px solid #fbbf24`, borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#92400e' }}>
-                        ⚠ Low contrast — the text may be hard to read on this background. Try a darker or lighter colour, or switch text colour to Auto.
-                      </div>
                     )}
-                    {/* Live preview */}
-                    <div>
-                      <div style={fieldLabelStyle}>Live preview</div>
-                      <BannerPreview banner={bn} pct={config.birthdayDiscount?.percentage} />
+                    {/* Preview — always visible, reduced opacity when off */}
+                    <div style={{ borderTop: `1px solid ${DS.gray200}`, marginTop: 12, paddingTop: 12 }}>
+                      <div style={fieldLabelStyle}>Preview</div>
+                      <div style={{ position: 'relative', opacity: bannerEnabled ? 1 : 0.45 }}>
+                        {!bannerEnabled && (
+                          <div style={{ position: 'absolute', inset: 0, zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+                            <span style={{ fontSize: 12, color: '#4b5563', fontWeight: 600, background: 'rgba(249,250,251,0.85)', padding: '4px 12px', borderRadius: 6 }}>Banner is off</span>
+                          </div>
+                        )}
+                        <BannerPreview banner={bn} pct={config.birthdayDiscount?.percentage} />
+                      </div>
                     </div>
                   </div>
                 );
