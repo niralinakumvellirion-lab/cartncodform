@@ -363,6 +363,33 @@
     return [r, g, b];
   }
 
+  // Return merchant copy for `key` (from popupCopy), or `fallback` if blank.
+  // Tokens: {pct} and {days} only; any other {x} is left literal.
+  function ccfCopy(key, fallback, vars) {
+    var pc = discountConfig && discountConfig.popupCopy;
+    var raw = (pc && typeof pc[key] === 'string') ? pc[key].trim() : '';
+    var text = raw || fallback;
+    if (vars) {
+      if (vars.pct !== undefined) text = text.split('{pct}').join(String(vars.pct));
+      if (vars.days !== undefined) text = text.split('{days}').join(String(vars.days));
+    }
+    return text;
+  }
+
+  // WCAG relative luminance then contrast ratio vs white → '#FFFFFF' or '#171A22'.
+  // Parity-tested with backend/utils/bannerColors.js resolveBannerColors.
+  function fgOn(hex) {
+    var rgb = ccfParseHex(hex);
+    if (!rgb) return '#FFFFFF';
+    function lin(v) {
+      v = v / 255;
+      return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    }
+    var L = 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]);
+    // contrast vs white (L=1): (1.05) / (L+0.05)
+    return (1.05 / (L + 0.05)) >= 4.5 ? '#FFFFFF' : '#171A22';
+  }
+
   // Build the status card DOM element that replaces the allow/offer button
   // during "Setting up…" and "Subscribed!" busy states.
   // state: 'setting_up' | 'subscribed'
@@ -449,13 +476,13 @@
     var titleEl = document.createElement('div');
     titleEl.style.cssText = 'font-size:15px;line-height:20px;font-weight:600;' +
       'color:' + titleColor + ';font-family:' + ff + ';';
-    titleEl.textContent = customTitle || (isSetup ? 'Setting up…' : 'Subscribed!');
+    titleEl.textContent = customTitle || (isSetup ? 'Setting up…' : ccfCopy('subscribedTitle', 'Subscribed!', {}));
     textCol.appendChild(titleEl);
 
     var subtitleEl = document.createElement('div');
     subtitleEl.style.cssText = 'font-size:13px;line-height:18px;font-weight:400;' +
       'color:' + subtitleColor + ';font-family:' + ff + ';';
-    subtitleEl.textContent = customSubtitle || (isSetup ? 'Just a moment' : 'Getting your discount…');
+    subtitleEl.textContent = customSubtitle || (isSetup ? 'Just a moment' : ccfCopy('subscribedSub', 'Getting your discount…', {}));
     textCol.appendChild(subtitleEl);
 
     return card;
@@ -533,10 +560,13 @@
   // popup-redesign-2: shared style builders so the main popup, the
   // discount-capture popup, and the split layout all match the same
   // premium visual language.
-  function ccfInputStyle() {
+  function ccfInputStyle(dark) {
+    var bg  = dark ? 'rgba(255,255,255,0.10)' : '#f9fafb';
+    var bdr = dark ? 'rgba(255,255,255,0.22)' : '#e5e7eb';
+    var col = dark ? '#ffffff' : '#111827';
     return 'width:100%;padding:11px 14px;font-size:13px;' +
-      'border:1.5px solid #e5e7eb;border-radius:12px;box-sizing:border-box;' +
-      'margin-bottom:8px;color:#111827;background:#f9fafb;font-family:inherit;';
+      'border:1.5px solid ' + bdr + ';border-radius:12px;box-sizing:border-box;' +
+      'margin-bottom:8px;color:' + col + ';background:' + bg + ';font-family:inherit;';
   }
   // popup-style: ctaStyle applies to EVERY Allow button (Split, Card, Flash
   // Sale, Gift Reveal, Bottom Sheet, Top Bar, Story Card). `compact`
@@ -567,7 +597,7 @@
     if (compact) {
       return sizing + 'color:' + accentColor + ';background:#fff;border:none;';
     }
-    return sizing + 'color:#fff;' +
+    return sizing + 'color:' + fgOn(accentColor) + ';' +
       'background:linear-gradient(135deg,' + accentColor + ',' + accentColor + 'dd);' +
       'border:none;box-shadow:0 4px 15px ' + accentColor + '44;';
   }
@@ -833,15 +863,17 @@
   // match its own content-section design — see showSoftPrompt()).
   // Returns a <div id="ccf-discount-fields"> or null when no discount is on.
   // Phone field removed — email-only capture (see ccfShowPhoneField()).
-  function ccfBuildDiscountFields() {
+  function ccfBuildDiscountFields(opts) {
     if (!ccfDiscountEnabled()) return null;
+    var dark = opts && opts.darkBg;
 
     var box = document.createElement('div');
     box.id = 'ccf-discount-fields';
     box.style.cssText = 'margin-top:10px;';
 
+    var headColor = dark ? 'rgba(255,255,255,0.70)' : '#6b7280';
     var head = document.createElement('div');
-    head.style.cssText = 'font-size:13px;color:#6b7280;margin-bottom:10px;text-align:center;';
+    head.style.cssText = 'font-size:13px;color:' + headColor + ';margin-bottom:10px;text-align:center;';
     head.textContent = (discountConfig && discountConfig.offerHeadline) ||
       'Get a discount on your first order!';
     box.appendChild(head);
@@ -852,11 +884,14 @@
       ei.id = 'ccf-email-input';
       ei.className = 'ccf-input';
       var ep = ccfFieldPct('emailDiscount');
-      ei.placeholder = 'Your email' + (ep ? ' (get ' + ep + '% off)' : '');
-      ei.style.cssText = ccfInputStyle();
+      ei.placeholder = ccfCopy('emailPlaceholder', 'Your email', {}) +
+        (ep ? ' (get ' + ep + '% off)' : '');
+      ei.style.cssText = ccfInputStyle(dark);
       box.appendChild(ei);
     }
-    ccfBuildWhatsappFields(box, { inputBg: '#f9fafb' });
+    var waBg = dark ? 'rgba(255,255,255,0.10)' : '#f9fafb';
+    var waFg = dark ? '#ffffff' : '#111827';
+    ccfBuildWhatsappFields(box, { inputBg: waBg, inputFg: waFg, darkBg: dark });
     return box;
   }
 
@@ -1116,13 +1151,13 @@
       var saveBtn = document.createElement('button');
       saveBtn.type = 'button';
       saveBtn.className = 'ccf-bd-btn-primary';
-      saveBtn.textContent = 'Send me my gift';
+      saveBtn.textContent = ccfCopy('bdButton', 'Send me my gift', {});
       container.appendChild(saveBtn);
 
       var skipBtn = document.createElement('button');
       skipBtn.type = 'button';
       skipBtn.className = 'ccf-bd-btn-skip';
-      skipBtn.textContent = 'No thanks';
+      skipBtn.textContent = ccfCopy('bdSkip', 'No thanks', {});
       container.appendChild(skipBtn);
 
       var consentEl = document.createElement('div');
@@ -1164,10 +1199,11 @@
             var leadDays = (discountConfig && discountConfig.birthdayDiscount &&
               discountConfig.birthdayDiscount.leadDays > 0)
               ? discountConfig.birthdayDiscount.leadDays : null;
-            var subLine = leadDays
+            var bdOkSubFallback = leadDays
               ? ('We\u2019ll send your gift code ' + leadDays +
                  ' days before your birthday.')
               : 'We\u2019ll send your gift code a few days before your birthday.';
+            var subLine = ccfCopy('bdOkSub', bdOkSubFallback, leadDays ? { days: leadDays } : {});
             container.innerHTML = '';
             var succ = document.createElement('div');
             succ.className = 'ccf-bd-success';
@@ -1180,7 +1216,7 @@
               ' aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
             var succTitle = document.createElement('p');
             succTitle.className = 'ccf-bd-success-title';
-            succTitle.textContent = 'You\u2019re all set';
+            succTitle.textContent = ccfCopy('bdOkTitle', 'You\u2019re all set', {});
             var succSub = document.createElement('p');
             succSub.className = 'ccf-bd-success-sub';
             succSub.textContent = subLine;
@@ -1208,8 +1244,7 @@
 
       ccfInjectBirthdayStyles();
 
-      var isDark  = ccfIsDarkColor(accentColor);
-      var btnFg   = isDark ? '#fff' : '#1a1a2e';
+      var btnFg = fgOn(accentColor);
       var pct = (discountConfig.birthdayDiscount &&
         discountConfig.birthdayDiscount.percentage) || 15;
       var offerText = (discountConfig.birthdayDiscount &&
@@ -1220,10 +1255,11 @@
       var leadDays = (discountConfig.birthdayDiscount &&
         discountConfig.birthdayDiscount.leadDays > 0)
         ? discountConfig.birthdayDiscount.leadDays : null;
-      var subText = leadDays
+      var bdSubFallback = leadDays
         ? ('Tell us your birthday. We will send your personal code ' +
            leadDays + ' days before.')
         : 'Tell us your birthday. We will send your personal code a few days before.';
+      var subText = ccfCopy('bdSub', bdSubFallback, leadDays ? { days: leadDays } : {});
 
       var prevFocused = document.activeElement;
       var closed = false;
@@ -1282,10 +1318,12 @@
       leftPanel.innerHTML = giftSvg64;
       var pctEl = document.createElement('p');
       pctEl.className = 'ccf-bd-left-pct';
+      pctEl.style.color = btnFg;
       pctEl.textContent = pct + '%';
       leftPanel.appendChild(pctEl);
       var subEl = document.createElement('p');
       subEl.className = 'ccf-bd-left-sub';
+      subEl.style.color = btnFg === '#FFFFFF' ? 'rgba(255,255,255,0.85)' : 'rgba(0,0,0,0.70)';
       subEl.textContent = 'off everything on your birthday';
       leftPanel.appendChild(subEl);
       dialog.appendChild(leftPanel);
@@ -1820,9 +1858,9 @@
       'display:flex;justify-content:center;' +
       'animation:ccfBounce 1s ease 3">' + ccfIcon('gift', 40) + '</div>' +
       '<div style="font-size:18px;font-weight:800;color:' + titleColor + ';' +
-      'margin-bottom:4px">' + d.percentage + '% OFF Unlocked!</div>' +
+      'margin-bottom:4px">' + ccfEscapeHtml(ccfCopy('unlockedTitle', d.percentage + '% OFF Unlocked!', {pct:d.percentage})) + '</div>' +
       '<div style="font-size:12px;color:' + subColor + ';margin-bottom:14px">' +
-      'Expires in ' + d.expiryDays + ' days</div>' +
+      ccfEscapeHtml(ccfCopy('unlockedSub', 'Expires in ' + d.expiryDays + ' days', {days:d.expiryDays})) + '</div>' +
       '<div style="background:' + chipBg + ';' +
       'border:' + chipBorder + ';border-radius:14px;' +
       'padding:' + (chipBig ? '18px' : '14px') + ';margin-bottom:14px">' +
@@ -2031,8 +2069,9 @@
       var b = document.createElement('button');
       b.id = 'ccf-offer-btn';
       b.type = 'button';
-      b.textContent = 'Get my offer';
-      b.setAttribute('aria-label', 'Get my offer without notifications');
+      var offerLabel = ccfCopy('captureButton', 'Get my offer without notifications', {});
+      b.textContent = offerLabel;
+      b.setAttribute('aria-label', offerLabel);
       b.style.cssText = 'display:block;width:100%;padding:13px;margin-bottom:8px;' +
         'border:2px solid ' + (accentColor || '#4f46e5') + ';border-radius:12px;' +
         'background:transparent;color:' + (fgColor || '#111827') + ';' +
@@ -2792,6 +2831,12 @@
       // anchor-table requirement, plus the max-height/overflow-y safety
       // net and the narrow-viewport width guard from item 3. ----------
       var cardRadius = (cfg.borderRadius != null ? cfg.borderRadius : 22) + 'px';
+      var cardBgRaw = cfg.bgColor || '#ffffff';
+      var cardBgIsDefault = /^#fff(fff)?$/i.test(cardBgRaw);
+      var cardBg = cardBgIsDefault
+        ? 'linear-gradient(145deg,#ffffff,#f8f9ff)'
+        : cardBgRaw;
+      var cardDark = !cardBgIsDefault && ccfIsDarkColor(cardBgRaw);
       wrap.style.cssText = isMobile ? [
         'position:fixed',
         'top:50%',
@@ -2799,7 +2844,7 @@
         'transform:translate(-50%,-50%)',
         'width:min(300px, calc(100vw - 32px))',
         'max-height:calc(100vh - 32px)',
-        'background:linear-gradient(145deg,#ffffff,#f8f9ff)',
+        'background:' + cardBg,
         'border-radius:' + cardRadius,
         'overflow-x:hidden',
         'overflow-y:auto',
@@ -2814,7 +2859,7 @@
         'left:50%',
         'transform:translateX(-50%)',
         'width:min(340px,90vw)',
-        'background:linear-gradient(145deg,#ffffff,#f8f9ff)',
+        'background:' + cardBg,
         'border-radius:' + cardRadius,
         'overflow:hidden',
         'box-shadow:0 20px 60px rgba(0,0,0,0.18),0 4px 12px rgba(0,0,0,0.08),inset 0 1px 0 rgba(255,255,255,0.8)',
@@ -2956,7 +3001,7 @@
           'font-weight:700',
           'letter-spacing:3px',
           'text-transform:uppercase',
-          'color:#9ca3af',
+          'color:' + (cardDark ? 'rgba(255,255,255,0.50)' : '#9ca3af'),
           'margin-bottom:8px'
         ].join(';');
         cardBrand.textContent = cfg.brandName;
@@ -2980,7 +3025,7 @@
         var cardSub = document.createElement('div');
         cardSub.style.cssText = [
           'font-size:13px',
-          'color:#6b7280',
+          'color:' + (cardDark ? 'rgba(255,255,255,0.70)' : '#6b7280'),
           'margin-bottom:16px',
           'line-height:1.5',
           'text-align:' + cardAlign
@@ -3022,24 +3067,29 @@
         cardEmailInput.id = 'ccf-email-input';
         cardEmailInput.className = 'ccf-input';
         var cardEp = ccfFieldPct('emailDiscount');
-        cardEmailInput.placeholder = 'Your email' + (cardEp ? ' (get ' + cardEp + '% off)' : '');
-        cardEmailInput.style.cssText = ccfInputStyle();
+        cardEmailInput.placeholder = ccfCopy('emailPlaceholder', 'Your email', {}) + (cardEp ? ' (get ' + cardEp + '% off)' : '');
+        cardEmailInput.style.cssText = ccfInputStyle(cardDark);
         cardContent.appendChild(cardEmailInput);
       }
-      ccfBuildWhatsappFields(cardContent, { inputBg: '#f9fafb' });
+      ccfBuildWhatsappFields(cardContent, {
+        inputBg: cardDark ? 'rgba(255,255,255,0.10)' : '#f9fafb',
+        inputFg: cardDark ? '#ffffff' : '#111827',
+        darkBg: cardDark,
+      });
 
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       cardContent.appendChild(allow);
-      if (ccfCaptureMode()) { cardContent.appendChild(buildOfferBtn(accent, '#111827')); }
+      if (ccfCaptureMode()) { cardContent.appendChild(buildOfferBtn(accent, fgOn(accent))); }
 
-      // Plain text dismiss — no border/box, not underlined by default
-      // (CSS handles the subtle hover color, see ccfInjectPopupStyles).
       deny = buildDenyBtn(ccfDenyButtonStyle());
+      if (cardDark) deny.style.color = 'rgba(255,255,255,0.55)';
       cardContent.appendChild(deny);
 
       if (cfg.showBranding) {
         cardContent.appendChild(buildBranding(
-          'margin-top:12px;font-size:10px;color:#d1d5db;text-align:center;letter-spacing:0.5px;'));
+          'margin-top:12px;font-size:10px;color:' +
+          (cardDark ? 'rgba(255,255,255,0.30)' : '#d1d5db') +
+          ';text-align:center;letter-spacing:0.5px;'));
       }
 
       wrap.appendChild(cardContent);
@@ -3259,7 +3309,7 @@
     // untouched while a non-classic style is selected — see
     // ccfResolveStyle()/Settings.jsx).
     if (ccfStyle.id === 'classic' && layout === 'split') {
-      var discountFields = ccfBuildDiscountFields();
+      var discountFields = ccfBuildDiscountFields({ darkBg: ccfIsDarkColor(cfg.bgColor || '#ffffff') });
       if (discountFields) {
         if (allow && allow.parentNode) {
           allow.parentNode.insertBefore(discountFields, allow);

@@ -3191,7 +3191,7 @@ export default function Settings({ shop }) {
             options={[{ value: 'split', label: 'Split' }, { value: 'card', label: 'Card' }]}
             onChange={(v) => setActivePopup((p) => ({ ...p, layout: v }))} />
         )}
-        <ColorRow label="Accent" value={activePopup.accentColor}
+        <ColorRow label={POPUP_STYLES[activeStyleId]?.fieldLabels?.accentColor || 'Accent'} value={activePopup.accentColor}
           defaultValue={(POPUP_STYLES[activeStyleId].defaultColors || {}).accentColor || '#4f46e5'}
           onChange={(v) => setActivePopup((p) => ({ ...p, accentColor: v }))} />
         <ColorRow label="Background" value={activePopup.bgColor}
@@ -3226,6 +3226,9 @@ export default function Settings({ shop }) {
       </div>
 
       <SectionHeading>Buttons</SectionHeading>
+      <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 8 }}>
+        Wording for later steps (discount box, subscribed, offer unlocked, birthday) is in <strong>Discounts &rarr; Entry popup wording</strong>.
+      </div>
       <div className="ccf-settings-grid">
         <TextEditRow fieldKey="allowText" label="Allow button" value={activePopup.allowText || 'Allow'}
           placeholder="Allow"

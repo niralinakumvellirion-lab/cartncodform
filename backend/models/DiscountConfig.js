@@ -123,6 +123,22 @@ const discountConfigSchema = new mongoose.Schema({
     default: 'Get a discount on your first order!',
   },
 
+  // Per-step merchant copy overrides for the entry popup.
+  // Empty string = use the storefront default. Stored trimmed.
+  popupCopy: {
+    emailPlaceholder: { type: String, default: '' },   // max 40
+    captureButton:    { type: String, default: '' },   // max 50
+    subscribedTitle:  { type: String, default: '' },   // max 40
+    subscribedSub:    { type: String, default: '' },   // max 60
+    unlockedTitle:    { type: String, default: '' },   // max 40
+    unlockedSub:      { type: String, default: '' },   // max 60
+    bdSub:            { type: String, default: '' },   // max 120
+    bdButton:         { type: String, default: '' },   // max 30
+    bdSkip:           { type: String, default: '' },   // max 30
+    bdOkTitle:        { type: String, default: '' },   // max 40
+    bdOkSub:          { type: String, default: '' },   // max 120
+  },
+
   updatedAt: { type: Date, default: Date.now },
 });
 

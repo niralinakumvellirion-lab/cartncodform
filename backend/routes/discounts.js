@@ -69,6 +69,11 @@ function defaultConfig(shop) {
       lastSyncAt: null,
       lastSyncError: '',
     },
+    popupCopy: {
+      emailPlaceholder: '', captureButton: '', subscribedTitle: '',
+      subscribedSub: '', unlockedTitle: '', unlockedSub: '',
+      bdSub: '', bdButton: '', bdSkip: '', bdOkTitle: '', bdOkSub: '',
+    },
   };
 }
 
@@ -77,6 +82,33 @@ function defaultConfig(shop) {
 const EDITABLE_KEYS = ['pushDiscount', 'emailDiscount'];
 const DISABLED_KEYS = ['phoneDiscount', 'bothDiscount'];
 const OFFER_TEXT_MAX = 120;
+
+const POPUP_COPY_KEYS = [
+  'emailPlaceholder', 'captureButton', 'subscribedTitle', 'subscribedSub',
+  'unlockedTitle', 'unlockedSub', 'bdSub', 'bdButton', 'bdSkip',
+  'bdOkTitle', 'bdOkSub',
+];
+const POPUP_COPY_MAX = {
+  emailPlaceholder: 40,  captureButton: 50,
+  subscribedTitle: 40,   subscribedSub: 60,
+  unlockedTitle: 40,     unlockedSub: 60,
+  bdSub: 120,            bdButton: 30,
+  bdSkip: 30,            bdOkTitle: 40,
+  bdOkSub: 120,
+};
+
+function sanitizePopupCopy(raw) {
+  if (!raw || typeof raw !== 'object') return {};
+  const out = {};
+  for (const k of POPUP_COPY_KEYS) {
+    if (k in raw) {
+      // Coerce to string, trim, strip control chars / newlines, truncate.
+      const s = String(raw[k]).replace(/[\x00-\x1F\x7F]/g, '').trim();
+      out[`popupCopy.${k}`] = s.slice(0, POPUP_COPY_MAX[k]);
+    }
+  }
+  return out;
+}
 
 // Clamp / coerce one incoming rule sub-doc before it is written.
 function sanitizeRule(input, fallbackPrefix) {
@@ -531,6 +563,10 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
       }
       const bdLead = Number(bd.leadDays);
       if (Number.isFinite(bdLead)) set['birthdayDiscount.leadDays'] = Math.min(7, Math.max(0, Math.round(bdLead)));
+    }
+
+    if (req.body.popupCopy && typeof req.body.popupCopy === 'object') {
+      Object.assign(set, sanitizePopupCopy(req.body.popupCopy));
     }
 
     // ── quantityTiers validation ───────────────────────────────────────────

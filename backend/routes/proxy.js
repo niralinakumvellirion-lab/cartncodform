@@ -167,6 +167,17 @@ router.get('/discount-config', async (req, res) => {
             : [],
         };
       }()),
+      popupCopy: (function () {
+        const pc = doc.popupCopy || {};
+        const KEYS = [
+          'emailPlaceholder', 'captureButton', 'subscribedTitle', 'subscribedSub',
+          'unlockedTitle', 'unlockedSub', 'bdSub', 'bdButton', 'bdSkip',
+          'bdOkTitle', 'bdOkSub',
+        ];
+        const out = {};
+        for (const k of KEYS) out[k] = String(pc[k] || '');
+        return out;
+      }()),
     });
   } catch (err) {
     console.error('[proxy] GET /discount-config error:', err.message);
@@ -186,6 +197,7 @@ router.get('/discount-config', async (req, res) => {
       },
       birthdayDiscount: { enabled: false, percentage: 15, offerText: '', consentText: "We'll use your birthday only to send you a birthday offer." },
       quantityTiers: { enabled: false, tiers: [], heading: 'Buy more, save more', accentColor: '#4F46E5', layout: 'cards' },
+      popupCopy: { emailPlaceholder: '', captureButton: '', subscribedTitle: '', subscribedSub: '', unlockedTitle: '', unlockedSub: '', bdSub: '', bdButton: '', bdSkip: '', bdOkTitle: '', bdOkSub: '' },
     });
   }
 });

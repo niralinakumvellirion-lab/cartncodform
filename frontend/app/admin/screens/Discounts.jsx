@@ -307,6 +307,11 @@ function buildPayload(config) {
     };
   }
   out.whatsappCapture = { enabled: !!(config.whatsappCapture && config.whatsappCapture.enabled) };
+  const PC_KEYS = ['emailPlaceholder','captureButton','subscribedTitle','subscribedSub',
+    'unlockedTitle','unlockedSub','bdSub','bdButton','bdSkip','bdOkTitle','bdOkSub'];
+  const pc = config.popupCopy || {};
+  out.popupCopy = {};
+  for (const k of PC_KEYS) out.popupCopy[k] = (pc[k] || '').trim();
   const bcap = config.birthdayCapture || {};
   const bn = bcap.banner || {};
   const bnDismiss = Math.min(30, Math.max(1, Math.round(Number(bn.dismissDays ?? 7)) || 7));
@@ -462,7 +467,7 @@ export default function Discounts({ shop }) {
                   }}
                 >
                   <Icons.Type size={20} />
-                  Popup headline
+                  Discount box heading (inside the popup)
                 </span>
                 <span style={counterStyle}>{headline.length} / {HEADLINE_MAX}</span>
               </div>
@@ -475,7 +480,7 @@ export default function Discounts({ shop }) {
                 style={{ ...fieldStyle, height: 36, width: '100%' }}
               />
               <div style={helperStyle}>
-                The main heading shown at the top of the popup.
+                The main heading shown at the top of the discount box. The popup headline and Allow / No thanks buttons are in Settings &rarr; Popup.
               </div>
             </div>
           </div>
@@ -1091,6 +1096,78 @@ export default function Discounts({ shop }) {
               </div>
             </div>
           </div>
+
+          {/* Entry popup wording */}
+          {(() => {
+            const pc = config.popupCopy || {};
+            function setPc(patch) {
+              setConfig((c) => ({ ...c, popupCopy: { ...(c.popupCopy || {}), ...patch } }));
+            }
+            const PC_MAX = {
+              emailPlaceholder:40, captureButton:50, subscribedTitle:40, subscribedSub:60,
+              unlockedTitle:40, unlockedSub:60, bdSub:120, bdButton:30, bdSkip:30,
+              bdOkTitle:40, bdOkSub:120,
+            };
+            function CopyField({ label, fieldKey, placeholder, helper }) {
+              const val = pc[fieldKey] || '';
+              const max = PC_MAX[fieldKey];
+              return (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={labelRowStyle}>
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>{label}</span>
+                    <span style={counterStyle}>{val.length} / {max}</span>
+                  </div>
+                  <input
+                    className="disc-input"
+                    type="text"
+                    value={val}
+                    maxLength={max}
+                    placeholder={placeholder}
+                    onChange={(e) => setPc({ [fieldKey]: e.target.value })}
+                    style={{ ...fieldStyle, height: 34, width: '100%' }}
+                  />
+                  {helper && <div style={helperStyle}>{helper}</div>}
+                </div>
+              );
+            }
+            const groupHeadStyle = { fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10, marginTop: 4 };
+            return (
+              <div style={{ ...DS.card, marginBottom: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>Entry popup wording</div>
+                  <button
+                    type="button"
+                    onClick={() => setConfig((c) => ({ ...c, popupCopy: {} }))}
+                    style={{ fontSize: 11, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
+                  >
+                    Reset to default wording
+                  </button>
+                </div>
+                <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 16 }}>
+                  Leave a field blank to use the default. Tokens: <code style={{ background: '#f3f4f6', borderRadius: 4, padding: '1px 4px' }}>{'{pct}'}</code> = discount %, <code style={{ background: '#f3f4f6', borderRadius: 4, padding: '1px 4px' }}>{'{days}'}</code> = days.
+                </div>
+
+                <div style={groupHeadStyle}>Discount box</div>
+                <CopyField fieldKey="emailPlaceholder" label="Email placeholder" placeholder="Your email" helper="The email input hint. The '(get N% off)' suffix is added automatically." />
+                <CopyField fieldKey="captureButton" label="'Get my offer' button" placeholder="Get my offer without notifications" helper="Shown when the visitor skips notifications but leaves an email." />
+
+                <div style={{ ...groupHeadStyle, marginTop: 16 }}>After subscribing</div>
+                <CopyField fieldKey="subscribedTitle" label="Title" placeholder="Subscribed!" />
+                <CopyField fieldKey="subscribedSub" label="Sub-text" placeholder="Getting your discount…" />
+
+                <div style={{ ...groupHeadStyle, marginTop: 16 }}>Offer unlocked</div>
+                <CopyField fieldKey="unlockedTitle" label="Title" placeholder="15% OFF Unlocked!" helper="Use {pct} for the discount percentage." />
+                <CopyField fieldKey="unlockedSub" label="Sub-text" placeholder="Expires in 7 days" helper="Use {days} for the expiry days." />
+
+                <div style={{ ...groupHeadStyle, marginTop: 16 }}>Birthday step</div>
+                <CopyField fieldKey="bdSub" label="Birthday ask sub-text" placeholder="Tell us your birthday. We will send your personal code {days} days before." helper="Use {days} for lead days. Leave blank to use the default." />
+                <CopyField fieldKey="bdButton" label="Submit button" placeholder="Send me my gift" />
+                <CopyField fieldKey="bdSkip" label="Skip link" placeholder="No thanks" />
+                <CopyField fieldKey="bdOkTitle" label="Saved title" placeholder="You're all set" />
+                <CopyField fieldKey="bdOkSub" label="Saved sub-text" placeholder="We'll send your gift code {days} days before your birthday." helper="Use {days} for lead days." />
+              </div>
+            );
+          })()}
 
           {/* Save button — right aligned, status text to its left */}
           <div

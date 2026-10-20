@@ -69,7 +69,7 @@ export const POPUP_STYLES = {
     layoutType: 'card',
     supportedFields: [
       'headline', 'subtext', 'brandName', 'imageUrl', 'imagePosition',
-      'accentColor', 'bgColor', 'textColor', 'fontFamily', 'borderRadius',
+      'accentColor', 'fontFamily', 'borderRadius',
       'allowText', 'denyText', 'ctaStyle',
     ],
     extraFields: [
@@ -196,6 +196,7 @@ export const POPUP_STYLES = {
       'headline', 'accentColor', 'textColor', 'fontFamily',
       'allowText', 'ctaStyle',
     ],
+    fieldLabels: { accentColor: 'Bar colour' },
     extraFields: [
       {
         key: 'arrowCta',
@@ -218,7 +219,7 @@ export const POPUP_STYLES = {
     layoutType: 'card',
     supportedFields: [
       'headline', 'subtext', 'imageUrl', 'imagePosition',
-      'accentColor', 'textColor', 'fontFamily',
+      'accentColor', 'fontFamily',
       'allowText', 'denyText', 'ctaStyle',
     ],
     extraFields: [
