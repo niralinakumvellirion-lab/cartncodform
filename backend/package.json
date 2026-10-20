@@ -33,8 +33,8 @@
     "resend": "^6.24.0"
   },
   "devDependencies": {
-    "@babel/plugin-transform-modules-commonjs": "^8.0.1",
-    "@babel/preset-react": "^8.0.1",
+    "@babel/plugin-transform-modules-commonjs": "^7.26.3",
+    "@babel/preset-react": "^7.26.3",
     "jest": "^30.5.1",
     "jest-environment-jsdom": "^30.5.2",
     "nodemon": "^3.1.4",

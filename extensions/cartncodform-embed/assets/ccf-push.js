@@ -3079,7 +3079,7 @@
 
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
       cardContent.appendChild(allow);
-      if (ccfCaptureMode()) { cardContent.appendChild(buildOfferBtn(accent, fgOn(accent))); }
+      if (ccfCaptureMode()) { cardContent.appendChild(buildOfferBtn(accent, cardDark ? '#F4F4F5' : '#171A22')); }
 
       deny = buildDenyBtn(ccfDenyButtonStyle());
       if (cardDark) deny.style.color = 'rgba(255,255,255,0.55)';

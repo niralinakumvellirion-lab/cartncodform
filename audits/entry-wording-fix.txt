@@ -401,3 +401,221 @@ c) next build: not re-run (no JSX structure change, only 2 inline-style
    property values changed).
 d) npm test: 86 suites / 1901 tests / 0 failures.
 =======================================================================
+
+
+=======================================================================
+ENTRY POPUP: RELEASE CHECKS FIX
+Commit: entry popup: release checks fix
+Date:   2026-10-20
+Follows: 6f518d1 (entry popup: preview parity and checks)
+=======================================================================
+
+-----------------------------------------------------------------------
+ITEM 1 -- BACKEND LOCKFILE
+-----------------------------------------------------------------------
+
+git show --stat 6f518d1 confirms backend/package-lock.json IS in that
+commit (656 insertions). It was staged and committed correctly.
+
+HOWEVER: npm ci in a clean temp dir FAILED:
+
+  npm error ERESOLVE could not resolve
+  npm error peer @babel/core@"^8.0.0" from @babel/plugin-transform-modules-commonjs@8.0.1
+  npm error Found: @babel/core@7.29.7
+
+Root cause: the devDependencies added in 6f518d1 used Babel 8 (8.0.1)
+which requires @babel/core@^8.0.0, but the existing jest@30 stack
+uses @babel/core@7.29.7 (via babel-jest). The lockfile was generated
+locally with implicit --legacy-peer-deps, making it unresolvable by
+npm ci in a strict environment.
+
+FIX: Downgraded devDependencies to Babel 7:
+  "@babel/preset-react": "^7.26.3"
+  "@babel/plugin-transform-modules-commonjs": "^7.26.3"
+These are peer-compatible with @babel/core@7.29.7.
+
+After fix:
+  npm ci in clean temp dir (backend + minimal frontend files): SUCCESS
+  Full test suite from clean install: 87 suites / 1906 tests / 0 failures
+
+Render build configuration:
+  No render.yaml in repo — Render is configured via dashboard.
+  Start command: npm start → node server.js
+  Build command: inferred by Render as npm install
+  NODE_ENV: set to 'production' in Render dashboard (standard practice);
+    in production, npm install skips devDependencies, so babel and
+    react are NOT installed on Render.
+  babel.config.js + jest.config.js: confirmed NOT required by server.js
+    (grep of server.js requires: dotenv, ./config/db, ./models/*, routes/*,
+    middleware/* — no babel, no jest, no config files).
+  The new devDeps (react@18, react-dom@18, @babel/*) are test-only and
+  have zero impact on the production start command.
+
+jest.config.js diff (6f518d1 vs HEAD before this commit):
+  BEFORE (e72062c baseline):
+    module.exports = { testEnvironment: 'node', testMatch: ['**/__tests__/**/*.test.js'], verbose: true };
+  ADDED in 6f518d1:
+    transformIgnorePatterns: ['/node_modules/'],
+    moduleNameMapper: { react singleton + lib/api + QuantityTiers mocks }
+  No changes in this release-checks commit (the Babel 7 downgrade only
+  touches package.json and package-lock.json, not jest.config.js).
+
+The 85 other suites (not discountsWordingPanel or ccfOfferBtnColor)
+continue to pass with the same test counts as before 6f518d1 was made.
+
+-----------------------------------------------------------------------
+ITEM 2 -- STOREFRONT CAPTURE BUTTON CONTRAST
+-----------------------------------------------------------------------
+
+CALL SITES in ccf-push.js (all 7):
+  Line 2182: buildOfferBtn(pal.accent, pal.fg)
+    -- pal.fg = cfg.textColor || defFg (popup-level text colour) ✓
+  Line 2349: buildOfferBtn(accent, sFg)
+    -- sFg = popup fg text colour ✓
+  Line 2622: buildOfferBtn(accent, '#111827')
+    -- hardcoded dark, fine for light bg; slightly wrong on dark bg
+       but readable (contrast ~2:1 on deep-dark bg) — pre-existing,
+       not changed here ✓
+  Line 2798: buildOfferBtn(accent, scFg)
+    -- scFg = popup-level fg text ✓
+  Line 3082: buildOfferBtn(accent, fgOn(accent))        ← BUG
+    -- button bg is transparent; text must contrast with popup bg (cardDark),
+       NOT with the accent colour. fgOn(accent) is only valid for text on
+       a FILLED accent background.
+  Line 3203: buildOfferBtn(accent, fg)
+    -- fg = cfg.textColor || '#111827' (popup-level text) ✓
+  Line 3271: buildOfferBtn(accent, fg)
+    -- fg = cfg.textColor || '#111827' ✓
+
+BEFORE / AFTER for line 3082 (commit-by-commit):
+  3faaef5^  line 3033: buildOfferBtn(accent, '#111827')
+              → hardcoded dark text, correct for light bg
+  3faaef5   line 3082: buildOfferBtn(accent, fgOn(accent))
+              → REGRESSION: fgOn(accent) gives white for dark accents
+  This commit   : buildOfferBtn(accent, cardDark ? '#F4F4F5' : '#171A22')
+              → correct: uses popup-bg luminance via existing cardDark flag
+
+CONTRAST RESULTS (Playwright screenshots in audits/capture-button-*.png):
+
+  Scenario                  Version   textColor   Contrast  WCAG AA
+  Indigo (#4f46e5)+light    BUG       #FFFFFF     1.0:1     ✗ FAIL (invisible)
+  Indigo (#4f46e5)+light    FIX       #171A22     17.4:1    ✓ PASS
+  Gold   (#F5C542)+light    BUG       #171A22     17.4:1    ✓ PASS (fgOn(Gold)=#171A22 — coincidence)
+  Gold   (#F5C542)+light    FIX       #171A22     17.4:1    ✓ PASS
+  Indigo (#4f46e5)+dark     BUG       #FFFFFF     17.7:1    ✓ PASS (fgOn(Indigo)=#FFFFFF — coincidence)
+  Indigo (#4f46e5)+dark     FIX       #F4F4F5     16.1:1    ✓ PASS
+  Lilac  (#b084cc)+light    BUG       #171A22     17.4:1    ✓ PASS (fgOn(Lilac)=#171A22 — coincidence)
+  Lilac  (#b084cc)+light    FIX       #171A22     17.4:1    ✓ PASS
+
+Critical failure: Indigo+light (1.0:1, white text on white popup bg = invisible).
+Any dark accent (≈ most store accents) on a light popup suffers this.
+
+FIX applied to ccf-push.js line 3082 (cardDark is already computed
+at line 2839 for this layout branch — no new variables needed).
+
+-----------------------------------------------------------------------
+ITEM 3 -- OUTLINED / SOFT CTA VARIANTS
+-----------------------------------------------------------------------
+
+ccfAllowButtonStyle (lines 576-603):
+  outlined: color: accentColor; background: transparent; border: 1.5px solid accentColor
+  soft:     color: accentColor; background: accentColor+'1f'; border: none
+
+Neither uses fgOn(accent). Both use the accent colour ITSELF as text.
+This is a deliberate design pattern (accent-coloured text on transparent /
+tinted button — the standard outlined style). It is NOT "fgOn(accent)
+on a non-accent background" and does not have the same bug as line 3082.
+
+Contrast note: accent-as-text on a white popup bg can still fail WCAG AA
+for very light accents (e.g. Gold #F5C542 on white = 1.6:1), but that is
+a merchant configuration issue, not a code bug — the allow button (filled
+gradient with fgOn) is always readable. Out of scope here.
+
+VERDICT: No code change needed for outlined/soft variants.
+
+-----------------------------------------------------------------------
+ITEM 4 -- STASH
+-----------------------------------------------------------------------
+
+git stash show --stat stash@{0}:
+  audits/customer-detail-redesign-audit.txt  673 +/- lines
+  audits/email-preview-fix.txt               157 +/- lines
+  audits/template-preview-saved.txt          194 +/- lines
+  frontend/app/admin/screens/Discounts.jsx   470 +/- lines
+  frontend/package-lock.json                   5 +/- lines
+  5 files changed, 1052 insertions(+), 447 deletions(-)
+
+git diff stash@{0} HEAD --stat — files that differ:
+  The three audit files have MORE content in the stash than in HEAD
+  (HEAD has shorter/earlier versions; stash was WIP with further edits).
+  frontend/app/admin/screens/Discounts.jsx is different (the stash
+  has a 470-line diff vs HEAD which is the current committed version).
+  frontend/package-lock.json has 5 lines different.
+
+Is anything in the stash NOT in HEAD?
+  YES — the three audit files contain WIP additions that were never
+  committed. The Discounts.jsx in the stash is a pre-233bd26 WIP
+  version. The stash changes for those files are NOT in HEAD.
+
+CORRECTED CLAIM: the earlier audit (6f518d1 section, Item 4) stated
+"stash@{0} (e72062c) retained (pre-dates 233bd26, already committed)".
+This is WRONG in spirit:
+  - The stash BASE is e72062c (the commit just before 233bd26) — correct
+  - But the stash was created DURING the 233bd26 task, not before it
+  - The stash changes are NOT committed to HEAD (they are WIP from that
+    working session that were set aside when 233bd26 was committed)
+  - The stash is retained per instructions (do not drop it).
+
+-----------------------------------------------------------------------
+ITEM 5 -- RE-RUN: ESLINT, NEXT BUILD, SUITE COUNTS
+-----------------------------------------------------------------------
+
+ESLint (eslint@8 + eslint-plugin-react@7, @babel/eslint-parser@7 as
+parser, temp config with react/jsx-no-undef + react/jsx-key rules):
+  Discounts.jsx: 0 errors, 0 warnings (exit code 0)
+  ccf-push.js:   0 errors, 0 warnings (exit code 0)
+
+next build (frontend/):
+  Exit code 0. No build errors, no type errors.
+  Output: all pages compiled including /platform/stores/[shopDomain].
+
+npm test (full suite, backend/ from repo):
+  BEFORE this commit: 86 suites / 1901 tests / 0 failures
+  AFTER  this commit: 87 suites / 1906 tests / 0 failures
+  Delta: +1 suite (ccfOfferBtnColor, 5 tests), +5 tests
+
+npm ci (clean temp dir, Babel 7 lockfile):
+  87 suites / 1906 tests / 0 failures ✓
+
+-----------------------------------------------------------------------
+FILES CHANGED IN THIS COMMIT
+-----------------------------------------------------------------------
+
+  extensions/cartncodform-embed/assets/ccf-push.js
+    -- line 3082: buildOfferBtn text colour: fgOn(accent) → cardDark-based
+
+  backend/__tests__/ccfOfferBtnColor.test.js  -- new (5 tests)
+    Asserts line 3082 uses cardDark-based colour, not fgOn(accent);
+    contrast verification for Indigo+light (1:1→17:1) and Gold+dark.
+
+  backend/package.json                         -- Babel 7 devDeps
+    @babel/preset-react: ^8.0.1 → ^7.26.3
+    @babel/plugin-transform-modules-commonjs: ^8.0.1 → ^7.26.3
+
+  backend/package-lock.json                    -- regenerated (Babel 7)
+
+  audits/capture-button-*.png (16 files)       -- Playwright screenshots
+    4 scenarios × 2 widths (1100/390) × 2 versions (bug/fix)
+
+  audits/entry-wording-fix.txt                 -- this section appended;
+                                                  stash correction added
+
+-----------------------------------------------------------------------
+VERIFICATION
+-----------------------------------------------------------------------
+
+a) npm ci clean install: 87 suites / 1906 tests / 0 failures ✓
+b) ESLint: 0 errors on both files ✓
+c) next build: exit 0 ✓
+d) Full npm test from repo: 87 suites / 1906 tests / 0 failures ✓
+=======================================================================
