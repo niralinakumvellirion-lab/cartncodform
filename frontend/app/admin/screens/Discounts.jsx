@@ -347,7 +347,8 @@ function buildPayload(config) {
 // Compact, content-sized inputs. Focus ring uses the accent color via CSS
 // (inline styles can't express :focus).
 const FOCUS_CSS =
-  '.disc-input:focus{outline:none;border-color:#4f46e5;box-shadow:0 0 0 3px rgba(79,70,229,0.18);}';
+  '.disc-input:focus{outline:none;border-color:#4f46e5;box-shadow:0 0 0 3px rgba(79,70,229,0.18);}' +
+  '.disc-input::placeholder{color:#6B7280;}';
 
 const fieldStyle = {
   height: 32,
@@ -393,7 +394,7 @@ function fgOn(hex) {
   return (1.05 / (L + 0.05)) >= 4.5 ? '#FFFFFF' : '#171A22';
 }
 
-const PREVIEW_TABS = ['Discount box', 'Subscribed', 'Offer unlocked', 'Birthday step'];
+
 
 export default function Discounts({ shop }) {
   const [config, setConfig] = useState({});
@@ -402,7 +403,7 @@ export default function Discounts({ shop }) {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
   const [previewColors, setPreviewColors] = useState({ accentColor: '#4f46e5', bgColor: '#ffffff' });
-  const [previewTab, setPreviewTab] = useState(0);
+  const [wordingTab, setWordingTab] = useState(0);
 
   useEffect(() => {
     if (!shop) return;
@@ -777,24 +778,227 @@ export default function Discounts({ shop }) {
             </div>
 
             {/* Method 2: Entry popup */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: `1px solid ${DS.gray200}` }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900 }}>Entry popup</div>
-                <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2 }}>Shows a birthday step after the subscriber or email capture step.</div>
+            <div style={{ borderBottom: `1px solid ${DS.gray200}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900 }}>Entry popup</div>
+                  <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2 }}>Shows a birthday step after the subscriber or email capture step.</div>
+                </div>
+                <div
+                  role="switch"
+                  aria-checked={!!(config.birthdayCapture?.popup?.enabled)}
+                  tabIndex={0}
+                  onClick={() => setConfig((c) => ({
+                    ...c,
+                    birthdayCapture: { ...(c.birthdayCapture || {}), popup: { enabled: !(c.birthdayCapture?.popup?.enabled) } },
+                  }))}
+                  onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setConfig((c) => ({ ...c, birthdayCapture: { ...(c.birthdayCapture || {}), popup: { enabled: !(c.birthdayCapture?.popup?.enabled) } } })); } }}
+                  style={{ width: 36, height: 20, borderRadius: 10, cursor: 'pointer', background: config.birthdayCapture?.popup?.enabled ? '#16a34a' : '#d1d5db', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
+                >
+                  <div style={{ position: 'absolute', top: 2, left: config.birthdayCapture?.popup?.enabled ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+                </div>
               </div>
-              <div
-                role="switch"
-                aria-checked={!!(config.birthdayCapture?.popup?.enabled)}
-                tabIndex={0}
-                onClick={() => setConfig((c) => ({
-                  ...c,
-                  birthdayCapture: { ...(c.birthdayCapture || {}), popup: { enabled: !(c.birthdayCapture?.popup?.enabled) } },
-                }))}
-                onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setConfig((c) => ({ ...c, birthdayCapture: { ...(c.birthdayCapture || {}), popup: { enabled: !(c.birthdayCapture?.popup?.enabled) } } })); } }}
-                style={{ width: 36, height: 20, borderRadius: 10, cursor: 'pointer', background: config.birthdayCapture?.popup?.enabled ? '#16a34a' : '#d1d5db', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
-              >
-                <div style={{ position: 'absolute', top: 2, left: config.birthdayCapture?.popup?.enabled ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
-              </div>
+              {/* Wording panel -- only when Entry popup is on */}
+              {config.birthdayCapture?.popup?.enabled && (() => {
+                const pc = config.popupCopy || {};
+                const setPc = (patch) => setConfig((c) => ({ ...c, popupCopy: { ...(c.popupCopy || {}), ...patch } }));
+                const PC_MAX = {
+                  emailPlaceholder:40, captureButton:50, subscribedTitle:40, subscribedSub:60,
+                  unlockedTitle:40, unlockedSub:60, bdSub:120, bdButton:30, bdSkip:30, bdOkTitle:40, bdOkSub:120,
+                };
+                const STEP_TABS = ['Discount box', 'Subscribed', 'Offer unlocked', 'Birthday step'];
+                const STEP_FIELDS = [
+                  ['emailPlaceholder', 'captureButton'],
+                  ['subscribedTitle', 'subscribedSub'],
+                  ['unlockedTitle', 'unlockedSub'],
+                  ['bdSub', 'bdButton', 'bdSkip', 'bdOkTitle', 'bdOkSub'],
+                ];
+                function hasDot(si) {
+                  return STEP_FIELDS[si].some((k) => (pc[k] || '').trim().length > 0);
+                }
+                const accent   = previewColors.accentColor;
+                const bg       = previewColors.bgColor;
+                const isBgDef  = /^#fff(fff)?$/i.test(bg);
+                const cardBg   = isBgDef ? 'linear-gradient(145deg,#ffffff,#f8f9ff)' : bg;
+                const cardDark = !isBgDef && fgOn(bg) === '#FFFFFF';
+                const fgText   = cardDark ? '#ffffff' : '#111827';
+                const fgSub    = cardDark ? 'rgba(255,255,255,0.70)' : '#6b7280';
+                const btnFg    = fgOn(accent);
+                const samplePct  = config.emailDiscount?.percentage || config.pushDiscount?.percentage || 15;
+                const sampleDays = config.emailDiscount?.expiryDays || 7;
+                const bdLeadDays = config.birthdayDiscount?.leadDays ?? 3;
+                function copyVal(key, fallback, vars) {
+                  const raw = (pc[key] || '').trim();
+                  let text = raw || fallback;
+                  if (vars && vars.pct !== undefined) text = text.split('{pct}').join(String(vars.pct));
+                  if (vars && vars.days !== undefined) text = text.split('{days}').join(String(vars.days));
+                  return text;
+                }
+                const fieldInner = { ...fieldStyle, height: 42, borderColor: '#AEB4C2', color: '#171A22', width: '100%' };
+                const lblSt  = { fontSize: 13, fontWeight: 700, color: '#171A22' };
+                const ctrSt  = { fontSize: '11.5px', color: '#9ca3af' };
+                const helpSt = { fontSize: 12, color: '#5A6070', marginTop: 3 };
+                function CopyField({ fieldKey, label, placeholder, helper }) {
+                  const val = pc[fieldKey] || '';
+                  const max = PC_MAX[fieldKey];
+                  return (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
+                        <span style={lblSt}>{label}</span>
+                        <span style={ctrSt}>{val.length} / {max}</span>
+                      </div>
+                      <input className="disc-input" type="text" value={val} maxLength={max} placeholder={placeholder}
+                        onChange={(e) => setPc({ [fieldKey]: e.target.value })}
+                        style={fieldInner} />
+                      {helper && <div style={helpSt}>{helper}</div>}
+                    </div>
+                  );
+                }
+                const curStepFields = STEP_FIELDS[wordingTab];
+                const canReset = curStepFields.some((k) => (pc[k] || '').trim().length > 0);
+                /* preview content per tab */
+                const previewSteps = [
+                  /* 0 -- Discount box */
+                  () => (
+                    <div>
+                      <div style={{ fontSize: '11.5px', color: fgSub, marginBottom: 8, textAlign: 'center', lineHeight: 1.4 }}>
+                        {config.offerHeadline || 'Get a discount on your first order!'}
+                      </div>
+                      <div style={{ background: cardDark ? 'rgba(255,255,255,0.10)' : '#f9fafb', border: `1px solid ${cardDark ? 'rgba(255,255,255,0.22)' : '#e5e7eb'}`, borderRadius: 8, padding: '7px 10px', fontSize: 12, color: cardDark ? '#ffffff' : '#111827', marginBottom: 8 }}>
+                        {copyVal('emailPlaceholder', 'Your email', {})}
+                        {samplePct ? <span style={{ color: fgSub }}>{' (get ' + samplePct + '% off)'}</span> : null}
+                      </div>
+                      <div style={{ background: accent, borderRadius: 8, padding: '8px 12px', textAlign: 'center', fontSize: '12.5px', fontWeight: 700, color: btnFg, marginBottom: 6 }}>
+                        Allow push notifications
+                      </div>
+                      <div style={{ background: accent + '22', border: '1px solid ' + accent + '55', borderRadius: 8, padding: '7px 12px', textAlign: 'center', fontSize: 12, fontWeight: 600, color: accent }}>
+                        {copyVal('captureButton', 'Get my offer without notifications', {})}
+                      </div>
+                    </div>
+                  ),
+                  /* 1 -- Subscribed */
+                  () => (
+                    <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: fgText, marginBottom: 6 }}>
+                        {copyVal('subscribedTitle', 'Subscribed!', {})}
+                      </div>
+                      <div style={{ fontSize: 12, color: fgSub }}>
+                        {copyVal('subscribedSub', 'Getting your discount...', {})}
+                      </div>
+                    </div>
+                  ),
+                  /* 2 -- Offer unlocked */
+                  () => (
+                    <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: accent, marginBottom: 4 }}>
+                        {copyVal('unlockedTitle', samplePct + '% OFF Unlocked!', { pct: samplePct })}
+                      </div>
+                      <div style={{ fontSize: 12, color: fgSub }}>
+                        {copyVal('unlockedSub', 'Expires in ' + sampleDays + ' days', { days: sampleDays })}
+                      </div>
+                    </div>
+                  ),
+                  /* 3 -- Birthday step */
+                  () => {
+                    const bdSubFb = bdLeadDays
+                      ? 'Tell us your birthday. We will send your personal code ' + bdLeadDays + ' days before.'
+                      : 'Tell us your birthday. We will send your personal code a few days before.';
+                    return (
+                      <div>
+                        <div style={{ fontSize: 12, color: fgSub, marginBottom: 12, lineHeight: 1.5 }}>
+                          {copyVal('bdSub', bdSubFb, bdLeadDays ? { days: bdLeadDays } : {})}
+                        </div>
+                        <div style={{ background: accent, borderRadius: 8, padding: '8px 12px', textAlign: 'center', fontSize: '12.5px', fontWeight: 700, color: btnFg, marginBottom: 6 }}>
+                          {copyVal('bdButton', 'Send me my gift', {})}
+                        </div>
+                        <div style={{ textAlign: 'center', fontSize: '11.5px', color: fgSub }}>
+                          {copyVal('bdSkip', 'No thanks', {})}
+                        </div>
+                      </div>
+                    );
+                  },
+                ];
+                return (
+                  <div style={{ background: '#F7F7FF', border: '1px solid #D9D8FF', borderRadius: 12, margin: '0 0 16px', padding: '16px 20px' }}>
+                    {/* Panel header */}
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#171A22' }}>Entry popup wording</div>
+                      <div style={{ fontSize: 12, color: '#5A6070', marginTop: 2 }}>
+                        Change the text on each step after the first popup screen. Leave a field empty to use the default.
+                      </div>
+                    </div>
+                    {/* Step tabs */}
+                    <div role="tablist" style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                      {STEP_TABS.map((label, i) => {
+                        const active = wordingTab === i;
+                        return (
+                          <button key={label} role="tab" type="button" aria-selected={active}
+                            onClick={() => setWordingTab(i)}
+                            style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, padding: '5px 12px', borderRadius: 20, border: '1.5px solid ' + (active ? '#4f46e5' : '#D9D8FF'), background: active ? '#4f46e5' : '#ffffff', color: active ? '#ffffff' : '#4f46e5', cursor: 'pointer', fontWeight: active ? 700 : 500 }}
+                          >
+                            {label}
+                            {hasDot(i) && !active && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4f46e5', flexShrink: 0 }} />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {/* Two-column layout -- fields + preview; stacks below 700px via flexWrap */}
+                    <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                      {/* Fields column */}
+                      <div style={{ flex: 1, minWidth: 220 }}>
+                        {wordingTab === 0 && (<>
+                          <CopyField fieldKey="emailPlaceholder" label="Email placeholder" placeholder="Your email" helper='The email input hint. The "(get N% off)" suffix is added automatically.' />
+                          <CopyField fieldKey="captureButton" label='"Get my offer" button' placeholder="Get my offer without notifications" helper="Shown when the visitor skips push but leaves an email." />
+                        </>)}
+                        {wordingTab === 1 && (<>
+                          <CopyField fieldKey="subscribedTitle" label="Title" placeholder="Subscribed!" />
+                          <CopyField fieldKey="subscribedSub" label="Sub-text" placeholder="Getting your discount..." />
+                        </>)}
+                        {wordingTab === 2 && (<>
+                          <CopyField fieldKey="unlockedTitle" label="Title" placeholder="15% OFF Unlocked!" helper="Use {pct} for the discount percentage." />
+                          <CopyField fieldKey="unlockedSub" label="Sub-text" placeholder="Expires in 7 days" helper="Use {days} for the expiry days." />
+                        </>)}
+                        {wordingTab === 3 && (<>
+                          <div style={{ fontSize: '11.5px', color: '#5A6070', background: '#ede9fe', borderRadius: 6, padding: '6px 10px', marginBottom: 10 }}>
+                            The birthday heading and consent text live in the &quot;The birthday gift&quot; card below.
+                          </div>
+                          <CopyField fieldKey="bdSub" label="Birthday ask sub-text" placeholder="Tell us your birthday. We will send your personal code {days} days before." helper="Use {days} for the number of lead days." />
+                          <CopyField fieldKey="bdButton" label="Submit button" placeholder="Send me my gift" />
+                          <CopyField fieldKey="bdSkip" label="Skip link" placeholder="No thanks" />
+                          <CopyField fieldKey="bdOkTitle" label="Saved title" placeholder="You're all set" />
+                          <CopyField fieldKey="bdOkSub" label="Saved sub-text" placeholder="We'll send your gift code {days} days before your birthday." helper="Use {days} for the number of lead days." />
+                        </>)}
+                        {(wordingTab === 2 || wordingTab === 3) && (
+                          <div style={{ fontSize: '11.5px', color: '#5A6070', marginTop: 4 }}>
+                            Tokens: <code style={{ background: '#ede9fe', borderRadius: 3, padding: '1px 4px', fontSize: 11 }}>{'{pct}'}</code>{' '}= discount %, <code style={{ background: '#ede9fe', borderRadius: 3, padding: '1px 4px', fontSize: 11 }}>{'{days}'}</code>{' '}= days.
+                          </div>
+                        )}
+                        <button type="button" disabled={!canReset}
+                          onClick={() => { const p = {}; STEP_FIELDS[wordingTab].forEach((k) => { p[k] = ''; }); setPc(p); }}
+                          style={{ marginTop: 12, fontSize: '11.5px', color: canReset ? '#4f46e5' : '#9ca3af', background: 'none', border: 'none', cursor: canReset ? 'pointer' : 'default', padding: 0, textDecoration: canReset ? 'underline' : 'none' }}
+                        >
+                          Reset this step
+                        </button>
+                      </div>
+                      {/* Preview column -- 290px, fills without overflow */}
+                      <div style={{ width: 290, flexShrink: 0, minWidth: 200 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Preview</div>
+                        <div style={{ background: cardBg, borderRadius: 14, padding: '14px 16px', boxShadow: '0 4px 16px rgba(0,0,0,0.10)', width: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+                          <div style={{ height: 3, background: 'linear-gradient(90deg,' + accent + ',' + accent + '88,transparent)', borderRadius: 2, marginBottom: 12, marginLeft: -16, marginRight: -16, marginTop: -14 }} />
+                          {previewSteps[wordingTab]?.()}
+                        </div>
+                        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>
+                          Uses your popup accent and background colours.
+                        </div>
+                      </div>
+                    </div>
+                    {/* Footer */}
+                    <div style={{ fontSize: '11.5px', color: '#5A6070', marginTop: 14, borderTop: '1px solid #D9D8FF', paddingTop: 10 }}>
+                      Saved with &quot;Save discount settings&quot;.
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Method 3: After first order */}
@@ -1133,194 +1337,6 @@ export default function Discounts({ shop }) {
             </div>
           </div>
 
-          {/* Entry popup wording */}
-          {(() => {
-            const pc = config.popupCopy || {};
-            function setPc(patch) {
-              setConfig((c) => ({ ...c, popupCopy: { ...(c.popupCopy || {}), ...patch } }));
-            }
-            const PC_MAX = {
-              emailPlaceholder:40, captureButton:50, subscribedTitle:40, subscribedSub:60,
-              unlockedTitle:40, unlockedSub:60, bdSub:120, bdButton:30, bdSkip:30,
-              bdOkTitle:40, bdOkSub:120,
-            };
-            function CopyField({ label, fieldKey, placeholder, helper }) {
-              const val = pc[fieldKey] || '';
-              const max = PC_MAX[fieldKey];
-              return (
-                <div style={{ marginBottom: 12 }}>
-                  <div style={labelRowStyle}>
-                    <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>{label}</span>
-                    <span style={counterStyle}>{val.length} / {max}</span>
-                  </div>
-                  <input
-                    className="disc-input"
-                    type="text"
-                    value={val}
-                    maxLength={max}
-                    placeholder={placeholder}
-                    onChange={(e) => setPc({ [fieldKey]: e.target.value })}
-                    style={{ ...fieldStyle, height: 34, width: '100%' }}
-                  />
-                  {helper && <div style={helperStyle}>{helper}</div>}
-                </div>
-              );
-            }
-            const groupHeadStyle = { fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10, marginTop: 4 };
-            return (
-              <div style={{ ...DS.card, marginBottom: 0 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 16 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>Entry popup wording</div>
-                  <button
-                    type="button"
-                    onClick={() => setConfig((c) => ({ ...c, popupCopy: {} }))}
-                    style={{ fontSize: 11, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer', padding: 0, textDecoration: 'underline' }}
-                  >
-                    Reset to default wording
-                  </button>
-                </div>
-                <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 16 }}>
-                  Leave a field blank to use the default. Tokens: <code style={{ background: '#f3f4f6', borderRadius: 4, padding: '1px 4px' }}>{'{pct}'}</code> = discount %, <code style={{ background: '#f3f4f6', borderRadius: 4, padding: '1px 4px' }}>{'{days}'}</code> = days.
-                </div>
-
-                <div style={groupHeadStyle}>Discount box</div>
-                <CopyField fieldKey="emailPlaceholder" label="Email placeholder" placeholder="Your email" helper="The email input hint. The '(get N% off)' suffix is added automatically." />
-                <CopyField fieldKey="captureButton" label="'Get my offer' button" placeholder="Get my offer without notifications" helper="Shown when the visitor skips notifications but leaves an email." />
-
-                <div style={{ ...groupHeadStyle, marginTop: 16 }}>After subscribing</div>
-                <CopyField fieldKey="subscribedTitle" label="Title" placeholder="Subscribed!" />
-                <CopyField fieldKey="subscribedSub" label="Sub-text" placeholder="Getting your discount…" />
-
-                <div style={{ ...groupHeadStyle, marginTop: 16 }}>Offer unlocked</div>
-                <CopyField fieldKey="unlockedTitle" label="Title" placeholder="15% OFF Unlocked!" helper="Use {pct} for the discount percentage." />
-                <CopyField fieldKey="unlockedSub" label="Sub-text" placeholder="Expires in 7 days" helper="Use {days} for the expiry days." />
-
-                <div style={{ ...groupHeadStyle, marginTop: 16 }}>Birthday step</div>
-                <CopyField fieldKey="bdSub" label="Birthday ask sub-text" placeholder="Tell us your birthday. We will send your personal code {days} days before." helper="Use {days} for lead days. Leave blank to use the default." />
-                <CopyField fieldKey="bdButton" label="Submit button" placeholder="Send me my gift" />
-                <CopyField fieldKey="bdSkip" label="Skip link" placeholder="No thanks" />
-                <CopyField fieldKey="bdOkTitle" label="Saved title" placeholder="You're all set" />
-                <CopyField fieldKey="bdOkSub" label="Saved sub-text" placeholder="We'll send your gift code {days} days before your birthday." helper="Use {days} for lead days." />
-
-                {/* Live preview with 4 tabs */}
-                {(() => {
-                  const accent = previewColors.accentColor;
-                  const bg     = previewColors.bgColor;
-                  const isBgDefault = /^#fff(fff)?$/i.test(bg);
-                  const cardBg = isBgDefault ? 'linear-gradient(145deg,#ffffff,#f8f9ff)' : bg;
-                  const cardDark = !isBgDefault && (fgOn(bg) === '#FFFFFF');
-                  const fgText   = cardDark ? '#ffffff' : '#111827';
-                  const fgSub    = cardDark ? 'rgba(255,255,255,0.70)' : '#6b7280';
-                  const btnFg    = fgOn(accent);
-                  const samplePct  = config.emailDiscount?.percentage || config.pushDiscount?.percentage || 15;
-                  const sampleDays = config.emailDiscount?.expiryDays || 7;
-                  const bdLeadDays = config.birthdayDiscount?.leadDays ?? 3;
-
-                  function copyVal(key, fallback, vars = {}) {
-                    const raw = (pc[key] || '').trim();
-                    let text = raw || fallback;
-                    if (vars.pct !== undefined) text = text.split('{pct}').join(String(vars.pct));
-                    if (vars.days !== undefined) text = text.split('{days}').join(String(vars.days));
-                    return text;
-                  }
-
-                  const tabs = [
-                    () => (
-                      <div>
-                        <div style={{ fontSize: 12, color: fgSub, marginBottom: 8, textAlign: 'center' }}>
-                          {(config.offerHeadline || '') || 'Get a discount on your first order!'}
-                        </div>
-                        <div style={{ background: cardDark ? 'rgba(255,255,255,0.10)' : '#f9fafb', border: `1px solid ${cardDark ? 'rgba(255,255,255,0.22)' : '#e5e7eb'}`, borderRadius: 10, padding: '8px 12px', fontSize: 12, color: cardDark ? '#ffffff' : '#111827', marginBottom: 8 }}>
-                          {copyVal('emailPlaceholder', 'Your email', {})}
-                          <span style={{ color: fgSub }}>{samplePct ? ` (get ${samplePct}% off)` : ''}</span>
-                        </div>
-                        <div style={{ background: accent, borderRadius: 10, padding: '9px 0', textAlign: 'center', fontSize: 13, fontWeight: 700, color: btnFg }}>
-                          Allow
-                        </div>
-                        <div style={{ marginTop: 6, padding: '7px 0', textAlign: 'center', fontSize: 12, color: cardDark ? 'rgba(255,255,255,0.55)' : '#9ca3af', borderTop: `1px solid ${cardDark ? 'rgba(255,255,255,0.12)' : '#f0f0f0'}` }}>
-                          {copyVal('captureButton', 'Get my offer without notifications', {})}
-                        </div>
-                      </div>
-                    ),
-                    () => (
-                      <div style={{ textAlign: 'center', padding: '8px 0' }}>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: fgText, marginBottom: 4 }}>
-                          {copyVal('subscribedTitle', 'Subscribed!', {})}
-                        </div>
-                        <div style={{ fontSize: 12, color: fgSub }}>
-                          {copyVal('subscribedSub', 'Getting your discount…', {})}
-                        </div>
-                      </div>
-                    ),
-                    () => (
-                      <div style={{ textAlign: 'center', padding: '8px 0' }}>
-                        <div style={{ fontSize: 15, fontWeight: 800, color: fgText, marginBottom: 2 }}>
-                          {copyVal('unlockedTitle', `${samplePct}% OFF Unlocked!`, { pct: samplePct })}
-                        </div>
-                        <div style={{ fontSize: 11, color: fgSub }}>
-                          {copyVal('unlockedSub', `Expires in ${sampleDays} days`, { days: sampleDays })}
-                        </div>
-                      </div>
-                    ),
-                    () => {
-                      const bdSubFallback = bdLeadDays
-                        ? `Tell us your birthday. We will send your personal code ${bdLeadDays} days before.`
-                        : 'Tell us your birthday. We will send your personal code a few days before.';
-                      const bdOkSubFallback = bdLeadDays
-                        ? `We’ll send your gift code ${bdLeadDays} days before your birthday.`
-                        : 'We’ll send your gift code a few days before your birthday.';
-                      return (
-                        <div>
-                          <div style={{ fontSize: 12, color: fgSub, marginBottom: 10, lineHeight: 1.4 }}>
-                            {copyVal('bdSub', bdSubFallback, bdLeadDays ? { days: bdLeadDays } : {})}
-                          </div>
-                          <div style={{ background: accent, borderRadius: 10, padding: '8px 0', textAlign: 'center', fontSize: 12, fontWeight: 700, color: btnFg, marginBottom: 6 }}>
-                            {copyVal('bdButton', 'Send me my gift', {})}
-                          </div>
-                          <div style={{ textAlign: 'center', fontSize: 11, color: fgSub }}>
-                            {copyVal('bdSkip', 'No thanks', {})}
-                          </div>
-                        </div>
-                      );
-                    },
-                  ];
-
-                  return (
-                    <div style={{ borderTop: `1px solid ${DS.gray200}`, marginTop: 20, paddingTop: 16 }}>
-                      <div style={fieldLabelStyle}>Live preview</div>
-                      {/* Tab row */}
-                      <div style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap' }}>
-                        {PREVIEW_TABS.map((label, i) => (
-                          <button
-                            key={label}
-                            type="button"
-                            onClick={() => setPreviewTab(i)}
-                            style={{
-                              fontSize: 11, padding: '4px 10px', borderRadius: 6,
-                              border: `1px solid ${previewTab === i ? accent : '#e5e7eb'}`,
-                              background: previewTab === i ? accent + '18' : 'transparent',
-                              color: previewTab === i ? accent : '#6b7280',
-                              cursor: 'pointer', fontWeight: previewTab === i ? 700 : 400,
-                            }}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                      {/* Preview card */}
-                      <div style={{ background: cardBg, borderRadius: 14, padding: '16px 18px', boxShadow: '0 4px 16px rgba(0,0,0,0.10)', maxWidth: 300, margin: '0 auto' }}>
-                        <div style={{ height: 3, background: `linear-gradient(90deg,${accent},${accent}88,transparent)`, borderRadius: 2, marginBottom: 12, marginInline: -18, marginTop: -16 }} />
-                        {tabs[previewTab]?.()}
-                      </div>
-                      <div style={{ fontSize: 10, color: '#9ca3af', textAlign: 'center', marginTop: 6 }}>
-                        Uses your current popup accent and background colours.
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            );
-          })()}
 
           {/* Save button — right aligned, status text to its left */}
           <div

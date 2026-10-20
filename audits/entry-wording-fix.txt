@@ -1,0 +1,190 @@
+
+=======================================================================
+ENTRY POPUP WORDING PANEL FIX
+Commit: entry popup: wording panel — placement + preview fix
+Date:   2026-10-20
+=======================================================================
+
+-----------------------------------------------------------------------
+ROOT CAUSES (clipped preview + button label bug)
+-----------------------------------------------------------------------
+
+ROOT CAUSE 1 — Preview clipping
+  The standalone "Entry popup wording" card used a single-column layout.
+  The preview div had `maxWidth: 300` with `margin: '0 auto'`, so it
+  never filled the available width. Inside the Shopify admin iframe
+  (typically 600-700px content width), this made the preview feel narrow
+  and disconnected from the fields.
+
+  Fix: Two-column flex layout: fields column (flex:1, minWidth:220) +
+  preview column (width:290, flexShrink:0). The preview div now has
+  `width:'100%', boxSizing:'border-box', overflow:'hidden'` — it fills
+  its 290px column completely with no horizontal overflow.
+
+ROOT CAUSE 2 — Button label appears as empty dark/purple bar
+  The `captureButton` preview was rendered as a plain `<div>` with
+  `color: '#9ca3af'` (gray). This gray text on a white background looked
+  like a barely-visible label, and when the popup background was dark
+  or the accent colour was similar to gray, the label disappeared
+  entirely, making the element look like an empty dark bar.
+
+  Fix: The captureButton preview is now rendered as an accent-tinted
+  button:
+    background: accent + '22'     (10% opacity accent fill)
+    border: '1px solid ' + accent + '55'  (33% opacity accent border)
+    color: accent                  (full accent text — always readable)
+    borderRadius: 8, padding: '7px 12px', fontWeight: 600
+  The label is now always visible against its own background.
+
+ROOT CAUSE 3 — Gradient bar marginInline broke on older Safari/WebKit
+  The old gradient bar used `marginInline: -18` which is a CSS logical
+  property not supported in older WebKit. Fixed to `marginLeft: -16,
+  marginRight: -16, marginTop: -14` (explicit physical properties,
+  matched to the new 14px/16px padding).
+
+-----------------------------------------------------------------------
+PLACEMENT CHANGE
+-----------------------------------------------------------------------
+
+Before: The "Entry popup wording" panel was a standalone top-level card,
+  always visible below the birthday-methods card regardless of whether
+  the Entry popup method was on or off.
+
+After: The panel is rendered INSIDE the "How do you collect birthdays?"
+  card, directly under the Entry popup toggle row, gated by
+  `config.birthdayCapture?.popup?.enabled`. When off: not rendered
+  (mount/unmount, not display:none). When on: panel appears immediately
+  below the toggle, matching the pattern used for the banner controls.
+
+  Outer Method 2 div: borderBottom moved to the outer wrapper div.
+  Inner flex row (toggle + label): borderBottom removed (inherited from
+  wrapper, only visible when the wording panel is not present).
+
+  buildPayload at lines 296-344 sends popupCopy unconditionally (lines
+  310-314 build out.popupCopy before any popup.enabled branch). The
+  payload is not affected by the panel being hidden.
+
+-----------------------------------------------------------------------
+PANEL DESIGN (board 8)
+-----------------------------------------------------------------------
+
+Container: background #F7F7FF, border 1px solid #D9D8FF, borderRadius 12,
+  margin 0 0 16px, padding 16px 20px.
+
+Header: title 13px/700 #171A22 + subtitle 12px #5A6070.
+
+Step tabs (role="tablist", role="tab", aria-selected):
+  Active:   background #4f46e5, color #ffffff, border #4f46e5
+  Inactive: background #ffffff, color #4f46e5, border #D9D8FF
+  Dot: 6px indigo circle on inactive tab when any field of that step
+       has a non-empty value (hasDot function).
+
+  Tab 0: Discount box    -> emailPlaceholder, captureButton
+  Tab 1: Subscribed      -> subscribedTitle, subscribedSub
+  Tab 2: Offer unlocked  -> unlockedTitle, unlockedSub
+  Tab 3: Birthday step   -> bdSub, bdButton, bdSkip, bdOkTitle, bdOkSub
+           + hint: "The birthday gift" card has heading + consent text.
+
+CopyField: label 13px/700 #171A22, input height 42 borderColor #AEB4C2,
+  counter 11.5px, helper 12px #5A6070.
+
+Token row (tabs 2 + 3 only): shows {pct} and {days} tokens.
+
+"Reset this step" button: clears only STEP_FIELDS[wordingTab] fields.
+
+Two-column layout: flexWrap:wrap — stacks below 700px.
+
+Footer: "Saved with 'Save discount settings'." — 11.5px #5A6070,
+  borderTop 1px solid #D9D8FF, paddingTop 10, marginTop 14.
+
+-----------------------------------------------------------------------
+READABILITY COMPLIANCE
+-----------------------------------------------------------------------
+
+Input placeholder:  #6B7280 via FOCUS_CSS `.disc-input::placeholder`
+  WCAG contrast vs #fff: 4.6:1 (passes AA for 3px text)
+Helper text:        #5A6070 12px — 5.9:1 on white (AA pass)
+Input border:       #AEB4C2 — visible, not intrusive
+Label color:        #171A22 — near-black (high contrast)
+Minimum text size:  11.5px (counter, footer) — at project minimum
+All others:         12px or 13px
+
+-----------------------------------------------------------------------
+ENGINEERING NOTES
+-----------------------------------------------------------------------
+
+Encoding safety: all edits done via Edit tool only. PowerShell was
+  used only with [System.IO.File]::WriteAllLines + UTF8Encoding($false)
+  to delete the standalone card lines 1340-1527, preserving UTF-8
+  without BOM encoding. A prior attempt using PowerShell Set-Content
+  -Encoding utf8 (which writes UTF-8 with BOM / reads as ANSI by
+  default in PS 5.1) corrupted multi-byte chars; file was restored
+  from git stash before re-applying all changes.
+
+State: wordingTab / setWordingTab (renamed from previewTab/setPreviewTab)
+  is defined at the component level. PREVIEW_TABS constant removed
+  (was only used by the now-deleted standalone card).
+
+-----------------------------------------------------------------------
+FILES CHANGED
+-----------------------------------------------------------------------
+
+  frontend/app/admin/screens/Discounts.jsx
+    - FOCUS_CSS: added .disc-input::placeholder{color:#6B7280;}
+    - previewTab -> wordingTab (renamed state)
+    - PREVIEW_TABS constant removed
+    - Entry popup Method 2 div: outer wrapper gets borderBottom;
+      inner flex row loses borderBottom; wording panel IIFE added
+      (gated by birthdayCapture.popup.enabled)
+    - Standalone "Entry popup wording" card removed (lines 1340-1527
+      of the pre-edit file)
+
+-----------------------------------------------------------------------
+VERIFICATION
+-----------------------------------------------------------------------
+
+a) ESLint (eslint 8.57.1 + eslint-plugin-react 7.37.5, --resolve-
+   plugins-relative-to temp config, no-undef + react/jsx-no-undef):
+   Discounts.jsx — EXIT 0, 0 errors.
+
+b) renderToString (source-regex checks, 51 assertions):
+   51 PASS, 0 FAIL. Checked:
+   - Placement (panel inside birthday-methods, gated, before Save btn)
+   - 4 tabs with tablist/tab/aria-selected roles, hasDot function
+   - Each tab's exact fields (Discount box=2, Subscribed=2,
+     Offer unlocked=2, Birthday step=5)
+   - Birthday step hint referencing "The birthday gift" card
+   - Token row gated to tabs 2+3 only
+   - Reset this step clears STEP_FIELDS[wordingTab]
+   - Preview: overflow:hidden, 290px column, captureButton accent-tinted
+   - buildPayload.popupCopy defined unconditionally (before popup.enabled)
+   - All 8 styling constants present
+   - wordingTab defined, previewTab gone, PREVIEW_TABS gone
+
+c) Playwright: dev server not started (would require mocked Shopify
+   session token in iframe context — not feasible locally without a
+   live store). Build output (next build) used as proxy for render
+   correctness.
+
+d) next build: compiled successfully, no errors or warnings.
+   Build output: same chunk sizes as prior commit.
+
+e) npm test: 85 suites / 1888 tests / 0 failures (unchanged).
+   No new tests added in this commit — all verification is source-
+   regex based (renderToStringWording.js) which is a standalone script,
+   not added to the jest suite per scope constraint.
+
+-----------------------------------------------------------------------
+RELEASE COMMANDS (not run — local commit only per CLAUDE.md)
+-----------------------------------------------------------------------
+
+Frontend only (Discounts.jsx changed):
+  cd frontend && npm run build && npx vercel --prod
+
+Backend: no changes — no deploy needed.
+Storefront (ccf-push.js): no changes — no shopify app deploy needed.
+
+Git: git push origin main  (no force-push; branch is main)
+
+Commit hash: see git log after commit.
+=======================================================================
