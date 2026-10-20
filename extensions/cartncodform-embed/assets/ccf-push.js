@@ -884,91 +884,305 @@
   var CCF_BDAY_KEY = 'ccf_bday_' + SHOP_DOMAIN;
   var CCF_BDAY_DISMISS_KEY = 'ccf_bday_dismiss_' + SHOP_DOMAIN;
 
+  // ─── Birthday dialog CSS (injected once per page) ────────────────────────
+  function ccfInjectBirthdayStyles() {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('ccf-bd-styles')) return;
+    var chev = "data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20width%3D'12'%20height%3D'8'%20viewBox%3D'0%200%2012%208'%3E%3Cpath%20d%3D'M1%201l5%205%205-5'%20stroke%3D'%234A5062'%20stroke-width%3D'1.5'%20fill%3D'none'%20stroke-linecap%3D'round'%2F%3E%3C%2Fsvg%3E";
+    var css = [
+      '.ccf-bd-scrim{position:fixed;inset:0;background:rgba(23,26,34,.55);',
+      'z-index:1000000;display:flex;align-items:center;justify-content:center;',
+      'padding:16px;box-sizing:border-box;}',
+      '.ccf-bd-dialog{background:#fff;border-radius:18px;',
+      'box-shadow:0 24px 60px rgba(0,0,0,.35);',
+      'width:620px;max-width:92vw;display:flex;overflow:hidden;position:relative;}',
+      '.ccf-bd-left{width:240px;min-width:240px;display:flex;flex-direction:column;',
+      'align-items:center;justify-content:center;padding:32px 24px;gap:16px;',
+      'background:var(--ccf-bd-accent,#4F46E5);}',
+      '.ccf-bd-left-pct{font-size:44px!important;font-weight:800!important;',
+      'color:#fff!important;line-height:1!important;',
+      'font-family:inherit!important;margin:0!important;padding:0!important;}',
+      '.ccf-bd-left-sub{font-size:13px!important;font-weight:600!important;',
+      'color:rgba(255,255,255,.95)!important;text-align:center;',
+      'line-height:1.4!important;font-family:inherit!important;',
+      'margin:0!important;padding:0!important;}',
+      '.ccf-bd-right{flex:1;padding:32px 32px 24px;position:relative;',
+      'font-family:inherit;min-width:0;box-sizing:border-box;}',
+      '.ccf-bd-close{position:absolute;top:12px;right:12px;',
+      'width:44px!important;height:44px!important;background:none!important;',
+      'border:none!important;cursor:pointer!important;',
+      'display:flex;align-items:center;justify-content:center;',
+      'border-radius:50%!important;color:#4A5062;padding:0!important;',
+      'box-sizing:border-box!important;margin:0!important;',
+      'min-height:44px!important;line-height:1!important;}',
+      '.ccf-bd-close:hover{background:#f3f4f6!important;}',
+      '.ccf-bd-close:focus{outline:2px solid var(--ccf-bd-accent,#4F46E5);outline-offset:2px;}',
+      '.ccf-bd-title{font-size:22px;font-weight:800;color:#111827;',
+      'line-height:1.25;margin:0 0 10px;padding-right:48px;',
+      'font-family:inherit;letter-spacing:0;}',
+      '.ccf-bd-sub{font-size:14px;color:#4A5062;margin:0 0 20px;',
+      'line-height:1.5;font-family:inherit;}',
+      '.ccf-bd-fields{display:flex;gap:12px;margin-bottom:8px;}',
+      '.ccf-bd-field{display:flex;flex-direction:column;gap:4px;}',
+      '.ccf-bd-field-month{flex:1;}',
+      '.ccf-bd-field-day{width:110px;min-width:110px;}',
+      '.ccf-bd-label{font-size:12px!important;font-weight:700!important;',
+      'color:#3B4152!important;display:block!important;',
+      'font-family:inherit!important;letter-spacing:0!important;',
+      'text-transform:none!important;line-height:1.4!important;',
+      'margin:0!important;padding:0!important;}',
+      '.ccf-bd-sel{height:46px!important;width:100%!important;',
+      'padding:0 32px 0 12px!important;font-size:15px!important;',
+      'border:1px solid #B8BDCB!important;border-radius:8px!important;',
+      'background-color:#fff!important;color:#111827!important;',
+      'box-sizing:border-box!important;font-family:inherit!important;',
+      'line-height:1!important;margin:0!important;letter-spacing:0!important;',
+      '-webkit-appearance:none!important;-moz-appearance:none!important;',
+      'appearance:none!important;',
+      'background-image:url("'+chev+'")!important;',
+      'background-repeat:no-repeat!important;',
+      'background-position:right 12px center!important;cursor:pointer;}',
+      '.ccf-bd-sel:focus{outline:2px solid var(--ccf-bd-accent,#4F46E5)!important;',
+      'outline-offset:0!important;border-color:transparent!important;}',
+      '.ccf-bd-error{font-size:12px;color:#B42318;margin:0 0 8px;',
+      'line-height:1.4;display:none;font-family:inherit;}',
+      '.ccf-bd-error.ccf-bd-visible{display:block;}',
+      '.ccf-bd-btn-primary{width:100%!important;height:48px!important;',
+      'border:none!important;',
+      'background:var(--ccf-bd-accent,#4F46E5)!important;',
+      'color:var(--ccf-bd-btn-fg,#fff)!important;',
+      'font-size:15px!important;font-weight:700!important;',
+      'border-radius:10px!important;cursor:pointer!important;',
+      'display:flex!important;align-items:center;justify-content:center;',
+      'gap:8px;font-family:inherit!important;box-sizing:border-box!important;',
+      'margin-bottom:8px!important;letter-spacing:0!important;',
+      'text-transform:none!important;line-height:1!important;',
+      'padding:0!important;min-height:48px!important;}',
+      '.ccf-bd-btn-primary:disabled{opacity:.75!important;cursor:not-allowed!important;}',
+      '.ccf-bd-btn-primary:focus{outline:2px solid var(--ccf-bd-accent,#4F46E5);outline-offset:2px;}',
+      '.ccf-bd-btn-skip{width:100%!important;background:none!important;',
+      'border:none!important;cursor:pointer!important;text-align:center!important;',
+      'font-size:13px!important;font-weight:600!important;color:#4A5062!important;',
+      'text-decoration:underline!important;min-height:36px!important;',
+      'padding:6px 0!important;font-family:inherit!important;',
+      'display:block!important;box-sizing:border-box!important;',
+      'letter-spacing:0!important;text-transform:none!important;',
+      'line-height:1.4!important;margin:0!important;}',
+      '.ccf-bd-btn-skip:focus{outline:2px solid var(--ccf-bd-accent,#4F46E5);outline-offset:2px;}',
+      '.ccf-bd-consent{font-size:11px;color:#5A6070;text-align:center;',
+      'margin-top:12px;line-height:1.5;font-family:inherit;',
+      'letter-spacing:0;text-transform:none;}',
+      '.ccf-bd-spinner{display:inline-block!important;',
+      'width:16px!important;height:16px!important;',
+      'border:2px solid rgba(255,255,255,.35)!important;',
+      'border-top-color:#fff!important;border-radius:50%!important;',
+      'flex-shrink:0!important;',
+      'animation:ccf-bd-spin .65s linear infinite!important;}',
+      '@keyframes ccf-bd-spin{to{transform:rotate(360deg);}}',
+      '.ccf-bd-success{display:flex;flex-direction:column;align-items:center;',
+      'justify-content:center;text-align:center;gap:12px;',
+      'padding:24px 0;font-family:inherit;}',
+      '.ccf-bd-success-icon{width:52px;height:52px;border-radius:50%;',
+      'background:#E0F5F1;color:#0F766E;',
+      'display:flex;align-items:center;justify-content:center;flex-shrink:0;}',
+      '.ccf-bd-success-title{font-size:20px;font-weight:800;color:#111827;',
+      'margin:0;font-family:inherit;line-height:1.2;}',
+      '.ccf-bd-success-sub{font-size:14px;color:#4A5062;margin:0;',
+      'line-height:1.5;font-family:inherit;}',
+      '@media(max-width:639px){',
+      '.ccf-bd-scrim{align-items:flex-end;padding:0;}',
+      '.ccf-bd-dialog{width:100%!important;max-width:100%!important;',
+      'border-radius:20px 20px 0 0!important;flex-direction:column;',
+      'padding:14px 20px 20px!important;box-sizing:border-box!important;}',
+      '.ccf-bd-left{display:none!important;}',
+      '.ccf-bd-phone-header{display:flex;align-items:center;gap:12px;margin-bottom:16px;}',
+      '.ccf-bd-phone-icon{width:48px;height:48px;border-radius:12px;',
+      'flex-shrink:0;background:var(--ccf-bd-accent,#4F46E5);',
+      'display:flex;align-items:center;justify-content:center;}',
+      '.ccf-bd-phone-headline{display:flex;flex-direction:column;gap:2px;}',
+      '.ccf-bd-phone-title{font-size:17px;font-weight:800;color:#111827;',
+      'margin:0;font-family:inherit;line-height:1.2;}',
+      '.ccf-bd-phone-pct{font-size:13px;color:#4A5062;margin:0;font-family:inherit;line-height:1.3;}',
+      '.ccf-bd-drag{width:40px;height:4px;background:#D1D5DB;border-radius:2px;margin:0 auto 12px;}',
+      '.ccf-bd-right{padding:0!important;}',
+      '.ccf-bd-title{display:none!important;}',
+      '.ccf-bd-sub{display:none!important;}',
+      '.ccf-bd-close{top:0!important;right:0!important;}',
+      '.ccf-bd-field-day{width:92px!important;min-width:92px!important;}',
+      '.ccf-bd-sel{height:48px!important;}',
+      '.ccf-bd-btn-primary{height:48px!important;min-height:48px!important;}',
+      '.ccf-bd-btn-skip{min-height:44px!important;}',
+      '}',
+      '@media(max-width:639px) and (prefers-reduced-motion:no-preference){',
+      '.ccf-bd-dialog{animation:ccf-bd-slideup .22s ease-out;}',
+      '}',
+      '@keyframes ccf-bd-slideup{from{transform:translateY(100%);}to{transform:translateY(0);}}'
+    ].join('');
+    var s = document.createElement('style');
+    s.id = 'ccf-bd-styles';
+    s.textContent = css;
+    document.head.appendChild(s);
+  }
+
   function ccfRenderBirthdayForm(container, opts, onDone) {
     try {
       var accentColor = (opts && opts.accentColor) || '#4f46e5';
-      var source = (opts && opts.source) || 'popup';
-      var consentText = (opts && opts.consentText) || 'We’ll use your birthday only to send you a birthday offer.';
+      var source      = (opts && opts.source) || 'popup';
+      var consentText = (opts && opts.consentText) ||
+        'We’ll use your birthday only to send you a birthday offer.';
+      var isDark = ccfIsDarkColor(accentColor);
+      var btnFg  = isDark ? '#fff' : '#1a1a2e';
 
+      ccfInjectBirthdayStyles();
+      if (container.style && container.style.setProperty) {
+        container.style.setProperty('--ccf-bd-accent', accentColor);
+        container.style.setProperty('--ccf-bd-btn-fg', btnFg);
+      }
       container.innerHTML = '';
 
-      if (opts && opts.offerText) {
-        var head = document.createElement('div');
-        head.style.cssText = 'font-size:16px;font-weight:700;color:#111827;margin-bottom:4px;';
-        head.textContent = opts.offerText;
-        container.appendChild(head);
-      }
+      var fieldsRow = document.createElement('div');
+      fieldsRow.className = 'ccf-bd-fields';
 
-      var consentEl = document.createElement('div');
-      consentEl.style.cssText = 'font-size:11px;color:#6b7280;margin-bottom:14px;line-height:1.4;';
-      consentEl.textContent = consentText;
-      container.appendChild(consentEl);
-
-      var fieldRow = document.createElement('div');
-      fieldRow.style.cssText = 'display:flex;gap:8px;margin-bottom:12px;';
-
+      var monthField = document.createElement('div');
+      monthField.className = 'ccf-bd-field ccf-bd-field-month';
+      var monthLabel = document.createElement('label');
+      monthLabel.className = 'ccf-bd-label';
+      monthLabel.htmlFor = 'ccf-bd-month';
+      monthLabel.textContent = 'Month';
       var monthSel = document.createElement('select');
+      monthSel.id = 'ccf-bd-month';
+      monthSel.className = 'ccf-bd-sel';
       monthSel.setAttribute('aria-label', 'Birthday month');
-      monthSel.style.cssText = 'flex:1;height:36px;font-size:13px;padding:0 8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#111827;box-sizing:border-box;';
-      var MONTHS = ['Month','January','February','March','April','May','June','July','August','September','October','November','December'];
+      var MONTHS = ['Month','January','February','March','April','May','June',
+        'July','August','September','October','November','December'];
       for (var mi = 0; mi < MONTHS.length; mi++) {
         var mopt = document.createElement('option');
-        mopt.value = String(mi);
-        mopt.textContent = MONTHS[mi];
+        mopt.value = String(mi); mopt.textContent = MONTHS[mi];
         monthSel.appendChild(mopt);
       }
-      fieldRow.appendChild(monthSel);
+      monthField.appendChild(monthLabel);
+      monthField.appendChild(monthSel);
 
+      var dayField = document.createElement('div');
+      dayField.className = 'ccf-bd-field ccf-bd-field-day';
+      var dayLabel = document.createElement('label');
+      dayLabel.className = 'ccf-bd-label';
+      dayLabel.htmlFor = 'ccf-bd-day';
+      dayLabel.textContent = 'Day';
       var daySel = document.createElement('select');
+      daySel.id = 'ccf-bd-day';
+      daySel.className = 'ccf-bd-sel';
       daySel.setAttribute('aria-label', 'Birthday day');
-      daySel.style.cssText = 'width:84px;height:36px;font-size:13px;padding:0 8px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#111827;box-sizing:border-box;';
-      var dopt0 = document.createElement('option');
-      dopt0.value = '0'; dopt0.textContent = 'Day'; daySel.appendChild(dopt0);
-      for (var di = 1; di <= 31; di++) {
-        var dopt = document.createElement('option');
-        dopt.value = String(di); dopt.textContent = String(di); daySel.appendChild(dopt);
+
+      var MAX_DAYS = [0,31,29,31,30,31,30,31,31,30,31,30,31];
+      function updateDayOptions(m) {
+        var prev = daySel.value;
+        daySel.innerHTML = '';
+        var d0 = document.createElement('option');
+        d0.value = '0'; d0.textContent = 'Day'; daySel.appendChild(d0);
+        var max = (m >= 1 && m <= 12) ? MAX_DAYS[m] : 31;
+        for (var di = 1; di <= max; di++) {
+          var dopt = document.createElement('option');
+          dopt.value = String(di); dopt.textContent = String(di);
+          daySel.appendChild(dopt);
+        }
+        if (Number(prev) >= 1 && Number(prev) <= max) daySel.value = prev;
       }
-      fieldRow.appendChild(daySel);
-      container.appendChild(fieldRow);
+      updateDayOptions(0);
+      monthSel.addEventListener('change', function() {
+        updateDayOptions(parseInt(monthSel.value, 10));
+      });
+
+      dayField.appendChild(dayLabel);
+      dayField.appendChild(daySel);
+      fieldsRow.appendChild(monthField);
+      fieldsRow.appendChild(dayField);
+      container.appendChild(fieldsRow);
+
+      var errEl = document.createElement('div');
+      errEl.className = 'ccf-bd-error';
+      errEl.setAttribute('role', 'alert');
+      errEl.setAttribute('aria-live', 'polite');
+      container.appendChild(errEl);
 
       var saveBtn = document.createElement('button');
       saveBtn.type = 'button';
-      saveBtn.textContent = 'Save my birthday';
-      saveBtn.style.cssText = 'width:100%;padding:10px;background:' + accentColor + ';color:#fff;border:none;border-radius:9px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:8px;min-height:44px;';
+      saveBtn.className = 'ccf-bd-btn-primary';
+      saveBtn.textContent = 'Send me my gift';
       container.appendChild(saveBtn);
 
       var skipBtn = document.createElement('button');
       skipBtn.type = 'button';
-      skipBtn.textContent = 'Skip';
-      skipBtn.style.cssText = 'width:100%;background:none;border:none;color:#9ca3af;font-size:12px;cursor:pointer;padding:8px;min-height:44px;';
+      skipBtn.className = 'ccf-bd-btn-skip';
+      skipBtn.textContent = 'No thanks';
       container.appendChild(skipBtn);
 
-      var errEl = document.createElement('div');
-      errEl.style.cssText = 'font-size:11px;color:#dc2626;margin-top:4px;display:none;';
-      container.appendChild(errEl);
+      var consentEl = document.createElement('div');
+      consentEl.className = 'ccf-bd-consent';
+      consentEl.textContent = consentText;
+      container.appendChild(consentEl);
 
       skipBtn.addEventListener('click', function() { onDone(false); });
 
       saveBtn.addEventListener('click', function() {
         var month = parseInt(monthSel.value, 10);
-        var day = parseInt(daySel.value, 10);
+        var day   = parseInt(daySel.value,   10);
         if (!month || !day) {
           errEl.textContent = 'Please select a month and day.';
-          errEl.style.display = '';
+          errEl.classList.add('ccf-bd-visible');
           return;
         }
-        errEl.style.display = 'none';
+        errEl.classList.remove('ccf-bd-visible');
+
+        var spinner = document.createElement('span');
+        spinner.className = 'ccf-bd-spinner';
+        spinner.setAttribute('aria-hidden', 'true');
         saveBtn.disabled = true;
         saveBtn.textContent = 'Saving…';
+        saveBtn.appendChild(spinner);
+
         var sid = '';
         try { sid = getSessionId(); } catch (e) {}
-        fetch(window.location.origin + '/apps/cartncodform/birthday?shop=' + encodeURIComponent(SHOP_DOMAIN), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ month: month, day: day, sessionId: sid, source: source })
-        })
-          .then(function() { onDone(true); })
-          .catch(function() { onDone(false); }); // failure never blocks
+        fetch(
+          window.location.origin +
+          '/apps/cartncodform/birthday?shop=' + encodeURIComponent(SHOP_DOMAIN),
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ month: month, day: day, sessionId: sid, source: source })
+          }
+        )
+          .then(function() {
+            var leadDays = (discountConfig && discountConfig.birthdayDiscount &&
+              discountConfig.birthdayDiscount.leadDays > 0)
+              ? discountConfig.birthdayDiscount.leadDays : null;
+            var subLine = leadDays
+              ? ('We’ll send your gift code ' + leadDays +
+                 ' days before your birthday.')
+              : 'We’ll send your gift code a few days before your birthday.';
+            container.innerHTML = '';
+            var succ = document.createElement('div');
+            succ.className = 'ccf-bd-success';
+            var iconWrap = document.createElement('div');
+            iconWrap.className = 'ccf-bd-success-icon';
+            iconWrap.innerHTML =
+              '<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28"' +
+              ' viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
+              ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"' +
+              ' aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
+            var succTitle = document.createElement('p');
+            succTitle.className = 'ccf-bd-success-title';
+            succTitle.textContent = 'You’re all set';
+            var succSub = document.createElement('p');
+            succSub.className = 'ccf-bd-success-sub';
+            succSub.textContent = subLine;
+            succ.appendChild(iconWrap);
+            succ.appendChild(succTitle);
+            succ.appendChild(succSub);
+            container.appendChild(succ);
+            setTimeout(function() { onDone(true); }, 2000);
+          })
+          .catch(function() { onDone(false); });
       });
     } catch (e) {
       try { onDone(false); } catch (_) {}
@@ -984,44 +1198,186 @@
       if (!bdEnabled) { onDone(); return; }
       try { if (localStorage.getItem(CCF_BDAY_KEY)) { onDone(); return; } } catch (e) {}
 
-      var section = wrap ? wrap.querySelector('#ccf-content-section') : null;
-      var bdOverlay = null;
-      if (!section) {
-        // top_bar and other styles without #ccf-content-section (e.g. mobile slim bar):
-        // create a bottom-sheet overlay so the birthday form is still reachable.
-        bdOverlay = document.createElement('div');
-        bdOverlay.style.cssText = 'position:fixed;left:0;right:0;top:0;bottom:0;z-index:2147483647;display:flex;align-items:flex-end;justify-content:center;background:rgba(0,0,0,0.45);padding:16px;box-sizing:border-box;';
-        var bdCard = document.createElement('div');
-        bdCard.style.cssText = 'background:#fff;border-radius:16px;padding:20px;width:100%;max-width:420px;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,sans-serif;';
-        bdOverlay.appendChild(bdCard);
-        document.body.appendChild(bdOverlay);
-        section = bdCard;
+      ccfInjectBirthdayStyles();
+
+      var isDark  = ccfIsDarkColor(accentColor);
+      var btnFg   = isDark ? '#fff' : '#1a1a2e';
+      var pct = (discountConfig.birthdayDiscount &&
+        discountConfig.birthdayDiscount.percentage) || 15;
+      var offerText = (discountConfig.birthdayDiscount &&
+        discountConfig.birthdayDiscount.offerText) || 'Get a birthday gift';
+      var consentText = (discountConfig.birthdayDiscount &&
+        discountConfig.birthdayDiscount.consentText) ||
+        'We’ll use your birthday only to send you a birthday offer.';
+      var leadDays = (discountConfig.birthdayDiscount &&
+        discountConfig.birthdayDiscount.leadDays > 0)
+        ? discountConfig.birthdayDiscount.leadDays : null;
+      var subText = leadDays
+        ? ('Tell us your birthday. We will send your personal code ' +
+           leadDays + ' days before.')
+        : 'Tell us your birthday. We will send your personal code a few days before.';
+
+      var prevFocused = document.activeElement;
+      var closed = false;
+      var scrim;
+
+      function doClose(saved) {
+        if (closed) return;
+        closed = true;
+        document.removeEventListener('keydown', handleKeydown);
+        try { localStorage.setItem(CCF_BDAY_KEY, saved ? '1' : 'skip'); } catch (e) {}
+        if (scrim && scrim.parentNode) scrim.parentNode.removeChild(scrim);
+        if (prevFocused && typeof prevFocused.focus === 'function') {
+          try { prevFocused.focus(); } catch (_) {}
+        }
+        onDone();
       }
 
-      var offerText = (discountConfig.birthdayDiscount && discountConfig.birthdayDiscount.offerText)
-        || 'Get a birthday gift';
-      var consentText = (discountConfig.birthdayDiscount && discountConfig.birthdayDiscount.consentText)
-        || 'We\u2019ll use your birthday only to send you a birthday offer.';
+      var giftSvg64 =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"' +
+        ' viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.5"' +
+        ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<rect x="3" y="8" width="18" height="4" rx="1"/>' +
+        '<path d="M12 8v13"/>' +
+        '<path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/>' +
+        '<path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8' +
+        'a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5"/></svg>';
+      var giftSvg24 =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"' +
+        ' viewBox="0 0 24 24" fill="none" stroke="' + btnFg + '"' +
+        ' stroke-width="2" stroke-linecap="round" stroke-linejoin="round"' +
+        ' aria-hidden="true">' +
+        '<rect x="3" y="8" width="18" height="4" rx="1"/>' +
+        '<path d="M12 8v13"/>' +
+        '<path d="M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/>' +
+        '<path d="M7.5 8a2.5 2.5 0 0 1 0-5A4.8 8 0 0 1 12 8' +
+        'a4.8 8 0 0 1 4.5-5 2.5 2.5 0 0 1 0 5"/></svg>';
 
-      section.style.textAlign = 'center';
-      section.style.padding = '8px 0 4px';
+      scrim = document.createElement('div');
+      scrim.className = 'ccf-bd-scrim';
+      scrim.addEventListener('click', function(e) {
+        if (e.target === scrim) doClose(false);
+      });
 
-      ccfRenderBirthdayForm(section, {
+      var dialog = document.createElement('div');
+      dialog.className = 'ccf-bd-dialog';
+      dialog.setAttribute('role', 'dialog');
+      dialog.setAttribute('aria-modal', 'true');
+      dialog.setAttribute('aria-labelledby', 'ccf-bd-title');
+      if (dialog.style && dialog.style.setProperty) {
+        dialog.style.setProperty('--ccf-bd-accent', accentColor);
+        dialog.style.setProperty('--ccf-bd-btn-fg', btnFg);
+      }
+
+      var leftPanel = document.createElement('div');
+      leftPanel.className = 'ccf-bd-left';
+      leftPanel.innerHTML = giftSvg64;
+      var pctEl = document.createElement('p');
+      pctEl.className = 'ccf-bd-left-pct';
+      pctEl.textContent = pct + '%';
+      leftPanel.appendChild(pctEl);
+      var subEl = document.createElement('p');
+      subEl.className = 'ccf-bd-left-sub';
+      subEl.textContent = 'off everything on your birthday';
+      leftPanel.appendChild(subEl);
+      dialog.appendChild(leftPanel);
+
+      var rightPanel = document.createElement('div');
+      rightPanel.className = 'ccf-bd-right';
+
+      var drag = document.createElement('div');
+      drag.className = 'ccf-bd-drag';
+      drag.setAttribute('aria-hidden', 'true');
+      rightPanel.appendChild(drag);
+
+      var phoneHdr = document.createElement('div');
+      phoneHdr.className = 'ccf-bd-phone-header';
+      var phoneIcon = document.createElement('div');
+      phoneIcon.className = 'ccf-bd-phone-icon';
+      phoneIcon.innerHTML = giftSvg24;
+      var phoneHL = document.createElement('div');
+      phoneHL.className = 'ccf-bd-phone-headline';
+      var phoneTitleEl = document.createElement('p');
+      phoneTitleEl.className = 'ccf-bd-phone-title';
+      phoneTitleEl.textContent = offerText;
+      var phonePctEl = document.createElement('p');
+      phonePctEl.className = 'ccf-bd-phone-pct';
+      phonePctEl.textContent = pct + '% off everything';
+      phoneHL.appendChild(phoneTitleEl);
+      phoneHL.appendChild(phonePctEl);
+      phoneHdr.appendChild(phoneIcon);
+      phoneHdr.appendChild(phoneHL);
+      rightPanel.appendChild(phoneHdr);
+
+      var closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.className = 'ccf-bd-close';
+      closeBtn.setAttribute('aria-label', 'Close');
+      closeBtn.innerHTML =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"' +
+        ' viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"' +
+        ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<line x1="18" y1="6" x2="6" y2="18"/>' +
+        '<line x1="6" y1="6" x2="18" y2="18"/></svg>';
+      closeBtn.addEventListener('click', function() { doClose(false); });
+      rightPanel.appendChild(closeBtn);
+
+      var titleEl = document.createElement('h2');
+      titleEl.id = 'ccf-bd-title';
+      titleEl.className = 'ccf-bd-title';
+      titleEl.textContent = offerText;
+      rightPanel.appendChild(titleEl);
+
+      var subP = document.createElement('p');
+      subP.className = 'ccf-bd-sub';
+      subP.textContent = subText;
+      rightPanel.appendChild(subP);
+
+      var formArea = document.createElement('div');
+      rightPanel.appendChild(formArea);
+
+      dialog.appendChild(rightPanel);
+      scrim.appendChild(dialog);
+      document.body.appendChild(scrim);
+
+      ccfRenderBirthdayForm(formArea, {
         accentColor: accentColor,
-        offerText: offerText,
         consentText: consentText,
         source: 'popup',
-      }, function(saved) {
-        try { localStorage.setItem(CCF_BDAY_KEY, saved ? '1' : 'skip'); } catch (e) {}
-        if (bdOverlay && bdOverlay.parentNode) bdOverlay.parentNode.removeChild(bdOverlay);
-        onDone();
-      });
+      }, function(saved) { doClose(saved); });
+
+      var monthSelEl = scrim.querySelector('#ccf-bd-month');
+      if (monthSelEl) { try { monthSelEl.focus(); } catch (_) {} }
+
+      function handleKeydown(e) {
+        if (e.key === 'Escape') { doClose(false); return; }
+        if (e.key !== 'Tab') return;
+        var focusable = Array.prototype.slice.call(
+          dialog.querySelectorAll(
+            'button:not([disabled]),select:not([disabled]),' +
+            '[tabindex]:not([tabindex="-1"])'
+          )
+        ).filter(function(el) {
+          return !!(el.offsetWidth || el.offsetHeight ||
+            el.getClientRects().length);
+        });
+        if (focusable.length < 2) return;
+        var first = focusable[0];
+        var last  = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault(); last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault(); first.focus();
+        }
+      }
+      document.addEventListener('keydown', handleKeydown);
+
     } catch (e) {
       try { onDone(); } catch (_) {}
     }
   }
 
-  // Top announcement banner — shown when banner.enabled AND no birthday saved
+    // Top announcement banner — shown when banner.enabled AND no birthday saved
   // AND not dismissed within dismissDays. Normal-flow bar (not fixed), inserted
   // as the first child of <body>. Admin-configured text via textContent only.
   function ccfInitBirthdayBanner() {
@@ -4153,6 +4509,7 @@
     window.__ccf_test.setDiscountConfig = function(v) { discountConfig = v; };
     window.__ccf_test.CCF_BDAY_KEY = CCF_BDAY_KEY;
     window.__ccf_test.renderBirthdayForm = ccfRenderBirthdayForm;
+    window.__ccf_test.injectBirthdayStyles = ccfInjectBirthdayStyles;
     window.__ccf_test.showSoftPrompt = showSoftPrompt;
     window.__ccf_test.setPopupConfig = function(v) { popupConfig = v; };
   }

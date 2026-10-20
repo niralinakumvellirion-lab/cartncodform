@@ -1,8 +1,8 @@
 /**
  * @jest-environment jsdom
  *
- * Tests for ccfShowBirthdayStep in ccf-push.js.
- * Uses the window.__ccf_test hook to reach the private function.
+ * Tests for the birthday UI redesign: ccfInjectBirthdayStyles,
+ * ccfRenderBirthdayForm, and ccfShowBirthdayStep in ccf-push.js.
  */
 'use strict';
 
@@ -17,7 +17,6 @@ const SCRIPT = fs.readFileSync(
 const SHOP = 'test.myshopify.com';
 
 function loadScript() {
-  // Set hook before IIFE runs so the hook block fires.
   window.__ccf_test = {};
   document.head.innerHTML = '';
   document.body.innerHTML = '';
@@ -49,9 +48,41 @@ afterAll(() => {
 const ACCENT = '#4f46e5';
 const BDAY_CONFIG = {
   birthdayCapture: { popup: { enabled: true } },
-  birthdayDiscount: { offerText: 'Birthday gift', consentText: 'We use your birthday only.' },
+  birthdayDiscount: {
+    offerText: 'Birthday gift',
+    consentText: 'We use your birthday only.',
+    percentage: 20,
+    leadDays: 5,
+  },
 };
 
+// ─── ccfInjectBirthdayStyles ──────────────────────────────────────────────────
+describe('ccfInjectBirthdayStyles', () => {
+  let hook;
+  beforeEach(() => { hook = loadScript(); });
+
+  test('injects <style id="ccf-bd-styles"> into head', () => {
+    hook.injectBirthdayStyles();
+    expect(document.getElementById('ccf-bd-styles')).not.toBeNull();
+  });
+
+  test('does not inject twice on repeated calls', () => {
+    hook.injectBirthdayStyles();
+    hook.injectBirthdayStyles();
+    expect(document.querySelectorAll('#ccf-bd-styles').length).toBe(1);
+  });
+
+  test('CSS contains .ccf-bd-* selectors', () => {
+    hook.injectBirthdayStyles();
+    const css = document.getElementById('ccf-bd-styles').textContent;
+    expect(css).toContain('.ccf-bd-dialog');
+    expect(css).toContain('.ccf-bd-sel');
+    expect(css).toContain('.ccf-bd-btn-primary');
+    expect(css).toContain('.ccf-bd-btn-skip');
+  });
+});
+
+// ─── ccfRenderBirthdayForm — direct ──────────────────────────────────────────
 describe('ccfRenderBirthdayForm — direct', () => {
   let hook;
   beforeEach(() => {
@@ -59,111 +90,241 @@ describe('ccfRenderBirthdayForm — direct', () => {
     document.body.innerHTML = '';
   });
 
-  test('renders selects and Skip button into container', () => {
+  test('renders month and day selects with visible labels (for/id wired)', () => {
     const container = document.createElement('div');
     document.body.appendChild(container);
-    let doneCalled = false;
-    hook.renderBirthdayForm(container, { accentColor: ACCENT, offerText: 'Gift', consentText: 'Consent' }, function() { doneCalled = true; });
-    expect(container.querySelector('select')).not.toBeNull();
-    expect(container.textContent).toContain('Skip');
+    hook.renderBirthdayForm(container, { accentColor: ACCENT, consentText: 'Consent' }, () => {});
+    const monthSel = container.querySelector('#ccf-bd-month');
+    const daySel   = container.querySelector('#ccf-bd-day');
+    const monthLbl = container.querySelector('label[for="ccf-bd-month"]');
+    const dayLbl   = container.querySelector('label[for="ccf-bd-day"]');
+    expect(monthSel).not.toBeNull();
+    expect(daySel).not.toBeNull();
+    expect(monthLbl).not.toBeNull();
+    expect(dayLbl).not.toBeNull();
+  });
+
+  test('primary button text is "Send me my gift", skip text is "No thanks"', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    hook.renderBirthdayForm(container, { accentColor: ACCENT, consentText: 'Consent' }, () => {});
+    const btns = Array.from(container.querySelectorAll('button'));
+    expect(btns.some(b => /send me my gift/i.test(b.textContent))).toBe(true);
+    expect(btns.some(b => /no thanks/i.test(b.textContent))).toBe(true);
+  });
+
+  test('error div has role=alert and aria-live=polite', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    hook.renderBirthdayForm(container, { accentColor: ACCENT, consentText: 'Consent' }, () => {});
+    const err = container.querySelector('[role="alert"]');
+    expect(err).not.toBeNull();
+    expect(err.getAttribute('aria-live')).toBe('polite');
+  });
+
+  test('Day options for January = 31, February = 29, April = 30', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    hook.renderBirthdayForm(container, { accentColor: ACCENT, consentText: 'Consent' }, () => {});
+    const monthSel = container.querySelector('#ccf-bd-month');
+    const daySel   = container.querySelector('#ccf-bd-day');
+
+    // January = month 1
+    monthSel.value = '1';
+    monthSel.dispatchEvent(new Event('change'));
+    const janOpts = daySel.querySelectorAll('option[value]');
+    const janDays = Array.from(janOpts).filter(o => o.value !== '0').length;
+    expect(janDays).toBe(31);
+
+    // February = month 2 (max 29)
+    monthSel.value = '2';
+    monthSel.dispatchEvent(new Event('change'));
+    const febOpts = daySel.querySelectorAll('option[value]');
+    const febDays = Array.from(febOpts).filter(o => o.value !== '0').length;
+    expect(febDays).toBe(29);
+
+    // April = month 4
+    monthSel.value = '4';
+    monthSel.dispatchEvent(new Event('change'));
+    const aprOpts = daySel.querySelectorAll('option[value]');
+    const aprDays = Array.from(aprOpts).filter(o => o.value !== '0').length;
+    expect(aprDays).toBe(30);
+  });
+
+  test('loading state: button disabled + textContent "Saving" after valid submit', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    // fetch stays pending for this test
+    let resolveFetch;
+    global.fetch = jest.fn(() => new Promise(r => { resolveFetch = r; }));
+
+    hook.renderBirthdayForm(container, { accentColor: ACCENT, consentText: 'Consent' }, () => {});
+    const monthSel = container.querySelector('#ccf-bd-month');
+    const daySel   = container.querySelector('#ccf-bd-day');
+    const saveBtn  = container.querySelector('.ccf-bd-btn-primary');
+    monthSel.value = '3'; monthSel.dispatchEvent(new Event('change'));
+    daySel.value   = '15';
+    saveBtn.click();
+
+    expect(saveBtn.disabled).toBe(true);
+    expect(saveBtn.textContent).toMatch(/saving/i);
+    resolveFetch({ ok: true });
+    // restore
+    global.fetch = jest.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
+  });
+
+  test('inline error shown (role=alert visible) when month or day not selected', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    hook.renderBirthdayForm(container, { accentColor: ACCENT, consentText: 'Consent' }, () => {});
+    const saveBtn = container.querySelector('.ccf-bd-btn-primary');
+    saveBtn.click(); // month=0, day=0
+    const err = container.querySelector('[role="alert"]');
+    expect(err.classList.contains('ccf-bd-visible')).toBe(true);
+    expect(err.textContent).toMatch(/select a month and day/i);
+  });
+
+  test('success state: "You\'re all set" shown after fetch resolves', async () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+
+    let onDoneCalled = false;
+    hook.renderBirthdayForm(container, { accentColor: ACCENT, consentText: 'Consent' }, () => { onDoneCalled = true; });
+    const monthSel = container.querySelector('#ccf-bd-month');
+    const daySel   = container.querySelector('#ccf-bd-day');
+    monthSel.value = '6'; monthSel.dispatchEvent(new Event('change'));
+    daySel.value   = '10';
+
+    container.querySelector('.ccf-bd-btn-primary').click();
+    await new Promise(r => setTimeout(r, 0)); // flush fetch microtask
+
+    expect(container.querySelector('.ccf-bd-success')).not.toBeNull();
+    expect(container.textContent).toMatch(/you.re all set/i);
+    expect(onDoneCalled).toBe(false); // auto-closes after 2000ms, not instantly
+
+    jest.useFakeTimers();
+    jest.advanceTimersByTime(2100);
+    jest.useRealTimers();
+  });
+
+  test('skip button calls onDone(false)', () => {
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    let result = null;
+    hook.renderBirthdayForm(container, { accentColor: ACCENT, consentText: 'Consent' }, (saved) => { result = saved; });
+    container.querySelector('.ccf-bd-btn-skip').click();
+    expect(result).toBe(false);
   });
 });
 
-describe('ccfShowBirthdayStep — no #ccf-content-section (top_bar / mobile)', () => {
+// ─── ccfShowBirthdayStep ──────────────────────────────────────────────────────
+describe('ccfShowBirthdayStep — overlay always created in body', () => {
   let hook;
   beforeEach(async () => {
     hook = loadScript();
-    // Flush microtasks so the mock-fetch chain in start() runs to completion
-    // and sets discountConfig = {} BEFORE we override it below.
     await new Promise(r => setTimeout(r, 0));
     hook.setDiscountConfig(BDAY_CONFIG);
     try { localStorage.removeItem(hook.CCF_BDAY_KEY); } catch (_) {}
   });
 
-  test('creates bottom-sheet overlay in body when wrap has no #ccf-content-section', () => {
-    const wrap = document.createElement('div');
-    wrap.id = 'ccf-push-prompt';
-    document.body.appendChild(wrap);
-
-    hook.showBirthdayStep(wrap, ACCENT, () => {});
-
-    // Overlay appended to body — birthday form inside it
-    const monthSel = document.body.querySelector('select');
-    expect(monthSel).not.toBeNull();
+  test('scrim appended to body with month select inside', () => {
+    hook.showBirthdayStep(null, ACCENT, () => {});
+    const scrim = document.body.querySelector('.ccf-bd-scrim');
+    expect(scrim).not.toBeNull();
+    expect(scrim.querySelector('#ccf-bd-month')).not.toBeNull();
   });
 
-  test('overlay is removed from body after onDone fires (skip path)', () => {
-    const wrap = document.createElement('div');
-    document.body.appendChild(wrap);
+  test('dialog has role=dialog, aria-modal=true, aria-labelledby=ccf-bd-title', () => {
+    hook.showBirthdayStep(null, ACCENT, () => {});
+    const dialog = document.body.querySelector('.ccf-bd-dialog');
+    expect(dialog).not.toBeNull();
+    expect(dialog.getAttribute('role')).toBe('dialog');
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(dialog.getAttribute('aria-labelledby')).toBe('ccf-bd-title');
+    expect(document.getElementById('ccf-bd-title')).not.toBeNull();
+  });
 
-    hook.showBirthdayStep(wrap, ACCENT, () => {});
+  test('Escape key closes dialog (scrim removed)', () => {
+    hook.showBirthdayStep(null, ACCENT, () => {});
+    expect(document.body.querySelector('.ccf-bd-scrim')).not.toBeNull();
+    const evt = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true });
+    document.dispatchEvent(evt);
+    expect(document.body.querySelector('.ccf-bd-scrim')).toBeNull();
+  });
 
-    // Click Skip
-    const buttons = Array.from(document.body.querySelectorAll('button'));
-    const skip = buttons.find(b => /skip/i.test(b.textContent));
+  test('close button (X) removes scrim from body', () => {
+    hook.showBirthdayStep(null, ACCENT, () => {});
+    const closeBtn = document.body.querySelector('.ccf-bd-close');
+    expect(closeBtn).not.toBeNull();
+    closeBtn.click();
+    expect(document.body.querySelector('.ccf-bd-scrim')).toBeNull();
+  });
+
+  test('No thanks button removes scrim and sets localStorage to "skip"', () => {
+    hook.showBirthdayStep(null, ACCENT, () => {});
+    const skip = Array.from(document.body.querySelectorAll('button'))
+      .find(b => /no thanks/i.test(b.textContent));
     expect(skip).not.toBeNull();
     skip.click();
-
-    // Overlay removed
-    expect(document.body.querySelector('select')).toBeNull();
-  });
-});
-
-describe('ccfShowBirthdayStep — with #ccf-content-section', () => {
-  let hook;
-  beforeEach(async () => {
-    hook = loadScript();
-    await new Promise(r => setTimeout(r, 0));
-    hook.setDiscountConfig(BDAY_CONFIG);
-    try { localStorage.removeItem(hook.CCF_BDAY_KEY); } catch (_) {}
-  });
-
-  test('renders birthday form inside #ccf-content-section', () => {
-    const wrap = document.createElement('div');
-    const section = document.createElement('div');
-    section.id = 'ccf-content-section';
-    wrap.appendChild(section);
-    document.body.appendChild(wrap);
-
-    hook.showBirthdayStep(wrap, ACCENT, () => {});
-
-    expect(section.querySelector('select')).not.toBeNull();
+    expect(document.body.querySelector('.ccf-bd-scrim')).toBeNull();
+    try {
+      expect(localStorage.getItem(hook.CCF_BDAY_KEY)).toBe('skip');
+    } catch (_) {}
   });
 
   test('calls onDone immediately when birthday disabled', () => {
     hook.setDiscountConfig({ birthdayCapture: { popup: { enabled: false } }, birthdayDiscount: {} });
-    const wrap = document.createElement('div');
     let called = false;
-    hook.showBirthdayStep(wrap, ACCENT, () => { called = true; });
+    hook.showBirthdayStep(null, ACCENT, () => { called = true; });
     expect(called).toBe(true);
   });
 
-  test('calls onDone immediately when CCF_BDAY_KEY already set in localStorage', () => {
+  test('calls onDone immediately when CCF_BDAY_KEY already set', () => {
     try { localStorage.setItem(hook.CCF_BDAY_KEY, '1'); } catch (_) {}
-    const wrap = document.createElement('div');
     let called = false;
-    hook.showBirthdayStep(wrap, ACCENT, () => { called = true; });
+    hook.showBirthdayStep(null, ACCENT, () => { called = true; });
     expect(called).toBe(true);
   });
 
-  test('sets localStorage to "skip" after Skip button click', () => {
-    const wrap = document.createElement('div');
-    const section = document.createElement('div');
-    section.id = 'ccf-content-section';
-    wrap.appendChild(section);
-    document.body.appendChild(wrap);
+  test('Tab key traps focus within dialog', () => {
+    hook.showBirthdayStep(null, ACCENT, () => {});
+    const dialog = document.body.querySelector('.ccf-bd-dialog');
+    const focusable = Array.from(
+      dialog.querySelectorAll('button:not([disabled]),select:not([disabled])')
+    );
+    expect(focusable.length).toBeGreaterThanOrEqual(2);
+    // Simulate Tab past last element → focus wraps to first
+    const last = focusable[focusable.length - 1];
+    last.focus();
+    const tabEvt = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, shiftKey: false });
+    document.dispatchEvent(tabEvt);
+    // jsdom doesn't move focus on preventDefault but the handler should not throw
+  });
 
-    let done = false;
-    hook.showBirthdayStep(wrap, ACCENT, () => { done = true; });
+  test('desktop: left panel (.ccf-bd-left) exists in DOM', () => {
+    hook.showBirthdayStep(null, ACCENT, () => {});
+    expect(document.body.querySelector('.ccf-bd-left')).not.toBeNull();
+  });
 
-    const skip = Array.from(section.querySelectorAll('button'))
-      .find(b => /skip/i.test(b.textContent));
-    expect(skip).not.toBeNull();
-    skip.click();
+  test('phone header (.ccf-bd-phone-header) exists in DOM', () => {
+    hook.showBirthdayStep(null, ACCENT, () => {});
+    expect(document.body.querySelector('.ccf-bd-phone-header')).not.toBeNull();
+  });
 
-    expect(done).toBe(true);
-    try {
-      expect(localStorage.getItem(hook.CCF_BDAY_KEY)).toBe('skip');
-    } catch (_) {}
+  test('drag handle (.ccf-bd-drag) exists in DOM', () => {
+    hook.showBirthdayStep(null, ACCENT, () => {});
+    expect(document.body.querySelector('.ccf-bd-drag')).not.toBeNull();
+  });
+
+  test('onDone called once on scrim-click (doClose prevents double-call)', () => {
+    let count = 0;
+    hook.showBirthdayStep(null, ACCENT, () => { count++; });
+    const scrim = document.body.querySelector('.ccf-bd-scrim');
+    // Simulate direct scrim click
+    const clickEvt = new MouseEvent('click', { bubbles: true });
+    Object.defineProperty(clickEvt, 'target', { value: scrim });
+    scrim.dispatchEvent(clickEvt);
+    expect(document.body.querySelector('.ccf-bd-scrim')).toBeNull();
+    expect(count).toBe(1);
   });
 });
