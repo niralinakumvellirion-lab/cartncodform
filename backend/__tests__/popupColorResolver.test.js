@@ -73,11 +73,11 @@ describe('ccfResolvePopupColors', () => {
       expect(r.text).toBe('#171A22');
     });
 
-    test("textMode='auto' uses bg-dark flag", () => {
+    test("textMode='auto' uses WCAG contrast (board values #171A22 / #F4F4F5)", () => {
       const light = ccfResolvePopupColors({ bgColor: '#ffffff', textMode: 'auto' });
       const dark  = ccfResolvePopupColors({ bgColor: '#111827', textMode: 'auto' });
-      expect(light.text).toBe('#111827');
-      expect(dark.text).toBe('#ffffff');
+      expect(light.text).toBe('#171A22');
+      expect(dark.text).toBe('#F4F4F5');
     });
 
     test("textMode='custom' with textColor set uses that value", () => {

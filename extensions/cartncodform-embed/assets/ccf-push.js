@@ -560,10 +560,10 @@
   // popup-redesign-2: shared style builders so the main popup, the
   // discount-capture popup, and the split layout all match the same
   // premium visual language.
-  function ccfInputStyle(dark) {
+  function ccfInputStyle(dark, fg) {
     var bg  = dark ? 'rgba(255,255,255,0.10)' : '#f9fafb';
     var bdr = dark ? 'rgba(255,255,255,0.22)' : '#e5e7eb';
-    var col = dark ? '#ffffff' : '#111827';
+    var col = fg || (dark ? '#ffffff' : '#111827');
     return 'width:100%;padding:11px 14px;font-size:13px;' +
       'border:1.5px solid ' + bdr + ';border-radius:12px;box-sizing:border-box;' +
       'margin-bottom:8px;color:' + col + ';background:' + bg + ';font-family:inherit;';
@@ -2106,7 +2106,7 @@
       var text;
       if (textM === 'white') text = '#ffffff';
       else if (textM === 'dark') text = '#171A22';
-      else if (textM === 'auto') text = dark ? '#ffffff' : '#111827';
+      else if (textM === 'auto') text = fgOn(rawBg) === '#FFFFFF' ? '#F4F4F5' : '#171A22';
       else /* custom */ text = c.textColor || defFg || (dark ? '#ffffff' : '#111827');
       var btnM = c.buttonTextColor || 'auto';
       var btnFg;
@@ -2867,6 +2867,7 @@
         ? 'linear-gradient(145deg,#ffffff,#f8f9ff)'
         : cardBgRaw;
       var cardDark = _r.dark;
+      var textIsLight = !ccfIsDarkColor(_r.text);
       wrap.style.cssText = isMobile ? [
         'position:fixed',
         'top:50%',
@@ -3031,7 +3032,7 @@
           'font-weight:700',
           'letter-spacing:3px',
           'text-transform:uppercase',
-          'color:' + (cardDark ? 'rgba(255,255,255,0.50)' : '#9ca3af'),
+          'color:' + (textIsLight ? 'rgba(255,255,255,0.50)' : '#9ca3af'),
           'margin-bottom:8px'
         ].join(';');
         cardBrand.textContent = cfg.brandName;
@@ -3055,7 +3056,7 @@
         var cardSub = document.createElement('div');
         cardSub.style.cssText = [
           'font-size:13px',
-          'color:' + (cardDark ? 'rgba(255,255,255,0.70)' : '#6b7280'),
+          'color:' + (textIsLight ? 'rgba(255,255,255,0.70)' : '#6b7280'),
           'margin-bottom:16px',
           'line-height:1.5',
           'text-align:' + cardAlign
@@ -3098,12 +3099,12 @@
         cardEmailInput.className = 'ccf-input';
         var cardEp = ccfFieldPct('emailDiscount');
         cardEmailInput.placeholder = ccfCopy('emailPlaceholder', 'Your email', {}) + (cardEp ? ' (get ' + cardEp + '% off)' : '');
-        cardEmailInput.style.cssText = ccfInputStyle(cardDark);
+        cardEmailInput.style.cssText = ccfInputStyle(cardDark, _r.text);
         cardContent.appendChild(cardEmailInput);
       }
       ccfBuildWhatsappFields(cardContent, {
-        inputBg: cardDark ? 'rgba(255,255,255,0.10)' : '#f9fafb',
-        inputFg: cardDark ? '#ffffff' : '#111827',
+        inputBg: _r.inputBg,
+        inputFg: _r.text,
         darkBg: cardDark,
       });
 
@@ -3112,13 +3113,13 @@
       if (ccfCaptureMode()) { cardContent.appendChild(buildOfferBtn(accent, _r.text)); }
 
       deny = buildDenyBtn(ccfDenyButtonStyle());
-      if (cardDark) deny.style.color = 'rgba(255,255,255,0.55)';
+      if (textIsLight) deny.style.color = 'rgba(255,255,255,0.55)';
       cardContent.appendChild(deny);
 
       if (cfg.showBranding) {
         cardContent.appendChild(buildBranding(
           'margin-top:12px;font-size:10px;color:' +
-          (cardDark ? 'rgba(255,255,255,0.30)' : '#d1d5db') +
+          (textIsLight ? 'rgba(255,255,255,0.30)' : '#d1d5db') +
           ';text-align:center;letter-spacing:0.5px;'));
       }
 

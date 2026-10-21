@@ -15,7 +15,7 @@
  *   6  wordingTab      0
  *   7  popupPanelView  0  (entry-popup-colours: 0=Wording, 1=Colours)
  *   8  coloursPatch    {}
- *   9  coloursSaving   false
+ * (coloursSaving removed in follow-up — single-save)
  */
 
 // --- useState / useEffect control (must appear before any require) ----------
@@ -55,9 +55,9 @@ const DISCOUNTS_SRC = fs.readFileSync(
 // Default preview colours (indigo accent, white bg → light card)
 const DEFAULT_COLORS = { accentColor: '#4f46e5', bgColor: '#ffffff', textColor: '', buttonTextColor: 'auto', textMode: 'custom', styleId: 'classic' };
 
-// Builds the 10-element state array expected by DiscountsScreen.
+// Builds the 9-element state array expected by DiscountsScreen.
 function makeStates({ config = {}, loading = false, previewColors = DEFAULT_COLORS, wordingTab = 0, popupPanelView = 0 } = {}) {
-  return [config, loading, false, false, '', previewColors, wordingTab, popupPanelView, {}, false];
+  return [config, loading, false, false, '', previewColors, wordingTab, popupPanelView, {}];
 }
 
 // Renders the Discounts component with controlled initial state.

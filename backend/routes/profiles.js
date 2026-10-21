@@ -781,9 +781,18 @@ router.patch('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, r
   try {
     const shop = req.params.shopDomain.trim().toLowerCase();
     const set = {};
+    const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+    const HEX_COLOR_FIELDS = new Set(['accentColor', 'bgColor', 'textColor']);
+    const ignored = [];
+
     for (const key of POPUP_FIELDS) {
       if (Object.prototype.hasOwnProperty.call(req.body, key)) {
-        set[`popup.${key}`] = key === 'layout' ? normalizeLayout(req.body[key]) : req.body[key];
+        const val = key === 'layout' ? normalizeLayout(req.body[key]) : req.body[key];
+        if (HEX_COLOR_FIELDS.has(key) && !HEX_RE.test(val || '')) {
+          ignored.push(`popup.${key}`);
+          continue;
+        }
+        set[`popup.${key}`] = val;
       }
     }
 
@@ -815,9 +824,14 @@ router.patch('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, r
     if (req.body.mobilePopup && typeof req.body.mobilePopup === 'object') {
       for (const key of POPUP_FIELDS) {
         if (Object.prototype.hasOwnProperty.call(req.body.mobilePopup, key)) {
-          set[`mobilePopup.${key}`] = key === 'layout'
+          const val = key === 'layout'
             ? normalizeLayout(req.body.mobilePopup[key])
             : req.body.mobilePopup[key];
+          if (HEX_COLOR_FIELDS.has(key) && !HEX_RE.test(val || '')) {
+            ignored.push(`mobilePopup.${key}`);
+            continue;
+          }
+          set[`mobilePopup.${key}`] = val;
         }
       }
       if (Object.prototype.hasOwnProperty.call(req.body.mobilePopup, 'styleId')) {
@@ -835,7 +849,6 @@ router.patch('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, r
     // values silently and collect them so the response can report them.
     const BUTTON_TEXT_COLOR_VALUES = new Set(['auto', 'white', 'dark']);
     const TEXT_MODE_VALUES = new Set(['custom', 'auto', 'white', 'dark']);
-    const ignored = [];
 
     function applyColorField(key, allowedSet, prefix) {
       if (Object.prototype.hasOwnProperty.call(

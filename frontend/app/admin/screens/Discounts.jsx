@@ -406,7 +406,6 @@ export default function Discounts({ shop }) {
   const [wordingTab, setWordingTab] = useState(0);
   const [popupPanelView, setPopupPanelView] = useState(0); // 0=Wording, 1=Colours
   const [coloursPatch, setColoursPatch] = useState({});
-  const [coloursSaving, setColoursSaving] = useState(false);
 
   useEffect(() => {
     if (!shop) return;
@@ -443,6 +442,13 @@ export default function Discounts({ shop }) {
       .then((data) => {
         if (cancelled) return;
         const p = data?.popup || {};
+        const mp = data?.mobilePopup || {};
+        const hexFields = ['accentColor', 'bgColor', 'textColor'];
+        const mDiffers = hexFields.some((k) => {
+          const pv = /^#[0-9a-fA-F]{6}$/.test(p[k] || '') ? p[k] : null;
+          const mv = /^#[0-9a-fA-F]{6}$/.test(mp[k] || '') ? mp[k] : null;
+          return pv !== mv;
+        }) || (['buttonTextColor', 'textMode'].some((k) => (p[k] || '') !== (mp[k] || '')));
         setPreviewColors({
           accentColor: /^#[0-9a-fA-F]{6}$/.test(p.accentColor || '') ? p.accentColor : '#4f46e5',
           bgColor: /^#[0-9a-fA-F]{6}$/.test(p.bgColor || '') ? p.bgColor : '#ffffff',
@@ -450,6 +456,7 @@ export default function Discounts({ shop }) {
           buttonTextColor: ['auto', 'white', 'dark'].includes(p.buttonTextColor) ? p.buttonTextColor : 'auto',
           textMode: ['custom', 'auto', 'white', 'dark'].includes(p.textMode) ? p.textMode : 'custom',
           styleId: p.styleId || 'classic',
+          _mobileDiverges: mDiffers,
         });
       })
       .catch(() => {}); // silent — preview uses defaults
@@ -471,6 +478,17 @@ export default function Discounts({ shop }) {
         buildPayload(config)
       );
       if (res?.config) setConfig(res.config);
+      if (Object.keys(coloursPatch).length > 0) {
+        try {
+          await apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', {
+            ...coloursPatch, mobilePopup: coloursPatch,
+          });
+          setColoursPatch({});
+        } catch {
+          setError('Discount settings saved. Colours failed to save — try again.');
+          return;
+        }
+      }
       setSuccess(true);
     } catch (e) {
       setError(e.message || 'Save failed');
@@ -931,7 +949,7 @@ export default function Discounts({ shop }) {
                   const m = previewColors.textMode || 'custom';
                   if (m === 'white') return '#ffffff';
                   if (m === 'dark') return '#171A22';
-                  if (m === 'auto') return dark ? '#ffffff' : '#111827';
+                  if (m === 'auto') return fgOn(previewColors.bgColor || '#ffffff') === '#FFFFFF' ? '#F4F4F5' : '#171A22';
                   return /^#[0-9a-fA-F]{6}$/.test(previewColors.textColor || '') ? previewColors.textColor : (dark ? '#ffffff' : '#111827');
                 }
                 function resolveBtnFg() {
@@ -945,18 +963,9 @@ export default function Discounts({ shop }) {
                 const styleId = previewColors.styleId || 'classic';
                 const coloursDisabled = NO_COLOUR_STYLES.has(styleId);
                 const bgDisabled = coloursDisabled || NO_BG_STYLES.has(styleId);
-                const ACCENT_SWATCHES = ['#4f46e5', '#0ea5e9', '#16a34a', '#dc2626', '#f59e0b'];
-                const BG_SWATCHES = ['#ffffff', '#f8fafc', '#1e293b', '#fef3c7', '#ede9fe'];
+                const ACCENT_SWATCHES = ['#4F46E5', '#7A3B74', '#171A22', '#0F5132', '#F5C542'];
+                const BG_SWATCHES = ['#FFFFFF', '#FFF7ED', '#F3F4F6', '#18181B', '#0F172A'];
                 const coloursDirty = Object.keys(coloursPatch).length > 0;
-                async function saveColours() {
-                  setColoursSaving(true);
-                  try {
-                    await apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', {
-                      ...coloursPatch, mobilePopup: coloursPatch,
-                    });
-                    setColoursPatch({});
-                  } catch { /* silent */ } finally { setColoursSaving(false); }
-                }
                 function setColour(key, val) {
                   setPreviewColors((p) => ({ ...p, [key]: val }));
                   setColoursPatch((p) => ({ ...p, [key]: val }));
@@ -1100,7 +1109,7 @@ export default function Discounts({ shop }) {
                       <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                         {/* Controls column */}
                         <div style={{ flex: 1, minWidth: 220 }}>
-                          <SwatchRow label="Accent colour" fieldKey="accentColor" swatches={ACCENT_SWATCHES} value={previewColors.accentColor} disabled={coloursDisabled} />
+                          <SwatchRow label={styleId === 'top_bar' ? 'Bar colour' : 'Accent colour'} fieldKey="accentColor" swatches={ACCENT_SWATCHES} value={previewColors.accentColor} disabled={coloursDisabled} />
                           <ModeRow label="Button text" fieldKey="buttonTextColor" options={[{ val: 'auto', lbl: 'Auto' }, { val: 'white', lbl: 'White' }, { val: 'dark', lbl: 'Dark' }]} value={previewColors.buttonTextColor || 'auto'} disabled={coloursDisabled} />
                           <SwatchRow label="Popup background" fieldKey="bgColor" swatches={BG_SWATCHES} value={previewColors.bgColor} disabled={bgDisabled} />
                           <ModeRow label="Popup text" fieldKey="textMode" options={[{ val: 'auto', lbl: 'Auto' }, { val: 'white', lbl: 'White' }, { val: 'dark', lbl: 'Dark' }, { val: 'custom', lbl: 'Custom' }]} value={previewColors.textMode || 'custom'} disabled={coloursDisabled} />
@@ -1116,10 +1125,14 @@ export default function Discounts({ shop }) {
                               )}
                             </div>
                           )}
-                          <button type="button" disabled={!coloursDirty || coloursDisabled || coloursSaving}
-                            onClick={saveColours}
-                            style={{ marginTop: 4, padding: '8px 20px', fontSize: 13, fontWeight: 700, borderRadius: 8, border: 'none', cursor: coloursDirty && !coloursDisabled && !coloursSaving ? 'pointer' : 'default', background: coloursDirty && !coloursDisabled ? '#4f46e5' : '#D9D8FF', color: coloursDirty && !coloursDisabled ? '#ffffff' : '#9ca3af' }}
-                          >{coloursSaving ? 'Saving…' : 'Save colours'}</button>
+                          {previewColors._mobileDiverges && !coloursDisabled && (
+                            <div style={{ fontSize: '11.5px', color: '#5A6070', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '6px 10px', marginBottom: 8 }}>
+                              Phone uses different colours (Settings &rarr; Popup &rarr; Mobile). Changing them here will update both.
+                            </div>
+                          )}
+                          <div style={{ fontSize: '11.5px', color: '#5A6070', marginTop: 4 }}>
+                            Saved with &ldquo;Save discount settings&rdquo;.
+                          </div>
                         </div>
                         {/* Preview column */}
                         <div style={{ width: 220, flexShrink: 0, minWidth: 160 }}>

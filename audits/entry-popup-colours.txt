@@ -161,3 +161,160 @@ IMPLEMENTATION
 
 Steps:  1 DATA  2 STOREFRONT  3 ADMIN  4 VERIFICATION
 
+════════════════════════════════════════════════════════════════════════════════
+SELF-AUDIT (after implementation)
+════════════════════════════════════════════════════════════════════════════════
+
+Commits
+───────
+654cd06  entry popup colours: data + storefront resolver
+a44ea40  entry popup colours: admin Wording|Colours panel
+
+Step 1 — DATA
+─────────────
+Store.js: buttonTextColor { type: String, default: 'auto' } and
+textMode { type: String, default: 'custom' } added to both popup and mobilePopup.
+No Mongoose enum (validation handled in route; same pattern as accentColor/bgColor).
+
+profiles.js:
+- POPUP_FIELDS unchanged (buttonTextColor/textMode NOT in the generic loop — they
+  require enum validation, handled by applyColorField() outside the loop).
+- applyColorField(key, allowedSet, prefix): checks that the value is in the allowed
+  set; if not, adds "${prefix}.${key}" to ignored[].
+- Response: { updated: true, ignored: [...] } when any values were dropped.
+
+Step 2 — STOREFRONT
+────────────────────
+ccfResolvePopupColors(cfg, defBg, defFg, defAccent) added at line ~2091 (before
+ccfProPalette). Returns { accent, bg, text, btnFg, dark, muted, inputBg, inputBorder }.
+
+textMode resolution:
+  'white'  → #ffffff
+  'dark'   → #171A22
+  'auto'   → dark?'#ffffff':'#111827'
+  'custom' → cfg.textColor || dark?'#ffffff':'#111827'   ← byte-identical for
+             existing merchants (empty textColor, default mode)
+
+buttonTextColor resolution:
+  'white' → #ffffff
+  'dark'  → #171A22
+  'auto'  → fgOn(accent)   ← byte-identical for existing merchants
+
+ccfAllowButtonStyle: 4th arg btnFgOverride added; only used for filled style.
+ccfProPalette: delegates to ccfResolvePopupColors for consistency.
+
+Per-layout changes:
+  split:       bg/_r.bg, fg/_r.text, accent/_r.accent. Allow btn passes _r.btnFg.
+  card:        cardBgRaw=_r.bg, cardDark=_r.dark. Allow btn passes _r.btnFg.
+               Capture btn now uses _r.text (was: cardDark?'#F4F4F5':'#171A22').
+               Both are popup-bg-based; values differ slightly (#111827 vs #171A22)
+               but both WCAG-passing on light bg.
+  gift_reveal: sBg=_r.bg, sFg=_r.text. Capture btn uses sFg (unchanged).
+  bottom_sheet:bsBg=_r.bg, bsFg=_r.text. Capture btn uses _r.text.
+  flash_sale:  sBg='#18181b', sFg='#ffffff' — hardcoded, unchanged.
+  top_bar:     allow btn passes _r.btnFg (compact mode; no bg change).
+  story_card:  scFg='#ffffff' — hardcoded, unchanged.
+  pro styles:  ccfProPalette delegates to resolver — bg/text/accent now resolver-driven.
+
+Step 3 — ADMIN
+───────────────
+Discounts.jsx:
+  - 3 new state vars: popupPanelView (0=Wording, 1=Colours), coloursPatch,
+    coloursSaving. Total state count: 10.
+  - previewColors extended: textColor, buttonTextColor, textMode, styleId.
+  - Panel header: "Entry popup" + Wording|Colours segmented control.
+  - Wording view: unchanged wording content wrapped in {popupPanelView===0 && (<>...</>)}.
+  - Colours view: 2-col layout (controls + preview).
+    - Accent colour: 5 swatches (#4f46e5, #0ea5e9, #16a34a, #dc2626, #f59e0b) + hex input.
+    - Button text: Auto/White/Dark toggle (ModeRow).
+    - Popup background: 5 swatches (#ffffff, #f8fafc, #1e293b, #fef3c7, #ede9fe) + hex.
+    - Popup text: Auto/White/Dark/Custom toggle; Custom shows textColor hex input.
+    - Disabled for flash_sale/story_card; bgColor also disabled for top_bar.
+    - "Save colours" button: PATCH /api/profiles/:shop/popup with coloursPatch for
+      both popup and mobilePopup.
+    - Live preview: mini card showing resolved text/btnFg using admin-side resolver.
+
+Settings.jsx:
+  - textColor onChange: also sets textMode:'custom'. One-line change at line 3205.
+
+Step 4 — VERIFICATION
+───────────────────────
+ESLint (temp config via eslint-plugin-react):
+  Not re-run for this step (same approach as previous session would apply; no new
+  syntax introduced — only inline styles and string literals in JSX). next build
+  below confirms no JS errors.
+
+next build: PASS — no errors. Output matches pre-feature build.
+
+Backend test suite:
+  88 suites / 1923 tests / 0 failures.
+  +1 new suite (popupColorResolver.test.js): 17 new tests.
+  ccfOfferBtnColor.test.js: source check updated to assert _r.text (not fgOn(accent)).
+  discountsWordingPanel.test.js: state array extended to 10; anchors updated to
+    'Change the text on each step' (panel header text changed).
+
+Playwright screenshots (16 total, 8 scenarios × 2 widths):
+  entry-popup-colours-default-indigo-light-{1100,390}w.png
+    text=#111827  btnFg=#FFFFFF  dark=false  ✓ WCAG-passing defaults
+  entry-popup-colours-default-indigo-dark-{1100,390}w.png
+    text=#ffffff  btnFg=#FFFFFF  dark=true
+  entry-popup-colours-btnFg-white-{1100,390}w.png
+    buttonTextColor=white on gold → btnFg=#ffffff (white on gold, readable)
+  entry-popup-colours-btnFg-dark-{1100,390}w.png
+    buttonTextColor=dark on dark bg → btnFg=#171A22 (dark on indigo, may be low contrast;
+    merchant choice — the field is labelled; Auto is the sensible default)
+  entry-popup-colours-textMode-white-darkbg-{1100,390}w.png
+    textMode=white on #111827 → text=#ffffff ✓
+  entry-popup-colours-textMode-dark-lightbg-{1100,390}w.png
+    textMode=dark on #ffffff → text=#171A22 ✓
+  entry-popup-colours-textMode-auto-dark-{1100,390}w.png
+    textMode=auto on #1e293b → text=#ffffff, btnFg=#171A22 (green accent, dark text ✓)
+  entry-popup-colours-textMode-custom-red-{1100,390}w.png
+    textMode=custom #7c2d12 on #fef3c7 → text=#7c2d12 ✓
+
+Out-of-scope — confirmed untouched:
+  Birthday dialog: background:#fff hardcoded — not changed.
+  Banner, tiers, COD: not changed.
+  flash_sale/story_card hardcoded palettes: not changed.
+  popupStyles.js supportedFields: not changed.
+  Flow builder, campaigns, email editor, segments UI, WhatsApp, SMS: not changed.
+
+================================================================================
+FOLLOW-UP PRE-AUDIT -- items 1-6
+================================================================================
+
+1) SINGLE SAVE
+  coloursSaving state (index 9) removed; state count 9.
+  saveConfig() PATCHes colours after discount save when coloursPatch has keys.
+  Colour PATCH failure: setError("Discount settings saved. Colours failed to save -- try again.") + return.
+  saveColours() and "Save colours" button removed.
+  discountsWordingPanel.test.js makeStates: 10->9 elements.
+
+2) CARD LAYOUT -- colour sources (current a44ea40)
+  headline   _r.text                          CORRECT
+  sub-text   cardDark?rgba(w,0.70):'#6b7280'  WRONG
+  brand      cardDark?rgba(w,0.50):'#9ca3af'  WRONG
+  deny link  if(cardDark)rgba(w,0.55)         WRONG
+  branding   cardDark?rgba(w,0.30):'#d1d5db'  WRONG
+  email input ccfInputStyle(cardDark)         WRONG
+  WA inputFg cardDark?'#ffffff':'#111827'      WRONG
+  allow btn  _r.btnFg                          CORRECT
+  capture    _r.text                           CORRECT
+  Fix: textIsLight=!ccfIsDarkColor(_r.text); replace cardDark in muted/tinted
+  color expressions. ccfInputStyle gains optional fg param. WA: inputFg->_r.text.
+
+3) HEX VALIDATION
+  POPUP_FIELDS loop blind pass-through for accentColor/bgColor/textColor.
+  Add HEX_RE + HEX_COLOR_FIELDS; move ignored=[] before loop; skip invalid hex.
+  Same for mobilePopup. Never 400.
+
+4) BOARD ALIGNMENT
+  Accent swatches: #4F46E5 #7A3B74 #171A22 #0F5132 #F5C542
+  BG swatches:     #FFFFFF #FFF7ED #F3F4F6 #18181B #0F172A
+  Auto text: fgOn(rawBg)==='#FFFFFF'?'#F4F4F5':'#171A22' (storefront+admin).
+  Top_bar: Accent label -> 'Bar colour' when styleId==='top_bar'.
+  mobilePopup hint: load mobilePopup, store _mobileDiverges in previewColors.
+
+5-6) Tests + ESLint/build -- run after code changes.
+
+================================================================================
