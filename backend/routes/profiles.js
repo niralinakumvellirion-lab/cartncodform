@@ -831,12 +831,40 @@ router.patch('/:shopDomain/popup', requireAuth, requireStoreOwner, async (req, r
       }
     }
 
+    // entry-popup-colours: validate buttonTextColor and textMode; drop invalid
+    // values silently and collect them so the response can report them.
+    const BUTTON_TEXT_COLOR_VALUES = new Set(['auto', 'white', 'dark']);
+    const TEXT_MODE_VALUES = new Set(['custom', 'auto', 'white', 'dark']);
+    const ignored = [];
+
+    function applyColorField(key, allowedSet, prefix) {
+      if (Object.prototype.hasOwnProperty.call(
+        prefix === 'popup' ? req.body : (req.body.mobilePopup || {}), key)) {
+        const src = prefix === 'popup' ? req.body : req.body.mobilePopup;
+        const val = src[key];
+        if (allowedSet.has(val)) {
+          set[`${prefix}.${key}`] = val;
+        } else {
+          const ign = `${prefix}.${key}`;
+          if (!ignored.includes(ign)) ignored.push(ign);
+        }
+      }
+    }
+    applyColorField('buttonTextColor', BUTTON_TEXT_COLOR_VALUES, 'popup');
+    applyColorField('textMode', TEXT_MODE_VALUES, 'popup');
+    if (req.body.mobilePopup && typeof req.body.mobilePopup === 'object') {
+      applyColorField('buttonTextColor', BUTTON_TEXT_COLOR_VALUES, 'mobilePopup');
+      applyColorField('textMode', TEXT_MODE_VALUES, 'mobilePopup');
+    }
+
     if (Object.keys(set).length === 0) {
       return res.status(400).json({ error: 'No popup fields provided' });
     }
 
     await Store.updateOne({ shopDomain: shop }, { $set: set });
-    return res.json({ updated: true });
+    const resp = { updated: true };
+    if (ignored.length) resp.ignored = ignored;
+    return res.json(resp);
   } catch (err) {
     console.error('[profiles] PATCH popup error:', err.message);
     return res.status(500).json({ error: 'Failed to update popup config' });

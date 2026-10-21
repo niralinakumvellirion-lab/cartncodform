@@ -11,8 +11,11 @@
  *   2  saving          false
  *   3  success         false
  *   4  error           ''
- *   5  previewColors   { accentColor:'#4f46e5', bgColor:'#ffffff' }
+ *   5  previewColors   { accentColor:'#4f46e5', bgColor:'#ffffff', ... }
  *   6  wordingTab      0
+ *   7  popupPanelView  0  (entry-popup-colours: 0=Wording, 1=Colours)
+ *   8  coloursPatch    {}
+ *   9  coloursSaving   false
  */
 
 // --- useState / useEffect control (must appear before any require) ----------
@@ -50,11 +53,11 @@ const DISCOUNTS_SRC = fs.readFileSync(
 );
 
 // Default preview colours (indigo accent, white bg → light card)
-const DEFAULT_COLORS = { accentColor: '#4f46e5', bgColor: '#ffffff' };
+const DEFAULT_COLORS = { accentColor: '#4f46e5', bgColor: '#ffffff', textColor: '', buttonTextColor: 'auto', textMode: 'custom', styleId: 'classic' };
 
-// Builds the 7-element state array expected by DiscountsScreen.
-function makeStates({ config = {}, loading = false, previewColors = DEFAULT_COLORS, wordingTab = 0 } = {}) {
-  return [config, loading, false, false, '', previewColors, wordingTab];
+// Builds the 10-element state array expected by DiscountsScreen.
+function makeStates({ config = {}, loading = false, previewColors = DEFAULT_COLORS, wordingTab = 0, popupPanelView = 0 } = {}) {
+  return [config, loading, false, false, '', previewColors, wordingTab, popupPanelView, {}, false];
 }
 
 // Renders the Discounts component with controlled initial state.
@@ -72,9 +75,11 @@ function renderWith(opts) {
 }
 
 // Returns number of <input elements inside the wording panel.
-// Panel is delimited by 'Entry popup wording' … 'Saved with'.
+// Panel is delimited by 'Change the text on each step' … 'Saved with'.
+// (entry-popup-colours: the panel header changed from 'Entry popup wording' to
+// 'Entry popup' + view switch; the description text is the stable anchor.)
 function countPanelInputs(html) {
-  const start = html.indexOf('Entry popup wording');
+  const start = html.indexOf('Change the text on each step');
   const end   = html.indexOf('Saved with', start);
   if (start < 0 || end < 0) return -1;
   return (html.slice(start, end).match(/<input /g) || []).length;
@@ -86,21 +91,23 @@ describe('Discounts wording panel — renderToStaticMarkup', () => {
 
   // ── Placement ──────────────────────────────────────────────────────────────
 
-  test('Entry popup OFF: "Entry popup wording" absent', () => {
+  test('Entry popup OFF: wording panel description absent', () => {
     const html = renderWith({ config: {} });
-    expect(html).not.toContain('Entry popup wording');
+    expect(html).not.toContain('Change the text on each step');
   });
 
-  test('Entry popup ON: "Entry popup wording" present', () => {
+  test('Entry popup ON: wording panel description present', () => {
     const html = renderWith({ config: { birthdayCapture: { popup: { enabled: true } } } });
-    expect(html).toContain('Entry popup wording');
+    // entry-popup-colours: header is now "Entry popup" + Wording|Colours switch.
+    // The wording view description is the stable anchor for panel presence.
+    expect(html).toContain('Change the text on each step');
   });
 
   test('ON: panel is inside the birthday card and after the Entry popup row', () => {
     const html = renderWith({ config: { birthdayCapture: { popup: { enabled: true } } } });
     const bdCard   = html.indexOf('How do you collect birthdays?');
     const entryRow = html.indexOf('Shows a birthday step after the subscriber');
-    const panel    = html.indexOf('Entry popup wording');
+    const panel    = html.indexOf('Change the text on each step');
     const method3  = html.indexOf('After the first order');
 
     expect(bdCard).toBeGreaterThan(0);

@@ -573,7 +573,9 @@
   // selects Top Bar's smaller sizing (its own inline bar) — everything else
   // uses the full-size button. An unrecognized/missing ctaStyle falls back
   // to 'rounded'.
-  function ccfAllowButtonStyle(accentColor, ctaStyle, compact) {
+  // btnFgOverride: optional override for filled-button text (entry-popup-colours).
+  // For outlined/soft the text is always accentColor (sits on popup bg, not accent bg).
+  function ccfAllowButtonStyle(accentColor, ctaStyle, compact, btnFgOverride) {
     var radius = ({ rounded: '14px', square: '0px', pill: '999px',
       outlined: '14px', soft: '14px' })[ctaStyle] || '14px';
     var pad = compact ? '8px 16px' : '14px';
@@ -597,7 +599,8 @@
     if (compact) {
       return sizing + 'color:' + accentColor + ';background:#fff;border:none;';
     }
-    return sizing + 'color:' + fgOn(accentColor) + ';' +
+    var filledFg = btnFgOverride || fgOn(accentColor);
+    return sizing + 'color:' + filledFg + ';' +
       'background:linear-gradient(135deg,' + accentColor + ',' + accentColor + 'dd);' +
       'border:none;box-shadow:0 4px 15px ' + accentColor + '44;';
   }
@@ -2035,10 +2038,11 @@
     // every device, never blank.
     if (isMobile || layout === 'banner') layout = 'card';
     var ccfStyle = ccfResolveStyle(isMobile);
-    var bg = cfg.bgColor || '#ffffff';
-    var fg = cfg.textColor || '#111827';
+    var _r = ccfResolvePopupColors(cfg);
+    var bg = _r.bg;
+    var fg = _r.text;
     var font = cfg.fontFamily || 'inherit';
-    var accent = cfg.accentColor || '#4f46e5';
+    var accent = _r.accent;
     var imagePosition = cfg.imagePosition || 'center center';
     var allowLabel = cfg.allowText || 'Allow';
     var denyLabel = cfg.denyText || 'No thanks';
@@ -2088,14 +2092,40 @@
     }
 
     // ---- Round 3 (spotlight / noir / color_block) shared pieces ----
-    function ccfProPalette(defBg, defFg, defAccent) {
-      var pBg = cfg.bgColor || defBg;
-      var pFg = cfg.textColor || defFg;
-      var dark = ccfIsDarkColor(pBg);
+    // entry-popup-colours: unified colour resolver. Returns the full popup
+    // palette from cfg's new buttonTextColor / textMode fields plus the
+    // existing accentColor / bgColor / textColor.
+    // DEFAULT-OUTPUT CONTRACT: with textMode='custom' + empty textColor and
+    // buttonTextColor='auto' (both defaults), output is byte-identical to the
+    // previous per-layout colour variables for split layout and gift_reveal.
+    function ccfResolvePopupColors(c, defBg, defFg, defAccent) {
+      var rawBg = c.bgColor || defBg || '#ffffff';
+      var dark = ccfIsDarkColor(rawBg);
+      var accent = c.accentColor || defAccent || '#4f46e5';
+      var textM = c.textMode || 'custom';
+      var text;
+      if (textM === 'white') text = '#ffffff';
+      else if (textM === 'dark') text = '#171A22';
+      else if (textM === 'auto') text = dark ? '#ffffff' : '#111827';
+      else /* custom */ text = c.textColor || defFg || (dark ? '#ffffff' : '#111827');
+      var btnM = c.buttonTextColor || 'auto';
+      var btnFg;
+      if (btnM === 'white') btnFg = '#ffffff';
+      else if (btnM === 'dark') btnFg = '#171A22';
+      else btnFg = fgOn(accent);
       return {
-        bg: pBg, fg: pFg, dark: dark, accent: cfg.accentColor || defAccent,
-        inputBg: dark ? 'rgba(255,255,255,0.08)' : '#ffffff',
-        inputBorder: dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.14)',
+        accent: accent, bg: rawBg, text: text, btnFg: btnFg, dark: dark,
+        muted: dark ? 'rgba(255,255,255,0.65)' : '#6b7280',
+        inputBg: dark ? 'rgba(255,255,255,0.10)' : '#f9fafb',
+        inputBorder: dark ? 'rgba(255,255,255,0.22)' : '#e5e7eb',
+      };
+    }
+    function ccfProPalette(defBg, defFg, defAccent) {
+      var r = ccfResolvePopupColors(cfg, defBg, defFg, defAccent);
+      return {
+        bg: r.bg, fg: r.text, dark: r.dark, accent: r.accent,
+        inputBg: r.dark ? 'rgba(255,255,255,0.08)' : '#ffffff',
+        inputBorder: r.dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.14)',
         font: cfg.fontFamily || '-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif'
       };
     }
@@ -2176,7 +2206,7 @@
       }
       ccfBuildWhatsappFields(c, { fg: pal.fg, inputBg: pal.inputBg, inputBorder: pal.inputBorder,
         height: 48, fontSize: '15px', borderRadius: o.inputRadius, telPadding: '0 16px' });
-      allow = buildAllowBtn(ccfAllowButtonStyle(pal.accent, cfg.ctaStyle) + 'font-size:16px;padding:15px;' +
+      allow = buildAllowBtn(ccfAllowButtonStyle(pal.accent, cfg.ctaStyle, false, _r.btnFg) + 'font-size:16px;padding:15px;' +
         (o.ctaLight ? 'background:#ffffff;color:#0f1115;box-shadow:none;border:none;' : ''));
       c.appendChild(allow);
       if (ccfCaptureMode()) { c.appendChild(buildOfferBtn(pal.accent, pal.fg)); }
@@ -2227,8 +2257,8 @@
       var isFlashSale = ccfStyle.id === 'flash_sale';
       var styleFields = ccfStyle.fields;
       var cardRadius2 = (cfg.borderRadius != null ? cfg.borderRadius : 16) + 'px';
-      var sBg = isFlashSale ? '#18181b' : (cfg.bgColor || '#fff7ed');
-      var sFg = isFlashSale ? '#ffffff' : (cfg.textColor || '#111827');
+      var sBg = isFlashSale ? '#18181b' : _r.bg;
+      var sFg = isFlashSale ? '#ffffff' : _r.text;
 
       // mobile-popup-polish: MOBILE is centered (both axes) with a
       // max-height/overflow-y safety net and a narrow-viewport width guard.
@@ -2344,7 +2374,7 @@
         }
       }
 
-      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
+      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle, false, _r.btnFg));
       sContent.appendChild(allow);
       if (ccfCaptureMode()) { sContent.appendChild(buildOfferBtn(accent, sFg)); }
 
@@ -2535,8 +2565,8 @@
       // affordance. Mobile-only (see ccfResolveStyle() above). ----------
       var bsFields = ccfStyle.fields || {};
       var bsRadius = (cfg.borderRadius != null ? cfg.borderRadius : 16) + 'px';
-      var bsBg = cfg.bgColor || '#ffffff';
-      var bsFg = cfg.textColor || '#111827';
+      var bsBg = _r.bg;
+      var bsFg = _r.text;
 
       // mobile-popup-polish: full-width edge-to-edge is this style's own
       // anchor (bottom sheets don't float with side margins on a real
@@ -2617,9 +2647,9 @@
       }
       ccfBuildWhatsappFields(bsContent, { inputBg: '#f9fafb' });
 
-      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
+      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle, false, _r.btnFg));
       bsContent.appendChild(allow);
-      if (ccfCaptureMode()) { bsContent.appendChild(buildOfferBtn(accent, '#111827')); }
+      if (ccfCaptureMode()) { bsContent.appendChild(buildOfferBtn(accent, _r.text)); }
 
       // mobile-popup-polish: padded up from ccfDenyButtonStyle()'s shared
       // 6px-tall default to a ~44px tap target — only for this style (not
@@ -2831,12 +2861,12 @@
       // anchor-table requirement, plus the max-height/overflow-y safety
       // net and the narrow-viewport width guard from item 3. ----------
       var cardRadius = (cfg.borderRadius != null ? cfg.borderRadius : 22) + 'px';
-      var cardBgRaw = cfg.bgColor || '#ffffff';
+      var cardBgRaw = _r.bg;
       var cardBgIsDefault = /^#fff(fff)?$/i.test(cardBgRaw);
       var cardBg = cardBgIsDefault
         ? 'linear-gradient(145deg,#ffffff,#f8f9ff)'
         : cardBgRaw;
-      var cardDark = !cardBgIsDefault && ccfIsDarkColor(cardBgRaw);
+      var cardDark = _r.dark;
       wrap.style.cssText = isMobile ? [
         'position:fixed',
         'top:50%',
@@ -3077,9 +3107,9 @@
         darkBg: cardDark,
       });
 
-      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
+      allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle, false, _r.btnFg));
       cardContent.appendChild(allow);
-      if (ccfCaptureMode()) { cardContent.appendChild(buildOfferBtn(accent, cardDark ? '#F4F4F5' : '#171A22')); }
+      if (ccfCaptureMode()) { cardContent.appendChild(buildOfferBtn(accent, _r.text)); }
 
       deny = buildDenyBtn(ccfDenyButtonStyle());
       if (cardDark) deny.style.color = 'rgba(255,255,255,0.55)';
@@ -3198,7 +3228,7 @@
           mContent.appendChild(mSub);
         }
 
-        allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
+        allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle, false, _r.btnFg));
         mContent.appendChild(allow);
         if (ccfCaptureMode()) { mContent.appendChild(buildOfferBtn(accent, fg)); }
 
@@ -3266,7 +3296,7 @@
           rightPanel.appendChild(splitSub);
         }
 
-        allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle));
+        allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle, false, _r.btnFg));
         rightPanel.appendChild(allow);
         if (ccfCaptureMode()) { rightPanel.appendChild(buildOfferBtn(accent, fg)); }
 

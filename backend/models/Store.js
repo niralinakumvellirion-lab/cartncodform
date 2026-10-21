@@ -83,6 +83,11 @@ const storeSchema = new mongoose.Schema({
     // that already store a value (including '#ffffff') keep it.
     bgColor: { type: String, default: '' },
     textColor: { type: String, default: '' },
+    // entry-popup-colours: 'auto'|'white'|'dark'. Validation in the route;
+    // invalid values are dropped, not rejected, so no Mongoose enum here.
+    buttonTextColor: { type: String, default: 'auto' },
+    // 'custom'|'auto'|'white'|'dark'. 'custom' -> use textColor field.
+    textMode: { type: String, default: 'custom' },
     fontFamily: { type: String, default: 'inherit' },
     borderRadius: { type: Number, default: 12 },
     imageUrl: { type: String, default: '' },
@@ -171,6 +176,8 @@ const storeSchema = new mongoose.Schema({
     // desktop value through the storefront's per-field merge.
     bgColor: { type: String, default: '' },
     textColor: { type: String, default: '' },
+    buttonTextColor: { type: String, default: 'auto' },
+    textMode: { type: String, default: 'custom' },
     fontFamily: { type: String, default: '' },
     borderRadius: { type: Number, default: 16 },
     allowText: { type: String, default: 'Allow' },

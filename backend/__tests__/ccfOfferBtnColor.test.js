@@ -43,14 +43,15 @@ describe('ccf-push.js classic-card buildOfferBtn text colour', () => {
 
   // ── Source check ────────────────────────────────────────────────────────────
 
-  test('line 3082 uses cardDark-based text colour (not fgOn(accent))', () => {
+  test('classic card capture button uses resolved popup-bg text, not fgOn(accent)', () => {
     // Locate the exact call site for the classic-card capture button.
     const line = SRC.split('\n').find(l =>
       l.includes('cardContent.appendChild(buildOfferBtn(accent,') &&
       l.includes('ccfCaptureMode()'));
     expect(line).toBeDefined();
-    // Must use the popup-bg-based choice, NOT fgOn(accent)
-    expect(line).toContain("cardDark ? '#F4F4F5' : '#171A22'");
+    // entry-popup-colours: now uses _r.text (from ccfResolvePopupColors), NOT fgOn(accent).
+    // _r.text defaults to cfg.textColor || (dark?'#ffffff':'#111827') — popup-bg-based.
+    expect(line).toContain('_r.text');
     expect(line).not.toContain('fgOn(accent)');
   });
 
