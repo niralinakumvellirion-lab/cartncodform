@@ -486,3 +486,86 @@ What was NOT changed:
 No state left inconsistent. 89/89 suites green. shopify app build clean.
 
 ================================================================================
+
+================================================================================
+VERIFY (baseline) — pre-audit + self-audit   (commit "entry popup colours: capture fix" 7aa9633)
+Date: 2026-10-21
+================================================================================
+
+PRE-AUDIT — what the request asked to check
+─────────────────────────────────────────────
+Baseline: commit 4658333 (before all colour work).
+Scope: all styles/layouts × bgColor in {#FFFFFF,#FFF7ED,#1a1a2e,#18181B}
+       × textColor in {'', '#111827', '#7c2d12'} × stage-2 × capture-mode on.
+textMode='custom', buttonTextColor='auto' throughout.
+
+Baseline colour model (4658333 card layout):
+  fg = cfg.textColor || '#111827'   ← NOT dark-aware
+  cardDark = !cardBgIsDefault && ccfIsDarkColor(cardBgRaw)
+  headline:    fg
+  captureText: cardDark ? '#F4F4F5' : '#171A22'
+  subtext:     cardDark ? 'rgba(255,255,255,0.70)' : '#6b7280'
+  brand:       cardDark ? 'rgba(255,255,255,0.50)' : '#9ca3af'
+  deny:        cardDark ? 'rgba(255,255,255,0.55)' : '(not set)'
+  branding:    cardDark ? 'rgba(255,255,255,0.30)' : '#d1d5db'
+  inputFg:     cardDark ? '#ffffff' : '#111827'
+
+  flash_sale:    sFg = '#ffffff' (fixed)
+  gift_reveal:   sFg = cfg.textColor || '#111827'
+  bottom_sheet:  captureText = '#111827' (hardcoded)
+  spotlight/noir/color_block: fixed palettes, not affected by user colour config.
+
+FULL DIFF TABLE (4658333 vs HEAD 1d84ebc / before capture fix)
+───────────────────────────────────────────────────────────────
+216 element comparisons across card, gift_reveal, bottom_sheet.
+
+REGRESSIONS (8 — all in card captureText):
+  card #FFFFFF   #111827  captureText: #171A22 → #111827
+  card #FFFFFF   #7c2d12  captureText: #171A22 → #7c2d12
+  card #FFF7ED   #111827  captureText: #171A22 → #111827
+  card #FFF7ED   #7c2d12  captureText: #171A22 → #7c2d12
+  card #1a1a2e   #111827  captureText: #F4F4F5 → #111827  *** dark text on dark card ***
+  card #1a1a2e   #7c2d12  captureText: #F4F4F5 → #7c2d12  *** dark/brown on dark card ***
+  card #18181B   #111827  captureText: #F4F4F5 → #111827  *** dark text on dark card ***
+  card #18181B   #7c2d12  captureText: #F4F4F5 → #7c2d12
+
+INTENDED CHANGES (resolver dark-awareness improvements — NOT regressions):
+  card #1a1a2e   (empty)  headline:    #111827 → #ffffff  (baseline was dark-on-dark, broken)
+  card #18181B   (empty)  headline:    #111827 → #ffffff
+  card #1a1a2e   (empty)  captureText: #F4F4F5 → #ffffff  (minor: both readable, off-white vs white)
+  card #18181B   (empty)  captureText: #F4F4F5 → #ffffff
+  gift_reveal #1a1a2e (empty) all 4 elements: #111827 → #ffffff (same fix)
+  gift_reveal #18181B (empty) all 4 elements: #111827 → #ffffff
+
+MINOR/ACCEPTABLE:
+  bottom_sheet captureText for explicit textColor: was hardcoded '#111827',
+    now follows textColor (e.g. #7c2d12). Acceptable — bottom_sheet always light bg.
+
+FIX APPLIED (ccf-push.js line 3116)
+─────────────────────────────────────
+Before: buildOfferBtn(accent, _r.text)
+After:  buildOfferBtn(accent, (cfg.textMode && cfg.textMode !== 'custom') ? _r.text : (cardDark ? '#F4F4F5' : '#171A22'))
+
+Identical pattern to the inputFg and WhatsApp guards added in 1d84ebc.
+Result: all 8 regression cases now byte-identical with 4658333.
+
+SELF-AUDIT
+──────────────────────────────────────────────────────
+Commit: 7aa9633  "entry popup colours: capture fix"
+Files changed: ccf-push.js (1 line), popupColoursFollowUp.test.js (+87 lines)
+
+Suite G adds:
+  - 12 fixture tests (4 bgs × 3 textColors) asserting capture matches baseline
+  - 2 source-assertion tests (line contains '#F4F4F5', contains "!== 'custom'")
+  - 2 non-custom mode tests (white/dark textMode on dark bg)
+  Total: 16 new tests.
+
+Full suite: 89 suites / 2008 tests / 0 failures. ✓
+shopify app build: not re-run (extension-only JS change; prior build clean). ✓
+
+Remaining intended differences (not regressions):
+  - Headline dark-on-dark fix: baseline #111827 on dark bg → HEAD #ffffff. INTENDED.
+  - gift_reveal dark bg fix: same. INTENDED.
+  - bottom_sheet capture follows textColor. MINOR/acceptable.
+
+================================================================================
