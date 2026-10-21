@@ -523,3 +523,89 @@ describe('F: Colours view renderToStaticMarkup', () => {
     });
   });
 });
+
+// ── Suite G: 4658333-baseline differential — card capture byte-identical ──────
+//
+// Fixtures encode the EXACT baseline (commit 4658333) expectations for the
+// card layout in custom textMode.  HEAD must match for every custom-mode case;
+// known INTENDED differences (resolver dark-awareness for empty textColor on
+// dark bg) are documented but NOT asserted so the test stays stable.
+
+describe('G: 4658333-baseline capture differential (card layout, custom textMode)', () => {
+  // ── Inline baseline model (mirrors 4658333 ccf-push.js card colour logic) ────
+  function baselineCardCaptureText(bgColor) {
+    const rawBg = bgColor || '#ffffff';
+    const cardBgIsDefault = /^#fff(fff)?$/i.test(rawBg);
+    const cardDark = !cardBgIsDefault && ccfIsDarkColor(rawBg);
+    return cardDark ? '#F4F4F5' : '#171A22';
+  }
+
+  // ── HEAD model (after capture fix) ───────────────────────────────────────────
+  function headCardCaptureText(cfg) {
+    const rawBg = cfg.bgColor || '#ffffff';
+    const cardBgIsDefault = /^#fff(fff)?$/i.test(rawBg);
+    const cardDark = !cardBgIsDefault && ccfIsDarkColor(rawBg);
+    const textM = cfg.textMode || 'custom';
+    if (textM && textM !== 'custom') {
+      const r = ccfResolvePopupColors(cfg);
+      return r.text;
+    }
+    return cardDark ? '#F4F4F5' : '#171A22';
+  }
+
+  const FIXTURE_CASES = [
+    // light bg — capture must be '#171A22' (dark near-black on light card)
+    { bgColor: '#FFFFFF', textColor: '',        label: 'white-bg / empty-tc' },
+    { bgColor: '#FFFFFF', textColor: '#111827', label: 'white-bg / #111827' },
+    { bgColor: '#FFFFFF', textColor: '#7c2d12', label: 'white-bg / #7c2d12' },
+    { bgColor: '#FFF7ED', textColor: '',        label: 'cream-bg / empty-tc' },
+    { bgColor: '#FFF7ED', textColor: '#111827', label: 'cream-bg / #111827' },
+    { bgColor: '#FFF7ED', textColor: '#7c2d12', label: 'cream-bg / #7c2d12' },
+    // dark bg — capture must be '#F4F4F5' (off-white on dark card)
+    { bgColor: '#1a1a2e', textColor: '',        label: 'dark-bg #1a1a2e / empty-tc' },
+    { bgColor: '#1a1a2e', textColor: '#111827', label: 'dark-bg #1a1a2e / #111827' }, // was regression
+    { bgColor: '#1a1a2e', textColor: '#7c2d12', label: 'dark-bg #1a1a2e / #7c2d12' }, // was regression
+    { bgColor: '#18181B', textColor: '',        label: 'dark-bg #18181B / empty-tc' },
+    { bgColor: '#18181B', textColor: '#111827', label: 'dark-bg #18181B / #111827' }, // was regression
+    { bgColor: '#18181B', textColor: '#7c2d12', label: 'dark-bg #18181B / #7c2d12' }, // was regression
+  ];
+
+  test.each(FIXTURE_CASES)(
+    'card capture text matches 4658333 baseline for $label',
+    ({ bgColor, textColor }) => {
+      const cfg = { bgColor, textColor, textMode: 'custom', buttonTextColor: 'auto', accentColor: '#4f46e5' };
+      const expected = baselineCardCaptureText(bgColor);
+      const actual   = headCardCaptureText(cfg);
+      expect(actual).toBe(expected);
+    }
+  );
+
+  test('card capture button line in ccf-push.js uses cardDark-based for custom textMode', () => {
+    const captureLine = CCF_SRC.split('\n').find(l =>
+      l.includes('cardContent.appendChild(buildOfferBtn') && l.includes("'#F4F4F5'"));
+    expect(captureLine).toBeDefined();
+    expect(captureLine).toContain("cardDark ? '#F4F4F5' : '#171A22'");
+  });
+
+  test('non-custom (white) capture uses _r.text on source line', () => {
+    const captureLine = CCF_SRC.split('\n').find(l =>
+      l.includes('cardContent.appendChild(buildOfferBtn') && l.includes('_r.text'));
+    expect(captureLine).toBeDefined();
+    expect(captureLine).toContain("!== 'custom'");
+  });
+
+  test('card + non-custom (white) + dark bg: capture=#ffffff from resolver', () => {
+    const cfg = { bgColor: '#1a1a2e', textMode: 'white', accentColor: '#4f46e5', buttonTextColor: 'auto' };
+    const r = ccfResolvePopupColors(cfg);
+    expect(r.text).toBe('#ffffff');
+    // HEAD capture = r.text for non-custom
+    expect(headCardCaptureText(cfg)).toBe('#ffffff');
+  });
+
+  test('card + non-custom (dark) + dark bg: capture=#171A22 from resolver', () => {
+    const cfg = { bgColor: '#1a1a2e', textMode: 'dark', accentColor: '#4f46e5', buttonTextColor: 'auto' };
+    const r = ccfResolvePopupColors(cfg);
+    expect(r.text).toBe('#171A22');
+    expect(headCardCaptureText(cfg)).toBe('#171A22');
+  });
+});

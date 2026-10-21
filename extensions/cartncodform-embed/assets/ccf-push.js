@@ -3113,7 +3113,7 @@
 
       allow = buildAllowBtn(ccfAllowButtonStyle(accent, cfg.ctaStyle, false, _r.btnFg));
       cardContent.appendChild(allow);
-      if (ccfCaptureMode()) { cardContent.appendChild(buildOfferBtn(accent, _r.text)); }
+      if (ccfCaptureMode()) { cardContent.appendChild(buildOfferBtn(accent, (cfg.textMode && cfg.textMode !== 'custom') ? _r.text : (cardDark ? '#F4F4F5' : '#171A22'))); }
 
       deny = buildDenyBtn(ccfDenyButtonStyle());
       if (textIsLight) deny.style.color = 'rgba(255,255,255,0.55)';
