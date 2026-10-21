@@ -23,7 +23,7 @@ function _contrast(a, b) {
 /**
  * Resolve post-order birthday block colours.
  * Returns null when all fields are at default (caller emits unchanged CSS).
- * Otherwise returns { accent, btnFg, bg, text, muted, skip, sep }.
+ * Otherwise returns { accent, btnFg, bg, text, muted, skip, sep, lowBtnContrast }.
  */
 export function resolvePostOrderColors(cfg) {
   if (!cfg || typeof cfg !== 'object') return null;
@@ -68,5 +68,12 @@ export function resolvePostOrderColors(cfg) {
   const skip  = muted;
   const sep   = bg ? null : '#e4e4e7';
 
-  return { accent, btnFg, bg, text, muted, skip, sep };
+  // Warn when buttonTextMode is forced and the forced colour fails 4.5:1 on accent
+  const lowBtnContrast = btnMode !== 'auto' && (
+    btnMode === 'white'
+      ? _contrast(accent, '#FFFFFF') < 4.5
+      : _contrast(accent, '#171A22') < 4.5
+  );
+
+  return { accent, btnFg, bg, text, muted, skip, sep, lowBtnContrast };
 }

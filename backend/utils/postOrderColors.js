@@ -21,7 +21,7 @@ const HEX_RE = /^#[0-9a-fA-F]{6}$/;
  * tells the caller to emit the existing CSS unchanged (byte-identical output).
  *
  * Otherwise returns:
- *   { accent, btnFg, bg, text, muted, skip, sep }
+ *   { accent, btnFg, bg, text, muted, skip, sep, lowBtnContrast }
  *   - accent  : resolved button/focus colour (#rrggbb)
  *   - btnFg   : text colour on the button (#rrggbb)
  *   - bg      : block background (#rrggbb) or null (keep transparent / border-top)
@@ -75,7 +75,13 @@ function resolvePostOrderColors(cfg) {
   const skip  = muted;
   const sep   = bg ? null : '#e4e4e7';
 
-  return { accent, btnFg, bg, text, muted, skip, sep };
+  const lowBtnContrast = btnMode !== 'auto' && (
+    btnMode === 'white'
+      ? contrastRatio(accent, '#FFFFFF') < 4.5
+      : contrastRatio(accent, '#171A22') < 4.5
+  );
+
+  return { accent, btnFg, bg, text, muted, skip, sep, lowBtnContrast };
 }
 
 module.exports = { resolvePostOrderColors };

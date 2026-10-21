@@ -514,4 +514,184 @@ describe('Discounts — Method 3 (post-order birthday ask)', () => {
     const slice  = html.slice(rowIdx, rowIdx + 8000);
     expect(slice).toContain('#E11D48');
   });
+
+  // ── Colours view: active mode button marked ──────────────────────────────────
+
+  test('ON (poView=1): buttonTextMode=auto → Auto button is highlighted', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 1,
+    });
+    // PoModeRow marks active with background:#4f46e5. 'Auto' is the default.
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    // Find Button text mode row: look for 'Button text' then check Auto is active (indigo bg)
+    const btnRowIdx = slice.indexOf('Button text');
+    expect(btnRowIdx).toBeGreaterThan(0);
+    const btnRowSlice = slice.slice(btnRowIdx, btnRowIdx + 500);
+    // Active button has background:#4f46e5 and colour white
+    expect(btnRowSlice).toContain('background:#4f46e5');
+  });
+
+  test('ON (poView=1): buttonTextMode=white → White button is highlighted, Auto is not', () => {
+    const html = renderWith({
+      config: {
+        birthdayCapture: {
+          postOrder: { enabled: true, buttonTextMode: 'white' },
+        },
+      },
+      poView: 1,
+    });
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    const btnRowIdx = slice.indexOf('Button text');
+    const btnRowSlice = slice.slice(btnRowIdx, btnRowIdx + 500);
+    // White button is active (one indigo background in the mode row)
+    expect(btnRowSlice).toContain('background:#4f46e5');
+  });
+
+  test('ON (poView=1): textMode=auto → Auto in text-colour row is highlighted', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 1,
+    });
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    // 'Text colour' label appears in the Colours view
+    expect(slice).toContain('Text colour');
+    const txtRowIdx = slice.indexOf('Text colour');
+    const txtRowSlice = slice.slice(txtRowIdx, txtRowIdx + 400);
+    expect(txtRowSlice).toContain('background:#4f46e5');
+  });
+
+  // ── Colours view: background presets ────────────────────────────────────────
+
+  test('ON (poView=1): background presets include None + 4 colour swatches', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 1,
+    });
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    // PO_BG_PRESETS: Cream, Pale blue, Smoke, Navy — plus the None button
+    expect(slice).toContain('None (default)');
+    expect(slice).toContain('#FFF7ED'); // Cream
+    expect(slice).toContain('#EEF2FF'); // Pale blue
+    expect(slice).toContain('#F3F4F6'); // Smoke
+    expect(slice).toContain('#0F172A'); // Navy
+  });
+
+  // ── Colours view: contrast warning ──────────────────────────────────────────
+
+  test('ON (poView=1): ⚠ Low contrast warning shown for gold accent + white text', () => {
+    const html = renderWith({
+      config: {
+        birthdayCapture: {
+          postOrder: {
+            enabled: true,
+            accentColor: '#F5C542',
+            buttonTextMode: 'white',
+          },
+        },
+      },
+      poView: 1,
+    });
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    expect(slice).toContain('⚠ Low contrast');
+  });
+
+  test('ON (poView=1): no contrast warning for default colours', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 1,
+    });
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    expect(slice).not.toContain('⚠ Low contrast');
+  });
+
+  // ── Wording view: counter format and Reset button ───────────────────────────
+
+  test('ON (poView=0): pitch counter shows "0 / 120" for empty pitch', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 0,
+    });
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    expect(slice).toContain('0 / 120');
+  });
+
+  test('ON (poView=0): Reset all to defaults is present and disabled for empty copy', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 0,
+    });
+    expect(html).toContain('Reset all to defaults');
+  });
+
+  // ── Default preview: #4f46e5 button with white text ─────────────────────────
+
+  test('ON (poPreviewState=0): default preview shows #4f46e5 button with #FFFFFF text', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 0,
+      poPreviewState: 0,
+    });
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    // Default poColors is null (all defaults) → previewAccent=#4f46e5, previewBtnFg=#FFFFFF
+    expect(slice).toContain('background:#4f46e5');
+    expect(slice).toContain('color:#FFFFFF');
+  });
+
+  // ── Preview state 1: Missing date (red border + error text) ─────────────────
+
+  test('ON (poPreviewState=1): month/day inputs have red border #dc2626', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 0,
+      poPreviewState: 1,
+    });
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    // PreviewBlock for state=1 renders Month/Day divs with border:1.5px solid #dc2626
+    expect(slice).toContain('#dc2626');
+  });
+
+  test('ON (poPreviewState=1): default error text is shown', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 0,
+      poPreviewState: 1,
+    });
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    expect(slice).toContain('Please pick a month and day.');
+  });
+
+  // ── Preview state 2: After saving (green text + saved message) ──────────────
+
+  test('ON (poPreviewState=2): saved message uses green (#16a34a)', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 0,
+      poPreviewState: 2,
+    });
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    expect(slice).toContain('#16a34a');
+  });
+
+  test('ON (poPreviewState=2): default saved text contains "Birthday saved!"', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 0,
+      poPreviewState: 2,
+    });
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    expect(slice).toContain('Birthday saved!');
+  });
 });

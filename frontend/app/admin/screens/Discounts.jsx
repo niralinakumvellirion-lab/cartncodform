@@ -1509,6 +1509,11 @@ export default function Discounts({ shop }) {
                                 <div style={{ fontSize: 11, color: '#dc2626', marginTop: -8, marginBottom: 10 }}>Not a valid 6-digit hex — enter #RRGGBB</div>
                               )}
                               <PoModeRow label="Button text" field="buttonTextMode" options={[{ val: 'auto', lbl: 'Auto' }, { val: 'white', lbl: 'White' }, { val: 'dark', lbl: 'Dark' }]} value={po.buttonTextMode || 'auto'} />
+                              {poColors?.lowBtnContrast && (
+                                <div style={{ background: '#fef3c7', border: '1px solid #fbbf24', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#92400e', marginTop: 4, marginBottom: 4 }}>
+                                  ⚠ Low contrast — the button text may be hard to read on this accent colour. Try Auto or a darker accent.
+                                </div>
+                              )}
                               <PoSwatchRow label="Block background" field="bgColor" swatches={PO_BG_PRESETS} value={po.bgColor || ''} allowEmpty emptyLabel="None (default)" />
                               {!bgHexValid && (po.bgColor || '') !== '' && (
                                 <div style={{ fontSize: 11, color: '#dc2626', marginTop: -8, marginBottom: 10 }}>Not a valid 6-digit hex — enter #RRGGBB</div>
