@@ -569,3 +569,73 @@ Remaining intended differences (not regressions):
   - bottom_sheet capture follows textColor. MINOR/acceptable.
 
 ================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+SELF-AUDIT — "entry popup colours: style fix" (EXTENDED DIFFERENTIAL)
+Date: 2026-10-21
+Commit: TBD (suite H addition only; no code regressions found)
+────────────────────────────────────────────────────────────────────────────────
+
+SCOPE
+Extend the 4658333 baseline differential to the 7 remaining styles not covered by
+the prior run (c4577a3): classic SPLIT (desktop), spotlight, noir, color_block,
+top_bar (mobile), flash_sale, story_card (mobile).
+Same matrix: bgColor ∈ {#FFFFFF, #FFF7ED, #1a1a2e, #18181B, + each pro default bg}
+× textColor ∈ {'', '#111827', '#7c2d12'} × custom textMode × buttonTextColor=auto.
+
+DIFF SCRIPT RESULTS (extendedDiff.js)
+Total comparisons: 522   Differences: 6   Regressions: 0
+
+Full diff table (only rows with any difference):
+
+  style   bgColor   textColor  element      baseline (4658333)  HEAD        verdict
+  ──────────────────────────────────────────────────────────────────────────────────
+  split   #1a1a2e   (empty)    headline     #111827             #ffffff     INTENDED
+  split   #1a1a2e   (empty)    captureText  #111827             #ffffff     INTENDED
+  split   #1a1a2e   (empty)    inputFg      #111827             #ffffff     INTENDED
+  split   #18181B   (empty)    headline     #111827             #ffffff     INTENDED
+  split   #18181B   (empty)    captureText  #111827             #ffffff     INTENDED
+  split   #18181B   (empty)    inputFg      #111827             #ffffff     INTENDED
+
+All other styles (spotlight, noir, color_block, top_bar, flash_sale, story_card):
+  516 comparisons → 0 differences → BYTE-IDENTICAL ✓
+
+EXPLANATION OF 6 DIFFERENCES (all INTENDED, no regressions)
+  Cause: at 4658333, SPLIT global `fg = cfg.textColor || '#111827'` (dark-unaware).
+  HEAD: `fg = _r.text` (resolver-backed, dark-aware).
+  For empty textColor + dark bg: baseline produces fg='#111827' (dark on dark — broken);
+  HEAD produces fg='#ffffff' (resolver correctly inverts for dark bg — fixed).
+  For explicit textColor or light bg: fg is identical in both versions. ✓
+
+PRO STYLE ANALYSIS — ccfProPalette parity
+  baseline: pFg = cfg.textColor || defFg
+  HEAD:      pFg = ccfResolvePopupColors(cfg, defBg, defFg, defAccent).text
+           = cfg.textColor || defFg || (dark ? '#ffffff' : '#111827')
+  Since defFg is always non-null for all three pro styles, the resolver returns defFg
+  when textColor is empty — identical to baseline.
+  spotlight (defFg=#1c1917): BYTE-IDENTICAL for all 5×3=15 matrix cases. ✓
+  noir (defFg=#f4f4f5): BYTE-IDENTICAL for all 5×3=15 matrix cases. ✓
+  color_block (defFg=#1c1917): BYTE-IDENTICAL for all 5×3=15 matrix cases. ✓
+
+HARDCODED-FG STYLES — unaffected by resolver changes
+  top_bar:    tbFg = cfg.textColor || '#ffffff' (unchanged in both versions). ✓
+  flash_sale: sFg  = '#ffffff' hardcoded (unchanged in both versions). ✓
+  story_card: scFg = '#ffffff' hardcoded (unchanged in both versions). ✓
+
+SUITE H — NEW PERMANENT FIXTURE TESTS
+  8 tests: SPLIT explicit textColor cases byte-identical (test.each)
+  1 test:  SPLIT light-bg empty textColor → #111827 (same in both)
+  1 test:  SPLIT dark-bg empty textColor → intended divergence
+  45 tests: pro styles (3 × 5 bgs × 3 textColors) byte-identical
+  1 test:  top_bar source assertion (tbFg logic unchanged)
+  1 test:  flash_sale source assertion (sFg hardcoded)
+  1 test:  story_card source assertion (scFg hardcoded)
+  Total: 58 new tests.
+
+FULL SUITE RESULT
+  89 suites / 2066 tests / 0 failures. ✓  (+58 from Suite H)
+
+CODE CHANGES
+  None to ccf-push.js (0 regressions found). Only popupColoursFollowUp.test.js.
+
+================================================================================

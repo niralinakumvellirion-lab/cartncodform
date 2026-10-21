@@ -609,3 +609,110 @@ describe('G: 4658333-baseline capture differential (card layout, custom textMode
     expect(headCardCaptureText(cfg)).toBe('#171A22');
   });
 });
+
+// ── Suite H: 4658333 baseline differential — extended styles ──────────────────
+// Split (desktop), spotlight, noir, color_block, top_bar, flash_sale, story_card.
+// textMode='custom', buttonTextColor='auto'. Covers the same matrix as Suite G.
+// Baseline colour logic mirrors ccf-push-4658333.js reading, verified Oct 2026.
+
+describe('H: 4658333-baseline differential — extended styles', () => {
+  // ── helpers ──
+  function fgOnAccent() { return fgOn('#4f46e5'); } // accent fixed in matrix
+
+  // Baseline SPLIT fg: cfg.textColor || '#111827' (dark-unaware)
+  function baselineSplitFg(textColor) { return textColor || '#111827'; }
+
+  // HEAD SPLIT fg: _r.text — resolver is dark-aware
+  function headSplitFg(bgColor, textColor) {
+    return ccfResolvePopupColors({ bgColor, textColor, textMode: 'custom', accentColor: '#4f46e5' }).text;
+  }
+
+  // baseline ccfProPalette fg: cfg.textColor || defFg
+  function baselineProFg(textColor, defFg) { return textColor || defFg; }
+
+  // HEAD ccfProPalette fg: resolver with defBg, defFg, defAccent
+  function headProFg(bgColor, textColor, defBg, defFg) {
+    return ccfResolvePopupColors(
+      { bgColor, textColor, textMode: 'custom', accentColor: '#4f46e5' },
+      defBg, defFg, '#c2410c'
+    ).text;
+  }
+
+  // ── SPLIT: explicit textColor cases are byte-identical ──
+  const SPLIT_EXPLICIT_CASES = [
+    { bg: '#FFFFFF',  tc: '#111827' },
+    { bg: '#FFFFFF',  tc: '#7c2d12' },
+    { bg: '#FFF7ED',  tc: '#111827' },
+    { bg: '#FFF7ED',  tc: '#7c2d12' },
+    { bg: '#1a1a2e',  tc: '#111827' },
+    { bg: '#1a1a2e',  tc: '#7c2d12' },
+    { bg: '#18181B',  tc: '#111827' },
+    { bg: '#18181B',  tc: '#7c2d12' },
+  ];
+
+  test.each(SPLIT_EXPLICIT_CASES)(
+    'split fg byte-identical for bg=$bg textColor=$tc (explicit)',
+    ({ bg, tc }) => {
+      expect(headSplitFg(bg, tc)).toBe(baselineSplitFg(tc));
+    }
+  );
+
+  // ── SPLIT: empty textColor on light bg — also byte-identical ──
+  test('split fg light-bg empty textColor: both resolve to #111827', () => {
+    expect(headSplitFg('#FFFFFF',  '')).toBe('#111827');
+    expect(headSplitFg('#FFF7ED',  '')).toBe('#111827');
+    expect(baselineSplitFg('')).toBe('#111827');
+  });
+
+  // ── SPLIT: empty textColor on dark bg — INTENDED resolver fix (not a regression) ──
+  test('split fg dark-bg empty textColor: HEAD=#ffffff, baseline=#111827 (intended fix)', () => {
+    expect(baselineSplitFg('')).toBe('#111827');         // baseline was broken (dark-on-dark)
+    expect(headSplitFg('#1a1a2e', '')).toBe('#ffffff'); // resolver corrects to white
+    expect(headSplitFg('#18181B', '')).toBe('#ffffff');
+  });
+
+  // ── Pro styles: byte-identical for custom textMode, all matrix cases ──
+  const PRO_STYLE_CASES = [
+    { id: 'spotlight', defBg: '#fbf4e8', defFg: '#1c1917' },
+    { id: 'noir',      defBg: '#0f1115', defFg: '#f4f4f5' },
+    { id: 'color_block', defBg: '#f6e3c4', defFg: '#1c1917' },
+  ];
+
+  const PRO_BG_CASES = ['#FFFFFF', '#FFF7ED', '#1a1a2e', '#18181B'];
+  const PRO_TC_CASES = ['', '#111827', '#7c2d12'];
+
+  for (const { id, defBg, defFg } of PRO_STYLE_CASES) {
+    for (const bg of [...PRO_BG_CASES, defBg]) {
+      for (const tc of PRO_TC_CASES) {
+        test(`${id} fg byte-identical bg=${bg} textColor=${tc || '(empty)'}`, () => {
+          const base = baselineProFg(tc, defFg);
+          const head = headProFg(bg, tc, defBg, defFg);
+          expect(head).toBe(base);
+        });
+      }
+    }
+  }
+
+  // ── top_bar: tbFg = textColor || '#ffffff' — same in both versions ──
+  test('top_bar tbFg source unchanged: textColor || #ffffff', () => {
+    const tbLine = CCF_SRC.split('\n').find(l =>
+      l.includes('tbFg') && l.includes("'#ffffff'"));
+    expect(tbLine).toBeDefined();
+    expect(tbLine).toContain("cfg.textColor || '#ffffff'");
+  });
+
+  // ── flash_sale: sFg = '#ffffff' hardcoded — same in both versions ──
+  test('flash_sale sFg hardcoded #ffffff in source', () => {
+    const flashLine = CCF_SRC.split('\n').find(l =>
+      l.includes('sFg') && l.includes("'#ffffff'") && !l.includes('tbFg'));
+    expect(flashLine).toBeDefined();
+  });
+
+  // ── story_card: scFg = '#ffffff' hardcoded — same in both versions ──
+  test('story_card scFg hardcoded #ffffff in source', () => {
+    const scLine = CCF_SRC.split('\n').find(l =>
+      l.includes('scFg') && l.includes("'#ffffff'"));
+    expect(scLine).toBeDefined();
+    expect(scLine).toContain("var scFg = '#ffffff'");
+  });
+});
