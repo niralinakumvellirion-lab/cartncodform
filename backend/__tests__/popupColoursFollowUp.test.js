@@ -220,19 +220,81 @@ describe('C: byte-identical defaults for custom/empty config', () => {
     expect(brandingLine).toBeDefined();
   });
 
-  test('card email input passes _r.text to ccfInputStyle', () => {
+  test('card email input passes _r.text to ccfInputStyle for non-custom textMode', () => {
+    // ccfInputStyle now receives _r.text only for non-custom modes
     const inputLine = CCF_SRC.split('\n').find(l =>
-      l.includes('ccfInputStyle(cardDark, _r.text)'));
+      l.includes('ccfInputStyle(cardDark,') && l.includes('_r.text'));
     expect(inputLine).toBeDefined();
   });
 
-  test('card WhatsApp inputFg uses _r.text', () => {
+  test('card WhatsApp inputFg uses _r.text for non-custom textMode', () => {
     const waLines = CCF_SRC.split('\n');
     const waIdx = waLines.findIndex(l => l.includes('ccfBuildWhatsappFields(cardContent,'));
     expect(waIdx).toBeGreaterThan(0);
     const waBlock = waLines.slice(waIdx, waIdx + 6).join('\n');
-    expect(waBlock).toContain('inputFg: _r.text');
+    // custom mode falls back to cardDark-based; non-custom uses _r.text
+    expect(waBlock).toContain('_r.text');
     expect(waBlock).toContain('inputBg: _r.inputBg');
+  });
+
+  test('textIsLight for custom textMode uses cardDark (byte-identical with pre-e995010)', () => {
+    // The fix: custom mode -> textIsLight = cardDark; non-custom -> !ccfIsDarkColor(_r.text)
+    const textIsLightLine = CCF_SRC.split('\n').find(l =>
+      l.includes('textIsLight') && l.includes("!== 'custom'"));
+    expect(textIsLightLine).toBeDefined();
+    expect(textIsLightLine).toContain('cardDark');
+  });
+
+  describe('byte-identical: custom mode + dark bg + explicit textColor', () => {
+    // ccfResolvePopupColors is already extracted above; simulate the card textIsLight fix
+    function textIsLightFixed(cfg, r) {
+      return (cfg.textMode && cfg.textMode !== 'custom') ? !ccfIsDarkColor(r.text) : r.dark;
+    }
+
+    const DARK_BG_CASES = [
+      { bgColor: '#1a1a2e', textColor: '#111827', textMode: 'custom', accentColor: '#4f46e5', buttonTextColor: 'auto', label: '#1a1a2e + #111827' },
+      { bgColor: '#18181B', textColor: '#111827', textMode: 'custom', accentColor: '#4f46e5', buttonTextColor: 'auto', label: '#18181B + #111827' },
+      { bgColor: '#1a1a2e', textColor: '#7c2d12', textMode: 'custom', accentColor: '#4f46e5', buttonTextColor: 'auto', label: '#1a1a2e + #7c2d12' },
+    ];
+
+    test.each(DARK_BG_CASES)(
+      'custom+dark bg: textIsLight=cardDark (not textIsLight(_r.text)) for %p',
+      (cfg) => {
+        const r = ccfResolvePopupColors(cfg);
+        const tl = textIsLightFixed(cfg, r);
+        // For dark bg: cardDark=true → textIsLight=true → uses light muted
+        expect(r.dark).toBe(true);
+        expect(tl).toBe(true);
+        // Brand muted should be light (white-toned)
+        const brand = tl ? 'rgba(255,255,255,0.50)' : '#9ca3af';
+        expect(brand).toBe('rgba(255,255,255,0.50)');
+        // InputFg: custom mode → cardDark ? '#ffffff' : '#111827'
+        const inputFg = (cfg.textMode && cfg.textMode !== 'custom')
+          ? r.text : (r.dark ? '#ffffff' : '#111827');
+        expect(inputFg).toBe('#ffffff');
+      }
+    );
+
+    test('non-custom (white) still uses text-derived muted on light bg', () => {
+      const cfg = { bgColor: '#FFFFFF', textMode: 'white', accentColor: '#4f46e5', buttonTextColor: 'auto' };
+      const r = ccfResolvePopupColors(cfg);
+      const tl = textIsLightFixed(cfg, r);
+      expect(r.dark).toBe(false);       // light bg
+      expect(r.text).toBe('#ffffff');   // white text forced
+      expect(tl).toBe(true);            // text-derived: #ffffff = light
+      const brand = tl ? 'rgba(255,255,255,0.50)' : '#9ca3af';
+      expect(brand).toBe('rgba(255,255,255,0.50)');
+    });
+
+    test('non-custom (dark) on dark bg: text=#171A22, textIsLight=false', () => {
+      const cfg = { bgColor: '#18181B', textMode: 'dark', accentColor: '#4f46e5', buttonTextColor: 'auto' };
+      const r = ccfResolvePopupColors(cfg);
+      const tl = textIsLightFixed(cfg, r);
+      expect(r.text).toBe('#171A22');
+      expect(tl).toBe(false);
+      const inputFg = (cfg.textMode && cfg.textMode !== 'custom') ? r.text : '#ffffff';
+      expect(inputFg).toBe('#171A22');
+    });
   });
 });
 

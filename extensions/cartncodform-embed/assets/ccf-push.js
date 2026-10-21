@@ -2867,7 +2867,10 @@
         ? 'linear-gradient(145deg,#ffffff,#f8f9ff)'
         : cardBgRaw;
       var cardDark = _r.dark;
-      var textIsLight = !ccfIsDarkColor(_r.text);
+      // custom textMode: muted colours follow cardDark (bg-darkness) so a stored
+      // explicit textColor doesn't silently change brand/sub/deny contrast.
+      // auto/white/dark: muted colours follow the resolved text colour.
+      var textIsLight = (cfg.textMode && cfg.textMode !== 'custom') ? !ccfIsDarkColor(_r.text) : cardDark;
       wrap.style.cssText = isMobile ? [
         'position:fixed',
         'top:50%',
@@ -3099,12 +3102,12 @@
         cardEmailInput.className = 'ccf-input';
         var cardEp = ccfFieldPct('emailDiscount');
         cardEmailInput.placeholder = ccfCopy('emailPlaceholder', 'Your email', {}) + (cardEp ? ' (get ' + cardEp + '% off)' : '');
-        cardEmailInput.style.cssText = ccfInputStyle(cardDark, _r.text);
+        cardEmailInput.style.cssText = ccfInputStyle(cardDark, (cfg.textMode && cfg.textMode !== 'custom') ? _r.text : undefined);
         cardContent.appendChild(cardEmailInput);
       }
       ccfBuildWhatsappFields(cardContent, {
         inputBg: _r.inputBg,
-        inputFg: _r.text,
+        inputFg: (cfg.textMode && cfg.textMode !== 'custom') ? _r.text : (cardDark ? '#ffffff' : '#111827'),
         darkBg: cardDark,
       });
 
