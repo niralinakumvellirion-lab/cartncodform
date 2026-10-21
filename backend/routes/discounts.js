@@ -51,7 +51,11 @@ function defaultConfig(shop) {
     birthdayCapture: {
       popup: { enabled: false },
       banner: { enabled: false, text: '', buttonText: 'Get my gift', dismissDays: 7, bgColor: '#3730A3', textColor: 'auto', highlight: true },
-      postOrder: { enabled: false },
+      postOrder: {
+        enabled: false,
+        copy: { pitch: '', button: '', skip: '', saved: '', error: '' },
+        accentColor: '', buttonTextMode: 'auto', bgColor: '', textMode: 'auto',
+      },
     },
     birthdayDiscount: { enabled: false, percentage: 15, expiryDays: 7, leadDays: 3, prefix: 'BDAY', offerText: '', consentText: "We'll use your birthday only to send you a birthday offer." },
     quantityTiers: {
@@ -520,8 +524,46 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
       if (bc.popup && typeof bc.popup.enabled === 'boolean') {
         set['birthdayCapture.popup.enabled'] = bc.popup.enabled;
       }
-      if (bc.postOrder && typeof bc.postOrder.enabled === 'boolean') {
-        set['birthdayCapture.postOrder.enabled'] = bc.postOrder.enabled;
+      if (bc.postOrder && typeof bc.postOrder === 'object') {
+        const po = bc.postOrder;
+        if (typeof po.enabled === 'boolean') {
+          set['birthdayCapture.postOrder.enabled'] = po.enabled;
+        }
+        const PO_COPY_MAX = { pitch: 120, button: 30, skip: 30, saved: 80, error: 60 };
+        if (po.copy && typeof po.copy === 'object') {
+          for (const k of ['pitch', 'button', 'skip', 'saved', 'error']) {
+            if (k in po.copy) {
+              const s = String(po.copy[k]).replace(/[\x00-\x1F\x7F]/g, '').trim();
+              set[`birthdayCapture.postOrder.copy.${k}`] = s.slice(0, PO_COPY_MAX[k]);
+            }
+          }
+        }
+        if (po.accentColor !== undefined) {
+          const v = String(po.accentColor || '').trim();
+          if (v !== '' && !/^#[0-9a-fA-F]{6}$/.test(v)) {
+            return res.status(400).json({ error: 'birthdayCapture.postOrder.accentColor must be a 6-digit hex colour or empty string' });
+          }
+          set['birthdayCapture.postOrder.accentColor'] = v;
+        }
+        if (po.bgColor !== undefined) {
+          const v = String(po.bgColor || '').trim();
+          if (v !== '' && !/^#[0-9a-fA-F]{6}$/.test(v)) {
+            return res.status(400).json({ error: 'birthdayCapture.postOrder.bgColor must be a 6-digit hex colour or empty string' });
+          }
+          set['birthdayCapture.postOrder.bgColor'] = v;
+        }
+        if (po.buttonTextMode !== undefined) {
+          if (!['auto', 'white', 'dark'].includes(po.buttonTextMode)) {
+            return res.status(400).json({ error: 'birthdayCapture.postOrder.buttonTextMode must be one of: auto, white, dark' });
+          }
+          set['birthdayCapture.postOrder.buttonTextMode'] = po.buttonTextMode;
+        }
+        if (po.textMode !== undefined) {
+          if (!['auto', 'white', 'dark'].includes(po.textMode)) {
+            return res.status(400).json({ error: 'birthdayCapture.postOrder.textMode must be one of: auto, white, dark' });
+          }
+          set['birthdayCapture.postOrder.textMode'] = po.textMode;
+        }
       }
       if (bc.banner && typeof bc.banner === 'object') {
         const bn = bc.banner;

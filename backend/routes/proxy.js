@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
@@ -10,6 +10,7 @@ const { sendNewCodOrderEmail } = require('../utils/email');
 const { sendPushToStore } = require('../utils/pushNotification');
 const { verifyProxySignature } = require('../utils/shopify');
 const { generateDiscount, defaultConfig } = require('./discounts');
+const { resolvePostOrderColors } = require('../utils/postOrderColors');
 
 /**
  * Escape a string for safe interpolation into HTML text / attribute context.
@@ -351,16 +352,44 @@ router.get('/cod-form', async (req, res) => {
   const priceLabel = price && !Number.isNaN(priceNum) ? priceNum.toFixed(2) : '—';
 
   // Load discount config — birthday flags + quantity tiers. Single query, both features.
+  const PO_DEFAULT_CONSENT = "We'll use your birthday only to send you a birthday offer.";
+  const HEX_RE_PO = /^#[0-9a-fA-F]{6}$/;
+  const PO_COPY_MAX = { pitch: 120, button: 30, skip: 30, saved: 80, error: 60 };
+  function sanitizePoStr(v, max) {
+    return String(v || '').replace(/[\x00-\x1F\x7F]/g, '').trim().slice(0, max);
+  }
+
   let postOrderEnabled = false;
   let birthdayPct = 15;
-  let consentText = "We'll use your birthday only to send you a birthday offer.";
+  let consentText = PO_DEFAULT_CONSENT;
+  let postOrderCopy = { pitch: '', button: '', skip: '', saved: '', error: '' };
+  let postOrderAccent = '';
+  let postOrderBtnMode = 'auto';
+  let postOrderBgColor = '';
+  let postOrderTxtMode = 'auto';
   let qtBoot = { enabled: false, tiers: [], heading: 'Buy more, save more', accentColor: '#4F46E5', layout: 'cards' };
   try {
     const cfg = await DiscountConfig.findOne({ shopDomain: shop }).lean();
     if (cfg) {
-      postOrderEnabled = !!(cfg.birthdayCapture && cfg.birthdayCapture.postOrder && cfg.birthdayCapture.postOrder.enabled);
+      const po = cfg.birthdayCapture && cfg.birthdayCapture.postOrder;
+      postOrderEnabled = !!(po && po.enabled);
       birthdayPct = (cfg.birthdayDiscount && cfg.birthdayDiscount.percentage) || 15;
-      consentText = String((cfg.birthdayDiscount && cfg.birthdayDiscount.consentText) || consentText).slice(0, 200);
+      // Trim consentText: whitespace-only falls back to default
+      const rawConsent = (cfg.birthdayDiscount && cfg.birthdayDiscount.consentText) || '';
+      consentText = String(rawConsent).trim() ? String(rawConsent).trim().slice(0, 200) : PO_DEFAULT_CONSENT;
+      if (po && po.copy && typeof po.copy === 'object') {
+        for (const k of ['pitch', 'button', 'skip', 'saved', 'error']) {
+          postOrderCopy[k] = sanitizePoStr(po.copy[k], PO_COPY_MAX[k]);
+        }
+      }
+      if (po) {
+        const rawAccent = String(po.accentColor || '').trim();
+        postOrderAccent = HEX_RE_PO.test(rawAccent) ? rawAccent : '';
+        const rawBg = String(po.bgColor || '').trim();
+        postOrderBgColor = HEX_RE_PO.test(rawBg) ? rawBg : '';
+        postOrderBtnMode = ['auto', 'white', 'dark'].includes(po.buttonTextMode) ? po.buttonTextMode : 'auto';
+        postOrderTxtMode = ['auto', 'white', 'dark'].includes(po.textMode)       ? po.textMode       : 'auto';
+      }
       const qt = cfg.quantityTiers;
       if (qt && qt.enabled && Array.isArray(qt.tiers) && qt.tiers.length > 0) {
         qtBoot = {
@@ -374,14 +403,23 @@ router.get('/cod-form', async (req, res) => {
     }
   } catch (_) { /* keep defaults */ }
 
-  // Values handed to the inline script — JSON-encoded, with "<" neutralised so
-  // the payload can never break out of the <script> element.
+  // Resolve post-order colours (null = use existing CSS unchanged).
+  const poColors = resolvePostOrderColors({
+    accentColor:    postOrderAccent,
+    bgColor:        postOrderBgColor,
+    buttonTextMode: postOrderBtnMode,
+    textMode:       postOrderTxtMode,
+  });
+
+  // Values handed to the inline script — JSON-encoded with "<", U+2028/2029
+  // neutralised so the payload can never break out of the <script> element.
   const bootJson = JSON.stringify({
     shop, productName, price, productId,
     quantity: quantityParam,
     postOrderEnabled, birthdayPct, consentText,
+    postOrderCopy,
     quantityTiers: qtBoot,
-  }).replace(/</g, '\\u003c');
+  }).replace(/</g, '\\u003c').replace(new RegExp('\u2028', 'g'), '\\u2028').replace(new RegExp('\u2029', 'g'), '\\u2029');
 
   const html = `<!doctype html>
 <html lang="en">
@@ -458,6 +496,13 @@ router.get('/cod-form', async (req, res) => {
   .bday-btn { width: 100%; padding: 10px; background: #4f46e5; color: #fff; border: none; border-radius: 9px; font-size: 14px; font-weight: 700; cursor: pointer; min-height: 44px; margin-bottom: 8px; }
   .bday-skip { width: 100%; background: none; border: none; color: #a1a1aa; font-size: 12px; cursor: pointer; padding: 8px; min-height: 44px; }
   .bday-err { font-size: 11px; color: #dc2626; margin-top: 4px; display: none; }
+${poColors ? `  /* post-order colour overrides */
+  .bday-ask { ${poColors.bg ? `background:${poColors.bg};border-top:none;border-radius:10px;padding:16px;` : `border-top:1px solid ${poColors.sep || '#e4e4e7'};`} }
+  .bday-ask p { color:${poColors.text}; }
+  .bday-consent { color:${poColors.muted}; }
+  .bday-btn { background:${poColors.accent}; color:${poColors.btnFg}; }
+  .bday-skip { color:${poColors.skip}; }
+  .bday-row select { color:${poColors.text}; }` : ''}
 </style>
 </head>
 <body>
@@ -645,7 +690,8 @@ router.get('/cod-form', async (req, res) => {
             bdAsk.className = 'bday-ask';
 
             var bdP = document.createElement('p');
-            bdP.textContent = 'One more thing — Share your birthday for ' + BOOT.birthdayPct + '% off on the day.';
+            var bdPitchCustom = BOOT.postOrderCopy && BOOT.postOrderCopy.pitch ? BOOT.postOrderCopy.pitch.split('{pct}').join(String(BOOT.birthdayPct)) : '';
+            bdP.textContent = bdPitchCustom || ('One more thing — Share your birthday for ' + BOOT.birthdayPct + '% off on the day.');
             bdAsk.appendChild(bdP);
 
             var bdConsent = document.createElement('div');
@@ -679,12 +725,12 @@ router.get('/cod-form', async (req, res) => {
 
             var bdBtn = document.createElement('button');
             bdBtn.type = 'button'; bdBtn.className = 'bday-btn';
-            bdBtn.textContent = 'Save my birthday';
+            bdBtn.textContent = (BOOT.postOrderCopy && BOOT.postOrderCopy.button) || 'Save my birthday';
             bdAsk.appendChild(bdBtn);
 
             var bdSkip = document.createElement('button');
             bdSkip.type = 'button'; bdSkip.className = 'bday-skip';
-            bdSkip.textContent = 'Skip';
+            bdSkip.textContent = (BOOT.postOrderCopy && BOOT.postOrderCopy.skip) || 'Skip';
             bdAsk.appendChild(bdSkip);
 
             var bdErr = document.createElement('div');
@@ -701,7 +747,7 @@ router.get('/cod-form', async (req, res) => {
               var m = parseInt(bdMonth.value, 10);
               var d = parseInt(bdDay.value, 10);
               if (!m || !d) {
-                bdErr.textContent = 'Please select a month and day.';
+                bdErr.textContent = (BOOT.postOrderCopy && BOOT.postOrderCopy.error) || 'Please select a month and day.';
                 bdErr.style.display = '';
                 return;
               }
@@ -717,11 +763,11 @@ router.get('/cod-form', async (req, res) => {
                   bdAsk.innerHTML = '';
                   var thanks = document.createElement('p');
                   thanks.style.cssText = 'text-align:center;font-size:13px;color:#16a34a;margin:8px 0 0;';
-                  thanks.textContent = 'Birthday saved! Your offer will arrive on your birthday.';
+                  thanks.textContent = (BOOT.postOrderCopy && BOOT.postOrderCopy.saved) || 'Birthday saved! Your offer will arrive on your birthday.';
                   bdAsk.appendChild(thanks);
                 })
                 .catch(function() {
-                  bdBtn.disabled = false; bdBtn.textContent = 'Save my birthday';
+                  bdBtn.disabled = false; bdBtn.textContent = (BOOT.postOrderCopy && BOOT.postOrderCopy.button) || 'Save my birthday';
                 });
             });
           }

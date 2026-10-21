@@ -77,7 +77,18 @@ const discountConfigSchema = new mongoose.Schema({
       highlight: { type: Boolean, default: true },
     },
     postOrder: {
-      enabled: { type: Boolean, default: false },
+      enabled:        { type: Boolean, default: false },
+      copy: {
+        pitch:  { type: String, default: '' },
+        button: { type: String, default: '' },
+        skip:   { type: String, default: '' },
+        saved:  { type: String, default: '' },
+        error:  { type: String, default: '' },
+      },
+      accentColor:    { type: String, default: '' },
+      buttonTextMode: { type: String, default: 'auto', enum: ['auto', 'white', 'dark'] },
+      bgColor:        { type: String, default: '' },
+      textMode:       { type: String, default: 'auto', enum: ['auto', 'white', 'dark'] },
     },
   },
 

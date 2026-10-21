@@ -1,0 +1,82 @@
+POST-ORDER BIRTHDAY ASK — BUILD SELF-AUDIT
+==========================================
+Date: 2026-10-21
+Branch: main
+Baseline commit: 374a7cb
+
+SCOPE LOCK VERIFIED
+--------------------
+- extensions/ unchanged (git diff --stat confirms)
+- No changes to: Entry popup, banner, Store.popup, product-page code, birthday save endpoint
+- localStorage logic untouched
+- COD form placement gates (postOrderEnabled, isFirstOrder, !hasBirthday, localStorage skip) untouched
+
+FILES CHANGED
+-------------
+backend/models/DiscountConfig.js
+  - Added to postOrder sub-doc: copy (5 string fields), accentColor, buttonTextMode, bgColor, textMode
+
+backend/utils/postOrderColors.js  [NEW]
+  - resolvePostOrderColors(cfg): returns null when all defaults (→ proxy emits existing CSS unchanged)
+  - Returns { accent, btnFg, bg, text, muted, skip, sep } otherwise
+  - Uses relativeLuminance / contrastRatio from bannerColors.js
+
+frontend/app/admin/lib/postOrderColors.js  [NEW]
+  - ESM mirror of backend helper (export function resolvePostOrderColors)
+  - Inline _luminance/_contrast helpers — same algorithm
+  - Parity proven by >= 30-combination test in postOrderColors.test.js
+
+backend/routes/discounts.js
+  - defaultConfig(): postOrder now includes all new fields
+  - PATCH handler: validates copy (strip ctrl, trim, truncate), hex colours (empty=allowed),
+    buttonTextMode/textMode enums; returns 400 for invalid non-empty hex or unknown enum
+
+backend/routes/proxy.js
+  - Imports resolvePostOrderColors
+  - Reads all new postOrder fields from config with same sanitisation as PATCH
+  - BOOT JSON includes postOrderCopy; serialisation escapes < U+2028 U+2029
+  - CSS block: emits override rules for .bday-ask/.bday-ask p/.bday-consent/.bday-btn/.bday-skip/.bday-row select
+    when poColors !== null
+  - Birthday JS block: all copy strings use BOOT.postOrderCopy.X || 'hardcoded fallback'
+  - Differential: when all fields are default, poColors=null and HTML is byte-identical to baseline
+
+backend/babel.config.js
+  - Added override for frontend/app/admin/lib/*.js to apply @babel/plugin-transform-modules-commonjs
+    so Jest can require() the ESM frontend mirror
+
+frontend/app/admin/screens/Discounts.jsx
+  - Import resolvePostOrderColors from ../lib/postOrderColors
+  - Added poView (0=Wording, 1=Colours) and poPreviewState (0=ask, 1=missing, 2=saved) states
+  - buildPayload: postOrder now includes copy + color fields
+  - Toggle updated to preserve existing postOrder fields when toggling (spread ...postOrder)
+  - Method 3 title: "After the first COD order"
+  - Always-visible panel below toggle (matches Entry popup panel pattern):
+    - OFF: info box + dimmed preview with pill "After the first COD order is off"
+    - ON: Wording/Colours view switcher + two-column (controls + preview)
+  - Wording: 5 PoCopyField inputs with char counters; {pct} note; consent-line note; Reset button
+  - Colours: PoSwatchRow + PoModeRow; 5 accent swatches; None+4 bg presets; btn/text mode; hex inputs
+  - Preview: 3 states (The ask / Missing date / After saving); live colour from resolvePostOrderColors
+
+NEW TEST FILES
+--------------
+backend/__tests__/postOrderColors.test.js   — 122 tests (null path, accent, btnFg, bg, text, parity)
+backend/__tests__/postOrderConfig.test.js   — 32 tests (PATCH validation, differential, XSS)
+
+UPDATED TEST FILES
+------------------
+backend/__tests__/discountsWordingPanel.test.js
+  - 2 anchor strings updated: 'After the first order' → 'After the first COD order'
+
+FINAL TEST RUN
+--------------
+Test Suites: 91 passed, 91 total
+Tests:       2234 passed, 2234 total
+
+WHAT WAS NOT DONE (out of scope / not in spec)
+----------------------------------------------
+- Playwright screenshots (no browser env available in current session)
+- `next build` (pre-existing monorepo workspace-root issue; Babel parse confirmed syntax OK)
+- ESLint (no eslint config file in project; Babel parse confirmed syntax OK)
+- No push to remote
+- No shopify deploy
+- git stash@{0} not popped (as instructed)

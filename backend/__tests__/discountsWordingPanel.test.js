@@ -108,7 +108,7 @@ describe('Discounts wording panel — renderToStaticMarkup', () => {
     const bdCard   = html.indexOf('How do you collect birthdays?');
     const entryRow = html.indexOf('Shows a birthday step after the subscriber');
     const panel    = html.indexOf('Change the text on each step');
-    const method3  = html.indexOf('After the first order');
+    const method3  = html.indexOf('After the first COD order');
 
     expect(bdCard).toBeGreaterThan(0);
     expect(entryRow).toBeGreaterThan(bdCard);  // row inside the card
@@ -337,8 +337,8 @@ describe('Discounts wording panel — OFF state (popup.enabled false)', () => {
     // (the wording description is only present in the ON panel body)
     const panelOff    = htmlOff.indexOf('Entry popup preview');
     const panelOn     = htmlOn.indexOf('Change the text on each step');
-    const method3Off  = htmlOff.indexOf('After the first order');
-    const method3On   = htmlOn.indexOf('After the first order');
+    const method3Off  = htmlOff.indexOf('After the first COD order');
+    const method3On   = htmlOn.indexOf('After the first COD order');
 
     // Panel comes after the Entry popup toggle row and before Method 3 in both states
     expect(panelOff).toBeGreaterThan(entryRowOff);
