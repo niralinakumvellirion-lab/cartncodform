@@ -238,3 +238,119 @@ describe('Discounts wording panel — renderToStaticMarkup', () => {
     }
   });
 });
+
+// ── OFF-state panel tests ─────────────────────────────────────────────────────
+// After the "always-visible" change: the panel renders regardless of popup.enabled.
+// State call order is unchanged (still 9 slots as before).
+
+describe('Discounts wording panel — OFF state (popup.enabled false)', () => {
+
+  test('OFF: panel title is "Entry popup preview"', () => {
+    const html = renderWith({ config: {} });
+    expect(html).toContain('Entry popup preview');
+  });
+
+  test('OFF: subtitle "Always visible" present', () => {
+    const html = renderWith({ config: {} });
+    expect(html).toContain('Always visible, so you can see how it looks.');
+  });
+
+  test('OFF: note "The Entry popup is off" present', () => {
+    const html = renderWith({ config: {} });
+    expect(html).toContain('The Entry popup is off');
+  });
+
+  test('OFF: note explanation "Visitors do not see" present', () => {
+    const html = renderWith({ config: {} });
+    expect(html).toContain('Visitors do not see this popup step right now.');
+  });
+
+  test('OFF: note "Your saved wording" present', () => {
+    const html = renderWith({ config: {} });
+    expect(html).toContain('Your saved wording and colours are kept while it is off.');
+  });
+
+  test('OFF: pill "Entry popup is off" present in preview area', () => {
+    const html = renderWith({ config: {} });
+    // The pill appears in the right-column preview wrapper
+    const pillCount = (html.match(/Entry popup is off/g) || []).length;
+    // "The Entry popup is off" (note) + "Entry popup is off" (pill) = 2 occurrences
+    expect(pillCount).toBeGreaterThanOrEqual(2);
+  });
+
+  test('OFF: preview card is present (accent gradient bar rendered)', () => {
+    const html = renderWith({ config: {} });
+    // The preview card has the gradient bar using the accent colour
+    expect(html).toContain('linear-gradient(90deg,#4f46e5,#4f46e588,transparent)');
+  });
+
+  test('OFF: preview is dimmed (opacity:0.55 wrapper rendered)', () => {
+    const html = renderWith({ config: {} });
+    expect(html).toContain('opacity:0.55');
+  });
+
+  test('OFF: step mini-tabs rendered (4 role="tab" buttons)', () => {
+    const html = renderWith({ config: {} });
+    expect((html.match(/role="tab"/g) || []).length).toBe(4);
+  });
+
+  test('OFF: Wording|Colours switch absent', () => {
+    const html = renderWith({ config: {} });
+    // The Wording|Colours switch uses background #E8E8F7 pill container
+    const offHtml = html;
+    // Easiest check: the text "Wording" inside a button that is the view switch
+    // is not rendered when OFF. Presence of 'Entry popup preview' as title
+    // and absence of the switch container colour is a clean proxy.
+    expect(html).not.toContain('background:#E8E8F7');
+  });
+
+  test('OFF: no form inputs rendered inside the panel', () => {
+    const html = renderWith({ config: {} });
+    // Find the panel (anchored by 'Entry popup preview' title)
+    const panelStart = html.indexOf('Entry popup preview');
+    const panelEnd   = html.indexOf('After the first order', panelStart);
+    const panelSlice = panelStart > 0 && panelEnd > panelStart
+      ? html.slice(panelStart, panelEnd)
+      : '';
+    // Count <input elements inside the panel — should be zero
+    const inputCount = (panelSlice.match(/<input /g) || []).length;
+    expect(inputCount).toBe(0);
+  });
+
+  test('OFF: popupCopy in config still reaches preview (default copy shown)', () => {
+    const html = renderWith({
+      config: {
+        popupCopy: { captureButton: 'My custom capture text' },
+      },
+    });
+    // Default wording tab (0) shows emailPlaceholder + captureButton copy in the preview
+    expect(html).toContain('My custom capture text');
+  });
+
+  test('OFF panel and ON panel: panel is in the same position relative to method rows', () => {
+    const htmlOff = renderWith({ config: {} });
+    const htmlOn  = renderWith({ config: { birthdayCapture: { popup: { enabled: true } } } });
+
+    const entryRowOff = htmlOff.indexOf('Shows a birthday step after the subscriber');
+    const entryRowOn  = htmlOn.indexOf('Shows a birthday step after the subscriber');
+    // Use 'Entry popup preview' for OFF and 'Change the text on each step' for ON
+    // (the wording description is only present in the ON panel body)
+    const panelOff    = htmlOff.indexOf('Entry popup preview');
+    const panelOn     = htmlOn.indexOf('Change the text on each step');
+    const method3Off  = htmlOff.indexOf('After the first order');
+    const method3On   = htmlOn.indexOf('After the first order');
+
+    // Panel comes after the Entry popup toggle row and before Method 3 in both states
+    expect(panelOff).toBeGreaterThan(entryRowOff);
+    expect(panelOff).toBeLessThan(method3Off);
+    expect(panelOn).toBeGreaterThan(entryRowOn);
+    expect(panelOn).toBeLessThan(method3On);
+  });
+
+  test('ON: Wording|Colours switch present and panel title is "Entry popup"', () => {
+    const html = renderWith({ config: { birthdayCapture: { popup: { enabled: true } } } });
+    expect(html).toContain('background:#E8E8F7');
+    // Title is 'Entry popup' (not 'Entry popup preview') when on
+    expect(html).not.toContain('Entry popup preview');
+  });
+});

@@ -1,0 +1,117 @@
+================================================================================
+AUDIT — entry-popup-off-preview
+Feature: Entry popup preview visible when Entry popup switch is OFF.
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+PRE-AUDIT — before any code changes
+────────────────────────────────────────────────────────────────────────────────
+
+Date: 2026-10-21
+Baseline commit: 23d7794
+
+FILES IN SCOPE
+  frontend/app/admin/screens/Discounts.jsx   (1544 lines)
+  backend/__tests__/discountsWordingPanel.test.js
+
+CURRENT BEHAVIOUR
+  Line 827: `{config.birthdayCapture?.popup?.enabled && (() => { ... })()}`
+  Panel (background #F7F7FF, 1px #D9D8FF, 12px radius) is ONLY rendered when
+  popup.enabled is true. When false: panel is entirely absent.
+
+TESTS BEFORE CHANGE
+  backend: 89 suites / 2066 tests / 0 failures
+
+DISCOUNTS WORDING PANEL TESTS (current):
+  - 'Entry popup OFF: wording panel description absent' — passes (panel absent)
+  - 'Entry popup ON: wording panel description present' — passes (panel present)
+  - 'ON: panel is inside the birthday card ...' — passes
+  - 'ON: exactly 4 tabs with role="tab"' — passes
+  - countPanelInputs uses 'Change the text on each step' anchor (wording view)
+
+CHANGE NEEDED
+  Remove the popup.enabled guard so the panel is ALWAYS rendered.
+  When OFF: title "Entry popup preview", subtitle, left note, dimmed preview
+    with dark pill "Entry popup is off", step mini-tabs still navigating.
+  When ON: exactly today's behaviour.
+
+STATE CALL ORDER (must not change)
+  0 config  1 loading  2 saving  3 success  4 error
+  5 previewColors  6 wordingTab  7 popupPanelView  8 coloursPatch
+
+────────────────────────────────────────────────────────────────────────────────
+SELF-AUDIT — "entry popup: off-state always-visible preview"
+Date: 2026-10-21
+────────────────────────────────────────────────────────────────────────────────
+
+FILES CHANGED
+  frontend/app/admin/screens/Discounts.jsx
+  backend/__tests__/discountsWordingPanel.test.js
+
+CHANGE SUMMARY (Discounts.jsx)
+  Before: `{config.birthdayCapture?.popup?.enabled && (() => { ... })()}`
+    Panel absent when popup is OFF.
+
+  After:  `{(() => { const popupOn = !!(config.birthdayCapture?.popup?.enabled); ... })()}`
+    Panel always rendered. Inside:
+
+  When OFF (popupOn=false):
+    - Panel header: "Entry popup preview" + subtitle "Always visible..."
+    - Wording|Colours switch: hidden
+    - Left column: white note box:
+        "The Entry popup is off" (bold)
+        "Visitors do not see this popup step right now. Switch Entry popup on
+         to edit the wording and colours. The preview shows how it will look
+         with your current saved settings."
+        "Your saved wording and colours are kept while it is off."
+    - Right column: 4 step mini-tabs (wordingTab state, role="tab")
+        + "Preview" label
+        + position:relative wrapper containing:
+            dark pill ("Entry popup is off", position:absolute, top 10, left 50%,
+            transform translateX(-50%), z-index 2, bg #111827)
+            opacity:0.55 div wrapping the existing preview card
+
+  When ON (popupOn=true): unchanged from before.
+
+STATE SLOT ORDER: unchanged (9 slots: config/loading/saving/success/error/
+  previewColors/wordingTab/popupPanelView/coloursPatch). No new useState calls.
+
+buildPayload / colour save: unaffected. The condition on rendering is purely UI;
+  buildPayload(config) uses config.popupCopy unconditionally (existing tests confirm).
+
+ESLINT (flat config, no-undef + react/jsx-no-undef)
+  0 errors, 0 warnings. ✓
+
+NEXT.JS BUILD
+  Clean (tail output shows all routes built without error). ✓
+
+PLAYWRIGHT SCREENSHOTS
+  entry-off-off-1100w.png  — OFF state desktop (1100px)
+  entry-off-off-390w.png   — OFF state mobile (390px)
+  entry-off-on-1100w.png   — ON state desktop (1100px, unchanged behaviour)
+  entry-off-on-390w.png    — ON state mobile (390px, unchanged behaviour)
+
+NEW TESTS (discountsWordingPanel.test.js)
+  +14 tests in "Discounts wording panel — OFF state (popup.enabled false)":
+    Panel title "Entry popup preview"
+    Subtitle "Always visible" present
+    Note "The Entry popup is off" present
+    Explanation "Visitors do not see" present
+    "Your saved wording" note present
+    Pill "Entry popup is off" appears >=2 times (note + pill)
+    Preview card present (gradient bar rendered)
+    Preview dimmed (opacity:0.55)
+    Step mini-tabs rendered (4 role="tab")
+    Wording|Colours switch absent (no background:#E8E8F7)
+    No form inputs inside panel when OFF
+    Custom popupCopy shown in OFF preview
+    Panel position relative to toggle row (OFF and ON)
+    ON state: switch present, title "Entry popup" (not "preview")
+
+FULL SUITE (2 consecutive runs)
+  Run 1: 89 suites / 2080 tests / 0 failures ✓
+  Run 2: 89 suites / 2080 tests / 0 failures ✓
+  (1 earlier run showed 1 flaky push-customer failure unrelated to this change;
+   resolved on re-run)
+
+================================================================================

@@ -823,8 +823,9 @@ export default function Discounts({ shop }) {
                   <div style={{ position: 'absolute', top: 2, left: config.birthdayCapture?.popup?.enabled ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
                 </div>
               </div>
-              {/* Wording panel -- only when Entry popup is on */}
-              {config.birthdayCapture?.popup?.enabled && (() => {
+              {/* Wording/colours panel — always rendered so merchant sees the preview */}
+              {(() => {
+                const popupOn = !!(config.birthdayCapture?.popup?.enabled);
                 const pc = config.popupCopy || {};
                 const setPc = (patch) => setConfig((c) => ({ ...c, popupCopy: { ...(c.popupCopy || {}), ...patch } }));
                 const PC_MAX = {
@@ -1011,19 +1012,71 @@ export default function Discounts({ shop }) {
                 const previewCardBg = previewIsBgDefault ? 'linear-gradient(145deg,#ffffff,#f8f9ff)' : previewBg;
                 return (
                   <div style={{ background: '#F7F7FF', border: '1px solid #D9D8FF', borderRadius: 12, margin: '0 0 16px', padding: '16px 20px' }}>
-                    {/* Panel header + Wording|Colours view switch */}
+                    {/* Panel header */}
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#171A22' }}>Entry popup</div>
-                      <div style={{ display: 'flex', gap: 2, background: '#E8E8F7', borderRadius: 8, padding: 2 }}>
-                        {['Wording', 'Colours'].map((lbl, vi) => (
-                          <button key={lbl} type="button" onClick={() => setPopupPanelView(vi)}
-                            style={{ fontSize: 12, fontWeight: popupPanelView === vi ? 700 : 500, padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', background: popupPanelView === vi ? '#ffffff' : 'transparent', color: popupPanelView === vi ? '#171A22' : '#5A6070', boxShadow: popupPanelView === vi ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.15s' }}
-                          >{lbl}</button>
-                        ))}
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#171A22' }}>
+                          {popupOn ? 'Entry popup' : 'Entry popup preview'}
+                        </div>
+                        {!popupOn && (
+                          <div style={{ fontSize: 12, color: '#5A6070', marginTop: 2 }}>
+                            Always visible, so you can see how it looks. Switch Entry popup on to show it to visitors and edit it.
+                          </div>
+                        )}
                       </div>
+                      {popupOn && (
+                        <div style={{ display: 'flex', gap: 2, background: '#E8E8F7', borderRadius: 8, padding: 2 }}>
+                          {['Wording', 'Colours'].map((lbl, vi) => (
+                            <button key={lbl} type="button" onClick={() => setPopupPanelView(vi)}
+                              style={{ fontSize: 12, fontWeight: popupPanelView === vi ? 700 : 500, padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', background: popupPanelView === vi ? '#ffffff' : 'transparent', color: popupPanelView === vi ? '#171A22' : '#5A6070', boxShadow: popupPanelView === vi ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.15s' }}
+                            >{lbl}</button>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
-                    {popupPanelView === 0 && (<>
+                    {/* OFF state: left note + step mini-tabs + dimmed preview with pill */}
+                    {!popupOn && (
+                      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 220 }}>
+                          <div style={{ background: '#ffffff', border: '1px solid #D9D8FF', borderRadius: 8, padding: '14px 16px' }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#171A22', marginBottom: 8 }}>The Entry popup is off</div>
+                            <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5, marginBottom: 8 }}>
+                              Visitors do not see this popup step right now. Switch Entry popup on to edit the wording and colours. The preview shows how it will look with your current saved settings.
+                            </div>
+                            <div style={{ fontSize: 12, color: '#6b7280' }}>Your saved wording and colours are kept while it is off.</div>
+                          </div>
+                        </div>
+                        <div style={{ width: 290, flexShrink: 0, minWidth: 200 }}>
+                          <div role="tablist" style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap' }}>
+                            {STEP_TABS.map((label, i) => {
+                              const active = wordingTab === i;
+                              return (
+                                <button key={label} role="tab" type="button" aria-selected={active}
+                                  onClick={() => setWordingTab(i)}
+                                  style={{ fontSize: 11, padding: '3px 8px', borderRadius: 12, border: '1.5px solid ' + (active ? '#374151' : '#D9D8FF'), background: active ? '#374151' : '#ffffff', color: active ? '#ffffff' : '#6b7280', cursor: 'pointer', fontWeight: active ? 700 : 500 }}
+                                >{label}</button>
+                              );
+                            })}
+                          </div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Preview</div>
+                          <div style={{ position: 'relative' }}>
+                            <div style={{ position: 'absolute', top: 10, left: '50%', transform: 'translateX(-50%)', zIndex: 2, background: '#111827', color: '#ffffff', fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 20, whiteSpace: 'nowrap', letterSpacing: '0.02em' }}>
+                              Entry popup is off
+                            </div>
+                            <div style={{ opacity: 0.55 }}>
+                              <div style={{ background: cardBg, borderRadius: 14, padding: '14px 16px', boxShadow: '0 4px 16px rgba(0,0,0,0.10)', width: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+                                <div style={{ height: 3, background: 'linear-gradient(90deg,' + accent + ',' + accent + '88,transparent)', borderRadius: 2, marginBottom: 12, marginLeft: -16, marginRight: -16, marginTop: -14 }} />
+                                {previewSteps[wordingTab]?.()}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ON state: existing Wording / Colours panel views */}
+                    {popupOn && popupPanelView === 0 && (<>
                       {/* Wording: description */}
                       <div style={{ fontSize: 12, color: '#5A6070', marginBottom: 12 }}>
                         Change the text on each step after the first popup screen. Leave a field empty to use the default.
@@ -1099,7 +1152,7 @@ export default function Discounts({ shop }) {
                       </div>
                     </>)}
 
-                    {popupPanelView === 1 && (<>
+                    {popupOn && popupPanelView === 1 && (<>
                       {coloursDisabled && (
                         <div style={{ fontSize: 12, color: '#9ca3af', background: '#f0f0f0', borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
                           Colour controls are not available for this popup style.
