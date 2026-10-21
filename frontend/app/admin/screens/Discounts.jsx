@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
 import QuantityTiers from './QuantityTiers';
+import { resolvePostOrderColors } from '../lib/postOrderColors';
 
 const DS = {
   page: {
@@ -317,7 +318,20 @@ function buildPayload(config) {
   const bnDismiss = Math.min(30, Math.max(1, Math.round(Number(bn.dismissDays ?? 7)) || 7));
   out.birthdayCapture = {
     popup: { enabled: !!(bcap.popup?.enabled) },
-    postOrder: { enabled: !!(bcap.postOrder?.enabled) },
+    postOrder: {
+      enabled:        !!(bcap.postOrder?.enabled),
+      copy: {
+        pitch:  (bcap.postOrder?.copy?.pitch  || '').slice(0, 120),
+        button: (bcap.postOrder?.copy?.button || '').slice(0, 30),
+        skip:   (bcap.postOrder?.copy?.skip   || '').slice(0, 30),
+        saved:  (bcap.postOrder?.copy?.saved  || '').slice(0, 80),
+        error:  (bcap.postOrder?.copy?.error  || '').slice(0, 60),
+      },
+      accentColor:    /^#[0-9a-fA-F]{6}$/.test(bcap.postOrder?.accentColor || '') ? bcap.postOrder.accentColor : '',
+      buttonTextMode: ['auto','white','dark'].includes(bcap.postOrder?.buttonTextMode) ? bcap.postOrder.buttonTextMode : 'auto',
+      bgColor:        /^#[0-9a-fA-F]{6}$/.test(bcap.postOrder?.bgColor || '') ? bcap.postOrder.bgColor : '',
+      textMode:       ['auto','white','dark'].includes(bcap.postOrder?.textMode) ? bcap.postOrder.textMode : 'auto',
+    },
     banner: {
       enabled: !!(bn.enabled),
       text: (bn.text || '').trim().slice(0, 120),
@@ -405,6 +419,8 @@ export default function Discounts({ shop }) {
   const [previewColors, setPreviewColors] = useState({ accentColor: '#4f46e5', bgColor: '#ffffff', textColor: '', buttonTextColor: 'auto', textMode: 'custom', styleId: 'classic' });
   const [wordingTab, setWordingTab] = useState(0);
   const [popupPanelView, setPopupPanelView] = useState(0); // 0=Wording, 1=Colours
+  const [poView, setPoView] = useState(0); // 0=Wording, 1=Colours  (post-order panel)
+  const [poPreviewState, setPoPreviewState] = useState(0); // 0=ask, 1=missing date, 2=saved
   const [coloursPatch, setColoursPatch] = useState({});
 
   useEffect(() => {
@@ -1205,25 +1221,329 @@ export default function Discounts({ shop }) {
               })()}
             </div>
 
-            {/* Method 3: After first order */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: `1px solid ${DS.gray200}` }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900 }}>After the first order</div>
-                <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2 }}>Shows a compact birthday ask on the COD order success screen.</div>
+            {/* Method 3: After the first COD order */}
+            <div style={{ borderBottom: `1px solid ${DS.gray200}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900 }}>After the first COD order</div>
+                  <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2 }}>Shows a compact birthday ask inline on the COD order success screen.</div>
+                </div>
+                <div
+                  role="switch"
+                  aria-checked={!!(config.birthdayCapture?.postOrder?.enabled)}
+                  tabIndex={0}
+                  onClick={() => setConfig((c) => ({
+                    ...c,
+                    birthdayCapture: { ...(c.birthdayCapture || {}), postOrder: { ...(c.birthdayCapture?.postOrder || {}), enabled: !(c.birthdayCapture?.postOrder?.enabled) } },
+                  }))}
+                  onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setConfig((c) => ({ ...c, birthdayCapture: { ...(c.birthdayCapture || {}), postOrder: { ...(c.birthdayCapture?.postOrder || {}), enabled: !(c.birthdayCapture?.postOrder?.enabled) } } })); } }}
+                  style={{ width: 36, height: 20, borderRadius: 10, cursor: 'pointer', background: config.birthdayCapture?.postOrder?.enabled ? '#16a34a' : '#d1d5db', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
+                >
+                  <div style={{ position: 'absolute', top: 2, left: config.birthdayCapture?.postOrder?.enabled ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+                </div>
               </div>
-              <div
-                role="switch"
-                aria-checked={!!(config.birthdayCapture?.postOrder?.enabled)}
-                tabIndex={0}
-                onClick={() => setConfig((c) => ({
+
+              {/* Always-visible panel (mirrors Entry popup panel pattern) */}
+              {(() => {
+                const poOn   = !!(config.birthdayCapture?.postOrder?.enabled);
+                const po     = config.birthdayCapture?.postOrder || {};
+                const poCopy = po.copy || {};
+                const setPo  = (patch) => setConfig((c) => ({
                   ...c,
-                  birthdayCapture: { ...(c.birthdayCapture || {}), postOrder: { enabled: !(c.birthdayCapture?.postOrder?.enabled) } },
-                }))}
-                onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setConfig((c) => ({ ...c, birthdayCapture: { ...(c.birthdayCapture || {}), postOrder: { enabled: !(c.birthdayCapture?.postOrder?.enabled) } } })); } }}
-                style={{ width: 36, height: 20, borderRadius: 10, cursor: 'pointer', background: config.birthdayCapture?.postOrder?.enabled ? '#16a34a' : '#d1d5db', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
-              >
-                <div style={{ position: 'absolute', top: 2, left: config.birthdayCapture?.postOrder?.enabled ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
-              </div>
+                  birthdayCapture: {
+                    ...(c.birthdayCapture || {}),
+                    postOrder: { ...(c.birthdayCapture?.postOrder || {}), ...patch },
+                  },
+                }));
+                const setPoCopy = (patch) => setConfig((c) => ({
+                  ...c,
+                  birthdayCapture: {
+                    ...(c.birthdayCapture || {}),
+                    postOrder: {
+                      ...(c.birthdayCapture?.postOrder || {}),
+                      copy: { ...(c.birthdayCapture?.postOrder?.copy || {}), ...patch },
+                    },
+                  },
+                }));
+
+                const PO_COPY_MAX = { pitch: 120, button: 30, skip: 30, saved: 80, error: 60 };
+                const bdPct = config.birthdayDiscount?.percentage ?? 15;
+                const bdLead = config.birthdayDiscount?.leadDays ?? 3;
+                const consentText = (config.birthdayDiscount?.consentText || '').trim() ||
+                  "We'll use your birthday only to send you a birthday offer.";
+
+                // Resolve live colours for preview
+                const poColors = resolvePostOrderColors({
+                  accentColor:    po.accentColor    || '',
+                  bgColor:        po.bgColor        || '',
+                  buttonTextMode: po.buttonTextMode || 'auto',
+                  textMode:       po.textMode       || 'auto',
+                });
+                const previewAccent  = (poColors?.accent)  || '#4f46e5';
+                const previewBtnFg   = (poColors?.btnFg)   || '#FFFFFF';
+                const previewBg      = (poColors?.bg)      || null;
+                const previewText    = (poColors?.text)    || '#18181B';
+                const previewMuted   = (poColors?.muted)   || '#71717A';
+                const previewSkip    = (poColors?.skip)    || '#a1a1aa';
+                const previewSep     = (poColors?.sep)     || '#e4e4e7';
+
+                const pitchText = (() => {
+                  const raw = (poCopy.pitch || '').trim();
+                  if (raw) return raw.split('{pct}').join(String(bdPct));
+                  return 'One more thing — Share your birthday for ' + bdPct + '% off on the day.';
+                })();
+                const btnText  = (poCopy.button || '').trim() || 'Save my birthday';
+                const skipText = (poCopy.skip   || '').trim() || 'No thanks';
+                const savedText = (poCopy.saved || '').trim() ||
+                  ("Birthday saved! We'll send your " + bdPct + '% off code ' + bdLead + ' days before.');
+                const errorText = (poCopy.error || '').trim() || 'Please pick a month and day.';
+
+                // View-switch tab strip
+                const viewTabStyle = (active) => ({
+                  fontSize: 12, padding: '4px 12px', borderRadius: 20, border: '1.5px solid ' + (active ? '#4f46e5' : '#D9D8FF'),
+                  background: active ? '#4f46e5' : '#ffffff', color: active ? '#ffffff' : '#4f46e5',
+                  cursor: 'pointer', fontWeight: active ? 700 : 500,
+                });
+
+                // PO_ACCENT swatches (5 brand-neutral presets)
+                const PO_ACCENT_SWATCHES = [
+                  { name: 'Indigo',    hex: '#4f46e5' },
+                  { name: 'Violet',    hex: '#7C3AED' },
+                  { name: 'Teal',      hex: '#0D9488' },
+                  { name: 'Rose',      hex: '#E11D48' },
+                  { name: 'Charcoal',  hex: '#171A22' },
+                ];
+                const PO_BG_PRESETS = [
+                  { name: 'Cream',   hex: '#FFF7ED' },
+                  { name: 'Pale blue', hex: '#EEF2FF' },
+                  { name: 'Smoke',   hex: '#F3F4F6' },
+                  { name: 'Navy',    hex: '#0F172A' },
+                ];
+
+                const HEX_RE = /^#[0-9a-fA-F]{6}$/;
+                const accentHexValid = HEX_RE.test(po.accentColor || '');
+                const bgHexValid     = HEX_RE.test(po.bgColor || '');
+
+                // Inline SwatchRow for post-order colours
+                function PoSwatchRow({ label, field, swatches, value, allowEmpty, emptyLabel }) {
+                  const activeVal = value || '';
+                  return (
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#171A22', marginBottom: 6 }}>{label}</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                        {allowEmpty && (
+                          <button type="button" onClick={() => setPo({ [field]: '' })}
+                            style={{ height: 28, padding: '0 10px', fontSize: 11, fontWeight: activeVal === '' ? 700 : 500, borderRadius: 6, border: '1.5px solid ' + (activeVal === '' ? '#4f46e5' : '#D9D8FF'), background: activeVal === '' ? '#4f46e5' : '#fff', color: activeVal === '' ? '#fff' : '#6b7280', cursor: 'pointer' }}>
+                            {emptyLabel || 'None'}
+                          </button>
+                        )}
+                        {swatches.map(({ name, hex }) => {
+                          const active = activeVal === hex;
+                          return (
+                            <button key={hex} type="button" title={name} onClick={() => setPo({ [field]: hex })}
+                              style={{ width: 24, height: 24, borderRadius: '50%', background: hex, border: active ? '3px solid #4f46e5' : '2px solid rgba(0,0,0,0.12)', cursor: 'pointer', flexShrink: 0 }} />
+                          );
+                        })}
+                        <input type="text" maxLength={7} placeholder="#4f46e5" value={activeVal}
+                          onChange={(e) => { const v = e.target.value; if (v === '' || HEX_RE.test(v)) setPo({ [field]: v }); }}
+                          style={{ width: 80, height: 28, padding: '0 8px', fontSize: 12, border: '1.5px solid #D9D8FF', borderRadius: 6, fontFamily: 'monospace' }} />
+                      </div>
+                    </div>
+                  );
+                }
+
+                function PoModeRow({ label, field, options, value }) {
+                  return (
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#171A22', marginBottom: 6 }}>{label}</div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {options.map(({ val, lbl }) => {
+                          const active = (value || 'auto') === val;
+                          return (
+                            <button key={val} type="button" onClick={() => setPo({ [field]: val })}
+                              style={{ height: 28, padding: '0 12px', fontSize: 12, fontWeight: active ? 700 : 500, borderRadius: 6, border: '1.5px solid ' + (active ? '#4f46e5' : '#D9D8FF'), background: active ? '#4f46e5' : '#fff', color: active ? '#fff' : '#6b7280', cursor: 'pointer' }}>
+                              {lbl}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                }
+
+                const fieldInner = { ...fieldStyle, height: 42, borderColor: '#AEB4C2', color: '#171A22', width: '100%' };
+                const lblSt  = { fontSize: 13, fontWeight: 700, color: '#171A22' };
+                const ctrSt  = { fontSize: '11.5px', color: '#9ca3af' };
+                const helpSt = { fontSize: 12, color: '#5A6070', marginTop: 3 };
+
+                function PoCopyField({ fieldKey, label, placeholder, helper }) {
+                  const val = poCopy[fieldKey] || '';
+                  const max = PO_COPY_MAX[fieldKey];
+                  return (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
+                        <span style={lblSt}>{label}</span>
+                        <span style={ctrSt}>{val.length} / {max}</span>
+                      </div>
+                      <input className="disc-input" type="text" value={val} maxLength={max} placeholder={placeholder}
+                        onChange={(e) => setPoCopy({ [fieldKey]: e.target.value })}
+                        style={fieldInner} />
+                      {helper && <div style={helpSt}>{helper}</div>}
+                    </div>
+                  );
+                }
+
+                const anyCopySet = ['pitch','button','skip','saved','error'].some((k) => (poCopy[k] || '').trim().length > 0);
+
+                // Preview states
+                const PO_PREVIEW_TABS = ['The ask', 'Missing date', 'After saving'];
+                const previewBlockStyle = {
+                  background: previewBg || '#ffffff',
+                  borderTop: previewBg ? 'none' : `1px solid ${previewSep}`,
+                  borderRadius: previewBg ? 10 : 0,
+                  padding: '16px',
+                  marginTop: previewBg ? 8 : 0,
+                };
+
+                function PreviewBlock() {
+                  return (
+                    <div style={previewBlockStyle}>
+                      {poPreviewState === 0 && (<>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: previewText, margin: '0 0 10px' }}>{pitchText}</div>
+                        <div style={{ fontSize: 11, color: previewMuted, marginBottom: 10, lineHeight: 1.4 }}>{consentText}</div>
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+                          <div style={{ flex: 1, height: 34, fontSize: 13, border: '1px solid #d4d4d8', borderRadius: 8, background: '#fff', color: previewText, display: 'flex', alignItems: 'center', paddingLeft: 8 }}>Month</div>
+                          <div style={{ flex: 1, height: 34, fontSize: 13, border: '1px solid #d4d4d8', borderRadius: 8, background: '#fff', color: previewText, display: 'flex', alignItems: 'center', paddingLeft: 8 }}>Day</div>
+                        </div>
+                        <div style={{ background: previewAccent, color: previewBtnFg, borderRadius: 9, padding: '10px', textAlign: 'center', fontSize: 14, fontWeight: 700, marginBottom: 8 }}>{btnText}</div>
+                        <div style={{ textAlign: 'center', fontSize: 12, color: previewSkip, padding: 8 }}>{skipText}</div>
+                      </>)}
+                      {poPreviewState === 1 && (<>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: previewText, margin: '0 0 10px' }}>{pitchText}</div>
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
+                          <div style={{ flex: 1, height: 34, fontSize: 13, border: '1.5px solid #dc2626', borderRadius: 8, background: '#fff', color: '#18181b', display: 'flex', alignItems: 'center', paddingLeft: 8 }}>Month</div>
+                          <div style={{ flex: 1, height: 34, fontSize: 13, border: '1.5px solid #dc2626', borderRadius: 8, background: '#fff', color: '#18181b', display: 'flex', alignItems: 'center', paddingLeft: 8 }}>Day</div>
+                        </div>
+                        <div style={{ fontSize: 11, color: '#dc2626', marginBottom: 8 }}>{errorText}</div>
+                        <div style={{ background: previewAccent, color: previewBtnFg, borderRadius: 9, padding: '10px', textAlign: 'center', fontSize: 14, fontWeight: 700, marginBottom: 8 }}>{btnText}</div>
+                      </>)}
+                      {poPreviewState === 2 && (
+                        <div style={{ fontSize: 13, color: '#16a34a', fontWeight: 600, textAlign: 'center', padding: '12px 0' }}>{savedText}</div>
+                      )}
+                    </div>
+                  );
+                }
+
+                return (
+                  <div style={{ borderTop: `1px solid ${DS.gray200}`, paddingTop: 14, paddingBottom: 14 }}>
+                    {/* OFF state: dimmed preview + info box */}
+                    {!poOn && (
+                      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 220 }}>
+                          <div style={{ background: '#ffffff', border: '1px solid #D9D8FF', borderRadius: 8, padding: '14px 16px' }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#171A22', marginBottom: 8 }}>After the first COD order is off</div>
+                            <div style={{ fontSize: 12, color: '#374151', lineHeight: 1.5, marginBottom: 8 }}>
+                              The birthday ask will not appear after orders. Switch it on to activate it. Your saved wording and colours are kept while it is off.
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ width: 260, flexShrink: 0, minWidth: 200 }}>
+                          <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+                            {PO_PREVIEW_TABS.map((lbl, i) => (
+                              <button key={lbl} type="button" onClick={() => setPoPreviewState(i)}
+                                style={{ fontSize: 11, padding: '3px 8px', borderRadius: 12, border: '1.5px solid ' + (poPreviewState === i ? '#374151' : '#D9D8FF'), background: poPreviewState === i ? '#374151' : '#fff', color: poPreviewState === i ? '#fff' : '#6b7280', cursor: 'pointer', fontWeight: poPreviewState === i ? 700 : 500 }}
+                              >{lbl}</button>
+                            ))}
+                          </div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Preview</div>
+                          <div style={{ position: 'relative' }}>
+                            <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 2, background: '#111827', color: '#fff', fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 20, whiteSpace: 'nowrap', letterSpacing: '0.02em' }}>
+                              After the first COD order is off
+                            </div>
+                            <div style={{ opacity: 0.55 }}>
+                              <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px', overflow: 'hidden' }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}>✓ Order placed!</div>
+                                <PreviewBlock />
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ON state: view switcher + two-column layout */}
+                    {poOn && (
+                      <div>
+                        {/* Wording / Colours switcher */}
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+                          <button type="button" onClick={() => setPoView(0)} style={viewTabStyle(poView === 0)}>Wording</button>
+                          <button type="button" onClick={() => setPoView(1)} style={viewTabStyle(poView === 1)}>Colours</button>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                          {/* Left column: Wording or Colours controls */}
+                          <div style={{ flex: 1, minWidth: 220 }}>
+                            {poView === 0 && (<>
+                              <div style={{ fontSize: 12, color: '#5A6070', marginBottom: 12 }}>
+                                Leave a field empty to use the default. Use <code style={{ background: '#ede9fe', borderRadius: 3, padding: '1px 4px', fontSize: 11 }}>{'{pct}'}</code> for the discount %.
+                              </div>
+                              <PoCopyField fieldKey="pitch" label="Pitch" placeholder={'One more thing — Share your birthday for ' + bdPct + '% off on the day.'} helper="Use {pct} for the discount percentage." />
+                              <PoCopyField fieldKey="button" label="Save button" placeholder="Save my birthday" />
+                              <PoCopyField fieldKey="skip" label="Skip link" placeholder="No thanks" />
+                              <PoCopyField fieldKey="saved" label="Success message" placeholder={'Birthday saved! We\'ll send your ' + bdPct + '% off code ' + bdLead + ' days before.'} helper="Shown after the birthday is saved successfully. Green text — always." />
+                              <PoCopyField fieldKey="error" label="Error message" placeholder="Please pick a month and day." helper="Shown when date is incomplete. Red text — always." />
+                              <div style={{ fontSize: 11, color: '#5A6070', background: '#fef9ec', border: '1px solid #fde68a', borderRadius: 6, padding: '6px 10px', marginBottom: 10 }}>
+                                The consent line (e.g. &ldquo;We'll use your birthday only…&rdquo;) is shared with all birthday capture methods and editable in &ldquo;The birthday gift&rdquo; card below.
+                              </div>
+                              <button type="button" disabled={!anyCopySet}
+                                onClick={() => setPoCopy({ pitch: '', button: '', skip: '', saved: '', error: '' })}
+                                style={{ fontSize: '11.5px', color: anyCopySet ? '#4f46e5' : '#9ca3af', background: 'none', border: 'none', cursor: anyCopySet ? 'pointer' : 'default', padding: 0, textDecoration: anyCopySet ? 'underline' : 'none' }}
+                              >
+                                Reset all to defaults
+                              </button>
+                            </>)}
+
+                            {poView === 1 && (<>
+                              <PoSwatchRow label="Accent colour" field="accentColor" swatches={PO_ACCENT_SWATCHES} value={po.accentColor || ''} />
+                              {!accentHexValid && (po.accentColor || '') !== '' && (
+                                <div style={{ fontSize: 11, color: '#dc2626', marginTop: -8, marginBottom: 10 }}>Not a valid 6-digit hex — enter #RRGGBB</div>
+                              )}
+                              <PoModeRow label="Button text" field="buttonTextMode" options={[{ val: 'auto', lbl: 'Auto' }, { val: 'white', lbl: 'White' }, { val: 'dark', lbl: 'Dark' }]} value={po.buttonTextMode || 'auto'} />
+                              <PoSwatchRow label="Block background" field="bgColor" swatches={PO_BG_PRESETS} value={po.bgColor || ''} allowEmpty emptyLabel="None (default)" />
+                              {!bgHexValid && (po.bgColor || '') !== '' && (
+                                <div style={{ fontSize: 11, color: '#dc2626', marginTop: -8, marginBottom: 10 }}>Not a valid 6-digit hex — enter #RRGGBB</div>
+                              )}
+                              <PoModeRow label="Text colour" field="textMode" options={[{ val: 'auto', lbl: 'Auto' }, { val: 'white', lbl: 'White' }, { val: 'dark', lbl: 'Dark' }]} value={po.textMode || 'auto'} />
+                              <div style={{ fontSize: 11, color: '#5A6070', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 10px', marginTop: 4 }}>
+                                Success and error messages keep their own green / red colour regardless of text colour.
+                              </div>
+                            </>)}
+                          </div>
+
+                          {/* Right column: preview */}
+                          <div style={{ width: 260, flexShrink: 0, minWidth: 200 }}>
+                            <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+                              {PO_PREVIEW_TABS.map((lbl, i) => (
+                                <button key={lbl} type="button" onClick={() => setPoPreviewState(i)}
+                                  style={{ fontSize: 11, padding: '3px 8px', borderRadius: 12, border: '1.5px solid ' + (poPreviewState === i ? '#4f46e5' : '#D9D8FF'), background: poPreviewState === i ? '#4f46e5' : '#fff', color: poPreviewState === i ? '#fff' : '#6b7280', cursor: 'pointer', fontWeight: poPreviewState === i ? 700 : 500 }}
+                                >{lbl}</button>
+                              ))}
+                            </div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Preview</div>
+                            <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 10, padding: '14px 16px', overflow: 'hidden' }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}>✓ Order placed!</div>
+                              <PreviewBlock />
+                            </div>
+                            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>
+                              Saved with &ldquo;Save discount settings&rdquo;.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Method 4: Top announcement banner */}
