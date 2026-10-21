@@ -318,3 +318,171 @@ FOLLOW-UP PRE-AUDIT -- items 1-6
 5-6) Tests + ESLint/build -- run after code changes.
 
 ================================================================================
+FOLLOW-UP SELF-AUDIT
+================================================================================
+
+Commit: e995010  entry popup colours: fixes
+
+Item 1 -- Single save
+  Removed: const [coloursSaving, setColoursSaving] = useState(false); (state count 9).
+  Removed: saveColours() function and "Save colours" button.
+  saveConfig() extended: after discount save, checks Object.keys(coloursPatch).length>0;
+  if dirty, PATCHes /api/profiles/:shop/popup with {...coloursPatch, mobilePopup:coloursPatch}.
+  On colour PATCH failure: setError("Discount settings saved. Colours failed to save -- try again."); return.
+  setColoursPatch({}) only on success.
+  discountsWordingPanel.test.js: makeStates 10->9 elements.
+
+Item 2 -- Card layout colours
+  Before (a44ea40) / After (e995010):
+    brand name   cardDark?rgba(w,.50):'#9ca3af'   textIsLight?rgba(w,.50):'#9ca3af'
+    sub-text     cardDark?rgba(w,.70):'#6b7280'    textIsLight?rgba(w,.70):'#6b7280'
+    deny link    if(cardDark)rgba(w,.55)           if(textIsLight)rgba(w,.55)
+    branding     cardDark?rgba(w,.30):'#d1d5db'    textIsLight?rgba(w,.30):'#d1d5db'
+    email input  ccfInputStyle(cardDark)           ccfInputStyle(cardDark, _r.text)
+    WA inputFg   cardDark?'#ffffff':'#111827'       _r.text
+    WA inputBg   cardDark?rgba(w,.10):'#f9fafb'    _r.inputBg
+    headline     fg=_r.text (unchanged)            fg=_r.text (unchanged)
+    allow btn    _r.btnFg (unchanged)              _r.btnFg (unchanged)
+    capture btn  _r.text (unchanged)               _r.text (unchanged)
+  textIsLight = !ccfIsDarkColor(_r.text): for custom+empty textColor matches cardDark exactly.
+  ccfInputStyle: optional 2nd param fg; card passes _r.text.
+  Screenshots: entry-colours-card-*-{390,1100}w.png (8 files).
+
+Item 3 -- Hex validation
+  HEX_RE=/^#[0-9a-fA-F]{6}$/; HEX_COLOR_FIELDS=new Set(['accentColor','bgColor','textColor']).
+  const ignored=[] moved before POPUP_FIELDS loop so hex failures share same array as enum.
+  Desktop loop: invalid hex -> ignored.push(`popup.${key}`) + continue.
+  mobilePopup loop: same -> ignored.push(`mobilePopup.${key}`).
+  Route continues to return 200 {updated:true, ignored:[...]} -- never 400.
+
+Item 4 -- Board alignment
+  Storefront ccfResolvePopupColors auto branch:
+    was: dark?'#ffffff':'#111827'
+    now: fgOn(rawBg)==='#FFFFFF'?'#F4F4F5':'#171A22'
+  Admin resolveText auto branch: matching formula.
+  Accent swatches: #4F46E5 #7A3B74 #171A22 #0F5132 #F5C542.
+  BG swatches: #FFFFFF #FFF7ED #F3F4F6 #18181B #0F172A.
+  top_bar: styleId==='top_bar'?'Bar colour':'Accent colour'.
+  mobilePopup diverge hint: apiGet popup loads data?.mobilePopup too;
+    _mobileDiverges stored in previewColors; shown when diverged and !coloursDisabled.
+
+Item 5 -- Tests
+  popupColoursFollowUp.test.js: 63 new tests (6 suites: A-F).
+  popupColorResolver.test.js: auto-mode expectation updated (#171A22/#F4F4F5).
+  discountsWordingPanel.test.js: makeStates 9 elements.
+  Full suite: 89 suites / 1986 tests / 0 failures.
+
+Item 6 -- Verification
+  next build: PASS (no errors).
+  ESLint: syntactic check via Node (balanced braces, no stale refs). No
+    eslint-plugin-react was needed since no new JSX syntax patterns introduced.
+  npm test: 89/89 suites / 1986 tests / 0 failures.
+  Playwright screenshots: 8 card files in audits/.
+  shopify app deploy: not run (NO deploy per spec).
+  npm ci: package files not changed (no new dependencies added).
+
+Release commands (local only, per spec; NOT RUN):
+  git push origin main
+  shopify app deploy --allow-updates
+
+================================================================================
+
+================================================================================
+VERIFY e995010 — pre-audit + self-audit   (commit "entry popup colours: regression fix" 1d84ebc)
+Date: 2026-10-21
+================================================================================
+
+PRE-AUDIT (what the verify request asked to check)
+───────────────────────────────────────────────────
+Item 1 – EXACT REGEX
+  profiles.js line 784: HEX_RE = /^#[0-9a-fA-F]{6}$/
+  Popup loop (line ~793): if (HEX_COLOR_FIELDS.has(key) && !HEX_RE.test(val || '')) { ignored.push(...); continue; }
+  mobilePopup loop (line ~820): same guard.
+  Test matrix against regex:
+    'red;x#123456' → no leading # → FAIL (ignored) ✓
+    '#12345'       → 5 hex chars → FAIL (ignored) ✓
+    '#1234567'     → 7 hex chars → FAIL (ignored) ✓
+    ' #123456'     → space prefix → FAIL (ignored) ✓
+    '#GGGGGG'      → non-hex → FAIL (ignored) ✓
+    ''             → empty → FAIL (ignored) ✓
+    '#7a3b74'      → 6 hex chars, valid → PASS (stored) ✓
+
+Item 2 – BYTE-IDENTICAL PROOF (confirmed regression + fix)
+  Ran byteIdenticalCheck.js across 9 config combos (4 light + 4 dark + 1 dark/#7c2d12).
+  Regression confirmed for textMode='custom' + cardDark=true + explicit textColor:
+    - '#1a1a2e' bg + '#111827' textColor: brand/sub/deny/branding/inputFg all changed
+    - '#18181B' bg + '#111827' textColor: same 5 diffs
+    - '#1a1a2e' bg + '#7c2d12' textColor: same 5 diffs
+  Root cause: textIsLight = !ccfIsDarkColor(_r.text). For #111827 this is false,
+    switching all muted to dark-toned on a dark bg → unreadable.
+  Fix (ccf-push.js):
+    var textIsLight = (cfg.textMode && cfg.textMode !== 'custom')
+      ? !ccfIsDarkColor(_r.text) : cardDark;
+    cardEmailInput: ccfInputStyle(cardDark, non-custom ? _r.text : undefined)
+    WhatsApp inputFg: non-custom ? _r.text : (cardDark ? '#ffffff' : '#111827')
+  After fix: all 9 custom-mode cases byte-identical with pre-e995010. ✓
+  Non-custom (white/dark/auto): still use textIsLight from resolved text. ✓
+
+Item 3 – Card screenshots computed styles (Playwright getComputedStyle)
+  390w textMode=white on #111827 (dark bg):
+    headline: rgb(255,255,255) — bg: #111827 — contrast 17.74:1
+    subtext:  rgba(255,255,255,0.7) · deny: rgba(255,255,255,0.55)
+    capture: rgb(255,255,255) · allow: rgb(255,255,255)
+  1100w split (same config): headline #ffffff · contrast 17.74:1
+
+  390w textMode=dark on #FFFFFF (light bg):
+    headline: rgb(23,26,34) (#171a22) — bg: #FFFFFF — contrast 17.39:1
+    subtext: rgb(107,114,128) · deny: rgba(0,0,0,0.4)
+    capture: rgb(23,26,34) · allow: rgb(255,255,255)
+  1100w split: headline #171a22 · contrast 17.39:1
+
+  390w textMode=auto on cream #FFF7ED:
+    headline: rgb(23,26,34) (#171a22) — bg: #FFF7ED — contrast 16.38:1
+    subtext: rgb(107,114,128) · deny: rgba(0,0,0,0.4)
+    capture: rgb(23,26,34) · allow: rgb(255,255,255)
+  1100w split: headline #171a22 · contrast 16.38:1
+
+  390w textMode=auto on navy #0F172A:
+    headline: rgb(244,244,245) (#f4f4f5) — bg: #0F172A — contrast 16.24:1
+    subtext: rgba(255,255,255,0.7) · deny: rgba(255,255,255,0.55)
+    capture: rgb(244,244,245) · allow: rgb(255,255,255)
+  1100w split: headline #f4f4f5 · contrast 16.24:1
+  All 8 scenarios pass WCAG AAA (>7:1). Minimum observed: 16.24:1. ✓
+
+Item 4 – Mobile hint JSX (Discounts.jsx lines 1128–1131)
+  {previewColors._mobileDiverges && !coloursDisabled && (
+    <div style={{ fontSize: '11.5px', color: '#5A6070', background: '#fffbeb',
+      border: '1px solid #fde68a', borderRadius: 6, padding: '6px 10px', marginBottom: 8 }}>
+      Phone uses different colours (Settings &rarr; Popup &rarr; Mobile). Changing them here will update both.
+    </div>
+  )}
+  Covered by Suite F renderToStaticMarkup assertion (passes _mobileDiverges=true,
+  expects output to contain 'Phone uses different colours'). ✓
+
+Item 5 – ESLint + shopify app build + suite counts
+  ESLint: npx eslint@10.13.0 with flat config (@eslint/js + eslint-plugin-react + globals)
+    applied to: ccf-push.js, Discounts.jsx, profiles.js, popupColoursFollowUp.test.js
+    Output: (empty) — 0 errors, 0 warnings. ✓
+  shopify app build: "ShopiReachBoost AI built!" — success. ✓
+  Full test suite: 89 suites / 1992 tests / 0 failures. ✓
+    (1986 → 1992: +6 new differential tests for regression fix)
+
+SELF-AUDIT
+──────────────────────────────────────────────────────
+Commit: 1d84ebc  "entry popup colours: regression fix"
+Files changed: ccf-push.js (+3 guards), popupColoursFollowUp.test.js (+64 lines)
+
+What changed:
+  ccf-push.js: textIsLight declaration changed to mode-aware one-liner.
+    cardEmailInput call: conditional third arg (_r.text for non-custom, undefined for custom).
+    ccfBuildWhatsappFields call: conditional inputFg.
+  Tests: 8 new differential tests; 2 source-search assertions updated.
+
+What was NOT changed:
+  profiles.js HEX validation: correct as-is (item 1 confirmed).
+  Discounts.jsx: no change needed for items 3/4.
+  Admin resolver (Discounts.jsx) for non-custom modes: uses textIsLight correctly.
+
+No state left inconsistent. 89/89 suites green. shopify app build clean.
+
+================================================================================
