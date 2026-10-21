@@ -14,7 +14,9 @@
  *   5  previewColors   { accentColor:'#4f46e5', bgColor:'#ffffff', ... }
  *   6  wordingTab      0
  *   7  popupPanelView  0  (entry-popup-colours: 0=Wording, 1=Colours)
- *   8  coloursPatch    {}
+ *   8  poView          0  (post-order panel: 0=Wording, 1=Colours)
+ *   9  poPreviewState  0  (post-order preview: 0=ask, 1=missing date, 2=saved)
+ *  10  coloursPatch    {}
  * (coloursSaving removed in follow-up — single-save)
  */
 
@@ -55,9 +57,9 @@ const DISCOUNTS_SRC = fs.readFileSync(
 // Default preview colours (indigo accent, white bg → light card)
 const DEFAULT_COLORS = { accentColor: '#4f46e5', bgColor: '#ffffff', textColor: '', buttonTextColor: 'auto', textMode: 'custom', styleId: 'classic' };
 
-// Builds the 9-element state array expected by DiscountsScreen.
-function makeStates({ config = {}, loading = false, previewColors = DEFAULT_COLORS, wordingTab = 0, popupPanelView = 0 } = {}) {
-  return [config, loading, false, false, '', previewColors, wordingTab, popupPanelView, {}];
+// Builds the 11-element state array expected by DiscountsScreen.
+function makeStates({ config = {}, loading = false, previewColors = DEFAULT_COLORS, wordingTab = 0, popupPanelView = 0, poView = 0, poPreviewState = 0 } = {}) {
+  return [config, loading, false, false, '', previewColors, wordingTab, popupPanelView, poView, poPreviewState, {}];
 }
 
 // Renders the Discounts component with controlled initial state.
@@ -241,7 +243,6 @@ describe('Discounts wording panel — renderToStaticMarkup', () => {
 
 // ── OFF-state panel tests ─────────────────────────────────────────────────────
 // After the "always-visible" change: the panel renders regardless of popup.enabled.
-// State call order is unchanged (still 9 slots as before).
 
 describe('Discounts wording panel — OFF state (popup.enabled false)', () => {
 
@@ -352,5 +353,165 @@ describe('Discounts wording panel — OFF state (popup.enabled false)', () => {
     expect(html).toContain('background:#E8E8F7');
     // Title is 'Entry popup' (not 'Entry popup preview') when on
     expect(html).not.toContain('Entry popup preview');
+  });
+});
+
+// ── Method 3 (post-order birthday ask) tests ──────────────────────────────────
+
+describe('Discounts — Method 3 (post-order birthday ask)', () => {
+
+  // ── Row always present ───────────────────────────────────────────────────────
+
+  test('row "After the first COD order" is always in the birthday card', () => {
+    const html = renderWith({ config: {} });
+    expect(html).toContain('After the first COD order');
+  });
+
+  test('toggle background is grey (#d1d5db) when disabled', () => {
+    const html = renderWith({ config: {} });
+    // Locate Method 3 toggle (comes after 'After the first COD order')
+    const rowIdx = html.indexOf('After the first COD order');
+    expect(rowIdx).toBeGreaterThan(0);
+    const slice = html.slice(rowIdx, rowIdx + 600);
+    expect(slice).toContain('#d1d5db');
+  });
+
+  test('toggle background is green (#16a34a) when enabled', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+    });
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 600);
+    expect(slice).toContain('#16a34a');
+  });
+
+  // ── OFF state panel ──────────────────────────────────────────────────────────
+
+  test('OFF: panel shows "After the first COD order is off" heading', () => {
+    const html = renderWith({ config: {} });
+    expect(html).toContain('After the first COD order is off');
+  });
+
+  test('OFF: panel shows "Switch it on to activate it." explanation', () => {
+    const html = renderWith({ config: {} });
+    expect(html).toContain('Switch it on to activate it.');
+  });
+
+  test('OFF: preview is dimmed (opacity:0.55 wrapper)', () => {
+    const html = renderWith({ config: {} });
+    // Find the post-order section (after 'After the first COD order')
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 3000);
+    expect(slice).toContain('opacity:0.55');
+  });
+
+  test('OFF: preview pill "After the first COD order is off" rendered', () => {
+    const html = renderWith({ config: {} });
+    // Appears both as the info heading and as the pill inside the dimmed preview
+    const matches = (html.match(/After the first COD order is off/g) || []).length;
+    expect(matches).toBeGreaterThanOrEqual(2);
+  });
+
+  // ── ON state — Wording view ──────────────────────────────────────────────────
+
+  test('ON (poView=0): Wording tab is active and 5 copy inputs are present', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 0,
+    });
+    // 5 PoCopyField inputs: pitch, button, skip, saved, error
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    const inputCount = (slice.match(/<input /g) || []).length;
+    expect(inputCount).toBeGreaterThanOrEqual(5);
+  });
+
+  test('ON (poView=0): "{pct}" helper text is present', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 0,
+    });
+    expect(html).toContain('{pct}');
+  });
+
+  test('ON (poView=0): "Reset all to defaults" control is present', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 0,
+    });
+    expect(html).toContain('Reset all to defaults');
+  });
+
+  test('ON (poView=0): custom pitch value appears in input', () => {
+    const html = renderWith({
+      config: {
+        birthdayCapture: {
+          postOrder: {
+            enabled: true,
+            copy: { pitch: 'Get {pct}% off on your big day!' },
+          },
+        },
+      },
+      poView: 0,
+    });
+    expect(html).toContain('Get {pct}% off on your big day!');
+  });
+
+  test('ON (poView=0): pitch text substitutes {pct} with birthdayDiscount.percentage in preview', () => {
+    const html = renderWith({
+      config: {
+        birthdayCapture: { postOrder: { enabled: true } },
+        birthdayDiscount: { percentage: 20 },
+      },
+      poView: 0,
+    });
+    // Preview renders pitch with {pct} → 20
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    expect(slice).toContain('20% off');
+  });
+
+  // ── ON state — Colours view ──────────────────────────────────────────────────
+
+  test('ON (poView=1): Colours view shows "Accent colour" label', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 1,
+    });
+    expect(html).toContain('Accent colour');
+  });
+
+  test('ON (poView=1): Colours view shows "Button text" mode row', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 1,
+    });
+    expect(html).toContain('Button text');
+  });
+
+  test('ON (poView=1): Colours view shows "Block background" label', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { postOrder: { enabled: true } } },
+      poView: 1,
+    });
+    expect(html).toContain('Block background');
+  });
+
+  test('ON (poView=1): custom accentColor is reflected in preview', () => {
+    const html = renderWith({
+      config: {
+        birthdayCapture: {
+          postOrder: {
+            enabled: true,
+            accentColor: '#E11D48',
+          },
+        },
+      },
+      poView: 1,
+    });
+    // Preview button background uses the custom accent
+    const rowIdx = html.indexOf('After the first COD order');
+    const slice  = html.slice(rowIdx, rowIdx + 8000);
+    expect(slice).toContain('#E11D48');
   });
 });
