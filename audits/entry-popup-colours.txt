@@ -1,0 +1,163 @@
+================================================================================
+AUDIT — entry-popup-colours
+Feature: Entry popup colour controls (accentColor, bgColor, buttonTextColor, textMode)
+in the Discounts "Entry popup" panel.
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────────
+PRE-AUDIT (Step 0) — before any code changes
+────────────────────────────────────────────────────────────────────────────────
+
+(a) PATCH /api/profiles/:shop/popup — partial-update safety
+────────────────────────────────────────────────────────────
+
+Confirmed: backend/routes/profiles.js line 780 uses per-key dot-notation $set:
+
+  for (const key of POPUP_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(req.body, key)) {
+      set[`popup.${key}`] = ...;
+    }
+  }
+  // same loop for mobilePopup
+  await Store.updateOne({ shopDomain: shop }, { $set: set });
+
+Sending a PARTIAL popup object (only the changed keys) does NOT wipe other fields.
+Each key in POPUP_FIELDS is a separate $set path; omitted keys are not written.
+
+(b) Settings.jsx save path
+──────────────────────────
+
+frontend/app/admin/screens/Settings.jsx line ~2250:
+  apiSend('/api/profiles/${shop}/popup', 'PATCH', { ...popupBody, mobilePopup: mobileBody })
+
+Where popupBody = { ...activePopup } (all popup state fields spread).
+New fields (buttonTextColor, textMode) will be included automatically in the spread
+once the state carries them. Settings.jsx also needs: when textColor is edited,
+set textMode:'custom' in the same state update (line 3205 onChange).
+
+(c) Storefront color resolution per layout/stage — ccf-push.js
+───────────────────────────────────────────────────────────────
+
+Shared variables set at line 2038-2041 (inside ccfBuildPromptUI, after ccfResolveStyle):
+  var bg     = cfg.bgColor || '#ffffff';
+  var fg     = cfg.textColor || '#111827';
+  var font   = cfg.fontFamily || 'inherit';
+  var accent = cfg.accentColor || '#4f46e5';
+
+Layout / style breakdown:
+
+  SPLIT layout (ccfStyle.id='classic', layout='split'):
+    bg/fg/accent from lines 2038-2041.
+    Allow button:   ccfAllowButtonStyle(accent, cfg.ctaStyle)
+                    → filled: fgOn(accent); outlined/soft: accentColor
+    Capture button: buildOfferBtn(accent, fg)           ← fg = textColor || '#111827'
+    Stage 2 inputs: ccfBuildDiscountFields({ darkBg: ccfIsDarkColor(cfg.bgColor || '#ffffff') })
+    Secondary text: fg directly
+
+  CARD layout (ccfStyle.id='classic', layout='card'):
+    Line 2834: cardBgRaw = cfg.bgColor || '#ffffff'
+    Line 2839: cardDark = !cardBgIsDefault && ccfIsDarkColor(cardBgRaw)
+    Text colors derived from cardDark (does NOT use cfg.textColor):
+      fgText = cardDark ? '#ffffff' : '#111827'
+    Allow button:   ccfAllowButtonStyle(accent, cfg.ctaStyle)   — same as split
+    Capture button: buildOfferBtn(accent, cardDark ? '#F4F4F5' : '#171A22')
+                    ← post-4658333 fix; uses bg-dark flag, not accent
+    Stage 2 inputs: ccfInputStyle(cardDark), ccfBuildWhatsappFields({darkBg:cardDark})
+    Secondary text: cardDark-based
+
+  FLASH SALE (ccfStyle.id='flash_sale'):
+    sBg = '#18181b', sFg = '#ffffff' — fully hardcoded, no merchant control.
+    Allow button: ccfAllowButtonStyle(accent, cfg.ctaStyle)
+    Capture button: buildOfferBtn(accent, sFg)  ← sFg always '#ffffff'
+    NOT in supportedFields for bgColor/textColor → admin controls disabled for this style.
+
+  GIFT REVEAL (ccfStyle.id='gift_reveal'):
+    sBg = cfg.bgColor || '#fff7ed',  sFg = cfg.textColor || '#111827'
+    Allow button: ccfAllowButtonStyle(accent, cfg.ctaStyle)
+    Capture button: buildOfferBtn(accent, sFg)
+    Supports bgColor and textColor.
+
+  BOTTOM SHEET (ccfStyle.id='bottom_sheet'):
+    bsBg = cfg.bgColor || '#ffffff',  bsFg = cfg.textColor || '#111827'
+    Allow button: ccfAllowButtonStyle(accent, cfg.ctaStyle)
+    Supports bgColor and textColor.
+
+  TOP BAR (ccfStyle.id='top_bar', mobile-only):
+    tbBg = cfg.accentColor || '#4f46e5'  ← bar background IS the accent colour
+    tbFg = cfg.textColor || '#ffffff'
+    Allow button: ccfAllowButtonStyle(tbBg, cfg.ctaStyle, true /*compact*/)
+    No bgColor field (the bar has no separate background). textColor supported.
+    Admin controls: accentColor + textColor only; bgColor disabled.
+
+  STORY CARD (ccfStyle.id='story_card', mobile-only):
+    scFg = '#ffffff' — hardcoded; bg = image or accent gradient.
+    NOT in supportedFields → admin controls disabled.
+
+  PRO STYLES (spotlight, noir, color_block):
+    ccfProPalette(defBg, defFg, defAccent) at line 2091:
+      bg = cfg.bgColor || defBg,  fg = cfg.textColor || defFg
+      dark = ccfIsDarkColor(bg)
+    Allow button: ccfAllowButtonStyle(pal.accent, cfg.ctaStyle)
+    Capture button: buildOfferBtn(pal.accent, pal.fg)
+    Supports bgColor, textColor, accentColor.
+
+ccfAllowButtonStyle (line 576):
+  - outlined/soft: text = accentColor (transparent bg)  [sits on popup bg]
+  - filled (rounded/square/pill/compact): text = fgOn(accentColor)
+
+buildOfferBtn (line 2068): transparent button, accent border.
+  Capture button text colour sits on the POPUP BACKGROUND, never the accent bg.
+  Fixed in 4658333 for card layout. For split: correctly uses fg=textColor.
+
+(d) Birthday dialog
+────────────────────
+
+ccf-push.js line 939: `.ccf-bd-dialog{background:#fff` — always white, confirmed.
+Left panel: `background:var(--ccf-bd-accent,#4F46E5)` — accent only, not affected.
+Birthday dialog unchanged in this feature.
+
+────────────────────────────────────────────────────────────────────────────────
+IMPACT PLAN
+────────────────────────────────────────────────────────────────────────────────
+
+New fields:
+  Store.popup.buttonTextColor: String ('auto'|'white'|'dark'), default 'auto'
+  Store.popup.textMode:        String ('custom'|'auto'|'white'|'dark'), default 'custom'
+  (mirrored in mobilePopup)
+
+Validation: invalid enum values are silently dropped (same pattern as other POPUP_FIELDS).
+Response: { updated: true, ignored: ['fieldName', ...] } when any keys were dropped.
+
+ccfResolvePopupColors(cfg) → { accent, bg, text, btnFg, dark, muted, inputBg, inputBorder }
+  text:  textMode='custom' → cfg.textColor || (dark?'#ffffff':'#111827')  [byte-identical for existing merchants]
+         textMode='auto'   → dark?'#ffffff':'#111827'
+         textMode='white'  → '#ffffff'
+         textMode='dark'   → '#171A22'
+  btnFg: buttonTextColor='auto'  → fgOn(accent)  [byte-identical for existing merchants]
+         buttonTextColor='white' → '#ffffff'
+         buttonTextColor='dark'  → '#171A22'
+
+Storefront:
+  - Resolver called once at top of ccfBuildPromptUI (line ~2035)
+  - bg/fg/accent replaced by resolver values for all layouts that support those fields
+  - ccfAllowButtonStyle gains optional 4th arg (btnFgOverride); default = fgOn(accent)
+  - Capture button: uses resolver.text everywhere
+  - flash_sale/story_card: hardcoded values unchanged
+  - top_bar: tbFg keeps cfg.textColor fallback; allow button uses btnFgOverride
+
+Admin (Discounts.jsx):
+  - Wording|Colours top-level view switch within Entry popup panel
+  - Colours panel: 4 controls (accent swatch, buttonTextColor, bgColor swatch, textMode/textColor)
+  - Disabled for flash_sale/story_card/top_bar
+  - Colours save via separate apiSend('/api/profiles/${shop}/popup', 'PATCH', ...)
+    triggered by clicking "Save colours" in the Colours panel
+
+Admin (Settings.jsx):
+  - textColor onChange also sets textMode:'custom'
+
+════════════════════════════════════════════════════════════════════════════════
+IMPLEMENTATION
+════════════════════════════════════════════════════════════════════════════════
+
+Steps:  1 DATA  2 STOREFRONT  3 ADMIN  4 VERIFICATION
+

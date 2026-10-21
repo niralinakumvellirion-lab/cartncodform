@@ -402,8 +402,11 @@ export default function Discounts({ shop }) {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
-  const [previewColors, setPreviewColors] = useState({ accentColor: '#4f46e5', bgColor: '#ffffff' });
+  const [previewColors, setPreviewColors] = useState({ accentColor: '#4f46e5', bgColor: '#ffffff', textColor: '', buttonTextColor: 'auto', textMode: 'custom', styleId: 'classic' });
   const [wordingTab, setWordingTab] = useState(0);
+  const [popupPanelView, setPopupPanelView] = useState(0); // 0=Wording, 1=Colours
+  const [coloursPatch, setColoursPatch] = useState({});
+  const [coloursSaving, setColoursSaving] = useState(false);
 
   useEffect(() => {
     if (!shop) return;
@@ -443,6 +446,10 @@ export default function Discounts({ shop }) {
         setPreviewColors({
           accentColor: /^#[0-9a-fA-F]{6}$/.test(p.accentColor || '') ? p.accentColor : '#4f46e5',
           bgColor: /^#[0-9a-fA-F]{6}$/.test(p.bgColor || '') ? p.bgColor : '#ffffff',
+          textColor: /^#[0-9a-fA-F]{6}$/.test(p.textColor || '') ? p.textColor : '',
+          buttonTextColor: ['auto', 'white', 'dark'].includes(p.buttonTextColor) ? p.buttonTextColor : 'auto',
+          textMode: ['custom', 'auto', 'white', 'dark'].includes(p.textMode) ? p.textMode : 'custom',
+          styleId: p.styleId || 'classic',
         });
       })
       .catch(() => {}); // silent — preview uses defaults
@@ -918,84 +925,215 @@ export default function Discounts({ shop }) {
                     );
                   },
                 ];
-                return (
-                  <div style={{ background: '#F7F7FF', border: '1px solid #D9D8FF', borderRadius: 12, margin: '0 0 16px', padding: '16px 20px' }}>
-                    {/* Panel header */}
-                    <div style={{ marginBottom: 12 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#171A22' }}>Entry popup wording</div>
-                      <div style={{ fontSize: 12, color: '#5A6070', marginTop: 2 }}>
-                        Change the text on each step after the first popup screen. Leave a field empty to use the default.
-                      </div>
+                // Colours panel helpers (admin-side resolver, mirrors ccfResolvePopupColors)
+                function resolveText() {
+                  const dark = fgOn(previewColors.bgColor || '#ffffff') === '#FFFFFF';
+                  const m = previewColors.textMode || 'custom';
+                  if (m === 'white') return '#ffffff';
+                  if (m === 'dark') return '#171A22';
+                  if (m === 'auto') return dark ? '#ffffff' : '#111827';
+                  return /^#[0-9a-fA-F]{6}$/.test(previewColors.textColor || '') ? previewColors.textColor : (dark ? '#ffffff' : '#111827');
+                }
+                function resolveBtnFg() {
+                  const m = previewColors.buttonTextColor || 'auto';
+                  if (m === 'white') return '#ffffff';
+                  if (m === 'dark') return '#171A22';
+                  return fgOn(previewColors.accentColor || '#4f46e5');
+                }
+                const NO_COLOUR_STYLES = new Set(['flash_sale', 'story_card']);
+                const NO_BG_STYLES = new Set(['top_bar']);
+                const styleId = previewColors.styleId || 'classic';
+                const coloursDisabled = NO_COLOUR_STYLES.has(styleId);
+                const bgDisabled = coloursDisabled || NO_BG_STYLES.has(styleId);
+                const ACCENT_SWATCHES = ['#4f46e5', '#0ea5e9', '#16a34a', '#dc2626', '#f59e0b'];
+                const BG_SWATCHES = ['#ffffff', '#f8fafc', '#1e293b', '#fef3c7', '#ede9fe'];
+                const coloursDirty = Object.keys(coloursPatch).length > 0;
+                async function saveColours() {
+                  setColoursSaving(true);
+                  try {
+                    await apiSend(`/api/profiles/${encodeURIComponent(shop)}/popup`, 'PATCH', {
+                      ...coloursPatch, mobilePopup: coloursPatch,
+                    });
+                    setColoursPatch({});
+                  } catch { /* silent */ } finally { setColoursSaving(false); }
+                }
+                function setColour(key, val) {
+                  setPreviewColors((p) => ({ ...p, [key]: val }));
+                  setColoursPatch((p) => ({ ...p, [key]: val }));
+                }
+                const SwatchRow = ({ label, fieldKey, swatches, value, disabled: dis }) => (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: dis ? '#9ca3af' : '#171A22', marginBottom: 6 }}>{label}</div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {swatches.map((sw) => (
+                        <button key={sw} type="button" disabled={dis}
+                          onClick={() => setColour(fieldKey, sw)}
+                          style={{ width: 24, height: 24, borderRadius: '50%', background: sw, border: value === sw ? '2.5px solid #171A22' : '1.5px solid rgba(0,0,0,0.12)', cursor: dis ? 'default' : 'pointer', outline: 'none', flexShrink: 0, boxShadow: value === sw ? '0 0 0 2px #ffffff, 0 0 0 4px #171A22' : 'none' }}
+                          aria-label={sw}
+                        />
+                      ))}
+                      <input type="text" disabled={dis} maxLength={7} value={value || ''} placeholder="#hex"
+                        onChange={(e) => { if (/^#[0-9a-fA-F]{6}$/.test(e.target.value)) setColour(fieldKey, e.target.value); }}
+                        style={{ width: 72, height: 28, padding: '0 8px', fontSize: 12, border: '1.5px solid #D9D8FF', borderRadius: 6, background: dis ? '#f0f0f0' : '#fff', color: dis ? '#9ca3af' : '#171A22', fontFamily: 'monospace' }}
+                      />
                     </div>
-                    {/* Step tabs */}
-                    <div role="tablist" style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
-                      {STEP_TABS.map((label, i) => {
-                        const active = wordingTab === i;
+                  </div>
+                );
+                const ModeRow = ({ label, fieldKey, options, value, disabled: dis }) => (
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: dis ? '#9ca3af' : '#171A22', marginBottom: 6 }}>{label}</div>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {options.map(({ val, lbl }) => {
+                        const active = value === val;
                         return (
-                          <button key={label} role="tab" type="button" aria-selected={active}
-                            onClick={() => setWordingTab(i)}
-                            style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, padding: '5px 12px', borderRadius: 20, border: '1.5px solid ' + (active ? '#4f46e5' : '#D9D8FF'), background: active ? '#4f46e5' : '#ffffff', color: active ? '#ffffff' : '#4f46e5', cursor: 'pointer', fontWeight: active ? 700 : 500 }}
-                          >
-                            {label}
-                            {hasDot(i) && !active && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4f46e5', flexShrink: 0 }} />}
-                          </button>
+                          <button key={val} type="button" disabled={dis}
+                            onClick={() => setColour(fieldKey, val)}
+                            style={{ fontSize: 12, padding: '4px 12px', borderRadius: 6, border: '1.5px solid ' + (active ? '#4f46e5' : '#D9D8FF'), background: active ? '#4f46e5' : '#ffffff', color: active ? '#ffffff' : (dis ? '#9ca3af' : '#4f46e5'), cursor: dis ? 'default' : 'pointer', fontWeight: active ? 700 : 500 }}
+                          >{lbl}</button>
                         );
                       })}
                     </div>
-                    {/* Two-column layout -- fields + preview; stacks below 700px via flexWrap */}
-                    <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                      {/* Fields column */}
-                      <div style={{ flex: 1, minWidth: 220 }}>
-                        {wordingTab === 0 && (<>
-                          <CopyField fieldKey="emailPlaceholder" label="Email placeholder" placeholder="Your email" helper='The email input hint. The "(get N% off)" suffix is added automatically.' />
-                          <CopyField fieldKey="captureButton" label='"Get my offer" button' placeholder="Get my offer without notifications" helper="Shown when the visitor skips push but leaves an email." />
-                        </>)}
-                        {wordingTab === 1 && (<>
-                          <CopyField fieldKey="subscribedTitle" label="Title" placeholder="Subscribed!" />
-                          <CopyField fieldKey="subscribedSub" label="Sub-text" placeholder="Getting your discount..." />
-                        </>)}
-                        {wordingTab === 2 && (<>
-                          <CopyField fieldKey="unlockedTitle" label="Title" placeholder="15% OFF Unlocked!" helper="Use {pct} for the discount percentage." />
-                          <CopyField fieldKey="unlockedSub" label="Sub-text" placeholder="Expires in 7 days" helper="Use {days} for the expiry days." />
-                        </>)}
-                        {wordingTab === 3 && (<>
-                          <div style={{ fontSize: '11.5px', color: '#5A6070', background: '#ede9fe', borderRadius: 6, padding: '6px 10px', marginBottom: 10 }}>
-                            The birthday heading and consent text live in the &quot;The birthday gift&quot; card below.
-                          </div>
-                          <CopyField fieldKey="bdSub" label="Birthday ask sub-text" placeholder="Tell us your birthday. We will send your personal code {days} days before." helper="Use {days} for the number of lead days." />
-                          <CopyField fieldKey="bdButton" label="Submit button" placeholder="Send me my gift" />
-                          <CopyField fieldKey="bdSkip" label="Skip link" placeholder="No thanks" />
-                          <CopyField fieldKey="bdOkTitle" label="Saved title" placeholder="You're all set" />
-                          <CopyField fieldKey="bdOkSub" label="Saved sub-text" placeholder="We'll send your gift code {days} days before your birthday." helper="Use {days} for the number of lead days." />
-                        </>)}
-                        {(wordingTab === 2 || wordingTab === 3) && (
-                          <div style={{ fontSize: '11.5px', color: '#5A6070', marginTop: 4 }}>
-                            Tokens: <code style={{ background: '#ede9fe', borderRadius: 3, padding: '1px 4px', fontSize: 11 }}>{'{pct}'}</code>{' '}= discount %, <code style={{ background: '#ede9fe', borderRadius: 3, padding: '1px 4px', fontSize: 11 }}>{'{days}'}</code>{' '}= days.
-                          </div>
-                        )}
-                        <button type="button" disabled={!canReset}
-                          onClick={() => { const p = {}; STEP_FIELDS[wordingTab].forEach((k) => { p[k] = ''; }); setPc(p); }}
-                          style={{ marginTop: 12, fontSize: '11.5px', color: canReset ? '#4f46e5' : '#9ca3af', background: 'none', border: 'none', cursor: canReset ? 'pointer' : 'default', padding: 0, textDecoration: canReset ? 'underline' : 'none' }}
-                        >
-                          Reset this step
-                        </button>
-                      </div>
-                      {/* Preview column -- 290px, fills without overflow */}
-                      <div style={{ width: 290, flexShrink: 0, minWidth: 200 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Preview</div>
-                        <div style={{ background: cardBg, borderRadius: 14, padding: '14px 16px', boxShadow: '0 4px 16px rgba(0,0,0,0.10)', width: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
-                          <div style={{ height: 3, background: 'linear-gradient(90deg,' + accent + ',' + accent + '88,transparent)', borderRadius: 2, marginBottom: 12, marginLeft: -16, marginRight: -16, marginTop: -14 }} />
-                          {previewSteps[wordingTab]?.()}
-                        </div>
-                        <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>
-                          Uses your popup accent and background colours.
-                        </div>
+                  </div>
+                );
+                const resolvedText = resolveText();
+                const resolvedBtnFg = resolveBtnFg();
+                const previewBg = previewColors.bgColor || '#ffffff';
+                const previewIsBgDefault = /^#fff(fff)?$/i.test(previewBg);
+                const previewCardBg = previewIsBgDefault ? 'linear-gradient(145deg,#ffffff,#f8f9ff)' : previewBg;
+                return (
+                  <div style={{ background: '#F7F7FF', border: '1px solid #D9D8FF', borderRadius: 12, margin: '0 0 16px', padding: '16px 20px' }}>
+                    {/* Panel header + Wording|Colours view switch */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#171A22' }}>Entry popup</div>
+                      <div style={{ display: 'flex', gap: 2, background: '#E8E8F7', borderRadius: 8, padding: 2 }}>
+                        {['Wording', 'Colours'].map((lbl, vi) => (
+                          <button key={lbl} type="button" onClick={() => setPopupPanelView(vi)}
+                            style={{ fontSize: 12, fontWeight: popupPanelView === vi ? 700 : 500, padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', background: popupPanelView === vi ? '#ffffff' : 'transparent', color: popupPanelView === vi ? '#171A22' : '#5A6070', boxShadow: popupPanelView === vi ? '0 1px 3px rgba(0,0,0,0.1)' : 'none', transition: 'all 0.15s' }}
+                          >{lbl}</button>
+                        ))}
                       </div>
                     </div>
-                    {/* Footer */}
-                    <div style={{ fontSize: '11.5px', color: '#5A6070', marginTop: 14, borderTop: '1px solid #D9D8FF', paddingTop: 10 }}>
-                      Saved with &quot;Save discount settings&quot;.
-                    </div>
+
+                    {popupPanelView === 0 && (<>
+                      {/* Wording: description */}
+                      <div style={{ fontSize: 12, color: '#5A6070', marginBottom: 12 }}>
+                        Change the text on each step after the first popup screen. Leave a field empty to use the default.
+                      </div>
+                      {/* Step tabs */}
+                      <div role="tablist" style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+                        {STEP_TABS.map((label, i) => {
+                          const active = wordingTab === i;
+                          return (
+                            <button key={label} role="tab" type="button" aria-selected={active}
+                              onClick={() => setWordingTab(i)}
+                              style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, padding: '5px 12px', borderRadius: 20, border: '1.5px solid ' + (active ? '#4f46e5' : '#D9D8FF'), background: active ? '#4f46e5' : '#ffffff', color: active ? '#ffffff' : '#4f46e5', cursor: 'pointer', fontWeight: active ? 700 : 500 }}
+                            >
+                              {label}
+                              {hasDot(i) && !active && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4f46e5', flexShrink: 0 }} />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {/* Two-column layout -- fields + preview; stacks below 700px via flexWrap */}
+                      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                        {/* Fields column */}
+                        <div style={{ flex: 1, minWidth: 220 }}>
+                          {wordingTab === 0 && (<>
+                            <CopyField fieldKey="emailPlaceholder" label="Email placeholder" placeholder="Your email" helper='The email input hint. The "(get N% off)" suffix is added automatically.' />
+                            <CopyField fieldKey="captureButton" label='"Get my offer" button' placeholder="Get my offer without notifications" helper="Shown when the visitor skips push but leaves an email." />
+                          </>)}
+                          {wordingTab === 1 && (<>
+                            <CopyField fieldKey="subscribedTitle" label="Title" placeholder="Subscribed!" />
+                            <CopyField fieldKey="subscribedSub" label="Sub-text" placeholder="Getting your discount..." />
+                          </>)}
+                          {wordingTab === 2 && (<>
+                            <CopyField fieldKey="unlockedTitle" label="Title" placeholder="15% OFF Unlocked!" helper="Use {pct} for the discount percentage." />
+                            <CopyField fieldKey="unlockedSub" label="Sub-text" placeholder="Expires in 7 days" helper="Use {days} for the expiry days." />
+                          </>)}
+                          {wordingTab === 3 && (<>
+                            <div style={{ fontSize: '11.5px', color: '#5A6070', background: '#ede9fe', borderRadius: 6, padding: '6px 10px', marginBottom: 10 }}>
+                              The birthday heading and consent text live in the &quot;The birthday gift&quot; card below.
+                            </div>
+                            <CopyField fieldKey="bdSub" label="Birthday ask sub-text" placeholder="Tell us your birthday. We will send your personal code {days} days before." helper="Use {days} for the number of lead days." />
+                            <CopyField fieldKey="bdButton" label="Submit button" placeholder="Send me my gift" />
+                            <CopyField fieldKey="bdSkip" label="Skip link" placeholder="No thanks" />
+                            <CopyField fieldKey="bdOkTitle" label="Saved title" placeholder="You're all set" />
+                            <CopyField fieldKey="bdOkSub" label="Saved sub-text" placeholder="We'll send your gift code {days} days before your birthday." helper="Use {days} for the number of lead days." />
+                          </>)}
+                          {(wordingTab === 2 || wordingTab === 3) && (
+                            <div style={{ fontSize: '11.5px', color: '#5A6070', marginTop: 4 }}>
+                              Tokens: <code style={{ background: '#ede9fe', borderRadius: 3, padding: '1px 4px', fontSize: 11 }}>{'{pct}'}</code>{' '}= discount %, <code style={{ background: '#ede9fe', borderRadius: 3, padding: '1px 4px', fontSize: 11 }}>{'{days}'}</code>{' '}= days.
+                            </div>
+                          )}
+                          <button type="button" disabled={!canReset}
+                            onClick={() => { const p = {}; STEP_FIELDS[wordingTab].forEach((k) => { p[k] = ''; }); setPc(p); }}
+                            style={{ marginTop: 12, fontSize: '11.5px', color: canReset ? '#4f46e5' : '#9ca3af', background: 'none', border: 'none', cursor: canReset ? 'pointer' : 'default', padding: 0, textDecoration: canReset ? 'underline' : 'none' }}
+                          >
+                            Reset this step
+                          </button>
+                        </div>
+                        {/* Preview column -- 290px, fills without overflow */}
+                        <div style={{ width: 290, flexShrink: 0, minWidth: 200 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Preview</div>
+                          <div style={{ background: cardBg, borderRadius: 14, padding: '14px 16px', boxShadow: '0 4px 16px rgba(0,0,0,0.10)', width: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+                            <div style={{ height: 3, background: 'linear-gradient(90deg,' + accent + ',' + accent + '88,transparent)', borderRadius: 2, marginBottom: 12, marginLeft: -16, marginRight: -16, marginTop: -14 }} />
+                            {previewSteps[wordingTab]?.()}
+                          </div>
+                          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>
+                            Uses your popup accent and background colours.
+                          </div>
+                        </div>
+                      </div>
+                      {/* Footer */}
+                      <div style={{ fontSize: '11.5px', color: '#5A6070', marginTop: 14, borderTop: '1px solid #D9D8FF', paddingTop: 10 }}>
+                        Saved with &quot;Save discount settings&quot;.
+                      </div>
+                    </>)}
+
+                    {popupPanelView === 1 && (<>
+                      {coloursDisabled && (
+                        <div style={{ fontSize: 12, color: '#9ca3af', background: '#f0f0f0', borderRadius: 6, padding: '8px 12px', marginBottom: 12 }}>
+                          Colour controls are not available for this popup style.
+                        </div>
+                      )}
+                      {/* Two-column layout: controls + preview */}
+                      <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                        {/* Controls column */}
+                        <div style={{ flex: 1, minWidth: 220 }}>
+                          <SwatchRow label="Accent colour" fieldKey="accentColor" swatches={ACCENT_SWATCHES} value={previewColors.accentColor} disabled={coloursDisabled} />
+                          <ModeRow label="Button text" fieldKey="buttonTextColor" options={[{ val: 'auto', lbl: 'Auto' }, { val: 'white', lbl: 'White' }, { val: 'dark', lbl: 'Dark' }]} value={previewColors.buttonTextColor || 'auto'} disabled={coloursDisabled} />
+                          <SwatchRow label="Popup background" fieldKey="bgColor" swatches={BG_SWATCHES} value={previewColors.bgColor} disabled={bgDisabled} />
+                          <ModeRow label="Popup text" fieldKey="textMode" options={[{ val: 'auto', lbl: 'Auto' }, { val: 'white', lbl: 'White' }, { val: 'dark', lbl: 'Dark' }, { val: 'custom', lbl: 'Custom' }]} value={previewColors.textMode || 'custom'} disabled={coloursDisabled} />
+                          {(previewColors.textMode === 'custom' || !previewColors.textMode) && !coloursDisabled && (
+                            <div style={{ marginTop: -6, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{ fontSize: 12, color: '#5A6070' }}>Custom colour:</span>
+                              <input type="text" maxLength={7} value={previewColors.textColor || ''} placeholder="#111827"
+                                onChange={(e) => { if (/^#[0-9a-fA-F]{6}$/.test(e.target.value)) setColour('textColor', e.target.value); }}
+                                style={{ width: 80, height: 28, padding: '0 8px', fontSize: 12, border: '1.5px solid #D9D8FF', borderRadius: 6, fontFamily: 'monospace' }}
+                              />
+                              {/^#[0-9a-fA-F]{6}$/.test(previewColors.textColor || '') && (
+                                <div style={{ width: 20, height: 20, borderRadius: 4, background: previewColors.textColor, border: '1px solid rgba(0,0,0,0.15)' }} />
+                              )}
+                            </div>
+                          )}
+                          <button type="button" disabled={!coloursDirty || coloursDisabled || coloursSaving}
+                            onClick={saveColours}
+                            style={{ marginTop: 4, padding: '8px 20px', fontSize: 13, fontWeight: 700, borderRadius: 8, border: 'none', cursor: coloursDirty && !coloursDisabled && !coloursSaving ? 'pointer' : 'default', background: coloursDirty && !coloursDisabled ? '#4f46e5' : '#D9D8FF', color: coloursDirty && !coloursDisabled ? '#ffffff' : '#9ca3af' }}
+                          >{coloursSaving ? 'Saving…' : 'Save colours'}</button>
+                        </div>
+                        {/* Preview column */}
+                        <div style={{ width: 220, flexShrink: 0, minWidth: 160 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>Preview</div>
+                          <div style={{ background: previewCardBg, borderRadius: 14, padding: '14px 16px', boxShadow: '0 4px 16px rgba(0,0,0,0.10)', width: '100%', boxSizing: 'border-box', overflow: 'hidden' }}>
+                            <div style={{ height: 3, background: 'linear-gradient(90deg,' + (previewColors.accentColor || '#4f46e5') + ',' + (previewColors.accentColor || '#4f46e5') + '88,transparent)', borderRadius: 2, marginBottom: 12, marginLeft: -16, marginRight: -16, marginTop: -14 }} />
+                            <div style={{ fontSize: 14, fontWeight: 700, color: resolvedText, marginBottom: 6 }}>Subscribe for offers</div>
+                            <div style={{ fontSize: 11, color: resolvedText, opacity: 0.65, marginBottom: 10 }}>Get 15% off your first order.</div>
+                            <div style={{ background: 'linear-gradient(135deg,' + (previewColors.accentColor || '#4f46e5') + ',' + (previewColors.accentColor || '#4f46e5') + 'dd)', borderRadius: 8, padding: '8px 12px', textAlign: 'center', fontSize: 12, fontWeight: 700, color: resolvedBtnFg, marginBottom: 6 }}>Allow push notifications</div>
+                            <div style={{ border: '1.5px solid ' + (previewColors.accentColor || '#4f46e5'), borderRadius: 8, padding: '7px 12px', textAlign: 'center', fontSize: 12, fontWeight: 700, color: resolvedText, marginBottom: 4 }}>Get my offer</div>
+                          </div>
+                        </div>
+                      </div>
+                    </>)}
                   </div>
                 );
               })()}

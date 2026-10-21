@@ -3202,7 +3202,7 @@ export default function Settings({ shop }) {
         {(POPUP_STYLES[activeStyleId].supportedFields || []).includes('textColor') && (
           <ColorRow label="Text color" value={activePopup.textColor}
             defaultValue={(POPUP_STYLES[activeStyleId].defaultColors || {}).textColor || '#111827'}
-            onChange={(v) => setActivePopup((p) => ({ ...p, textColor: v }))} />
+            onChange={(v) => setActivePopup((p) => ({ ...p, textColor: v, textMode: 'custom' }))} />
         )}
         <SelectRow label="Font" value={activePopup.fontFamily || 'inherit'}
           options={[
