@@ -368,9 +368,11 @@ router.post('/birthday', async (req, res) => {
       lastSeenAt: new Date(),
     };
     if (emailForProfile) {
+      const emailTs = new Date();
       profileUpdates['channels.email.address']    = emailForProfile;
       profileUpdates['channels.email.source']     = 'form';
-      profileUpdates['channels.email.capturedAt'] = new Date();
+      profileUpdates['channels.email.capturedAt'] = emailTs;
+      profileUpdates['channels.email.consentedAt'] = emailTs;
     }
     const profileIdentifiers = {
       phone: phone || null,

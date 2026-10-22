@@ -27,6 +27,7 @@ const profileSchema = new Schema({
       address: String,
       source: { type: String, enum: ['cod', 'form', 'checkout', 'popup'] },
       capturedAt: { type: Date },
+      consentedAt: { type: Date, default: null },
     },
     whatsapp: {
       phone: { type: String, default: null },        // E.164

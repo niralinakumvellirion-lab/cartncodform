@@ -272,12 +272,14 @@ describe('POST /birthday — product_page source', () => {
     expect(res.body.ok).toBe(true);
   });
 
-  test('attaches email via channels.email.address', async () => {
+  test('attaches email via channels.email.address and records consentedAt', async () => {
     await runBirthday(VALID, ppEnabledCfg);
     const updates = upsertProfile.mock.calls[0][2];
     expect(updates['channels.email.address']).toBe('user@example.com');
     expect(updates['channels.email.source']).toBe('form');
     expect(updates['channels.email.capturedAt']).toBeInstanceOf(Date);
+    expect(updates['channels.email.consentedAt']).toBeInstanceOf(Date);
+    expect(updates['channels.email.consentedAt']).toEqual(updates['channels.email.capturedAt']);
   });
 
   test('email lowercased before saving', async () => {
