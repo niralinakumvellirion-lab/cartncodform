@@ -4,6 +4,76 @@ import { useState, useEffect } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
 import QuantityTiers from './QuantityTiers';
 import { resolvePostOrderColors } from '../lib/postOrderColors';
+import { resolveProductBoxColors } from '../lib/productBoxColors';
+
+// ── Module-scope helpers shared by Method 3 and Method 4 panels ──────────────
+
+const _HEX_RE = /^#[0-9a-fA-F]{6}$/;
+
+function PoSwatchRow({ label, field, swatches, value, allowEmpty, emptyLabel, onPatch }) {
+  const activeVal = value || '';
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: '#171A22', marginBottom: 6 }}>{label}</div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+        {allowEmpty && (
+          <button type="button" onClick={() => onPatch({ [field]: '' })}
+            style={{ height: 28, padding: '0 10px', fontSize: 11, fontWeight: activeVal === '' ? 700 : 500, borderRadius: 6, border: '1.5px solid ' + (activeVal === '' ? '#4f46e5' : '#D9D8FF'), background: activeVal === '' ? '#4f46e5' : '#fff', color: activeVal === '' ? '#fff' : '#6b7280', cursor: 'pointer' }}>
+            {emptyLabel || 'None'}
+          </button>
+        )}
+        {swatches.map(({ name, hex }) => {
+          const active = activeVal === hex;
+          return (
+            <button key={hex} type="button" title={name} onClick={() => onPatch({ [field]: hex })}
+              style={{ width: 24, height: 24, borderRadius: '50%', background: hex, border: active ? '3px solid #4f46e5' : '2px solid rgba(0,0,0,0.12)', cursor: 'pointer', flexShrink: 0 }} />
+          );
+        })}
+        <input type="text" maxLength={7} placeholder="#4f46e5" value={activeVal}
+          onChange={(e) => { const v = e.target.value; if (v === '' || _HEX_RE.test(v)) onPatch({ [field]: v }); }}
+          style={{ width: 80, height: 28, padding: '0 8px', fontSize: 12, border: '1.5px solid #D9D8FF', borderRadius: 6, fontFamily: 'monospace' }} />
+      </div>
+    </div>
+  );
+}
+
+function PoModeRow({ label, field, options, value, onPatch }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: '#171A22', marginBottom: 6 }}>{label}</div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        {options.map(({ val, lbl }) => {
+          const active = (value || 'auto') === val;
+          return (
+            <button key={val} type="button" onClick={() => onPatch({ [field]: val })}
+              style={{ height: 28, padding: '0 12px', fontSize: 12, fontWeight: active ? 700 : 500, borderRadius: 6, border: '1.5px solid ' + (active ? '#4f46e5' : '#D9D8FF'), background: active ? '#4f46e5' : '#fff', color: active ? '#fff' : '#6b7280', cursor: 'pointer' }}>
+              {lbl}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function PoCopyField({ fieldKey, label, placeholder, helper, value, maxLen, onPatch }) {
+  const lblSt  = { fontSize: 13, fontWeight: 700, color: '#171A22' };
+  const ctrSt  = { fontSize: '11.5px', color: '#9ca3af' };
+  const helpSt = { fontSize: 12, color: '#5A6070', marginTop: 3 };
+  const fieldInner = { height: 42, borderColor: '#AEB4C2', color: '#171A22', width: '100%', padding: '0 12px', border: '1.5px solid #AEB4C2', borderRadius: 8, fontSize: 13, outline: 'none', boxSizing: 'border-box' };
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
+        <span style={lblSt}>{label}</span>
+        <span style={ctrSt}>{(value || '').length} / {maxLen}</span>
+      </div>
+      <input className="disc-input" type="text" value={value || ''} maxLength={maxLen} placeholder={placeholder}
+        onChange={(e) => onPatch({ [fieldKey]: e.target.value })}
+        style={fieldInner} />
+      {helper && <div style={helpSt}>{helper}</div>}
+    </div>
+  );
+}
 
 const DS = {
   page: {
@@ -422,6 +492,9 @@ export default function Discounts({ shop }) {
   const [poView, setPoView] = useState(0); // 0=Wording, 1=Colours  (post-order panel)
   const [poPreviewState, setPoPreviewState] = useState(0); // 0=ask, 1=missing date, 2=saved
   const [coloursPatch, setColoursPatch] = useState({});
+  const [ppView, setPpView] = useState(0);                // 0=Wording, 1=Colours
+  const [ppPreviewState, setPpPreviewState] = useState(0); // 0=ask, 1=email-err, 2=date-err, 3=saved
+  const [ppColoursPatch, setPpColoursPatch] = useState({});
 
   useEffect(() => {
     if (!shop) return;
@@ -1320,78 +1393,8 @@ export default function Discounts({ shop }) {
                   { name: 'Navy',    hex: '#0F172A' },
                 ];
 
-                const HEX_RE = /^#[0-9a-fA-F]{6}$/;
-                const accentHexValid = HEX_RE.test(po.accentColor || '');
-                const bgHexValid     = HEX_RE.test(po.bgColor || '');
-
-                // Inline SwatchRow for post-order colours
-                function PoSwatchRow({ label, field, swatches, value, allowEmpty, emptyLabel }) {
-                  const activeVal = value || '';
-                  return (
-                    <div style={{ marginBottom: 12 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: '#171A22', marginBottom: 6 }}>{label}</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-                        {allowEmpty && (
-                          <button type="button" onClick={() => setPo({ [field]: '' })}
-                            style={{ height: 28, padding: '0 10px', fontSize: 11, fontWeight: activeVal === '' ? 700 : 500, borderRadius: 6, border: '1.5px solid ' + (activeVal === '' ? '#4f46e5' : '#D9D8FF'), background: activeVal === '' ? '#4f46e5' : '#fff', color: activeVal === '' ? '#fff' : '#6b7280', cursor: 'pointer' }}>
-                            {emptyLabel || 'None'}
-                          </button>
-                        )}
-                        {swatches.map(({ name, hex }) => {
-                          const active = activeVal === hex;
-                          return (
-                            <button key={hex} type="button" title={name} onClick={() => setPo({ [field]: hex })}
-                              style={{ width: 24, height: 24, borderRadius: '50%', background: hex, border: active ? '3px solid #4f46e5' : '2px solid rgba(0,0,0,0.12)', cursor: 'pointer', flexShrink: 0 }} />
-                          );
-                        })}
-                        <input type="text" maxLength={7} placeholder="#4f46e5" value={activeVal}
-                          onChange={(e) => { const v = e.target.value; if (v === '' || HEX_RE.test(v)) setPo({ [field]: v }); }}
-                          style={{ width: 80, height: 28, padding: '0 8px', fontSize: 12, border: '1.5px solid #D9D8FF', borderRadius: 6, fontFamily: 'monospace' }} />
-                      </div>
-                    </div>
-                  );
-                }
-
-                function PoModeRow({ label, field, options, value }) {
-                  return (
-                    <div style={{ marginBottom: 12 }}>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: '#171A22', marginBottom: 6 }}>{label}</div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        {options.map(({ val, lbl }) => {
-                          const active = (value || 'auto') === val;
-                          return (
-                            <button key={val} type="button" onClick={() => setPo({ [field]: val })}
-                              style={{ height: 28, padding: '0 12px', fontSize: 12, fontWeight: active ? 700 : 500, borderRadius: 6, border: '1.5px solid ' + (active ? '#4f46e5' : '#D9D8FF'), background: active ? '#4f46e5' : '#fff', color: active ? '#fff' : '#6b7280', cursor: 'pointer' }}>
-                              {lbl}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                }
-
-                const fieldInner = { ...fieldStyle, height: 42, borderColor: '#AEB4C2', color: '#171A22', width: '100%' };
-                const lblSt  = { fontSize: 13, fontWeight: 700, color: '#171A22' };
-                const ctrSt  = { fontSize: '11.5px', color: '#9ca3af' };
-                const helpSt = { fontSize: 12, color: '#5A6070', marginTop: 3 };
-
-                function PoCopyField({ fieldKey, label, placeholder, helper }) {
-                  const val = poCopy[fieldKey] || '';
-                  const max = PO_COPY_MAX[fieldKey];
-                  return (
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
-                        <span style={lblSt}>{label}</span>
-                        <span style={ctrSt}>{val.length} / {max}</span>
-                      </div>
-                      <input className="disc-input" type="text" value={val} maxLength={max} placeholder={placeholder}
-                        onChange={(e) => setPoCopy({ [fieldKey]: e.target.value })}
-                        style={fieldInner} />
-                      {helper && <div style={helpSt}>{helper}</div>}
-                    </div>
-                  );
-                }
+                const accentHexValid = _HEX_RE.test(po.accentColor || '');
+                const bgHexValid     = _HEX_RE.test(po.bgColor || '');
 
                 const anyCopySet = ['pitch','button','skip','saved','error'].some((k) => (poCopy[k] || '').trim().length > 0);
 
@@ -1487,11 +1490,11 @@ export default function Discounts({ shop }) {
                               <div style={{ fontSize: 12, color: '#5A6070', marginBottom: 12 }}>
                                 Leave a field empty to use the default. Use <code style={{ background: '#ede9fe', borderRadius: 3, padding: '1px 4px', fontSize: 11 }}>{'{pct}'}</code> for the discount %.
                               </div>
-                              <PoCopyField fieldKey="pitch" label="Pitch" placeholder={'One more thing — Share your birthday for ' + bdPct + '% off on the day.'} helper="Use {pct} for the discount percentage." />
-                              <PoCopyField fieldKey="button" label="Save button" placeholder="Save my birthday" />
-                              <PoCopyField fieldKey="skip" label="Skip link" placeholder="No thanks" />
-                              <PoCopyField fieldKey="saved" label="Success message" placeholder={'Birthday saved! We\'ll send your ' + bdPct + '% off code ' + bdLead + ' days before.'} helper="Shown after the birthday is saved successfully. Green text — always." />
-                              <PoCopyField fieldKey="error" label="Error message" placeholder="Please pick a month and day." helper="Shown when date is incomplete. Red text — always." />
+                              <PoCopyField fieldKey="pitch" label="Pitch" placeholder={'One more thing — Share your birthday for ' + bdPct + '% off on the day.'} helper="Use {pct} for the discount percentage." value={poCopy.pitch || ''} maxLen={PO_COPY_MAX.pitch} onPatch={setPoCopy} />
+                              <PoCopyField fieldKey="button" label="Save button" placeholder="Save my birthday" value={poCopy.button || ''} maxLen={PO_COPY_MAX.button} onPatch={setPoCopy} />
+                              <PoCopyField fieldKey="skip" label="Skip link" placeholder="No thanks" value={poCopy.skip || ''} maxLen={PO_COPY_MAX.skip} onPatch={setPoCopy} />
+                              <PoCopyField fieldKey="saved" label="Success message" placeholder={'Birthday saved! We\'ll send your ' + bdPct + '% off code ' + bdLead + ' days before.'} helper="Shown after the birthday is saved successfully. Green text — always." value={poCopy.saved || ''} maxLen={PO_COPY_MAX.saved} onPatch={setPoCopy} />
+                              <PoCopyField fieldKey="error" label="Error message" placeholder="Please pick a month and day." helper="Shown when date is incomplete. Red text — always." value={poCopy.error || ''} maxLen={PO_COPY_MAX.error} onPatch={setPoCopy} />
                               <div style={{ fontSize: 11, color: '#5A6070', background: '#fef9ec', border: '1px solid #fde68a', borderRadius: 6, padding: '6px 10px', marginBottom: 10 }}>
                                 The consent line (e.g. &ldquo;We'll use your birthday only…&rdquo;) is shared with all birthday capture methods and editable in &ldquo;The birthday gift&rdquo; card below.
                               </div>
@@ -1504,21 +1507,21 @@ export default function Discounts({ shop }) {
                             </>)}
 
                             {poView === 1 && (<>
-                              <PoSwatchRow label="Accent colour" field="accentColor" swatches={PO_ACCENT_SWATCHES} value={po.accentColor || ''} />
+                              <PoSwatchRow label="Accent colour" field="accentColor" swatches={PO_ACCENT_SWATCHES} value={po.accentColor || ''} onPatch={setPo} />
                               {!accentHexValid && (po.accentColor || '') !== '' && (
                                 <div style={{ fontSize: 11, color: '#dc2626', marginTop: -8, marginBottom: 10 }}>Not a valid 6-digit hex — enter #RRGGBB</div>
                               )}
-                              <PoModeRow label="Button text" field="buttonTextMode" options={[{ val: 'auto', lbl: 'Auto' }, { val: 'white', lbl: 'White' }, { val: 'dark', lbl: 'Dark' }]} value={po.buttonTextMode || 'auto'} />
+                              <PoModeRow label="Button text" field="buttonTextMode" options={[{ val: 'auto', lbl: 'Auto' }, { val: 'white', lbl: 'White' }, { val: 'dark', lbl: 'Dark' }]} value={po.buttonTextMode || 'auto'} onPatch={setPo} />
                               {poColors?.lowBtnContrast && (
                                 <div style={{ background: '#fef3c7', border: '1px solid #fbbf24', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#92400e', marginTop: 4, marginBottom: 4 }}>
                                   ⚠ Low contrast — the button text may be hard to read on this accent colour. Try Auto or a darker accent.
                                 </div>
                               )}
-                              <PoSwatchRow label="Block background" field="bgColor" swatches={PO_BG_PRESETS} value={po.bgColor || ''} allowEmpty emptyLabel="None (default)" />
+                              <PoSwatchRow label="Block background" field="bgColor" swatches={PO_BG_PRESETS} value={po.bgColor || ''} allowEmpty emptyLabel="None (default)" onPatch={setPo} />
                               {!bgHexValid && (po.bgColor || '') !== '' && (
                                 <div style={{ fontSize: 11, color: '#dc2626', marginTop: -8, marginBottom: 10 }}>Not a valid 6-digit hex — enter #RRGGBB</div>
                               )}
-                              <PoModeRow label="Text colour" field="textMode" options={[{ val: 'auto', lbl: 'Auto' }, { val: 'white', lbl: 'White' }, { val: 'dark', lbl: 'Dark' }]} value={po.textMode || 'auto'} />
+                              <PoModeRow label="Text colour" field="textMode" options={[{ val: 'auto', lbl: 'Auto' }, { val: 'white', lbl: 'White' }, { val: 'dark', lbl: 'Dark' }]} value={po.textMode || 'auto'} onPatch={setPo} />
                               <div style={{ fontSize: 11, color: '#5A6070', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 10px', marginTop: 4 }}>
                                 Success and error messages keep their own green / red colour regardless of text colour.
                               </div>
@@ -1551,7 +1554,305 @@ export default function Discounts({ shop }) {
               })()}
             </div>
 
-            {/* Method 4: Top announcement banner */}
+            {/* Method 4: Product page box */}
+            <div style={{ borderBottom: `1px solid ${DS.gray200}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: DS.gray900 }}>Product page box</div>
+                    <span style={{ fontSize: 10, fontWeight: 700, background: '#4f46e5', color: '#fff', borderRadius: 4, padding: '1px 6px', letterSpacing: '0.04em' }}>NEW</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: DS.gray400, marginTop: 2 }}>A birthday card with email capture under the Buy it now button.</div>
+                </div>
+                <div
+                  role="switch"
+                  aria-checked={!!(config.birthdayCapture?.productPage?.enabled)}
+                  tabIndex={0}
+                  onClick={() => setConfig((c) => ({
+                    ...c,
+                    birthdayCapture: { ...(c.birthdayCapture || {}), productPage: { ...(c.birthdayCapture?.productPage || {}), enabled: !(c.birthdayCapture?.productPage?.enabled) } },
+                  }))}
+                  onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setConfig((c) => ({ ...c, birthdayCapture: { ...(c.birthdayCapture || {}), productPage: { ...(c.birthdayCapture?.productPage || {}), enabled: !(c.birthdayCapture?.productPage?.enabled) } } })); } }}
+                  style={{ width: 36, height: 20, borderRadius: 10, cursor: 'pointer', background: config.birthdayCapture?.productPage?.enabled ? '#16a34a' : '#d1d5db', position: 'relative', transition: 'background 0.2s', flexShrink: 0 }}
+                >
+                  <div style={{ position: 'absolute', top: 2, left: config.birthdayCapture?.productPage?.enabled ? 18 : 2, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+                </div>
+              </div>
+
+              {/* Always-visible panel */}
+              {(() => {
+                const ppOn   = !!(config.birthdayCapture?.productPage?.enabled);
+                const pp     = config.birthdayCapture?.productPage || {};
+                const ppCopy = pp.copy || {};
+                const setPp  = (patch) => setConfig((c) => ({
+                  ...c,
+                  birthdayCapture: {
+                    ...(c.birthdayCapture || {}),
+                    productPage: { ...(c.birthdayCapture?.productPage || {}), ...patch },
+                  },
+                }));
+                const setPpCopy = (patch) => setConfig((c) => ({
+                  ...c,
+                  birthdayCapture: {
+                    ...(c.birthdayCapture || {}),
+                    productPage: {
+                      ...(c.birthdayCapture?.productPage || {}),
+                      copy: { ...(c.birthdayCapture?.productPage?.copy || {}), ...patch },
+                    },
+                  },
+                }));
+
+                const PP_COPY_MAX = { heading: 60, sub: 120, emailPlaceholder: 40, consent: 80, button: 30, skip: 30, saved: 80, error: 60, emailError: 60 };
+                const bdPct  = config.birthdayDiscount?.percentage ?? 15;
+                const bdLead = config.birthdayDiscount?.leadDays ?? 3;
+
+                // Resolve colours for preview
+                const ppColors = resolveProductBoxColors({
+                  accentColor:    pp.accentColor    || '',
+                  bgColor:        pp.bgColor        || '',
+                  buttonTextMode: pp.buttonTextMode || 'auto',
+                  textMode:       pp.textMode       || 'auto',
+                });
+                const pvAccent  = ppColors.accent  || '#4F46E5';
+                const pvBtnFg   = ppColors.btnFg   || '#FFFFFF';
+                const pvBg      = ppColors.bg;       // null = outlined
+                const pvText    = ppColors.text    || '#18181B';
+                const pvMuted   = ppColors.muted   || '#71717A';
+                const pvField   = ppColors.fieldBg || '#FFFFFF';
+                const pvFBorder = ppColors.fieldBorder || '#D4D4D8';
+
+                // Preview copy
+                const pvHeading = (ppCopy.heading || '').trim() || ('One more thing — happy birthday soon?');
+                const pvSub     = (ppCopy.sub     || '').trim() || ('Share your birthday for ' + bdPct + '% off on the day.');
+                const pvPlaceholder = (ppCopy.emailPlaceholder || '').trim() || 'Your email address';
+                const pvConsent = (ppCopy.consent  || '').trim() || ("We'll send your birthday gift " + bdLead + ' day(s) before.');
+                const pvBtn     = (ppCopy.button   || '').trim() || 'Save my birthday';
+                const pvSkip    = (ppCopy.skip     || '').trim() || 'No thanks';
+                const pvSaved   = (ppCopy.saved    || '').trim() || ('Birthday saved! Your ' + bdPct + '% off code arrives ' + bdLead + ' day(s) before.');
+                const pvError   = (ppCopy.error    || '').trim() || 'Please pick a month and day.';
+                const pvEmailErr = (ppCopy.emailError || '').trim() || 'Please enter a valid email address.';
+
+                const ppTabStyle = (active) => ({
+                  fontSize: 12, padding: '4px 12px', borderRadius: 20, border: '1.5px solid ' + (active ? '#4f46e5' : '#D9D8FF'),
+                  background: active ? '#4f46e5' : '#ffffff', color: active ? '#ffffff' : '#4f46e5',
+                  cursor: 'pointer', fontWeight: active ? 700 : 500,
+                });
+
+                const PP_ACCENT_SWATCHES = [
+                  { name: 'Indigo',   hex: '#4F46E5' },
+                  { name: 'Violet',   hex: '#7C3AED' },
+                  { name: 'Teal',     hex: '#0D9488' },
+                  { name: 'Rose',     hex: '#E11D48' },
+                  { name: 'Charcoal', hex: '#171A22' },
+                ];
+                const PP_BG_PRESETS = [
+                  { name: 'Cream',     hex: '#FFF7ED' },
+                  { name: 'Pale blue', hex: '#EEF2FF' },
+                  { name: 'Smoke',     hex: '#F3F4F6' },
+                  { name: 'Navy',      hex: '#0F172A' },
+                ];
+
+                const ppAccentHexValid = _HEX_RE.test(pp.accentColor || '');
+                const ppBgHexValid     = _HEX_RE.test(pp.bgColor || '');
+                const anyCopySetPp     = ['heading','sub','emailPlaceholder','consent','button','skip','saved','error','emailError'].some((k) => (ppCopy[k] || '').trim().length > 0);
+
+                // "Add to product page" deep-link
+                const apiKey = typeof document !== 'undefined'
+                  ? (document.querySelector('meta[name="shopify-api-key"]')?.getAttribute('content') || '')
+                  : '';
+                const shopDomain = config._shop || '';
+                const themeEditorUrl = shopDomain && apiKey
+                  ? ('https://' + shopDomain + '/admin/themes/current/editor?template=product&addAppBlockId=' + encodeURIComponent(apiKey + '/birthday-product') + '&target=mainSection')
+                  : (shopDomain ? 'https://' + shopDomain + '/admin/themes/current/editor?template=product' : '');
+
+                const PP_PREVIEW_TABS = ['Ask', 'Email error', 'Date error', 'After saving'];
+
+                function PpPreviewBlock() {
+                  const boxStyle = {
+                    ...(pvBg
+                      ? { background: pvBg, borderRadius: 12, padding: '20px 16px' }
+                      : { border: '1px solid #D4D4D8', borderRadius: 12, padding: '20px 16px' }),
+                    color: pvText,
+                  };
+                  const fldStyle = { width: '100%', height: 36, fontSize: 13, border: '1px solid ' + pvFBorder, borderRadius: 8, background: pvField, color: pvText, marginBottom: 8, display: 'flex', alignItems: 'center', paddingLeft: 8, boxSizing: 'border-box' };
+                  const errStyle = { fontSize: 11, color: '#dc2626', marginBottom: 6 };
+
+                  if (ppPreviewState === 3) {
+                    return (
+                      <div style={boxStyle}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: '#16a34a', textAlign: 'center', padding: '12px 0' }}>{pvSaved}</div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={boxStyle}>
+                      {pvHeading && <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>{pvHeading}</div>}
+                      {pvSub && <div style={{ fontSize: 13, color: pvMuted, marginBottom: 10 }}>{pvSub}</div>}
+                      {/* Email */}
+                      {ppPreviewState === 1
+                        ? (<>
+                            <div style={{ ...fldStyle, borderColor: '#dc2626' }}>{pvPlaceholder}</div>
+                            <div style={errStyle}>{pvEmailErr}</div>
+                          </>)
+                        : <div style={fldStyle}>{pvPlaceholder}</div>
+                      }
+                      {/* Month / Day */}
+                      <div style={{ display: 'flex', gap: 8, marginBottom: ppPreviewState === 2 ? 4 : 8 }}>
+                        <div style={{ ...fldStyle, marginBottom: 0, flex: 1, ...(ppPreviewState === 2 ? { borderColor: '#dc2626' } : {}) }}>Month</div>
+                        <div style={{ ...fldStyle, marginBottom: 0, flex: 1, ...(ppPreviewState === 2 ? { borderColor: '#dc2626' } : {}) }}>Day</div>
+                      </div>
+                      {ppPreviewState === 2 && <div style={{ ...errStyle, marginTop: 4 }}>{pvError}</div>}
+                      {/* Consent */}
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginBottom: 10, marginTop: 4 }}>
+                        <div style={{ width: 14, height: 14, border: '1px solid ' + pvMuted, borderRadius: 3, marginTop: 1, flexShrink: 0 }} />
+                        <div style={{ fontSize: 11, color: pvMuted, lineHeight: 1.4 }}>{pvConsent}</div>
+                      </div>
+                      <div style={{ background: pvAccent, color: pvBtnFg, borderRadius: 10, padding: '11px', textAlign: 'center', fontSize: 14, fontWeight: 700, marginBottom: 8 }}>{pvBtn}</div>
+                      <div style={{ textAlign: 'center', fontSize: 12, color: pvMuted }}>{pvSkip}</div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div style={{ borderTop: `1px solid ${DS.gray200}`, paddingTop: 14, paddingBottom: 14 }}>
+                    {/* OFF state */}
+                    {!ppOn && (
+                      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 220 }}>
+                          <div style={{ background: '#ffffff', border: '1px solid #D9D8FF', borderRadius: 8, padding: '14px 16px' }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: '#171A22', marginBottom: 8 }}>Product page box is off</div>
+                            {/* Setup card */}
+                            <div style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>To add the birthday box to your product page:</div>
+                            <ol style={{ margin: '0 0 10px', paddingLeft: 18, fontSize: 12, color: '#374151', lineHeight: 1.8 }}>
+                              <li>Switch on the toggle above.</li>
+                              <li>Click &ldquo;Add to product page&rdquo; — the theme editor opens.</li>
+                              <li>Place the <strong>Birthday box</strong> block under Buy it now, then save.</li>
+                            </ol>
+                            {themeEditorUrl && (
+                              <a href={themeEditorUrl} target="_blank" rel="noreferrer"
+                                style={{ display: 'inline-block', fontSize: 12, fontWeight: 600, color: '#fff', background: '#4f46e5', borderRadius: 6, padding: '6px 14px', textDecoration: 'none' }}>
+                                Add to product page ↗
+                              </a>
+                            )}
+                            <div style={{ marginTop: 10, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '6px 10px', fontSize: 11, color: '#92400e' }}>
+                              ⚠ Horizon themes: place the block inside the <strong>Main product</strong> section so it renders near the buy button.
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ width: 260, flexShrink: 0, minWidth: 200 }}>
+                          <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+                            {PP_PREVIEW_TABS.map((lbl, i) => (
+                              <button key={lbl} type="button" onClick={() => setPpPreviewState(i)}
+                                style={{ fontSize: 11, padding: '3px 8px', borderRadius: 12, border: '1.5px solid ' + (ppPreviewState === i ? '#374151' : '#D9D8FF'), background: ppPreviewState === i ? '#374151' : '#fff', color: ppPreviewState === i ? '#fff' : '#6b7280', cursor: 'pointer', fontWeight: ppPreviewState === i ? 700 : 500 }}
+                              >{lbl}</button>
+                            ))}
+                          </div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Preview</div>
+                          <div style={{ position: 'relative' }}>
+                            <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', zIndex: 2, background: '#111827', color: '#fff', fontSize: 10, fontWeight: 700, padding: '3px 10px', borderRadius: 20, whiteSpace: 'nowrap' }}>
+                              Product page box is off
+                            </div>
+                            <div style={{ opacity: 0.55 }}><PpPreviewBlock /></div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ON state */}
+                    {ppOn && (
+                      <div>
+                        <div style={{ display: 'flex', gap: 6, marginBottom: 14 }}>
+                          <button type="button" onClick={() => setPpView(0)} style={ppTabStyle(ppView === 0)}>Wording</button>
+                          <button type="button" onClick={() => setPpView(1)} style={ppTabStyle(ppView === 1)}>Colours</button>
+                        </div>
+                        <div style={{ display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                          {/* Left: Wording or Colours */}
+                          <div style={{ flex: 1, minWidth: 220 }}>
+                            {ppView === 0 && (<>
+                              <div style={{ fontSize: 12, color: '#5A6070', marginBottom: 12 }}>
+                                Leave a field empty to use the default. Use{' '}
+                                <code style={{ background: '#ede9fe', borderRadius: 3, padding: '1px 4px', fontSize: 11 }}>{'{pct}'}</code>{' '}for the discount %{' '}and{' '}
+                                <code style={{ background: '#ede9fe', borderRadius: 3, padding: '1px 4px', fontSize: 11 }}>{'{days}'}</code>{' '}for lead days.
+                              </div>
+                              <PoCopyField fieldKey="heading" label="Heading" placeholder="One more thing — happy birthday soon?" value={ppCopy.heading || ''} maxLen={PP_COPY_MAX.heading} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="sub" label="Sub-text" placeholder={'Share your birthday for ' + bdPct + '% off on the day.'} helper="Use {pct} for the discount %." value={ppCopy.sub || ''} maxLen={PP_COPY_MAX.sub} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="emailPlaceholder" label="Email placeholder" placeholder="Your email address" value={ppCopy.emailPlaceholder || ''} maxLen={PP_COPY_MAX.emailPlaceholder} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="consent" label="Consent line" placeholder={'We\'ll send your birthday gift ' + bdLead + ' day(s) before.'} helper="Shown next to the consent checkbox." value={ppCopy.consent || ''} maxLen={PP_COPY_MAX.consent} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="button" label="Save button" placeholder="Save my birthday" value={ppCopy.button || ''} maxLen={PP_COPY_MAX.button} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="skip" label="Skip link" placeholder="No thanks" value={ppCopy.skip || ''} maxLen={PP_COPY_MAX.skip} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="saved" label="Success message" placeholder={'Birthday saved! Your ' + bdPct + '% off code arrives ' + bdLead + ' day(s) before.'} helper="Shown after saving. Green text — always." value={ppCopy.saved || ''} maxLen={PP_COPY_MAX.saved} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="error" label="Date error" placeholder="Please pick a month and day." helper="Red text — always." value={ppCopy.error || ''} maxLen={PP_COPY_MAX.error} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="emailError" label="Email error" placeholder="Please enter a valid email address." helper="Red text — always." value={ppCopy.emailError || ''} maxLen={PP_COPY_MAX.emailError} onPatch={setPpCopy} />
+                              <div style={{ marginBottom: 10 }}>
+                                <button type="button" disabled={!anyCopySetPp}
+                                  onClick={() => setPpCopy({ heading: '', sub: '', emailPlaceholder: '', consent: '', button: '', skip: '', saved: '', error: '', emailError: '' })}
+                                  style={{ fontSize: '11.5px', color: anyCopySetPp ? '#4f46e5' : '#9ca3af', background: 'none', border: 'none', cursor: anyCopySetPp ? 'pointer' : 'default', padding: 0, textDecoration: anyCopySetPp ? 'underline' : 'none' }}
+                                >
+                                  Reset wording
+                                </button>
+                              </div>
+                              {themeEditorUrl && (
+                                <a href={themeEditorUrl} target="_blank" rel="noreferrer"
+                                  style={{ display: 'inline-block', fontSize: 12, fontWeight: 600, color: '#fff', background: '#4f46e5', borderRadius: 6, padding: '6px 14px', textDecoration: 'none', marginBottom: 8 }}>
+                                  Add to product page ↗
+                                </a>
+                              )}
+                              <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 6, padding: '6px 10px', fontSize: 11, color: '#92400e' }}>
+                                ⚠ Horizon themes: place the block inside the <strong>Main product</strong> section.
+                              </div>
+                            </>)}
+
+                            {ppView === 1 && (<>
+                              <PoSwatchRow label="Accent colour" field="accentColor" swatches={PP_ACCENT_SWATCHES} value={pp.accentColor || ''} onPatch={setPp} />
+                              {!ppAccentHexValid && (pp.accentColor || '') !== '' && (
+                                <div style={{ fontSize: 11, color: '#dc2626', marginTop: -8, marginBottom: 10 }}>Not a valid 6-digit hex — enter #RRGGBB</div>
+                              )}
+                              <PoModeRow label="Button text" field="buttonTextMode" options={[{ val: 'auto', lbl: 'Auto' }, { val: 'white', lbl: 'White' }, { val: 'dark', lbl: 'Dark' }]} value={pp.buttonTextMode || 'auto'} onPatch={setPp} />
+                              {ppColors.lowBtnContrast && (
+                                <div style={{ background: '#fef3c7', border: '1px solid #fbbf24', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#92400e', marginTop: 4, marginBottom: 4 }}>
+                                  ⚠ Low contrast — the button text may be hard to read on this accent colour. Try Auto or a darker accent.
+                                </div>
+                              )}
+                              <PoSwatchRow label="Box background" field="bgColor" swatches={PP_BG_PRESETS} value={pp.bgColor || ''} allowEmpty emptyLabel="None (outlined)" onPatch={setPp} />
+                              {!ppBgHexValid && (pp.bgColor || '') !== '' && (
+                                <div style={{ fontSize: 11, color: '#dc2626', marginTop: -8, marginBottom: 10 }}>Not a valid 6-digit hex — enter #RRGGBB</div>
+                              )}
+                              <PoModeRow label="Text colour" field="textMode" options={[{ val: 'auto', lbl: 'Auto' }, { val: 'white', lbl: 'White' }, { val: 'dark', lbl: 'Dark' }]} value={pp.textMode || 'auto'} onPatch={setPp} />
+                              {ppColors.lowTextContrast && (
+                                <div style={{ background: '#fef3c7', border: '1px solid #fbbf24', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#92400e', marginTop: 4, marginBottom: 4 }}>
+                                  ⚠ Low text contrast — the chosen text colour may be hard to read on this background. Try Auto.
+                                </div>
+                              )}
+                              <div style={{ fontSize: 11, color: '#5A6070', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 10px', marginTop: 4 }}>
+                                Success and error messages keep their own green / red colour regardless of text colour.
+                              </div>
+                            </>)}
+                          </div>
+
+                          {/* Right: preview */}
+                          <div style={{ width: 260, flexShrink: 0, minWidth: 200 }}>
+                            <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
+                              {PP_PREVIEW_TABS.map((lbl, i) => (
+                                <button key={lbl} type="button" onClick={() => setPpPreviewState(i)}
+                                  style={{ fontSize: 11, padding: '3px 8px', borderRadius: 12, border: '1.5px solid ' + (ppPreviewState === i ? '#4f46e5' : '#D9D8FF'), background: ppPreviewState === i ? '#4f46e5' : '#fff', color: ppPreviewState === i ? '#fff' : '#6b7280', cursor: 'pointer', fontWeight: ppPreviewState === i ? 700 : 500 }}
+                                >{lbl}</button>
+                              ))}
+                            </div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Preview</div>
+                            <PpPreviewBlock />
+                            <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 6 }}>
+                              Saved with &ldquo;Save discount settings&rdquo;.
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Method 5: Top announcement banner */}
             <div style={{ padding: '12px 0' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <div style={{ flex: 1 }}>
