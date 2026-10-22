@@ -81,6 +81,26 @@ export function resolveProductBoxColors(cfg) {
   const errBg    = isLightText ? '#450A0A' : '#FEE2E2';
   const ok       = isLightText ? '#4ADE80' : '#16A34A';
 
+  // Highlight / animation color keys
+  function hexToRgb(h) {
+    const n = parseInt(h.slice(1), 16);
+    return [(n >> 16) & 0xFF, (n >> 8) & 0xFF, n & 0xFF];
+  }
+  function mixHex(h1, h2, t) {
+    const a = hexToRgb(h1), b = hexToRgb(h2);
+    return '#' + [0,1,2].map(i =>
+      ('0' + Math.round(a[i]*(1-t) + b[i]*t).toString(16)).slice(-2)
+    ).join('');
+  }
+  const stubFgRgb = hexToRgb(stubFg);
+  const accentRgb = hexToRgb(accent);
+  const hlStub    = `rgba(${stubFgRgb.join(',')},0.34)`;
+  const hlBody    = `rgba(${accentRgb.join(',')},${isLightText ? '0.40' : '0.26'})`;
+  const ring      = `rgba(${accentRgb.join(',')},0.30)`;
+  const sealSheen = `rgba(${accentRgb.join(',')},0.30)`;
+  const sealText2 = mixHex(sealText, '#000000', 0.40);
+
   return { accent, btnFg, bg, text, muted, fieldBg, fieldBorder, checkBorder, lowBtnContrast, lowTextContrast,
-           stubFg, sealText, bodyBg, err, errBg, ok };
+           stubFg, sealText, bodyBg, err, errBg, ok,
+           hlStub, hlBody, ring, sealSheen, sealText2 };
 }
