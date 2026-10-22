@@ -1,0 +1,16 @@
+<ccf-birthday-box
+  data-shop="{{ shop.permanent_domain | escape }}"
+  data-design-mode="{{ request.design_mode }}"
+></ccf-birthday-box>
+<script src="{{ 'ccf-bday-product.js' | asset_url }}" defer></script>
+
+{% schema %}
+{
+  "name": "Birthday box",
+  "target": "section",
+  "enabled_on": {
+    "templates": ["product"]
+  },
+  "settings": []
+}
+{% endschema %}
