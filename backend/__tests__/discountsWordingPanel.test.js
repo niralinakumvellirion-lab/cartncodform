@@ -835,6 +835,15 @@ describe('Discounts — Method 4 (product-page birthday box)', () => {
     expect(ppSlice(html)).toContain('Text colour');
   });
 
+  // g. Component test: config with productPage toggled on → buildPayload produces enabled:true
+  test('g. buildPayload called with productPage.enabled=true state → payload.birthdayCapture.productPage.enabled is true', () => {
+    const { buildPayload } = require('../../frontend/app/admin/screens/Discounts');
+    const states = makeStates({ config: { birthdayCapture: { productPage: { enabled: true } } } });
+    const config = states[0];
+    const payload = buildPayload(config);
+    expect(payload.birthdayCapture.productPage.enabled).toBe(true);
+  });
+
   test('ON (ppView=1): low button contrast warning for gold accent + white text', () => {
     const html = renderWith({
       config: { birthdayCapture: { productPage: { enabled: true, accentColor: '#F5C542', buttonTextMode: 'white' } } },

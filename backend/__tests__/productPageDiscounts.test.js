@@ -372,3 +372,182 @@ describe('POST /birthday — product_page source', () => {
     expect(res.statusCode).toBe(403);
   });
 });
+
+// ── Section F: buildPayload sends productPage to the PATCH handler ────────────
+
+describe('buildPayload — productPage payload', () => {
+  let buildPayload;
+
+  beforeAll(() => {
+    buildPayload = require('../../frontend/app/admin/screens/Discounts').buildPayload;
+  });
+
+  // a. Real buildPayload output with enabled=true → $set has productPage.enabled=true
+  test('a. real buildPayload(enabled=true) → $set["birthdayCapture.productPage.enabled"] is true', async () => {
+    const config = { birthdayCapture: { productPage: { enabled: true } } };
+    const payload = buildPayload(config);
+    DiscountConfig.findOneAndUpdate.mockReturnValue({
+      lean: () => Promise.resolve({ birthdayCapture: { productPage: { enabled: true } } }),
+    });
+    const { set } = await runPatch(payload);
+    expect(set['birthdayCapture.productPage.enabled']).toBe(true);
+  });
+
+  // b. Full round-trip: save → proxy read returns enabled=true, custom heading, custom accent
+  test('b. round trip: enabled=true + custom heading + custom accentColor survive save+read', async () => {
+    const config = {
+      birthdayCapture: {
+        productPage: {
+          enabled: true,
+          copy: { heading: 'My heading', button: 'Click me' },
+          accentColor: '#FF5733',
+        },
+      },
+      birthdayDiscount: { percentage: 20, leadDays: 5 },
+    };
+    const payload = buildPayload(config);
+    const savedDoc = {
+      birthdayCapture: {
+        productPage: {
+          enabled: true,
+          copy: payload.birthdayCapture.productPage.copy,
+          accentColor: '#FF5733',
+          bgColor: '',
+          buttonTextMode: 'auto',
+          textMode: 'auto',
+        },
+      },
+      birthdayDiscount: { percentage: 20, leadDays: 5 },
+    };
+    DiscountConfig.findOneAndUpdate.mockReturnValue({ lean: () => Promise.resolve(savedDoc) });
+    const { set } = await runPatch(payload);
+    expect(set['birthdayCapture.productPage.enabled']).toBe(true);
+    expect(set['birthdayCapture.productPage.copy.heading']).toBe('My heading');
+    expect(set['birthdayCapture.productPage.copy.button']).toBe('Click me');
+    expect(set['birthdayCapture.productPage.accentColor']).toBe('#FF5733');
+    const res = await runDiscountConfig(savedDoc);
+    expect(res.body.birthdayCapture.productPage.enabled).toBe(true);
+    expect(res.body.birthdayCapture.productPage.copy.heading).toBe('My heading');
+  });
+
+  // c. Switch off: enabled=false is written, not skipped
+  test('c. enabled=false is written to $set (not skipped)', async () => {
+    const config = { birthdayCapture: { productPage: { enabled: false } } };
+    const payload = buildPayload(config);
+    DiscountConfig.findOneAndUpdate.mockReturnValue({
+      lean: () => Promise.resolve({ birthdayCapture: { productPage: { enabled: false } } }),
+    });
+    const { set } = await runPatch(payload);
+    expect(set['birthdayCapture.productPage.enabled']).toBe(false);
+  });
+
+  // d. All defaults: enabled false, copy all empty, colours empty, modes auto → backend accepts (200)
+  test('d. all defaults (empty config): no 400, enabled false, all copy empty, modes auto', async () => {
+    const payload = buildPayload({});
+    DiscountConfig.findOneAndUpdate.mockReturnValue({ lean: () => Promise.resolve({}) });
+    const { res } = await runPatch(payload);
+    expect(res.statusCode).toBe(200);
+    const pp = payload.birthdayCapture.productPage;
+    expect(pp.enabled).toBe(false);
+    for (const k of ['heading','sub','emailPlaceholder','consent','button','skip','saved','error','emailError']) {
+      expect(pp.copy[k]).toBe('');
+    }
+    expect(pp.accentColor).toBe('');
+    expect(pp.bgColor).toBe('');
+    expect(pp.buttonTextMode).toBe('auto');
+    expect(pp.textMode).toBe('auto');
+  });
+
+  // e. Over-long copy and invalid hex are trimmed/cleared → backend never returns 400
+  test('e. over-long copy trimmed to max, invalid hex cleared to empty → no 400', async () => {
+    const config = {
+      birthdayCapture: {
+        productPage: {
+          enabled: true,
+          copy: {
+            heading:          'x'.repeat(200),
+            sub:              'y'.repeat(200),
+            emailPlaceholder: 'z'.repeat(200),
+            consent:          'c'.repeat(200),
+            button:           'b'.repeat(200),
+            skip:             's'.repeat(200),
+            saved:            'k'.repeat(200),
+            error:            'e'.repeat(200),
+            emailError:       'a'.repeat(200),
+          },
+          accentColor: 'notahex',
+          bgColor: '#ZZZZZZZ',
+          buttonTextMode: 'invalid',
+          textMode: 'bad',
+        },
+      },
+    };
+    const payload = buildPayload(config);
+    const pp = payload.birthdayCapture.productPage;
+    expect(pp.copy.heading.length).toBe(60);
+    expect(pp.copy.sub.length).toBe(120);
+    expect(pp.copy.emailPlaceholder.length).toBe(40);
+    expect(pp.copy.consent.length).toBe(80);
+    expect(pp.copy.button.length).toBe(30);
+    expect(pp.copy.skip.length).toBe(30);
+    expect(pp.copy.saved.length).toBe(80);
+    expect(pp.copy.error.length).toBe(60);
+    expect(pp.copy.emailError.length).toBe(60);
+    expect(pp.accentColor).toBe('');
+    expect(pp.bgColor).toBe('');
+    expect(pp.buttonTextMode).toBe('auto');
+    expect(pp.textMode).toBe('auto');
+    DiscountConfig.findOneAndUpdate.mockReturnValue({ lean: () => Promise.resolve({}) });
+    const { res } = await runPatch(payload);
+    expect(res.statusCode).toBe(200);
+  });
+
+  // f. Parity guard: buildPayload emits every key the backend PATCH handler accepts
+  test('f. parity: buildPayload emits all keys accepted by the PATCH handler for every birthdayCapture sub-section', () => {
+    const config = {
+      birthdayCapture: {
+        popup: { enabled: true },
+        postOrder: {
+          enabled: true,
+          copy: { pitch: 'p', button: 'b', skip: 's', saved: 'ok', error: 'err' },
+          accentColor: '#4F46E5', bgColor: '#FFFFFF', buttonTextMode: 'white', textMode: 'dark',
+        },
+        banner: {
+          enabled: true, text: 't', buttonText: 'Get', dismissDays: 7,
+          bgColor: '#3730A3', textColor: 'white', highlight: true,
+        },
+        productPage: {
+          enabled: true,
+          copy: { heading: 'h', sub: 'su', emailPlaceholder: 'ep', consent: 'co', button: 'b', skip: 's', saved: 'ok', error: 'er', emailError: 'ee' },
+          accentColor: '#4F46E5', bgColor: '#FFFFFF', buttonTextMode: 'white', textMode: 'dark',
+        },
+      },
+    };
+    const payload = buildPayload(config);
+    const bc = payload.birthdayCapture;
+
+    // popup: backend accepts enabled only
+    expect(bc.popup).toHaveProperty('enabled');
+
+    // postOrder: backend accepts enabled, copy.{5}, accentColor, bgColor, buttonTextMode, textMode
+    for (const k of ['enabled','accentColor','bgColor','buttonTextMode','textMode']) {
+      expect(bc.postOrder).toHaveProperty(k);
+    }
+    for (const k of ['pitch','button','skip','saved','error']) {
+      expect(bc.postOrder.copy).toHaveProperty(k);
+    }
+
+    // banner: backend accepts enabled, text, buttonText, dismissDays, bgColor, textColor, highlight
+    for (const k of ['enabled','text','buttonText','dismissDays','bgColor','textColor','highlight']) {
+      expect(bc.banner).toHaveProperty(k);
+    }
+
+    // productPage: backend accepts enabled, copy.{9}, accentColor, bgColor, buttonTextMode, textMode
+    for (const k of ['enabled','accentColor','bgColor','buttonTextMode','textMode']) {
+      expect(bc.productPage).toHaveProperty(k);
+    }
+    for (const k of ['heading','sub','emailPlaceholder','consent','button','skip','saved','error','emailError']) {
+      expect(bc.productPage.copy).toHaveProperty(k);
+    }
+  });
+});

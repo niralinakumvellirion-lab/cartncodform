@@ -386,6 +386,7 @@ function buildPayload(config) {
   const bcap = config.birthdayCapture || {};
   const bn = bcap.banner || {};
   const bnDismiss = Math.min(30, Math.max(1, Math.round(Number(bn.dismissDays ?? 7)) || 7));
+  const pp = bcap.productPage || {};
   out.birthdayCapture = {
     popup: { enabled: !!(bcap.popup?.enabled) },
     postOrder: {
@@ -410,6 +411,24 @@ function buildPayload(config) {
       bgColor: /^#[0-9a-fA-F]{6}$/.test(bn.bgColor || '') ? bn.bgColor : '#3730A3',
       textColor: ['auto', 'white', 'dark'].includes(bn.textColor) ? bn.textColor : 'auto',
       highlight: bn.highlight !== false,
+    },
+    productPage: {
+      enabled:        !!(pp.enabled),
+      copy: {
+        heading:          (pp.copy?.heading          || '').slice(0, 60),
+        sub:              (pp.copy?.sub              || '').slice(0, 120),
+        emailPlaceholder: (pp.copy?.emailPlaceholder || '').slice(0, 40),
+        consent:          (pp.copy?.consent          || '').slice(0, 80),
+        button:           (pp.copy?.button           || '').slice(0, 30),
+        skip:             (pp.copy?.skip             || '').slice(0, 30),
+        saved:            (pp.copy?.saved            || '').slice(0, 80),
+        error:            (pp.copy?.error            || '').slice(0, 60),
+        emailError:       (pp.copy?.emailError       || '').slice(0, 60),
+      },
+      accentColor:    /^#[0-9a-fA-F]{6}$/.test(pp.accentColor    || '') ? pp.accentColor    : '',
+      buttonTextMode: ['auto','white','dark'].includes(pp.buttonTextMode) ? pp.buttonTextMode : 'auto',
+      bgColor:        /^#[0-9a-fA-F]{6}$/.test(pp.bgColor        || '') ? pp.bgColor        : '',
+      textMode:       ['auto','white','dark'].includes(pp.textMode)       ? pp.textMode       : 'auto',
     },
   };
   const bd = config.birthdayDiscount || {};
@@ -2217,7 +2236,10 @@ export default function Discounts({ shop }) {
           shopDomain={shop}
           onSaveComplete={(updatedConfig) => setConfig(updatedConfig)}
         />
+
       )}
     </div>
   );
 }
+
+export { buildPayload };
