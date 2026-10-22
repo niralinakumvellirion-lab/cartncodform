@@ -52,56 +52,164 @@
     try { localStorage.setItem(getSkipKey(shopDomain), String(Date.now())); } catch (e) {}
   }
 
+  // ── SVG helpers (no innerHTML, no external files) ─────────────────────────
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+
+  function svgAttr(el, attrs) {
+    var keys = Object.keys(attrs);
+    for (var i = 0; i < keys.length; i++) {
+      el.setAttribute(keys[i], String(attrs[i]));
+    }
+  }
+
+  function svgEl(tag, attrs) {
+    var e = document.createElementNS(SVG_NS, tag);
+    if (attrs) svgAttr(e, attrs);
+    return e;
+  }
+
+  function makeGiftSvg(strokeColor) {
+    var s = svgEl('svg', { width: 28, height: 28, viewBox: '0 0 24 24', fill: 'none',
+      stroke: strokeColor, 'stroke-width': '1.8', 'stroke-linecap': 'round',
+      'stroke-linejoin': 'round', 'aria-hidden': 'true' });
+    s.appendChild(svgEl('rect',  { x: '3', y: '10', width: '18', height: '11', rx: '1' }));
+    s.appendChild(svgEl('rect',  { x: '2', y: '7',  width: '20', height: '3',  rx: '1' }));
+    s.appendChild(svgEl('line',  { x1: '12', y1: '7', x2: '12', y2: '21' }));
+    s.appendChild(svgEl('path',  { d: 'M12 7C12 7 11 4 9 3C7 2 6 3 7 5C8 7 12 7 12 7Z' }));
+    s.appendChild(svgEl('path',  { d: 'M12 7C12 7 13 4 15 3C17 2 18 3 17 5C16 7 12 7 12 7Z' }));
+    return s;
+  }
+
+  function makeCheckSvg(strokeColor) {
+    var s = svgEl('svg', { width: 24, height: 24, viewBox: '0 0 24 24', fill: 'none',
+      stroke: strokeColor, 'stroke-width': '2.5', 'stroke-linecap': 'round',
+      'stroke-linejoin': 'round', 'aria-hidden': 'true' });
+    s.appendChild(svgEl('circle', { cx: '12', cy: '12', r: '10' }));
+    s.appendChild(svgEl('path',   { d: 'M7 12.5l3.5 3.5 6-7' }));
+    return s;
+  }
+
   // ── CSS injection (once per page) ─────────────────────────────────────────
   var _stylesInjected = false;
 
   function injectStyles(colors) {
     if (_stylesInjected) return;
     _stylesInjected = true;
-    var accent      = colors.accent      || '#4F46E5';
-    var btnFg       = colors.btnFg       || '#FFFFFF';
-    var bg          = colors.bg;          // null = outlined
-    var text        = colors.text        || '#18181B';
-    var muted       = colors.muted       || '#71717A';
-    var fieldBg     = colors.fieldBg     || '#FFFFFF';
-    var fieldBorder = colors.fieldBorder || '#D4D4D8';
-    var checkBorder = colors.checkBorder || '#71717A';
+
+    var accent     = colors.accent      || '#4F46E5';
+    var stubFg     = colors.stubFg      || '#FFFFFF';
+    var sealText   = colors.sealText    || accent;
+    var bodyBg     = colors.bodyBg      || '#FFFFFF';
+    var text       = colors.text        || '#18181B';
+    var muted      = colors.muted       || '#71717A';
+    var fieldBg    = colors.fieldBg     || '#FFFFFF';
+    var fldBorder  = colors.fieldBorder || '#D4D4D8';
+    var chkBorder  = colors.checkBorder || '#71717A';
+    var btnFg      = colors.btnFg       || '#FFFFFF';
+    var err        = colors.err         || '#DC2626';
+    var errBg      = colors.errBg       || '#FEE2E2';
+    var ok         = colors.ok          || '#16A34A';
+
+    var seamColor = (stubFg === '#FFFFFF')
+      ? 'rgba(255,255,255,0.35)'
+      : 'rgba(23,26,34,0.25)';
 
     var css = [
-      '.ccf-bp-wrap{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;',
-      bg
-        ? 'background:' + bg + ';border-radius:12px;padding:20px 16px;'
-        : 'border:1px solid #D4D4D8;border-radius:12px;padding:20px 16px;background:transparent;',
-      'color:' + text + ';margin:16px 0;}',
-      '.ccf-bp-heading{font-size:15px;font-weight:700;margin:0 0 4px;}',
-      '.ccf-bp-sub{font-size:13px;color:' + muted + ';margin:0 0 12px;line-height:1.5;}',
+      // Card wrapper (fallback: rounded + clipped; notch applied via JS mask)
+      '.ccf-bp-card{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;',
+      'border-radius:12px;overflow:hidden;margin:16px 0;}',
+      // Stub (top accent section)
+      '.ccf-bp-stub{background:' + accent + ';padding:16px 14px;',
+      'display:flex;align-items:center;justify-content:space-between;gap:12px;}',
+      '.ccf-bp-stub-text{flex:1;min-width:0;}',
+      '.ccf-bp-stub-heading{font-size:15px;font-weight:700;color:' + stubFg + ';',
+      'margin:0 0 4px;line-height:1.3;}',
+      '.ccf-bp-stub-sub{font-size:12px;color:' + stubFg + ';opacity:0.85;',
+      'margin:0;line-height:1.45;}',
+      // Seal (circular, rotated, white background)
+      '.ccf-bp-seal{width:74px;height:74px;flex-shrink:0;border-radius:50%;',
+      'background:#FFFFFF;display:flex;flex-direction:column;align-items:center;',
+      'justify-content:center;transform:rotate(-8deg);position:relative;',
+      'box-shadow:0 2px 8px rgba(0,0,0,0.15);}',
+      '.ccf-bp-seal-ring{position:absolute;inset:5px;border-radius:50%;',
+      'border:1.5px dashed ' + sealText + ';opacity:0.3;pointer-events:none;}',
+      '.ccf-bp-seal-pct{font-size:13px;font-weight:800;color:' + sealText + ';',
+      'margin-top:2px;letter-spacing:-0.5px;line-height:1;}',
+      // Seam (dashed divider between stub and body)
+      '.ccf-bp-seam{background:' + accent + ';height:8px;position:relative;}',
+      '.ccf-bp-seam::after{content:"";position:absolute;left:12px;right:12px;',
+      'top:50%;border-top:2px dashed ' + seamColor + ';transform:translateY(-50%);}',
+      // Body (bottom section)
+      '.ccf-bp-body{background:' + bodyBg + ';padding:14px 14px 12px;}',
+      // Email input
       '.ccf-bp-email{width:100%;height:44px;font-size:16px;padding:0 12px;',
-      'box-sizing:border-box;border:1px solid ' + fieldBorder + ';border-radius:8px;',
-      'background:' + fieldBg + ';color:' + text + ';margin-bottom:8px;}',
-      '.ccf-bp-row{display:flex;gap:8px;margin-bottom:8px;}',
+      'box-sizing:border-box;border:1px solid ' + fldBorder + ';border-radius:8px;',
+      'background:' + fieldBg + ';color:' + text + ';margin-bottom:8px;display:block;}',
+      // Month/day row
+      '.ccf-bp-date-row{display:flex;gap:8px;margin-bottom:8px;}',
       '.ccf-bp-select{flex:1;height:44px;font-size:16px;padding:0 8px;',
-      'box-sizing:border-box;border:1px solid ' + fieldBorder + ';border-radius:8px;',
+      'box-sizing:border-box;border:1px solid ' + fldBorder + ';border-radius:8px;',
       'background:' + fieldBg + ';color:' + text + ';-webkit-appearance:none;}',
-      '.ccf-bp-select.ccf-bp-error{border-color:#dc2626 !important;}',
-      '.ccf-bp-email.ccf-bp-error{border-color:#dc2626 !important;}',
-      '.ccf-bp-consent{display:flex;gap:8px;align-items:flex-start;margin-bottom:12px;}',
+      // Error state on inputs
+      '.ccf-bp-select.ccf-bp-error{border-color:' + err + ' !important;}',
+      '.ccf-bp-email.ccf-bp-error{border-color:' + err + ' !important;}',
+      // Consent row
+      '.ccf-bp-consent{display:flex;gap:8px;align-items:flex-start;',
+      'margin-bottom:10px;margin-top:2px;}',
       '.ccf-bp-check{width:18px;height:18px;flex-shrink:0;margin-top:1px;',
-      'accent-color:' + accent + ';border:1px solid ' + checkBorder + ';}',
+      'accent-color:' + accent + ';border:1px solid ' + chkBorder + ';}',
       '.ccf-bp-consent-text{font-size:12px;color:' + muted + ';line-height:1.4;}',
+      // Error box (wraps the error message text)
+      '.ccf-bp-err-box{background:' + errBg + ';border-radius:6px;',
+      'padding:6px 10px;margin-bottom:8px;}',
+      '.ccf-bp-msg-err{font-size:12px;color:' + err + ';margin:0;}',
+      // Save button
       '.ccf-bp-btn{width:100%;height:46px;font-size:15px;font-weight:700;',
       'background:' + accent + ';color:' + btnFg + ';border:none;border-radius:10px;',
       'cursor:pointer;margin-bottom:8px;}',
+      // Skip link
       '.ccf-bp-skip{display:block;width:100%;font-size:13px;color:' + muted + ';',
       'background:none;border:none;cursor:pointer;text-align:center;padding:4px 0;}',
-      '.ccf-bp-msg-ok{font-size:14px;font-weight:600;color:#16a34a;text-align:center;padding:12px 0;}',
-      '.ccf-bp-msg-err{font-size:13px;color:#dc2626;margin:4px 0 8px;}',
+      // Success message
+      '.ccf-bp-msg-ok{font-size:14px;font-weight:600;color:' + ok + ';',
+      'text-align:center;padding:12px 0;display:flex;align-items:center;',
+      'justify-content:center;gap:8px;}',
+      // Design-mode placeholder
       '.ccf-bp-design-placeholder{border:2px dashed #D4D4D8;border-radius:12px;',
       'padding:16px;text-align:center;font-size:13px;color:#9ca3af;margin:16px 0;}',
     ].join('');
 
-    var el = document.createElement('style');
-    el.textContent = css;
-    document.head.appendChild(el);
+    var styleEl = document.createElement('style');
+    styleEl.textContent = css;
+    document.head.appendChild(styleEl);
+  }
+
+  // ── Notch mask (applied after layout) ─────────────────────────────────────
+  // Uses CSS mask radial-gradients to punch half-circle notches into the card
+  // sides at the stub/body seam. Fallback: overflow:hidden + border-radius
+  // (applied in CSS above) already looks good without the notch.
+  function applyNotchMask(card, seamY) {
+    var r = '12';  // corner radius in px
+    var n = '11';  // notch radius in px
+    var y = String(seamY);
+    var layers = [
+      'radial-gradient(circle ' + r + 'px at 0 0,transparent ' + r + 'px,#000 ' + r + 'px)',
+      'radial-gradient(circle ' + r + 'px at 100% 0,transparent ' + r + 'px,#000 ' + r + 'px)',
+      'radial-gradient(circle ' + r + 'px at 0 100%,transparent ' + r + 'px,#000 ' + r + 'px)',
+      'radial-gradient(circle ' + r + 'px at 100% 100%,transparent ' + r + 'px,#000 ' + r + 'px)',
+      'radial-gradient(circle ' + n + 'px at 0 ' + y + 'px,transparent ' + n + 'px,#000 ' + n + 'px)',
+      'radial-gradient(circle ' + n + 'px at 100% ' + y + 'px,transparent ' + n + 'px,#000 ' + n + 'px)',
+      'linear-gradient(#000,#000)',
+    ].join(',');
+    var intersect7 = 'intersect,intersect,intersect,intersect,intersect,intersect,intersect';
+    var destIn7    = 'destination-in,destination-in,destination-in,destination-in,destination-in,destination-in,destination-in';
+
+    card.style.borderRadius = '0';
+    card.style.overflow = 'visible';
+    card.style.webkitMaskImage = layers;
+    card.style.webkitMaskComposite = destIn7;
+    card.style.maskImage = layers;
+    card.style.maskComposite = intersect7;
   }
 
   // ── Months helper ──────────────────────────────────────────────────────────
@@ -149,40 +257,77 @@
         if (!pp || !pp.enabled) return;
 
         var colors = pp.colors || {};
+        var pct    = (pp.pct != null) ? String(pp.pct) : '15';
         injectStyles(colors);
 
         var copy = pp.copy || {};
-        var wrap = document.createElement('div');
-        wrap.className = 'ccf-bp-wrap';
+        var uid  = 'ccf-bp-consent-' + shop.replace(/[^a-z0-9]/g, '-') + '-' + (++_instanceCount);
 
-        // Heading
+        // ── Gift-card wrapper ─────────────────────────────────────────────────
+        var card = document.createElement('div');
+        card.className = 'ccf-bp-card';
+
+        // ── Stub section ──────────────────────────────────────────────────────
+        var stub = document.createElement('div');
+        stub.className = 'ccf-bp-stub';
+
+        var stubText = document.createElement('div');
+        stubText.className = 'ccf-bp-stub-text';
+
         if (copy.heading) {
           var h = document.createElement('div');
-          h.className = 'ccf-bp-heading';
+          h.className = 'ccf-bp-stub-heading';
           h.textContent = copy.heading;
-          wrap.appendChild(h);
+          stubText.appendChild(h);
         }
-
-        // Sub
         if (copy.sub) {
           var sub = document.createElement('div');
-          sub.className = 'ccf-bp-sub';
+          sub.className = 'ccf-bp-stub-sub';
           sub.textContent = copy.sub;
-          wrap.appendChild(sub);
+          stubText.appendChild(sub);
         }
+        stub.appendChild(stubText);
 
-        // Email input
+        // Seal
+        var sealStroke = colors.sealText || colors.accent || '#4F46E5';
+        var seal = document.createElement('div');
+        seal.className = 'ccf-bp-seal';
+
+        var sealRing = document.createElement('div');
+        sealRing.className = 'ccf-bp-seal-ring';
+        seal.appendChild(sealRing);
+
+        seal.appendChild(makeGiftSvg(sealStroke));
+
+        var sealPct = document.createElement('div');
+        sealPct.className = 'ccf-bp-seal-pct';
+        sealPct.textContent = '−' + pct + '%';  // − (minus sign U+2212)
+        seal.appendChild(sealPct);
+
+        stub.appendChild(seal);
+        card.appendChild(stub);
+
+        // ── Seam ──────────────────────────────────────────────────────────────
+        var seam = document.createElement('div');
+        seam.className = 'ccf-bp-seam';
+        card.appendChild(seam);
+
+        // ── Body section ──────────────────────────────────────────────────────
+        var body = document.createElement('div');
+        body.className = 'ccf-bp-body';
+
+        // Email
         var emailInput = document.createElement('input');
         emailInput.type = 'email';
         emailInput.className = 'ccf-bp-email';
         emailInput.placeholder = copy.emailPlaceholder || 'Your email';
         emailInput.setAttribute('autocomplete', 'email');
-        wrap.appendChild(emailInput);
+        body.appendChild(emailInput);
 
-        // Month / Day row (day count is month-aware, mirrors ccfRenderBirthdayForm)
+        // Month / Day row (day count is month-aware)
         var MAX_DAYS = [0,31,29,31,30,31,30,31,31,30,31,30,31];
-        var row = document.createElement('div');
-        row.className = 'ccf-bp-row';
+        var dateRow = document.createElement('div');
+        dateRow.className = 'ccf-bp-date-row';
 
         var monthSel = document.createElement('select');
         monthSel.className = 'ccf-bp-select';
@@ -196,14 +341,14 @@
           mo.textContent = MONTHS[mi];
           monthSel.appendChild(mo);
         }
-        row.appendChild(monthSel);
+        dateRow.appendChild(monthSel);
 
         var daySel = document.createElement('select');
         daySel.className = 'ccf-bp-select';
 
         function updateDayOptions(m) {
           var prev = daySel.value;
-          daySel.innerHTML = '';
+          while (daySel.firstChild) { daySel.removeChild(daySel.firstChild); }
           var d0 = document.createElement('option');
           d0.value = ''; d0.textContent = 'Day'; daySel.appendChild(d0);
           var max = (m >= 1 && m <= 12) ? MAX_DAYS[m] : 31;
@@ -220,40 +365,42 @@
           updateDayOptions(parseInt(monthSel.value, 10));
         });
 
-        row.appendChild(daySel);
-        wrap.appendChild(row);
+        dateRow.appendChild(daySel);
+        body.appendChild(dateRow);
 
-        // Consent row — always visible; server fills the default text but we
-        // also fall back client-side in case the field arrives empty.
+        // Consent row — always visible
         var consentRow = document.createElement('div');
         consentRow.className = 'ccf-bp-consent';
 
         var check = document.createElement('input');
         check.type = 'checkbox';
         check.className = 'ccf-bp-check';
-        check.id = 'ccf-bp-consent-' + shop.replace(/[^a-z0-9]/g, '-') + '-' + (++_instanceCount);
+        check.id = uid;
 
         var consentLbl = document.createElement('label');
-        consentLbl.htmlFor = check.id;
+        consentLbl.htmlFor = uid;
         consentLbl.className = 'ccf-bp-consent-text';
         consentLbl.textContent = copy.consent || 'Email me my birthday offer';
 
         consentRow.appendChild(check);
         consentRow.appendChild(consentLbl);
-        wrap.appendChild(consentRow);
+        body.appendChild(consentRow);
 
-        // Error message area
-        var errDiv = document.createElement('div');
-        errDiv.className = 'ccf-bp-msg-err';
-        errDiv.style.display = 'none';
-        wrap.appendChild(errDiv);
+        // Error box (wraps error message; hidden by default)
+        var errBox = document.createElement('div');
+        errBox.className = 'ccf-bp-err-box';
+        errBox.style.display = 'none';
+        var errMsg = document.createElement('div');
+        errMsg.className = 'ccf-bp-msg-err';
+        errBox.appendChild(errMsg);
+        body.appendChild(errBox);
 
         // Save button
         var btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'ccf-bp-btn';
         btn.textContent = copy.button || 'Save my birthday';
-        wrap.appendChild(btn);
+        body.appendChild(btn);
 
         // Skip link
         if (copy.skip) {
@@ -265,24 +412,35 @@
             markSkipped(shop);
             self.innerHTML = '';
           });
-          wrap.appendChild(skip);
+          body.appendChild(skip);
         }
 
+        card.appendChild(body);
+        self.appendChild(card);
+
+        // Apply notch mask after the card is in the DOM and has layout
+        if (typeof requestAnimationFrame !== 'undefined') {
+          requestAnimationFrame(function () {
+            var seamY = stub.offsetHeight + Math.round(seam.offsetHeight / 2);
+            applyNotchMask(card, seamY);
+          });
+        }
+
+        // ── Validation + submit ───────────────────────────────────────────────
         btn.addEventListener('click', function () {
-          errDiv.style.display = 'none';
-          errDiv.textContent = '';
+          errBox.style.display = 'none';
+          errMsg.textContent = '';
 
-          var emailVal = emailInput.value.trim().toLowerCase();
-          var monthVal = parseInt(monthSel.value, 10);
-          var dayVal   = parseInt(daySel.value, 10);
+          var emailVal   = emailInput.value.trim().toLowerCase();
+          var monthVal   = parseInt(monthSel.value, 10);
+          var dayVal     = parseInt(daySel.value, 10);
           var consentVal = check.checked;
-
-          var hasError = false;
+          var hasError   = false;
 
           if (!emailVal || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(emailVal)) {
             emailInput.classList.add('ccf-bp-error');
-            errDiv.textContent = copy.emailError || 'Enter a valid email and tick the box.';
-            errDiv.style.display = '';
+            errMsg.textContent = copy.emailError || 'Enter a valid email and tick the box.';
+            errBox.style.display = '';
             hasError = true;
           } else {
             emailInput.classList.remove('ccf-bp-error');
@@ -292,8 +450,8 @@
             monthSel.classList.add('ccf-bp-error');
             daySel.classList.add('ccf-bp-error');
             if (!hasError) {
-              errDiv.textContent = copy.error || 'Please select a month and day.';
-              errDiv.style.display = '';
+              errMsg.textContent = copy.error || 'Please select a month and day.';
+              errBox.style.display = '';
             }
             hasError = true;
           } else {
@@ -303,14 +461,13 @@
 
           if (!consentVal) {
             if (!hasError) {
-              errDiv.textContent = 'Please accept the consent checkbox.';
-              errDiv.style.display = '';
+              errMsg.textContent = 'Please accept the consent checkbox.';
+              errBox.style.display = '';
             }
             hasError = true;
           }
 
           if (hasError) return;
-
           btn.disabled = true;
 
           var sessionId = getSessionId(shop);
@@ -332,26 +489,31 @@
             if (res && res.ok) {
               markSaved(shop);
               self.innerHTML = '';
-              var ok = document.createElement('div');
-              ok.className = 'ccf-bp-wrap';
+
+              var okCard = document.createElement('div');
+              okCard.className = 'ccf-bp-card';
+              var okBody = document.createElement('div');
+              okBody.className = 'ccf-bp-body';
               var okMsg = document.createElement('div');
               okMsg.className = 'ccf-bp-msg-ok';
-              okMsg.textContent = copy.saved || 'Thanks! Your gift will arrive before your birthday.';
-              ok.appendChild(okMsg);
-              self.appendChild(ok);
+              okMsg.appendChild(makeCheckSvg(colors.ok || '#16A34A'));
+              var okSpan = document.createElement('span');
+              okSpan.textContent = copy.saved || 'Thanks! Your gift will arrive before your birthday.';
+              okMsg.appendChild(okSpan);
+              okBody.appendChild(okMsg);
+              okCard.appendChild(okBody);
+              self.appendChild(okCard);
             } else {
               btn.disabled = false;
-              errDiv.textContent = (res && res.message) || copy.error || 'Something went wrong. Please try again.';
-              errDiv.style.display = '';
+              errMsg.textContent = (res && res.message) || copy.error || 'Something went wrong. Please try again.';
+              errBox.style.display = '';
             }
           }).catch(function () {
             btn.disabled = false;
-            errDiv.textContent = copy.error || 'Something went wrong. Please try again.';
-            errDiv.style.display = '';
+            errMsg.textContent = copy.error || 'Something went wrong. Please try again.';
+            errBox.style.display = '';
           });
         });
-
-        self.appendChild(wrap);
       }).catch(function () {});
     };
 
