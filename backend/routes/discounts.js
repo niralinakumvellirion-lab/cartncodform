@@ -58,7 +58,7 @@ function defaultConfig(shop) {
       },
       productPage: {
         enabled: false,
-        copy: { heading: '', sub: '', emailPlaceholder: '', consent: '', button: '', skip: '', saved: '', error: '', emailError: '' },
+        copy: { heading: '', sub: '', emailPlaceholder: '', consent: '', button: '', skip: '', saved: '', error: '', emailError: '', unlockTitle: '', openButton: '' },
         accentColor: '', bgColor: '', buttonTextMode: 'auto', textMode: 'auto',
       },
     },
@@ -575,9 +575,9 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
         if (typeof pp.enabled === 'boolean') {
           set['birthdayCapture.productPage.enabled'] = pp.enabled;
         }
-        const PP_COPY_MAX = { heading: 60, sub: 120, emailPlaceholder: 40, consent: 80, button: 30, skip: 30, saved: 80, error: 60, emailError: 60 };
+        const PP_COPY_MAX = { heading: 60, sub: 120, emailPlaceholder: 40, consent: 80, button: 30, skip: 30, saved: 80, error: 60, emailError: 60, unlockTitle: 60, openButton: 30 };
         if (pp.copy && typeof pp.copy === 'object') {
-          for (const k of ['heading', 'sub', 'emailPlaceholder', 'consent', 'button', 'skip', 'saved', 'error', 'emailError']) {
+          for (const k of ['heading', 'sub', 'emailPlaceholder', 'consent', 'button', 'skip', 'saved', 'error', 'emailError', 'unlockTitle', 'openButton']) {
             if (k in pp.copy) {
               const s = String(pp.copy[k]).replace(/[\x00-\x1F\x7F]/g, '').trim();
               set[`birthdayCapture.productPage.copy.${k}`] = s.slice(0, PP_COPY_MAX[k]);

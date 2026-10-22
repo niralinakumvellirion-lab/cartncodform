@@ -102,6 +102,8 @@ const discountConfigSchema = new mongoose.Schema({
         saved:            { type: String, default: '' },
         error:            { type: String, default: '' },
         emailError:       { type: String, default: '' },
+        unlockTitle:      { type: String, default: '' },  // max 60 — teaser heading
+        openButton:       { type: String, default: '' },  // max 30 — teaser CTA
       },
       accentColor:    { type: String, default: '' },
       bgColor:        { type: String, default: '' },

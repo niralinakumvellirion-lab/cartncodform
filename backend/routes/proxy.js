@@ -173,6 +173,8 @@ router.get('/discount-config', async (req, res) => {
               saved:            tok(copy.saved,            'Thanks! Your gift will arrive before your birthday.'),
               error:            tok(copy.error,            'Please select a month and day.'),
               emailError:       tok(copy.emailError,       'Enter a valid email and tick the box.'),
+              unlockTitle:      tok(copy.unlockTitle,      'Unlock {pct}% off your birthday gift'),
+              openButton:       tok(copy.openButton,       'Open my gift'),
             },
             colors: resolveProductBoxColors({
               accentColor:    pp.accentColor    || '',
