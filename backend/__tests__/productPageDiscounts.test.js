@@ -117,8 +117,8 @@ describe('DiscountConfig — productPage defaults', () => {
     expect(p.defaultValue).toBe(false);
   });
 
-  test('productPage.copy has all 9 wording keys defaulting to empty string', () => {
-    const keys = ['heading','sub','emailPlaceholder','consent','button','skip','saved','error','emailError'];
+  test('productPage.copy has all 11 wording keys defaulting to empty string', () => {
+    const keys = ['heading','sub','emailPlaceholder','consent','button','skip','saved','error','emailError','unlockTitle','openButton'];
     for (const k of keys) {
       const p = RealDC.schema.path('birthdayCapture.productPage.copy.' + k);
       expect(p).toBeTruthy();
@@ -197,6 +197,14 @@ describe('PATCH /:shopDomain/config — productPage validation', () => {
     expect(set['birthdayCapture.productPage.copy.heading']).toBe('HelloWorld');
     expect(set['birthdayCapture.productPage.copy.emailError'].length).toBe(60);
   });
+
+  test('unlockTitle truncated at 60, openButton at 30', async () => {
+    const { set } = await runPatch({
+      birthdayCapture: { productPage: { copy: { unlockTitle: 'x'.repeat(80), openButton: 'y'.repeat(50) } } },
+    });
+    expect(set['birthdayCapture.productPage.copy.unlockTitle'].length).toBe(60);
+    expect(set['birthdayCapture.productPage.copy.openButton'].length).toBe(30);
+  });
 });
 
 // ── Section D: /discount-config response ────────────────────────────────────
@@ -274,6 +282,18 @@ describe('GET /discount-config — productPage key', () => {
     expect(copy.saved).toBe('Thanks! Your gift will arrive before your birthday.');
     expect(copy.error).toBe('Please select a month and day.');
     expect(copy.emailError).toBe('Enter a valid email and tick the box.');
+    expect(copy.unlockTitle).toBe('Unlock 15% off your birthday gift');
+    expect(copy.openButton).toBe('Open my gift');
+  });
+
+  test('unlockTitle and openButton substitute {pct} token', async () => {
+    const res = await runDiscountConfig({
+      birthdayCapture: { productPage: { enabled: true, copy: { unlockTitle: 'Get {pct}% — open now', openButton: 'Claim {pct}%' } } },
+      birthdayDiscount: { percentage: 20, leadDays: 3 },
+    });
+    const copy = res.body.birthdayCapture.productPage.copy;
+    expect(copy.unlockTitle).toBe('Get 20% — open now');
+    expect(copy.openButton).toBe('Claim 20%');
   });
 });
 

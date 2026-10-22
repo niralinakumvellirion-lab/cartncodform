@@ -745,16 +745,17 @@ describe('Discounts — Method 4 (product-page birthday box)', () => {
     expect(slice).toContain('Horizon');
   });
 
-  test('OFF state: preview tabs include Ask, Email error, Date error, After saving', () => {
+  test('OFF state: preview tabs include Closed, Ask, Email error, Date error, After saving', () => {
     const html = renderWith({ config: {} });
     const slice = ppSlice(html);
+    expect(slice).toContain('Closed');
     expect(slice).toContain('Ask');
     expect(slice).toContain('Email error');
     expect(slice).toContain('Date error');
     expect(slice).toContain('After saving');
   });
 
-  test('ON (ppView=0): 9 wording fields rendered', () => {
+  test('ON (ppView=0): 11 wording fields rendered', () => {
     const html = renderWith({
       config: { birthdayCapture: { productPage: { enabled: true } } },
       ppView: 0,
@@ -770,6 +771,8 @@ describe('Discounts — Method 4 (product-page birthday box)', () => {
     expect(slice).toContain('Success message');
     expect(slice).toContain('Date error');
     expect(slice).toContain('Email error');
+    expect(slice).toContain('Unlock title');
+    expect(slice).toContain('Open button');
   });
 
   test('ON (ppView=0): "Reset wording" button is present', () => {
@@ -844,6 +847,19 @@ describe('Discounts — Method 4 (product-page birthday box)', () => {
     expect(payload.birthdayCapture.productPage.enabled).toBe(true);
   });
 
+  // f. Parity test: every productPage copy field is serialised by buildPayload
+  test('f. buildPayload serialises all 11 productPage copy fields', () => {
+    const { buildPayload } = require('../../frontend/app/admin/screens/Discounts');
+    const allFields = ['heading','sub','emailPlaceholder','consent','button','skip','saved','error','emailError','unlockTitle','openButton'];
+    const copy = Object.fromEntries(allFields.map(k => [k, 'val_' + k]));
+    const config = { birthdayCapture: { productPage: { enabled: true, copy } } };
+    const payload = buildPayload(config);
+    const pc = payload.birthdayCapture.productPage.copy;
+    for (const k of allFields) {
+      expect(pc[k]).toBeDefined();
+    }
+  });
+
   test('ON (ppView=1): low button contrast warning for gold accent + white text', () => {
     const html = renderWith({
       config: { birthdayCapture: { productPage: { enabled: true, accentColor: '#F5C542', buttonTextMode: 'white' } } },
@@ -868,6 +884,17 @@ describe('Discounts — Method 4 (product-page birthday box)', () => {
     const slice = ppSlice(html);
     expect(slice).not.toContain('Low contrast');
     expect(slice).not.toContain('Low text contrast');
+  });
+
+  test('ON (ppPreviewState=-1): Closed teaser shows unlock title default in preview', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 0,
+      ppPreviewState: -1,
+    });
+    const slice = ppSlice(html);
+    expect(slice).toContain('Unlock');
+    expect(slice).toContain('Open my gift');
   });
 
   test('ON (ppPreviewState=0): default heading shown in preview', () => {

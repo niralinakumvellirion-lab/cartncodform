@@ -26,7 +26,8 @@ const { resolveProductBoxColors: resolveProductBoxColorsFE } = mod.exports;
 function roundtrip(be, fe) {
   // Every key must be equal between backend and frontend
   const keys = ['accent','btnFg','bg','text','muted','fieldBg','fieldBorder','checkBorder','lowBtnContrast','lowTextContrast',
-                 'stubFg','sealText','bodyBg','err','errBg','ok'];
+                 'stubFg','sealText','bodyBg','err','errBg','ok',
+                 'hlStub','hlBody','ring','sealSheen','sealText2'];
   for (const k of keys) {
     expect(fe[k]).toEqual(be[k]);
   }
