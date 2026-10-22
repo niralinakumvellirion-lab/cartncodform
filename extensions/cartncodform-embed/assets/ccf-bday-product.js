@@ -108,15 +108,21 @@
   var MONTHS = ['January','February','March','April','May','June',
     'July','August','September','October','November','December'];
 
+  // ── Unique id counter (prevents duplicate ids when 2 boxes on one page) ────
+  var _instanceCount = 0;
+
   // ── Custom element ─────────────────────────────────────────────────────────
   var CCFBirthdayBox = (function () {
+    // Reflect.construct is required for ES5 functions extending built-in
+    // HTMLElement; HTMLElement.call(this) does not set up internal slots
+    // in WebKit and will throw "Illegal constructor".
     function CCFBirthdayBox() {
-      var instance = HTMLElement.call(this) || this;
-      return instance;
+      return Reflect.construct(HTMLElement, [], CCFBirthdayBox);
     }
 
-    CCFBirthdayBox.prototype = Object.create(HTMLElement.prototype);
-    CCFBirthdayBox.prototype.constructor = CCFBirthdayBox;
+    CCFBirthdayBox.prototype = Object.create(HTMLElement.prototype, {
+      constructor: { value: CCFBirthdayBox, writable: true, configurable: true },
+    });
 
     CCFBirthdayBox.prototype.connectedCallback = function () {
       if (this._rendered) return;
@@ -173,7 +179,8 @@
         emailInput.setAttribute('autocomplete', 'email');
         wrap.appendChild(emailInput);
 
-        // Month / Day row
+        // Month / Day row (day count is month-aware, mirrors ccfRenderBirthdayForm)
+        var MAX_DAYS = [0,31,29,31,30,31,30,31,31,30,31,30,31];
         var row = document.createElement('div');
         row.className = 'ccf-bp-row';
 
@@ -193,44 +200,47 @@
 
         var daySel = document.createElement('select');
         daySel.className = 'ccf-bp-select';
-        var dOpt = document.createElement('option');
-        dOpt.value = '';
-        dOpt.textContent = 'Day';
-        daySel.appendChild(dOpt);
-        for (var di = 1; di <= 31; di++) {
-          var dop = document.createElement('option');
-          dop.value = String(di);
-          dop.textContent = String(di);
-          daySel.appendChild(dop);
+
+        function updateDayOptions(m) {
+          var prev = daySel.value;
+          daySel.innerHTML = '';
+          var d0 = document.createElement('option');
+          d0.value = ''; d0.textContent = 'Day'; daySel.appendChild(d0);
+          var max = (m >= 1 && m <= 12) ? MAX_DAYS[m] : 31;
+          for (var di = 1; di <= max; di++) {
+            var dop = document.createElement('option');
+            dop.value = String(di); dop.textContent = String(di);
+            daySel.appendChild(dop);
+          }
+          if (Number(prev) >= 1 && Number(prev) <= max) daySel.value = prev;
         }
+        updateDayOptions(0);
+
+        monthSel.addEventListener('change', function () {
+          updateDayOptions(parseInt(monthSel.value, 10));
+        });
+
         row.appendChild(daySel);
         wrap.appendChild(row);
 
-        // Consent row
-        if (copy.consent) {
-          var consentRow = document.createElement('div');
-          consentRow.className = 'ccf-bp-consent';
+        // Consent row — always visible; server fills the default text but we
+        // also fall back client-side in case the field arrives empty.
+        var consentRow = document.createElement('div');
+        consentRow.className = 'ccf-bp-consent';
 
-          var check = document.createElement('input');
-          check.type = 'checkbox';
-          check.className = 'ccf-bp-check';
-          check.id = 'ccf-bp-consent-' + shop.replace(/[^a-z0-9]/g, '-');
+        var check = document.createElement('input');
+        check.type = 'checkbox';
+        check.className = 'ccf-bp-check';
+        check.id = 'ccf-bp-consent-' + shop.replace(/[^a-z0-9]/g, '-') + '-' + (++_instanceCount);
 
-          var consentLbl = document.createElement('label');
-          consentLbl.htmlFor = check.id;
-          consentLbl.className = 'ccf-bp-consent-text';
-          consentLbl.textContent = copy.consent;
+        var consentLbl = document.createElement('label');
+        consentLbl.htmlFor = check.id;
+        consentLbl.className = 'ccf-bp-consent-text';
+        consentLbl.textContent = copy.consent || 'I agree to share my birthday with this store.';
 
-          consentRow.appendChild(check);
-          consentRow.appendChild(consentLbl);
-          wrap.appendChild(consentRow);
-        } else {
-          var check = document.createElement('input');
-          check.type = 'checkbox';
-          check.style.display = 'none';
-          check.checked = true;
-          wrap.appendChild(check);
-        }
+        consentRow.appendChild(check);
+        consentRow.appendChild(consentLbl);
+        wrap.appendChild(consentRow);
 
         // Error message area
         var errDiv = document.createElement('div');
