@@ -424,6 +424,8 @@ function buildPayload(config) {
         saved:            (pp.copy?.saved            || '').slice(0, 80),
         error:            (pp.copy?.error            || '').slice(0, 60),
         emailError:       (pp.copy?.emailError       || '').slice(0, 60),
+        unlockTitle:      (pp.copy?.unlockTitle      || '').slice(0, 60),
+        openButton:       (pp.copy?.openButton       || '').slice(0, 30),
       },
       accentColor:    /^#[0-9a-fA-F]{6}$/.test(pp.accentColor    || '') ? pp.accentColor    : '',
       buttonTextMode: ['auto','white','dark'].includes(pp.buttonTextMode) ? pp.buttonTextMode : 'auto',
@@ -1621,7 +1623,7 @@ export default function Discounts({ shop }) {
                   },
                 }));
 
-                const PP_COPY_MAX = { heading: 60, sub: 120, emailPlaceholder: 40, consent: 80, button: 30, skip: 30, saved: 80, error: 60, emailError: 60 };
+                const PP_COPY_MAX = { heading: 60, sub: 120, emailPlaceholder: 40, consent: 80, button: 30, skip: 30, saved: 80, error: 60, emailError: 60, unlockTitle: 60, openButton: 30 };
                 const bdPct  = config.birthdayDiscount?.percentage ?? 15;
                 const bdLead = config.birthdayDiscount?.leadDays ?? 3;
 
@@ -1654,7 +1656,9 @@ export default function Discounts({ shop }) {
                 const pvSkip    = (ppCopy.skip     || '').trim() || 'No thanks';
                 const pvSaved   = (ppCopy.saved    || '').trim() || 'Thanks! Your gift will arrive before your birthday.';
                 const pvError   = (ppCopy.error    || '').trim() || 'Please select a month and day.';
-                const pvEmailErr = (ppCopy.emailError || '').trim() || 'Enter a valid email and tick the box.';
+                const pvEmailErr     = (ppCopy.emailError  || '').trim() || 'Enter a valid email and tick the box.';
+                const pvUnlockTitle = (ppCopy.unlockTitle || '').trim() || ('Unlock ' + bdPct + '% off your birthday gift');
+                const pvOpenButton  = (ppCopy.openButton  || '').trim() || 'Open my gift';
 
                 const ppTabStyle = (active) => ({
                   fontSize: 12, padding: '4px 12px', borderRadius: 20, border: '1.5px solid ' + (active ? '#4f46e5' : '#D9D8FF'),
@@ -1678,7 +1682,7 @@ export default function Discounts({ shop }) {
 
                 const ppAccentHexValid = _HEX_RE.test(pp.accentColor || '');
                 const ppBgHexValid     = _HEX_RE.test(pp.bgColor || '');
-                const anyCopySetPp     = ['heading','sub','emailPlaceholder','consent','button','skip','saved','error','emailError'].some((k) => (ppCopy[k] || '').trim().length > 0);
+                const anyCopySetPp     = ['heading','sub','emailPlaceholder','consent','button','skip','saved','error','emailError','unlockTitle','openButton'].some((k) => (ppCopy[k] || '').trim().length > 0);
 
                 // "Add to product page" deep-link
                 const apiKey = typeof document !== 'undefined'
@@ -1689,7 +1693,8 @@ export default function Discounts({ shop }) {
                   ? ('https://' + shopDomain + '/admin/themes/current/editor?template=product&addAppBlockId=' + encodeURIComponent(apiKey + '/birthday-product') + '&target=mainSection')
                   : (shopDomain ? 'https://' + shopDomain + '/admin/themes/current/editor?template=product' : '');
 
-                const PP_PREVIEW_TABS = ['Ask', 'Email error', 'Date error', 'After saving'];
+                const PP_PREVIEW_TABS = ['Closed', 'Ask', 'Email error', 'Date error', 'After saving'];
+                const PP_PREVIEW_TAB_STATES = [-1, 0, 1, 2, 3];
 
                 function PpPreviewBlock() {
                   const notchStub   = 'radial-gradient(circle 11px at 0 100%,#0000 97%,#000),radial-gradient(circle 11px at 100% 100%,#0000 97%,#000)';
@@ -1717,6 +1722,26 @@ export default function Discounts({ shop }) {
                       <div aria-hidden="true" style={{ position: 'absolute', left: 22, right: 22, bottom: 0, borderBottom: '2px dashed ' + dashedColor, pointerEvents: 'none' }} />
                     </div>
                   );
+
+                  // Closed teaser preview (horizontal ticket)
+                  if (ppPreviewState === -1) {
+                    const teaserStubStyle = { background: pvAccent, minWidth: 72, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '10px 8px', borderRadius: '12px 0 0 12px', position: 'relative', fontSize: 10 };
+                    const teaserBodyStyle = { flex: 1, background: pvBodyBg, padding: '8px 10px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 5, borderRadius: '0 12px 12px 0' };
+                    const teaserWrapStyle = { display: 'flex', filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.10))', fontSize: 12 };
+                    const ctaPillStyle = { display: 'inline-flex', alignItems: 'center', gap: 3, background: pvAccent, color: pvBtnFg, fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 14, width: 'fit-content' };
+                    return (
+                      <div style={teaserWrapStyle}>
+                        <div style={teaserStubStyle}>
+                          <div style={{ fontSize: 14 }}>🎁</div>
+                          <div style={{ fontSize: 8, color: pvStubFg, opacity: 0.75 }}>✦ ✦</div>
+                        </div>
+                        <div style={teaserBodyStyle}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: pvText, lineHeight: 1.3 }}>{pvUnlockTitle}</div>
+                          <div style={ctaPillStyle}>{pvOpenButton} →</div>
+                        </div>
+                      </div>
+                    );
+                  }
 
                   return (
                     <div style={cardStyle}>
@@ -1779,11 +1804,14 @@ export default function Discounts({ shop }) {
                         </div>
                         <div style={{ width: 260, flexShrink: 0, minWidth: 200 }}>
                           <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
-                            {PP_PREVIEW_TABS.map((lbl, i) => (
-                              <button key={lbl} type="button" onClick={() => setPpPreviewState(i)}
-                                style={{ fontSize: 11, padding: '3px 8px', borderRadius: 12, border: '1.5px solid ' + (ppPreviewState === i ? '#374151' : '#D9D8FF'), background: ppPreviewState === i ? '#374151' : '#fff', color: ppPreviewState === i ? '#fff' : '#6b7280', cursor: 'pointer', fontWeight: ppPreviewState === i ? 700 : 500 }}
-                              >{lbl}</button>
-                            ))}
+                            {PP_PREVIEW_TABS.map((lbl, i) => {
+                              const st = PP_PREVIEW_TAB_STATES[i];
+                              return (
+                                <button key={lbl} type="button" onClick={() => setPpPreviewState(st)}
+                                  style={{ fontSize: 11, padding: '3px 8px', borderRadius: 12, border: '1.5px solid ' + (ppPreviewState === st ? '#374151' : '#D9D8FF'), background: ppPreviewState === st ? '#374151' : '#fff', color: ppPreviewState === st ? '#fff' : '#6b7280', cursor: 'pointer', fontWeight: ppPreviewState === st ? 700 : 500 }}
+                                >{lbl}</button>
+                              );
+                            })}
                           </div>
                           <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Preview</div>
                           <div style={{ position: 'relative' }}>
@@ -1821,9 +1849,11 @@ export default function Discounts({ shop }) {
                               <PoCopyField fieldKey="saved" label="Success message" placeholder="Thanks! Your gift will arrive before your birthday." helper="Shown after saving. Green text — always." value={ppCopy.saved || ''} maxLen={PP_COPY_MAX.saved} onPatch={setPpCopy} />
                               <PoCopyField fieldKey="error" label="Date error" placeholder="Please select a month and day." helper="Red text — always." value={ppCopy.error || ''} maxLen={PP_COPY_MAX.error} onPatch={setPpCopy} />
                               <PoCopyField fieldKey="emailError" label="Email error" placeholder="Enter a valid email and tick the box." helper="Red text — always." value={ppCopy.emailError || ''} maxLen={PP_COPY_MAX.emailError} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="unlockTitle" label="Unlock title" placeholder="Unlock {pct}% off your birthday gift" helper="Teaser heading before the gift is opened. Use {pct} for the discount %." value={ppCopy.unlockTitle || ''} maxLen={PP_COPY_MAX.unlockTitle} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="openButton" label="Open button" placeholder="Open my gift" helper="Teaser CTA pill." value={ppCopy.openButton || ''} maxLen={PP_COPY_MAX.openButton} onPatch={setPpCopy} />
                               <div style={{ marginBottom: 10 }}>
                                 <button type="button" disabled={!anyCopySetPp}
-                                  onClick={() => setPpCopy({ heading: '', sub: '', emailPlaceholder: '', consent: '', button: '', skip: '', saved: '', error: '', emailError: '' })}
+                                  onClick={() => setPpCopy({ heading: '', sub: '', emailPlaceholder: '', consent: '', button: '', skip: '', saved: '', error: '', emailError: '', unlockTitle: '', openButton: '' })}
                                   style={{ fontSize: '11.5px', color: anyCopySetPp ? '#4f46e5' : '#9ca3af', background: 'none', border: 'none', cursor: anyCopySetPp ? 'pointer' : 'default', padding: 0, textDecoration: anyCopySetPp ? 'underline' : 'none' }}
                                 >
                                   Reset wording
@@ -1870,12 +1900,14 @@ export default function Discounts({ shop }) {
                           {/* Right: preview */}
                           <div style={{ width: 260, flexShrink: 0, minWidth: 200 }}>
                             <div style={{ display: 'flex', gap: 4, marginBottom: 8, flexWrap: 'wrap' }}>
-                              {PP_PREVIEW_TABS.map((lbl, i) => (
-                                <button key={lbl} type="button" onClick={() => setPpPreviewState(i)}
-                                  style={{ fontSize: 11, padding: '3px 8px', borderRadius: 12, border: '1.5px solid ' + (ppPreviewState === i ? '#4f46e5' : '#D9D8FF'), background: ppPreviewState === i ? '#4f46e5' : '#fff', color: ppPreviewState === i ? '#fff' : '#6b7280', cursor: 'pointer', fontWeight: ppPreviewState === i ? 700 : 500 }}
-
-                                >{lbl}</button>
-                              ))}
+                              {PP_PREVIEW_TABS.map((lbl, i) => {
+                                const st = PP_PREVIEW_TAB_STATES[i];
+                                return (
+                                  <button key={lbl} type="button" onClick={() => setPpPreviewState(st)}
+                                    style={{ fontSize: 11, padding: '3px 8px', borderRadius: 12, border: '1.5px solid ' + (ppPreviewState === st ? '#4f46e5' : '#D9D8FF'), background: ppPreviewState === st ? '#4f46e5' : '#fff', color: ppPreviewState === st ? '#fff' : '#6b7280', cursor: 'pointer', fontWeight: ppPreviewState === st ? 700 : 500 }}
+                                  >{lbl}</button>
+                                );
+                              })}
                             </div>
                             <div style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>Preview</div>
                             <PpPreviewBlock />
