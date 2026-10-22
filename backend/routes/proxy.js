@@ -163,15 +163,15 @@ router.get('/discount-config', async (req, res) => {
           return {
             enabled: !!pp.enabled,
             copy: {
-              heading:          tok(copy.heading,          'One more thing — happy birthday soon?'),
-              sub:              tok(copy.sub,              'Share your birthday for {pct}% off on the day.'.replace(/\{pct\}/g, pct)),
-              emailPlaceholder: tok(copy.emailPlaceholder, 'Your email address'),
-              consent:          tok(copy.consent,          ('We\'ll send your birthday gift {days} day(s) before.').replace(/\{days\}/g, days)),
+              heading:          tok(copy.heading,          'Get {pct}% off on your birthday'),
+              sub:              tok(copy.sub,              'Tell us your birthday and we\'ll email you a gift {days} days before.'),
+              emailPlaceholder: tok(copy.emailPlaceholder, 'Your email'),
+              consent:          tok(copy.consent,          'Email me my birthday offer'),
               button:           tok(copy.button,           'Save my birthday'),
               skip:             tok(copy.skip,             'No thanks'),
-              saved:            tok(copy.saved,            ('Birthday saved! Your {pct}% off code arrives {days} day(s) before.').replace(/\{pct\}/g, pct).replace(/\{days\}/g, days)),
-              error:            tok(copy.error,            'Please pick a month and day.'),
-              emailError:       tok(copy.emailError,       'Please enter a valid email address.'),
+              saved:            tok(copy.saved,            'Thanks! Your gift will arrive before your birthday.'),
+              error:            tok(copy.error,            'Please select a month and day.'),
+              emailError:       tok(copy.emailError,       'Enter a valid email and tick the box.'),
             },
             colors: resolveProductBoxColors({
               accentColor:    pp.accentColor    || '',

@@ -1622,15 +1622,15 @@ export default function Discounts({ shop }) {
                 const pvFBorder = ppColors.fieldBorder || '#D4D4D8';
 
                 // Preview copy
-                const pvHeading = (ppCopy.heading || '').trim() || ('One more thing — happy birthday soon?');
-                const pvSub     = (ppCopy.sub     || '').trim() || ('Share your birthday for ' + bdPct + '% off on the day.');
-                const pvPlaceholder = (ppCopy.emailPlaceholder || '').trim() || 'Your email address';
-                const pvConsent = (ppCopy.consent  || '').trim() || ("We'll send your birthday gift " + bdLead + ' day(s) before.');
+                const pvHeading = (ppCopy.heading || '').trim() || ('Get ' + bdPct + '% off on your birthday');
+                const pvSub     = (ppCopy.sub     || '').trim() || ('Tell us your birthday and we\'ll email you a gift ' + bdLead + ' days before.');
+                const pvPlaceholder = (ppCopy.emailPlaceholder || '').trim() || 'Your email';
+                const pvConsent = (ppCopy.consent  || '').trim() || 'Email me my birthday offer';
                 const pvBtn     = (ppCopy.button   || '').trim() || 'Save my birthday';
                 const pvSkip    = (ppCopy.skip     || '').trim() || 'No thanks';
-                const pvSaved   = (ppCopy.saved    || '').trim() || ('Birthday saved! Your ' + bdPct + '% off code arrives ' + bdLead + ' day(s) before.');
-                const pvError   = (ppCopy.error    || '').trim() || 'Please pick a month and day.';
-                const pvEmailErr = (ppCopy.emailError || '').trim() || 'Please enter a valid email address.';
+                const pvSaved   = (ppCopy.saved    || '').trim() || 'Thanks! Your gift will arrive before your birthday.';
+                const pvError   = (ppCopy.error    || '').trim() || 'Please select a month and day.';
+                const pvEmailErr = (ppCopy.emailError || '').trim() || 'Enter a valid email and tick the box.';
 
                 const ppTabStyle = (active) => ({
                   fontSize: 12, padding: '4px 12px', borderRadius: 20, border: '1.5px solid ' + (active ? '#4f46e5' : '#D9D8FF'),
@@ -1774,15 +1774,15 @@ export default function Discounts({ shop }) {
                                 <code style={{ background: '#ede9fe', borderRadius: 3, padding: '1px 4px', fontSize: 11 }}>{'{pct}'}</code>{' '}for the discount %{' '}and{' '}
                                 <code style={{ background: '#ede9fe', borderRadius: 3, padding: '1px 4px', fontSize: 11 }}>{'{days}'}</code>{' '}for lead days.
                               </div>
-                              <PoCopyField fieldKey="heading" label="Heading" placeholder="One more thing — happy birthday soon?" value={ppCopy.heading || ''} maxLen={PP_COPY_MAX.heading} onPatch={setPpCopy} />
-                              <PoCopyField fieldKey="sub" label="Sub-text" placeholder={'Share your birthday for ' + bdPct + '% off on the day.'} helper="Use {pct} for the discount %." value={ppCopy.sub || ''} maxLen={PP_COPY_MAX.sub} onPatch={setPpCopy} />
-                              <PoCopyField fieldKey="emailPlaceholder" label="Email placeholder" placeholder="Your email address" value={ppCopy.emailPlaceholder || ''} maxLen={PP_COPY_MAX.emailPlaceholder} onPatch={setPpCopy} />
-                              <PoCopyField fieldKey="consent" label="Consent line" placeholder={'We\'ll send your birthday gift ' + bdLead + ' day(s) before.'} helper="Shown next to the consent checkbox." value={ppCopy.consent || ''} maxLen={PP_COPY_MAX.consent} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="heading" label="Heading" placeholder="Get {pct}% off on your birthday" value={ppCopy.heading || ''} maxLen={PP_COPY_MAX.heading} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="sub" label="Sub-text" placeholder={'Tell us your birthday and we\'ll email you a gift {days} days before.'} helper="Use {pct} for the discount %." value={ppCopy.sub || ''} maxLen={PP_COPY_MAX.sub} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="emailPlaceholder" label="Email placeholder" placeholder="Your email" value={ppCopy.emailPlaceholder || ''} maxLen={PP_COPY_MAX.emailPlaceholder} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="consent" label="Consent line" placeholder="Email me my birthday offer" helper="Shown next to the consent checkbox." value={ppCopy.consent || ''} maxLen={PP_COPY_MAX.consent} onPatch={setPpCopy} />
                               <PoCopyField fieldKey="button" label="Save button" placeholder="Save my birthday" value={ppCopy.button || ''} maxLen={PP_COPY_MAX.button} onPatch={setPpCopy} />
                               <PoCopyField fieldKey="skip" label="Skip link" placeholder="No thanks" value={ppCopy.skip || ''} maxLen={PP_COPY_MAX.skip} onPatch={setPpCopy} />
-                              <PoCopyField fieldKey="saved" label="Success message" placeholder={'Birthday saved! Your ' + bdPct + '% off code arrives ' + bdLead + ' day(s) before.'} helper="Shown after saving. Green text — always." value={ppCopy.saved || ''} maxLen={PP_COPY_MAX.saved} onPatch={setPpCopy} />
-                              <PoCopyField fieldKey="error" label="Date error" placeholder="Please pick a month and day." helper="Red text — always." value={ppCopy.error || ''} maxLen={PP_COPY_MAX.error} onPatch={setPpCopy} />
-                              <PoCopyField fieldKey="emailError" label="Email error" placeholder="Please enter a valid email address." helper="Red text — always." value={ppCopy.emailError || ''} maxLen={PP_COPY_MAX.emailError} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="saved" label="Success message" placeholder="Thanks! Your gift will arrive before your birthday." helper="Shown after saving. Green text — always." value={ppCopy.saved || ''} maxLen={PP_COPY_MAX.saved} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="error" label="Date error" placeholder="Please select a month and day." helper="Red text — always." value={ppCopy.error || ''} maxLen={PP_COPY_MAX.error} onPatch={setPpCopy} />
+                              <PoCopyField fieldKey="emailError" label="Email error" placeholder="Enter a valid email and tick the box." helper="Red text — always." value={ppCopy.emailError || ''} maxLen={PP_COPY_MAX.emailError} onPatch={setPpCopy} />
                               <div style={{ marginBottom: 10 }}>
                                 <button type="button" disabled={!anyCopySetPp}
                                   onClick={() => setPpCopy({ heading: '', sub: '', emailPlaceholder: '', consent: '', button: '', skip: '', saved: '', error: '', emailError: '' })}

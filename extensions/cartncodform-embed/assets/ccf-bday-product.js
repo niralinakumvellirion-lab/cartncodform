@@ -175,7 +175,7 @@
         var emailInput = document.createElement('input');
         emailInput.type = 'email';
         emailInput.className = 'ccf-bp-email';
-        emailInput.placeholder = copy.emailPlaceholder || 'Your email address';
+        emailInput.placeholder = copy.emailPlaceholder || 'Your email';
         emailInput.setAttribute('autocomplete', 'email');
         wrap.appendChild(emailInput);
 
@@ -236,7 +236,7 @@
         var consentLbl = document.createElement('label');
         consentLbl.htmlFor = check.id;
         consentLbl.className = 'ccf-bp-consent-text';
-        consentLbl.textContent = copy.consent || 'I agree to share my birthday with this store.';
+        consentLbl.textContent = copy.consent || 'Email me my birthday offer';
 
         consentRow.appendChild(check);
         consentRow.appendChild(consentLbl);
@@ -281,7 +281,7 @@
 
           if (!emailVal || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(emailVal)) {
             emailInput.classList.add('ccf-bp-error');
-            errDiv.textContent = copy.emailError || 'Please enter a valid email address.';
+            errDiv.textContent = copy.emailError || 'Enter a valid email and tick the box.';
             errDiv.style.display = '';
             hasError = true;
           } else {
@@ -292,7 +292,7 @@
             monthSel.classList.add('ccf-bp-error');
             daySel.classList.add('ccf-bp-error');
             if (!hasError) {
-              errDiv.textContent = copy.error || 'Please pick a month and day.';
+              errDiv.textContent = copy.error || 'Please select a month and day.';
               errDiv.style.display = '';
             }
             hasError = true;
@@ -336,7 +336,7 @@
               ok.className = 'ccf-bp-wrap';
               var okMsg = document.createElement('div');
               okMsg.className = 'ccf-bp-msg-ok';
-              okMsg.textContent = copy.saved || 'Birthday saved!';
+              okMsg.textContent = copy.saved || 'Thanks! Your gift will arrive before your birthday.';
               ok.appendChild(okMsg);
               self.appendChild(ok);
             } else {

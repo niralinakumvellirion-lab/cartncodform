@@ -868,7 +868,7 @@ describe('Discounts — Method 4 (product-page birthday box)', () => {
       ppPreviewState: 0,
     });
     const slice = ppSlice(html);
-    expect(slice).toContain('happy birthday');
+    expect(slice).toContain('off on your birthday');
   });
 
   test('ON (ppPreviewState=1): email error shown in preview', () => {
@@ -898,7 +898,48 @@ describe('Discounts — Method 4 (product-page birthday box)', () => {
       ppPreviewState: 3,
     });
     const slice = ppSlice(html);
-    expect(slice).toContain('Birthday saved');
+    expect(slice).toContain('Your gift will arrive');
+  });
+
+  test('board-10 defaults: preview fallbacks match exact strings (bdPct=15, bdLead=3)', () => {
+    // Render with enabled productPage, empty copy, bdPct=15 bdLead=3 (config defaults)
+    const html = renderWith({
+      config: {
+        birthdayCapture: { productPage: { enabled: true, copy: {} } },
+        birthdayDiscount: { percentage: 15, leadDays: 3 },
+      },
+      ppView: 0,
+      ppPreviewState: 0,
+    });
+    const slice = ppSlice(html);
+    // These must stay in sync with backend/routes/proxy.js tok() defaults and
+    // extensions/cartncodform-embed/assets/ccf-bday-product.js fallbacks.
+    expect(slice).toContain('Get 15% off on your birthday');
+    expect(slice).toContain('email you a gift 3 days before.');
+    expect(slice).toContain('Your email');
+    expect(slice).toContain('Email me my birthday offer');
+    expect(slice).toContain('Save my birthday');
+    expect(slice).toContain('No thanks');
+  });
+
+  test('board-10 defaults: saved/error/emailError preview fallbacks match exact strings', () => {
+    const html3 = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true, copy: {} } } },
+      ppView: 0, ppPreviewState: 3,
+    });
+    expect(ppSlice(html3)).toContain('Thanks! Your gift will arrive before your birthday.');
+
+    const html2 = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true, copy: {} } } },
+      ppView: 0, ppPreviewState: 2,
+    });
+    expect(ppSlice(html2)).toContain('Please select a month and day.');
+
+    const html1 = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true, copy: {} } } },
+      ppView: 0, ppPreviewState: 1,
+    });
+    expect(ppSlice(html1)).toContain('Enter a valid email and tick the box.');
   });
 
   test('Method 3 (post-order) still renders when product-page is also enabled', () => {

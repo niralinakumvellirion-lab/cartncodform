@@ -258,6 +258,23 @@ describe('GET /discount-config — productPage key', () => {
     expect(bc.postOrder).toBeDefined();
     expect(bc.postOrder.enabled).toBe(false);
   });
+
+  test('board-10 defaults: exact strings returned for empty copy (pct=15, days=3)', async () => {
+    const res = await runDiscountConfig({
+      birthdayCapture: { productPage: { enabled: true, copy: {} } },
+      birthdayDiscount: { percentage: 15, leadDays: 3 },
+    });
+    const copy = res.body.birthdayCapture.productPage.copy;
+    expect(copy.heading).toBe('Get 15% off on your birthday');
+    expect(copy.sub).toBe("Tell us your birthday and we'll email you a gift 3 days before.");
+    expect(copy.emailPlaceholder).toBe('Your email');
+    expect(copy.consent).toBe('Email me my birthday offer');
+    expect(copy.button).toBe('Save my birthday');
+    expect(copy.skip).toBe('No thanks');
+    expect(copy.saved).toBe('Thanks! Your gift will arrive before your birthday.');
+    expect(copy.error).toBe('Please select a month and day.');
+    expect(copy.emailError).toBe('Enter a valid email and tick the box.');
+  });
 });
 
 // ── Section E: /birthday product_page source ─────────────────────────────────
