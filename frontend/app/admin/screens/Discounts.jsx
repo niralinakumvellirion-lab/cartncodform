@@ -1632,13 +1632,18 @@ export default function Discounts({ shop }) {
                   buttonTextMode: pp.buttonTextMode || 'auto',
                   textMode:       pp.textMode       || 'auto',
                 });
-                const pvAccent  = ppColors.accent  || '#4F46E5';
-                const pvBtnFg   = ppColors.btnFg   || '#FFFFFF';
-                const pvBg      = ppColors.bg;       // null = outlined
-                const pvText    = ppColors.text    || '#18181B';
-                const pvMuted   = ppColors.muted   || '#71717A';
-                const pvField   = ppColors.fieldBg || '#FFFFFF';
-                const pvFBorder = ppColors.fieldBorder || '#D4D4D8';
+                const pvAccent   = ppColors.accent      || '#4F46E5';
+                const pvBtnFg    = ppColors.btnFg       || '#FFFFFF';
+                const pvStubFg   = ppColors.stubFg      || '#FFFFFF';
+                const pvSealText = ppColors.sealText     || pvAccent;
+                const pvBodyBg   = ppColors.bodyBg      || '#FFFFFF';
+                const pvText     = ppColors.text        || '#18181B';
+                const pvMuted    = ppColors.muted       || '#71717A';
+                const pvField    = ppColors.fieldBg     || '#FFFFFF';
+                const pvFBorder  = ppColors.fieldBorder || '#D4D4D8';
+                const pvErr      = ppColors.err         || '#DC2626';
+                const pvErrBg    = ppColors.errBg       || '#FEE2E2';
+                const pvOk       = ppColors.ok          || '#16A34A';
 
                 // Preview copy
                 const pvHeading = (ppCopy.heading || '').trim() || ('Get ' + bdPct + '% off on your birthday');
@@ -1687,47 +1692,65 @@ export default function Discounts({ shop }) {
                 const PP_PREVIEW_TABS = ['Ask', 'Email error', 'Date error', 'After saving'];
 
                 function PpPreviewBlock() {
-                  const boxStyle = {
-                    ...(pvBg
-                      ? { background: pvBg, borderRadius: 12, padding: '20px 16px' }
-                      : { border: '1px solid #D4D4D8', borderRadius: 12, padding: '20px 16px' }),
-                    color: pvText,
-                  };
-                  const fldStyle = { width: '100%', height: 36, fontSize: 13, border: '1px solid ' + pvFBorder, borderRadius: 8, background: pvField, color: pvText, marginBottom: 8, display: 'flex', alignItems: 'center', paddingLeft: 8, boxSizing: 'border-box' };
-                  const errStyle = { fontSize: 11, color: '#dc2626', marginBottom: 6 };
+                  const cardStyle  = { borderRadius: 12, overflow: 'hidden', fontSize: 12 };
+                  const stubStyle  = { background: pvAccent, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 };
+                  const sealStyle  = { width: 50, height: 50, borderRadius: '50%', background: '#FFFFFF', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-8deg)', boxShadow: '0 1px 4px rgba(0,0,0,0.15)' };
+                  const seamStyle  = { background: pvAccent, height: 6, position: 'relative' };
+                  const bodyStyle  = { background: pvBodyBg, padding: '10px 12px 8px', color: pvText };
+                  const fldStyle   = { width: '100%', height: 30, fontSize: 11, border: '1px solid ' + pvFBorder, borderRadius: 6, background: pvField, color: pvText, marginBottom: 6, display: 'flex', alignItems: 'center', paddingLeft: 6, boxSizing: 'border-box' };
+                  const errBoxStyle = { background: pvErrBg, borderRadius: 4, padding: '3px 7px', marginBottom: 5 };
+                  const errTxtStyle = { fontSize: 10, color: pvErr, margin: 0 };
+                  const pct        = ((config.birthdayDiscount && config.birthdayDiscount.percentage) || 15);
 
                   if (ppPreviewState === 3) {
                     return (
-                      <div style={boxStyle}>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: '#16a34a', textAlign: 'center', padding: '12px 0' }}>{pvSaved}</div>
+                      <div style={cardStyle}>
+                        <div style={bodyStyle}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', padding: '8px 0', fontSize: 13, fontWeight: 600, color: pvOk }}>
+                            ✓ {pvSaved}
+                          </div>
+                        </div>
                       </div>
                     );
                   }
                   return (
-                    <div style={boxStyle}>
-                      {pvHeading && <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>{pvHeading}</div>}
-                      {pvSub && <div style={{ fontSize: 13, color: pvMuted, marginBottom: 10 }}>{pvSub}</div>}
-                      {/* Email */}
-                      {ppPreviewState === 1
-                        ? (<>
-                            <div style={{ ...fldStyle, borderColor: '#dc2626' }}>{pvPlaceholder}</div>
-                            <div style={errStyle}>{pvEmailErr}</div>
-                          </>)
-                        : <div style={fldStyle}>{pvPlaceholder}</div>
-                      }
-                      {/* Month / Day */}
-                      <div style={{ display: 'flex', gap: 8, marginBottom: ppPreviewState === 2 ? 4 : 8 }}>
-                        <div style={{ ...fldStyle, marginBottom: 0, flex: 1, ...(ppPreviewState === 2 ? { borderColor: '#dc2626' } : {}) }}>Month</div>
-                        <div style={{ ...fldStyle, marginBottom: 0, flex: 1, ...(ppPreviewState === 2 ? { borderColor: '#dc2626' } : {}) }}>Day</div>
+                    <div style={cardStyle}>
+                      {/* Stub */}
+                      <div style={stubStyle}>
+                        <div style={{ flex: 1 }}>
+                          {pvHeading && <div style={{ fontSize: 11, fontWeight: 700, color: pvStubFg, marginBottom: 2, lineHeight: 1.3 }}>{pvHeading}</div>}
+                          {pvSub && <div style={{ fontSize: 10, color: pvStubFg, opacity: 0.85, lineHeight: 1.35 }}>{pvSub}</div>}
+                        </div>
+                        <div style={sealStyle}>
+                          <div style={{ fontSize: 13 }}>🎁</div>
+                          <div style={{ fontSize: 9, fontWeight: 800, color: pvSealText, marginTop: 1 }}>&minus;{pct}%</div>
+                        </div>
                       </div>
-                      {ppPreviewState === 2 && <div style={{ ...errStyle, marginTop: 4 }}>{pvError}</div>}
-                      {/* Consent */}
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginBottom: 10, marginTop: 4 }}>
-                        <div style={{ width: 14, height: 14, border: '1px solid ' + pvMuted, borderRadius: 3, marginTop: 1, flexShrink: 0 }} />
-                        <div style={{ fontSize: 11, color: pvMuted, lineHeight: 1.4 }}>{pvConsent}</div>
+                      {/* Seam */}
+                      <div style={seamStyle}>
+                        <div style={{ position: 'absolute', left: 10, right: 10, top: '50%', borderTop: '1.5px dashed rgba(255,255,255,0.35)', transform: 'translateY(-50%)' }} />
                       </div>
-                      <div style={{ background: pvAccent, color: pvBtnFg, borderRadius: 10, padding: '11px', textAlign: 'center', fontSize: 14, fontWeight: 700, marginBottom: 8 }}>{pvBtn}</div>
-                      <div style={{ textAlign: 'center', fontSize: 12, color: pvMuted }}>{pvSkip}</div>
+                      {/* Body */}
+                      <div style={bodyStyle}>
+                        {ppPreviewState === 1
+                          ? (<>
+                              <div style={{ ...fldStyle, borderColor: pvErr }}>{pvPlaceholder}</div>
+                              <div style={errBoxStyle}><div style={errTxtStyle}>{pvEmailErr}</div></div>
+                            </>)
+                          : <div style={fldStyle}>{pvPlaceholder}</div>
+                        }
+                        <div style={{ display: 'flex', gap: 5, marginBottom: ppPreviewState === 2 ? 2 : 5 }}>
+                          <div style={{ ...fldStyle, marginBottom: 0, flex: 1, ...(ppPreviewState === 2 ? { borderColor: pvErr } : {}) }}>Month</div>
+                          <div style={{ ...fldStyle, marginBottom: 0, flex: 1, ...(ppPreviewState === 2 ? { borderColor: pvErr } : {}) }}>Day</div>
+                        </div>
+                        {ppPreviewState === 2 && <div style={{ ...errBoxStyle, marginTop: 2 }}><div style={errTxtStyle}>{pvError}</div></div>}
+                        <div style={{ display: 'flex', gap: 5, alignItems: 'flex-start', marginBottom: 5, marginTop: 3 }}>
+                          <div style={{ width: 11, height: 11, border: '1px solid ' + pvMuted, borderRadius: 2, marginTop: 1, flexShrink: 0 }} />
+                          <div style={{ fontSize: 10, color: pvMuted, lineHeight: 1.35 }}>{pvConsent}</div>
+                        </div>
+                        <div style={{ background: pvAccent, color: pvBtnFg, borderRadius: 8, padding: '7px', textAlign: 'center', fontSize: 11, fontWeight: 700, marginBottom: 3 }}>{pvBtn}</div>
+                        <div style={{ textAlign: 'center', fontSize: 10, color: pvMuted }}>{pvSkip}</div>
+                      </div>
                     </div>
                   );
                 }
@@ -1832,7 +1855,7 @@ export default function Discounts({ shop }) {
                                   ⚠ Low contrast — the button text may be hard to read on this accent colour. Try Auto or a darker accent.
                                 </div>
                               )}
-                              <PoSwatchRow label="Box background" field="bgColor" swatches={PP_BG_PRESETS} value={pp.bgColor || ''} allowEmpty emptyLabel="None (outlined)" onPatch={setPp} />
+                              <PoSwatchRow label="Box background" field="bgColor" swatches={PP_BG_PRESETS} value={pp.bgColor || ''} allowEmpty emptyLabel="White" onPatch={setPp} />
                               {!ppBgHexValid && (pp.bgColor || '') !== '' && (
                                 <div style={{ fontSize: 11, color: '#dc2626', marginTop: -8, marginBottom: 10 }}>Not a valid 6-digit hex — enter #RRGGBB</div>
                               )}
@@ -1843,7 +1866,7 @@ export default function Discounts({ shop }) {
                                 </div>
                               )}
                               <div style={{ fontSize: 11, color: '#5A6070', background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 6, padding: '6px 10px', marginTop: 4 }}>
-                                Success and error messages keep their own green / red colour regardless of text colour.
+                                Success and error colours adapt to the body background — they come from the background setting, not the text colour.
                               </div>
                             </>)}
                           </div>
@@ -1854,6 +1877,7 @@ export default function Discounts({ shop }) {
                               {PP_PREVIEW_TABS.map((lbl, i) => (
                                 <button key={lbl} type="button" onClick={() => setPpPreviewState(i)}
                                   style={{ fontSize: 11, padding: '3px 8px', borderRadius: 12, border: '1.5px solid ' + (ppPreviewState === i ? '#4f46e5' : '#D9D8FF'), background: ppPreviewState === i ? '#4f46e5' : '#fff', color: ppPreviewState === i ? '#fff' : '#6b7280', cursor: 'pointer', fontWeight: ppPreviewState === i ? 700 : 500 }}
+
                                 >{lbl}</button>
                               ))}
                             </div>
