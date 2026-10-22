@@ -110,17 +110,22 @@
     var errBg      = colors.errBg       || '#FEE2E2';
     var ok         = colors.ok          || '#16A34A';
 
-    var seamColor = (stubFg === '#FFFFFF')
-      ? 'rgba(255,255,255,0.35)'
-      : 'rgba(23,26,34,0.25)';
+    var notchStub   = 'radial-gradient(circle 11px at 0 100%,#0000 97%,#000),' +
+                      'radial-gradient(circle 11px at 100% 100%,#0000 97%,#000)';
+    var notchBody   = 'radial-gradient(circle 11px at 0 0,#0000 97%,#000),' +
+                      'radial-gradient(circle 11px at 100% 0,#0000 97%,#000)';
+    var dashedColor = (stubFg === '#FFFFFF') ? 'rgba(255,255,255,0.45)' : 'rgba(23,26,34,0.45)';
 
     var css = [
-      // Card wrapper (fallback: rounded + clipped; notch applied via JS mask)
+      // Card wrapper — drop-shadow applied here; stub/body carry their own radius + mask
       '.ccf-bp-card{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;',
-      'border-radius:12px;overflow:hidden;margin:16px 0;}',
-      // Stub (top accent section)
+      'margin:16px 0;filter:drop-shadow(0 2px 8px rgba(0,0,0,0.12));}',
+      // Stub — top radius 16px, notch mask cuts bottom corners
       '.ccf-bp-stub{background:' + accent + ';padding:16px 14px;',
-      'display:flex;align-items:center;justify-content:space-between;gap:12px;}',
+      'display:flex;align-items:center;justify-content:space-between;gap:12px;',
+      'border-radius:16px 16px 0 0;position:relative;',
+      'mask:' + notchStub + ';mask-composite:intersect;',
+      '-webkit-mask:' + notchStub + ';-webkit-mask-composite:source-in;}',
       '.ccf-bp-stub-text{flex:1;min-width:0;}',
       '.ccf-bp-stub-heading{font-size:15px;font-weight:700;color:' + stubFg + ';',
       'margin:0 0 4px;line-height:1.3;}',
@@ -135,12 +140,19 @@
       'border:1.5px dashed ' + sealText + ';opacity:0.3;pointer-events:none;}',
       '.ccf-bp-seal-pct{font-size:13px;font-weight:800;color:' + sealText + ';',
       'margin-top:2px;letter-spacing:-0.5px;line-height:1;}',
-      // Seam (dashed divider between stub and body)
-      '.ccf-bp-seam{background:' + accent + ';height:8px;position:relative;}',
-      '.ccf-bp-seam::after{content:"";position:absolute;left:12px;right:12px;',
-      'top:50%;border-top:2px dashed ' + seamColor + ';transform:translateY(-50%);}',
-      // Body (bottom section)
-      '.ccf-bp-body{background:' + bodyBg + ';padding:14px 14px 12px;}',
+      // Dashed separator — aria-hidden span at stub bottom
+      '.ccf-bp-dashed{position:absolute;left:22px;right:22px;bottom:0;display:block;',
+      'border-bottom:2px dashed ' + dashedColor + ';pointer-events:none;}',
+      // Body — bottom radius 16px, notch mask cuts top corners
+      '.ccf-bp-body{background:' + bodyBg + ';padding:14px 14px 12px;',
+      'border-radius:0 0 16px 16px;',
+      'mask:' + notchBody + ';mask-composite:intersect;',
+      '-webkit-mask:' + notchBody + ';-webkit-mask-composite:source-in;}',
+      // @supports fallback: plain rounded card when mask is unavailable
+      '@supports not (mask:none){',
+      '.ccf-bp-card{overflow:hidden;border-radius:16px;}',
+      '.ccf-bp-stub{mask:none;-webkit-mask:none;border-radius:16px 16px 0 0;}',
+      '.ccf-bp-body{mask:none;-webkit-mask:none;border-radius:0 0 16px 16px;}}',
       // Email input
       '.ccf-bp-email{width:100%;height:44px;font-size:16px;padding:0 12px;',
       'box-sizing:border-box;border:1px solid ' + fldBorder + ';border-radius:8px;',
@@ -182,34 +194,6 @@
     var styleEl = document.createElement('style');
     styleEl.textContent = css;
     document.head.appendChild(styleEl);
-  }
-
-  // ── Notch mask (applied after layout) ─────────────────────────────────────
-  // Uses CSS mask radial-gradients to punch half-circle notches into the card
-  // sides at the stub/body seam. Fallback: overflow:hidden + border-radius
-  // (applied in CSS above) already looks good without the notch.
-  function applyNotchMask(card, seamY) {
-    var r = '12';  // corner radius in px
-    var n = '11';  // notch radius in px
-    var y = String(seamY);
-    var layers = [
-      'radial-gradient(circle ' + r + 'px at 0 0,transparent ' + r + 'px,#000 ' + r + 'px)',
-      'radial-gradient(circle ' + r + 'px at 100% 0,transparent ' + r + 'px,#000 ' + r + 'px)',
-      'radial-gradient(circle ' + r + 'px at 0 100%,transparent ' + r + 'px,#000 ' + r + 'px)',
-      'radial-gradient(circle ' + r + 'px at 100% 100%,transparent ' + r + 'px,#000 ' + r + 'px)',
-      'radial-gradient(circle ' + n + 'px at 0 ' + y + 'px,transparent ' + n + 'px,#000 ' + n + 'px)',
-      'radial-gradient(circle ' + n + 'px at 100% ' + y + 'px,transparent ' + n + 'px,#000 ' + n + 'px)',
-      'linear-gradient(#000,#000)',
-    ].join(',');
-    var intersect7 = 'intersect,intersect,intersect,intersect,intersect,intersect,intersect';
-    var destIn7    = 'destination-in,destination-in,destination-in,destination-in,destination-in,destination-in,destination-in';
-
-    card.style.borderRadius = '0';
-    card.style.overflow = 'visible';
-    card.style.webkitMaskImage = layers;
-    card.style.webkitMaskComposite = destIn7;
-    card.style.maskImage = layers;
-    card.style.maskComposite = intersect7;
   }
 
   // ── Months helper ──────────────────────────────────────────────────────────
@@ -305,12 +289,14 @@
         seal.appendChild(sealPct);
 
         stub.appendChild(seal);
-        card.appendChild(stub);
 
-        // ── Seam ──────────────────────────────────────────────────────────────
-        var seam = document.createElement('div');
-        seam.className = 'ccf-bp-seam';
-        card.appendChild(seam);
+        // Dashed separator — aria-hidden span at stub bottom
+        var dashedLine = document.createElement('span');
+        dashedLine.setAttribute('aria-hidden', 'true');
+        dashedLine.className = 'ccf-bp-dashed';
+        stub.appendChild(dashedLine);
+
+        card.appendChild(stub);
 
         // ── Body section ──────────────────────────────────────────────────────
         var body = document.createElement('div');
@@ -418,14 +404,6 @@
         card.appendChild(body);
         self.appendChild(card);
 
-        // Apply notch mask after the card is in the DOM and has layout
-        if (typeof requestAnimationFrame !== 'undefined') {
-          requestAnimationFrame(function () {
-            var seamY = stub.offsetHeight + Math.round(seam.offsetHeight / 2);
-            applyNotchMask(card, seamY);
-          });
-        }
-
         // ── Validation + submit ───────────────────────────────────────────────
         btn.addEventListener('click', function () {
           errBox.style.display = 'none';
@@ -488,21 +466,15 @@
           }).then(function (r) { return r.json(); }).then(function (res) {
             if (res && res.ok) {
               markSaved(shop);
-              self.innerHTML = '';
-
-              var okCard = document.createElement('div');
-              okCard.className = 'ccf-bp-card';
-              var okBody = document.createElement('div');
-              okBody.className = 'ccf-bp-body';
+              // Keep card and stub intact; replace body content with success message
+              while (body.firstChild) { body.removeChild(body.firstChild); }
               var okMsg = document.createElement('div');
               okMsg.className = 'ccf-bp-msg-ok';
               okMsg.appendChild(makeCheckSvg(colors.ok || '#16A34A'));
               var okSpan = document.createElement('span');
               okSpan.textContent = copy.saved || 'Thanks! Your gift will arrive before your birthday.';
               okMsg.appendChild(okSpan);
-              okBody.appendChild(okMsg);
-              okCard.appendChild(okBody);
-              self.appendChild(okCard);
+              body.appendChild(okMsg);
             } else {
               btn.disabled = false;
               errMsg.textContent = (res && res.message) || copy.error || 'Something went wrong. Please try again.';
