@@ -11,6 +11,7 @@ const { sendPushToStore } = require('../utils/pushNotification');
 const { verifyProxySignature } = require('../utils/shopify');
 const { generateDiscount, defaultConfig } = require('./discounts');
 const { resolvePostOrderColors } = require('../utils/postOrderColors');
+const { resolveProductBoxColors } = require('../utils/productBoxColors');
 
 /**
  * Escape a string for safe interpolation into HTML text / attribute context.
@@ -149,6 +150,37 @@ router.get('/discount-config', async (req, res) => {
           };
         }()),
         postOrder: { enabled: !!(doc.birthdayCapture && doc.birthdayCapture.postOrder && doc.birthdayCapture.postOrder.enabled) },
+        productPage: (function () {
+          const pp = (doc.birthdayCapture && doc.birthdayCapture.productPage) || {};
+          const bd = doc.birthdayDiscount || {};
+          const pct  = String(Number.isFinite(bd.percentage) ? bd.percentage : 15);
+          const days = String(Number.isFinite(bd.leadDays)   ? bd.leadDays   : 3);
+          function tok(s, def) {
+            const v = String(s || '').replace(/[\x00-\x1F\x7F]/g, '').trim();
+            return (v || def).replace(/\{pct\}/g, pct).replace(/\{days\}/g, days);
+          }
+          const copy = pp.copy || {};
+          return {
+            enabled: !!pp.enabled,
+            copy: {
+              heading:          tok(copy.heading,          'One more thing — happy birthday soon?'),
+              sub:              tok(copy.sub,              'Share your birthday for {pct}% off on the day.'.replace(/\{pct\}/g, pct)),
+              emailPlaceholder: tok(copy.emailPlaceholder, 'Your email address'),
+              consent:          tok(copy.consent,          ('We\'ll send your birthday gift {days} day(s) before.').replace(/\{days\}/g, days)),
+              button:           tok(copy.button,           'Save my birthday'),
+              skip:             tok(copy.skip,             'No thanks'),
+              saved:            tok(copy.saved,            ('Birthday saved! Your {pct}% off code arrives {days} day(s) before.').replace(/\{pct\}/g, pct).replace(/\{days\}/g, days)),
+              error:            tok(copy.error,            'Please pick a month and day.'),
+              emailError:       tok(copy.emailError,       'Please enter a valid email address.'),
+            },
+            colors: resolveProductBoxColors({
+              accentColor:    pp.accentColor    || '',
+              bgColor:        pp.bgColor        || '',
+              buttonTextMode: pp.buttonTextMode || 'auto',
+              textMode:       pp.textMode       || 'auto',
+            }),
+          };
+        }()),
       },
       birthdayDiscount: {
         enabled: !!(doc.birthdayDiscount && doc.birthdayDiscount.enabled),
@@ -270,7 +302,8 @@ function _isValidBirthday(month, day) {
   return day <= _BDAY_MAX_DAY[month - 1];
 }
 
-const _BDAY_SOURCES = ['popup', 'banner', 'post_order', 'thank_you'];
+const _BDAY_SOURCES = ['popup', 'banner', 'post_order', 'thank_you', 'product_page'];
+const _EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 router.post('/birthday', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -297,12 +330,27 @@ router.post('/birthday', async (req, res) => {
 
     const config = await DiscountConfig.findOne({ shopDomain: shop }).lean();
     // Gate: at least one birthday capture method must be enabled.
+    const bc = config && config.birthdayCapture;
     const anyEnabled = !!(config &&
-      ((config.birthdayCapture && config.birthdayCapture.popup && config.birthdayCapture.popup.enabled) ||
-       (config.birthdayCapture && config.birthdayCapture.banner && config.birthdayCapture.banner.enabled) ||
-       (config.birthdayCapture && config.birthdayCapture.postOrder && config.birthdayCapture.postOrder.enabled)));
+      ((bc && bc.popup && bc.popup.enabled) ||
+       (bc && bc.banner && bc.banner.enabled) ||
+       (bc && bc.postOrder && bc.postOrder.enabled) ||
+       (bc && bc.productPage && bc.productPage.enabled)));
     if (!anyEnabled) {
       return res.status(403).json({ ok: false, error: 'Birthday capture not enabled' });
+    }
+
+    // product_page source requires a valid email and consent=true.
+    let emailForProfile = null;
+    if (source === 'product_page') {
+      const rawEmail = req.body && req.body.email ? String(req.body.email).trim().toLowerCase() : '';
+      if (!rawEmail || rawEmail.length > 254 || !_EMAIL_RE.test(rawEmail)) {
+        return res.status(400).json({ ok: false, error: 'INVALID_EMAIL', message: 'A valid email address is required.' });
+      }
+      if (req.body && req.body.consent !== true) {
+        return res.status(400).json({ ok: false, error: 'CONSENT_REQUIRED', message: 'Consent is required.' });
+      }
+      emailForProfile = rawEmail;
     }
 
     const month = parseInt(req.body && req.body.month, 10);
@@ -312,17 +360,24 @@ router.post('/birthday', async (req, res) => {
     }
 
     const { upsertProfile } = require('../services/profileService');
-    upsertProfile(
-      shop,
-      { phone: phone || null, sessionId: sessionId || null },
-      {
-        'birthday.month': month,
-        'birthday.day': day,
-        'birthday.capturedAt': new Date(),
-        'birthday.source': source,
-        lastSeenAt: new Date(),
-      }
-    ).catch(() => {});
+    const profileUpdates = {
+      'birthday.month': month,
+      'birthday.day': day,
+      'birthday.capturedAt': new Date(),
+      'birthday.source': source,
+      lastSeenAt: new Date(),
+    };
+    if (emailForProfile) {
+      profileUpdates['channels.email.address']    = emailForProfile;
+      profileUpdates['channels.email.source']     = 'form';
+      profileUpdates['channels.email.capturedAt'] = new Date();
+    }
+    const profileIdentifiers = {
+      phone: phone || null,
+      sessionId: sessionId || null,
+      ...(emailForProfile ? { email: emailForProfile } : {}),
+    };
+    upsertProfile(shop, profileIdentifiers, profileUpdates).catch(() => {});
 
     return res.json({ ok: true });
   } catch (err) {

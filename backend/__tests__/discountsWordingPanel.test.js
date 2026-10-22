@@ -57,9 +57,13 @@ const DISCOUNTS_SRC = fs.readFileSync(
 // Default preview colours (indigo accent, white bg → light card)
 const DEFAULT_COLORS = { accentColor: '#4f46e5', bgColor: '#ffffff', textColor: '', buttonTextColor: 'auto', textMode: 'custom', styleId: 'classic' };
 
-// Builds the 11-element state array expected by DiscountsScreen.
-function makeStates({ config = {}, loading = false, previewColors = DEFAULT_COLORS, wordingTab = 0, popupPanelView = 0, poView = 0, poPreviewState = 0 } = {}) {
-  return [config, loading, false, false, '', previewColors, wordingTab, popupPanelView, poView, poPreviewState, {}];
+// Builds the 14-element state array expected by DiscountsScreen.
+// Slots 11-13 are NEW (added for the product-page birthday box panel):
+//   11  ppView          0  (product-page panel: 0=Wording, 1=Colours)
+//   12  ppPreviewState  0  (product-page preview: 0=Ask, 1=Email-err, 2=Date-err, 3=Saved)
+//   13  ppColoursPatch  {}
+function makeStates({ config = {}, loading = false, previewColors = DEFAULT_COLORS, wordingTab = 0, popupPanelView = 0, poView = 0, poPreviewState = 0, ppView = 0, ppPreviewState = 0 } = {}) {
+  return [config, loading, false, false, '', previewColors, wordingTab, popupPanelView, poView, poPreviewState, {}, ppView, ppPreviewState, {}];
 }
 
 // Renders the Discounts component with controlled initial state.
@@ -693,5 +697,220 @@ describe('Discounts — Method 3 (post-order birthday ask)', () => {
     const rowIdx = html.indexOf('After the first COD order');
     const slice  = html.slice(rowIdx, rowIdx + 8000);
     expect(slice).toContain('Birthday saved!');
+  });
+});
+
+// ── Discounts — Method 4 (product-page birthday box) ────────────────────────
+// State slots 11-13 added for this panel (see makeStates update above).
+
+describe('Discounts — Method 4 (product-page birthday box)', () => {
+  // Helper: slice of html from "Product page box" row onwards
+  function ppSlice(html, limit = 12000) {
+    const idx = html.indexOf('Product page box');
+    if (idx < 0) return '';
+    return html.slice(idx, idx + limit);
+  }
+
+  test('product page box row is rendered in the birthday section', () => {
+    const html = renderWith({ config: {} });
+    expect(html).toContain('Product page box');
+  });
+
+  test('product page box row has a NEW badge', () => {
+    const html = renderWith({ config: {} });
+    const slice = ppSlice(html);
+    expect(slice).toContain('NEW');
+  });
+
+  test('OFF state: "Product page box is off" info shown', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: false } } },
+    });
+    const slice = ppSlice(html);
+    expect(slice).toContain('Product page box is off');
+  });
+
+  test('OFF state: setup steps shown (ol with 3 steps)', () => {
+    const html = renderWith({ config: {} });
+    const slice = ppSlice(html);
+    // All 3 setup steps are present
+    expect(slice).toContain('Switch on the toggle');
+    expect(slice).toContain('Add to product page');
+    expect(slice).toContain('Birthday box');
+  });
+
+  test('OFF state: Horizon note shown', () => {
+    const html = renderWith({ config: {} });
+    const slice = ppSlice(html);
+    expect(slice).toContain('Horizon');
+  });
+
+  test('OFF state: preview tabs include Ask, Email error, Date error, After saving', () => {
+    const html = renderWith({ config: {} });
+    const slice = ppSlice(html);
+    expect(slice).toContain('Ask');
+    expect(slice).toContain('Email error');
+    expect(slice).toContain('Date error');
+    expect(slice).toContain('After saving');
+  });
+
+  test('ON (ppView=0): 9 wording fields rendered', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 0,
+    });
+    const slice = ppSlice(html);
+    // Verify wording field labels
+    expect(slice).toContain('Heading');
+    expect(slice).toContain('Sub-text');
+    expect(slice).toContain('Email placeholder');
+    expect(slice).toContain('Consent line');
+    expect(slice).toContain('Save button');
+    expect(slice).toContain('Skip link');
+    expect(slice).toContain('Success message');
+    expect(slice).toContain('Date error');
+    expect(slice).toContain('Email error');
+  });
+
+  test('ON (ppView=0): "Reset wording" button is present', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 0,
+    });
+    expect(ppSlice(html)).toContain('Reset wording');
+  });
+
+  test('ON (ppView=0): token note shown', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 0,
+    });
+    const slice = ppSlice(html);
+    expect(slice).toContain('{pct}');
+    expect(slice).toContain('{days}');
+  });
+
+  test('ON (ppView=0): heading counter shows "0 / 60" for empty heading', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 0,
+    });
+    expect(ppSlice(html)).toContain('0 / 60');
+  });
+
+  test('ON (ppView=1): accent colour row present', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 1,
+    });
+    const slice = ppSlice(html);
+    expect(slice).toContain('Accent colour');
+  });
+
+  test('ON (ppView=1): button text mode row with Auto/White/Dark', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 1,
+    });
+    const slice = ppSlice(html);
+    expect(slice).toContain('Button text');
+    expect(slice).toContain('Auto');
+    expect(slice).toContain('White');
+    expect(slice).toContain('Dark');
+  });
+
+  test('ON (ppView=1): box background row with None (outlined)', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 1,
+    });
+    expect(ppSlice(html)).toContain('None (outlined)');
+  });
+
+  test('ON (ppView=1): text colour row present', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 1,
+    });
+    expect(ppSlice(html)).toContain('Text colour');
+  });
+
+  test('ON (ppView=1): low button contrast warning for gold accent + white text', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true, accentColor: '#F5C542', buttonTextMode: 'white' } } },
+      ppView: 1,
+    });
+    expect(ppSlice(html)).toContain('⚠ Low contrast');
+  });
+
+  test('ON (ppView=1): low text contrast warning for white text on light bg', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true, bgColor: '#ffffff', textMode: 'white' } } },
+      ppView: 1,
+    });
+    expect(ppSlice(html)).toContain('Low text contrast');
+  });
+
+  test('ON (ppView=1): no contrast warnings for default colours', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 1,
+    });
+    const slice = ppSlice(html);
+    expect(slice).not.toContain('Low contrast');
+    expect(slice).not.toContain('Low text contrast');
+  });
+
+  test('ON (ppPreviewState=0): default heading shown in preview', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 0,
+      ppPreviewState: 0,
+    });
+    const slice = ppSlice(html);
+    expect(slice).toContain('happy birthday');
+  });
+
+  test('ON (ppPreviewState=1): email error shown in preview', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 0,
+      ppPreviewState: 1,
+    });
+    const slice = ppSlice(html);
+    expect(slice).toContain('valid email');
+  });
+
+  test('ON (ppPreviewState=2): date error shown in preview', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 0,
+      ppPreviewState: 2,
+    });
+    const slice = ppSlice(html);
+    expect(slice).toContain('month and day');
+  });
+
+  test('ON (ppPreviewState=3): saved message shown in preview', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 0,
+      ppPreviewState: 3,
+    });
+    const slice = ppSlice(html);
+    expect(slice).toContain('Birthday saved');
+  });
+
+  test('Method 3 (post-order) still renders when product-page is also enabled', () => {
+    const html = renderWith({
+      config: {
+        birthdayCapture: {
+          postOrder: { enabled: true },
+          productPage: { enabled: true },
+        },
+      },
+    });
+    expect(html).toContain('After the first COD order');
+    expect(html).toContain('Product page box');
   });
 });

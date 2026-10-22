@@ -56,6 +56,11 @@ function defaultConfig(shop) {
         copy: { pitch: '', button: '', skip: '', saved: '', error: '' },
         accentColor: '', buttonTextMode: 'auto', bgColor: '', textMode: 'auto',
       },
+      productPage: {
+        enabled: false,
+        copy: { heading: '', sub: '', emailPlaceholder: '', consent: '', button: '', skip: '', saved: '', error: '', emailError: '' },
+        accentColor: '', bgColor: '', buttonTextMode: 'auto', textMode: 'auto',
+      },
     },
     birthdayDiscount: { enabled: false, percentage: 15, expiryDays: 7, leadDays: 3, prefix: 'BDAY', offerText: '', consentText: "We'll use your birthday only to send you a birthday offer." },
     quantityTiers: {
@@ -563,6 +568,47 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
             return res.status(400).json({ error: 'birthdayCapture.postOrder.textMode must be one of: auto, white, dark' });
           }
           set['birthdayCapture.postOrder.textMode'] = po.textMode;
+        }
+      }
+      if (bc.productPage && typeof bc.productPage === 'object') {
+        const pp = bc.productPage;
+        if (typeof pp.enabled === 'boolean') {
+          set['birthdayCapture.productPage.enabled'] = pp.enabled;
+        }
+        const PP_COPY_MAX = { heading: 60, sub: 120, emailPlaceholder: 40, consent: 80, button: 30, skip: 30, saved: 80, error: 60, emailError: 60 };
+        if (pp.copy && typeof pp.copy === 'object') {
+          for (const k of ['heading', 'sub', 'emailPlaceholder', 'consent', 'button', 'skip', 'saved', 'error', 'emailError']) {
+            if (k in pp.copy) {
+              const s = String(pp.copy[k]).replace(/[\x00-\x1F\x7F]/g, '').trim();
+              set[`birthdayCapture.productPage.copy.${k}`] = s.slice(0, PP_COPY_MAX[k]);
+            }
+          }
+        }
+        if (pp.accentColor !== undefined) {
+          const v = String(pp.accentColor || '').trim();
+          if (v !== '' && !/^#[0-9a-fA-F]{6}$/.test(v)) {
+            return res.status(400).json({ error: 'birthdayCapture.productPage.accentColor must be a 6-digit hex colour or empty string' });
+          }
+          set['birthdayCapture.productPage.accentColor'] = v;
+        }
+        if (pp.bgColor !== undefined) {
+          const v = String(pp.bgColor || '').trim();
+          if (v !== '' && !/^#[0-9a-fA-F]{6}$/.test(v)) {
+            return res.status(400).json({ error: 'birthdayCapture.productPage.bgColor must be a 6-digit hex colour or empty string' });
+          }
+          set['birthdayCapture.productPage.bgColor'] = v;
+        }
+        if (pp.buttonTextMode !== undefined) {
+          if (!['auto', 'white', 'dark'].includes(pp.buttonTextMode)) {
+            return res.status(400).json({ error: 'birthdayCapture.productPage.buttonTextMode must be one of: auto, white, dark' });
+          }
+          set['birthdayCapture.productPage.buttonTextMode'] = pp.buttonTextMode;
+        }
+        if (pp.textMode !== undefined) {
+          if (!['auto', 'white', 'dark'].includes(pp.textMode)) {
+            return res.status(400).json({ error: 'birthdayCapture.productPage.textMode must be one of: auto, white, dark' });
+          }
+          set['birthdayCapture.productPage.textMode'] = pp.textMode;
         }
       }
       if (bc.banner && typeof bc.banner === 'object') {

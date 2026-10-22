@@ -90,6 +90,24 @@ const discountConfigSchema = new mongoose.Schema({
       bgColor:        { type: String, default: '' },
       textMode:       { type: String, default: 'auto', enum: ['auto', 'white', 'dark'] },
     },
+    productPage: {
+      enabled:        { type: Boolean, default: false },
+      copy: {
+        heading:          { type: String, default: '' },
+        sub:              { type: String, default: '' },
+        emailPlaceholder: { type: String, default: '' },
+        consent:          { type: String, default: '' },
+        button:           { type: String, default: '' },
+        skip:             { type: String, default: '' },
+        saved:            { type: String, default: '' },
+        error:            { type: String, default: '' },
+        emailError:       { type: String, default: '' },
+      },
+      accentColor:    { type: String, default: '' },
+      bgColor:        { type: String, default: '' },
+      buttonTextMode: { type: String, default: 'auto', enum: ['auto', 'white', 'dark'] },
+      textMode:       { type: String, default: 'auto', enum: ['auto', 'white', 'dark'] },
+    },
   },
 
   // Birthday discount settings.
