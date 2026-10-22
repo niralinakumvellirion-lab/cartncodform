@@ -551,3 +551,53 @@ describe('buildPayload — productPage payload', () => {
     }
   });
 });
+
+// ── Step 1b — pct number in productPage /discount-config response ─────────────
+describe('Step 1b — productPage.pct field', () => {
+  test('pct is the birthday discount percentage as a number', async () => {
+    const doc = {
+      birthdayCapture: { productPage: { enabled: true, copy: {}, accentColor: '', bgColor: '', buttonTextMode: 'auto', textMode: 'auto' } },
+      birthdayDiscount: { percentage: 20, leadDays: 5 },
+    };
+    const res = await runDiscountConfig(doc);
+    expect(res.body.birthdayCapture.productPage.pct).toBe(20);
+  });
+
+  test('pct defaults to 15 when birthdayDiscount.percentage is absent', async () => {
+    const doc = {
+      birthdayCapture: { productPage: { enabled: true, copy: {} } },
+      birthdayDiscount: {},
+    };
+    const res = await runDiscountConfig(doc);
+    expect(res.body.birthdayCapture.productPage.pct).toBe(15);
+  });
+});
+
+// ── Step 1c — new gift-card color keys appear in /discount-config response ────
+describe('Step 1c — productPage.colors new keys', () => {
+  test('colors includes all 6 new gift-card keys', async () => {
+    const doc = {
+      birthdayCapture: { productPage: { enabled: true, accentColor: '#4F46E5', bgColor: '#FFFFFF', buttonTextMode: 'auto', textMode: 'auto' } },
+      birthdayDiscount: { percentage: 15, leadDays: 3 },
+    };
+    const res = await runDiscountConfig(doc);
+    const colors = res.body.birthdayCapture.productPage.colors;
+    for (const k of ['stubFg', 'sealText', 'bodyBg', 'err', 'errBg', 'ok']) {
+      expect(colors).toHaveProperty(k);
+    }
+    expect(typeof colors.stubFg).toBe('string');
+    expect(typeof colors.ok).toBe('string');
+  });
+
+  test('dark body: err is lighter red, ok is lighter green', async () => {
+    const doc = {
+      birthdayCapture: { productPage: { enabled: true, accentColor: '#4F46E5', bgColor: '#0F172A', buttonTextMode: 'auto', textMode: 'auto' } },
+      birthdayDiscount: { percentage: 15, leadDays: 3 },
+    };
+    const res = await runDiscountConfig(doc);
+    const colors = res.body.birthdayCapture.productPage.colors;
+    expect(colors.err).toBe('#F87171');
+    expect(colors.ok).toBe('#4ADE80');
+    expect(colors.errBg).toBe('#450A0A');
+  });
+});

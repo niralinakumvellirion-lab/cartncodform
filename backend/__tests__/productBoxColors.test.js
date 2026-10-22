@@ -25,7 +25,8 @@ const { resolveProductBoxColors: resolveProductBoxColorsFE } = mod.exports;
 
 function roundtrip(be, fe) {
   // Every key must be equal between backend and frontend
-  const keys = ['accent','btnFg','bg','text','muted','fieldBg','fieldBorder','checkBorder','lowBtnContrast','lowTextContrast'];
+  const keys = ['accent','btnFg','bg','text','muted','fieldBg','fieldBorder','checkBorder','lowBtnContrast','lowTextContrast',
+                 'stubFg','sealText','bodyBg','err','errBg','ok'];
   for (const k of keys) {
     expect(fe[k]).toEqual(be[k]);
   }
@@ -74,6 +75,14 @@ const COMBINATIONS = [
   // Invalid hex falls back to defaults
   { accentColor: 'not-a-hex', bgColor: 'invalid' },
   { accentColor: '#ZZZZZZ', bgColor: '' },
+  // Additional combos for gift-card keys (brings total ≥36)
+  { accentColor: '#10B981' },                                                    // green accent
+  { accentColor: '#FBBF24', buttonTextMode: 'auto' },                            // yellow: dark btn text auto
+  { bgColor: '#1E293B', textMode: 'white' },                                     // navy bg + explicit white text
+  { accentColor: '#F97316', bgColor: '#1E293B', textMode: 'auto' },              // orange on navy
+  { accentColor: '#DB2777', bgColor: '#FDF2F8', textMode: 'dark' },              // pink on blush
+  { accentColor: '#4F46E5', bgColor: '#0F172A', buttonTextMode: 'white', textMode: 'white' },
+  { accentColor: '#000000', bgColor: '#FFFFFF' },                                // pure black on white
 ];
 
 describe('resolveProductBoxColors — backend/frontend parity', () => {
@@ -154,5 +163,76 @@ describe('resolveProductBoxColors — lowTextContrast flag', () => {
 
   test('white text on dark bg: does not warn', () => {
     expect(resolveProductBoxColors({ bgColor: '#171A22', textMode: 'white' }).lowTextContrast).toBe(false);
+  });
+});
+
+describe('resolveProductBoxColors — stubFg (gift-card stub text)', () => {
+  test('indigo accent ≥4.5:1 on white → stubFg is white', () => {
+    expect(resolveProductBoxColors({ accentColor: '#4F46E5' }).stubFg).toBe('#FFFFFF');
+  });
+
+  test('gold accent < 4.5:1 on white → stubFg is dark', () => {
+    expect(resolveProductBoxColors({ accentColor: '#F5C542' }).stubFg).toBe('#171A22');
+  });
+
+  test('stubFg is independent of buttonTextMode', () => {
+    const rDark = resolveProductBoxColors({ accentColor: '#4F46E5', buttonTextMode: 'dark' });
+    const rAuto = resolveProductBoxColors({ accentColor: '#4F46E5', buttonTextMode: 'auto' });
+    expect(rDark.stubFg).toBe('#FFFFFF');
+    expect(rAuto.stubFg).toBe('#FFFFFF');
+  });
+});
+
+describe('resolveProductBoxColors — sealText (gift-card seal text/icon)', () => {
+  test('dark indigo ≥3:1 on white → sealText equals accent', () => {
+    const r = resolveProductBoxColors({ accentColor: '#4F46E5' });
+    expect(r.sealText).toBe('#4F46E5');
+  });
+
+  test('near-white accent < 3:1 on white → sealText is #171A22', () => {
+    const r = resolveProductBoxColors({ accentColor: '#F9FAFB' });
+    expect(r.sealText).toBe('#171A22');
+  });
+});
+
+describe('resolveProductBoxColors — bodyBg', () => {
+  test('no bgColor → bodyBg is #FFFFFF', () => {
+    expect(resolveProductBoxColors({}).bodyBg).toBe('#FFFFFF');
+  });
+
+  test('bgColor set → bodyBg equals bgColor', () => {
+    expect(resolveProductBoxColors({ bgColor: '#FFF7ED' }).bodyBg).toBe('#FFF7ED');
+  });
+
+  test('dark bgColor → bodyBg equals dark color', () => {
+    expect(resolveProductBoxColors({ bgColor: '#0F172A' }).bodyBg).toBe('#0F172A');
+  });
+});
+
+describe('resolveProductBoxColors — err / errBg / ok (gift-card status colours)', () => {
+  test('light body → dark err (#DC2626), light errBg (#FEE2E2), dark ok (#16A34A)', () => {
+    const r = resolveProductBoxColors({ bgColor: '#FFFFFF' });
+    expect(r.err).toBe('#DC2626');
+    expect(r.errBg).toBe('#FEE2E2');
+    expect(r.ok).toBe('#16A34A');
+  });
+
+  test('dark body → lighter err (#F87171), dark errBg (#450A0A), lighter ok (#4ADE80)', () => {
+    const r = resolveProductBoxColors({ bgColor: '#0F172A' });
+    expect(r.err).toBe('#F87171');
+    expect(r.errBg).toBe('#450A0A');
+    expect(r.ok).toBe('#4ADE80');
+  });
+
+  test('explicit white textMode on dark bg → still uses light-text branch', () => {
+    const r = resolveProductBoxColors({ bgColor: '#171A22', textMode: 'white' });
+    expect(r.err).toBe('#F87171');
+    expect(r.ok).toBe('#4ADE80');
+  });
+
+  test('explicit dark textMode on light bg → uses dark-text branch', () => {
+    const r = resolveProductBoxColors({ bgColor: '#FFFFFF', textMode: 'dark' });
+    expect(r.err).toBe('#DC2626');
+    expect(r.ok).toBe('#16A34A');
   });
 });

@@ -819,12 +819,12 @@ describe('Discounts — Method 4 (product-page birthday box)', () => {
     expect(slice).toContain('Dark');
   });
 
-  test('ON (ppView=1): box background row with None (outlined)', () => {
+  test('ON (ppView=1): box background row with White empty option', () => {
     const html = renderWith({
       config: { birthdayCapture: { productPage: { enabled: true } } },
       ppView: 1,
     });
-    expect(ppSlice(html)).toContain('None (outlined)');
+    expect(ppSlice(html)).toContain('White');
   });
 
   test('ON (ppView=1): text colour row present', () => {

@@ -60,7 +60,16 @@ function resolveProductBoxColors(cfg) {
       : contrastRatio(effectiveBg, '#18181B') < 4.5
   );
 
-  return { accent, btnFg, bg, text, muted, fieldBg, fieldBorder, checkBorder, lowBtnContrast, lowTextContrast };
+  // Gift-card restyle keys
+  const stubFg   = contrastRatio(accent, '#FFFFFF') >= 4.5 ? '#FFFFFF' : '#171A22';
+  const sealText = contrastRatio(accent, '#FFFFFF') >= 3.0  ? accent    : '#171A22';
+  const bodyBg   = effectiveBg;
+  const err      = isLightText ? '#F87171' : '#DC2626';
+  const errBg    = isLightText ? '#450A0A' : '#FEE2E2';
+  const ok       = isLightText ? '#4ADE80' : '#16A34A';
+
+  return { accent, btnFg, bg, text, muted, fieldBg, fieldBorder, checkBorder, lowBtnContrast, lowTextContrast,
+           stubFg, sealText, bodyBg, err, errBg, ok };
 }
 
 module.exports = { resolveProductBoxColors };

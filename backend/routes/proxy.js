@@ -162,6 +162,7 @@ router.get('/discount-config', async (req, res) => {
           const copy = pp.copy || {};
           return {
             enabled: !!pp.enabled,
+            pct: Number.isFinite(bd.percentage) ? bd.percentage : 15,
             copy: {
               heading:          tok(copy.heading,          'Get {pct}% off on your birthday'),
               sub:              tok(copy.sub,              'Tell us your birthday and we\'ll email you a gift {days} days before.'),
