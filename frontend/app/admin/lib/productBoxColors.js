@@ -92,10 +92,11 @@ export function resolveProductBoxColors(cfg) {
       ('0' + Math.round(a[i]*(1-t) + b[i]*t).toString(16)).slice(-2)
     ).join('');
   }
-  const stubFgRgb = hexToRgb(stubFg);
   const accentRgb = hexToRgb(accent);
-  const hlStub    = `rgba(${stubFgRgb.join(',')},0.34)`;
-  const hlBody    = `rgba(${accentRgb.join(',')},${isLightText ? '0.40' : '0.26'})`;
+  // Highlight must never lower contrast: darken if text is light, lighten if dark
+  const isLightStubFg = stubFg === '#FFFFFF';
+  const hlStub    = isLightStubFg ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.35)';
+  const hlBody    = isLightText   ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.35)';
   const ring      = `rgba(${accentRgb.join(',')},0.30)`;
   const sealSheen = `rgba(${accentRgb.join(',')},0.30)`;
   const sealText2 = mixHex(sealText, '#000000', 0.40);

@@ -79,10 +79,11 @@ function resolveProductBoxColors(cfg) {
       return ('0' + Math.round(a[i]*(1-t) + b[i]*t).toString(16)).slice(-2);
     }).join('');
   }
-  var stubFgRgb = hexToRgb(stubFg);
   var accentRgb = hexToRgb(accent);
-  var hlStub   = 'rgba(' + stubFgRgb.join(',')  + ',0.34)';
-  var hlBody   = 'rgba(' + accentRgb.join(',') + ',' + (isLightText ? '0.40' : '0.26') + ')';
+  // Highlight must never lower contrast: darken if text is light, lighten if dark
+  var isLightStubFg = stubFg === '#FFFFFF';
+  var hlStub   = isLightStubFg ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.35)';
+  var hlBody   = isLightText   ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.35)';
   var ring     = 'rgba(' + accentRgb.join(',') + ',0.30)';
   var sealSheen = 'rgba(' + accentRgb.join(',') + ',0.30)';
   var sealText2 = mixHex(sealText, '#000000', 0.40);
