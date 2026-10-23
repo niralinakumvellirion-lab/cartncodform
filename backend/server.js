@@ -169,6 +169,8 @@ const whatsappRouter = require('./routes/whatsapp');
 app.use('/api/whatsapp', whatsappRouter);
 const dashboardRouter = require('./routes/dashboard');
 app.use('/api/dashboard', dashboardRouter);
+const pushUsersRouter = require('./routes/pushUsers');
+app.use('/api/dashboard/:shopDomain/channels/push', pushUsersRouter);
 app.use('/apps/cartncodform', proxyRouter);
 // Public unsubscribe endpoint — no requireAuth, has its own rate limiter.
 const unsubscribeRouter = require('./routes/unsubscribe');
