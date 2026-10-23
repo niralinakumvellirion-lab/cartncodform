@@ -1646,6 +1646,7 @@ export default function Discounts({ shop }) {
                 const pvErr      = ppColors.err         || '#DC2626';
                 const pvErrBg    = ppColors.errBg       || '#FEE2E2';
                 const pvOk       = ppColors.ok          || '#16A34A';
+                const pvRing     = ppColors.ring        || 'rgba(79,70,229,0.30)';
 
                 // Preview copy
                 const pvHeading = (ppCopy.heading || '').trim() || ('Get ' + bdPct + '% off on your birthday');
@@ -1700,58 +1701,60 @@ export default function Discounts({ shop }) {
                   const notchStub   = 'radial-gradient(circle 11px at 0 100%,#0000 97%,#000),radial-gradient(circle 11px at 100% 100%,#0000 97%,#000)';
                   const notchBody   = 'radial-gradient(circle 11px at 0 0,#0000 97%,#000),radial-gradient(circle 11px at 100% 0,#0000 97%,#000)';
                   const dashedColor = pvStubFg === '#FFFFFF' ? 'rgba(255,255,255,0.45)' : 'rgba(23,26,34,0.45)';
-                  const cardStyle   = { fontSize: 12, filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.08))' };
-                  const stubStyle   = { background: pvAccent, padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8, borderRadius: '16px 16px 0 0', position: 'relative', mask: notchStub, maskComposite: 'intersect', WebkitMask: notchStub, WebkitMaskComposite: 'source-in' };
-                  const sealStyle   = { width: 50, height: 50, borderRadius: '50%', background: '#FFFFFF', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-8deg)', boxShadow: '0 1px 4px rgba(0,0,0,0.15)' };
-                  const bodyStyle   = { background: pvBodyBg, padding: '10px 12px 8px', color: pvText, borderRadius: '0 0 16px 16px', mask: notchBody, maskComposite: 'intersect', WebkitMask: notchBody, WebkitMaskComposite: 'source-in' };
-                  const fldStyle    = { width: '100%', height: 30, fontSize: 11, border: '1px solid ' + pvFBorder, borderRadius: 6, background: pvField, color: pvText, marginBottom: 6, display: 'flex', alignItems: 'center', paddingLeft: 6, boxSizing: 'border-box' };
-                  const errBoxStyle = { background: pvErrBg, borderRadius: 4, padding: '3px 7px', marginBottom: 5 };
-                  const errTxtStyle = { fontSize: 10, color: pvErr, margin: 0 };
+                  const cardStyle   = { filter: 'drop-shadow(0 1px 1.5px rgba(23,26,34,.2)) drop-shadow(0 8px 14px rgba(23,26,34,.12))' };
+                  const formStubBg  = `radial-gradient(circle at 92% 8%,rgba(255,255,255,.22),transparent 58%),radial-gradient(rgba(255,255,255,.18) 1px,transparent 1.6px) 0 0/14px 14px,${pvAccent}`;
+                  const stubStyle   = { background: formStubBg, padding: '11px 12px 14px', display: 'flex', alignItems: 'center', gap: 10, borderRadius: '16px 16px 0 0', position: 'relative', mask: notchStub, maskComposite: 'intersect', WebkitMask: notchStub, WebkitMaskComposite: 'source-in' };
+                  const sealStyle   = { width: 42, height: 42, borderRadius: '50%', background: '#FFFFFF', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-8deg)', boxShadow: `0 0 0 3px ${pvRing},0 4px 8px rgba(0,0,0,.18)`, overflow: 'visible', position: 'relative' };
+                  const bodyStyle   = { background: pvBodyBg, padding: '13px 12px 10px', color: pvText, borderRadius: '0 0 16px 16px', display: 'flex', flexDirection: 'column', gap: 7, mask: notchBody, maskComposite: 'intersect', WebkitMask: notchBody, WebkitMaskComposite: 'source-in' };
+                  const fldStyle    = { width: '100%', height: 28, fontSize: 11, border: '1px solid ' + pvFBorder, borderRadius: 7, background: pvField, color: pvText, display: 'flex', alignItems: 'center', paddingLeft: 6, boxSizing: 'border-box' };
+                  const errBoxStyle = { background: pvErrBg, borderRadius: 6, padding: '4px 7px' };
+                  const errTxtStyle = { fontSize: 10, fontWeight: 700, color: pvErr, margin: 0 };
                   const pct         = ((config.birthdayDiscount && config.birthdayDiscount.percentage) || 15);
+                  const teaserStubBg = `radial-gradient(circle at 50% 40%,rgba(255,255,255,.22),transparent 65%),radial-gradient(rgba(255,255,255,.18) 1px,transparent 1.6px) 0 0/14px 14px,${pvAccent}`;
 
                   const stubJsx = (
                     <div style={stubStyle}>
                       <div style={{ flex: 1 }}>
-                        {pvHeading && <div style={{ fontSize: 11, fontWeight: 700, color: pvStubFg, marginBottom: 2, lineHeight: 1.3 }}>{pvHeading}</div>}
-                        {pvSub && <div style={{ fontSize: 10, color: pvStubFg, opacity: 0.85, lineHeight: 1.35 }}>{pvSub}</div>}
+                        {pvHeading && <div style={{ fontSize: 11, fontWeight: 700, color: pvStubFg, lineHeight: 1.35, textShadow: '0 1px 0 rgba(0,0,0,.12)' }}>{pvHeading}</div>}
+                        {pvSub && <div style={{ fontSize: 9.5, color: pvStubFg, opacity: 0.95, lineHeight: 1.6, marginTop: 3 }}>{pvSub}</div>}
                       </div>
                       <div style={sealStyle}>
-                        <div style={{ fontSize: 13 }}>🎁</div>
-                        <div style={{ fontSize: 9, fontWeight: 800, color: pvSealText, marginTop: 1 }}>&minus;{pct}%</div>
+                        <div style={{ position: 'absolute', inset: 3, borderRadius: '50%', border: `1px dashed ${pvSealText}`, pointerEvents: 'none' }} />
+                        <div style={{ fontSize: 9 }}>🎁</div>
+                        <div style={{ fontSize: 8, fontWeight: 800, color: pvSealText, letterSpacing: '-0.02em' }}>&minus;{pct}%</div>
                       </div>
-                      <div aria-hidden="true" style={{ position: 'absolute', left: 22, right: 22, bottom: 0, borderBottom: '2px dashed ' + dashedColor, pointerEvents: 'none' }} />
+                      <div aria-hidden="true" style={{ position: 'absolute', left: 16, right: 16, bottom: 0, borderBottom: '2px dashed ' + dashedColor, pointerEvents: 'none' }} />
                     </div>
                   );
 
-                  // Closed teaser preview (horizontal ticket)
+                  // Closed teaser preview (horizontal ticket — spec layout)
                   if (ppPreviewState === -1) {
-                    const teaserStubStyle = { background: pvAccent, minWidth: 72, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '10px 8px', borderRadius: '12px 0 0 12px', position: 'relative', fontSize: 10 };
-                    const teaserBodyStyle = { flex: 1, background: pvBodyBg, padding: '8px 10px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 5, borderRadius: '0 12px 12px 0' };
-                    const teaserWrapStyle = { display: 'flex', filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.10))', fontSize: 12 };
-                    const ctaPillStyle = { display: 'inline-flex', alignItems: 'center', gap: 3, background: pvAccent, color: pvBtnFg, fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 14, width: 'fit-content' };
+                    const teaserWrapStyle = { marginTop: 4, display: 'flex', filter: 'drop-shadow(0 1px 1.5px rgba(23,26,34,.2)) drop-shadow(0 8px 14px rgba(23,26,34,.12))' };
+                    const teaserStubStyle = { background: teaserStubBg, width: 72, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, padding: '8px 6px', borderRadius: '12px 0 0 12px' };
+                    const teaserBodyStyle = { flex: 1, background: pvBodyBg, padding: '10px 10px 10px 12px', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center', gap: 7, borderRadius: '0 12px 12px 0' };
+                    const ctaPillStyle = { display: 'inline-flex', alignItems: 'center', gap: 5, background: pvAccent, color: pvBtnFg, fontSize: 9.5, fontWeight: 800, height: 28, padding: '0 10px', borderRadius: 8, width: 'fit-content', boxShadow: `inset 0 1px 0 rgba(255,255,255,.25),0 3px 7px rgba(0,0,0,.18)` };
                     return (
                       <div style={teaserWrapStyle}>
                         <div style={teaserStubStyle}>
-                          <div style={{ fontSize: 14 }}>🎁</div>
-                          <div style={{ fontSize: 8, color: pvStubFg, opacity: 0.75 }}>✦ ✦</div>
+                          <div style={{ fontSize: 28 }}>🎁</div>
                         </div>
                         <div style={teaserBodyStyle}>
-                          <div style={{ fontSize: 11, fontWeight: 700, color: pvText, lineHeight: 1.3 }}>{pvUnlockTitle}</div>
+                          <div style={{ fontSize: 10.5, fontWeight: 800, color: pvText, lineHeight: 1.4, letterSpacing: '-0.01em' }}>{pvUnlockTitle}</div>
                           <div style={ctaPillStyle}>{pvOpenButton} →</div>
                         </div>
                       </div>
                     );
                   }
 
-                  // Saved state: no stub, just a success card
+                  // Saved state: no stub, success card
                   if (ppPreviewState === 3) {
                     return (
                       <div style={{ background: pvBodyBg, borderRadius: 16, filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.08))', padding: '16px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                         <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44 }}>
-                          <div style={{ fontSize: 26 }}>🎁</div>
+                          <div style={{ fontSize: 28 }}>🎁</div>
                           <div style={{ position: 'absolute', bottom: -2, right: -4, width: 16, height: 16, borderRadius: '50%', background: pvOk, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: '#fff', fontWeight: 800, border: '2px solid ' + pvBodyBg }}>✓</div>
                         </div>
-                        <div style={{ fontSize: 11, fontWeight: 600, color: pvOk, textAlign: 'center', lineHeight: 1.4 }}>{pvSaved}</div>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: pvOk, textAlign: 'center', lineHeight: 1.4 }}>{pvSaved}</div>
                       </div>
                     );
                   }
@@ -1768,17 +1771,17 @@ export default function Discounts({ shop }) {
                               </>)
                             : <div style={fldStyle}>{pvPlaceholder}</div>
                           }
-                          <div style={{ display: 'flex', gap: 5, marginBottom: ppPreviewState === 2 ? 2 : 5 }}>
-                            <div style={{ ...fldStyle, marginBottom: 0, flex: 1, ...(ppPreviewState === 2 ? { borderColor: pvErr } : {}) }}>Month</div>
-                            <div style={{ ...fldStyle, marginBottom: 0, flex: 1, ...(ppPreviewState === 2 ? { borderColor: pvErr } : {}) }}>Day</div>
+                          <div style={{ display: 'flex', gap: 5 }}>
+                            <div style={{ ...fldStyle, flex: 1, ...(ppPreviewState === 2 ? { borderColor: pvErr } : {}) }}>Month</div>
+                            <div style={{ ...fldStyle, width: 72, flexShrink: 0, flex: 'none', ...(ppPreviewState === 2 ? { borderColor: pvErr } : {}) }}>Day</div>
                           </div>
-                          {ppPreviewState === 2 && <div style={{ ...errBoxStyle, marginTop: 2 }}><div style={errTxtStyle}>{pvError}</div></div>}
-                          <div style={{ display: 'flex', gap: 5, alignItems: 'flex-start', marginBottom: 5, marginTop: 3 }}>
+                          {ppPreviewState === 2 && <div style={errBoxStyle}><div style={errTxtStyle}>{pvError}</div></div>}
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
                             <div style={{ width: 11, height: 11, border: '1px solid ' + pvMuted, borderRadius: 2, marginTop: 1, flexShrink: 0 }} />
                             <div style={{ fontSize: 10, color: pvMuted, lineHeight: 1.35 }}>{pvConsent}</div>
                           </div>
-                          <div style={{ background: pvAccent, color: pvBtnFg, borderRadius: 8, padding: '7px', textAlign: 'center', fontSize: 11, fontWeight: 700, marginBottom: 3 }}>{pvBtn}</div>
-                          <div style={{ textAlign: 'center', fontSize: 10, color: pvMuted }}>{pvSkip}</div>
+                          <div style={{ background: pvAccent, color: pvBtnFg, borderRadius: 9, padding: '6px', textAlign: 'center', fontSize: 10.5, fontWeight: 800, boxShadow: `inset 0 1px 0 rgba(255,255,255,.25),0 3px 7px rgba(0,0,0,.18)` }}>{pvBtn}</div>
+                          <div style={{ textAlign: 'center', fontSize: 10, color: pvMuted, textDecoration: 'underline' }}>{pvSkip}</div>
                         </>
                       </div>
                     </div>
