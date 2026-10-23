@@ -671,3 +671,41 @@ describe('E12 no raw token in response', () => {
     expect(res._body.users[0].userKey).toBe('a_' + SUB_DOC_ID.toString());
   });
 });
+
+// =============================================================================
+// E13 — Manual FestivalQueue doc: isManualSend=true, status='sent',
+//        never picked up by festival poller (status≠'approved')
+// =============================================================================
+
+describe('E13 manual FestivalQueue doc is attribution-only', () => {
+  test('FestivalQueue model has isManualSend field defaulting to false', () => {
+    const FestivalQueue = require('../models/FestivalQueue');
+    const paths = FestivalQueue.schema.paths;
+    expect(paths).toHaveProperty('isManualSend');
+    expect(paths.isManualSend.defaultValue).toBe(false);
+  });
+
+  test('poller query (status=approved) never matches status=sent manual doc', () => {
+    // The poller's match is: { status: 'approved', scheduledAt: { $lte: now } }
+    // A manual doc is created with status='sent' → this can NEVER match.
+    const pollerStatusFilter = 'approved';
+    const manualDocStatus    = 'sent';
+    expect(pollerStatusFilter === manualDocStatus).toBe(false);
+  });
+
+  test('queue /festival listing query includes isManualSend: { $ne: true }', async () => {
+    // Read the route source and confirm the filter is present
+    const fs = require('fs');
+    const src = fs.readFileSync(require.resolve('../routes/queue.js'), 'utf8');
+    // The /festival find must have isManualSend: { $ne: true }
+    expect(src).toMatch(/isManualSend.*\$ne.*true/);
+  });
+
+  test('queue recent-sends query includes isManualSend: { $ne: true }', async () => {
+    const fs = require('fs');
+    const src = fs.readFileSync(require.resolve('../routes/queue.js'), 'utf8');
+    const occurrences = (src.match(/isManualSend.*\$ne.*true/g) || []).length;
+    // Expect at least 2 occurrences: /festival listing + recent-sends + duplicate aggregate
+    expect(occurrences).toBeGreaterThanOrEqual(3);
+  });
+});

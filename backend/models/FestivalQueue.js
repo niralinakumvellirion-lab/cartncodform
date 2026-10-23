@@ -51,6 +51,12 @@ const festivalQueueSchema = new mongoose.Schema({
   // click / revisit attribution is available. False/absent for rows created
   // before this feature was deployed — those are reported as "not_tracked".
   tracked: { type: Boolean, default: false },
+  // True for docs created by routes/push.js send-store (manual "Send Now"
+  // broadcasts). These are attribution-only records — they must never appear
+  // in the Queue / Campaign screens or be picked up by the festival poller.
+  // Poller safety is guaranteed by status='sent'; this flag is the display
+  // guard for calendar + duplicate-check queries that have no status filter.
+  isManualSend: { type: Boolean, default: false },
 }, { timestamps: true });
 
 module.exports = mongoose.model('FestivalQueue', festivalQueueSchema);

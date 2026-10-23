@@ -744,6 +744,7 @@ router.post('/send-store', requireAuth, requireNotSuspended, async (req, res) =>
         sentAt: new Date(),
         channel: 'push',
         tracked: true,
+        isManualSend: true,
       });
       manualFqId = manualFq._id;
     } catch (fqErr) {
@@ -825,6 +826,11 @@ router.post('/send-store', requireAuth, requireNotSuspended, async (req, res) =>
     }
 
     const totalSent = (mobileResult.sent || 0) + (desktopResult.sent || 0);
+    // Update recipientCount on the manual FestivalQueue doc so it reflects
+    // the actual send count if it ever surfaces in reporting queries.
+    if (manualFqId) {
+      FestivalQueue.findByIdAndUpdate(manualFqId, { recipientCount: totalSent }).catch(() => {});
+    }
     console.log(`[push] Festival push split-sent to ${shop}: mobile=${mobileResult.sent || 0} desktop=${desktopResult.sent || 0}`);
     return res.json({
       success: true,

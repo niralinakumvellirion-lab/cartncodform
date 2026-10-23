@@ -113,7 +113,7 @@ router.get('/:shopDomain/recent-sends', requireAuth, requireStoreOwner,
     const FestivalQueue = require('../models/FestivalQueue');
 
     const [festivalItems, autoJobs] = await Promise.all([
-      FestivalQueue.find({ shopDomain: shop, status: 'sent' })
+      FestivalQueue.find({ shopDomain: shop, status: 'sent', isManualSend: { $ne: true } })
         .sort({ sentAt: -1 })
         .limit(LIMIT)
         .select('title recipientCount sentAt')
@@ -451,7 +451,7 @@ router.get('/:shopDomain/festival', requireAuth, requireStoreOwner,
     const shop = req.params.shopDomain.trim().toLowerCase();
     const FestivalQueue = require('../models/FestivalQueue');
 
-    const items = await FestivalQueue.find({ shopDomain: shop })
+    const items = await FestivalQueue.find({ shopDomain: shop, isManualSend: { $ne: true } })
       .sort({ scheduledAt: 1 })
       .lean();
 
@@ -1025,7 +1025,7 @@ router.get('/:shopDomain/festival/_duplicates', requireAuth,
     const FestivalQueue = require('../models/FestivalQueue');
 
     const groups = await FestivalQueue.aggregate([
-      { $match: { shopDomain: shop } },
+      { $match: { shopDomain: shop, isManualSend: { $ne: true } } },
       {
         $group: {
           _id: {
