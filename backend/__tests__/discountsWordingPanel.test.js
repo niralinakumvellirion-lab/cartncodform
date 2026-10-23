@@ -937,6 +937,18 @@ describe('Discounts — Method 4 (product-page birthday box)', () => {
     expect(slice).toContain('Your gift will arrive');
   });
 
+  test('ON (ppPreviewState=3): stub notch mask absent in saved state', () => {
+    const html = renderWith({
+      config: { birthdayCapture: { productPage: { enabled: true } } },
+      ppView: 0,
+      ppPreviewState: 3,
+    });
+    const slice = ppSlice(html);
+    // In states 0-2, stubStyle has border-radius:16px 16px 0 0 (top-rounded ticket stub).
+    // In state 3 we return a flat success card — no ticket stub, so that specific value is absent.
+    expect(slice).not.toContain('border-radius:16px 16px 0 0');
+  });
+
   test('board-10 defaults: preview fallbacks match exact strings (bdPct=15, bdLead=3)', () => {
     // Render with enabled productPage, empty copy, bdPct=15 bdLead=3 (config defaults)
     const html = renderWith({

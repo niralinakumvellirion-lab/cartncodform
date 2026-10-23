@@ -184,6 +184,91 @@ describe('resolveProductBoxColors — stubFg (gift-card stub text)', () => {
   });
 });
 
+// ── Contrast safety: highlight must never lower contrast ──────────────────────
+
+function hexLuminance(hex) {
+  const r = parseInt(hex.slice(1,3),16)/255, g = parseInt(hex.slice(3,5),16)/255, b = parseInt(hex.slice(5,7),16)/255;
+  const lin = c => c <= 0.03928 ? c/12.92 : Math.pow((c+0.055)/1.055,2.4);
+  return 0.2126*lin(r)+0.7152*lin(g)+0.0722*lin(b);
+}
+function hexContrast(a, b) {
+  const lA = hexLuminance(a), lB = hexLuminance(b);
+  return (Math.max(lA,lB)+0.05)/(Math.min(lA,lB)+0.05);
+}
+// Blend rgba overlay onto a hex background, return blended hex
+function blendRgbaOnHex(rgba, bgHex) {
+  const m = rgba.match(/rgba?\((\d+),(\d+),(\d+),([\d.]+)\)/);
+  if (!m) return bgHex;
+  const [,R,G,B,A] = m.map(Number);
+  const bg = [parseInt(bgHex.slice(1,3),16), parseInt(bgHex.slice(3,5),16), parseInt(bgHex.slice(5,7),16)];
+  return '#' + [R,G,B].map((c,i) => Math.round(c*A + bg[i]*(1-A)).toString(16).padStart(2,'0')).join('');
+}
+
+describe('resolveProductBoxColors — highlight contrast invariant', () => {
+  // For each accent, verify: contrast(textOnHighlightBg) >= contrast(textOnPlainBg)
+  const ACCENTS = [
+    '#4F46E5',  // indigo
+    '#7C3AED',  // plum
+    '#FBBF24',  // gold
+    '#7A3B74',  // berry
+    '#F5C542',  // yellow
+    '#0F172A',  // near-black
+    '#DC2626',  // red
+    '#16A34A',  // green
+    '#FFFFFF',  // white
+    '#000000',  // black
+    '#10B981',  // emerald
+    '#F97316',  // orange
+  ];
+
+  test.each(ACCENTS.map(a => [a]))('hlStub contrast >= plain stub contrast: accent=%s', (accent) => {
+    const r = resolveProductBoxColors({ accentColor: accent });
+    const plainCR    = hexContrast(r.stubFg, r.accent);
+    const hlBg       = blendRgbaOnHex(r.hlStub, r.accent);
+    const hlCR       = hexContrast(r.stubFg, hlBg);
+    // hl must not lower contrast (allow 0.05 floating-point slack)
+    expect(hlCR).toBeGreaterThanOrEqual(plainCR - 0.05);
+  });
+
+  test.each(ACCENTS.map(a => [a]))('hlBody contrast >= plain body contrast: accent=%s', (accent) => {
+    const r = resolveProductBoxColors({ accentColor: accent });
+    const plainCR    = hexContrast(r.text, r.bodyBg);
+    const hlBg       = blendRgbaOnHex(r.hlBody, r.bodyBg);
+    const hlCR       = hexContrast(r.text, hlBg);
+    expect(hlCR).toBeGreaterThanOrEqual(plainCR - 0.05);
+  });
+
+  test('indigo hlStub >= 4.5:1', () => {
+    const r = resolveProductBoxColors({ accentColor: '#4F46E5' });
+    const hlBg = blendRgbaOnHex(r.hlStub, r.accent);
+    expect(hexContrast(r.stubFg, hlBg)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test('plum hlStub >= 4.5:1', () => {
+    const r = resolveProductBoxColors({ accentColor: '#7C3AED' });
+    const hlBg = blendRgbaOnHex(r.hlStub, r.accent);
+    expect(hexContrast(r.stubFg, hlBg)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test('gold hlStub >= 4.5:1', () => {
+    const r = resolveProductBoxColors({ accentColor: '#FBBF24' });
+    const hlBg = blendRgbaOnHex(r.hlStub, r.accent);
+    expect(hexContrast(r.stubFg, hlBg)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test('indigo hlBody >= 4.5:1', () => {
+    const r = resolveProductBoxColors({ accentColor: '#4F46E5' });
+    const hlBg = blendRgbaOnHex(r.hlBody, r.bodyBg);
+    expect(hexContrast(r.text, hlBg)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  test('gold hlBody (dark bg) >= 4.5:1', () => {
+    const r = resolveProductBoxColors({ accentColor: '#FBBF24', bgColor: '#1E293B' });
+    const hlBg = blendRgbaOnHex(r.hlBody, r.bodyBg);
+    expect(hexContrast(r.text, hlBg)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
 describe('resolveProductBoxColors — sealText (gift-card seal text/icon)', () => {
   test('dark indigo ≥3:1 on white → sealText equals accent', () => {
     const r = resolveProductBoxColors({ accentColor: '#4F46E5' });
