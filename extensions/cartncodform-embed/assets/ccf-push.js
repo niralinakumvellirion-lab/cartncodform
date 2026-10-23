@@ -3509,6 +3509,7 @@
               })
               .then(function (r) { return r.json(); })
               .then(function (d) {
+                try { if (email) localStorage.setItem('ccf_known_email', JSON.stringify({ email: email, ts: Date.now() })); } catch (e) {}
                 ccfShowBirthdayStep(wrap, accent, function() { finishDiscount(d, capAction); });
               });
           })
@@ -3580,6 +3581,7 @@
               .then(function (d) {
                 // Stage 3: discount generated — show birthday step first
                 // (if enabled), then renderDiscountCode via finishDiscount().
+                try { if (email) localStorage.setItem('ccf_known_email', JSON.stringify({ email: email, ts: Date.now() })); } catch (e) {}
                 ccfShowBirthdayStep(wrap, accent, function() { finishDiscount(d, action); });
               })
               .catch(function () {
