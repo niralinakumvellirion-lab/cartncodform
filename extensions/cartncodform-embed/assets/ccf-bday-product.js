@@ -853,7 +853,6 @@
         // Part 2: if email already known from popup, show masked email + "Not you?" link
         if (emailIsKnown) {
           emailWrap.style.display = 'none';
-          check.checked = true; // pre-tick consent
 
           var knownEmailRow = document.createElement('div');
           knownEmailRow.className = 'ccf-bp-known-email';
