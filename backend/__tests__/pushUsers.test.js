@@ -51,6 +51,13 @@ jest.mock('../middleware/requireOwner', () => ({
   requireStoreOwner: (req, res, next) => next(),
 }));
 
+// ─── auth test helpers (use REAL middleware, not the mock above) ──────────────
+// We load the REAL middleware module separately, bypassing the jest.mock above,
+// by resolving the file path directly.
+function getRealRequireAuth() {
+  return require('../middleware/requireOwner').requireAuth;
+}
+
 // We stub the models per-test using jest.spyOn so each test is clean.
 const ScheduledJob           = require('../models/ScheduledJob');
 const FestivalQueue          = require('../models/FestivalQueue');
@@ -707,5 +714,61 @@ describe('E13 manual FestivalQueue doc is attribution-only', () => {
     const occurrences = (src.match(/isManualSend.*\$ne.*true/g) || []).length;
     // Expect at least 2 occurrences: /festival listing + recent-sends + duplicate aggregate
     expect(occurrences).toBeGreaterThanOrEqual(3);
+  });
+});
+
+// =============================================================================
+// E14 — Auth: unauthenticated requests get 401 (REAL middleware, no mock)
+// =============================================================================
+
+describe('E14 auth: unauthenticated request → 401', () => {
+  test('requireAuth returns 401 when Authorization header is missing', () => {
+    const realMw = jest.requireActual('../middleware/requireOwner');
+    const requireAuth = realMw.requireAuth;
+
+    const req = { get: () => '' };
+    const res = makeRes();
+    const next = jest.fn();
+
+    requireAuth(req, res, next);
+
+    expect(res._status).toBe(401);
+    expect(res._body).toMatchObject({ error: expect.stringContaining('Missing') });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('requireAuth returns 401/500 for a Bearer token with invalid JWT; next() not called', () => {
+    const realMw = jest.requireActual('../middleware/requireOwner');
+    const requireAuth = realMw.requireAuth;
+
+    const req = { get: () => 'Bearer not.a.real.jwt' };
+    const res = makeRes();
+    const next = jest.fn();
+
+    requireAuth(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect([401, 500]).toContain(res._status);
+  });
+
+  test('all 5 pushUsers routes declare requireAuth + requireStoreOwner', () => {
+    const fs = require('fs');
+    const src = fs.readFileSync(require.resolve('../routes/pushUsers.js'), 'utf8');
+
+    const routes = [
+      "router.get('/users',",
+      "router.get('/users/:userKey/count',",
+      "router.get('/users/:userKey/revisit',",
+      "router.get('/revisited',",
+      "router.get('/users.csv',",
+    ];
+
+    for (const route of routes) {
+      const idx = src.indexOf(route);
+      expect(idx).toBeGreaterThan(-1);
+      const snippet = src.slice(idx, idx + 200);
+      expect(snippet).toContain('requireAuth');
+      expect(snippet).toContain('requireStoreOwner');
+    }
   });
 });
