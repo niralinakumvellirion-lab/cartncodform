@@ -170,6 +170,13 @@
     return fb;
   }
 
+  // ── Color helpers (cont.) ───────────────────────────────────────────────────
+  // Returns true when hex is a light colour (YIQ perceived brightness > 128).
+  function isLightColor(hex) {
+    var rgb = hexToRgb(hex);
+    return (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000 > 128;
+  }
+
   // ── CSS builder ─────────────────────────────────────────────────────────────
   function buildCss(c) {
     var accent     = safeColor(c.accent,      '#4F46E5');
@@ -187,8 +194,13 @@
     var ok         = safeColor(c.ok,          '#16A34A');
     var ring       = safeColor(c.ring,        rgbaFromHex(accent, 0.30));
     var sealSheen  = safeColor(c.sealSheen,   rgbaFromHex(accent, 0.30));
-    var hlStub     = safeColor(c.hlStub,      rgbaFromHex(stubFg, 0.34));
-    var hlBody     = safeColor(c.hlBody,      rgbaFromHex(accent, 0.26));
+    // hlStub: darken when stubFg is light (contrast rule), lighten when dark.
+    // Old fallback was rgbaFromHex(stubFg,0.34) → white-on-accent, not an accent tint.
+    var hlStubFb   = (stubFg === '#FFFFFF') ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.35)';
+    var hlStub     = safeColor(c.hlStub,      hlStubFb);
+    // hlBody: accent tint — stronger on dark body so it stays visible.
+    var hlBodyFb   = rgbaFromHex(accent, isLightColor(bodyBg) ? 0.26 : 0.40);
+    var hlBody     = safeColor(c.hlBody,      hlBodyFb);
     var sealText2  = safeColor(c.sealText2,   sealText);
     var ribbon     = darkenHex(accent, 0.28);
 
@@ -206,6 +218,9 @@
       // ── Host reset — prevents Shopify theme CSS from leaking through CSS inheritance ──
       // all:initial resets every CSS property; then re-enable what we need to inherit.
       ':host{all:initial;display:block;font-family:inherit;color:inherit;}',
+      // all:initial resets font on form controls — restore inherited font so the
+      // teaser, CTA, and form fields use the store's typeface, not browser UA defaults.
+      'button,input,select{font:inherit}',
 
       // SVG base reset — fill:none;stroke:none means shapes are invisible UNLESS overridden
       // by inline styles (set via el.style.setProperty in svgAttr). This ensures:
@@ -270,7 +285,7 @@
 
       // CTA pill — white-space:nowrap prevents wrapping
       '.ccf-bp-cta-pill{display:inline-flex;align-items:center;gap:5px;',
-      'background:' + accent + ';color:' + btnFg + ';font-size:12px;font-weight:700;',
+      'background:' + accent + ';color:' + btnFg + ';font-size:14px;font-weight:800;',
       'padding:5px 12px;border-radius:20px;position:relative;overflow:hidden;',
       'white-space:nowrap;min-height:42px;box-sizing:border-box;width:fit-content;}',
 
@@ -308,7 +323,7 @@
       '.ccf-bp-stub-heading{font-size:17px;font-weight:800;color:' + stubFg + ';',
       'margin:0 0 4px;line-height:1.3;}',
       '.ccf-bp-stub-sub{font-size:12.5px;color:' + stubFg + ';opacity:0.85;margin:0;line-height:1.45;}',
-      '.ccf-bp-hl{background:' + hlStub + ';border-radius:2px;padding:0 2px;}',
+      '.ccf-bp-hl{background:linear-gradient(transparent 52%,' + hlStub + ' 52%,' + hlStub + ' 92%,transparent 92%);padding:0 2px;}',
 
       // Seal (circular)
       '.ccf-bp-seal{width:74px;height:74px;flex-shrink:0;border-radius:50%;overflow:hidden;',
@@ -337,7 +352,7 @@
       'border-radius:0 0 16px 16px;',
       'mask:' + notchBodyT + ';mask-composite:intersect;',
       '-webkit-mask:' + notchBodyT + ';-webkit-mask-composite:source-in;}',
-      '.ccf-bp-body-hl{background:' + hlBody + ';border-radius:2px;padding:0 2px;}',
+      '.ccf-bp-body-hl{background:linear-gradient(transparent 52%,' + hlBody + ' 52%,' + hlBody + ' 92%,transparent 92%);padding:0 2px;}',
 
       '@supports not (mask:none){',
       '.ccf-bp-stub{mask:none;-webkit-mask:none;border-radius:16px 16px 0 0;}',
@@ -595,7 +610,8 @@
         var unlockTitleEl = document.createElement('p');
         unlockTitleEl.className = 'ccf-bp-unlock-title';
         var unlockTitleText = copy.unlockTitle || ('Unlock ' + pct + '% off your birthday gift');
-        unlockTitleEl.appendChild(highlightText(unlockTitleText, pctNum, daysNum, 'ccf-bp-hl'));
+        // Unlock title is on bodyBg (white/custom), not accent — use body-hl (accent tint).
+        unlockTitleEl.appendChild(highlightText(unlockTitleText, pctNum, daysNum, 'ccf-bp-body-hl'));
         tbody.appendChild(unlockTitleEl);
 
         var ctaPill = document.createElement('span');
