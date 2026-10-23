@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
+import PushUsersPanel from './PushUsersPanel';
 import { useWhatsapp } from '../screens/customerShared';
 
 const CARD_STYLE = {
@@ -390,7 +391,7 @@ export function ChannelDrawer({ shop, channel, initialStatus, onClose, isMobileV
         aria-modal="true"
         style={{
           position: 'fixed', top: 0, right: 0, bottom: 0,
-          width: isMobileView ? '100%' : 480,
+          width: isMobileView ? '100%' : channel === 'push' ? 560 : 480,
           background: '#fff',
           zIndex: 1001,
           boxShadow: '-4px 0 24px rgba(0,0,0,0.12)',
@@ -464,8 +465,8 @@ export function ChannelDrawer({ shop, channel, initialStatus, onClose, isMobileV
           ))}
         </div>
 
-        {/* Origin filter — only for sent items */}
-        {activeTab === 'sent' && (
+        {/* Origin filter — for sent items, except push which has its own filter bar */}
+        {activeTab === 'sent' && channel !== 'push' && (
           <div style={{ display: 'flex', gap: 6, padding: '10px 20px', flexShrink: 0,
                         borderBottom: '1px solid #f3f4f6', flexWrap: 'wrap' }}>
             {[
@@ -505,52 +506,59 @@ export function ChannelDrawer({ shop, channel, initialStatus, onClose, isMobileV
           </div>
         )}
 
-        {/* Items */}
-        <div style={{ flex: 1, overflowY: 'auto' }}>
-          {loadingItems ? (
-            <div style={{ padding: '40px 20px', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
-              Loading…
+        {/* Push Sent tab: dedicated users panel */}
+        {channel === 'push' && activeTab === 'sent' ? (
+          <PushUsersPanel shop={shop} from={from} to={to} />
+        ) : (
+          <>
+            {/* Items */}
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {loadingItems ? (
+                <div style={{ padding: '40px 20px', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+                  Loading…
+                </div>
+              ) : items.length === 0 ? (
+                <div style={{ padding: '40px 20px', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+                  {activeTab === 'pending' ? 'No pending items' : 'Nothing sent in this period'}
+                </div>
+              ) : items.map((item) => (
+                <DrawerItem
+                  key={item.id}
+                  item={item}
+                  channel={channel}
+                  shop={shop}
+                  sendWhatsapp={sendWhatsapp}
+                />
+              ))}
             </div>
-          ) : items.length === 0 ? (
-            <div style={{ padding: '40px 20px', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
-              {activeTab === 'pending' ? 'No pending items' : 'Nothing sent in this period'}
-            </div>
-          ) : items.map((item) => (
-            <DrawerItem
-              key={item.id}
-              item={item}
-              channel={channel}
-              shop={shop}
-              sendWhatsapp={sendWhatsapp}
-            />
-          ))}
-        </div>
 
-        {/* Pagination */}
-        {!loadingItems && total > LIMIT && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        padding: '12px 20px', borderTop: '1px solid #f3f4f6', flexShrink: 0,
-                        fontSize: 12, color: '#6b7280' }}>
-            <span>{page * LIMIT + 1}–{Math.min((page + 1) * LIMIT, total)} of {total}</span>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-                disabled={page === 0}
-                aria-label="Previous page"
-                style={{ padding: '5px 10px', border: '1px solid #e5e7eb', borderRadius: 6,
-                         background: 'none', cursor: page === 0 ? 'not-allowed' : 'pointer',
-                         fontSize: 12, color: page === 0 ? '#d1d5db' : '#374151' }}
-              >← Prev</button>
-              <button
-                onClick={() => setPage((p) => p + 1)}
-                disabled={(page + 1) * LIMIT >= total}
-                aria-label="Next page"
-                style={{ padding: '5px 10px', border: '1px solid #e5e7eb', borderRadius: 6,
-                         background: 'none', cursor: (page + 1) * LIMIT >= total ? 'not-allowed' : 'pointer',
-                         fontSize: 12, color: (page + 1) * LIMIT >= total ? '#d1d5db' : '#374151' }}
-              >Next →</button>
-            </div>
-          </div>
+            {/* Pagination */}
+            {!loadingItems && total > LIMIT && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                            padding: '12px 20px', borderTop: '1px solid #f3f4f6', flexShrink: 0,
+                            fontSize: 12, color: '#6b7280' }}>
+                <span>{page * LIMIT + 1}–{Math.min((page + 1) * LIMIT, total)} of {total}</span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                    disabled={page === 0}
+                    aria-label="Previous page"
+                    style={{ padding: '5px 10px', border: '1px solid #e5e7eb', borderRadius: 6,
+                             background: 'none', cursor: page === 0 ? 'not-allowed' : 'pointer',
+                             fontSize: 12, color: page === 0 ? '#d1d5db' : '#374151' }}
+                  >← Prev</button>
+                  <button
+                    onClick={() => setPage((p) => p + 1)}
+                    disabled={(page + 1) * LIMIT >= total}
+                    aria-label="Next page"
+                    style={{ padding: '5px 10px', border: '1px solid #e5e7eb', borderRadius: 6,
+                             background: 'none', cursor: (page + 1) * LIMIT >= total ? 'not-allowed' : 'pointer',
+                             fontSize: 12, color: (page + 1) * LIMIT >= total ? '#d1d5db' : '#374151' }}
+                  >Next →</button>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </>
