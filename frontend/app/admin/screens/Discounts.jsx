@@ -1743,15 +1743,24 @@ export default function Discounts({ shop }) {
                     );
                   }
 
+                  // Saved state: no stub, just a success card
+                  if (ppPreviewState === 3) {
+                    return (
+                      <div style={{ background: pvBodyBg, borderRadius: 16, filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.08))', padding: '16px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                        <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 44, height: 44 }}>
+                          <div style={{ fontSize: 26 }}>🎁</div>
+                          <div style={{ position: 'absolute', bottom: -2, right: -4, width: 16, height: 16, borderRadius: '50%', background: pvOk, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 9, color: '#fff', fontWeight: 800, border: '2px solid ' + pvBodyBg }}>✓</div>
+                        </div>
+                        <div style={{ fontSize: 11, fontWeight: 600, color: pvOk, textAlign: 'center', lineHeight: 1.4 }}>{pvSaved}</div>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div style={cardStyle}>
                       {stubJsx}
                       <div style={bodyStyle}>
-                        {ppPreviewState === 3 ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center', padding: '8px 0', fontSize: 13, fontWeight: 600, color: pvOk }}>
-                            ✓ {pvSaved}
-                          </div>
-                        ) : (<>
+                        <>
                           {ppPreviewState === 1
                             ? (<>
                                 <div style={{ ...fldStyle, borderColor: pvErr }}>{pvPlaceholder}</div>
@@ -1770,7 +1779,7 @@ export default function Discounts({ shop }) {
                           </div>
                           <div style={{ background: pvAccent, color: pvBtnFg, borderRadius: 8, padding: '7px', textAlign: 'center', fontSize: 11, fontWeight: 700, marginBottom: 3 }}>{pvBtn}</div>
                           <div style={{ textAlign: 'center', fontSize: 10, color: pvMuted }}>{pvSkip}</div>
-                        </>)}
+                        </>
                       </div>
                     </div>
                   );
