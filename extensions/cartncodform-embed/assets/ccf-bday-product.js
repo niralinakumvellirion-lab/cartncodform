@@ -79,7 +79,7 @@
     return e;
   }
 
-  // Gift icon — outline stroked, no fill. strokeColor must be a concrete hex/rgb string.
+  // Gift icon — outline stroked (used for seal, save button). strokeColor must be a concrete hex/rgb string.
   function makeGiftSvg(strokeColor, size) {
     var sz = String(size || 28);
     var s = svgEl('svg', { width: sz, height: sz, viewBox: '0 0 24 24', fill: 'none',
@@ -93,6 +93,42 @@
     return s;
   }
 
+  // Filled gift illustration — used for the teaser (78px) and saved card (56px).
+  // ribbonT: accent darkened 28%; size: SVG width/height px.
+  function makeFilledGiftSvg(ribbonT, size) {
+    var sz = String(size || 78);
+    var s = svgEl('svg', { width: sz, height: sz, viewBox: '0 0 96 96', 'aria-hidden': 'true' });
+    // Ground shadow
+    s.appendChild(svgEl('ellipse', { cx: '48', cy: '89', rx: '29', ry: '4', fill: 'rgba(0,0,0,.16)' }));
+    // Box body (white)
+    s.appendChild(svgEl('rect', { x: '18', y: '46', width: '60', height: '40', rx: '5', fill: '#FFFFFF' }));
+    // Box top shade
+    s.appendChild(svgEl('rect', { x: '18', y: '46', width: '60', height: '7', fill: 'rgba(0,0,0,.10)' }));
+    // Box ribbon stripe
+    s.appendChild(svgEl('rect', { x: '43', y: '46', width: '10', height: '40', fill: ribbonT }));
+    // Lid (white)
+    s.appendChild(svgEl('rect', { x: '13', y: '35', width: '70', height: '14', rx: '4', fill: '#FFFFFF' }));
+    // Lid ribbon stripe
+    s.appendChild(svgEl('rect', { x: '43', y: '35', width: '10', height: '14', fill: ribbonT }));
+    // Bow loop left
+    s.appendChild(svgEl('path', { d: 'M48 34C38 14 20 18 26 30C30 38 44 36 48 34Z', fill: ribbonT }));
+    // Bow loop right (mirror)
+    s.appendChild(svgEl('path', { d: 'M48 34C58 14 76 18 70 30C66 38 52 36 48 34Z', fill: ribbonT }));
+    // Bow centre knot
+    s.appendChild(svgEl('circle', { cx: '48', cy: '34', r: '5', fill: ribbonT }));
+    // Sparkle stars (4-point, white, animated via CSS)
+    var sp1 = svgEl('path', { d: 'M15 11L16.2 13.8L19 15L16.2 16.2L15 19L13.8 16.2L11 15L13.8 13.8Z',
+      fill: 'rgba(255,255,255,0.9)', 'class': 'ccf-bp-sv-sp1' });
+    s.appendChild(sp1);
+    var sp2 = svgEl('path', { d: 'M77 10L78 12.5L80.5 13.5L78 14.5L77 17L76 14.5L73.5 13.5L76 12.5Z',
+      fill: 'rgba(255,255,255,0.8)', 'class': 'ccf-bp-sv-sp2' });
+    s.appendChild(sp2);
+    var sp3 = svgEl('path', { d: 'M83 56L84 58L86 59L84 60L83 62L82 60L80 59L82 58Z',
+      fill: 'rgba(255,255,255,0.85)', 'class': 'ccf-bp-sv-sp3' });
+    s.appendChild(sp3);
+    return s;
+  }
+
   // Check / success icon — circle + checkmark, stroke only.
   function makeCheckSvg(strokeColor) {
     var s = svgEl('svg', { width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none',
@@ -103,10 +139,10 @@
     return s;
   }
 
-  // Arrow icon — used in CTA pill.
+  // Arrow icon — used in CTA pill (16px per spec).
   function makeArrowSvg(strokeColor) {
     var color = strokeColor || '#FFFFFF';
-    var s = svgEl('svg', { width: '14', height: '14', viewBox: '0 0 24 24', fill: 'none',
+    var s = svgEl('svg', { width: '16', height: '16', viewBox: '0 0 24 24', fill: 'none',
       stroke: color, 'stroke-width': '2.5', 'stroke-linecap': 'round',
       'stroke-linejoin': 'round', 'aria-hidden': 'true' });
     s.appendChild(svgEl('path', { d: 'M5 12h14M13 6l6 6-6 6', fill: 'none' }));
@@ -194,53 +230,50 @@
     var ok         = safeColor(c.ok,          '#16A34A');
     var ring       = safeColor(c.ring,        rgbaFromHex(accent, 0.30));
     var sealSheen  = safeColor(c.sealSheen,   rgbaFromHex(accent, 0.30));
-    // hlStub: darken when stubFg is light (contrast rule), lighten when dark.
-    // Old fallback was rgbaFromHex(stubFg,0.34) → white-on-accent, not an accent tint.
     var hlStubFb   = (stubFg === '#FFFFFF') ? 'rgba(0,0,0,0.22)' : 'rgba(255,255,255,0.35)';
     var hlStub     = safeColor(c.hlStub,      hlStubFb);
-    // hlBody: accent tint — stronger on dark body so it stays visible.
     var hlBodyFb   = rgbaFromHex(accent, isLightColor(bodyBg) ? 0.26 : 0.40);
     var hlBody     = safeColor(c.hlBody,      hlBodyFb);
     var sealText2  = safeColor(c.sealText2,   sealText);
-    var ribbon     = darkenHex(accent, 0.28);
+    var accentShadow = rgbaFromHex(accent, 0.40);
 
-    var notchStubR  = 'radial-gradient(circle 11px at 100% 0%,#0000 97%,#000),' +
-                      'radial-gradient(circle 11px at 100% 100%,#0000 97%,#000)';
-    var notchBodyL  = 'radial-gradient(circle 11px at 0% 0%,#0000 97%,#000),' +
-                      'radial-gradient(circle 11px at 0% 100%,#0000 97%,#000)';
+    // r10 notch for teaser (tighter seam), r11 for form (softer corner)
+    var notchStubR  = 'radial-gradient(circle 10px at 100% 0%,#0000 97%,#000),' +
+                      'radial-gradient(circle 10px at 100% 100%,#0000 97%,#000)';
+    var notchBodyL  = 'radial-gradient(circle 10px at 0% 0%,#0000 97%,#000),' +
+                      'radial-gradient(circle 10px at 0% 100%,#0000 97%,#000)';
     var notchStubB  = 'radial-gradient(circle 11px at 0 100%,#0000 97%,#000),' +
                       'radial-gradient(circle 11px at 100% 100%,#0000 97%,#000)';
     var notchBodyT  = 'radial-gradient(circle 11px at 0 0,#0000 97%,#000),' +
                       'radial-gradient(circle 11px at 100% 0,#0000 97%,#000)';
     var dashedColor = (stubFg === '#FFFFFF') ? 'rgba(255,255,255,0.45)' : 'rgba(23,26,34,0.45)';
 
-    return [
-      // ── Host reset — prevents Shopify theme CSS from leaking through CSS inheritance ──
-      // all:initial resets every CSS property; then re-enable what we need to inherit.
-      ':host{all:initial;display:block;font-family:inherit;color:inherit;}',
-      // all:initial resets font on form controls — restore inherited font so the
-      // teaser, CTA, and form fields use the store's typeface, not browser UA defaults.
-      'button,input,select{font:inherit}',
+    // Stub bg: radial glow overlay + dot pattern + accent base
+    var stubBg = 'radial-gradient(circle at 50% 40%,rgba(255,255,255,.22),transparent 65%),' +
+                 'radial-gradient(rgba(255,255,255,.18) 1px,transparent 1.6px) 0 0/14px 14px,' + accent;
+    // Form stub: glow at top-right corner + dots + accent
+    var formStubBg = 'radial-gradient(circle at 92% 8%,rgba(255,255,255,.22),transparent 58%),' +
+                     'radial-gradient(rgba(255,255,255,.18) 1px,transparent 1.6px) 0 0/14px 14px,' + accent;
 
-      // SVG base reset — fill:none;stroke:none means shapes are invisible UNLESS overridden
-      // by inline styles (set via el.style.setProperty in svgAttr). This ensures:
-      //   (a) no shape bleeds when inline styles are absent
-      //   (b) the mutation-check test fails (invalid inline → CSS none → invisible)
+    return [
+      ':host{all:initial;display:block;font-family:inherit;color:inherit;}',
+      'button,input,select{font:inherit}',
       'svg{display:block;flex:none;fill:none;stroke:none;}',
 
-      // ── Card wrapper ─────────────────────────────────────────────────────────
-      '.ccf-bp-card{margin:16px 0;filter:drop-shadow(0 2px 8px rgba(0,0,0,0.12));}',
+      // ── Card wrapper (form) ───────────────────────────────────────────────────
+      '.ccf-bp-card{filter:drop-shadow(0 1px 1.5px rgba(23,26,34,.2)) drop-shadow(0 12px 18px rgba(23,26,34,.16));}',
 
-      // ── CLOSED TEASER ────────────────────────────────────────────────────────
-      '.ccf-bp-teaser{display:flex;width:100%;min-height:132px;border:none;padding:0;',
-      'background:none;cursor:pointer;text-align:left;border-radius:0;',
-      'filter:drop-shadow(0 2px 8px rgba(0,0,0,0.12));}',
+      // ── Teaser wrapper ────────────────────────────────────────────────────────
+      '.ccf-bp-teaser-wrap{margin-top:6px;display:block;width:100%;',
+      'filter:drop-shadow(0 1px 1.5px rgba(23,26,34,.2)) drop-shadow(0 12px 18px rgba(23,26,34,.16));}',
+
+      // ── CLOSED TEASER (row) ───────────────────────────────────────────────────
+      '.ccf-bp-teaser{display:flex;align-items:stretch;width:100%;min-height:132px;',
+      'border:none;padding:0;background:none;cursor:pointer;text-align:left;border-radius:0;}',
       '.ccf-bp-teaser:focus-visible{outline:3px solid ' + ring + ';outline-offset:2px;border-radius:4px;}',
 
-      // Teaser stub (left — accent bg) — fixed 112px, flex:none
-      '.ccf-bp-tstub{background:' + accent + ';',
-      'background-image:radial-gradient(circle 1.5px at 50% 50%,rgba(255,255,255,0.18) 100%,transparent 100%);',
-      'background-size:12px 12px;',
+      // Teaser stub (left — accent bg) — 112px, flex:none
+      '.ccf-bp-tstub{background:' + stubBg + ';',
       'width:112px;flex:none;min-height:132px;box-sizing:border-box;',
       'display:flex;flex-direction:column;align-items:center;',
       'justify-content:center;gap:6px;padding:12px 10px;position:relative;',
@@ -248,15 +281,12 @@
       'mask:' + notchStubR + ';mask-composite:intersect;',
       '-webkit-mask:' + notchStubR + ';-webkit-mask-composite:source-in;}',
 
-      // Ribbon decoration
-      '.ccf-bp-ribbon{position:absolute;left:0;right:0;top:50%;height:8px;',
-      'transform:translateY(-50%);background:' + ribbon + ';opacity:0.55;pointer-events:none;}',
-
-      // Gift art — explicit 78×78 container, flex:none
+      // Gift art wrapper — 78×78, wiggle animation
+      '@keyframes ccfWiggle{0%,100%{transform:rotate(-2.5deg)}50%{transform:rotate(2.5deg)}}',
       '.ccf-bp-gift-wrap{position:relative;display:flex;align-items:center;justify-content:center;',
-      'width:78px;height:78px;flex:none;}',
+      'width:78px;height:78px;flex:none;animation:ccfWiggle 3.4s ease-in-out infinite;}',
 
-      // Sparkles (positioned absolutely around the gift icon)
+      // External sparkle spans (around gift icon)
       '.ccf-bp-sp1{position:absolute;top:-8px;left:-4px;}',
       '.ccf-bp-sp2{position:absolute;top:-4px;right:-6px;}',
       '.ccf-bp-sp3{position:absolute;bottom:-6px;right:-2px;}',
@@ -268,26 +298,37 @@
       '.ccf-bp-sp2{animation:ccfSparkle2 3.1s ease-in-out infinite 0.8s;}',
       '.ccf-bp-sp3{animation:ccfSparkle3 2.8s ease-in-out infinite 1.5s;}',
 
+      // SVG-internal sparkle paths
+      '@keyframes ccfSvSp1{0%,100%{opacity:0.9}50%{opacity:0.2}}',
+      '@keyframes ccfSvSp2{0%,100%{opacity:0.7}50%{opacity:1.0}}',
+      '@keyframes ccfSvSp3{0%,100%{opacity:0.8}70%{opacity:0.1}}',
+      '.ccf-bp-sv-sp1{animation:ccfSvSp1 2.4s ease-in-out infinite;}',
+      '.ccf-bp-sv-sp2{animation:ccfSvSp2 3.1s ease-in-out infinite 0.7s;}',
+      '.ccf-bp-sv-sp3{animation:ccfSvSp3 2.8s ease-in-out infinite 1.4s;}',
+
       // Teaser body (right — box bg)
-      '.ccf-bp-tbody{flex:1;min-width:0;background:' + bodyBg + ';padding:12px 14px;',
-      'display:flex;flex-direction:column;justify-content:center;gap:8px;',
+      '.ccf-bp-tbody{flex:1;min-width:0;background:' + bodyBg + ';',
+      'padding:18px 16px 18px 20px;',
+      'display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:11px;',
       'border-radius:0 16px 16px 0;position:relative;',
       'mask:' + notchBodyL + ';mask-composite:intersect;',
       '-webkit-mask:' + notchBodyL + ';-webkit-mask-composite:source-in;}',
 
       // Dashed vertical seam
-      '.ccf-bp-dashed-v{position:absolute;top:10px;bottom:10px;left:0;display:block;',
+      '.ccf-bp-dashed-v{position:absolute;top:14px;bottom:14px;left:0;display:block;',
       'border-left:2px dashed ' + dashedColor + ';pointer-events:none;}',
 
-      // Unlock title — max 3 lines via line-clamp
-      '.ccf-bp-unlock-title{font-size:17px;font-weight:800;color:' + text + ';line-height:1.3;margin:0;',
+      // Unlock title
+      '.ccf-bp-unlock-title{font-size:17px;font-weight:800;color:' + text + ';',
+      'line-height:1.4;letter-spacing:-0.01em;margin:0;',
       'display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;}',
 
-      // CTA pill — white-space:nowrap prevents wrapping
-      '.ccf-bp-cta-pill{display:inline-flex;align-items:center;gap:5px;',
+      // CTA pill (height 42px, padding 0 16px, radius 11px, gap 8px, arrow 16px)
+      '.ccf-bp-cta-pill{display:inline-flex;align-items:center;gap:8px;',
       'background:' + accent + ';color:' + btnFg + ';font-size:14px;font-weight:800;',
-      'padding:5px 12px;border-radius:20px;position:relative;overflow:hidden;',
-      'white-space:nowrap;min-height:42px;box-sizing:border-box;width:fit-content;}',
+      'height:42px;padding:0 16px;border-radius:11px;position:relative;overflow:hidden;',
+      'white-space:nowrap;box-sizing:border-box;width:fit-content;',
+      'box-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 6px 14px ' + accentShadow + ';}',
 
       '.ccf-bp-cta-pill::before{content:"";position:absolute;inset:0 0 50% 0;',
       'background:linear-gradient(180deg,rgba(255,255,255,0.26) 0%,rgba(255,255,255,0) 100%);',
@@ -299,7 +340,7 @@
       'pointer-events:none;animation:ccfSheen 3.8s ease-in-out infinite;}',
 
       '.ccf-bp-cta-text{position:relative;z-index:1;}',
-      '.ccf-bp-cta-pill svg{position:relative;z-index:1;width:14px;height:14px;flex-shrink:0;}',
+      '.ccf-bp-cta-pill svg{position:relative;z-index:1;width:16px;height:16px;flex-shrink:0;}',
 
       '.ccf-bp-teaser:hover .ccf-bp-cta-pill{filter:brightness(1.08);}',
       '.ccf-bp-teaser:active .ccf-bp-cta-pill{transform:translateY(1px);}',
@@ -313,23 +354,24 @@
       '.ccf-bp-form{opacity:0;transition:opacity 0.3s ease;}',
       '.ccf-bp-form.ccf-bp-visible{opacity:1;}',
 
-      // Gift card stub — top
-      '.ccf-bp-stub{background:' + accent + ';padding:22px 18px 26px;',
-      'display:flex;align-items:center;justify-content:space-between;gap:12px;',
+      // Form stub — top (accent bg, glow + dots)
+      '.ccf-bp-stub{background:' + formStubBg + ';padding:22px 18px 26px;',
+      'display:flex;align-items:center;justify-content:space-between;gap:14px;',
       'border-radius:16px 16px 0 0;position:relative;',
       'mask:' + notchStubB + ';mask-composite:intersect;',
       '-webkit-mask:' + notchStubB + ';-webkit-mask-composite:source-in;}',
       '.ccf-bp-stub-text{flex:1;min-width:0;}',
       '.ccf-bp-stub-heading{font-size:17px;font-weight:800;color:' + stubFg + ';',
-      'margin:0 0 4px;line-height:1.3;}',
-      '.ccf-bp-stub-sub{font-size:12.5px;color:' + stubFg + ';opacity:0.85;margin:0;line-height:1.45;}',
+      'margin:0;line-height:1.35;text-shadow:0 1px 0 rgba(0,0,0,.12);}',
+      '.ccf-bp-stub-sub{font-size:12.5px;color:' + stubFg + ';opacity:0.95;',
+      'margin:5px 0 0;line-height:1.6;}',
       '.ccf-bp-hl{background:linear-gradient(transparent 52%,' + hlStub + ' 52%,' + hlStub + ' 92%,transparent 92%);padding:0 2px;}',
 
-      // Seal (circular)
-      '.ccf-bp-seal{width:74px;height:74px;flex-shrink:0;border-radius:50%;overflow:hidden;',
+      // Seal (ring = box-shadow 0 0 0 4px + drop; inner dashed ring inset 5px)
+      '.ccf-bp-seal{width:74px;height:74px;flex-shrink:0;border-radius:50%;',
       'background:#FFFFFF;display:flex;flex-direction:column;align-items:center;',
       'justify-content:center;transform:rotate(-8deg);position:relative;',
-      'box-shadow:0 2px 8px rgba(0,0,0,0.15);}',
+      'box-shadow:0 0 0 4px ' + ring + ',0 6px 14px rgba(0,0,0,.18);}',
       '.ccf-bp-seal-ring{position:absolute;inset:5px;border-radius:50%;',
       'border:1.5px dashed ' + sealText + ';pointer-events:none;}',
       '@keyframes ccfSealShimmer{0%,100%{opacity:0.3}50%{opacity:0.65}}',
@@ -338,7 +380,7 @@
       '.ccf-bp-seal::after{content:"";position:absolute;inset:0;border-radius:50%;',
       'background:linear-gradient(105deg,transparent 35%,' + sealSheen + ' 50%,transparent 65%);',
       'pointer-events:none;animation:ccfSealSheen 5s ease-in-out infinite 1.2s;}',
-      '.ccf-bp-seal-pct{font-size:13px;font-weight:800;letter-spacing:-0.5px;line-height:1;',
+      '.ccf-bp-seal-pct{font-size:18px;font-weight:800;letter-spacing:-0.02em;line-height:1;',
       'background:linear-gradient(180deg,' + sealText + ' 0%,' + sealText2 + ' 100%);',
       '-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}',
       '.ccf-bp-seal svg{display:block;width:17px;height:17px;flex-shrink:0;}',
@@ -347,35 +389,39 @@
       '.ccf-bp-dashed{position:absolute;left:22px;right:22px;bottom:0;display:block;',
       'border-bottom:2px dashed ' + dashedColor + ';pointer-events:none;}',
 
-      // Body — bottom radius 16px, notch mask cuts top corners
-      '.ccf-bp-body{background:' + bodyBg + ';padding:14px 14px 12px;',
+      // Body — form bottom section (flex column, gap 11px between fields)
+      '.ccf-bp-body{background:' + bodyBg + ';padding:24px 18px 18px;',
       'border-radius:0 0 16px 16px;',
+      'display:flex;flex-direction:column;gap:11px;',
       'mask:' + notchBodyT + ';mask-composite:intersect;',
       '-webkit-mask:' + notchBodyT + ';-webkit-mask-composite:source-in;}',
-      '.ccf-bp-body-hl{background:linear-gradient(transparent 52%,' + hlBody + ' 52%,' + hlBody + ' 92%,transparent 92%);padding:0 2px;}',
+      '.ccf-bp-body-hl{background:linear-gradient(transparent 52%,' + hlBody + ' 52%,' + hlBody + ' 92%,transparent 92%);padding:0 3px;border-radius:3px;}',
 
       '@supports not (mask:none){',
       '.ccf-bp-stub{mask:none;-webkit-mask:none;border-radius:16px 16px 0 0;}',
       '.ccf-bp-body{mask:none;-webkit-mask:none;border-radius:0 0 16px 16px;}}',
 
       // Email input with envelope icon wrapper
-      '.ccf-bp-email-wrap{position:relative;margin-bottom:8px;}',
+      '.ccf-bp-email-wrap{position:relative;}',
       '.ccf-bp-email-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);',
       'pointer-events:none;display:flex;align-items:center;}',
-      '.ccf-bp-email{width:100%;height:44px;font-size:16px;padding:0 12px 0 38px;',
-      'box-sizing:border-box;border:1px solid ' + fldBorder + ';border-radius:8px;',
+      '.ccf-bp-email-icon svg{width:17px;height:17px;}',
+      '.ccf-bp-email{width:100%;height:44px;padding:0 12px 0 38px;font-size:16px;',
+      'box-sizing:border-box;border:1px solid ' + fldBorder + ';border-radius:10px;',
       'background:' + fieldBg + ';color:' + text + ';display:block;',
       'outline:none;transition:border-color 0.15s,box-shadow 0.15s;}',
+      '@media (pointer:fine){.ccf-bp-email,.ccf-bp-select{font-size:13.5px;}}',
       '.ccf-bp-email:hover{border-color:' + ring + ';box-shadow:0 0 0 2px ' + ring + ';}',
       '.ccf-bp-email:focus{border-color:' + accent + ';box-shadow:0 0 0 3px ' + ring + ';}',
 
-      // Month/day row with chevron wrappers
-      '.ccf-bp-date-row{display:flex;gap:8px;margin-bottom:8px;}',
+      // Month/day row
+      '.ccf-bp-date-row{display:flex;gap:8px;}',
       '.ccf-bp-sel-wrap{flex:1;position:relative;}',
-      '.ccf-bp-sel-icon{position:absolute;right:10px;top:50%;transform:translateY(-50%);',
+      '.ccf-bp-sel-wrap-day{flex:none !important;width:96px;}',
+      '.ccf-bp-sel-icon{position:absolute;right:11px;top:50%;transform:translateY(-50%);',
       'pointer-events:none;display:flex;align-items:center;}',
-      '.ccf-bp-select{width:100%;height:44px;font-size:16px;padding:0 32px 0 8px;',
-      'box-sizing:border-box;border:1px solid ' + fldBorder + ';border-radius:8px;',
+      '.ccf-bp-select{width:100%;height:44px;font-size:16px;padding:0 30px 0 8px;',
+      'box-sizing:border-box;border:1px solid ' + fldBorder + ';border-radius:10px;',
       'background:' + fieldBg + ';color:' + text + ';-webkit-appearance:none;appearance:none;',
       'outline:none;transition:border-color 0.15s,box-shadow 0.15s;}',
       '.ccf-bp-select:hover{border-color:' + ring + ';box-shadow:0 0 0 2px ' + ring + ';}',
@@ -384,24 +430,23 @@
       '.ccf-bp-select.ccf-bp-error{border-color:' + err + ' !important;}',
       '.ccf-bp-email.ccf-bp-error{border-color:' + err + ' !important;}',
 
-      // Consent row
-      '.ccf-bp-consent{display:flex;gap:8px;align-items:flex-start;',
-      'margin-bottom:10px;margin-top:2px;}',
+      // Consent row (gap 9px, no extra margins — body uses gap:11px)
+      '.ccf-bp-consent{display:flex;gap:9px;align-items:flex-start;}',
       '.ccf-bp-check{width:18px;height:18px;flex-shrink:0;margin-top:1px;',
       'accent-color:' + accent + ';border:1px solid ' + chkBorder + ';}',
-      '.ccf-bp-consent-text{font-size:12px;color:' + muted + ';line-height:1.4;}',
+      '.ccf-bp-consent-text{font-size:12.5px;color:' + muted + ';line-height:1.4;}',
 
-      // Error box
-      '.ccf-bp-err-box{background:' + errBg + ';border-radius:6px;',
-      'padding:6px 10px;margin-bottom:8px;}',
-      '.ccf-bp-msg-err{font-size:12px;color:' + err + ';margin:0;}',
+      // Error box (12.5px/700, radius 8px, padding 8px 10px)
+      '.ccf-bp-err-box{background:' + errBg + ';border-radius:8px;padding:8px 10px;}',
+      '.ccf-bp-msg-err{font-size:12.5px;font-weight:700;color:' + err + ';margin:0;}',
 
-      // Save button — 48px tall, gift icon left of text
-      '.ccf-bp-btn{width:100%;height:48px;font-size:15px;font-weight:700;',
-      'background:' + accent + ';color:' + btnFg + ';border:none;border-radius:10px;',
-      'cursor:pointer;margin-bottom:8px;position:relative;overflow:hidden;',
-      'display:flex;align-items:center;justify-content:center;gap:7px;',
-      'outline:none;transition:filter 0.15s,transform 0.08s;}',
+      // Save button (14.5px/800, radius 11px, gap 9px, inset highlight + accent shadow)
+      '.ccf-bp-btn{width:100%;height:48px;font-size:14.5px;font-weight:800;',
+      'background:' + accent + ';color:' + btnFg + ';border:none;border-radius:11px;',
+      'cursor:pointer;position:relative;overflow:hidden;',
+      'display:flex;align-items:center;justify-content:center;gap:9px;',
+      'outline:none;transition:filter 0.15s,transform 0.08s;',
+      'box-shadow:inset 0 1px 0 rgba(255,255,255,.30),0 6px 14px ' + accentShadow + ';}',
       '.ccf-bp-btn::before{content:"";position:absolute;inset:0 0 50% 0;',
       'background:linear-gradient(180deg,rgba(255,255,255,0.26) 0%,rgba(255,255,255,0) 100%);',
       'pointer-events:none;}',
@@ -414,21 +459,19 @@
       '.ccf-bp-btn:active{transform:translateY(1px);}',
       '.ccf-bp-btn:focus-visible{outline:3px solid ' + ring + ';outline-offset:2px;}',
 
-      // Skip link — 36px min-height
-      '.ccf-bp-skip{display:block;width:100%;font-size:13px;color:' + muted + ';',
+      // Skip link (12.5px, height 36px, underline)
+      '.ccf-bp-skip{display:block;width:100%;font-size:12.5px;color:' + muted + ';',
       'background:none;border:none;cursor:pointer;text-align:center;padding:8px 0;',
-      'min-height:36px;line-height:20px;',
+      'height:36px;line-height:20px;text-decoration:underline;',
       'outline:none;border-radius:4px;}',
       '.ccf-bp-skip:hover{background:' + ring + ';}',
       '.ccf-bp-skip:focus-visible{outline:3px solid ' + ring + ';outline-offset:2px;}',
 
       // ── SAVED SUCCESS CARD ───────────────────────────────────────────────────
-      // Replaces the whole form card after save. No stub, no notches.
       '.ccf-bp-success-card{background:' + bodyBg + ';border-radius:16px;',
       'filter:drop-shadow(0 2px 8px rgba(0,0,0,0.12));',
       'padding:20px 16px;display:flex;flex-direction:column;align-items:center;gap:10px;',
       'margin:16px 0;}',
-      // Gift + check badge container
       '.ccf-bp-sc-art{position:relative;display:flex;align-items:center;justify-content:center;',
       'width:56px;height:56px;}',
       '.ccf-bp-sc-check-badge{position:absolute;bottom:-2px;right:-4px;',
@@ -436,15 +479,22 @@
       'background:' + ok + ';border:2.5px solid ' + bodyBg + ';',
       'display:flex;align-items:center;justify-content:center;}',
       '.ccf-bp-sc-check-badge svg{width:12px;height:12px;}',
-      // Saved text
-      '.ccf-bp-sc-text{font-size:14px;font-weight:600;color:' + ok + ';',
+      // Saved text: 14.5px/800
+      '.ccf-bp-sc-text{font-size:14.5px;font-weight:800;color:' + ok + ';',
       'text-align:center;line-height:1.4;margin:0;}',
 
-      // Success message (legacy — kept for the open-form success path before card replace)
+      // Legacy success message
       '.ccf-bp-msg-ok{font-size:14px;font-weight:600;color:' + ok + ';',
       'text-align:center;padding:12px 0;display:flex;align-items:center;',
       'justify-content:center;gap:8px;}',
       '.ccf-bp-msg-ok svg{display:block;width:24px;height:24px;flex-shrink:0;}',
+
+      // Known-email display (Part 2: email already known)
+      '.ccf-bp-known-email{font-size:13px;color:' + text + ';',
+      'display:flex;gap:6px;align-items:center;flex-wrap:wrap;line-height:1.4;}',
+      '.ccf-bp-known-email-addr{font-weight:600;}',
+      '.ccf-bp-not-you{background:none;border:none;cursor:pointer;',
+      'font-size:12px;color:' + muted + ';text-decoration:underline;padding:0;line-height:inherit;}',
 
       // Design-mode placeholder
       '.ccf-bp-design-placeholder{border:2px dashed #D4D4D8;border-radius:12px;',
@@ -453,6 +503,8 @@
       // ── Reduced motion ───────────────────────────────────────────────────────
       '@media (prefers-reduced-motion:reduce){',
       '.ccf-bp-sp1,.ccf-bp-sp2,.ccf-bp-sp3{animation:none;}',
+      '.ccf-bp-gift-wrap{animation:none;}',
+      '.ccf-bp-sv-sp1,.ccf-bp-sv-sp2,.ccf-bp-sv-sp3{animation:none;}',
       '.ccf-bp-seal-ring{animation:none;opacity:0.3;}',
       '.ccf-bp-cta-pill::after,.ccf-bp-btn::after{animation:none;}',
       '.ccf-bp-form{transition:none;}',
@@ -498,6 +550,26 @@
   // ── Months helper ───────────────────────────────────────────────────────────
   var MONTHS = ['January','February','March','April','May','June',
     'July','August','September','October','November','December'];
+
+  // ── Part 2: known-email helpers ─────────────────────────────────────────────
+  // Reads the key written by the entry popup after a successful email save.
+  function readKnownEmail() {
+    try {
+      var raw = localStorage.getItem('ccf_known_email');
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (parsed && parsed.email && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(parsed.email)) {
+        return parsed.email;
+      }
+    } catch (e) {}
+    return null;
+  }
+
+  function maskEmail(email) {
+    var at = email.indexOf('@');
+    if (at < 1) return email;
+    return email.slice(0, 1) + '***' + email.slice(at);
+  }
 
   // ── Unique id counter ───────────────────────────────────────────────────────
   var _instanceCount = 0;
@@ -551,9 +623,12 @@
         var uid  = 'ccf-bp-consent-' + shop.replace(/[^a-z0-9]/g, '-') + '-' + (++_instanceCount);
         var formId = 'ccf-bp-form-' + uid;
 
-        var btnFg  = safeColor(colors.btnFg,  '#FFFFFF');
-        var okColor = safeColor(colors.ok,    '#16A34A');
-        var sealStroke = safeColor(colors.sealText, safeColor(colors.accent, '#4F46E5'));
+        var btnFg       = safeColor(colors.btnFg,  '#FFFFFF');
+        var okColor     = safeColor(colors.ok,     '#16A34A');
+        var sealStroke  = safeColor(colors.sealText, safeColor(colors.accent, '#4F46E5'));
+        var ribbonColor = darkenHex(safeColor(colors.accent, '#4F46E5'), 0.28);
+        var knownEmail  = readKnownEmail();
+        var emailIsKnown = !!knownEmail;
 
         // Inject styles into shadow root
         var styleEl = document.createElement('style');
@@ -571,12 +646,7 @@
         var tstub = document.createElement('div');
         tstub.className = 'ccf-bp-tstub';
 
-        var ribbon = document.createElement('div');
-        ribbon.className = 'ccf-bp-ribbon';
-        ribbon.setAttribute('aria-hidden', 'true');
-        tstub.appendChild(ribbon);
-
-        // Gift art wrapper (gift SVG 78×78 + 3 sparkles)
+        // Gift art wrapper — filled illustration + external sparkles + wiggle
         var giftWrap = document.createElement('div');
         giftWrap.className = 'ccf-bp-gift-wrap';
         giftWrap.setAttribute('aria-hidden', 'true');
@@ -594,7 +664,7 @@
         giftWrap.appendChild(sp1);
         giftWrap.appendChild(sp2);
         giftWrap.appendChild(sp3);
-        giftWrap.appendChild(makeGiftSvg('#FFFFFF', 78));
+        giftWrap.appendChild(makeFilledGiftSvg(ribbonColor, 78));
         tstub.appendChild(giftWrap);
         teaserBtn.appendChild(tstub);
 
@@ -624,7 +694,12 @@
         tbody.appendChild(ctaPill);
 
         teaserBtn.appendChild(tbody);
-        shadow.appendChild(teaserBtn);
+
+        // Wrap teaser in filter/margin container
+        var teaserWrap = document.createElement('div');
+        teaserWrap.className = 'ccf-bp-teaser-wrap';
+        teaserWrap.appendChild(teaserBtn);
+        shadow.appendChild(teaserWrap);
 
         // ── OPEN FORM CONTAINER ──────────────────────────────────────────────
         var formContainer = document.createElement('div');
@@ -752,7 +827,9 @@
           updateDayOptions(parseInt(monthSel.value, 10));
         });
 
-        dateRow.appendChild(makeSelWrap(daySel));
+        var dayWrap = makeSelWrap(daySel);
+        dayWrap.classList.add('ccf-bp-sel-wrap-day');
+        dateRow.appendChild(dayWrap);
         body.appendChild(dateRow);
 
         // Consent row
@@ -772,6 +849,33 @@
         consentRow.appendChild(check);
         consentRow.appendChild(consentLbl);
         body.appendChild(consentRow);
+
+        // Part 2: if email already known from popup, show masked email + "Not you?" link
+        if (emailIsKnown) {
+          emailWrap.style.display = 'none';
+          check.checked = true; // pre-tick consent
+
+          var knownEmailRow = document.createElement('div');
+          knownEmailRow.className = 'ccf-bp-known-email';
+          knownEmailRow.appendChild(document.createTextNode('Gift will be sent to '));
+          var knownEmailAddr = document.createElement('span');
+          knownEmailAddr.className = 'ccf-bp-known-email-addr';
+          knownEmailAddr.textContent = maskEmail(knownEmail);
+          knownEmailRow.appendChild(knownEmailAddr);
+          var notYouBtn = document.createElement('button');
+          notYouBtn.type = 'button';
+          notYouBtn.className = 'ccf-bp-not-you';
+          notYouBtn.textContent = 'Not you?';
+          notYouBtn.addEventListener('click', function () {
+            try { localStorage.removeItem('ccf_known_email'); } catch (e) {}
+            emailIsKnown = false;
+            knownEmailRow.style.display = 'none';
+            emailWrap.style.display = '';
+            emailInput.focus();
+          });
+          knownEmailRow.appendChild(notYouBtn);
+          body.insertBefore(knownEmailRow, consentRow);
+        }
 
         // Error box
         var errBox = document.createElement('div');
@@ -813,9 +917,12 @@
         // ── Teaser → form transition ─────────────────────────────────────────
         teaserBtn.addEventListener('click', function () {
           teaserBtn.setAttribute('aria-expanded', 'true');
-          teaserBtn.style.display = 'none';
+          teaserWrap.style.display = 'none';
           formContainer.classList.add('ccf-bp-visible');
-          setTimeout(function () { emailInput.focus(); }, 50);
+          // If email already known, focus month first; otherwise focus email
+          setTimeout(function () {
+            if (emailIsKnown) { monthSel.focus(); } else { emailInput.focus(); }
+          }, 50);
         });
 
         // ── Validation + submit ──────────────────────────────────────────────
@@ -823,18 +930,19 @@
           errBox.style.display = 'none';
           errMsg.textContent = '';
 
-          var emailVal   = emailInput.value.trim().toLowerCase();
+          // Use known email if the input is hidden; else read from field
+          var emailVal   = emailIsKnown ? knownEmail : emailInput.value.trim().toLowerCase();
           var monthVal   = parseInt(monthSel.value, 10);
           var dayVal     = parseInt(daySel.value, 10);
           var consentVal = check.checked;
           var hasError   = false;
 
-          if (!emailVal || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(emailVal)) {
+          if (!emailIsKnown && (!emailVal || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(emailVal))) {
             emailInput.classList.add('ccf-bp-error');
             errMsg.textContent = copy.emailError || 'Enter a valid email and tick the box.';
             errBox.style.display = '';
             hasError = true;
-          } else {
+          } else if (!emailIsKnown) {
             emailInput.classList.remove('ccf-bp-error');
           }
 
@@ -898,7 +1006,7 @@
               scArt.appendChild(scSp1);
               scArt.appendChild(scSp2);
               scArt.appendChild(scSp3);
-              scArt.appendChild(makeGiftSvg(okColor, 56));
+              scArt.appendChild(makeFilledGiftSvg(okColor, 56));
               // Check badge
               var scBadge = document.createElement('div');
               scBadge.className = 'ccf-bp-sc-check-badge';
