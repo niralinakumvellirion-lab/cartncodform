@@ -101,4 +101,13 @@ scheduledJobSchema.index(
   }
 );
 
+// Dashboard channel-stats aggregations filter on all four fields — without
+// this index they scan by { shopDomain, status, runAt } then filter channel + sentAt.
+scheduledJobSchema.index({ shopDomain: 1, channel: 1, status: 1, sentAt: 1 });
+
+// Festival click attribution: find a specific subscriber's own send-log row
+// to update its outcome='clicked'. Compound covers the exact-match query
+// { shopDomain, festivalQueueId, subscriptionToken }.
+scheduledJobSchema.index({ shopDomain: 1, festivalQueueId: 1, subscriptionToken: 1 });
+
 module.exports = mongoose.model('ScheduledJob', scheduledJobSchema);

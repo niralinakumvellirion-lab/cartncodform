@@ -47,6 +47,10 @@ const festivalQueueSchema = new mongoose.Schema({
   // chose to resend a previously-sent notification on a new date). The original
   // sent doc is never modified; this is a fresh draft copy of its content.
   isResend: { type: Boolean, default: false },
+  // True when this broadcast was sent with a ?ccf_job tracking URL so that
+  // click / revisit attribution is available. False/absent for rows created
+  // before this feature was deployed — those are reported as "not_tracked".
+  tracked: { type: Boolean, default: false },
 }, { timestamps: true });
 
 module.exports = mongoose.model('FestivalQueue', festivalQueueSchema);
