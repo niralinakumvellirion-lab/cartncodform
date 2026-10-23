@@ -84,8 +84,11 @@ router.post('/', async (req, res) => {
     if (body.ccf_job) {
       (async () => {
         try {
+          const mongoose = require('mongoose');
           const AttributedEvent = require('../models/AttributedEvent');
           const Profile = require('../models/Profile');
+          const ScheduledJob = require('../models/ScheduledJob');
+          const FestivalQueue = require('../models/FestivalQueue');
 
           let profileId = null;
           let email = null;
@@ -100,12 +103,39 @@ router.post('/', async (req, res) => {
             }
           }
 
+          // Resolve whether ccf_job is a ScheduledJob _id or a FestivalQueue _id.
+          // Two index lookups at most per batch — both use _id (always indexed).
+          let attrJobId = null;
+          let attrFestivalQueueId = null;
+          if (mongoose.Types.ObjectId.isValid(body.ccf_job)) {
+            const schedJob = await ScheduledJob.findOne(
+              { _id: body.ccf_job, shopDomain: shop }, '_id'
+            ).lean();
+            if (schedJob) {
+              attrJobId = schedJob._id;
+            } else {
+              const festDoc = await FestivalQueue.findOne(
+                { _id: body.ccf_job, shopDomain: shop }, '_id'
+              ).lean();
+              if (festDoc) attrFestivalQueueId = festDoc._id;
+            }
+          }
+
+          if (!attrJobId && !attrFestivalQueueId) {
+            // ccf_job didn't resolve to any known doc for this shop.
+            // Fallback: write it as a raw jobId (legacy behaviour — keeps
+            // old clients and test fixtures that use non-ObjectId strings
+            // working without changes on either end).
+            attrJobId = body.ccf_job;
+          }
+
           const rows = events
             .filter((e) => ATTRIBUTION_TYPE_MAP[e.type])
             .map((e) => ({
               shopDomain: shop,
               profileId: profileId || undefined,
-              jobId: body.ccf_job,
+              jobId: attrJobId || undefined,
+              festivalQueueId: attrFestivalQueueId || undefined,
               sessionId: sessionId || undefined,
               email: email || undefined,
               eventType: ATTRIBUTION_TYPE_MAP[e.type],

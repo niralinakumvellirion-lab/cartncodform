@@ -924,7 +924,13 @@ async function processFestivalQueue() {
         }
 
         // ── PUSH (or missing channel) ───────────────────────────────────────
-        const clickUrl = buildClickUrl(item.shopDomain, item.targetType, item.productHandle);
+        // Append ?ccf_src=push&ccf_job=<FestivalQueue._id> so the storefront
+        // can record click + revisit attribution for this broadcast.
+        const clickBase = buildClickUrl(item.shopDomain, item.targetType, item.productHandle);
+        const clickUrl = clickBase + (clickBase.includes('?') ? '&' : '?') +
+          'ccf_src=push&ccf_job=' + item._id.toString();
+        // Mark as tracked so the users API can distinguish new rows from old.
+        FestivalQueue.findByIdAndUpdate(item._id, { tracked: true }).catch(() => {});
 
         const rawMobile = item.mobileImageUrl || '';
         const rawDesktop = item.desktopImageUrl || '';

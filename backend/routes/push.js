@@ -10,6 +10,7 @@ const { requireAuth, requireNotSuspended } = require('../middleware/requireOwner
 const { upsertProfile } = require('../services/profileService');
 const { Resend } = require('resend');
 const { uploadToCloudinary } = require('../utils/cloudinary');
+const FestivalQueue = require('../models/FestivalQueue');
 
 // Same safe-fallback pattern as utils/email.js: the Resend constructor
 // throws if the key is falsy, which would otherwise take this whole route
@@ -727,12 +728,35 @@ router.post('/send-store', requireAuth, requireNotSuspended, async (req, res) =>
       return res.status(400).json({ error: 'title and body required' });
     }
 
-    // Absolute click-through URL — FCM's fcm_options.link (and this
-    // function's own data.url) both require a fully-qualified URL, not
-    // the bare '/' this route used to pass. targetType/productHandle are
-    // optional; buildClickUrl() falls back to the shop root when either
-    // is missing or targetType isn't 'product'.
-    const clickUrl = buildClickUrl(shop, targetType, productHandle);
+    // Create a FestivalQueue doc so every manual broadcast has a stable id
+    // for click / revisit attribution (?ccf_job=<_id> in the notification URL).
+    // Created as status='sent'/'tracked:true' immediately — this is a
+    // synchronous broadcast, not a queued item. Failure here is not fatal:
+    // the notification still goes out; only attribution is lost.
+    let manualFqId = null;
+    try {
+      const manualFq = await FestivalQueue.create({
+        shopDomain: shop,
+        title,
+        body,
+        scheduledAt: new Date(),
+        status: 'sent',
+        sentAt: new Date(),
+        channel: 'push',
+        tracked: true,
+      });
+      manualFqId = manualFq._id;
+    } catch (fqErr) {
+      console.error('[send-store] FestivalQueue create error:', fqErr.message);
+    }
+
+    // Absolute click-through URL with ccf_job tracking when a FestivalQueue
+    // id was obtained. Falls back to untracked URL on FestivalQueue failure.
+    const clickBase = buildClickUrl(shop, targetType, productHandle);
+    const clickUrl = manualFqId
+      ? clickBase + (clickBase.includes('?') ? '&' : '?') +
+        'ccf_src=push&ccf_job=' + manualFqId.toString()
+      : clickBase;
 
     // FCM only accepts a real, fetchable image URL — a base64 data: URI
     // (what the Dashboard editor's file upload produces, see
@@ -768,12 +792,11 @@ router.post('/send-store', requireAuth, requireNotSuspended, async (req, res) =>
       shop, title, body, clickUrl, desktopImage, false, null, false, true
     );
 
-    // Per-recipient send log (queue-notification-detail-audit.txt finding
-    // #2) — same helper processFestivalQueue uses, festivalQueueId null
-    // since this is a manual Send Now broadcast, not a queued item.
+    // Per-recipient send log. Pass manualFqId so each ScheduledJob row links
+    // back to the FestivalQueue doc (enables festival click attribution lookup).
     await logBroadcastSend({
       shopDomain: shop,
-      festivalQueueId: null,
+      festivalQueueId: manualFqId,
       signalType: 'manual',
       title,
       body,
@@ -784,7 +807,7 @@ router.post('/send-store', requireAuth, requireNotSuspended, async (req, res) =>
     });
     await logBroadcastSend({
       shopDomain: shop,
-      festivalQueueId: null,
+      festivalQueueId: manualFqId,
       signalType: 'manual',
       title,
       body,
