@@ -168,7 +168,8 @@ describe('ccfRenderBirthdayForm — direct', () => {
 
     expect(saveBtn.disabled).toBe(true);
     expect(saveBtn.textContent).toMatch(/saving/i);
-    resolveFetch({ ok: true });
+    // Reject so the auto-close setTimeout is never scheduled (prevents timer leak)
+    resolveFetch = null; // abandon the pending promise — it GC's without settling
     // restore
     global.fetch = jest.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({}) });
   });
@@ -185,6 +186,9 @@ describe('ccfRenderBirthdayForm — direct', () => {
   });
 
   test('success state: "You\'re all set" shown after fetch resolves', async () => {
+    // Use fake timers from the start so the 2000ms auto-close setTimeout is
+    // captured as a fake timer and never leaks into subsequent tests.
+    jest.useFakeTimers();
     const container = document.createElement('div');
     document.body.appendChild(container);
 
@@ -196,13 +200,14 @@ describe('ccfRenderBirthdayForm — direct', () => {
     daySel.value   = '10';
 
     container.querySelector('.ccf-bd-btn-primary').click();
-    await new Promise(r => setTimeout(r, 0)); // flush fetch microtask
+    // Flush the fetch .then() microtask using a real Promise tick, then resume
+    await Promise.resolve();
+    await Promise.resolve(); // second tick in case chain is longer
 
     expect(container.querySelector('.ccf-bd-success')).not.toBeNull();
     expect(container.textContent).toMatch(/you.re all set/i);
     expect(onDoneCalled).toBe(false); // auto-closes after 2000ms, not instantly
 
-    jest.useFakeTimers();
     jest.advanceTimersByTime(2100);
     jest.useRealTimers();
   });
