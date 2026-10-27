@@ -973,7 +973,7 @@ export default function PushUsersPanel({ shop, from, to }) {
         {viewMode === 'all' && !isNarrow && (
           <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
             <LeftMenu active={menuTab} onChange={(k) => { setMenuTab(k); setExpandedKey(null); }} isNarrow={false} />
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', paddingBottom: 96 }}>
               {renderList()}
             </div>
           </div>
@@ -981,13 +981,13 @@ export default function PushUsersPanel({ shop, from, to }) {
         {viewMode === 'all' && isNarrow && (
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <LeftMenu active={menuTab} onChange={(k) => { setMenuTab(k); setExpandedKey(null); }} isNarrow={true} />
-            <div style={{ flex: 1, overflowY: 'auto' }}>
+            <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 96 }}>
               {renderList()}
             </div>
           </div>
         )}
         {viewMode === 'revisited' && (
-          <div style={{ flex: 1, overflowY: 'auto' }}>
+          <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 96 }}>
             {renderList()}
           </div>
         )}

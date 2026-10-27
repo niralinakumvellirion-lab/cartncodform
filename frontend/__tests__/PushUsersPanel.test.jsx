@@ -363,6 +363,21 @@ test('B16: re-expanding a row after collapse does not trigger a second fetch', a
   expect(apiGet).not.toHaveBeenCalled();
 });
 
+// ─── B18: scroll container has Sidekick clearance padding ───────────────────
+
+test('B18: scroll container has paddingBottom >= 88px (Sidekick clearance)', async () => {
+  mockApiGetResolve(USERS_RESPONSE);
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
+
+  // In jsdom, innerWidth defaults to 1024 > 520, so isNarrow=false and viewMode='all'
+  // → the desktop scroll container (overflowY:auto) is rendered
+  const allStyled = Array.from(document.querySelectorAll('[style]'));
+  const scrollContainer = allStyled.find(el => el.style.overflowY === 'auto');
+  expect(scrollContainer).toBeTruthy();
+  expect(parseInt(scrollContainer.style.paddingBottom || '0', 10)).toBeGreaterThanOrEqual(88);
+});
+
 // ─── B17: includeVia NOT sent in Count mode or Revisited view ─────────────────
 
 test('B17: includeVia=1 is absent in Count mode and in Revisited users view', async () => {
