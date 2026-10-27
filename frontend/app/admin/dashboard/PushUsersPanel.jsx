@@ -6,14 +6,12 @@ const FG = '#4f46e5';
 const BG = '#eef2ff';
 const LIMIT = 20;
 
-// All push notification type labels — matches backend SIGNAL_LABELS in pushUsers.js
 const TYPE_LABELS = {
   cart_abandon:      'Cart reminder',
   browse_abandon:    'Browse reminder',
-  checkout_abandon:  'Checkout reminder',
+  price_drop:        'Price drop',
+  back_in_stock:     'Back in stock',
   high_intent:       'High intent',
-  price_hesitation:  'Price hesitation',
-  post_purchase_d3:  'Post-purchase',
   lapsing:           'Going quiet',
   email_capture:     'Email capture',
   cod_to_prepaid:    'Prepaid upgrade',
@@ -21,57 +19,41 @@ const TYPE_LABELS = {
   welcome:           'Welcome',
   festival:          'Campaign',
   manual:            'Manual send',
-  followup:          'Follow-up',
-  order:             'Order message',
+  order_confirm:     'Order confirm',
+  order_shipped:     'Shipped',
+  order_delivered:   'Delivered',
 };
-const KNOWN_TYPES = Object.entries(TYPE_LABELS).map(([type, label]) => ({ type, label }));
 
 function fmtTime(iso) {
-  if (!iso) return '';
+  if (!iso) return '—';
   const d = new Date(iso);
-  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ', ' +
-    d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true })
-      .toLowerCase().replace(' am', ' am').replace(' pm', ' pm');
-}
-
-function fmtDateOnly(iso) {
-  if (!iso) return '';
-  return new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+  return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: true });
 }
 
 function rangeStr(from, to) {
   if (!from && !to) return 'All time';
-  if (from && to) return `${fmtDateOnly(from)} – ${fmtDateOnly(to)}`;
-  return from ? `From ${fmtDateOnly(from)}` : `Until ${fmtDateOnly(to)}`;
+  const fmt = (s) => s ? new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '…';
+  return `${fmt(from)} – ${fmt(to)}`;
 }
 
 function initials(name) {
-  if (!name) return '?';
-  const p = name.trim().split(/\s+/);
-  return (p[0][0] + (p.length > 1 ? p[p.length - 1][0] : '')).toUpperCase();
+  if (!name || name === 'Anonymous visitor') return '?';
+  return name.split(' ').slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('');
 }
 
 function tlabel(type, label) {
-  return label || TYPE_LABELS[type] || (type ? type.replace(/_/g, ' ') : 'Other');
+  return label || TYPE_LABELS[type] || type || 'Unknown';
 }
 
-// ─── Icons ───────────────────────────────────────────────────────────────────
+// ─── Icons ────────────────────────────────────────────────────────────────────
 
 function PersonIcon() {
   return (
-    <svg width={18} height={18} viewBox="0 0 24 24" fill="none"
-      stroke={FG} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
       <circle cx={12} cy={7} r={4}/>
-    </svg>
-  );
-}
-
-function ChevronRightIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none"
-      stroke="#9ca3af" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <polyline points="9 18 15 12 9 6"/>
     </svg>
   );
 }
@@ -97,16 +79,6 @@ function SearchIcon() {
   );
 }
 
-function ArrowLeftIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <line x1={19} y1={12} x2={5} y2={12}/>
-      <polyline points="12 19 5 12 12 5"/>
-    </svg>
-  );
-}
-
 function CountIcon() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none"
@@ -124,6 +96,16 @@ function RevisitIcon() {
       stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <polyline points="1 4 1 10 7 10"/>
       <path d="M3.51 15a9 9 0 1 0 .49-3.51"/>
+    </svg>
+  );
+}
+
+function ChevronDownIcon({ expanded }) {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"
+      style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.15s' }}>
+      <polyline points="6 9 12 15 18 9"/>
     </svg>
   );
 }
@@ -177,7 +159,7 @@ function Pagination({ page, total, onPage }) {
                   padding: '12px 20px', borderTop: '1px solid #f3f4f6', flexShrink: 0,
                   fontSize: 12, color: '#6b7280' }}>
       <span>{page * LIMIT + 1}–{Math.min((page + 1) * LIMIT, total)} of {total}</span>
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 6 }}>
         <button onClick={() => onPage((p) => Math.max(0, p - 1))} disabled={prevDisabled}
           aria-label="Previous page"
           style={{ padding: '5px 10px', border: '1px solid #e5e7eb', borderRadius: 6,
@@ -193,503 +175,584 @@ function Pagination({ page, total, onPage }) {
   );
 }
 
-// ─── User row (Sent / All users view) ────────────────────────────────────────
+// ─── Anon subtitle helper ─────────────────────────────────────────────────────
 
-function UserRow({ user, onSelect, rowRef }) {
-  const isAnon = !user.email;
-  const nameText = user.name || 'Anonymous visitor';
-  const subtitle = isAnon
-    ? (user.deviceType
-        ? user.deviceType.charAt(0).toUpperCase() + user.deviceType.slice(1) + ' visitor'
-        : 'Anonymous visitor')
-    : user.email;
+function anonSubtitle(userKey, deviceType) {
+  const last4 = userKey.slice(-4);
+  let type = 'Device';
+  if (deviceType) {
+    const dt = deviceType.toLowerCase();
+    if (dt === 'desktop' || dt === 'web') type = 'Desktop';
+    else type = 'Mobile';
+  }
+  return `${type} - ...${last4}`;
+}
+
+// ─── Left vertical menu (Count / Revisit) ────────────────────────────────────
+
+const MENU_ITEMS = [
+  { key: 'count',   label: 'Count',   Icon: CountIcon },
+  { key: 'revisit', label: 'Revisit', Icon: RevisitIcon },
+];
+
+function LeftMenu({ active, onChange, isNarrow }) {
+  const btns = useRef([]);
+
+  const handleKey = useCallback((e, i) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
+      e.preventDefault();
+      btns.current[(i + 1) % MENU_ITEMS.length]?.focus();
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      btns.current[(i - 1 + MENU_ITEMS.length) % MENU_ITEMS.length]?.focus();
+    }
+  }, []);
+
+  if (isNarrow) {
+    return (
+      <div
+        role="tablist"
+        aria-orientation="horizontal"
+        style={{
+          display: 'flex', gap: 4, padding: '8px 16px',
+          borderBottom: '1px solid #f3f4f6', flexShrink: 0,
+        }}
+      >
+        {MENU_ITEMS.map(({ key, label, Icon }, i) => {
+          const isActive = active === key;
+          return (
+            <button
+              key={key}
+              ref={(el) => { btns.current[i] = el; }}
+              role="tab"
+              aria-selected={isActive}
+              tabIndex={isActive ? 0 : -1}
+              onClick={() => onChange(key)}
+              onKeyDown={(e) => handleKey(e, i)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                height: 36, padding: '0 14px', borderRadius: 999,
+                background: isActive ? BG : 'none',
+                color: isActive ? FG : '#6b7280',
+                border: 'none', cursor: 'pointer',
+                fontSize: 13, fontWeight: 600,
+              }}
+            >
+              <Icon />{label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
-    <button
-      ref={rowRef}
-      onClick={() => onSelect(user)}
+    <div
+      role="tablist"
+      aria-orientation="vertical"
       style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        width: '100%', height: 64, padding: '0 20px',
-        background: 'none', border: 'none', borderBottom: '1px solid #f9fafb',
-        cursor: 'pointer', textAlign: 'left', outline: 'none',
+        width: 120, flexShrink: 0,
+        borderRight: '1px solid #f3f4f6',
+        display: 'flex', flexDirection: 'column',
+        padding: '12px 0', gap: 2,
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = '#f9fafb'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-      onFocus={(e) => { e.currentTarget.style.boxShadow = `inset 0 0 0 2px ${FG}`; }}
-      onBlur={(e) => { e.currentTarget.style.boxShadow = 'none'; }}
-      aria-label={`View notifications for ${nameText}`}
     >
-      <Avatar name={user.name} isAnon={isAnon} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, color: '#111827',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {nameText}
-        </div>
-        <div style={{ fontSize: 12.5, color: '#6b7280', marginTop: 1,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {subtitle}
-        </div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-        <span style={{ fontSize: 11.5, color: '#6b7280' }}>
-          {user.lastSentAt ? fmtTime(user.lastSentAt) : '—'}
-        </span>
-        <ChevronRightIcon />
-      </div>
-    </button>
+      {MENU_ITEMS.map(({ key, label, Icon }, i) => {
+        const isActive = active === key;
+        return (
+          <button
+            key={key}
+            ref={(el) => { btns.current[i] = el; }}
+            role="tab"
+            aria-selected={isActive}
+            tabIndex={isActive ? 0 : -1}
+            onClick={() => onChange(key)}
+            onKeyDown={(e) => handleKey(e, i)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              height: 40, padding: '0 16px',
+              borderRadius: 10,
+              background: isActive ? BG : 'none',
+              color: isActive ? FG : '#6b7280',
+              border: 'none',
+              borderLeft: `3px solid ${isActive ? FG : 'transparent'}`,
+              cursor: 'pointer',
+              fontSize: 13, fontWeight: 600,
+              textAlign: 'left',
+            }}
+            onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = '#f3f4f6'; }}
+            onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'none'; }}
+          >
+            <Icon />{label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
-// ─── Revisited user row ───────────────────────────────────────────────────────
+// ─── Revisit status chip ──────────────────────────────────────────────────────
 
-function RevisitedUserRow({ user, onSelect, rowRef }) {
-  const isAnon = !user.email;
-  const nameText = user.name || 'Anonymous visitor';
-  const subtitle = isAnon
-    ? (user.deviceType
-        ? user.deviceType.charAt(0).toUpperCase() + user.deviceType.slice(1) + ' visitor'
-        : 'Anonymous visitor')
-    : user.email;
-
+function RevisitChip({ revisited }) {
+  let bg, color, text;
+  if (revisited === true) {
+    bg = '#dcfce7'; color = '#16a34a'; text = 'Revisited';
+  } else if (revisited === 'not_tracked') {
+    bg = '#fef3c7'; color = '#92400e'; text = 'Not tracked';
+  } else {
+    bg = '#f3f4f6'; color = '#6b7280'; text = 'No revisit yet';
+  }
   return (
-    <button
-      ref={rowRef}
-      onClick={() => onSelect(user)}
-      style={{
-        display: 'flex', alignItems: 'flex-start', gap: 12,
-        width: '100%', padding: '14px 20px', minHeight: 64,
-        background: 'none', border: 'none', borderBottom: '1px solid #f9fafb',
-        cursor: 'pointer', textAlign: 'left', outline: 'none',
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = '#f9fafb'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-      onFocus={(e) => { e.currentTarget.style.boxShadow = `inset 0 0 0 2px ${FG}`; }}
-      onBlur={(e) => { e.currentTarget.style.boxShadow = 'none'; }}
-      aria-label={`View revisit details for ${nameText}`}
-    >
-      <div style={{ marginTop: 2, flexShrink: 0 }}>
-        <Avatar name={user.name} isAnon={isAnon} />
-      </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
-          <div style={{ minWidth: 0, flex: 1, marginRight: 8 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#111827',
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {nameText}
-            </div>
-            <div style={{ fontSize: 12.5, color: '#6b7280', marginTop: 1,
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {subtitle}
-            </div>
-          </div>
-          <div style={{ flexShrink: 0, textAlign: 'right' }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
-              {user.revisits} visit{user.revisits !== 1 ? 's' : ''}
-            </div>
-            <div style={{ fontSize: 11.5, color: '#6b7280', marginTop: 1 }}>
-              Last {fmtTime(user.lastVisitAt)}
-            </div>
-          </div>
-        </div>
-        {user.cameBackVia && user.cameBackVia.length > 0 && (
-          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: '#9ca3af', marginRight: 2 }}>Came back through</span>
-            {user.cameBackVia.map((v) => (
-              <span key={v.type} style={{
-                fontSize: 11, padding: '2px 7px', borderRadius: 999,
-                background: BG, color: FG, fontWeight: 600,
-              }}>
-                {tlabel(v.type, v.label)} ×{v.count}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    </button>
+    <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 999,
+                   background: bg, color, fontWeight: 600, whiteSpace: 'nowrap' }}>
+      {text}
+    </span>
   );
 }
 
-// ─── Count panel ─────────────────────────────────────────────────────────────
+// ─── Count expand panel (inset) ───────────────────────────────────────────────
 
-function CountPanel({ data, loading, error, rLabel }) {
+function CountExpandPanel({ data, loading, error, onRetry }) {
   if (loading) {
     return (
-      <div style={{ padding: 24 }}>
+      <div style={{ padding: 12 }}>
         {[1, 2, 3].map((i) => (
-          <div key={i} style={{ marginBottom: 16 }}>
-            <div style={{ width: '30%', height: 28, background: '#f3f4f6', borderRadius: 6, marginBottom: 8 }} />
-            <div style={{ width: '60%', height: 10, background: '#f3f4f6', borderRadius: 4 }} />
+          <div key={i} style={{ marginBottom: 12 }}>
+            <div style={{ width: '35%', height: 10, background: '#e5e7eb', borderRadius: 4, marginBottom: 6 }} />
+            <div style={{ width: '60%', height: 6, background: '#e5e7eb', borderRadius: 999 }} />
           </div>
         ))}
       </div>
     );
   }
   if (error) {
-    return <div style={{ padding: 24, fontSize: 13, color: '#ef4444' }}>Failed to load count data.</div>;
+    return (
+      <div style={{ padding: 12, fontSize: 12, color: '#ef4444' }}>
+        Failed to load.{' '}
+        <button onClick={onRetry}
+          style={{ color: FG, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, padding: 0 }}>
+          Retry
+        </button>
+      </div>
+    );
   }
   if (!data) return null;
 
   const max = Math.max(...(data.byType || []).map((t) => t.count), 1);
 
   return (
-    <div style={{ padding: 24 }}>
-      <div style={{ fontSize: 28, fontWeight: 800, color: FG, lineHeight: 1 }}>{data.total}</div>
-      <div style={{ fontSize: 13, color: '#6b7280', marginTop: 4 }}>notifications sent</div>
-      <div style={{ fontSize: 11.5, color: '#9ca3af', marginTop: 2 }}>{rLabel}</div>
-
+    <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
       {data.byType && data.byType.length > 0 ? (
-        <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {data.byType.map((t) => (
-            <div key={t.type}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
-                <TypePill type={t.type} label={t.label} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>{t.count}</span>
-              </div>
-              <div style={{ height: 6, background: '#f3f4f6', borderRadius: 999, overflow: 'hidden' }}>
-                <div style={{
-                  height: '100%', borderRadius: 999,
-                  width: `${(t.count / max) * 100}%`,
-                  background: BG,
-                }} />
-              </div>
+        data.byType.map((t) => (
+          <div key={t.type}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+              <TypePill type={t.type} label={t.label} />
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>{t.count}</span>
             </div>
-          ))}
-        </div>
+            <div style={{ height: 6, background: '#e5e7eb', borderRadius: 999, overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 999,
+                width: `${(t.count / max) * 100}%`,
+                background: FG,
+              }} />
+            </div>
+          </div>
+        ))
       ) : (
-        <div style={{ marginTop: 20, fontSize: 13, color: '#9ca3af' }}>No notifications in this period</div>
+        <div style={{ fontSize: 12, color: '#9ca3af' }}>No notifications in this period</div>
       )}
     </div>
   );
 }
 
-// ─── Revisit panel ────────────────────────────────────────────────────────────
+// ─── Revisit expand panel (notifications list) ────────────────────────────────
 
-function RevisitPanel({ data, loading, error, page, onPage }) {
+function RevisitExpandPanel({ data, loading, error, page, onPage, onRetry }) {
   if (loading) {
     return (
-      <div style={{ padding: 24 }}>
-        <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
-          {[1, 2].map((i) => (
-            <div key={i} style={{ flex: 1, background: '#f9fafb', borderRadius: 10, padding: '12px 14px' }}>
-              <div style={{ width: '50%', height: 9, background: '#e5e7eb', borderRadius: 4, marginBottom: 8 }} />
-              <div style={{ width: '40%', height: 20, background: '#e5e7eb', borderRadius: 4 }} />
-            </div>
-          ))}
-        </div>
+      <div style={{ padding: 12 }}>
         {[1, 2, 3].map((i) => (
-          <div key={i} style={{ background: '#f9fafb', borderRadius: 10, padding: '12px 14px', marginBottom: 8 }}>
-            <div style={{ width: '70%', height: 10, background: '#e5e7eb', borderRadius: 4 }} />
+          <div key={i} style={{ background: '#f3f4f6', borderRadius: 8, padding: '10px 12px', marginBottom: 6 }}>
+            <div style={{ width: '70%', height: 9, background: '#e5e7eb', borderRadius: 4 }} />
           </div>
         ))}
       </div>
     );
   }
   if (error) {
-    return <div style={{ padding: 24, fontSize: 13, color: '#ef4444' }}>Failed to load revisit data.</div>;
+    return (
+      <div style={{ padding: 12, fontSize: 12, color: '#ef4444' }}>
+        Failed to load.{' '}
+        <button onClick={onRetry}
+          style={{ color: FG, background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, padding: 0 }}>
+          Retry
+        </button>
+      </div>
+    );
   }
   if (!data) return null;
 
-  const { summary, notifications, total } = data;
-  const sent = summary?.sent ?? 0;
-  const came = summary?.revisitedAfter ?? 0;
+  const { notifications, total } = data;
+
+  if (!notifications || notifications.length === 0) {
+    return <div style={{ padding: 12, fontSize: 12, color: '#9ca3af' }}>No notifications in this period</div>;
+  }
 
   return (
-    <div style={{ padding: 24 }}>
-      {/* Stat cards */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
-        <div style={{ flex: 1, background: '#f9fafb', borderRadius: 10, padding: '12px 14px' }}>
-          <div style={{ fontSize: 11, color: '#9ca3af' }}>Sent</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: '#111827', marginTop: 2 }}>{sent}</div>
-        </div>
-        <div style={{ flex: 1, background: '#f9fafb', borderRadius: 10, padding: '12px 14px' }}>
-          <div style={{ fontSize: 11, color: '#9ca3af' }}>Came back after</div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: FG, marginTop: 2 }}>{came}</div>
-        </div>
-      </div>
+    <div style={{ padding: 12 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {notifications.map((n) => {
+          const isRevisited  = n.status === 'revisited';
+          const isNotTracked = n.status === 'not_tracked';
 
-      {/* Came back through */}
-      {summary?.byType && summary.byType.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 20 }}>
-          <span style={{ fontSize: 11.5, color: '#9ca3af' }}>Came back through</span>
-          {summary.byType.map((t) => (
-            <span key={t.type} style={{
-              fontSize: 11, padding: '3px 8px', borderRadius: 999,
-              background: BG, color: FG, fontWeight: 600,
-            }}>
-              {tlabel(t.type, t.label)} ×{t.count}
-            </span>
-          ))}
-        </div>
-      )}
+          let chipBg, chipColor, chipText;
+          if (isRevisited) {
+            chipBg = '#dcfce7'; chipColor = '#16a34a';
+            chipText = `Revisited · ${n.visits} visit${n.visits !== 1 ? 's' : ''}`;
+          } else if (isNotTracked) {
+            chipBg = '#fef3c7'; chipColor = '#92400e';
+            chipText = 'Not tracked';
+          } else {
+            chipBg = '#f3f4f6'; chipColor = '#6b7280';
+            chipText = 'No revisit yet';
+          }
 
-      {/* Notification list */}
-      {!notifications || notifications.length === 0 ? (
-        <div style={{ fontSize: 13, color: '#9ca3af' }}>No notifications in this period</div>
-      ) : (
-        <>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {notifications.map((n) => {
-              const isRevisited  = n.status === 'revisited';
-              const isNotTracked = n.status === 'not_tracked';
-
-              let chipBg, chipColor, chipText;
-              if (isRevisited) {
-                chipBg = '#dcfce7'; chipColor = '#16a34a';
-                chipText = `Revisited · ${n.visits} visit${n.visits !== 1 ? 's' : ''}`;
-              } else if (isNotTracked) {
-                chipBg = '#fef3c7'; chipColor = '#92400e';
-                chipText = 'Not tracked';
-              } else {
-                chipBg = '#f3f4f6'; chipColor = '#6b7280';
-                chipText = 'No revisit yet';
-              }
-
-              return (
-                <div key={n.jobId} style={{ background: '#f9fafb', borderRadius: 10, padding: '12px 14px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 5 }}>
-                        <TypePill type={n.type} label={n.label} />
-                        <span style={{ fontSize: 11.5, color: '#9ca3af' }}>{fmtTime(n.sentAt)}</span>
-                      </div>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: '#111827',
-                                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {n.title || '(no title)'}
-                      </div>
-                      {isRevisited && n.lastVisitAt && (
-                        <div style={{ fontSize: 11, color: '#6b7280', marginTop: 3 }}>
-                          Last visit {fmtTime(n.lastVisitAt)}
-                        </div>
-                      )}
-                      {isNotTracked && (
-                        <div style={{ fontSize: 11, color: '#92400e', marginTop: 3 }}>
-                          Sent before tracking was added
-                        </div>
-                      )}
-                      {isRevisited && (n.funnel?.addedToCart || n.funnel?.checkout || n.funnel?.purchased) && (
-                        <div style={{ display: 'flex', gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
-                          {n.funnel.addedToCart && (
-                            <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 999,
-                                           background: '#f0fdf4', color: '#16a34a', fontWeight: 600 }}>
-                              Added to cart
-                            </span>
-                          )}
-                          {n.funnel.checkout && (
-                            <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 999,
-                                           background: '#fef3c7', color: '#d97706', fontWeight: 600 }}>
-                              Checkout
-                            </span>
-                          )}
-                          {n.funnel.purchased && (
-                            <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 999,
-                                           background: '#dcfce7', color: '#16a34a', fontWeight: 600 }}>
-                              Purchased
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ flexShrink: 0 }}>
-                      <span style={{
-                        fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 999,
-                        background: chipBg, color: chipColor, whiteSpace: 'nowrap',
-                      }}>
-                        {chipText}
-                      </span>
-                    </div>
+          return (
+            <div key={n.jobId} style={{ background: '#f3f4f6', borderRadius: 8, padding: '10px 12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+                    <TypePill type={n.type} label={n.label} />
+                    <span style={{ fontSize: 11, color: '#9ca3af' }}>{fmtTime(n.sentAt)}</span>
                   </div>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: '#111827',
+                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {n.title || '(no title)'}
+                  </div>
+                  {isRevisited && n.lastVisitAt && (
+                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                      Last visit {fmtTime(n.lastVisitAt)}
+                    </div>
+                  )}
+                  {isNotTracked && (
+                    <div style={{ fontSize: 11, color: '#92400e', marginTop: 2 }}>
+                      Sent before tracking was added
+                    </div>
+                  )}
+                  {isRevisited && (n.funnel?.addedToCart || n.funnel?.checkout || n.funnel?.purchased) && (
+                    <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                      {n.funnel.addedToCart && (
+                        <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 999,
+                                       background: '#f0fdf4', color: '#16a34a', fontWeight: 600 }}>Added to cart</span>
+                      )}
+                      {n.funnel.checkout && (
+                        <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 999,
+                                       background: '#fef3c7', color: '#d97706', fontWeight: 600 }}>Checkout</span>
+                      )}
+                      {n.funnel.purchased && (
+                        <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 999,
+                                       background: '#dcfce7', color: '#16a34a', fontWeight: 600 }}>Purchased</span>
+                      )}
+                    </div>
+                  )}
                 </div>
-              );
-            })}
+                <div style={{ flexShrink: 0 }}>
+                  <span style={{
+                    fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 999,
+                    background: chipBg, color: chipColor, whiteSpace: 'nowrap',
+                  }}>
+                    {chipText}
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <Pagination page={page} total={total} onPage={onPage} />
+    </div>
+  );
+}
+
+// ─── Accordion user row (All users view) ─────────────────────────────────────
+
+function AccordionUserRow({ user, menuTab, expanded, onToggle, shop, from, to, expandCache }) {
+  const isAnon    = !user.email;
+  const nameText  = user.name || 'Anonymous visitor';
+  const subtitle  = isAnon ? anonSubtitle(user.userKey, user.deviceType) : user.email;
+
+  const panelId = `expand-panel-${user.userKey}`;
+
+  const [countData,       setCountData]       = useState(null);
+  const [countLoading,    setCountLoading]    = useState(false);
+  const [countError,      setCountError]      = useState(false);
+  const [revisitData,     setRevisitData]     = useState(null);
+  const [revisitLoading,  setRevisitLoading]  = useState(false);
+  const [revisitError,    setRevisitError]    = useState(false);
+  const [revisitPage,     setRevisitPage]     = useState(0);
+
+  useEffect(() => {
+    if (!expanded || menuTab !== 'count') return;
+    const cKey = `count:${user.userKey}:${from}:${to}`;
+    const cached = expandCache.current[cKey];
+    if (cached) { setCountData(cached); return; }
+    let cancelled = false;
+    setCountLoading(true); setCountError(false);
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to)   params.set('to', to);
+    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/push/users/${encodeURIComponent(user.userKey)}/count?${params}`)
+      .then((d) => { if (!cancelled) { expandCache.current[cKey] = d; setCountData(d); } })
+      .catch(() => { if (!cancelled) setCountError(true); })
+      .finally(() => { if (!cancelled) setCountLoading(false); });
+    return () => { cancelled = true; };
+  }, [expanded, menuTab, user.userKey, from, to, shop]);
+
+  useEffect(() => {
+    if (!expanded || menuTab !== 'revisit') return;
+    const rKey = `revisit:${user.userKey}:${from}:${to}:${revisitPage}`;
+    const cached = expandCache.current[rKey];
+    if (cached) { setRevisitData(cached); return; }
+    let cancelled = false;
+    setRevisitLoading(true); setRevisitError(false);
+    const params = new URLSearchParams({ page: String(revisitPage), limit: String(LIMIT) });
+    if (from) params.set('from', from);
+    if (to)   params.set('to', to);
+    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/push/users/${encodeURIComponent(user.userKey)}/revisit?${params}`)
+      .then((d) => { if (!cancelled) { expandCache.current[rKey] = d; setRevisitData(d); } })
+      .catch(() => { if (!cancelled) setRevisitError(true); })
+      .finally(() => { if (!cancelled) setRevisitLoading(false); });
+    return () => { cancelled = true; };
+  }, [expanded, menuTab, user.userKey, from, to, revisitPage, shop]);
+
+  const handleRetryCount = useCallback(() => {
+    const cKey = `count:${user.userKey}:${from}:${to}`;
+    delete expandCache.current[cKey];
+    setCountData(null); setCountError(false); setCountLoading(true);
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to)   params.set('to', to);
+    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/push/users/${encodeURIComponent(user.userKey)}/count?${params}`)
+      .then((d) => { expandCache.current[cKey] = d; setCountData(d); })
+      .catch(() => setCountError(true))
+      .finally(() => setCountLoading(false));
+  }, [user.userKey, from, to, shop]);
+
+  const handleRetryRevisit = useCallback(() => {
+    const rKey = `revisit:${user.userKey}:${from}:${to}:${revisitPage}`;
+    delete expandCache.current[rKey];
+    setRevisitData(null); setRevisitError(false); setRevisitLoading(true);
+    const params = new URLSearchParams({ page: String(revisitPage), limit: String(LIMIT) });
+    if (from) params.set('from', from);
+    if (to)   params.set('to', to);
+    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/push/users/${encodeURIComponent(user.userKey)}/revisit?${params}`)
+      .then((d) => { expandCache.current[rKey] = d; setRevisitData(d); })
+      .catch(() => setRevisitError(true))
+      .finally(() => setRevisitLoading(false));
+  }, [user.userKey, from, to, revisitPage, shop]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(user.userKey); }
+  };
+
+  return (
+    <div style={{ borderBottom: '1px solid #f9fafb' }}>
+      <button
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        onClick={() => onToggle(user.userKey)}
+        onKeyDown={handleKeyDown}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 12,
+          width: '100%',
+          minHeight: 64,
+          padding: menuTab === 'revisit' ? '10px 20px' : '0 20px',
+          background: 'none', border: 'none',
+          cursor: 'pointer', textAlign: 'left', outline: 'none',
+          height: menuTab === 'count' ? 64 : undefined,
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = '#f9fafb'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+        onFocus={(e) => { e.currentTarget.style.boxShadow = `inset 0 0 0 2px ${FG}`; }}
+        onBlur={(e) => { e.currentTarget.style.boxShadow = 'none'; }}
+        aria-label={`${expanded ? 'Collapse' : 'Expand'} ${nameText}`}
+      >
+        <Avatar name={user.name} isAnon={isAnon} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#111827',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {nameText}
           </div>
-          <Pagination page={page} total={total} onPage={onPage} />
-        </>
+          <div style={{ fontSize: 12.5, color: '#6b7280', marginTop: 1,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {subtitle}
+          </div>
+          {menuTab === 'revisit' && (
+            <div style={{ marginTop: 4, display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              <RevisitChip revisited={user.revisited} />
+              {user.cameBackVia && user.cameBackVia.length > 0 && user.cameBackVia.map((v) => (
+                <span key={v.type} style={{
+                  fontSize: 11, padding: '2px 7px', borderRadius: 999,
+                  background: BG, color: FG, fontWeight: 600,
+                }}>
+                  {tlabel(v.type, v.label)} ×{v.count}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+        {menuTab === 'count' && (
+          <div style={{ flexShrink: 0, textAlign: 'right', marginRight: 6 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: '#111827' }}>
+              {user.sentCount}
+            </div>
+            <div style={{ fontSize: 11.5, color: '#9ca3af' }}>sent</div>
+          </div>
+        )}
+        <ChevronDownIcon expanded={expanded} />
+      </button>
+
+      {expanded && (
+        <div
+          id={panelId}
+          style={{
+            background: '#f9fafb', border: '1px solid #eef0f4', borderRadius: 10,
+            margin: '0 20px 12px 68px',
+          }}
+        >
+          {menuTab === 'count' ? (
+            <CountExpandPanel data={countData} loading={countLoading} error={countError} onRetry={handleRetryCount} />
+          ) : (
+            <RevisitExpandPanel
+              data={revisitData} loading={revisitLoading} error={revisitError}
+              page={revisitPage} onPage={setRevisitPage} onRetry={handleRetryRevisit}
+            />
+          )}
+        </div>
       )}
     </div>
   );
 }
 
-// ─── Detail view (Count + Revisit tabs) ──────────────────────────────────────
+// ─── Accordion revisited user row ─────────────────────────────────────────────
 
-const DETAIL_MENU = [
-  { key: 'count',   label: 'Count',   Icon: CountIcon },
-  { key: 'revisit', label: 'Revisit', Icon: RevisitIcon },
-];
-
-function DetailView({ shop, user, from, to, initialTab, backLabel, onBack }) {
-  const [detailTab,    setDetailTab]    = useState(initialTab || 'count');
-  const [countData,    setCountData]    = useState(null);
-  const [revisitData,  setRevisitData]  = useState(null);
-  const [countLoading, setCountLoading] = useState(true);
-  const [revisitLoading, setRevisitLoading] = useState(true);
-  const [countError,   setCountError]   = useState(false);
-  const [revisitError, setRevisitError] = useState(false);
-  const [revisitPage,  setRevisitPage]  = useState(0);
-  const [isNarrow,     setIsNarrow]     = useState(false);
-
-  const cacheRef   = useRef({});
-  const menuBtns   = useRef([]);
-
-  const isAnon  = !user.email;
+function AccordionRevisitedRow({ user, expanded, onToggle, shop, from, to, expandCache }) {
+  const isAnon   = !user.email;
   const nameText = user.name || 'Anonymous visitor';
-  const rLabel  = rangeStr(from, to);
-  const rangeKey = `${user.userKey}:${from}:${to}`;
+  const subtitle = isAnon ? anonSubtitle(user.userKey, user.deviceType) : user.email;
 
-  // Track narrow viewport for horizontal menu at <=520px
-  useEffect(() => {
-    const check = () => setIsNarrow(window.innerWidth <= 520);
-    check();
-    window.addEventListener('resize', check);
-    return () => window.removeEventListener('resize', check);
-  }, []);
+  const panelId = `revisited-panel-${user.userKey}`;
 
-  // Fetch count data
+  const [revisitData,     setRevisitData]     = useState(null);
+  const [revisitLoading,  setRevisitLoading]  = useState(false);
+  const [revisitError,    setRevisitError]    = useState(false);
+  const [revisitPage,     setRevisitPage]     = useState(0);
+
   useEffect(() => {
-    const cKey = `count:${rangeKey}`;
-    if (cacheRef.current[cKey]) { setCountData(cacheRef.current[cKey]); setCountLoading(false); return; }
-    setCountLoading(true); setCountError(false);
-    const params = new URLSearchParams();
-    if (from) params.set('from', from);
-    if (to)   params.set('to', to);
+    if (!expanded) return;
+    const rKey = `revisited:${user.userKey}:${from}:${to}:${revisitPage}`;
+    const cached = expandCache.current[rKey];
+    if (cached) { setRevisitData(cached); return; }
     let cancelled = false;
-    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/push/users/${encodeURIComponent(user.userKey)}/count?${params}`)
-      .then((d) => { if (!cancelled) { cacheRef.current[cKey] = d; setCountData(d); } })
-      .catch(() => { if (!cancelled) setCountError(true); })
-      .finally(() => { if (!cancelled) setCountLoading(false); });
-    return () => { cancelled = true; };
-  }, [shop, user.userKey, rangeKey, from, to]);
-
-  // Fetch revisit data
-  useEffect(() => {
-    const rKey = `revisit:${rangeKey}:${revisitPage}`;
-    if (cacheRef.current[rKey]) { setRevisitData(cacheRef.current[rKey]); setRevisitLoading(false); return; }
     setRevisitLoading(true); setRevisitError(false);
     const params = new URLSearchParams({ page: String(revisitPage), limit: String(LIMIT) });
     if (from) params.set('from', from);
     if (to)   params.set('to', to);
-    let cancelled = false;
     apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/push/users/${encodeURIComponent(user.userKey)}/revisit?${params}`)
-      .then((d) => { if (!cancelled) { cacheRef.current[rKey] = d; setRevisitData(d); } })
+      .then((d) => { if (!cancelled) { expandCache.current[rKey] = d; setRevisitData(d); } })
       .catch(() => { if (!cancelled) setRevisitError(true); })
       .finally(() => { if (!cancelled) setRevisitLoading(false); });
     return () => { cancelled = true; };
-  }, [shop, user.userKey, rangeKey, from, to, revisitPage]);
+  }, [expanded, user.userKey, from, to, revisitPage, shop]);
 
-  // Roving tabindex — arrow keys move between Count / Revisit menu items
-  const handleMenuKey = useCallback((e, i) => {
-    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-      e.preventDefault();
-      menuBtns.current[(i + 1) % DETAIL_MENU.length]?.focus();
-    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-      e.preventDefault();
-      menuBtns.current[(i - 1 + DETAIL_MENU.length) % DETAIL_MENU.length]?.focus();
-    }
-  }, []);
+  const handleRetry = useCallback(() => {
+    const rKey = `revisited:${user.userKey}:${from}:${to}:${revisitPage}`;
+    delete expandCache.current[rKey];
+    setRevisitData(null); setRevisitError(false); setRevisitLoading(true);
+    const params = new URLSearchParams({ page: String(revisitPage), limit: String(LIMIT) });
+    if (from) params.set('from', from);
+    if (to)   params.set('to', to);
+    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/push/users/${encodeURIComponent(user.userKey)}/revisit?${params}`)
+      .then((d) => { expandCache.current[rKey] = d; setRevisitData(d); })
+      .catch(() => setRevisitError(true))
+      .finally(() => setRevisitLoading(false));
+  }, [user.userKey, from, to, revisitPage, shop]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(user.userKey); }
+  };
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      {/* Top strip */}
-      <div style={{ padding: '12px 20px', borderBottom: '1px solid #f3f4f6', flexShrink: 0 }}>
-        <button
-          onClick={onBack}
-          style={{
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-            background: 'none', border: 'none', cursor: 'pointer',
-            fontSize: 12, color: '#6b7280', padding: 0, marginBottom: 12,
-          }}
-          aria-label={`Back to ${backLabel}`}
-        >
-          <ArrowLeftIcon />
-          {backLabel}
-        </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+    <div style={{ borderBottom: '1px solid #f9fafb' }}>
+      <button
+        aria-expanded={expanded}
+        aria-controls={panelId}
+        onClick={() => onToggle(user.userKey)}
+        onKeyDown={handleKeyDown}
+        style={{
+          display: 'flex', alignItems: 'flex-start', gap: 12,
+          width: '100%', minHeight: 64, padding: '10px 20px',
+          background: 'none', border: 'none',
+          cursor: 'pointer', textAlign: 'left', outline: 'none',
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = '#f9fafb'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+        onFocus={(e) => { e.currentTarget.style.boxShadow = `inset 0 0 0 2px ${FG}`; }}
+        onBlur={(e) => { e.currentTarget.style.boxShadow = 'none'; }}
+        aria-label={`${expanded ? 'Collapse' : 'Expand'} ${nameText}`}
+      >
+        <div style={{ marginTop: 2, flexShrink: 0 }}>
           <Avatar name={user.name} isAnon={isAnon} />
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#111827',
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {nameText}
-            </div>
-            {isAnon ? (
-              <span style={{ fontSize: 11, padding: '2px 7px', borderRadius: 999,
-                             background: '#f3f4f6', color: '#6b7280', fontWeight: 600 }}>
-                {user.deviceType ? user.deviceType.charAt(0).toUpperCase() + user.deviceType.slice(1) : 'Unknown device'}
-              </span>
-            ) : (
-              <div style={{ fontSize: 12, color: '#6b7280',
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+            <div style={{ minWidth: 0, flex: 1, marginRight: 8 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#111827',
                             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {user.email}
+                {nameText}
               </div>
-            )}
+              <div style={{ fontSize: 12.5, color: '#6b7280', marginTop: 1,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {subtitle}
+              </div>
+            </div>
+            <div style={{ flexShrink: 0, textAlign: 'right' }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>
+                {user.revisits} visit{user.revisits !== 1 ? 's' : ''}
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
-
-      {/* Menu + panel */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: isNarrow ? 'column' : 'row', minHeight: 0 }}>
-        {/* Tab menu */}
-        <div
-          role="tablist"
-          aria-orientation={isNarrow ? 'horizontal' : 'vertical'}
-          style={{
-            width: isNarrow ? '100%' : 140, flexShrink: 0,
-            borderRight: isNarrow ? 'none' : '1px solid #f3f4f6',
-            borderBottom: isNarrow ? '1px solid #f3f4f6' : 'none',
-            display: 'flex',
-            flexDirection: isNarrow ? 'row' : 'column',
-            padding: isNarrow ? '8px 16px' : '12px 0',
-            gap: isNarrow ? 4 : 2,
-          }}
-        >
-          {DETAIL_MENU.map(({ key, label, Icon }, i) => {
-            const active = detailTab === key;
-            return (
-              <button
-                key={key}
-                ref={(el) => { menuBtns.current[i] = el; }}
-                role="tab"
-                aria-selected={active}
-                aria-controls={`detail-panel-${key}`}
-                tabIndex={active ? 0 : -1}
-                onClick={() => setDetailTab(key)}
-                onKeyDown={(e) => handleMenuKey(e, i)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: isNarrow ? '6px 12px' : '8px 16px',
-                  borderRadius: isNarrow ? 999 : 0,
-                  background: active ? BG : 'none',
-                  color: active ? FG : '#6b7280',
-                  border: 'none',
-                  borderLeft: !isNarrow ? `3px solid ${active ? FG : 'transparent'}` : 'none',
-                  cursor: 'pointer',
-                  fontSize: 13, fontWeight: 600,
-                  textAlign: 'left',
-                }}
-              >
-                <Icon />
-                {label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Panel */}
-        <div
-          id={`detail-panel-${detailTab}`}
-          role="tabpanel"
-          aria-label={detailTab === 'count' ? 'Notifications sent count' : 'Revisit history'}
-          style={{ flex: 1, overflowY: 'auto' }}
-        >
-          {detailTab === 'count' ? (
-            <CountPanel data={countData} loading={countLoading} error={countError} rLabel={rLabel} />
-          ) : (
-            <RevisitPanel
-              data={revisitData} loading={revisitLoading} error={revisitError}
-              page={revisitPage} onPage={setRevisitPage}
-            />
+          {user.cameBackVia && user.cameBackVia.length > 0 && (
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: 11, color: '#9ca3af', marginRight: 2 }}>Came back through</span>
+              {user.cameBackVia.map((v) => (
+                <span key={v.type} style={{
+                  fontSize: 11, padding: '2px 7px', borderRadius: 999,
+                  background: BG, color: FG, fontWeight: 600,
+                }}>
+                  {tlabel(v.type, v.label)} ×{v.count}
+                </span>
+              ))}
+            </div>
           )}
         </div>
-      </div>
+        <ChevronDownIcon expanded={expanded} />
+      </button>
+
+      {expanded && (
+        <div
+          id={panelId}
+          style={{
+            background: '#f9fafb', border: '1px solid #eef0f4', borderRadius: 10,
+            margin: '0 20px 12px 68px',
+          }}
+        >
+          <RevisitExpandPanel
+            data={revisitData} loading={revisitLoading} error={revisitError}
+            page={revisitPage} onPage={setRevisitPage} onRetry={handleRetry}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -698,6 +761,7 @@ function DetailView({ shop, user, from, to, initialTab, backLabel, onBack }) {
 
 export default function PushUsersPanel({ shop, from, to }) {
   const [viewMode,     setViewMode]     = useState('all');   // 'all' | 'revisited'
+  const [menuTab,      setMenuTab]      = useState('count'); // 'count' | 'revisit'
   const [searchInput,  setSearchInput]  = useState('');
   const [search,       setSearch]       = useState('');
   const [typeFilter,   setTypeFilter]   = useState('');
@@ -707,22 +771,25 @@ export default function PushUsersPanel({ shop, from, to }) {
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState(false);
   const [retryCount,   setRetryCount]   = useState(0);
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [fromRevisited, setFromRevisited] = useState(false);
+  const [expandedKey,  setExpandedKey]  = useState(null);
+  const [isNarrow,     setIsNarrow]     = useState(false);
 
-  const rowRefMap      = useRef({});
-  const lastClickedKey = useRef(null);
+  const expandCache = useRef({});
 
-  // 300ms search debounce
+  useEffect(() => {
+    const check = () => setIsNarrow(window.innerWidth <= 520);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
   useEffect(() => {
     const t = setTimeout(() => setSearch(searchInput), 300);
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  // Reset page when filters / view / date range change
-  useEffect(() => { setPage(0); }, [search, typeFilter, originFilter, viewMode, from, to]);
+  useEffect(() => { setPage(0); setExpandedKey(null); }, [search, typeFilter, originFilter, viewMode, menuTab, from, to]);
 
-  // Fetch users/revisited
   useEffect(() => {
     if (!shop) return;
     let cancelled = false;
@@ -735,6 +802,7 @@ export default function PushUsersPanel({ shop, from, to }) {
     if (search)     params.set('q', search);
     if (typeFilter) params.set('type', typeFilter);
     if (viewMode === 'all' && originFilter !== 'all') params.set('origin', originFilter);
+    if (viewMode === 'all' && menuTab === 'revisit') params.set('includeVia', '1');
 
     const endpoint = viewMode === 'revisited'
       ? `/api/dashboard/${encodeURIComponent(shop)}/channels/push/revisited?${params}`
@@ -746,19 +814,10 @@ export default function PushUsersPanel({ shop, from, to }) {
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [shop, viewMode, search, typeFilter, originFilter, page, from, to, retryCount]);
+  }, [shop, viewMode, menuTab, search, typeFilter, originFilter, page, from, to, retryCount]);
 
-  const handleSelectUser = useCallback((user, fromRev) => {
-    lastClickedKey.current = user.userKey;
-    setFromRevisited(!!fromRev);
-    setSelectedUser(user);
-  }, []);
-
-  const handleBack = useCallback(() => {
-    const key = lastClickedKey.current;
-    setSelectedUser(null);
-    // Restore focus after re-render
-    setTimeout(() => { rowRefMap.current[key]?.focus(); }, 0);
+  const handleToggle = useCallback((key) => {
+    setExpandedKey((prev) => (prev === key ? null : key));
   }, []);
 
   const handleExport = useCallback(async () => {
@@ -791,25 +850,10 @@ export default function PushUsersPanel({ shop, from, to }) {
   const users  = data?.users || [];
   const total  = data?.total || 0;
 
-  if (selectedUser) {
-    return (
-      <DetailView
-        shop={shop}
-        user={selectedUser}
-        from={from}
-        to={to}
-        initialTab={fromRevisited ? 'revisit' : 'count'}
-        backLabel={fromRevisited ? '← Revisited users' : '← All users'}
-        onBack={handleBack}
-      />
-    );
-  }
-
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       {/* Filter bar */}
       <div style={{ padding: '10px 20px', borderBottom: '1px solid #f3f4f6', flexShrink: 0 }}>
-        {/* View chips */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
           {[
             { key: 'all',      label: 'All users' },
@@ -835,9 +879,7 @@ export default function PushUsersPanel({ shop, from, to }) {
           })}
         </div>
 
-        {/* Search + type + origin + export */}
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          {/* Search */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: isNarrow ? 'wrap' : 'nowrap', alignItems: 'center' }}>
           <div style={{ position: 'relative', flexGrow: 1, minWidth: 160 }}>
             <div style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none' }}>
               <SearchIcon />
@@ -870,7 +912,6 @@ export default function PushUsersPanel({ shop, from, to }) {
             )}
           </div>
 
-          {/* Type */}
           <select
             value={typeFilter}
             onChange={(e) => { setTypeFilter(e.target.value); setPage(0); }}
@@ -881,12 +922,11 @@ export default function PushUsersPanel({ shop, from, to }) {
             }}
           >
             <option value="">All types</option>
-            {KNOWN_TYPES.map((t) => (
-              <option key={t.type} value={t.type}>{t.label}</option>
+            {Object.entries(TYPE_LABELS).map(([type, label]) => (
+              <option key={type} value={type}>{label}</option>
             ))}
           </select>
 
-          {/* Origin — All users view only */}
           {viewMode === 'all' && (
             <select
               value={originFilter}
@@ -897,13 +937,12 @@ export default function PushUsersPanel({ shop, from, to }) {
                 fontSize: 12, color: '#374151', background: '#fff', cursor: 'pointer', outline: 'none',
               }}
             >
-              <option value="all">All</option>
+              <option value="all">All sources</option>
               <option value="automated">Automated</option>
               <option value="manual">Manual</option>
             </select>
           )}
 
-          {/* Export — All users view only */}
           {viewMode === 'all' && (
             <button
               onClick={handleExport}
@@ -929,59 +968,99 @@ export default function PushUsersPanel({ shop, from, to }) {
         </span>
       </div>
 
-      {/* List */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {loading ? (
-          Array.from({ length: 6 }).map((_, i) => <ShimmerRow key={i} />)
-        ) : error ? (
-          <div style={{ padding: '40px 20px', textAlign: 'center' }}>
-            <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>Failed to load users</div>
-            <button
-              onClick={() => setRetryCount((c) => c + 1)}
-              style={{
-                padding: '7px 16px', background: FG, color: '#fff', border: 'none',
-                borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600,
-              }}
-            >
-              Retry
-            </button>
-          </div>
-        ) : users.length === 0 ? (
-          <div style={{ padding: '40px 20px', textAlign: 'center', fontSize: 13, color: '#9ca3af' }}>
-            {search
-              ? 'No users match your search'
-              : viewMode === 'revisited'
-                ? 'No revisits yet. A revisit is recorded when a customer opens your store from a notification.'
-                : 'No users yet in this date range'}
-          </div>
-        ) : viewMode === 'revisited' ? (
-          <>
-            <div style={{ padding: '10px 20px 6px', fontSize: 13, fontWeight: 600, color: '#374151' }}>
-              {total} user{total !== 1 ? 's' : ''} came back from notifications
+      {/* Content area: left menu + list (or full-width revisited) */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        {viewMode === 'all' && !isNarrow && (
+          <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+            <LeftMenu active={menuTab} onChange={(k) => { setMenuTab(k); setExpandedKey(null); }} isNarrow={false} />
+            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+              {renderList()}
             </div>
-            {users.map((user) => (
-              <RevisitedUserRow
-                key={user.userKey}
-                user={user}
-                onSelect={(u) => handleSelectUser(u, true)}
-                rowRef={(el) => { rowRefMap.current[user.userKey] = el; }}
-              />
-            ))}
-          </>
-        ) : (
-          users.map((user) => (
-            <UserRow
-              key={user.userKey}
-              user={user}
-              onSelect={(u) => handleSelectUser(u, false)}
-              rowRef={(el) => { rowRefMap.current[user.userKey] = el; }}
-            />
-          ))
+          </div>
+        )}
+        {viewMode === 'all' && isNarrow && (
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <LeftMenu active={menuTab} onChange={(k) => { setMenuTab(k); setExpandedKey(null); }} isNarrow={true} />
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {renderList()}
+            </div>
+          </div>
+        )}
+        {viewMode === 'revisited' && (
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            {renderList()}
+          </div>
         )}
       </div>
 
-      {/* Pagination */}
       {!loading && !error && <Pagination page={page} total={total} onPage={setPage} />}
     </div>
   );
+
+  function renderList() {
+    if (loading) {
+      return Array.from({ length: 6 }).map((_, i) => <ShimmerRow key={i} />);
+    }
+    if (error) {
+      return (
+        <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+          <div style={{ fontSize: 13, color: '#6b7280', marginBottom: 12 }}>Failed to load users</div>
+          <button
+            onClick={() => setRetryCount((c) => c + 1)}
+            style={{
+              padding: '7px 16px', background: FG, color: '#fff', border: 'none',
+              borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      );
+    }
+    if (users.length === 0) {
+      return (
+        <div style={{ padding: '40px 20px', textAlign: 'center', fontSize: 13, color: '#9ca3af' }}>
+          {search
+            ? 'No users match your search'
+            : viewMode === 'revisited'
+              ? 'No revisits yet. A revisit is recorded when a customer opens your store from a notification.'
+              : 'No users yet in this date range'}
+        </div>
+      );
+    }
+    if (viewMode === 'revisited') {
+      return (
+        <>
+          <div style={{ padding: '10px 20px 6px', fontSize: 13, fontWeight: 600, color: '#374151' }}>
+            {total} user{total !== 1 ? 's' : ''} came back from notifications
+          </div>
+          {users.map((user) => (
+            <AccordionRevisitedRow
+              key={user.userKey}
+              user={user}
+              expanded={expandedKey === user.userKey}
+              onToggle={handleToggle}
+              shop={shop}
+              from={from}
+              to={to}
+              expandCache={expandCache}
+            />
+          ))}
+        </>
+      );
+    }
+    return users.map((user) => (
+      <AccordionUserRow
+        key={user.userKey}
+        user={user}
+        menuTab={menuTab}
+        expanded={expandedKey === user.userKey}
+        onToggle={handleToggle}
+        shop={shop}
+        from={from}
+        to={to}
+        expandCache={expandCache}
+      />
+    ));
+  }
 }

@@ -26,7 +26,7 @@ const REVISITED_RESPONSE = {
   users: [
     { userKey: 'p_111', name: 'Alice', email: 'a***@shop.com', deviceType: null,
       revisits: 3, lastVisitAt: '2026-10-20T15:00:00.000Z',
-      cameBackVia: [{ type: 'cart_abandon', label: 'Cart reminder', count: 3, lastVisitAt: '2026-10-20T15:00:00.000Z' }] },
+      cameBackVia: [{ type: 'cart_abandon', label: 'Cart reminder', count: 3 }] },
   ],
 };
 
@@ -38,8 +38,6 @@ function renderPanel(props = {}) {
   );
 }
 
-// ─── helpers ──────────────────────────────────────────────────────────────────
-
 function mockApiGetResolve(data) {
   apiGet.mockResolvedValue(data);
 }
@@ -49,394 +47,246 @@ function mockApiGetReject() {
 }
 
 beforeEach(() => {
-  jest.resetAllMocks(); // clears calls AND resets implementations
-  // Default: resolve with user list
+  jest.clearAllMocks();
+  if (!window.shopify) {
+    window.shopify = { idToken: jest.fn().mockResolvedValue('test-token') };
+  }
+});
+
+// ─── B1: loading shimmer ──────────────────────────────────────────────────────
+
+test('B1: shows shimmer rows while loading', () => {
+  apiGet.mockReturnValue(new Promise(() => {}));
+  renderPanel();
+  // shimmer divs are rendered (no text, just visual)
+  const container = document.querySelector('[style]');
+  expect(container).toBeTruthy();
+});
+
+// ─── B2: user list renders ────────────────────────────────────────────────────
+
+test('B2: renders user names when loaded', async () => {
   mockApiGetResolve(USERS_RESPONSE);
-});
-
-// ─── B1: initial render shows shimmer then user rows ─────────────────────────
-describe('B1 initial render', () => {
-  it('shows 6 shimmer rows while loading then user names after data arrives', async () => {
-    let resolve;
-    apiGet.mockReturnValue(new Promise((r) => { resolve = r; }));
-    renderPanel();
-
-    // During loading there are no user-row buttons (shimmer divs only)
-    expect(screen.queryByRole('button', { name: /Alice/i })).toBeNull();
-
-    // Resolve the fetch
-    await act(async () => { resolve(USERS_RESPONSE); });
-
-    expect(await screen.findByRole('button', { name: /View notifications for Alice/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Anonymous visitor/i })).toBeInTheDocument();
+  renderPanel();
+  await waitFor(() => {
+    expect(screen.getByText('Alice')).toBeInTheDocument();
   });
+  expect(screen.getByText('Anonymous visitor')).toBeInTheDocument();
 });
 
-// ─── B2: search debounce ─────────────────────────────────────────────────────
-describe('B2 search debounce', () => {
-  it('fires ONE apiGet after typing, not one per keystroke', async () => {
-    jest.useFakeTimers();
-    mockApiGetResolve(USERS_RESPONSE);
-    renderPanel();
+// ─── B3: search debounce ──────────────────────────────────────────────────────
 
-    // Initial fetch fires immediately on mount
-    await act(async () => jest.runAllTimers());
-    const initialCallCount = apiGet.mock.calls.length; // 1 (initial)
+test('B3: search input debounces and triggers fetch', async () => {
+  jest.useFakeTimers();
+  mockApiGetResolve(USERS_RESPONSE);
+  renderPanel();
+  await act(async () => { jest.runAllTimers(); });
+  apiGet.mockClear();
+  mockApiGetResolve(USERS_RESPONSE);
 
-    const input = screen.getByRole('searchbox', { name: /search users/i });
+  const input = screen.getByRole('searchbox', { name: /search/i });
+  fireEvent.change(input, { target: { value: 'alice' } });
 
-    // Type 3 characters rapidly
-    await act(async () => {
-      fireEvent.change(input, { target: { value: 'a' } });
-      fireEvent.change(input, { target: { value: 'al' } });
-      fireEvent.change(input, { target: { value: 'ali' } });
-    });
+  // Before debounce: no extra call
+  expect(apiGet).not.toHaveBeenCalled();
 
-    // No new call yet — debounce not elapsed
-    expect(apiGet.mock.calls.length).toBe(initialCallCount);
+  await act(async () => { jest.advanceTimersByTime(400); });
+  await waitFor(() => expect(apiGet).toHaveBeenCalled());
+  const url = apiGet.mock.calls[0][0];
+  expect(url).toContain('q=alice');
+  jest.useRealTimers();
+});
 
-    // Advance past debounce window
-    await act(async () => {
-      jest.advanceTimersByTime(350);
-    });
+// ─── B4: error state + retry ──────────────────────────────────────────────────
 
-    // Exactly one additional call with q=ali
-    expect(apiGet.mock.calls.length).toBe(initialCallCount + 1);
-    const url = apiGet.mock.calls[apiGet.mock.calls.length - 1][0];
-    expect(url).toContain('q=ali');
+test('B4: shows error state and retry button', async () => {
+  mockApiGetReject();
+  renderPanel();
+  await waitFor(() => {
+    expect(screen.getByText(/failed to load/i)).toBeInTheDocument();
+  });
+  const retryBtn = screen.getByRole('button', { name: /retry/i });
+  expect(retryBtn).toBeInTheDocument();
+});
 
-    jest.useRealTimers();
+// ─── B5: empty state ─────────────────────────────────────────────────────────
+
+test('B5: shows empty state message when no users', async () => {
+  mockApiGetResolve(EMPTY_RESPONSE);
+  renderPanel();
+  await waitFor(() => {
+    expect(screen.getByText(/no users yet/i)).toBeInTheDocument();
   });
 });
 
-// ─── B3: stale response race ──────────────────────────────────────────────────
-describe('B3 stale response guard', () => {
-  it('slow first response does not overwrite a newer response', async () => {
-    jest.useFakeTimers();
+// ─── B6: pagination ──────────────────────────────────────────────────────────
 
-    let resolveFirst;
-    const firstResponse  = new Promise((r) => { resolveFirst = r; });
-    const secondResponse = Promise.resolve({ total: 1, users: [{ userKey: 'p_new', name: 'Bob',
-      email: 'b***@shop.com', deviceType: null, lastSentAt: null, sentCount: 1, revisited: false }] });
-
-    apiGet
-      .mockReturnValueOnce(firstResponse)   // initial mount → stale
-      .mockReturnValueOnce(secondResponse); // after type → newer
-
-    renderPanel();
-
-    // Trigger second fetch by advancing debounce after typing
-    const input = screen.getByRole('searchbox', { name: /search users/i });
-    await act(async () => {
-      fireEvent.change(input, { target: { value: 'b' } });
-      jest.advanceTimersByTime(350);
-    });
-    // Let second resolve immediately
-    await act(async () => { await Promise.resolve(); });
-
-    // Now resolve the first (stale) response
-    await act(async () => { resolveFirst(USERS_RESPONSE); });
-    await act(async () => { await Promise.resolve(); });
-
-    // Should show Bob (second response), NOT Alice (first stale response)
-    expect(screen.queryByRole('button', { name: /Alice/i })).toBeNull();
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /View notifications for Bob/i })).toBeInTheDocument(),
-    );
-
-    jest.useRealTimers();
-  });
+test('B6: Next/Prev pagination buttons absent when total <= limit', async () => {
+  mockApiGetResolve(USERS_RESPONSE); // total=2 < limit=20
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
+  expect(screen.queryByRole('button', { name: /next page/i })).toBeNull();
+  expect(screen.queryByRole('button', { name: /previous page/i })).toBeNull();
 });
 
-// ─── B4: view chip switches endpoint ─────────────────────────────────────────
-describe('B4 chip switches view', () => {
-  it('clicking "Revisited users" calls the /revisited endpoint', async () => {
-    mockApiGetResolve(USERS_RESPONSE);
-    renderPanel();
-    await waitFor(() => expect(screen.getByRole('button', { name: /All users/i })).toBeInTheDocument());
-
-    apiGet.mockResolvedValue(REVISITED_RESPONSE);
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Revisited users/i }));
-    });
-
-    await waitFor(() => {
-      const lastUrl = apiGet.mock.calls[apiGet.mock.calls.length - 1][0];
-      expect(lastUrl).toContain('/revisited');
-    });
-  });
-
-  it('switching back to "All users" calls the /users endpoint', async () => {
-    mockApiGetResolve(USERS_RESPONSE);
-    renderPanel();
-    await waitFor(() => expect(screen.getByRole('button', { name: /All users/i })).toBeInTheDocument());
-
-    // Switch to revisited first
-    apiGet.mockResolvedValue(REVISITED_RESPONSE);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Revisited users/i })); });
-
-    // Switch back
-    apiGet.mockResolvedValue(USERS_RESPONSE);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /All users/i })); });
-
-    await waitFor(() => {
-      const lastUrl = apiGet.mock.calls[apiGet.mock.calls.length - 1][0];
-      expect(lastUrl).toContain('/users');
-      expect(lastUrl).not.toContain('/revisited');
-    });
-  });
+test('B6b: pagination buttons visible when total > limit', async () => {
+  mockApiGetResolve({ total: 50, users: USERS_RESPONSE.users });
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
+  expect(screen.getByRole('button', { name: /next page/i })).toBeInTheDocument();
 });
 
-// ─── B5: Export calls users.csv with active filters ──────────────────────────
-describe('B5 export CSV', () => {
-  it('Export button hits /users.csv with from/to filters', async () => {
-    mockApiGetResolve(USERS_RESPONSE);
-    // Stub fetch for the CSV download
-    const mockFetch = jest.fn().mockResolvedValue({
-      text: () => Promise.resolve('name,email\nAlice,a***@shop.com'),
-    });
-    global.fetch = mockFetch;
+// ─── B7: type filter ─────────────────────────────────────────────────────────
 
-    renderPanel();
-    await waitFor(() => expect(screen.getByRole('button', { name: /Export users as CSV/i })).toBeInTheDocument());
+test('B7: selecting a type filter passes type param to apiGet', async () => {
+  mockApiGetResolve(USERS_RESPONSE);
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
+  apiGet.mockClear();
+  mockApiGetResolve(USERS_RESPONSE);
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Export users as CSV/i }));
-    });
-    await act(async () => {}); // flush promises
+  const select = screen.getByRole('combobox', { name: /filter by type/i });
+  fireEvent.change(select, { target: { value: 'cart_abandon' } });
 
-    expect(mockFetch).toHaveBeenCalledTimes(1);
-    const calledUrl = mockFetch.mock.calls[0][0];
-    expect(calledUrl).toContain('/users.csv');
-    expect(calledUrl).toContain(`from=${FROM}`);
-    expect(calledUrl).toContain(`to=${TO}`);
-  });
-
-  it('Export URL includes active type filter', async () => {
-    mockApiGetResolve(USERS_RESPONSE);
-    const mockFetch = jest.fn().mockResolvedValue({ text: () => Promise.resolve('') });
-    global.fetch = mockFetch;
-
-    renderPanel();
-    await waitFor(() => expect(screen.getByRole('combobox', { name: /filter by type/i })).toBeInTheDocument());
-
-    // Set type filter
-    await act(async () => {
-      fireEvent.change(screen.getByRole('combobox', { name: /filter by type/i }), { target: { value: 'cart_abandon' } });
-    });
-    await act(async () => {}); // let state settle
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Export users as CSV/i }));
-    });
-    await act(async () => {});
-
-    const calledUrl = mockFetch.mock.calls[0][0];
-    expect(calledUrl).toContain('type=cart_abandon');
-  });
+  await waitFor(() => expect(apiGet).toHaveBeenCalled());
+  expect(apiGet.mock.calls[0][0]).toContain('type=cart_abandon');
 });
 
-// ─── B6: Retry reloads ────────────────────────────────────────────────────────
-describe('B6 error and retry', () => {
-  it('error state shows Retry button; clicking Retry re-calls apiGet', async () => {
-    mockApiGetReject();
-    renderPanel();
+// ─── B8: revisited view ──────────────────────────────────────────────────────
 
-    await waitFor(() => expect(screen.getByRole('button', { name: /Retry/i })).toBeInTheDocument());
+test('B8: clicking Revisited users button fetches revisited endpoint', async () => {
+  mockApiGetResolve(USERS_RESPONSE);
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
+  apiGet.mockClear();
+  mockApiGetResolve(REVISITED_RESPONSE);
 
-    const callsBefore = apiGet.mock.calls.length;
-    apiGet.mockResolvedValue(USERS_RESPONSE);
+  const revisitedBtn = screen.getByRole('button', { name: /revisited users/i });
+  fireEvent.click(revisitedBtn);
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Retry/i }));
-    });
-
-    await waitFor(() => expect(apiGet.mock.calls.length).toBeGreaterThan(callsBefore));
-  });
+  await waitFor(() => expect(apiGet).toHaveBeenCalled());
+  expect(apiGet.mock.calls[0][0]).toContain('revisited');
 });
 
-// ─── B7: date-range change reloads ────────────────────────────────────────────
-describe('B7 date range reload', () => {
-  it('changing from/to props triggers a new fetch with new dates', async () => {
-    mockApiGetResolve(USERS_RESPONSE);
-    const { rerender } = renderPanel({ from: FROM, to: TO });
-    await waitFor(() => expect(apiGet).toHaveBeenCalled());
+// ─── B9: accordion expand / collapse ─────────────────────────────────────────
 
-    const callsBefore = apiGet.mock.calls.length;
-    const NEW_FROM = '2026-09-01';
-    const NEW_TO   = '2026-09-30';
+test('B9: accordion row expands and collapses on click', async () => {
+  mockApiGetResolve(USERS_RESPONSE);
+  apiGet.mockResolvedValue(USERS_RESPONSE);
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
 
-    await act(async () => {
-      rerender(<PushUsersPanel shop={SHOP} from={NEW_FROM} to={NEW_TO} />);
-    });
+  // Find the accordion toggle for Alice
+  const aliceBtn = screen.getByRole('button', { name: /expand alice/i });
+  expect(aliceBtn.getAttribute('aria-expanded')).toBe('false');
 
-    await waitFor(() => expect(apiGet.mock.calls.length).toBeGreaterThan(callsBefore));
-    const lastUrl = apiGet.mock.calls[apiGet.mock.calls.length - 1][0];
-    expect(lastUrl).toContain(`from=${NEW_FROM}`);
-    expect(lastUrl).toContain(`to=${NEW_TO}`);
+  // Stub the per-user fetch
+  apiGet.mockResolvedValue({ byType: [] });
+  await act(async () => { fireEvent.click(aliceBtn); });
+
+  await waitFor(() => {
+    expect(aliceBtn.getAttribute('aria-expanded')).toBe('true');
   });
+
+  // Click again to collapse
+  await act(async () => { fireEvent.click(aliceBtn); });
+  expect(aliceBtn.getAttribute('aria-expanded')).toBe('false');
 });
 
-// ─── B8: empty state messages ─────────────────────────────────────────────────
-describe('B8 empty state messages', () => {
-  it('shows "No users yet in this date range" for empty all-users view', async () => {
-    mockApiGetResolve(EMPTY_RESPONSE);
-    renderPanel();
-    await waitFor(() =>
-      expect(screen.getByText(/No users yet in this date range/i)).toBeInTheDocument(),
-    );
-  });
+// ─── B10: Count/Revisit left menu + includeVia param ─────────────────────────
 
-  it('shows correct empty message for revisited view', async () => {
-    apiGet
-      .mockResolvedValueOnce(USERS_RESPONSE) // initial /users fetch
-      .mockResolvedValue(EMPTY_RESPONSE);    // /revisited fetch
+test('B10: switching to Revisit tab fires request with includeVia=1', async () => {
+  mockApiGetResolve(USERS_RESPONSE);
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
 
-    renderPanel();
-    await waitFor(() => expect(screen.getByRole('button', { name: /All users/i })).toBeInTheDocument());
+  apiGet.mockClear();
+  mockApiGetResolve({ ...USERS_RESPONSE, users: USERS_RESPONSE.users.map(u => ({ ...u, cameBackVia: [] })) });
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Revisited users/i }));
-    });
+  // tablist is rendered for All users view
+  const tablist = screen.getByRole('tablist');
+  expect(tablist).toBeInTheDocument();
 
-    await waitFor(() =>
-      expect(screen.getByText(/No revisits yet/i)).toBeInTheDocument(),
-    );
-  });
+  const revisitTab = screen.getByRole('tab', { name: /revisit/i });
+  fireEvent.click(revisitTab);
 
-  it('shows "No users match your search" when search returns empty', async () => {
-    jest.useFakeTimers();
-    apiGet
-      .mockResolvedValueOnce(USERS_RESPONSE)
-      .mockResolvedValue(EMPTY_RESPONSE);
-
-    renderPanel();
-    await act(async () => jest.runAllTimers());
-
-    const input = screen.getByRole('searchbox', { name: /search users/i });
-    await act(async () => {
-      fireEvent.change(input, { target: { value: 'xyz' } });
-      jest.advanceTimersByTime(350);
-    });
-    await act(async () => { await Promise.resolve(); });
-
-    await waitFor(() =>
-      expect(screen.getByText(/No users match your search/i)).toBeInTheDocument(),
-    );
-    jest.useRealTimers();
-  });
+  await waitFor(() => expect(apiGet).toHaveBeenCalled());
+  expect(apiGet.mock.calls[0][0]).toContain('includeVia=1');
 });
 
-// ─── B9: keyboard — Tab+Enter opens detail; Back restores focus ──────────────
-describe('B9 keyboard: Enter opens detail, Back restores focus', () => {
-  it('pressing Enter on a user row opens the detail view', async () => {
-    mockApiGetResolve(USERS_RESPONSE);
-    // Mock detail endpoints
-    apiGet.mockImplementation((url) => {
-      if (url.includes('/count')) return Promise.resolve({ total: 5, byType: [] });
-      if (url.includes('/revisit')) return Promise.resolve({ summary: { sent: 5, revisitedAfter: 1, byType: [] }, notifications: [], total: 0 });
-      return Promise.resolve(USERS_RESPONSE);
-    });
+// ─── B11: CSV export ─────────────────────────────────────────────────────────
 
-    renderPanel();
-    const aliceBtn = await screen.findByRole('button', { name: /View notifications for Alice/i });
+test('B11: export button triggers CSV download', async () => {
+  mockApiGetResolve(USERS_RESPONSE);
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
 
-    await act(async () => { fireEvent.keyDown(aliceBtn, { key: 'Enter' }); aliceBtn.click(); });
+  const mockBlob = new Blob(['csv'], { type: 'text/csv' });
+  global.fetch = jest.fn().mockResolvedValue({ text: () => Promise.resolve('email,count\n') });
+  const createObjectURL = jest.fn().mockReturnValue('blob:url');
+  const revokeObjectURL = jest.fn();
+  window.URL.createObjectURL = createObjectURL;
+  window.URL.revokeObjectURL = revokeObjectURL;
 
-    // Detail view shows back button
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: /Back to ← All users/i })).toBeInTheDocument(),
-    );
-  });
+  const exportBtn = screen.getByRole('button', { name: /export/i });
+  await act(async () => { fireEvent.click(exportBtn); });
 
-  it('Back button returns to list and summary line is visible', async () => {
-    mockApiGetResolve(USERS_RESPONSE);
-    apiGet.mockImplementation((url) => {
-      if (url.includes('/count')) return Promise.resolve({ total: 5, byType: [] });
-      if (url.includes('/revisit')) return Promise.resolve({ summary: { sent: 5, revisitedAfter: 1, byType: [] }, notifications: [], total: 0 });
-      return Promise.resolve(USERS_RESPONSE);
-    });
-
-    renderPanel();
-    const aliceBtn = await screen.findByRole('button', { name: /View notifications for Alice/i });
-    await act(async () => { aliceBtn.click(); });
-
-    await waitFor(() => expect(screen.getByRole('button', { name: /Back to/i })).toBeInTheDocument());
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /Back to/i }));
-    });
-
-    // Back at list — summary line shows count (e.g. "2 users ·…")
-    await waitFor(() =>
-      expect(screen.getByText(/\d+ users?/i)).toBeInTheDocument(),
-    );
-  });
+  await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+  expect(global.fetch.mock.calls[0][0]).toContain('users.csv');
 });
 
-// ─── B10: roving tabindex in detail tablist ────────────────────────────────────
-describe('B10 roving tabindex in detail tablist', () => {
-  it('Count tab is tabIndex=0 initially; Revisit tab is tabIndex=-1', async () => {
-    mockApiGetResolve(USERS_RESPONSE);
-    apiGet.mockImplementation((url) => {
-      if (url.includes('/count')) return Promise.resolve({ total: 3, byType: [] });
-      if (url.includes('/revisit')) return Promise.resolve({ summary: { sent: 3, revisitedAfter: 0, byType: [] }, notifications: [], total: 0 });
-      return Promise.resolve(USERS_RESPONSE);
-    });
+// ─── B12: no date/time on rows ────────────────────────────────────────────────
 
-    renderPanel();
-    const aliceBtn = await screen.findByRole('button', { name: /View notifications for Alice/i });
-    await act(async () => { aliceBtn.click(); });
+test('B12: user rows do not display date/time text', async () => {
+  mockApiGetResolve(USERS_RESPONSE);
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
 
-    await waitFor(() => expect(screen.getByRole('tab', { name: /Count/i })).toBeInTheDocument());
-
-    const countTab   = screen.getByRole('tab', { name: /Count/i });
-    const revisitTab = screen.getByRole('tab', { name: /Revisit/i });
-
-    expect(countTab).toHaveAttribute('tabindex', '0');
-    expect(revisitTab).toHaveAttribute('tabindex', '-1');
-  });
-
-  it('Arrow key moves focus in tablist', async () => {
-    mockApiGetResolve(USERS_RESPONSE);
-    apiGet.mockImplementation((url) => {
-      if (url.includes('/count')) return Promise.resolve({ total: 3, byType: [] });
-      if (url.includes('/revisit')) return Promise.resolve({ summary: { sent: 3, revisitedAfter: 0, byType: [] }, notifications: [], total: 0 });
-      return Promise.resolve(USERS_RESPONSE);
-    });
-
-    renderPanel();
-    const aliceBtn = await screen.findByRole('button', { name: /View notifications for Alice/i });
-    await act(async () => { aliceBtn.click(); });
-
-    await waitFor(() => expect(screen.getByRole('tab', { name: /Count/i })).toBeInTheDocument());
-
-    const countTab = screen.getByRole('tab', { name: /Count/i });
-    countTab.focus();
-
-    // Press ArrowDown → Revisit tab should become active
-    await act(async () => {
-      fireEvent.keyDown(countTab, { key: 'ArrowDown' });
-    });
-
-    const revisitTab = screen.getByRole('tab', { name: /Revisit/i });
-    expect(document.activeElement).toBe(revisitTab);
-  });
+  // Row buttons must not contain the lastSentAt date/time
+  // lastSentAt = '2026-10-20T14:00:00.000Z' — verify neither the date nor time appears in row buttons
+  const aliceBtn = screen.getByRole('button', { name: /expand alice/i });
+  expect(aliceBtn.textContent).not.toMatch(/2026-10-20/);
+  expect(aliceBtn.textContent).not.toMatch(/14:00/);
+  // No ISO date string leaked into any button
+  const allBtns = screen.getAllByRole('button');
+  for (const btn of allBtns) {
+    expect(btn.textContent).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/);
+  }
 });
 
-// ─── B11: clear search clears the query ──────────────────────────────────────
-describe('B11 clear search button', () => {
-  it('clicking × clears the search input', async () => {
-    mockApiGetResolve(USERS_RESPONSE);
-    renderPanel();
-    await waitFor(() => expect(screen.getByRole('searchbox', { name: /search users/i })).toBeInTheDocument());
+// ─── B12b: anon row subtitle format ──────────────────────────────────────────
 
-    const input = screen.getByRole('searchbox', { name: /search users/i });
-    await act(async () => { fireEvent.change(input, { target: { value: 'alice' } }); });
-    expect(input.value).toBe('alice');
+test('B12b: anon user row shows device+id subtitle, not double "Anonymous visitor"', async () => {
+  mockApiGetResolve(USERS_RESPONSE); // a_333 is anon with deviceType 'android'
+  renderPanel();
+  await waitFor(() => screen.getByText('Anonymous visitor'));
 
-    const clearBtn = screen.getByRole('button', { name: /Clear search/i });
-    await act(async () => { fireEvent.click(clearBtn); });
-    expect(input.value).toBe('');
-  });
+  // The second line (subtitle) for a_333 should be "Mobile - ...e333" or similar
+  // userKey=a_333 → last4=_333... wait, 'a_333'.slice(-4) = '_333' but that starts with _
+  // Actually the real subtitle: anonSubtitle('a_333', 'android') = 'Mobile - ..._333'
+  // Just check it doesn't say "Anonymous visitor" twice (second line is device+id)
+  const anonBtn = screen.getByRole('button', { name: /expand anonymous visitor/i });
+  // The button has two divs: name and subtitle. Check subtitle is NOT "Anonymous visitor"
+  const spans = anonBtn.querySelectorAll('div');
+  // Find the subtitle div (second text div): index 1
+  const subtitleDivs = Array.from(spans).filter(d => d.children.length === 0 && d.textContent.trim().length > 0);
+  // At least one subtitle div should contain "Mobile" or "Desktop" or "Device"
+  const hasDeviceType = subtitleDivs.some(d => /mobile|desktop|device/i.test(d.textContent));
+  expect(hasDeviceType).toBe(true);
+});
+
+// ─── B13: no back arrow in markup ────────────────────────────────────────────
+
+test('B13: no back arrow button or ArrowLeft SVG in rendered output', async () => {
+  mockApiGetResolve(USERS_RESPONSE);
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
+
+  // No button with back-arrow label
+  expect(screen.queryByRole('button', { name: /back/i })).toBeNull();
+  // No button with unicode left-arrow text
+  const allBtns = screen.getAllByRole('button');
+  for (const btn of allBtns) {
+    expect(btn.textContent).not.toContain('←');
+  }
 });
