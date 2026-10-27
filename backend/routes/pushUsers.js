@@ -441,7 +441,7 @@ router.get('/users/:userKey/count', requireAuth, requireStoreOwner, async (req, 
       if (!mongoose.Types.ObjectId.isValid(parsed.id)) {
         return res.status(400).json({ error: 'Invalid userKey id' });
       }
-      jobMatch = { shopDomain: shop, channel: 'push', status: 'sent', sentAt: { $gte: from, $lte: to }, profileId: parsed.id };
+      jobMatch = { shopDomain: shop, channel: 'push', status: 'sent', sentAt: { $gte: from, $lte: to }, profileId: new mongoose.Types.ObjectId(parsed.id) };
     } else {
       // anon: look up by subscriptionDocId → get token → query by token
       const sub = await CustomerPushSubscription.findOne(
@@ -490,7 +490,7 @@ router.get('/users/:userKey/revisit', requireAuth, requireStoreOwner, async (req
       // Verify this profile belongs to this shop
       const profileExists = await Profile.findOne({ _id: parsed.id, shopDomain: shop }, '_id').lean();
       if (!profileExists) return res.status(404).json({ error: 'User not found' });
-      jobQuery = { shopDomain: shop, channel: 'push', status: 'sent', sentAt: { $gte: from, $lte: to }, profileId: parsed.id };
+      jobQuery = { shopDomain: shop, channel: 'push', status: 'sent', sentAt: { $gte: from, $lte: to }, profileId: new mongoose.Types.ObjectId(parsed.id) };
     } else {
       const sub = await CustomerPushSubscription.findOne({ _id: parsed.id, shopDomain: shop }, 'token').lean();
       if (!sub) return res.status(404).json({ error: 'User not found' });

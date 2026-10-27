@@ -1194,3 +1194,66 @@ describe('E18-E21 includeVia param', () => {
     expect(anonUser.cameBackVia).toEqual([]);
   });
 });
+
+// =============================================================================
+// E22 — Bug: profileId must be ObjectId in aggregate $match and find() query
+// =============================================================================
+// Failing before fix: parsed.id is a plain string; aggregate does not auto-cast.
+// Passing after fix: new mongoose.Types.ObjectId(parsed.id) makes the type explicit.
+
+describe('E22 profileId cast to ObjectId', () => {
+  test('E22a: /count aggregate $match.profileId is ObjectId, not string', async () => {
+    const handler = getHandler('get', '/users/:userKey/count');
+    const userKey = 'p_' + PROFILE_ID.toString();
+    const req = makeReq({
+      params: { shopDomain: SHOP, userKey },
+      query: { from: '2026-10-01', to: '2026-10-31' },
+    });
+    const res = makeRes();
+
+    let capturedPipeline;
+    jest.spyOn(ScheduledJob, 'aggregate').mockImplementation((pipeline) => {
+      capturedPipeline = pipeline;
+      return Promise.resolve([]);
+    });
+
+    await handler(req, res);
+
+    expect(capturedPipeline).toBeDefined();
+    const matchProfileId = capturedPipeline[0].$match.profileId;
+    // aggregate() does not auto-cast — profileId MUST be an ObjectId here.
+    expect(matchProfileId).toBeInstanceOf(ObjectId);
+    expect(matchProfileId.toString()).toBe(PROFILE_ID.toString());
+  });
+
+  test('E22b: /revisit find() query.profileId is ObjectId, not string', async () => {
+    const handler = getHandler('get', '/users/:userKey/revisit');
+    const userKey = 'p_' + PROFILE_ID.toString();
+    const req = makeReq({
+      params: { shopDomain: SHOP, userKey },
+      query: { from: '2026-10-01', to: '2026-10-31' },
+    });
+    const res = makeRes();
+
+    jest.spyOn(Profile, 'findOne').mockReturnValue({
+      lean: jest.fn().mockResolvedValue({ _id: PROFILE_ID }),
+    });
+
+    let capturedQuery;
+    jest.spyOn(ScheduledJob, 'find').mockImplementation((query) => {
+      capturedQuery = query;
+      return {
+        sort: () => ({ select: () => ({ lean: jest.fn().mockResolvedValue([]) }) }),
+      };
+    });
+    jest.spyOn(FestivalQueue, 'find').mockReturnValue({ lean: jest.fn().mockResolvedValue([]) });
+    jest.spyOn(AttributedEvent, 'find').mockReturnValue({ lean: jest.fn().mockResolvedValue([]) });
+
+    await handler(req, res);
+
+    expect(capturedQuery).toBeDefined();
+    // Being explicit about ObjectId prevents future regressions if find() auto-cast is removed.
+    expect(capturedQuery.profileId).toBeInstanceOf(ObjectId);
+    expect(capturedQuery.profileId.toString()).toBe(PROFILE_ID.toString());
+  });
+});
