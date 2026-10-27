@@ -290,3 +290,97 @@ test('B13: no back arrow button or ArrowLeft SVG in rendered output', async () =
     expect(btn.textContent).not.toContain('←');
   }
 });
+
+// ─── B14: one panel open at a time ───────────────────────────────────────────
+
+test('B14: expanding a second row closes the first', async () => {
+  mockApiGetResolve(USERS_RESPONSE);
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
+
+  // Stub per-user fetch
+  apiGet.mockResolvedValue({ byType: [] });
+
+  const aliceBtn = screen.getByRole('button', { name: /expand alice/i });
+  await act(async () => { fireEvent.click(aliceBtn); });
+  await waitFor(() => expect(aliceBtn.getAttribute('aria-expanded')).toBe('true'));
+
+  const anonBtn = screen.getByRole('button', { name: /expand anonymous visitor/i });
+  await act(async () => { fireEvent.click(anonBtn); });
+  await waitFor(() => expect(anonBtn.getAttribute('aria-expanded')).toBe('true'));
+
+  // Alice must now be collapsed
+  expect(aliceBtn.getAttribute('aria-expanded')).toBe('false');
+});
+
+// ─── B15: lazy fetch — only fetches on expand ────────────────────────────────
+
+test('B15: per-user detail is not fetched until row is expanded', async () => {
+  mockApiGetResolve(USERS_RESPONSE);
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
+
+  // Record calls AFTER the initial list load
+  apiGet.mockClear();
+  apiGet.mockResolvedValue({ byType: [] });
+
+  // Before expanding: no per-user call
+  expect(apiGet).not.toHaveBeenCalled();
+
+  // Expand Alice → per-user count fetch fires
+  const aliceBtn = screen.getByRole('button', { name: /expand alice/i });
+  await act(async () => { fireEvent.click(aliceBtn); });
+  await waitFor(() => expect(apiGet).toHaveBeenCalled());
+  expect(apiGet.mock.calls[0][0]).toContain('/users/');
+});
+
+// ─── B16: expand cache — re-expand does not re-fetch ─────────────────────────
+
+test('B16: re-expanding a row after collapse does not trigger a second fetch', async () => {
+  mockApiGetResolve(USERS_RESPONSE);
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
+
+  apiGet.mockClear();
+  apiGet.mockResolvedValue({ byType: [{ type: 'cart_abandon', label: 'Cart reminder', count: 3 }] });
+
+  const aliceBtn = screen.getByRole('button', { name: /expand alice/i });
+  // Expand
+  await act(async () => { fireEvent.click(aliceBtn); });
+  await waitFor(() => expect(aliceBtn.getAttribute('aria-expanded')).toBe('true'));
+  const callsAfterFirstExpand = apiGet.mock.calls.length;
+
+  // Collapse
+  await act(async () => { fireEvent.click(aliceBtn); });
+  expect(aliceBtn.getAttribute('aria-expanded')).toBe('false');
+
+  // Re-expand
+  apiGet.mockClear();
+  await act(async () => { fireEvent.click(aliceBtn); });
+  await waitFor(() => expect(aliceBtn.getAttribute('aria-expanded')).toBe('true'));
+
+  // No new API call — served from cache
+  expect(apiGet).not.toHaveBeenCalled();
+});
+
+// ─── B17: includeVia NOT sent in Count mode or Revisited view ─────────────────
+
+test('B17: includeVia=1 is absent in Count mode and in Revisited users view', async () => {
+  mockApiGetResolve(USERS_RESPONSE);
+  renderPanel();
+  await waitFor(() => screen.getByText('Alice'));
+
+  // Count mode (default) — no includeVia
+  const countUrl = apiGet.mock.calls[apiGet.mock.calls.length - 1][0];
+  expect(countUrl).not.toContain('includeVia');
+
+  // Switch to Revisited users view — no includeVia
+  apiGet.mockClear();
+  mockApiGetResolve({ total: 0, users: [] });
+  const revisitedBtn = screen.getByRole('button', { name: /revisited users/i });
+  fireEvent.click(revisitedBtn);
+  await waitFor(() => expect(apiGet).toHaveBeenCalled());
+  expect(apiGet.mock.calls[0][0]).not.toContain('includeVia');
+  // The revisited endpoint is used
+  expect(apiGet.mock.calls[0][0]).toContain('revisited');
+});
