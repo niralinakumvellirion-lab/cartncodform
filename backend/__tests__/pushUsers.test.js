@@ -1085,3 +1085,112 @@ describe('E17 /users.csv: CSV safety and structure', () => {
     expect(res._headers['Content-Type']).toMatch(/text\/csv/);
   });
 });
+
+// =============================================================================
+// E18-E21 — GET /users includeVia=1 param
+// =============================================================================
+
+describe('E18-E21 includeVia param', () => {
+  function lean(rows) {
+    return { lean: jest.fn().mockResolvedValue(rows) };
+  }
+
+  function stubProfileUser(jobId) {
+    jest.spyOn(ScheduledJob, 'aggregate').mockResolvedValue([{
+      _id: { profileId: PROFILE_ID, token: null },
+      sentCount: 3,
+      lastSentAt: new Date('2026-10-20'),
+      jobIds: [jobId],
+      festivalQueueIds: [],
+      trackedJobCount: 3,
+    }]);
+    jest.spyOn(Profile, 'find').mockReturnValue(lean([{
+      _id: PROFILE_ID,
+      channels: { email: { address: 'alice@example.com' } },
+      identifiers: { pushTokens: [], emails: ['alice@example.com'] },
+    }]));
+  }
+
+  test('E18: without includeVia, users have no cameBackVia field', async () => {
+    const handler = getHandler('get', '/users');
+    stubProfileUser(JOB_ID);
+    jest.spyOn(ScheduledJob, 'find').mockReturnValue(lean([]));
+    jest.spyOn(AttributedEvent, 'find').mockReturnValue(lean([]));
+
+    const res = makeRes();
+    await handler(makeReq({ query: {} }), res);
+    expect(res._status).toBe(200);
+    const user = res._body.users[0];
+    expect(user).not.toHaveProperty('cameBackVia');
+  });
+
+  test('E19: with includeVia=1 and a revisit event, user has cameBackVia', async () => {
+    const handler = getHandler('get', '/users');
+    stubProfileUser(JOB_ID);
+    // ScheduledJob.find: first call = addRevisitedStatus (clicked), second = includeVia signal lookup
+    jest.spyOn(ScheduledJob, 'find')
+      .mockReturnValueOnce(lean([]))
+      .mockReturnValueOnce(lean([{ _id: JOB_ID, signalType: 'cart_abandon' }]));
+    // AttributedEvent.find: first = addRevisitedStatus, second = includeVia batch
+    jest.spyOn(AttributedEvent, 'find')
+      .mockReturnValueOnce(lean([]))
+      .mockReturnValueOnce(lean([{ jobId: JOB_ID }]));
+
+    const res = makeRes();
+    await handler(makeReq({ query: { includeVia: '1' } }), res);
+    expect(res._status).toBe(200);
+    const user = res._body.users[0];
+    expect(user).toHaveProperty('cameBackVia');
+    expect(user.cameBackVia.length).toBeGreaterThan(0);
+    expect(user.cameBackVia[0].type).toBe('cart_abandon');
+  });
+
+  test('E20: cross-shop isolation — includeVia with no matching events returns cameBackVia:[]', async () => {
+    const handler = getHandler('get', '/users');
+    stubProfileUser(JOB_ID);
+    jest.spyOn(ScheduledJob, 'find')
+      .mockReturnValueOnce(lean([]))
+      .mockReturnValueOnce(lean([]));
+    jest.spyOn(AttributedEvent, 'find')
+      .mockReturnValueOnce(lean([]))
+      .mockReturnValueOnce(lean([]));
+
+    const res = makeRes();
+    await handler(makeReq({ query: { includeVia: '1' } }), res);
+    expect(res._status).toBe(200);
+    const user = res._body.users[0];
+    expect(user.cameBackVia).toEqual([]);
+  });
+
+  test('E21: anonymous user gets cameBackVia:[] when no revisits', async () => {
+    const handler = getHandler('get', '/users');
+    jest.spyOn(ScheduledJob, 'aggregate').mockResolvedValue([{
+      _id: { profileId: null, token: FCM_TOKEN },
+      sentCount: 1,
+      lastSentAt: new Date('2026-10-19'),
+      jobIds: [JOB_ID2],
+      festivalQueueIds: [],
+      trackedJobCount: 0,
+    }]);
+    // Profile.find for token resolution → empty
+    jest.spyOn(Profile, 'find').mockReturnValue(lean([]));
+    // CustomerPushSubscription resolves token → anon doc
+    jest.spyOn(CustomerPushSubscription, 'find').mockReturnValue(lean([
+      { _id: SUB_DOC_ID, token: FCM_TOKEN, deviceType: 'android' },
+    ]));
+    jest.spyOn(ScheduledJob, 'find')
+      .mockReturnValueOnce(lean([]))   // addRevisitedStatus clicked
+      .mockReturnValueOnce(lean([]));  // includeVia signal lookup
+    jest.spyOn(AttributedEvent, 'find')
+      .mockReturnValueOnce(lean([]))   // addRevisitedStatus
+      .mockReturnValueOnce(lean([]));  // includeVia batch
+
+    const res = makeRes();
+    await handler(makeReq({ query: { includeVia: '1' } }), res);
+    expect(res._status).toBe(200);
+    expect(res._body.users.length).toBeGreaterThan(0);
+    const anonUser = res._body.users.find((u) => u.userKey.startsWith('a_'));
+    expect(anonUser).toBeDefined();
+    expect(anonUser.cameBackVia).toEqual([]);
+  });
+});

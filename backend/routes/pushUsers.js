@@ -311,6 +311,7 @@ router.get('/users', requireAuth, requireStoreOwner, async (req, res) => {
     const typeFilter = typeof req.query.type  === 'string' && req.query.type.trim()   ? req.query.type.trim()   : null;
     const originFilter = typeof req.query.origin === 'string' && req.query.origin.trim() ? req.query.origin.trim() : null;
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+    const includeVia = req.query.includeVia === '1';
 
     const match = {
       shopDomain: shop,
@@ -358,17 +359,63 @@ router.get('/users', requireAuth, requireStoreOwner, async (req, res) => {
     const total = users.length;
     const slice = users.slice(page * limit, (page + 1) * limit);
 
+    // When includeVia=1, batch-fetch cameBackVia for the page slice
+    let viaMap = {};  // userKey -> [{type, label, count}]
+    if (includeVia && slice.length > 0) {
+      const allJobIds = [];
+      for (const u of slice) allJobIds.push(...u.jobIds);
+
+      if (allJobIds.length) {
+        const attrRows = await AttributedEvent.find(
+          { shopDomain: shop, eventType: 'revisit', jobId: { $in: allJobIds } },
+          'jobId'
+        ).lean();
+
+        const jobToUserKey = {};
+        for (const u of slice) {
+          for (const jid of u.jobIds) jobToUserKey[String(jid)] = u.userKey;
+        }
+
+        const jobSignalRows = await ScheduledJob.find(
+          { _id: { $in: allJobIds } },
+          '_id signalType'
+        ).lean();
+        const jobSignalMap = {};
+        for (const j of jobSignalRows) jobSignalMap[String(j._id)] = j.signalType || 'other';
+
+        const tally = {};  // userKey -> { signalType -> count }
+        for (const a of attrRows) {
+          const jid = String(a.jobId);
+          const uk = jobToUserKey[jid];
+          if (!uk) continue;
+          const st = jobSignalMap[jid] || 'other';
+          if (!tally[uk]) tally[uk] = {};
+          tally[uk][st] = (tally[uk][st] || 0) + 1;
+        }
+
+        for (const [uk, typeCounts] of Object.entries(tally)) {
+          viaMap[uk] = Object.entries(typeCounts)
+            .map(([type, count]) => ({ type, label: typeLabel(type), count }))
+            .sort((a, b) => b.count - a.count);
+        }
+      }
+    }
+
     return res.json({
       total,
-      users: slice.map((u) => ({
-        userKey:    u.userKey,
-        name:       u.name,
-        email:      u.email,
-        deviceType: u.deviceType,
-        lastSentAt: u.lastSentAt,
-        sentCount:  u.sentCount,
-        revisited:  u.revisited,
-      })),
+      users: slice.map((u) => {
+        const base = {
+          userKey:    u.userKey,
+          name:       u.name,
+          email:      u.email,
+          deviceType: u.deviceType,
+          lastSentAt: u.lastSentAt,
+          sentCount:  u.sentCount,
+          revisited:  u.revisited,
+        };
+        if (includeVia) base.cameBackVia = viaMap[u.userKey] || [];
+        return base;
+      }),
     });
   } catch (err) {
     console.error('[push-users] GET /users error:', err.message);
