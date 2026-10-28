@@ -13,6 +13,41 @@ const { computeSignalsForProfile } = require('../services/signalEngine');
 const Profile = require('../models/Profile');
 const ScheduledJob = require('../models/ScheduledJob');
 const { recordSubscriptionEvent } = require('../utils/subscriptionEvents');
+const AttributedEvent = require('../models/AttributedEvent');
+const AutomationConfig = require('../models/AutomationConfig');
+const CodOrder = require('../models/CodOrder');
+const DiscountConfig = require('../models/DiscountConfig');
+const EmailTemplate = require('../models/EmailTemplate');
+const FestivalQueue = require('../models/FestivalQueue');
+const PushSubscription = require('../models/PushSubscription');
+const ShopWeights = require('../models/ShopWeights');
+const Signal = require('../models/Signal');
+const SignalConfig = require('../models/SignalConfig');
+const ComplianceRequest = require('../models/ComplianceRequest');
+
+// All models that hold shopDomain-scoped data and must be wiped on shop/redact.
+// ALLOWLIST (intentionally excluded): SubscriptionEvent (billing analytics, no shopper PII),
+// ComplianceRequest (audit trail), AuditLog (admin IP only), CopyCache (no PII, TTL-indexed),
+// ProductImageCache (no PII, TTL-indexed).
+const SHOP_REDACT_MODELS = [
+  AbandonedCustomer,
+  AttributedEvent,
+  AutomationConfig,
+  CodOrder,
+  CustomerPushSubscription,
+  DiscountConfig,
+  EmailTemplate,
+  FestivalQueue,
+  Profile,
+  PushClick,
+  PushSubscription,
+  ScheduledJob,
+  ShopWeights,
+  Signal,
+  SignalConfig,
+  Store,
+  StorefrontEvent,
+];
 
 const router = express.Router();
 
@@ -482,22 +517,52 @@ async function handleCustomersDataRequest(req, res) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
+    .toString().trim().toLowerCase();
+  const customerId = req.body.customer?.id ? String(req.body.customer.id) : null;
+  const customerEmail = req.body.customer?.email || null;
+  const customerPhone = req.body.customer?.phone || null;
+
+  let cr;
   try {
-    const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
-      .toString().trim().toLowerCase();
-    const customerId = req.body.customer?.id ? String(req.body.customer.id) : null;
-    const customerEmail = req.body.customer?.email || null;
-    const customerPhone = req.body.customer?.phone || null;
+    cr = await Promise.race([
+      ComplianceRequest.create({
+        shopDomain,
+        topic: 'customers/data_request',
+        identifiers: { customerId, customerEmail, customerPhone },
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('insert timeout')), 2000)
+      ),
+    ]);
+  } catch (insertErr) {
+    console.error('[gdpr] customers/data_request — failed to persist:', insertErr.message);
+    return res.status(503).json({ error: 'Service temporarily unavailable' });
+  }
 
-    console.log(`[gdpr] customers/data_request for shop ${shopDomain}, customer ${customerId || customerEmail || 'unknown'}`);
+  res.status(200).json({ received: true });
 
-    // Log what data we hold for this customer, for manual fulfillment
-    // if the merchant needs it. We do not have a customer support
-    // channel to auto-deliver this, so we surface it in logs.
+  setImmediate(() => {
+    runDataRequestJob(cr).catch((e) =>
+      console.error('[gdpr] customers/data_request background job error:', e.message)
+    );
+  });
+}
+
+async function runDataRequestJob(cr) {
+  const { shopDomain } = cr;
+  const { customerId, customerEmail, customerPhone } = cr.identifiers || {};
+
+  await ComplianceRequest.updateOne(
+    { _id: cr._id },
+    { $set: { status: 'processing', lastAttemptAt: new Date() }, $inc: { attempts: 1 } }
+  );
+
+  try {
     if (customerId || customerEmail || customerPhone) {
-      const query = { shopDomain };
-      if (customerId) query.customerId = customerId;
-      else if (customerEmail) query.email = customerEmail.toLowerCase();
+      const acQuery = { shopDomain };
+      if (customerId) acQuery.customerId = customerId;
+      else if (customerEmail) acQuery.email = customerEmail.toLowerCase();
 
       const profileOr = [];
       if (customerId) profileOr.push({ 'identifiers.customerId': customerId });
@@ -508,38 +573,38 @@ async function handleCustomersDataRequest(req, res) {
       if (customerEmail) codOrClauses.push({ email: customerEmail.toLowerCase() });
       if (customerPhone) codOrClauses.push({ phone: customerPhone });
 
-      const CodOrder = require('../models/CodOrder');
       const [carts, events, profiles, codOrders] = await Promise.all([
-        AbandonedCustomer.find(query).lean(),
-        StorefrontEvent.find(customerId ? { shopDomain, customerId } : {}).limit(100).lean(),
-        profileOr.length
-          ? Profile.find({ shopDomain, $or: profileOr }).lean()
-          : Promise.resolve([]),
+        AbandonedCustomer.countDocuments(acQuery),
+        StorefrontEvent.countDocuments(customerId ? { shopDomain, customerId } : { _id: null }),
+        profileOr.length ? Profile.find({ shopDomain, $or: profileOr }).lean() : Promise.resolve([]),
         codOrClauses.length
-          ? CodOrder.find({ shopDomain, $or: codOrClauses }).lean()
-          : Promise.resolve([]),
+          ? CodOrder.countDocuments({ shopDomain, $or: codOrClauses })
+          : Promise.resolve(0),
       ]);
 
+      const profileIds = profiles.map((p) => p._id);
       const jobQuery = { shopDomain, $or: [] };
       if (customerId) jobQuery.$or.push({ customerId });
-      const profileIds = profiles.map((p) => p._id);
       if (profileIds.length) jobQuery.$or.push({ profileId: { $in: profileIds } });
-      const jobs = jobQuery.$or.length ? await ScheduledJob.find(jobQuery).limit(100).lean() : [];
+      const jobCount = jobQuery.$or.length ? await ScheduledJob.countDocuments(jobQuery) : 0;
 
-      // Profile rows include channels.whatsapp consent data (phone, consentedAt,
-      // optedOutAt). ScheduledJob rows include whatsapp jobs (channel='whatsapp').
-      // Both are already covered by the queries above via profileId linkage.
       console.log(
-        `[gdpr] Data on file — AbandonedCustomer rows: ${carts.length}, StorefrontEvent rows: ${events.length}, ` +
-        `Profile rows (incl. WhatsApp channel): ${profiles.length}, ScheduledJob rows (incl. WhatsApp): ${jobs.length}, ` +
-        `CodOrder rows: ${codOrders.length}`
+        `[gdpr] data_request — AbandonedCustomer: ${carts}, StorefrontEvent: ${events}, ` +
+        `Profile: ${profiles.length}, ScheduledJob: ${jobCount}, CodOrder: ${codOrders}`
       );
     }
 
-    return res.status(200).json({ received: true });
+    await ComplianceRequest.updateOne(
+      { _id: cr._id },
+      { $set: { status: 'completed', completedAt: new Date(), identifiers: null } }
+    );
   } catch (err) {
-    console.error('[gdpr] customers/data_request error:', err.message);
-    return res.status(200).json({ received: true, error: err.message });
+    await ComplianceRequest.updateOne(
+      { _id: cr._id },
+      { $set: { status: 'failed', errorMessage: err.message } }
+    );
+    console.error('[gdpr] data_request job failed:', err.message);
+    throw err;
   }
 }
 
@@ -555,55 +620,76 @@ async function handleCustomersRedact(req, res) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
+  const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
+    .toString().trim().toLowerCase();
+  const customerId = req.body.customer?.id ? String(req.body.customer.id) : null;
+  const customerEmail = req.body.customer?.email || null;
+  const customerPhone = req.body.customer?.phone || null;
+
+  if (!customerId && !customerEmail && !customerPhone) {
+    console.warn('[gdpr] customers/redact — no customer identifier in payload, nothing to delete');
+    return res.status(200).json({ received: true });
+  }
+
+  let cr;
   try {
-    const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
-      .toString().trim().toLowerCase();
-    const customerId = req.body.customer?.id ? String(req.body.customer.id) : null;
-    const customerEmail = req.body.customer?.email || null;
-    const customerPhone = req.body.customer?.phone || null;
+    cr = await Promise.race([
+      ComplianceRequest.create({
+        shopDomain,
+        topic: 'customers/redact',
+        identifiers: { customerId, customerEmail, customerPhone },
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('insert timeout')), 2000)
+      ),
+    ]);
+  } catch (insertErr) {
+    console.error('[gdpr] customers/redact — failed to persist:', insertErr.message);
+    return res.status(503).json({ error: 'Service temporarily unavailable' });
+  }
 
-    console.log(`[gdpr] customers/redact for shop ${shopDomain}, customer ${customerId || customerEmail || 'unknown'}`);
+  res.status(200).json({ received: true });
 
-    if (!customerId && !customerEmail && !customerPhone) {
-      console.warn('[gdpr] customers/redact — no customer identifier in payload, nothing to delete');
-      return res.status(200).json({ received: true });
-    }
+  setImmediate(() => {
+    runCustomersRedact(cr).catch((e) =>
+      console.error('[gdpr] customers/redact background job error:', e.message)
+    );
+  });
+}
 
+async function runCustomersRedact(cr) {
+  const { shopDomain } = cr;
+  const { customerId, customerEmail, customerPhone } = cr.identifiers || {};
+
+  await ComplianceRequest.updateOne(
+    { _id: cr._id },
+    { $set: { status: 'processing', lastAttemptAt: new Date() }, $inc: { attempts: 1 } }
+  );
+
+  try {
     const orClauses = [];
     if (customerId) orClauses.push({ customerId });
     if (customerEmail) orClauses.push({ email: customerEmail.toLowerCase() });
 
-    // Profile is matched separately (it's keyed by identifiers.*, not the
-    // flat customerId/email fields AbandonedCustomer/StorefrontEvent use).
     const profileOr = [];
     if (customerId) profileOr.push({ 'identifiers.customerId': customerId });
     if (customerEmail) profileOr.push({ 'identifiers.emails': customerEmail.toLowerCase() });
     if (customerPhone) profileOr.push({ 'identifiers.phones': customerPhone });
 
-    // Read the Profile(s) BEFORE deleting them — we need their cartTokens to
-    // find ScheduledJob rows that never got a customerId (e.g. a job
-    // scheduled while the visitor was still anonymous).
+    // Read Profile(s) first — cartTokens/sessionIds/pushTokens are needed to
+    // match rows created before the customer logged in.
     const profiles = profileOr.length
       ? await Profile.find({ shopDomain, $or: profileOr }).lean()
       : [];
     const profileIds = profiles.map((p) => p._id);
-    const cartTokens = [...new Set(
-      profiles.flatMap((p) => (p.identifiers && p.identifiers.cartTokens) || [])
-    )];
-    const sessionIds = [...new Set(
-      profiles.flatMap((p) => (p.identifiers && p.identifiers.sessionIds) || [])
-    )];
-    const pushTokens = [...new Set(
-      profiles.flatMap((p) => (p.identifiers && p.identifiers.pushTokens) || [])
-    )];
+    const cartTokens = [...new Set(profiles.flatMap((p) => p.identifiers?.cartTokens || []))];
+    const sessionIds = [...new Set(profiles.flatMap((p) => p.identifiers?.sessionIds || []))];
+    const pushTokens = [...new Set(profiles.flatMap((p) => p.identifiers?.pushTokens || []))];
 
-    const cartResult = await AbandonedCustomer.deleteMany({ shopDomain, $or: orClauses });
+    const cartResult = orClauses.length
+      ? await AbandonedCustomer.deleteMany({ shopDomain, $or: orClauses })
+      : { deletedCount: 0 };
 
-    // Build a comprehensive deletion query covering every identifier type
-    // that a StorefrontEvent row might carry: customerId (logged-in sessions),
-    // ccfSessionIds (stable localStorage UUID, stored in sessionId column),
-    // cartTokens (also stored in sessionId column per buildJourneyEntry),
-    // and FCM push tokens (stored in the token column).
     const seOrClauses = [];
     if (customerId) seOrClauses.push({ customerId });
     if (sessionIds.length) seOrClauses.push({ sessionId: { $in: sessionIds } });
@@ -612,15 +698,33 @@ async function handleCustomersRedact(req, res) {
     const eventResult = seOrClauses.length
       ? await StorefrontEvent.deleteMany({ shopDomain, $or: seOrClauses })
       : { deletedCount: 0 };
-    const subResult = customerId
-      ? await CustomerPushSubscription.deleteMany({ shopDomain, customerId })
+
+    const subOrClauses = [];
+    if (customerId) subOrClauses.push({ customerId });
+    if (cartTokens.length) subOrClauses.push({ cartToken: { $in: cartTokens } });
+    if (pushTokens.length) subOrClauses.push({ token: { $in: pushTokens } });
+    const subResult = subOrClauses.length
+      ? await CustomerPushSubscription.deleteMany({ shopDomain, $or: subOrClauses })
       : { deletedCount: 0 };
 
-    // ScheduledJob rows are ANONYMISED, not deleted — the poller's per-send
-    // outcome (channel/status/sentAt/outcome) feeds the nightly weights job
-    // (services/weightsService.js, 90-day lookback) and the Activity/Insights
-    // screens' aggregate counts, which the merchant relies on. Only the
-    // fields that identify or quote this specific customer are stripped.
+    // PushClick — gap that was missing from old code
+    const clickOrClauses = [];
+    if (customerId) clickOrClauses.push({ customerId });
+    if (cartTokens.length) clickOrClauses.push({ cartToken: { $in: cartTokens } });
+    if (pushTokens.length) clickOrClauses.push({ subscriptionToken: { $in: pushTokens } });
+    const clickResult = clickOrClauses.length
+      ? await PushClick.deleteMany({ shopDomain, $or: clickOrClauses })
+      : { deletedCount: 0 };
+
+    // AttributedEvent — no customerId field; matched via sessionId and profileId
+    const attrOrClauses = [];
+    if (sessionIds.length) attrOrClauses.push({ sessionId: { $in: sessionIds } });
+    if (profileIds.length) attrOrClauses.push({ profileId: { $in: profileIds } });
+    const attrResult = attrOrClauses.length
+      ? await AttributedEvent.deleteMany({ shopDomain, $or: attrOrClauses })
+      : { deletedCount: 0 };
+
+    // ScheduledJob — anonymise, not delete (aggregate counts feed merchant analytics)
     const jobOr = [];
     if (customerId) jobOr.push({ customerId });
     if (cartTokens.length) jobOr.push({ cartToken: { $in: cartTokens } });
@@ -641,9 +745,6 @@ async function handleCustomersRedact(req, res) {
         )
       : { modifiedCount: 0 };
 
-    // CodOrder rows — anonymise PII fields (name, phone, email, address).
-    // CodOrder has no customerId; match by email and phone only.
-    const CodOrder = require('../models/CodOrder');
     const codOrClauses = [];
     if (customerEmail) codOrClauses.push({ email: customerEmail.toLowerCase() });
     if (customerPhone) codOrClauses.push({ phone: customerPhone });
@@ -654,31 +755,36 @@ async function handleCustomersRedact(req, res) {
         )
       : { modifiedCount: 0 };
 
-    // Profile IS the customer record — channels.whatsapp, birthday, and all
-    // sub-documents are deleted with it since they live inside the same doc.
     const profileResult = profileOr.length
       ? await Profile.deleteMany({ shopDomain, $or: profileOr })
       : { deletedCount: 0 };
 
-    // ScheduledJob anonymisation covers whatsapp jobs too (they carry profileId).
-    console.log(
-      `[gdpr] Redacted — carts: ${cartResult.deletedCount}, events: ${eventResult.deletedCount}, ` +
-      `subscriptions: ${subResult.deletedCount}, profiles (incl. birthday/WhatsApp): ${profileResult.deletedCount}, ` +
-      `jobs anonymised (incl. WhatsApp): ${jobResult.modifiedCount}, ` +
-      `cod orders anonymised: ${codResult.modifiedCount}`
+    await ComplianceRequest.updateOne(
+      { _id: cr._id },
+      { $set: { status: 'completed', completedAt: new Date(), identifiers: null } }
     );
 
-    return res.status(200).json({ received: true });
+    console.log(
+      `[gdpr] customers/redact completed — carts: ${cartResult.deletedCount}, ` +
+      `events: ${eventResult.deletedCount}, subscriptions: ${subResult.deletedCount}, ` +
+      `pushClicks: ${clickResult.deletedCount}, attributedEvents: ${attrResult.deletedCount}, ` +
+      `profiles: ${profileResult.deletedCount}, jobs anonymised: ${jobResult.modifiedCount}, ` +
+      `cod orders anonymised: ${codResult.modifiedCount}`
+    );
   } catch (err) {
-    console.error('[gdpr] customers/redact error:', err.message);
-    return res.status(200).json({ received: true, error: err.message });
+    await ComplianceRequest.updateOne(
+      { _id: cr._id },
+      { $set: { status: 'failed', errorMessage: err.message } }
+    );
+    console.error('[gdpr] customers/redact job failed:', err.message);
+    throw err;
   }
 }
 
 /**
  * GDPR: shop/redact
  * Fired 48h after a shop uninstalls the app. Delete ALL data for
- * that shop across every collection.
+ * that shop across every collection in SHOP_REDACT_MODELS.
  */
 async function handleShopRedact(req, res) {
   const hmacHeader = req.get('X-Shopify-Hmac-Sha256');
@@ -687,41 +793,67 @@ async function handleShopRedact(req, res) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  try {
-    const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
-      .toString().trim().toLowerCase();
-
-    if (!shopDomain) {
-      console.warn('[gdpr] shop/redact — no shop domain in payload');
-      return res.status(200).json({ received: true });
-    }
-
-    console.log(`[gdpr] shop/redact for ${shopDomain} — deleting all data`);
-
-    const PushClick = require('../models/PushClick');
-    const CodOrder = require('../models/CodOrder');
-    const PushSubscription = require('../models/PushSubscription');
-
-    // SubscriptionEvent is intentionally NOT deleted here. It contains only
-    // shopDomain + plan/event-type/date — no personal data (no emails, names,
-    // or shopper identifiers) — and is required for billing analytics.
-    const results = await Promise.all([
-      AbandonedCustomer.deleteMany({ shopDomain }),
-      StorefrontEvent.deleteMany({ shopDomain }),
-      CustomerPushSubscription.deleteMany({ shopDomain }),
-      PushSubscription.deleteMany({ shopDomain }),
-      ScheduledJob.deleteMany({ shopDomain }),
-      PushClick.deleteMany({ shopDomain }),
-      CodOrder.deleteMany({ shopDomain }),
-      Store.deleteOne({ shopDomain }),
-    ]);
-
-    console.log(`[gdpr] shop/redact complete for ${shopDomain} — collections cleared: ${results.map(r => r.deletedCount ?? (r.acknowledged ? 1 : 0)).join(', ')}`);
-
+  const shopDomain = (req.get('X-Shopify-Shop-Domain') || req.body.shop_domain || '')
+    .toString().trim().toLowerCase();
+  if (!shopDomain) {
+    console.warn('[gdpr] shop/redact — no shop domain in payload');
     return res.status(200).json({ received: true });
+  }
+
+  let cr;
+  try {
+    cr = await Promise.race([
+      ComplianceRequest.create({
+        shopDomain,
+        topic: 'shop/redact',
+        identifiers: {},
+      }),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('insert timeout')), 2000)
+      ),
+    ]);
+  } catch (insertErr) {
+    console.error('[gdpr] shop/redact — failed to persist:', insertErr.message);
+    return res.status(503).json({ error: 'Service temporarily unavailable' });
+  }
+
+  res.status(200).json({ received: true });
+
+  setImmediate(() => {
+    runShopRedact(cr).catch((e) =>
+      console.error('[gdpr] shop/redact background job error:', e.message)
+    );
+  });
+}
+
+async function runShopRedact(cr) {
+  const { shopDomain } = cr;
+
+  await ComplianceRequest.updateOne(
+    { _id: cr._id },
+    { $set: { status: 'processing', lastAttemptAt: new Date() }, $inc: { attempts: 1 } }
+  );
+
+  try {
+    // SubscriptionEvent is intentionally NOT deleted — billing analytics only,
+    // no shopper PII, required for merchant reporting.
+    await Promise.all(
+      SHOP_REDACT_MODELS.map((Model) => Model.deleteMany({ shopDomain }))
+    );
+
+    await ComplianceRequest.updateOne(
+      { _id: cr._id },
+      { $set: { status: 'completed', completedAt: new Date(), identifiers: null } }
+    );
+
+    console.log(`[gdpr] shop/redact completed for ${shopDomain}`);
   } catch (err) {
-    console.error('[gdpr] shop/redact error:', err.message);
-    return res.status(200).json({ received: true, error: err.message });
+    await ComplianceRequest.updateOne(
+      { _id: cr._id },
+      { $set: { status: 'failed', errorMessage: err.message } }
+    );
+    console.error('[gdpr] shop/redact job failed:', err.message);
+    throw err;
   }
 }
 
@@ -771,5 +903,15 @@ router.post('/compliance', (req, res) => {
 // (backend/routes/push.js) still uses it to resolve per-product images.
 // Attached to `router` so it survives the `module.exports = router` assignment.
 router.fetchProductImage = fetchProductImage;
+
+// Exported for the compliance-retry poller in server.js.
+router.runShopRedact = runShopRedact;
+router.runCustomersRedact = runCustomersRedact;
+router.SHOP_REDACT_MODELS = SHOP_REDACT_MODELS;
+
+// Exported for unit tests only.
+router._handleCustomersDataRequest = handleCustomersDataRequest;
+router._handleCustomersRedact = handleCustomersRedact;
+router._handleShopRedact = handleShopRedact;
 
 module.exports = router;

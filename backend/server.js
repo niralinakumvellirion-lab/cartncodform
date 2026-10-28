@@ -1142,6 +1142,31 @@ async function runBirthdaySweepForShop(shopDomain, storeDoc) {
 // processFestivalQueue() runs after processScheduledJobs() on the same
 // tick, wrapped in its own try/catch here (on top of its own internal
 // one) so a failure in either poller can never block or crash the other.
+const ComplianceRequest = require('./models/ComplianceRequest');
+const webhookRouter = require('./routes/webhooks');
+
+async function retryPendingCompliance() {
+  const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
+  const pending = await ComplianceRequest.find({
+    topic: { $in: ['shop/redact', 'customers/redact'] },
+    status: { $in: ['received', 'failed'] },
+    attempts: { $lt: 5 },
+    $or: [{ lastAttemptAt: { $lt: twoMinAgo } }, { lastAttemptAt: null }],
+  }).lean();
+
+  for (const cr of pending) {
+    if (cr.topic === 'shop/redact') {
+      webhookRouter.runShopRedact(cr).catch((e) =>
+        console.error('[gdpr-retry] shop/redact retry error:', e.message)
+      );
+    } else if (cr.topic === 'customers/redact') {
+      webhookRouter.runCustomersRedact(cr).catch((e) =>
+        console.error('[gdpr-retry] customers/redact retry error:', e.message)
+      );
+    }
+  }
+}
+
 async function runPollerTick() {
   try {
     await processScheduledJobs();
@@ -1152,6 +1177,11 @@ async function runPollerTick() {
     await processFestivalQueue();
   } catch (err) {
     console.error('[festival-queue] processFestivalQueue error (poller tick):', err.message);
+  }
+  try {
+    await retryPendingCompliance();
+  } catch (err) {
+    console.error('[gdpr-retry] compliance retry error (poller tick):', err.message);
   }
 }
 setInterval(runPollerTick, 30 * 1000);
