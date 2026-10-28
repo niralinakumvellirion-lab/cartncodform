@@ -1,12 +1,26 @@
 const express = require('express');
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
-const { refreshAccessTokenIfNeeded } = require('../utils/shopify');
+const { refreshAccessTokenIfNeeded, API_VERSION } = require('../utils/shopify');
 const Store = require('../models/Store');
 const AbandonedCustomer = require('../models/AbandonedCustomer');
 const CodOrder = require('../models/CodOrder');
 const PushSubscription = require('../models/PushSubscription');
 
 const router = express.Router();
+
+/**
+ * Map Shopify Admin GraphQL product nodes to the shape the frontend expects.
+ * Exported for unit testing.
+ */
+function mapProductNodes(nodes) {
+  return nodes.map((p) => ({
+    id: parseInt(p.id.replace('gid://shopify/Product/', ''), 10),
+    title: p.title,
+    handle: p.handle,
+    imageUrl: p.featuredImage?.url || null,
+    status: p.status.toLowerCase(),
+  }));
+}
 
 // In-memory cache for GET /:shopDomain/products — the trimmed, active-only
 // product list per shop, 5 minutes. A plain module-level Map is enough
@@ -114,23 +128,25 @@ router.get('/:shopDomain/products', requireAuth, requireStoreOwner, async (req, 
         });
       }
 
-      // Always fetch Shopify's own per-request max (250), never scoped by
-      // `title=` — the response `limit` is applied to our own
-      // filtered/searched result below, not to this fetch.
-      const params = new URLSearchParams({
-        limit: '250',
-        fields: 'id,title,handle,image,status',
-      });
+      // Fetch up to 250 active products via Admin GraphQL (pre-filtered
+      // server-side; no client-side status filter needed).
+      const gqlQuery = `{
+        products(first: 250, query: "status:active") {
+          nodes { id title handle featuredImage { url } status }
+        }
+      }`;
 
       let shopifyRes;
       try {
         shopifyRes = await fetch(
-          `https://${shopDomain}/admin/api/2025-01/products.json?${params.toString()}`,
+          `https://${shopDomain}/admin/api/${API_VERSION}/graphql.json`,
           {
+            method: 'POST',
             headers: {
               'X-Shopify-Access-Token': apiToken,
               'Content-Type': 'application/json',
             },
+            body: JSON.stringify({ query: gqlQuery }),
           }
         );
       } catch (fetchErr) {
@@ -147,16 +163,12 @@ router.get('/:shopDomain/products', requireAuth, requireStoreOwner, async (req, 
         return res.status(502).json({ error: 'Failed to load products from Shopify. Please try again.' });
       }
 
-      const data = await shopifyRes.json();
-      allProducts = (data.products || [])
-        .filter((p) => p.status === 'active')
-        .map((p) => ({
-          id: p.id,
-          title: p.title,
-          handle: p.handle,
-          imageUrl: p.image?.src || null,
-          status: p.status,
-        }));
+      const gqlData = await shopifyRes.json();
+      if (gqlData.errors) {
+        console.error('[stores] GET /:shopDomain/products — GraphQL error:', gqlData.errors[0].message);
+        return res.status(502).json({ error: 'Failed to load products from Shopify. Please try again.' });
+      }
+      allProducts = mapProductNodes(gqlData.data?.products?.nodes || []);
 
       productsCache.set(shopDomain, {
         data: allProducts,
@@ -207,3 +219,4 @@ router.delete('/:shopDomain', requireAuth, requireStoreOwner, async (req, res) =
 });
 
 module.exports = router;
+router.mapProductNodes = mapProductNodes;

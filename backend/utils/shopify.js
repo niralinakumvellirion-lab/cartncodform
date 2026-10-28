@@ -4,9 +4,8 @@ const Store = require('../models/Store');
 
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
-const SCOPES =
-  'read_orders,read_customers,write_customers,read_products,write_discounts,read_discounts';
-const API_VERSION = '2025-01';
+const SCOPES = 'read_orders,read_products,write_discounts';
+const API_VERSION = '2026-10';
 
 /**
  * Build the Shopify OAuth authorization URL the merchant is redirected to.
@@ -170,22 +169,23 @@ async function getOnlineToken(shop, sessionToken) {
 }
 
 /**
- * Fetch the shop record from the Admin API and return the fields we need at
- * install time: contact email (links a connected store to an owner when no
- * owner_email was supplied) and the shop's own IANA timezone (iana_timezone).
- * One call for both — needs no scope beyond what an installed app already
- * has, since the Shop resource is always readable.
+ * Fetch the shop record via Admin GraphQL and return the fields we need at
+ * install time: contact email, IANA timezone, and shop name.
+ * No scope beyond what an installed app already has (Shop is always readable).
  */
 async function fetchShopInfo(shop, accessToken) {
   try {
-    const url = `https://${shop}/admin/api/${API_VERSION}/shop.json`;
-    const { data } = await axios.get(url, {
-      headers: { 'X-Shopify-Access-Token': accessToken },
-    });
-    const s = data && data.shop;
+    const url = `https://${shop}/admin/api/${API_VERSION}/graphql.json`;
+    const query = `{ shop { email ianaTimezone name } }`;
+    const { data } = await axios.post(
+      url,
+      { query },
+      { headers: { 'X-Shopify-Access-Token': accessToken, 'Content-Type': 'application/json' } }
+    );
+    const s = data && data.data && data.data.shop;
     return {
       email: (s && s.email) || null,
-      ianaTimezone: (s && s.iana_timezone) || null,
+      ianaTimezone: (s && s.ianaTimezone) || null,
       shopName: (s && s.name) || null,
     };
   } catch (err) {
@@ -228,46 +228,6 @@ async function fetchBrandData(shop, accessToken) {
   }
 }
 
-/**
- * Register a single webhook topic pointing at our backend.
- */
-async function registerWebhook(shop, accessToken, topic, address) {
-  const url = `https://${shop}/admin/api/${API_VERSION}/webhooks.json`;
-  try {
-    await axios.post(
-      url,
-      { webhook: { topic, address, format: 'json' } },
-      { headers: { 'X-Shopify-Access-Token': accessToken } }
-    );
-    console.log(`[shopify] Registered webhook "${topic}" for ${shop}`);
-  } catch (err) {
-    const detail = err.response ? JSON.stringify(err.response.data) : err.message;
-    console.error(`[shopify] Failed to register webhook "${topic}" for ${shop}: ${detail}`);
-  }
-}
-
-/**
- * Register every webhook topic the app relies on.
- */
-async function registerAllWebhooks(shop, accessToken, backendUrl) {
-  // NOTE: carts/create, carts/update, checkouts/create,
-  // checkouts/update, orders/create are now declared in
-  // shopify.app.toml (declarative subscriptions) and no longer
-  // need to be registered here. This function is kept for any
-  // future dynamic registrations only.
-  const topics = [
-    'app_subscriptions/update',
-    'app/uninstalled',
-  ];
-
-  for (const topic of topics) {
-    let path;
-    if (topic === 'app_subscriptions/update') path = 'app-subscription';
-    else if (topic === 'app/uninstalled') path = 'app-uninstalled';
-    const address = `${backendUrl}/api/webhooks/${path}`;
-    await registerWebhook(shop, accessToken, topic, address);
-  }
-}
 
 /**
  * Resolve a usable Admin API token for `store`. Prefers the offline
@@ -340,7 +300,5 @@ module.exports = {
   getOnlineToken,
   fetchShopInfo,
   fetchBrandData,
-  registerWebhook,
-  registerAllWebhooks,
   refreshAccessTokenIfNeeded,
 };

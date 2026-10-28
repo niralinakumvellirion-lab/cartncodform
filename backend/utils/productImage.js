@@ -1,6 +1,6 @@
 const Store = require('../models/Store');
 const ProductImageCache = require('../models/ProductImageCache');
-const { refreshAccessTokenIfNeeded } = require('./shopify');
+const { refreshAccessTokenIfNeeded, API_VERSION } = require('./shopify');
 
 /**
  * Turn a scraped/API image URL into an absolute https URL, or null.
@@ -66,46 +66,39 @@ async function fetchProductImage(shop, accessToken, productId) {
     const apiToken = store ? await refreshAccessTokenIfNeeded(store) : accessToken;
     if (!apiToken) return null;
 
-    // DEBUG (temporary)
-    console.log('[webhook-img] fetching image for productId:', productId,
-      'shop:', shop, 'token type:', apiToken?.startsWith('shpua_') ? 'online' : 'offline');
-
     console.log('[webhook] Fetching image for productId:', productId,
-      'shop:', shop,
-      'hasToken:', !!apiToken);
+      'shop:', shop, 'hasToken:', !!apiToken);
+
+    const gqlQuery = `query ProductImage($id: ID!) {
+      product(id: $id) { featuredImage { url } images(first: 1) { nodes { url } } }
+    }`;
     const res = await fetch(
-      `https://${shop}/admin/api/2025-01/products/${productId}.json`,
+      `https://${shop}/admin/api/${API_VERSION}/graphql.json`,
       {
-        headers: {
-          'X-Shopify-Access-Token': apiToken,
-          'Content-Type': 'application/json'
-        }
+        method: 'POST',
+        headers: { 'X-Shopify-Access-Token': apiToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: gqlQuery, variables: { id: `gid://shopify/Product/${productId}` } }),
       }
     );
 
-    // DEBUG (temporary)
-    console.log('[webhook-img] HTTP status:', res.status, 'for product:', productId);
-
     if (!res.ok) {
-      console.warn('[webhook] fetchProductImage failed:', res.status,
-        'for', productId);
-      // DEBUG (temporary)
-      console.log('[webhook-img] fetch failed:', res.status);
+      console.warn('[webhook] fetchProductImage failed:', res.status, 'for', productId);
       return null;
     }
 
     const data = await res.json();
-    const imageUrl = data.product?.image?.src ||
-                     data.product?.images?.[0]?.src ||
+    if (data.errors) {
+      console.warn('[webhook] fetchProductImage GraphQL error:', data.errors[0]?.message);
+      return null;
+    }
+    const p = data.data?.product;
+    const imageUrl = p?.featuredImage?.url ||
+                     p?.images?.nodes?.[0]?.url ||
                      null;
     console.log(`[webhook] Product image for ${productId}:`, imageUrl ? 'found' : 'not found');
 
-    // Cache the result — only when truthy. A null result (product genuinely
-    // has no image, or the API call failed for any reason) is intentionally
-    // NOT cached: doing so would freeze that "no image" verdict in place
-    // for up to 24h (this model's TTL index), silently blocking every
-    // retry in that window even after whatever caused the null (e.g. an
-    // auth failure) is fixed.
+    // Cache only truthy results — a null is not cached so a later retry
+    // (after a transient auth failure etc.) can succeed.
     if (imageUrl) {
       try {
         await ProductImageCache.findOneAndUpdate(
@@ -118,13 +111,8 @@ async function fetchProductImage(shop, accessToken, productId) {
       }
     }
 
-    // DEBUG (temporary)
-    console.log('[webhook-img] imageUrl result:', imageUrl || 'null');
-
     return imageUrl;
   } catch(err) {
-    // DEBUG (temporary)
-    console.log('[webhook-img] error:', err.message);
     console.log('[webhook] Image fetch error:', err.message);
     return null;
   }
