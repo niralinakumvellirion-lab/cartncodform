@@ -1,11 +1,12 @@
 const axios = require('axios');
+const { API_VERSION } = require('./shopify');
 
 /**
  * Execute a GraphQL query/mutation against the Shopify Admin API.
  */
 async function shopifyGraphQL(shop, accessToken, query, variables = {}) {
   const res = await axios.post(
-    `https://${shop}/admin/api/2025-01/graphql.json`,
+    `https://${shop}/admin/api/${API_VERSION}/graphql.json`,
     { query, variables },
     {
       headers: {

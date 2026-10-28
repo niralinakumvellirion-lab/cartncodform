@@ -36,7 +36,7 @@ jest.mock('../middleware/requireOwner', () => ({
 }));
 jest.mock('../utils/shopify', () => ({
   verifyProxySignature: jest.fn(() => true),
-  API_VERSION: '2025-01',
+  API_VERSION: '2026-10',
 }));
 jest.mock('../services/profileService', () => ({
   upsertProfile: jest.fn().mockResolvedValue(null),
