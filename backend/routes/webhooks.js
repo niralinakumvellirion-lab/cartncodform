@@ -716,12 +716,18 @@ async function runCustomersRedact(cr) {
       ? await PushClick.deleteMany({ shopDomain, $or: clickOrClauses })
       : { deletedCount: 0 };
 
-    // AttributedEvent — no customerId field; matched via sessionId and profileId
+    // AttributedEvent — matched via sessionId, profileId, or email
     const attrOrClauses = [];
     if (sessionIds.length) attrOrClauses.push({ sessionId: { $in: sessionIds } });
     if (profileIds.length) attrOrClauses.push({ profileId: { $in: profileIds } });
+    if (customerEmail) attrOrClauses.push({ email: customerEmail.toLowerCase() });
     const attrResult = attrOrClauses.length
       ? await AttributedEvent.deleteMany({ shopDomain, $or: attrOrClauses })
+      : { deletedCount: 0 };
+
+    // Signal — has profileId field; delete by profileId
+    const signalResult = profileIds.length
+      ? await Signal.deleteMany({ shopDomain, profileId: { $in: profileIds } })
       : { deletedCount: 0 };
 
     // ScheduledJob — anonymise, not delete (aggregate counts feed merchant analytics)
@@ -768,14 +774,24 @@ async function runCustomersRedact(cr) {
       `[gdpr] customers/redact completed — carts: ${cartResult.deletedCount}, ` +
       `events: ${eventResult.deletedCount}, subscriptions: ${subResult.deletedCount}, ` +
       `pushClicks: ${clickResult.deletedCount}, attributedEvents: ${attrResult.deletedCount}, ` +
+      `signals: ${signalResult.deletedCount}, ` +
       `profiles: ${profileResult.deletedCount}, jobs anonymised: ${jobResult.modifiedCount}, ` +
       `cod orders anonymised: ${codResult.modifiedCount}`
     );
   } catch (err) {
-    await ComplianceRequest.updateOne(
-      { _id: cr._id },
-      { $set: { status: 'failed', errorMessage: err.message } }
-    );
+    const newAttempts = (cr.attempts || 0) + 1;
+    if (newAttempts >= 5) {
+      await ComplianceRequest.updateOne(
+        { _id: cr._id },
+        { $set: { status: 'dead', errorMessage: err.message, completedAt: new Date(), identifiers: {} } }
+      );
+      console.error(`[compliance] DEAD job ${cr._id} topic=${cr.topic} shop=${cr.shopDomain}`);
+    } else {
+      await ComplianceRequest.updateOne(
+        { _id: cr._id },
+        { $set: { status: 'failed', errorMessage: err.message } }
+      );
+    }
     console.error('[gdpr] customers/redact job failed:', err.message);
     throw err;
   }
@@ -848,10 +864,19 @@ async function runShopRedact(cr) {
 
     console.log(`[gdpr] shop/redact completed for ${shopDomain}`);
   } catch (err) {
-    await ComplianceRequest.updateOne(
-      { _id: cr._id },
-      { $set: { status: 'failed', errorMessage: err.message } }
-    );
+    const newAttempts = (cr.attempts || 0) + 1;
+    if (newAttempts >= 5) {
+      await ComplianceRequest.updateOne(
+        { _id: cr._id },
+        { $set: { status: 'dead', errorMessage: err.message, completedAt: new Date(), identifiers: {} } }
+      );
+      console.error(`[compliance] DEAD job ${cr._id} topic=${cr.topic} shop=${cr.shopDomain}`);
+    } else {
+      await ComplianceRequest.updateOne(
+        { _id: cr._id },
+        { $set: { status: 'failed', errorMessage: err.message } }
+      );
+    }
     console.error('[gdpr] shop/redact job failed:', err.message);
     throw err;
   }
