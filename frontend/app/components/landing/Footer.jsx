@@ -24,7 +24,7 @@ export default function Footer({ onOpenInstall }) {
             </p>
             <div className="flex items-center gap-2 text-xs font-medium text-emerald-700 bg-emerald-50 px-3 py-1.5 rounded-lg w-fit">
               <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Shopify App Bridge &amp; GDPR Compliant</span>
+              <span>Built with Shopify App Bridge</span>
             </div>
           </div>
 
