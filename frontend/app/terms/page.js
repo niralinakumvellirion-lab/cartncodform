@@ -86,8 +86,7 @@ export default function TermsPage() {
           <p>
             The App may offer a free tier and one or more paid plans. Billing is processed through
             Shopify's billing API. If you cancel your paid plan, your access will revert to the
-            free tier at the end of the current billing period. No refunds are issued for partial
-            billing periods unless required by applicable law.
+            free tier at the end of the current billing period.
           </p>
         </Section>
 

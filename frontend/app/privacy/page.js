@@ -50,8 +50,12 @@ export default function PrivacyPage() {
               the COD order form, or at checkout via a Shopify webhook.
             </li>
             <li>
-              <strong>Phone number, name, and delivery address</strong> — collected when a shopper
-              places a COD order through the app's order form.
+              <strong>Phone number, email address, name, and delivery address</strong> — collected
+              when a shopper places a COD order through the app's order form.
+            </li>
+            <li>
+              <strong>WhatsApp phone number</strong> — collected if you provide it in the popup,
+              used to send you an offer message.
             </li>
             <li>
               <strong>Cart contents</strong> — product titles, quantities, prices, and product IDs,
@@ -112,6 +116,10 @@ export default function PrivacyPage() {
             <li>
               To send birthday messages when a shopper has voluntarily provided their birth month
               and day.
+            </li>
+            <li>
+              To send WhatsApp offer messages to shoppers who have provided their WhatsApp number
+              through the app's popup.
             </li>
             <li>
               To determine the best time and content for messages, using anonymized browsing
@@ -185,9 +193,31 @@ export default function PrivacyPage() {
             ShopiReachBoost AI processes shopper data on behalf of the merchant. Shoppers who wish
             to have their data deleted, or to receive a copy of their data, should contact the
             merchant (the Shopify store owner) directly. The merchant can submit a deletion request
-            through Shopify's admin tools. When Shopify sends us a deletion webhook, we delete or
-            anonymize all personal data associated with that shopper, including their email, phone,
-            name, address, push tokens, session identifiers, and cart records.
+            through Shopify's admin tools.
+          </p>
+          <p>
+            When Shopify sends us a shopper deletion webhook, we process it as follows within 48
+            hours:
+          </p>
+          <ul>
+            <li>
+              <strong>Deleted:</strong> abandoned cart records, browsing and cart events, push
+              notification subscriptions, push click records, attribution events, shopper profile
+              (including push token, email, phone, birthday, and order history), and Signal records
+              linked to the profile.
+            </li>
+            <li>
+              <strong>Anonymised (not deleted):</strong> scheduled notification records (merchant
+              analytics are preserved; personal identifiers are removed) and COD orders (name,
+              phone, email, and address are replaced with <code>[redacted]</code>; order existence
+              is retained for merchant records).
+            </li>
+          </ul>
+          <p>
+            When a merchant uninstalls the app, Shopify sends a shop deletion webhook 48 hours
+            later. At that point we delete all data associated with that store across every
+            collection, including all shopper profiles, orders, events, subscriptions, and
+            configuration.
           </p>
           <p>
             Merchants who uninstall the app may contact us at the email below to request deletion

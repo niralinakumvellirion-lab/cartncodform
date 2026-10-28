@@ -51,7 +51,7 @@ export default function SupportPage() {
             />
             <Faq
               question="What is the COD order form?"
-              answer="The Cash on Delivery (COD) order form is an overlay on your storefront that lets shoppers place orders by entering their name, phone number, and delivery address, without going through the standard Shopify checkout. Orders placed through the form appear in your ShopiReachBoost AI admin dashboard."
+              answer="The Cash on Delivery (COD) order form is an overlay on your storefront that lets shoppers place orders by entering their name, phone number, email address, and delivery address, without going through the standard Shopify checkout. Orders placed through the form appear in your ShopiReachBoost AI admin dashboard."
             />
             <Faq
               question="How is AI-generated copy used?"
