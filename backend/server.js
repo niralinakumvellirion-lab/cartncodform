@@ -1147,11 +1147,20 @@ const webhookRouter = require('./routes/webhooks');
 
 async function retryPendingCompliance() {
   const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
+  const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
   const pending = await ComplianceRequest.find({
     topic: { $in: ['shop/redact', 'customers/redact'] },
-    status: { $in: ['received', 'failed'] },
     attempts: { $lt: 5 },
-    $or: [{ lastAttemptAt: { $lt: twoMinAgo } }, { lastAttemptAt: null }],
+    $or: [
+      {
+        status: { $in: ['received', 'failed'] },
+        $or: [{ lastAttemptAt: { $lt: twoMinAgo } }, { lastAttemptAt: null }],
+      },
+      {
+        status: 'processing',
+        lastAttemptAt: { $lt: fiveMinAgo },
+      },
+    ],
   }).lean();
 
   for (const cr of pending) {
