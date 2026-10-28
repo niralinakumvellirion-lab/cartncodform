@@ -10,8 +10,6 @@ const {
   getOnlineToken,
   fetchShopInfo,
   fetchBrandData,
-  registerAllWebhooks,
-  refreshAccessTokenIfNeeded,
 } = require('../utils/shopify');
 const { requireAuth } = require('../middleware/requireOwner');
 const { getActiveSubscription, createSubscription } = require('../utils/billing');
@@ -170,14 +168,6 @@ router.get('/callback', async (req, res) => {
     console.log(
       `[auth] Store connected: ${shopDomain}${ownerEmail ? ` (owner: ${ownerEmail})` : ''}`
     );
-
-    // Register webhooks (best-effort, non-blocking failures are logged).
-    // Resolve via refreshAccessTokenIfNeeded() rather than the raw
-    // `accessToken` local — a no-op here since `store` was just upserted
-    // with a fresh, unexpired accessToken, but keeps every Admin API call
-    // site on the same shared token-selection policy.
-    const webhookApiToken = await refreshAccessTokenIfNeeded(store);
-    await registerAllWebhooks(shopDomain, webhookApiToken, getBackendUrl(req));
 
     // Return the merchant into the embedded app inside Shopify Admin.
     const dashboardUrl = `https://admin.shopify.com/store/${shopDomain.replace('.myshopify.com', '')}/apps/cartncodform`;
