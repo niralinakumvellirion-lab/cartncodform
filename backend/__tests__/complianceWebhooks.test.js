@@ -75,7 +75,7 @@ function makeRes() {
 
 async function flushBackground() {
   await new Promise((r) => setImmediate(r));
-  await new Promise((r) => setTimeout(r, 80));
+  await new Promise((r) => setTimeout(r, 300));
 }
 
 // ---------------------------------------------------------------------------
@@ -365,10 +365,19 @@ describe('runShopRedact', () => {
 describe('retryPendingCompliance query', () => {
   function findPending() {
     const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
     return ComplianceRequest.find({
-      status: { $in: ['received', 'failed'] },
       attempts: { $lt: 5 },
-      $or: [{ lastAttemptAt: { $lt: twoMinAgo } }, { lastAttemptAt: null }],
+      $or: [
+        {
+          status: { $in: ['received', 'failed'] },
+          $or: [{ lastAttemptAt: { $lt: twoMinAgo } }, { lastAttemptAt: null }],
+        },
+        {
+          status: 'processing',
+          lastAttemptAt: { $lt: fiveMinAgo },
+        },
+      ],
     }).lean();
   }
 
@@ -420,6 +429,162 @@ describe('retryPendingCompliance query', () => {
     const pending = await findPending();
     expect(pending).toHaveLength(1);
   });
+
+  test('[T2] picks up stale processing row (>5 min old)', async () => {
+    await ComplianceRequest.create({
+      shopDomain: 'rt5.myshopify.com',
+      topic: 'shop/redact',
+      status: 'processing',
+      attempts: 1,
+      lastAttemptAt: new Date(Date.now() - 6 * 60 * 1000),
+      identifiers: {},
+    });
+    const pending = await findPending();
+    expect(pending).toHaveLength(1);
+  });
+
+  test('does NOT pick up processing row updated <5 min ago', async () => {
+    await ComplianceRequest.create({
+      shopDomain: 'rt6.myshopify.com',
+      topic: 'shop/redact',
+      status: 'processing',
+      attempts: 1,
+      lastAttemptAt: new Date(Date.now() - 3 * 60 * 1000),
+      identifiers: {},
+    });
+    expect(await findPending()).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. New compliance behaviour tests (T1, T3–T7)
+// ---------------------------------------------------------------------------
+describe('compliance new behaviour', () => {
+  const Signal = require('../models/Signal');
+  const FestivalQueue = require('../models/FestivalQueue');
+
+  test('[T1] insert timeout → 503', async () => {
+    // Temporarily monkey-patch ComplianceRequest.create to hang
+    const orig = ComplianceRequest.create.bind(ComplianceRequest);
+    ComplianceRequest.create = () => new Promise(() => {}); // never resolves
+
+    const shop = 't1.myshopify.com';
+    const req = makeReq({
+      shopDomain: shop,
+      body: { customer: { id: '100' } },
+    });
+    const res = makeRes();
+    await webhooks._handleCustomersRedact(req, res);
+    expect(res._status).toBe(503);
+
+    ComplianceRequest.create = orig;
+  });
+
+  test('[T3] row reaches attempts=5 → status dead, identifiers={}', async () => {
+    const shop = 't3.myshopify.com';
+    // Simulate a cr that is on its 5th attempt
+    const cr = await ComplianceRequest.create({
+      shopDomain: shop,
+      topic: 'shop/redact',
+      status: 'failed',
+      attempts: 4, // runShopRedact increments to 5 inside
+      identifiers: { someKey: 'someVal' },
+    });
+
+    // Force runShopRedact to fail by making one model throw
+    const origDelete = Store.deleteMany.bind(Store);
+    Store.deleteMany = jest.fn().mockRejectedValue(new Error('simulated db error'));
+
+    await expect(webhooks.runShopRedact(cr)).rejects.toThrow();
+
+    Store.deleteMany = origDelete;
+
+    const updated = await ComplianceRequest.findById(cr._id);
+    expect(updated.status).toBe('dead');
+    expect(updated.identifiers).toEqual({});
+    expect(updated.completedAt).toBeTruthy();
+  });
+
+  test('[T5] customers/redact deletes Signal rows by profileId', async () => {
+    const shop = 't5.myshopify.com';
+    const profile = await Profile.create({
+      shopDomain: shop,
+      identifiers: {
+        customerId: '55',
+        emails: [],
+        phones: [],
+        sessionIds: [],
+        cartTokens: [],
+        pushTokens: [],
+      },
+    });
+    await Signal.create({
+      shopDomain: shop,
+      profileId: profile._id,
+      type: 'cart_abandon',
+      strength: 0.8,
+      expiresAt: new Date(Date.now() + 86400000),
+    });
+    await Signal.create({
+      shopDomain: shop,
+      profileId: new mongoose.Types.ObjectId(), // different profile
+      type: 'lapsing',
+      strength: 0.5,
+      expiresAt: new Date(Date.now() + 86400000),
+    });
+
+    const cr = await ComplianceRequest.create({
+      shopDomain: shop,
+      topic: 'customers/redact',
+      identifiers: { customerId: '55' },
+    });
+    await webhooks.runCustomersRedact(cr);
+
+    const remaining = await Signal.find({ shopDomain: shop });
+    expect(remaining).toHaveLength(1); // the other profile's signal survives
+  });
+
+  test('[T6] customers/redact deletes AttributedEvent matched by email', async () => {
+    const shop = 't6.myshopify.com';
+    const targetEmail = 'target@example.com';
+    await AttributedEvent.create({ shopDomain: shop, email: targetEmail, eventType: 'revisit' });
+    await AttributedEvent.create({ shopDomain: shop, email: 'other@example.com', eventType: 'revisit' });
+
+    const cr = await ComplianceRequest.create({
+      shopDomain: shop,
+      topic: 'customers/redact',
+      identifiers: { customerId: null, customerEmail: targetEmail, customerPhone: null },
+    });
+    await webhooks.runCustomersRedact(cr);
+
+    const remaining = await AttributedEvent.find({ shopDomain: shop });
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].email).toBe('other@example.com');
+  });
+
+  test('[T7] second customer rows untouched after first customer redact', async () => {
+    const shop = 't7.myshopify.com';
+    await AbandonedCustomer.create({ shopDomain: shop, customerId: 'cust-A', cartItems: [] });
+    await AbandonedCustomer.create({ shopDomain: shop, customerId: 'cust-B', cartItems: [] });
+
+    const cr = await ComplianceRequest.create({
+      shopDomain: shop,
+      topic: 'customers/redact',
+      identifiers: { customerId: 'cust-A' },
+    });
+    await webhooks.runCustomersRedact(cr);
+
+    const remaining = await AbandonedCustomer.find({ shopDomain: shop });
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].customerId).toBe('cust-B');
+  });
+
+  test('[FestivalQueue] has no per-customer identifier — shop/redact covers it', async () => {
+    // FestivalQueue has only shopDomain; it belongs to shop/redact (already in
+    // SHOP_REDACT_MODELS), not customers/redact. Verify it is in the list.
+    const names = webhooks.SHOP_REDACT_MODELS.map((M) => M.modelName);
+    expect(names).toContain('FestivalQueue');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -433,9 +598,12 @@ describe('SHOP_REDACT_MODELS guard', () => {
   const ALLOWLIST = new Set([
     'SubscriptionEvent',  // billing analytics; no shopper PII
     'ComplianceRequest',  // audit trail; required for compliance
-    'AuditLog',           // admin IP only; no shopper PII
+    'AuditLog',           // admin IP only; no shopper PII — sanitizeMeta() strips PII at write time
     'CopyCache',          // no PII; TTL-indexed
     'ProductImageCache',  // no PII; TTL 24h
+    // OAuthState uses 'shop' (not 'shopDomain') — shop-scoped, TTL 3600s,
+    // no shopper data (ownerEmail is merchant/staff email only).
+    'OAuthState',
   ]);
 
   test('every shopDomain model is deleted or explicitly allowlisted', () => {
@@ -447,7 +615,8 @@ describe('SHOP_REDACT_MODELS guard', () => {
     const uncovered = [];
     for (const file of files) {
       const src = fs.readFileSync(path.join(modelsDir, file), 'utf8');
-      if (!src.includes('shopDomain')) continue;
+      // 'shop' field (OAuthState) and 'shopDomain' are both shop-scope identifiers.
+      if (!src.includes('shopDomain') && !src.includes("'shop'") && !src.includes('"shop"')) continue;
       const modelName = path.basename(file, '.js');
       if (!redactNames.has(modelName) && !ALLOWLIST.has(modelName)) {
         uncovered.push(modelName);

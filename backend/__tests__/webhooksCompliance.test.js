@@ -26,6 +26,7 @@ jest.mock('../models/CodOrder');
 jest.mock('../models/PushClick');
 jest.mock('../models/AttributedEvent');
 jest.mock('../models/ComplianceRequest');
+jest.mock('../models/Signal');
 
 const express = require('express');
 const AbandonedCustomer = require('../models/AbandonedCustomer');
@@ -37,6 +38,7 @@ const CodOrder = require('../models/CodOrder');
 const PushClick = require('../models/PushClick');
 const AttributedEvent = require('../models/AttributedEvent');
 const ComplianceRequest = require('../models/ComplianceRequest');
+const Signal = require('../models/Signal');
 const webhooksRouter = require('../routes/webhooks');
 
 const SHOP = 'demo.myshopify.com';
@@ -85,6 +87,7 @@ beforeEach(() => {
   CodOrder.countDocuments.mockResolvedValue(0);
   PushClick.deleteMany.mockResolvedValue({ deletedCount: 0 });
   AttributedEvent.deleteMany.mockResolvedValue({ deletedCount: 0 });
+  Signal.deleteMany.mockResolvedValue({ deletedCount: 0 });
 });
 afterEach(() => jest.restoreAllMocks());
 
