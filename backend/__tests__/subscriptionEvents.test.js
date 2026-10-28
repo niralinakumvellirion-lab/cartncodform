@@ -35,6 +35,15 @@ jest.mock('../models/PushClick');
 jest.mock('../models/PushSubscription');
 jest.mock('../models/OAuthState');
 jest.mock('../models/Profile');
+jest.mock('../models/AttributedEvent');
+jest.mock('../models/AutomationConfig');
+jest.mock('../models/DiscountConfig');
+jest.mock('../models/EmailTemplate');
+jest.mock('../models/FestivalQueue');
+jest.mock('../models/ShopWeights');
+jest.mock('../models/Signal');
+jest.mock('../models/SignalConfig');
+jest.mock('../models/ComplianceRequest');
 
 jest.mock('../utils/billing', () => ({
   PLAN_PRICE: 9.99,
@@ -301,6 +310,13 @@ function setupWebhookMocks() {
   require('../models/CodOrder').deleteMany.mockResolvedValue({ deletedCount: 0 });
   require('../models/PushClick').deleteMany.mockResolvedValue({ deletedCount: 0 });
   require('../models/PushSubscription').deleteMany.mockResolvedValue({ deletedCount: 0 });
+  const CR = require('../models/ComplianceRequest');
+  CR.create.mockImplementation((doc) => Promise.resolve({ _id: 'cr-id', ...doc }));
+  CR.updateOne.mockResolvedValue({ acknowledged: true });
+  for (const m of ['AttributedEvent','AutomationConfig','DiscountConfig','EmailTemplate',
+                   'FestivalQueue','ShopWeights','Signal','SignalConfig','Profile']) {
+    require(`../models/${m}`).deleteMany.mockResolvedValue({ deletedCount: 0 });
+  }
 }
 
 describe('webhooks: app_subscriptions/update → ACTIVE', () => {

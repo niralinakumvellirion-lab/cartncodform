@@ -34,6 +34,7 @@ jest.mock('../utils/productImage', () => ({
 }));
 jest.mock('../models/AttributedEvent', () => ({
   find: jest.fn(),
+  deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }),
 }));
 jest.mock('../models/Store', () => ({
   findOne: jest.fn(),
@@ -606,7 +607,15 @@ jest.mock('../utils/shopify', () => ({
 }));
 jest.mock('../models/CustomerPushSubscription', () => ({ deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) }));
 jest.mock('../models/PushClick', () => ({ deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) }));
+jest.mock('../models/ComplianceRequest');
+jest.mock('../models/AutomationConfig', () => ({ deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) }));
+jest.mock('../models/EmailTemplate', () => ({ deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) }));
+jest.mock('../models/FestivalQueue', () => ({ deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) }));
+jest.mock('../models/ShopWeights', () => ({ deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) }));
+jest.mock('../models/Signal', () => ({ deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) }));
+jest.mock('../models/SignalConfig', () => ({ deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) }));
 
+const ComplianceRequest = require('../models/ComplianceRequest');
 const webhooksRouter = require('../routes/webhooks');
 
 function gdprHandler(router, path) {
@@ -633,8 +642,13 @@ function makeGdprReq(topic, body) {
 
 beforeEach(() => {
   jest.spyOn(console, 'log').mockImplementation(() => {});
+  ComplianceRequest.create.mockImplementation((doc) =>
+    Promise.resolve({ _id: 'gdpr-cr-id', ...doc })
+  );
+  ComplianceRequest.updateOne.mockResolvedValue({ acknowledged: true });
   Profile.find.mockReturnValue({ lean: jest.fn().mockResolvedValue([]) });
   AbandonedCustomer.deleteMany.mockResolvedValue({ deletedCount: 0 });
+  StorefrontEvent.deleteMany.mockResolvedValue({ deletedCount: 0 });
   StorefrontEvent.find.mockReturnValue({
     sort: jest.fn().mockReturnThis(),
     limit: jest.fn().mockReturnThis(),
@@ -659,6 +673,8 @@ test('customers/redact: anonymises CodOrder rows by email', async () => {
   await redactHandler(makeGdprReq('customers/redact', {
     customer: { id: 42, email: 'shopper@example.com', phone: null },
   }), res);
+  // Flush setImmediate so the background job (runCustomersRedact) runs.
+  await new Promise((r) => setImmediate(r));
 
   expect(CodOrder.updateMany).toHaveBeenCalledWith(
     { shopDomain: SHOP, $or: expect.arrayContaining([{ email: 'shopper@example.com' }]) },
@@ -673,6 +689,7 @@ test('customers/redact: anonymises CodOrder rows by phone', async () => {
   await redactHandler(makeGdprReq('customers/redact', {
     customer: { id: null, email: null, phone: '+919876543210' },
   }), res);
+  await new Promise((r) => setImmediate(r));
 
   expect(CodOrder.updateMany).toHaveBeenCalledWith(
     { shopDomain: SHOP, $or: expect.arrayContaining([{ phone: '+919876543210' }]) },
@@ -681,22 +698,22 @@ test('customers/redact: anonymises CodOrder rows by phone', async () => {
 });
 
 test('customers/data_request: includes CodOrder count in log', async () => {
-  CodOrder.find.mockReturnValue({ lean: jest.fn().mockResolvedValue([{ _id: 'c1' }, { _id: 'c2' }]) });
-  AbandonedCustomer.find.mockReturnValue({ lean: jest.fn().mockResolvedValue([]) });
+  CodOrder.countDocuments = jest.fn().mockResolvedValue(2);
+  AbandonedCustomer.countDocuments = jest.fn().mockResolvedValue(0);
+  StorefrontEvent.countDocuments = jest.fn().mockResolvedValue(0);
+  ScheduledJob.countDocuments = jest.fn().mockResolvedValue(0);
   Profile.find.mockReturnValue({ lean: jest.fn().mockResolvedValue([]) });
-  StorefrontEvent.find.mockReturnValue({
-    limit: jest.fn().mockReturnValue({ lean: jest.fn().mockResolvedValue([]) }),
-  });
 
   const logSpy = jest.spyOn(console, 'log');
   const res = mockRes();
   await redactHandler(makeGdprReq('customers/data_request', {
     customer: { id: null, email: 'shopper@example.com' },
   }), res);
+  await new Promise((r) => setImmediate(r));
 
   const logMsg = logSpy.mock.calls.find(([m]) => typeof m === 'string' && m.includes('CodOrder'));
   expect(logMsg).toBeDefined();
-  expect(logMsg[0]).toContain('CodOrder rows: 2');
+  expect(logMsg[0]).toContain('CodOrder: 2');
 });
 
 // ---------------------------------------------------------------------------
