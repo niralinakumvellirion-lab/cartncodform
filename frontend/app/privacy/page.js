@@ -13,7 +13,7 @@ export default function PrivacyPage() {
           Privacy Policy
         </h1>
         <p className="text-sm text-gray-500 mb-8">
-          Effective: October 28, 2026 &nbsp;·&nbsp; ShopiReachBoost AI (operated by Nirali Nakum), India
+          Effective: October 28, 2026 &nbsp;·&nbsp; ShopiReachBoost AI (operated by Effectto Tech Society), India
         </p>
 
         <Section title="1. About This Policy">
@@ -242,7 +242,7 @@ export default function PrivacyPage() {
 
         <Section title="9. Contact">
           <p>
-            ShopiReachBoost AI (operated by Nirali Nakum)<br />
+            ShopiReachBoost AI (operated by Effectto Tech Society)<br />
             India<br />
             <a
               href="mailto:niralinakum.vellirion@gmail.com"

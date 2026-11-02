@@ -167,3 +167,25 @@ describe('Footer', () => {
     expect(footerSrc).toContain('href="/support"');
   });
 });
+
+// ── Owner name ────────────────────────────────────────────────────────────────
+describe('Legal owner name', () => {
+  const OWNER = 'Effectto Tech Society';
+
+  it('terms, privacy and support name the owner', () => {
+    expect(termsSrc).toContain(`operated by ${OWNER}`);
+    expect(privacySrc).toContain(`operated by ${OWNER}`);
+    expect(supportSrc).toContain(`operated by ${OWNER}`);
+  });
+
+  it('terms say the app is owned by the owner', () => {
+    expect(termsSrc).toContain(`owned by ${OWNER}`);
+    expect(termsSrc).toContain(`ShopiReachBoost AI and ${OWNER}`);
+  });
+
+  it('no page still names the previous owner', () => {
+    for (const src of [termsSrc, privacySrc, supportSrc]) {
+      expect(src).not.toMatch(/Nirali Nakum/);
+    }
+  });
+});

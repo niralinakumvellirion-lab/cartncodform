@@ -13,7 +13,7 @@ export default function TermsPage() {
           Terms of Service
         </h1>
         <p className="text-sm text-gray-500 mb-8">
-          Effective: October 28, 2026 &nbsp;·&nbsp; ShopiReachBoost AI (operated by Nirali Nakum), India
+          Effective: October 28, 2026 &nbsp;·&nbsp; ShopiReachBoost AI (operated by Effectto Tech Society), India
         </p>
 
         <Section title="1. Acceptance">
@@ -92,7 +92,7 @@ export default function TermsPage() {
 
         <Section title="7. Intellectual Property">
           <p>
-            The App and its content, features, and functionality are owned by Nirali Nakum. You may
+            The App and its content, features, and functionality are owned by Effectto Tech Society. You may
             not copy, modify, distribute, sell, or reverse-engineer the App or any part of it.
           </p>
         </Section>
@@ -110,7 +110,7 @@ export default function TermsPage() {
 
         <Section title="9. Limitation of Liability">
           <p>
-            To the maximum extent permitted by applicable law, ShopiReachBoost AI and Nirali Nakum
+            To the maximum extent permitted by applicable law, ShopiReachBoost AI and Effectto Tech Society
             are not liable for any indirect, incidental, special, or consequential damages arising
             from your use of, or inability to use, the App.
           </p>
@@ -126,7 +126,7 @@ export default function TermsPage() {
 
         <Section title="11. Contact">
           <p>
-            ShopiReachBoost AI (operated by Nirali Nakum)<br />
+            ShopiReachBoost AI (operated by Effectto Tech Society)<br />
             India<br />
             <a
               href="mailto:niralinakum.vellirion@gmail.com"

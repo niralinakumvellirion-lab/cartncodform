@@ -13,7 +13,7 @@ export default function SupportPage() {
           Support
         </h1>
         <p className="text-sm text-gray-500 mb-8">
-          ShopiReachBoost AI (operated by Nirali Nakum), India
+          ShopiReachBoost AI (operated by Effectto Tech Society), India
         </p>
 
         <section className="mt-0 p-6 rounded-2xl border border-brand/20 bg-brand/5">
