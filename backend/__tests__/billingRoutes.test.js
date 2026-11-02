@@ -16,9 +16,15 @@ jest.mock('../utils/billing', () => ({
   TRIAL_DAYS: 30,
 }));
 
+jest.mock('../utils/shopify', () => ({
+  exchangeSessionToken: jest.fn(),
+  refreshAccessTokenIfNeeded: jest.fn(),
+}));
+
 const http = require('http');
 const express = require('express');
 const { createSubscription } = require('../utils/billing');
+const { exchangeSessionToken, refreshAccessTokenIfNeeded } = require('../utils/shopify');
 const billingRouter = require('../routes/billing');
 
 let server;
@@ -75,28 +81,43 @@ describe('GET /api/billing/:shop/status', () => {
 });
 
 describe('POST /api/billing/:shop/start', () => {
-  test('returns the Shopify approval URL and builds the callback return URL', async () => {
+  const START = () => ({ method: 'POST', headers: { Authorization: 'Bearer session-jwt' } });
+
+  test('returns the Shopify approval URL using a freshly exchanged token', async () => {
+    exchangeSessionToken.mockResolvedValue('fresh-tok');
     createSubscription.mockResolvedValue({ confirmationUrl: 'https://shopify.test/confirm/1' });
-    const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/start`, { method: 'POST' });
+    const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/start`, START());
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({ confirmationUrl: 'https://shopify.test/confirm/1' });
+    expect(exchangeSessionToken).toHaveBeenCalledWith('bill-shop.myshopify.com', 'session-jwt');
     const [shop, token, returnUrl] = createSubscription.mock.calls[0];
     expect(shop).toBe('bill-shop.myshopify.com');
-    expect(token).toBe('tok');
+    expect(token).toBe('fresh-tok');
     expect(returnUrl).toBe(
       'https://api.example.test/api/auth/billing/callback?shop=bill-shop.myshopify.com'
     );
   });
 
+  test('token exchange fails → falls back to the stored-token policy', async () => {
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+    exchangeSessionToken.mockRejectedValue(new Error('exchange denied'));
+    refreshAccessTokenIfNeeded.mockResolvedValue('fallback-tok');
+    createSubscription.mockResolvedValue({ confirmationUrl: 'https://shopify.test/confirm/2' });
+    const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/start`, START());
+    expect(r.status).toBe(200);
+    expect(refreshAccessTokenIfNeeded).toHaveBeenCalledWith(global.__billingTestStore);
+    expect(createSubscription.mock.calls[0][1]).toBe('fallback-tok');
+  });
+
   test('no confirmationUrl → 500', async () => {
-    createSubscription.mockResolvedValue({ confirmationUrl: null });
-    const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/start`, { method: 'POST' });
+    exchangeSessionToken.mockResolvedValue('t'); createSubscription.mockResolvedValue({ confirmationUrl: null });
+    const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/start`, START());
     expect(r.status).toBe(500);
   });
 
   test('Shopify error → 500 with a safe message', async () => {
-    createSubscription.mockRejectedValue(new Error('Billing error: secret detail'));
-    const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/start`, { method: 'POST' });
+    exchangeSessionToken.mockResolvedValue('t'); createSubscription.mockRejectedValue(new Error('Billing error: secret detail'));
+    const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/start`, START());
     expect(r.status).toBe(500);
     const body = await r.json();
     expect(body.error).toMatch(/free trial/i);

@@ -5,6 +5,7 @@ const {
 } = require('../middleware/requireOwner');
 const { createSubscription, PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS } = require('../utils/billing');
 const { hasActivePlan } = require('../utils/planAccess');
+const { exchangeSessionToken, refreshAccessTokenIfNeeded } = require('../utils/shopify');
 
 const router = express.Router();
 
@@ -39,7 +40,20 @@ router.post('/:shopDomain/start', requireAuth, requireStoreOwnerAnyPlan, async (
     const shop = req.store.shopDomain;
     const returnUrl = `${getBackendUrl(req)}/api/auth/billing/callback?shop=${encodeURIComponent(shop)}`;
     const isTest = process.env.NODE_ENV !== 'production';
-    const { confirmationUrl } = await createSubscription(shop, req.store.accessToken, returnUrl, isTest);
+
+    // The stored offline token can be stale or a legacy format Shopify rejects
+    // (403). Trade the merchant's live session token for a fresh one; fall back
+    // to the shared token policy only if that exchange fails.
+    let token;
+    try {
+      const sessionToken = (req.get('Authorization') || '').slice(7);
+      token = await exchangeSessionToken(shop, sessionToken);
+    } catch (exErr) {
+      console.warn('[billing] token exchange failed, using stored token:', exErr.message);
+    }
+    if (!token) token = await refreshAccessTokenIfNeeded(req.store);
+
+    const { confirmationUrl } = await createSubscription(shop, token, returnUrl, isTest);
     if (!confirmationUrl) {
       return res.status(500).json({ error: 'Failed to create subscription' });
     }
