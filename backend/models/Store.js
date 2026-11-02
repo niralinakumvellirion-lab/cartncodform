@@ -242,6 +242,9 @@ const storeSchema = new mongoose.Schema({
   // audits/api-token-test-audit.txt for the live 403 the old format now
   // gets). Populated alongside `accessToken` at OAuth callback time.
   accessTokenExpiresAt: { type: Date, default: null },
+  // Refresh pair for the expiring offline token (90-day refresh token).
+  refreshToken: { type: String, default: null },
+  refreshTokenExpiresAt: { type: Date, default: null },
 
   installedAt: {
     type: Date,

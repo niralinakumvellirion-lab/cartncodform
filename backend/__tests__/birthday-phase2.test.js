@@ -36,6 +36,7 @@ jest.mock('../middleware/requireOwner', () => ({
 }));
 jest.mock('../utils/shopify', () => ({
   verifyProxySignature: jest.fn(() => true),
+  refreshAccessTokenIfNeeded: jest.fn(async (s) => s.onlineAccessToken || s.accessToken),
   API_VERSION: '2026-10',
 }));
 jest.mock('../services/profileService', () => ({

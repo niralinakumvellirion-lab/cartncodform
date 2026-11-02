@@ -14,23 +14,16 @@
 
 const Store = require('../models/Store');
 const DiscountConfig = require('../models/DiscountConfig');
-const { API_VERSION } = require('../utils/shopify');
+const { API_VERSION, refreshAccessTokenIfNeeded } = require('../utils/shopify');
 
 // ── Token resolution ─────────────────────────────────────────────────────────
 
 async function getToken(shopDomain) {
   const store = await Store.findOne({ shopDomain })
-    .select('accessToken onlineAccessToken onlineTokenExpiresAt')
+    .select('shopDomain accessToken accessTokenExpiresAt refreshToken refreshTokenExpiresAt onlineAccessToken onlineTokenExpiresAt')
     .lean();
   if (!store || !store.accessToken) throw new Error('Store not connected');
-  if (
-    store.onlineAccessToken &&
-    store.onlineTokenExpiresAt &&
-    new Date() < new Date(store.onlineTokenExpiresAt)
-  ) {
-    return store.onlineAccessToken;
-  }
-  return store.accessToken;
+  return refreshAccessTokenIfNeeded(store);
 }
 
 // ── Shopify GraphQL helper ───────────────────────────────────────────────────

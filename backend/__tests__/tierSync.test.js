@@ -7,7 +7,10 @@ jest.mock('../models/DiscountConfig', () => ({
   findOne: jest.fn(),
   updateOne: jest.fn(),
 }));
-jest.mock('../utils/shopify', () => ({ API_VERSION: '2025-01' }));
+jest.mock('../utils/shopify', () => ({
+  API_VERSION: '2025-01',
+  refreshAccessTokenIfNeeded: jest.fn(async (s) => s.onlineAccessToken || s.accessToken),
+}));
 
 const Store = require('../models/Store');
 const DiscountConfig = require('../models/DiscountConfig');

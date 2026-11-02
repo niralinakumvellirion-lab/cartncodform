@@ -604,6 +604,7 @@ test('profile: attribution ScheduledJob scoped by shopDomain', async () => {
 jest.mock('../utils/shopify', () => ({
   verifyWebhookHmac: jest.fn().mockReturnValue(true),
   verifyProxySignature: jest.fn().mockReturnValue(true),
+  refreshAccessTokenIfNeeded: jest.fn(async (s) => s.onlineAccessToken || s.accessToken),
 }));
 jest.mock('../models/CustomerPushSubscription', () => ({ deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) }));
 jest.mock('../models/PushClick', () => ({ deleteMany: jest.fn().mockResolvedValue({ deletedCount: 0 }) }));

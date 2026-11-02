@@ -110,13 +110,38 @@ function verifyWebhookHmac(rawBody, hmacHeader) {
  * now gets rejected with).
  */
 async function exchangeCodeForToken(shop, code) {
-  const url = `https://${shop}/admin/oauth/access_token`;
-  const { data } = await axios.post(url, {
-    client_id: SHOPIFY_API_KEY,
-    client_secret: SHOPIFY_API_SECRET,
-    code,
-  });
+  return postTokenRequest(shop, { code, expiring: '1' });
+}
+
+/**
+ * POST to the shop's OAuth token endpoint, form-encoded as Shopify documents
+ * for the expiring-token grants. Returns the raw response body.
+ */
+async function postTokenRequest(shop, params) {
+  const { data } = await axios.post(
+    `https://${shop}/admin/oauth/access_token`,
+    new URLSearchParams({
+      client_id: SHOPIFY_API_KEY,
+      client_secret: SHOPIFY_API_SECRET,
+      ...params,
+    }).toString(),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' } }
+  );
   return data;
+}
+
+function secondsFromNow(seconds) {
+  return seconds ? new Date(Date.now() + Number(seconds) * 1000) : null;
+}
+
+// Turn a token-endpoint response into the fields we store on Store.
+function toTokenPair(data) {
+  return {
+    accessToken: data.access_token,
+    accessTokenExpiresAt: secondsFromNow(data.expires_in),
+    refreshToken: data.refresh_token || null,
+    refreshTokenExpiresAt: secondsFromNow(data.refresh_token_expires_in),
+  };
 }
 
 /**
@@ -127,19 +152,42 @@ async function exchangeCodeForToken(shop, code) {
  *
  * @param {string} shop         the *.myshopify.com domain
  * @param {string} sessionToken the App Bridge session token from the request
- * @returns {Promise<string|undefined>} the new offline access token
+ * @returns {Promise<{accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt}>}
+ *          a new EXPIRING offline token pair (caller stores it)
  */
 async function exchangeSessionToken(shop, sessionToken) {
-  const url = `https://${shop}/admin/oauth/access_token`;
-  const { data } = await axios.post(url, {
-    client_id: SHOPIFY_API_KEY,
-    client_secret: SHOPIFY_API_SECRET,
+  const data = await postTokenRequest(shop, {
     grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
     subject_token: sessionToken,
     subject_token_type: 'urn:ietf:params:oauth:token-type:id_token',
     requested_token_type: 'urn:shopify:params:oauth:token-type:offline-access-token',
+    expiring: '1',
   });
-  return data.access_token;
+  return toTokenPair(data);
+}
+
+/**
+ * Convert a stored NON-expiring offline token into an expiring one (Shopify
+ * invalidates the old token). The caller must store the returned pair.
+ */
+async function migrateOfflineToken(shop, oldOfflineToken) {
+  const data = await postTokenRequest(shop, {
+    grant_type: 'urn:ietf:params:oauth:grant-type:token-exchange',
+    subject_token: oldOfflineToken,
+    subject_token_type: 'urn:shopify:params:oauth:token-type:offline-access-token',
+    requested_token_type: 'urn:shopify:params:oauth:token-type:offline-access-token',
+    expiring: '1',
+  });
+  return toTokenPair(data);
+}
+
+/** Trade a refresh token for a new access + refresh token pair. */
+async function refreshOfflineToken(shop, refreshToken) {
+  const data = await postTokenRequest(shop, {
+    grant_type: 'refresh_token',
+    refresh_token: refreshToken,
+  });
+  return toTokenPair(data);
 }
 
 /**
@@ -250,9 +298,43 @@ async function fetchBrandData(shop, accessToken) {
  * webhooks.js's fetchProductImage() own pre-existing fallback logic (see
  * audits/token-fix-audit.txt for the full reasoning).
  */
-async function refreshAccessTokenIfNeeded(store) {
+function refreshAccessTokenIfNeeded(store, opts = {}) {
+  // One resolution at a time per shop: a refresh replaces the refresh token,
+  // so two concurrent refreshes could leave one caller with a dead token.
+  const key = store.shopDomain;
+  if (inflightTokenResolutions.has(key)) return inflightTokenResolutions.get(key);
+  const p = resolveAccessToken(store, opts).finally(() => inflightTokenResolutions.delete(key));
+  inflightTokenResolutions.set(key, p);
+  return p;
+}
+
+const inflightTokenResolutions = new Map();
+
+function logTokenFailure(what, shop, err) {
+  const status = err && err.response && err.response.status;
+  const code = err && err.response && err.response.data && err.response.data.error;
+  console.warn(`[auth] ${what} failed for ${shop}:`, status || '', code || err.message);
+}
+
+async function saveTokenPair(shop, pair) {
+  await Store.updateOne(
+    { shopDomain: shop },
+    {
+      $set: {
+        accessToken: pair.accessToken,
+        accessTokenExpiresAt: pair.accessTokenExpiresAt,
+        refreshToken: pair.refreshToken,
+        refreshTokenExpiresAt: pair.refreshTokenExpiresAt,
+        needsReauth: false,
+      },
+    }
+  );
+}
+
+async function resolveAccessToken(store, opts) {
   const now = new Date();
   const fiveMinutes = 5 * 60 * 1000;
+  const shop = store.shopDomain;
 
   const offlineExpiry = store.accessTokenExpiresAt ? new Date(store.accessTokenExpiresAt) : null;
   const offlineKnownValid = offlineExpiry && offlineExpiry > new Date(now.getTime() + fiveMinutes);
@@ -260,6 +342,44 @@ async function refreshAccessTokenIfNeeded(store) {
   // Offline token has a known, comfortably-future expiry — use it.
   if (offlineKnownValid) {
     return store.accessToken;
+  }
+
+  // Expiring offline token is stale: trade the refresh token for a new pair.
+  if (store.refreshToken && (!store.refreshTokenExpiresAt || new Date(store.refreshTokenExpiresAt) > now)) {
+    try {
+      const pair = await refreshOfflineToken(shop, store.refreshToken);
+      await saveTokenPair(shop, pair);
+      return pair.accessToken;
+    } catch (err) {
+      logTokenFailure('offline token refresh', shop, err);
+      if (err.response && err.response.status === 401) {
+        // Terminal: Shopify no longer knows this refresh token.
+        await Store.updateOne({ shopDomain: shop }, { $set: { refreshToken: null, refreshTokenExpiresAt: null } }).catch(() => {});
+      }
+    }
+  }
+
+  // A live App Bridge session token can mint a brand-new expiring pair.
+  if (opts.sessionToken) {
+    try {
+      const pair = await exchangeSessionToken(shop, opts.sessionToken);
+      await saveTokenPair(shop, pair);
+      return pair.accessToken;
+    } catch (err) {
+      logTokenFailure('session token exchange', shop, err);
+    }
+  }
+
+  // Legacy store: a stored NON-expiring offline token (no expiry, no refresh
+  // token). Shopify rejects it for the Admin API, so convert it once.
+  if (!offlineExpiry && !store.refreshToken && store.accessToken) {
+    try {
+      const pair = await migrateOfflineToken(shop, store.accessToken);
+      await saveTokenPair(shop, pair);
+      return pair.accessToken;
+    } catch (err) {
+      logTokenFailure('offline token migration', shop, err);
+    }
   }
 
   // Offline token is expired, expiring soon, or its expiry is unknown —
@@ -297,6 +417,8 @@ module.exports = {
   verifyWebhookHmac,
   exchangeCodeForToken,
   exchangeSessionToken,
+  migrateOfflineToken,
+  refreshOfflineToken,
   getOnlineToken,
   fetchShopInfo,
   fetchBrandData,

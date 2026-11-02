@@ -10,6 +10,7 @@ const {
   getOnlineToken,
   fetchShopInfo,
   fetchBrandData,
+  refreshAccessTokenIfNeeded,
 } = require('../utils/shopify');
 const { requireAuth } = require('../middleware/requireOwner');
 const { getActiveSubscription, createSubscription } = require('../utils/billing');
@@ -137,6 +138,10 @@ router.get('/callback', async (req, res) => {
       shopDomain,
       accessToken,
       accessTokenExpiresAt,
+      refreshToken: tokenData.refresh_token || null,
+      refreshTokenExpiresAt: tokenData.refresh_token_expires_in
+        ? new Date(Date.now() + tokenData.refresh_token_expires_in * 1000)
+        : null,
       installedAt: new Date(),
       // Fresh grant — clear the "reconnect to enable discounts" flag that a
       // prior ACCESS_DENIED (token predating write_discounts) may have set.
@@ -288,7 +293,7 @@ router.get('/billing/callback', async (req, res) => {
       return res.redirect(dashboardUrl);
     }
 
-    const activeSub = await getActiveSubscription(shop, store.accessToken);
+    const activeSub = await getActiveSubscription(shop, await refreshAccessTokenIfNeeded(store));
     if (activeSub) {
       const prevPlan = store?.plan ?? null;
       await Store.findOneAndUpdate(

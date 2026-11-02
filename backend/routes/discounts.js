@@ -4,7 +4,10 @@ const router = express.Router();
 const Store = require('../models/Store');
 const DiscountConfig = require('../models/DiscountConfig');
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
-const { verifyProxySignature, API_VERSION } = require('../utils/shopify');
+const { verifyProxySignature, API_VERSION, refreshAccessTokenIfNeeded } = require('../utils/shopify');
+
+const TOKEN_FIELDS =
+  'shopDomain accessToken accessTokenExpiresAt refreshToken refreshTokenExpiresAt onlineAccessToken onlineTokenExpiresAt';
 const { sanitizeTiers, sanitizeAccentColor, DEFAULT_ACCENT } = require('../utils/quantityTiers');
 const tierSync = require('../services/tierSync');
 
@@ -160,16 +163,13 @@ async function generateDiscount(shopDomain, body = {}, opts = {}) {
   if (action === 'birthday') {
     const [bdConfig, bdStore] = await Promise.all([
       DiscountConfig.findOne({ shopDomain: shop }),
-      Store.findOne({ shopDomain: shop }).select('accessToken onlineAccessToken onlineTokenExpiresAt'),
+      Store.findOne({ shopDomain: shop }).select(TOKEN_FIELDS),
     ]);
     if (!bdStore || !bdStore.accessToken) return { code: null, error: 'Store not connected' };
     const bdCfg = bdConfig && bdConfig.birthdayDiscount;
     if (!bdCfg || !bdCfg.enabled) return { code: null, error: 'Birthday discount not enabled' };
 
-    let bdToken = bdStore.onlineAccessToken || bdStore.accessToken;
-    if (bdStore.onlineAccessToken && bdStore.onlineTokenExpiresAt && new Date() > bdStore.onlineTokenExpiresAt) {
-      bdToken = bdStore.accessToken;
-    }
+    const bdToken = await refreshAccessTokenIfNeeded(bdStore);
 
     const bdPrefix = String(bdCfg.prefix || 'BDAY').toUpperCase().replace(/[^A-Z0-9]/g, '') || 'BDAY';
     const bdCode = bdPrefix + '_' + Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -255,32 +255,15 @@ async function generateDiscount(shopDomain, body = {}, opts = {}) {
 
   const [config, store] = await Promise.all([
     DiscountConfig.findOne({ shopDomain: shop }),
-    Store.findOne({ shopDomain: shop }).select(
-      'accessToken onlineAccessToken onlineTokenExpiresAt'
-    ),
+    Store.findOne({ shopDomain: shop }).select(TOKEN_FIELDS),
   ]);
 
   if (!store || !store.accessToken) {
     return { code: null, error: 'Store not connected' };
   }
 
-  // Prefer the online token (shpua_) — works with new Shopify API.
-  // Fall back to the offline token for backwards compatibility.
-  let apiToken = store.onlineAccessToken || store.accessToken;
-
-  // Check if the online token is expired.
-  if (store.onlineAccessToken && store.onlineTokenExpiresAt) {
-    if (new Date() > store.onlineTokenExpiresAt) {
-      console.log('[discounts] online token expired for', shop);
-      // Fall back to offline token.
-      apiToken = store.accessToken;
-    }
-  }
-
-  console.log(
-    '[discounts] using token type:',
-    apiToken && apiToken.startsWith('shpua_') ? 'online' : 'offline'
-  );
+  // Expiring offline token (refreshed when stale); online token as fallback.
+  const apiToken = await refreshAccessTokenIfNeeded(store);
 
   // Resolution order: {action}Discount first; if that rule is disabled but
   // bothDiscount is enabled, fall back to bothDiscount's settings so the
