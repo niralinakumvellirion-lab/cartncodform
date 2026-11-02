@@ -59,7 +59,11 @@ router.post('/:shopDomain/start', requireAuth, requireStoreOwnerAnyPlan, async (
     }
     return res.json({ confirmationUrl });
   } catch (err) {
-    console.error('[billing] start error:', err.message);
+    // Shopify's error body (no PII) explains refusals such as a non-public app.
+    const detail = err.response
+      ? `${err.response.status} ${JSON.stringify(err.response.data).slice(0, 500)}`
+      : err.message;
+    console.error('[billing] start error:', detail);
     return res.status(500).json({ error: 'Failed to start your free trial' });
   }
 });
