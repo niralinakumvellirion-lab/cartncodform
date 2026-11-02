@@ -3,6 +3,7 @@ jest.mock('../models/OAuthState');
 jest.mock('../utils/billing', () => ({
   getActiveSubscription: jest.fn(),
   createSubscription: jest.fn(),
+  shouldUseTestCharge: jest.fn(),
 }));
 jest.mock('../utils/subscriptionEvents', () => ({ recordSubscriptionEvent: jest.fn() }));
 jest.mock('../utils/shopify', () => ({
@@ -20,7 +21,7 @@ const http = require('http');
 const express = require('express');
 const Store = require('../models/Store');
 const OAuthState = require('../models/OAuthState');
-const { getActiveSubscription, createSubscription } = require('../utils/billing');
+const { getActiveSubscription, createSubscription, shouldUseTestCharge } = require('../utils/billing');
 const { exchangeCodeForToken } = require('../utils/shopify');
 const authRouter = require('../routes/auth');
 
@@ -48,6 +49,7 @@ beforeEach(() => {
   Store.exists.mockResolvedValue(null);
   Store.findOneAndUpdate.mockResolvedValue({ shopDomain: SHOP, plan: 'free' });
   getActiveSubscription.mockResolvedValue(null);
+  shouldUseTestCharge.mockResolvedValue(true);
   createSubscription.mockResolvedValue({ confirmationUrl: 'https://shopify.test/approve/1' });
   exchangeCodeForToken.mockResolvedValue({
     access_token: 'acc',
@@ -86,9 +88,11 @@ describe('GET /api/auth/callback — expiring tokens + billing redirect', () => 
     const r = await callback();
     expect(r.status).toBe(302);
     expect(r.headers.get('location')).toBe('https://shopify.test/approve/1');
-    const [shop, token, returnUrl] = createSubscription.mock.calls[0];
+    const [shop, token, returnUrl, isTest] = createSubscription.mock.calls[0];
     expect(shop).toBe(SHOP);
     expect(token).toBe('acc');
+    expect(isTest).toBe(true);
+    expect(shouldUseTestCharge).toHaveBeenCalledWith(SHOP, 'acc');
     expect(returnUrl).toBe(`https://api.example.test/api/auth/billing/callback?shop=${SHOP}`);
   });
 

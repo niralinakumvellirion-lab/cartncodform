@@ -3,7 +3,7 @@ const {
   requireAuth,
   requireStoreOwnerAnyPlan,
 } = require('../middleware/requireOwner');
-const { createSubscription, PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS } = require('../utils/billing');
+const { createSubscription, shouldUseTestCharge, PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS } = require('../utils/billing');
 const { hasActivePlan } = require('../utils/planAccess');
 const { refreshAccessTokenIfNeeded } = require('../utils/shopify');
 
@@ -52,12 +52,12 @@ router.post('/:shopDomain/start', requireAuth, requireStoreOwnerAnyPlan, async (
   try {
     const shop = req.store.shopDomain;
     const returnUrl = `${getBackendUrl(req)}/api/auth/billing/callback?shop=${encodeURIComponent(shop)}`;
-    const isTest = process.env.NODE_ENV !== 'production';
 
     // Expiring offline token: refreshed or minted from the live session token
     // when the stored one is stale or a legacy non-expiring token.
     const token = await refreshAccessTokenIfNeeded(req.store, { sessionToken: sessionTokenOf(req) });
 
+    const isTest = await shouldUseTestCharge(shop, token);
     const { confirmationUrl } = await createSubscription(shop, token, returnUrl, isTest);
     if (!confirmationUrl) {
       return res.status(500).json({ error: 'Failed to create subscription' });

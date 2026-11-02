@@ -28,6 +28,34 @@ async function getActiveSubscription(shop, accessToken) {
 }
 
 /**
+ * True for Shopify partner development stores. Those stores have no payment
+ * method, so a real (non-test) charge cannot be approved there; the charge
+ * must be created with test: true. Any error → false (treat as a real store).
+ */
+async function isDevelopmentShop(shop, accessToken) {
+  try {
+    const data = await shopifyGraphQL(
+      shop,
+      accessToken,
+      'query { shop { plan { partnerDevelopment } } }'
+    );
+    return data?.shop?.plan?.partnerDevelopment === true;
+  } catch (err) {
+    console.warn('[billing] could not check development store flag:', err.message);
+    return false;
+  }
+}
+
+/**
+ * Whether a new subscription for this shop must be a test charge: always
+ * outside production, and on development stores in production.
+ */
+async function shouldUseTestCharge(shop, accessToken) {
+  if (process.env.NODE_ENV !== 'production') return true;
+  return isDevelopmentShop(shop, accessToken);
+}
+
+/**
  * Create a new app subscription. Returns the Shopify-hosted
  * confirmationUrl the merchant must visit to approve the charge.
  */
@@ -89,4 +117,4 @@ async function createSubscription(shop, accessToken, returnUrl, isTest) {
   };
 }
 
-module.exports = { getActiveSubscription, createSubscription, PLAN_NAME, PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS };
+module.exports = { getActiveSubscription, createSubscription, isDevelopmentShop, shouldUseTestCharge, PLAN_NAME, PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS };

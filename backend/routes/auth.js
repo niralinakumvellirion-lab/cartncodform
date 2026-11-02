@@ -13,7 +13,7 @@ const {
   refreshAccessTokenIfNeeded,
 } = require('../utils/shopify');
 const { requireAuth } = require('../middleware/requireOwner');
-const { getActiveSubscription, createSubscription } = require('../utils/billing');
+const { getActiveSubscription, createSubscription, shouldUseTestCharge } = require('../utils/billing');
 const { recordSubscriptionEvent } = require('../utils/subscriptionEvents');
 
 const router = express.Router();
@@ -219,7 +219,7 @@ router.get('/callback', async (req, res) => {
     // land in the app on the "Start your free trial" screen.
     try {
       const returnUrl = `${getBackendUrl(req)}/api/auth/billing/callback?shop=${encodeURIComponent(shopDomain)}`;
-      const isTest = process.env.NODE_ENV !== 'production';
+      const isTest = await shouldUseTestCharge(shopDomain, accessToken);
       const { confirmationUrl } = await createSubscription(shopDomain, accessToken, returnUrl, isTest);
       if (confirmationUrl) {
         console.log(`[auth] No active subscription for ${shopDomain} — redirecting to Shopify approval page`);

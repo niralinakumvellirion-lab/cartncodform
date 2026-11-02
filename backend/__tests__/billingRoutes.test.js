@@ -11,6 +11,7 @@ jest.mock('../middleware/requireOwner', () => ({
 
 jest.mock('../utils/billing', () => ({
   createSubscription: jest.fn(),
+  shouldUseTestCharge: jest.fn(),
   PLAN_PRICE: 10,
   PLAN_CURRENCY: 'USD',
   TRIAL_DAYS: 30,
@@ -22,7 +23,7 @@ jest.mock('../utils/shopify', () => ({
 
 const http = require('http');
 const express = require('express');
-const { createSubscription } = require('../utils/billing');
+const { createSubscription, shouldUseTestCharge } = require('../utils/billing');
 const { refreshAccessTokenIfNeeded } = require('../utils/shopify');
 const billingRouter = require('../routes/billing');
 
@@ -53,6 +54,7 @@ beforeEach(() => {
     plan: 'free',
   };
   refreshAccessTokenIfNeeded.mockResolvedValue('fresh-tok');
+  shouldUseTestCharge.mockResolvedValue(false);
 });
 
 afterEach(() => jest.restoreAllMocks());
@@ -120,12 +122,21 @@ describe('POST /api/billing/:shop/start', () => {
       global.__billingTestStore,
       { sessionToken: 'session-jwt' }
     );
-    const [shop, token, returnUrl] = createSubscription.mock.calls[0];
+    const [shop, token, returnUrl, isTest] = createSubscription.mock.calls[0];
     expect(shop).toBe('bill-shop.myshopify.com');
     expect(token).toBe('fresh-tok');
+    expect(isTest).toBe(false);
     expect(returnUrl).toBe(
       'https://api.example.test/api/auth/billing/callback?shop=bill-shop.myshopify.com'
     );
+  });
+
+  test('development store → subscription created as a TEST charge', async () => {
+    shouldUseTestCharge.mockResolvedValue(true);
+    createSubscription.mockResolvedValue({ confirmationUrl: 'https://shopify.test/confirm/3' });
+    await fetch(`${base}/api/billing/bill-shop.myshopify.com/start`, START());
+    expect(shouldUseTestCharge).toHaveBeenCalledWith('bill-shop.myshopify.com', 'fresh-tok');
+    expect(createSubscription.mock.calls[0][3]).toBe(true);
   });
 
   test('no confirmationUrl → 500', async () => {
