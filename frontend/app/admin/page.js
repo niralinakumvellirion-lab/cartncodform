@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import '@shopify/polaris/build/esm/styles.css';
 
 import OnboardingScreen from './screens/Onboarding';
+import { getItem, setItem } from '../../lib/safeStorage';
 
 function AdminHomeContent() {
   const router = useRouter();
@@ -17,7 +18,7 @@ function AdminHomeContent() {
   useEffect(() => {
     if (onboardingChecked) return;
     setOnboardingChecked(true);
-    const hasOnboarded = localStorage.getItem('ccf_onboarded') === 'true';
+    const hasOnboarded = getItem('ccf_onboarded') === 'true';
     if (hasOnboarded) {
       // /admin is just a landing gate — send onboarded merchants to the real
       // Dashboard route so the URL matches (and highlights) the Dashboard nav
@@ -38,7 +39,7 @@ function AdminHomeContent() {
         shop={shop}
         onNavigate={() => {}}
         onDone={() => {
-          localStorage.setItem('ccf_onboarded', 'true');
+          setItem('ccf_onboarded', 'true');
           router.replace(`/admin/dashboard?shop=${encodeURIComponent(shop)}`);
         }}
       />

@@ -28,7 +28,7 @@ export default function FaqSection() {
     },
     {
       q: 'Is there a free trial?',
-      a: 'Yes! Every store gets a 14-day full-featured free trial. You can install the app, test real behavioral triggers, experience the live recovery engine, and review the AI weekly narrative completely risk-free.',
+      a: 'Yes! Every store gets a 30-day full-featured free trial, then $10/month billed through Shopify. You can install the app, test real behavioral triggers, experience the live recovery engine, and review the AI weekly narrative completely risk-free.',
     },
   ];
 

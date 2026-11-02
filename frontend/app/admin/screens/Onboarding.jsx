@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { getItem, setItem } from '../../../lib/safeStorage';
 
 const DS = {
   page: {
@@ -103,8 +104,8 @@ function PageHeader({ title, subtitle, action }) {
 }
 
 // Storefront onboarding checklist. Per-step "done" and the overall
-// "ccf_onboarded" flag live in localStorage (per browser) — see
-// PHASE_G3_AUDIT open question re: CLAUDE.md "no localStorage in admin".
+// "ccf_onboarded" flag use lib/safeStorage (falls back to memory when the
+// admin iframe blocks browser storage, e.g. Chrome incognito).
 
 export default function Onboarding({ shop, onNavigate, onDone }) {
   const STEPS = [
@@ -150,7 +151,7 @@ export default function Onboarding({ shop, onNavigate, onDone }) {
       id: step.id,
       done:
         typeof window !== 'undefined' &&
-        localStorage.getItem(`ccf_step_${step.id}_done`) === 'true',
+        getItem(`ccf_step_${step.id}_done`) === 'true',
     }))
   );
 
@@ -161,11 +162,7 @@ export default function Onboarding({ shop, onNavigate, onDone }) {
       prev.map((s) => {
         if (s.id !== id) return s;
         const newDone = !s.done;
-        try {
-          localStorage.setItem(`ccf_step_${id}_done`, String(newDone));
-        } catch (e) {
-          /* storage unavailable — in-memory update still applies */
-        }
+        setItem(`ccf_step_${id}_done`, String(newDone));
         return { ...s, done: newDone };
       })
     );
@@ -182,11 +179,7 @@ export default function Onboarding({ shop, onNavigate, onDone }) {
   }
 
   function finish() {
-    try {
-      localStorage.setItem('ccf_onboarded', 'true');
-    } catch (e) {
-      /* storage unavailable */
-    }
+    setItem('ccf_onboarded', 'true');
     onDone();
   }
 

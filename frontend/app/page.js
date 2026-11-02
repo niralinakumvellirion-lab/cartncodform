@@ -50,7 +50,7 @@ export default function LandingPage() {
               Ready to Stop Losing Carts &amp; Multiply Repeat Purchases?
             </h2>
             <p className="mt-5 text-base sm:text-lg text-indigo-100 max-w-2xl mx-auto leading-relaxed">
-              Install ShopiReachBoost AI on your Shopify store in under 60 seconds. Zero liquid code edits. 14-day free trial.
+              Install ShopiReachBoost AI on your Shopify store in under 60 seconds. Zero liquid code edits. 30-day free trial.
             </p>
 
             <div className="mt-9 flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -75,7 +75,7 @@ export default function LandingPage() {
             </div>
 
             <p className="mt-5 text-xs text-indigo-200">
-              No credit card required • GDPR compliant • 100% money-back satisfaction guarantee
+              All features included • Billed through Shopify • Cancel any time
             </p>
           </div>
         </section>
