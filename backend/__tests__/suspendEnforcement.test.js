@@ -135,7 +135,7 @@ describe('requireStoreOwner — suspended store', () => {
   });
 
   test('200 when store.suspended=false', async () => {
-    Store.findOne.mockResolvedValue({ shopDomain: TEST_SHOP, suspended: false });
+    Store.findOne.mockResolvedValue({ shopDomain: TEST_SHOP, suspended: false, plan: 'pro' });
     const r = await httpGet(
       `/test/owner/${TEST_SHOP}`,
       authHeader()
@@ -144,7 +144,7 @@ describe('requireStoreOwner — suspended store', () => {
   });
 
   test('200 when store.suspended is undefined (old document without field)', async () => {
-    Store.findOne.mockResolvedValue({ shopDomain: TEST_SHOP });
+    Store.findOne.mockResolvedValue({ shopDomain: TEST_SHOP, plan: 'pro' });
     const r = await httpGet(
       `/test/owner/${TEST_SHOP}`,
       authHeader()
@@ -166,7 +166,7 @@ describe('requireNotSuspended — send routes', () => {
   });
 
   test('passes through when store.suspended=false', async () => {
-    Store.findOne.mockReturnValue({ lean: () => Promise.resolve({ shopDomain: TEST_SHOP, suspended: false }) });
+    Store.findOne.mockReturnValue({ lean: () => Promise.resolve({ shopDomain: TEST_SHOP, suspended: false, plan: 'pro' }) });
     const r = await httpPost('/test/send', {}, authHeader());
     expect(r.status).toBe(200);
   });
@@ -226,7 +226,7 @@ describe('processScheduledJobs — suspended store', () => {
   });
 
   test('does NOT skip job when store is active', async () => {
-    const store = { shopDomain: TEST_SHOP, suspended: false };
+    const store = { shopDomain: TEST_SHOP, suspended: false, plan: 'pro' };
     ScheduledJob.findOneAndUpdate.mockResolvedValue({});
 
     const job = { _id: 'job2', shopDomain: TEST_SHOP, status: 'pending' };
@@ -309,7 +309,7 @@ describe('nightly signals — suspended stores skipped', () => {
     const mockRunNightlySignals = jest.fn().mockResolvedValue();
     const mockRunBrain = jest.fn().mockResolvedValue();
 
-    const s = { shopDomain: TEST_SHOP, suspended: false };
+    const s = { shopDomain: TEST_SHOP, suspended: false, plan: 'pro' };
 
     if (!s.suspended) {
       mockRunNightlySignals(s.shopDomain);

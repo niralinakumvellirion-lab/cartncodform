@@ -2,7 +2,7 @@
 export const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:4000';
 
-import { checkSuspended } from './checkSuspended';
+import { checkSuspended, checkPlanRequired } from './checkSuspended';
 export { checkSuspended };
 
 // fetch() rejects with a bare "TypeError: Failed to fetch" for any network-level
@@ -72,6 +72,7 @@ export async function apiGet(path) {
     if (!retryRes.ok) {
       const err = await retryRes.json().catch(() => ({}));
       checkSuspended(retryRes.status, err);
+      checkPlanRequired(retryRes.status, err);
       throw new Error(err.error || `${path} failed (${retryRes.status})`);
     }
     return retryRes.json();
@@ -85,6 +86,7 @@ export async function apiGet(path) {
       bodyJson = JSON.parse(bodyText);
     } catch {}
     checkSuspended(res.status, bodyJson);
+    checkPlanRequired(res.status, bodyJson);
     throw new Error(`GET ${path} failed (${res.status}): ${bodyText}`);
   }
   return res.json();
@@ -146,6 +148,7 @@ export async function apiSend(path, method, body) {
     if (!retryRes.ok) {
       const err = await retryRes.json().catch(() => ({}));
       checkSuspended(retryRes.status, err);
+      checkPlanRequired(retryRes.status, err);
       throw new Error(err.error || `${method} ${path} failed (${retryRes.status})`);
     }
     return retryRes.json().catch(() => ({}));
@@ -154,6 +157,7 @@ export async function apiSend(path, method, body) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     checkSuspended(res.status, data);
+    checkPlanRequired(res.status, data);
     const err = new Error(data.error || `${method} ${path} failed (${res.status})`);
     if (data.field) err.field = data.field;
     throw err;

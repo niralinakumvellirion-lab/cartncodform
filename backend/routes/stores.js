@@ -1,5 +1,5 @@
 const express = require('express');
-const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
+const { requireAuth, requireStoreOwner, requireStoreOwnerAnyPlan } = require('../middleware/requireOwner');
 const { refreshAccessTokenIfNeeded, API_VERSION } = require('../utils/shopify');
 const Store = require('../models/Store');
 const AbandonedCustomer = require('../models/AbandonedCustomer');
@@ -193,7 +193,7 @@ router.get('/:shopDomain/products', requireAuth, requireStoreOwner, async (req, 
  * DELETE /api/stores/:shopDomain
  * Disconnect a store: remove the Store plus every record tied to that shop.
  */
-router.delete('/:shopDomain', requireAuth, requireStoreOwner, async (req, res) => {
+router.delete('/:shopDomain', requireAuth, requireStoreOwnerAnyPlan, async (req, res) => {
   try {
     const shopDomain = req.params.shopDomain.trim().toLowerCase();
 

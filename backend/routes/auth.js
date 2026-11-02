@@ -17,6 +17,9 @@ const { recordSubscriptionEvent } = require('../utils/subscriptionEvents');
 
 const router = express.Router();
 
+// Embedded-app URL handle in Shopify admin (same value as frontend/lib/api.js).
+const APP_HANDLE = 'cartncod-form';
+
 // Build the public base URL of THIS backend. In production BACKEND_URL must be
 // set (e.g. https://api.shopireachboost.com) so the OAuth redirect_uri
 // exactly matches the one registered in the Shopify app. Only when it is unset
@@ -170,7 +173,7 @@ router.get('/callback', async (req, res) => {
     );
 
     // Return the merchant into the embedded app inside Shopify Admin.
-    const dashboardUrl = `https://admin.shopify.com/store/${shopDomain.replace('.myshopify.com', '')}/apps/cartncodform`;
+    const dashboardUrl = `https://admin.shopify.com/store/${shopDomain.replace('.myshopify.com', '')}/apps/${APP_HANDLE}`;
 
     // Check for an existing active subscription. If found, sync it
     // locally and go straight to the dashboard.
@@ -206,11 +209,20 @@ router.get('/callback', async (req, res) => {
       return res.redirect(dashboardUrl);
     }
 
-    // No active subscription — the merchant stays on the free plan
-    // for now. They can upgrade later from the dashboard (a separate
-    // "Upgrade" button/route will trigger createSubscription + redirect
-    // to Shopify's hosted confirmation page).
-    console.log(`[auth] No active subscription for ${shopDomain} — redirecting to dashboard on free plan`);
+    // No active subscription — send the merchant to Shopify's approval page
+    // (free trial, then monthly). If they decline, or creating it fails, they
+    // land in the app on the "Start your free trial" screen.
+    try {
+      const returnUrl = `${getBackendUrl(req)}/api/auth/billing/callback?shop=${encodeURIComponent(shopDomain)}`;
+      const isTest = process.env.NODE_ENV !== 'production';
+      const { confirmationUrl } = await createSubscription(shopDomain, accessToken, returnUrl, isTest);
+      if (confirmationUrl) {
+        console.log(`[auth] No active subscription for ${shopDomain} — redirecting to Shopify approval page`);
+        return res.redirect(confirmationUrl);
+      }
+    } catch (subErr) {
+      console.error(`[auth] Could not start subscription for ${shopDomain}:`, subErr.message);
+    }
     return res.redirect(dashboardUrl);
   } catch (err) {
     const detail = err.response ? JSON.stringify(err.response.data) : err.message;
@@ -256,41 +268,6 @@ router.post('/refresh-token', requireAuth, async (req, res) => {
 });
 
 /**
- * GET /api/auth/upgrade?shop=<domain>
- * Creates a new app subscription and redirects the merchant to
- * Shopify's hosted confirmation page. Requires the merchant to
- * already be an installed store (has an accessToken on file).
- */
-router.get('/upgrade', async (req, res) => {
-  try {
-    const shop = (req.query.shop || '').toString().trim().toLowerCase();
-    if (!shop) {
-      return res.status(400).json({ error: 'shop is required' });
-    }
-
-    const store = await Store.findOne({ shopDomain: shop });
-    if (!store) {
-      return res.status(404).json({ error: 'Store not found — please reinstall the app' });
-    }
-
-    const backendUrl = getBackendUrl(req);
-    const returnUrl = `${backendUrl}/api/auth/billing/callback?shop=${encodeURIComponent(shop)}`;
-    const isTest = process.env.NODE_ENV !== 'production';
-
-    const { confirmationUrl } = await createSubscription(shop, store.accessToken, returnUrl, isTest);
-
-    if (!confirmationUrl) {
-      return res.status(500).json({ error: 'Failed to create subscription' });
-    }
-
-    return res.redirect(confirmationUrl);
-  } catch (err) {
-    console.error('[auth] /upgrade error:', err.message);
-    return res.status(500).json({ error: 'Failed to start upgrade' });
-  }
-});
-
-/**
  * GET /api/auth/billing/callback?shop=<domain>&charge_id=<id>
  * Shopify redirects here after the merchant approves (or declines)
  * the subscription on the hosted confirmation page. Re-check the
@@ -300,7 +277,7 @@ router.get('/billing/callback', async (req, res) => {
   try {
     const shop = (req.query.shop || '').toString().trim().toLowerCase();
     const frontendUrl = (process.env.FRONTEND_URL || 'http://localhost:3000').replace(/\/+$/, '');
-    const dashboardUrl = `https://admin.shopify.com/store/${shop.replace('.myshopify.com', '')}/apps/cartncodform`;
+    const dashboardUrl = `https://admin.shopify.com/store/${shop.replace('.myshopify.com', '')}/apps/${APP_HANDLE}`;
 
     if (!shop) {
       return res.redirect(frontendUrl);

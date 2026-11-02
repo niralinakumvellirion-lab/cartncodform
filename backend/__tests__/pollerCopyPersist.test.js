@@ -89,7 +89,7 @@ beforeEach(() => {
   Store.find.mockReturnValue({ lean: () => Promise.resolve([]) });
   // Quiet hours check + jobStore load — both use Store.findOne
   Store.findOne.mockReturnValue({
-    select: () => ({ lean: () => Promise.resolve({ timezone: 'Asia/Kolkata', quietHours: { enabled: false } }) }),
+    select: () => ({ lean: () => Promise.resolve({ timezone: 'Asia/Kolkata', quietHours: { enabled: false }, plan: 'pro' }) }),
     // non-lean (jobStore) path
     voice: {},
     toObject: () => ({}),

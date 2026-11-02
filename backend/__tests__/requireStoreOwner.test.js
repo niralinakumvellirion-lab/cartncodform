@@ -23,7 +23,7 @@ describe('requireStoreOwner', () => {
   });
 
   test('calls next() and sets req.store when the token shop matches the path shop', async () => {
-    const fakeStore = { shopDomain: 'test-shop.myshopify.com', ownerEmail: 'owner@example.com', plan: 'free' };
+    const fakeStore = { shopDomain: 'test-shop.myshopify.com', ownerEmail: 'owner@example.com', plan: 'pro' };
     Store.findOne.mockResolvedValue(fakeStore);
 
     const req = { shopDomain: 'test-shop.myshopify.com', params: { shopDomain: 'test-shop.myshopify.com' } };
@@ -65,7 +65,7 @@ describe('requireStoreOwner', () => {
   });
 
   test('returns 403 when the store has no ownerEmail on record', async () => {
-    Store.findOne.mockResolvedValue({ shopDomain: 'shop.myshopify.com', ownerEmail: null });
+    Store.findOne.mockResolvedValue({ shopDomain: 'shop.myshopify.com', ownerEmail: null, plan: 'pro' });
 
     const req = mockReq('shop.myshopify.com', 'someone@example.com');
     const res = mockRes();

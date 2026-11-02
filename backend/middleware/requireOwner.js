@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const Store = require('../models/Store');
+const { hasActivePlan, PLAN_REQUIRED_BODY } = require('../utils/planAccess');
 
 /**
  * Verifies a Shopify App Bridge session token (Authorization: Bearer <token>).
@@ -92,31 +93,43 @@ function requireAuth(req, res, next) {
  * store to req.store for downstream handlers to reuse.
  * Also blocks suspended stores — merchants see a 403 with code STORE_SUSPENDED.
  */
-async function requireStoreOwner(req, res, next) {
-  try {
-    const store = await Store.findOne({ shopDomain: req.shopDomain });
-    if (!store) {
-      return res.status(404).json({ error: 'Store not found' });
-    }
+function makeStoreOwner(enforcePlan) {
+  return async function storeOwner(req, res, next) {
+    try {
+      const store = await Store.findOne({ shopDomain: req.shopDomain });
+      if (!store) {
+        return res.status(404).json({ error: 'Store not found' });
+      }
 
-    if (req.shopDomain !== req.params.shopDomain) {
-      return res.status(403).json({ error: 'Not authorized for this store' });
-    }
+      if (req.shopDomain !== req.params.shopDomain) {
+        return res.status(403).json({ error: 'Not authorized for this store' });
+      }
 
-    if (store.suspended) {
-      return res.status(403).json({
-        error: 'Your account is paused. Contact support.',
-        code: 'STORE_SUSPENDED',
-      });
-    }
+      if (store.suspended) {
+        return res.status(403).json({
+          error: 'Your account is paused. Contact support.',
+          code: 'STORE_SUSPENDED',
+        });
+      }
 
-    req.store = store;
-    next();
-  } catch (err) {
-    console.error('[auth] requireStoreOwner error:', err.message);
-    return res.status(500).json({ error: 'Authorization check failed' });
-  }
+      if (enforcePlan && !hasActivePlan(store)) {
+        return res.status(402).json(PLAN_REQUIRED_BODY);
+      }
+
+      req.store = store;
+      next();
+    } catch (err) {
+      console.error('[auth] requireStoreOwner error:', err.message);
+      return res.status(500).json({ error: 'Authorization check failed' });
+    }
+  };
 }
+
+// Default: owner check + active subscription/trial required.
+const requireStoreOwner = makeStoreOwner(true);
+// Same checks but no plan requirement. Only for billing status/start and
+// account deletion, which must work before a merchant has subscribed.
+const requireStoreOwnerAnyPlan = makeStoreOwner(false);
 
 /**
  * For routes that use requireAuth only (no requireStoreOwner / no :shopDomain
@@ -127,13 +140,16 @@ async function requireNotSuspended(req, res, next) {
   try {
     const store = await Store.findOne(
       { shopDomain: req.shopDomain },
-      'suspended'
+      'suspended plan isInternal'
     ).lean();
     if (store && store.suspended) {
       return res.status(403).json({
         error: 'Your account is paused. Contact support.',
         code: 'STORE_SUSPENDED',
       });
+    }
+    if (store && !hasActivePlan(store)) {
+      return res.status(402).json(PLAN_REQUIRED_BODY);
     }
     next();
   } catch (err) {
@@ -159,4 +175,4 @@ function requirePaidPlan(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, requireStoreOwner, requirePaidPlan, requireNotSuspended };
+module.exports = { requireAuth, requireStoreOwner, requireStoreOwnerAnyPlan, requirePaidPlan, requireNotSuspended };

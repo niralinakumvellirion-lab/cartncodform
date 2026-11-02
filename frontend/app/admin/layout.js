@@ -1,4 +1,5 @@
 import SuspendedGate from './components/SuspendedGate';
+import PlanGate from './components/PlanGate';
 
 export default function AdminLayout({ children }) {
   return (
@@ -9,7 +10,9 @@ export default function AdminLayout({ children }) {
       />
       {/* Shopify App Bridge v4 loads specifically inside embedded admin context */}
       <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js" />
-      <SuspendedGate>{children}</SuspendedGate>
+      <SuspendedGate>
+        <PlanGate>{children}</PlanGate>
+      </SuspendedGate>
     </>
   );
 }

@@ -25,6 +25,7 @@ jest.mock('../middleware/requireOwner', () => ({
     req.store = { shopDomain: req.shopDomain };
     next();
   },
+  requireStoreOwnerAnyPlan: (req, _res, next) => next(),
 }));
 jest.mock('../models/Store');
 jest.mock('../models/FestivalQueue');

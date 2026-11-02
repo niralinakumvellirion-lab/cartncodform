@@ -6,7 +6,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { checkSuspended, _resetForTest } from './checkSuspended.js';
+import { checkSuspended, checkPlanRequired, _resetForTest } from './checkSuspended.js';
 
 // Stub window with a real EventTarget so dispatchEvent works.
 function setup() {
@@ -143,6 +143,58 @@ console.log('checkSuspended');
   ok('window undefined (SSR) → no throw, no event');
   // Restore for any subsequent code
   globalThis.window = new EventTarget();
+}
+
+// ── checkPlanRequired ────────────────────────────────────────────────────────
+console.log('\ncheckPlanRequired');
+
+function setupPlan() {
+  _resetForTest();
+  const win = new EventTarget();
+  globalThis.window = win;
+  const dispatched = [];
+  win.addEventListener('ccf:plan-required', () => dispatched.push('ccf:plan-required'));
+  win.addEventListener('ccf:store-suspended', () => dispatched.push('ccf:store-suspended'));
+  return dispatched;
+}
+
+{
+  const d = setupPlan();
+  checkPlanRequired(402, { code: 'PLAN_REQUIRED', upgradeRequired: true });
+  assert.deepEqual(d, ['ccf:plan-required']);
+  ok('402 + PLAN_REQUIRED → dispatches plan-required once');
+}
+{
+  const d = setupPlan();
+  checkPlanRequired(402, { code: 'PLAN_REQUIRED' });
+  checkPlanRequired(402, { code: 'PLAN_REQUIRED' });
+  assert.equal(d.length, 1);
+  ok('plan-required is idempotent per page load');
+}
+{
+  const d = setupPlan();
+  checkPlanRequired(403, { code: 'PLAN_REQUIRED' });
+  checkPlanRequired(402, { code: 'OTHER' });
+  checkPlanRequired(402, { error: 'Pay up' });
+  checkPlanRequired(402, null);
+  checkPlanRequired(402, [{ code: 'PLAN_REQUIRED' }]);
+  checkPlanRequired(200, { code: 'PLAN_REQUIRED' });
+  assert.equal(d.length, 0);
+  ok('wrong status / code / body shape → no event');
+}
+{
+  const d = setupPlan();
+  checkSuspended(402, { code: 'PLAN_REQUIRED' });
+  checkSuspended(403, { code: 'STORE_SUSPENDED' });
+  assert.deepEqual(d, ['ccf:store-suspended']);
+  ok('suspended and plan-required events stay separate');
+}
+{
+  _resetForTest();
+  delete globalThis.window;
+  checkPlanRequired(402, { code: 'PLAN_REQUIRED' });
+  globalThis.window = new EventTarget();
+  ok('window undefined (SSR) → no throw');
 }
 
 console.log(`\n  ${passed} tests passed`);

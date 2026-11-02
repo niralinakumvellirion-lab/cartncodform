@@ -84,7 +84,7 @@ const PROF_ID = '507f1f77bcf86cd799439088';
 
 function makeStore(extra = {}) {
   return {
-    select: () => ({ lean: () => Promise.resolve({ timezone: 'Asia/Kolkata', quietHours: { enabled: false }, suspended: false, ...extra }) }),
+    select: () => ({ lean: () => Promise.resolve({ timezone: 'Asia/Kolkata', quietHours: { enabled: false }, suspended: false, plan: 'pro', ...extra }) }),
     voice: {},
     toObject: () => ({}),
   };
