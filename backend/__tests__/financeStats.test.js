@@ -100,15 +100,15 @@ describe('computeSummary — basic counts', () => {
   test('Pro store with no events → approx, uses planUpdatedAt', () => {
     const planUpdatedAt = new Date(NOW.getTime() - 2 * MS);
     const s = store({ plan: 'pro', planUpdatedAt, status: 'ACTIVE' });
-    // trialEnd = planUpdatedAt + TRIAL_DAYS. If 2 days ago + 7 days > now → trial
+    // trialEnd = planUpdatedAt + TRIAL_DAYS. If 2 days ago + TRIAL_DAYS > now → trial
     const r = computeSummary({ stores: [s], events: [], now: NOW });
     expect(r.counts.trial + r.counts.paying).toBe(1);
-    // 2 days into a 7-day trial → still in trial
+    // 2 days into the trial → still in trial
     expect(r.counts.trial).toBe(1);
   });
 
   test('Pro store with no events, planUpdatedAt old enough → paying (approx)', () => {
-    const planUpdatedAt = new Date(NOW.getTime() - 10 * MS);
+    const planUpdatedAt = new Date(NOW.getTime() - (TRIAL_DAYS + 3) * MS);
     const s = store({ plan: 'pro', planUpdatedAt, status: 'ACTIVE' });
     const r = computeSummary({ stores: [s], events: [], now: NOW });
     expect(r.counts.paying).toBe(1);
@@ -127,7 +127,7 @@ describe('computeSummary — basic counts', () => {
 
   test('baseline never counted as a purchase (paying = 0, no MRR contribution for it alone)', () => {
     const s = store({ plan: 'pro', status: 'ACTIVE' });
-    const approxSince = new Date(NOW.getTime() - 10 * MS); // trial long expired
+    const approxSince = new Date(NOW.getTime() - (TRIAL_DAYS + 3) * MS); // trial long expired
     const ev = event({ eventType: 'baseline', toPlan: 'pro', shopifyStatus: 'ACTIVE',
       approxSince, trialEndsAt: null });
     const r = computeSummary({ stores: [s], events: [ev], now: NOW });

@@ -278,7 +278,7 @@ export default function FinanceScreen() {
         </div>
         <p className="text-sm text-[#5A6070]">
           Who is on which plan, and what that is worth each month. Stores are counted once, at the Pro price
-          of {summary ? fmtMoney(summary.priceUsd) : '$9.99'} every 30 days.
+          of {summary ? fmtMoney(summary.priceUsd) : '$10.00'} every 30 days.
         </p>
       </div>
 
@@ -304,12 +304,12 @@ export default function FinanceScreen() {
           loading={summaryLoading}
         />
         <KpiCard
-          label="In 7-day trial"
+          label="In 30-day trial"
           value={summary ? summary.counts.trial : '—'}
           hint={
             summary
               ? summary.counts.trial > 0
-                ? `Would add ${fmtMoney(summary.counts.trial * (summary.priceUsd || 9.99))} a month if they stay.`
+                ? `Would add ${fmtMoney(summary.counts.trial * (summary.priceUsd || 10))} a month if they stay.`
                 : 'No trials running.'
               : ''
           }

@@ -1,9 +1,9 @@
 const { shopifyGraphQL } = require('./shopifyGraphQL');
 
 const PLAN_NAME = 'ShopiReachBoost AI Pro';
-const PLAN_PRICE = 9.99;
+const PLAN_PRICE = 10;
 const PLAN_CURRENCY = 'USD';
-const TRIAL_DAYS = 7;
+const TRIAL_DAYS = 30;
 
 /**
  * Query Shopify for this shop's currently active subscription(s).
