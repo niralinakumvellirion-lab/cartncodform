@@ -246,6 +246,27 @@ describe('saving', () => {
   });
 });
 
+describe('preview stays in view while the settings scroll', () => {
+  it('sits in a column that stretches to the full height and sticks to the top', async () => {
+    await renderScreen();
+    const aside = screen.getByRole('complementary', { name: 'Preview' });
+    const sticky = aside.parentElement;
+    const column = sticky.parentElement;
+    // A sticky box can only stay in view inside a parent that is taller than itself, so the column must
+    // stretch (a grid with align-items:start made it exactly as tall as the preview: it scrolled away).
+    expect(column.style.alignSelf).toBe('stretch');
+    expect(sticky.style.position).toBe('sticky');
+    expect(sticky.style.top).toBe('16px');
+  });
+
+  it('on a narrow screen the preview is shown in normal flow (no sticky)', async () => {
+    window.innerWidth = 600;
+    await renderScreen();
+    const aside = screen.getByRole('complementary', { name: 'Preview' });
+    expect(aside.parentElement.style.position).not.toBe('sticky');
+  });
+});
+
 describe('preview follows the settings', () => {
   const preview = () => screen.getByRole('complementary', { name: 'Preview' });
 

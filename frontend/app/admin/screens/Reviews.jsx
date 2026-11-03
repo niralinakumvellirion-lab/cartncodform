@@ -488,7 +488,8 @@ export default function Reviews({ shop }) {
           {saveError && !typesError ? <div style={ui.errorBox} role="alert">{saveError}</div> : null}
         </div>
 
-        {wide ? <div><div style={{ position: 'sticky', top: 16 }}><Preview s={draft} /></div></div> : <Preview s={draft} />}
+        {/* The column must stretch to the full height of the settings, or the sticky preview has no room to stay in view. */}
+        {wide ? <div style={ui.previewCol}><div style={ui.previewSticky}><Preview s={draft} /></div></div> : <Preview s={draft} />}
       </div>
 
       {/* Save bar */}
@@ -519,6 +520,8 @@ const ui = {
   bannerIcon: { flexShrink: 0, width: 18, height: 18, borderRadius: 999, background: ACCENT, color: '#fff', fontSize: 12, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   layout: { display: 'grid', gap: 20, alignItems: 'start' },
   column: { display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 },
+  previewCol: { alignSelf: 'stretch', minWidth: 0 },
+  previewSticky: { position: 'sticky', top: 16 },
   card: { background: '#fff', border: '1px solid #E5E7EB', borderRadius: 12, boxShadow: '0 1px 2px rgba(16,24,40,0.04)', overflow: 'hidden' },
   cardHead: { padding: '16px 20px 12px', borderBottom: '1px solid #F3F4F6' },
   cardTitle: { fontSize: 15, fontWeight: 800, margin: 0, color: '#111827' },
