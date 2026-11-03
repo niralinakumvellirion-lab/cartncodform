@@ -27,6 +27,9 @@ jest.mock('../models/PushClick');
 jest.mock('../models/AttributedEvent');
 jest.mock('../models/ComplianceRequest');
 jest.mock('../models/Signal');
+jest.mock('../models/Review');
+jest.mock('../models/ReviewVote');
+jest.mock('../models/PurchaseRecord');
 
 const express = require('express');
 const AbandonedCustomer = require('../models/AbandonedCustomer');
@@ -39,6 +42,10 @@ const PushClick = require('../models/PushClick');
 const AttributedEvent = require('../models/AttributedEvent');
 const ComplianceRequest = require('../models/ComplianceRequest');
 const Signal = require('../models/Signal');
+const Review = require('../models/Review');
+const ReviewVote = require('../models/ReviewVote');
+const PurchaseRecord = require('../models/PurchaseRecord');
+const { hashEmail } = require('../utils/reviewsCore');
 const webhooksRouter = require('../routes/webhooks');
 
 const SHOP = 'demo.myshopify.com';
@@ -88,6 +95,9 @@ beforeEach(() => {
   PushClick.deleteMany.mockResolvedValue({ deletedCount: 0 });
   AttributedEvent.deleteMany.mockResolvedValue({ deletedCount: 0 });
   Signal.deleteMany.mockResolvedValue({ deletedCount: 0 });
+  Review.deleteMany.mockResolvedValue({ deletedCount: 0 });
+  ReviewVote.deleteMany.mockResolvedValue({ deletedCount: 0 });
+  PurchaseRecord.deleteMany.mockResolvedValue({ deletedCount: 0 });
 });
 afterEach(() => jest.restoreAllMocks());
 
@@ -280,5 +290,25 @@ describe('customers/data_request', () => {
       msg.includes('Profile:') && msg.includes('1') &&
       msg.includes('ScheduledJob:') && msg.includes('2')
     )).toBe(true);
+  });
+});
+
+describe('customers/redact - product reviews', () => {
+  test('deletes the customer reviews, purchase records and helpful votes in this shop only', async () => {
+    const res = await postCompliance('customers/redact', { customer: { id: 555, email: 'Shopper@Example.com' } });
+    expect(res.status).toBe(200);
+    await flushBackground();
+
+    const or = [{ customerId: '555' }, { emailHash: hashEmail('shopper@example.com') }];
+    expect(Review.deleteMany).toHaveBeenCalledWith({ shopDomain: SHOP, $or: or });
+    expect(PurchaseRecord.deleteMany).toHaveBeenCalledWith({ shopDomain: SHOP, $or: or });
+    expect(ReviewVote.deleteMany).toHaveBeenCalledWith({ shopDomain: SHOP, customerId: '555' });
+  });
+
+  test('works with only an email (guest reviewer): no vote lookup by customer id', async () => {
+    await postCompliance('customers/redact', { customer: { email: 'guest@example.com' } });
+    await flushBackground();
+    expect(Review.deleteMany).toHaveBeenCalledWith({ shopDomain: SHOP, $or: [{ emailHash: hashEmail('guest@example.com') }] });
+    expect(ReviewVote.deleteMany).not.toHaveBeenCalled();
   });
 });

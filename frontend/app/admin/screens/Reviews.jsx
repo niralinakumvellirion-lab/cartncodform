@@ -27,6 +27,7 @@ const DEFAULTS = {
   reviewsPerPage: 10,
   photos: { enabled: true, maxPhotos: 3, maxFileSizeMb: 5, allowedTypes: ['jpeg', 'png', 'webp'] },
   helpfulVotes: true,
+  requireApproval: true,
 };
 
 const ACCENT = '#4F46E5';
@@ -47,6 +48,7 @@ function normalize(raw) {
       allowedTypes: Array.isArray(p.allowedTypes) ? [...p.allowedTypes] : [...DEFAULTS.photos.allowedTypes],
     },
     helpfulVotes: typeof s.helpfulVotes === 'boolean' ? s.helpfulVotes : DEFAULTS.helpfulVotes,
+    requireApproval: typeof s.requireApproval === 'boolean' ? s.requireApproval : DEFAULTS.requireApproval,
   };
 }
 
@@ -178,6 +180,7 @@ function Preview({ s }) {
           <div>{who ? who.info : ''}</div>
           <div>{s.starRating ? (s.starRequired ? 'A star rating is required.' : 'A star rating is optional.') : 'Star ratings are off.'}</div>
           <div>Shows {s.reviewsPerPage} reviews per page.</div>
+          <div>{s.requireApproval ? 'New reviews wait for your approval.' : 'New reviews appear right away.'}</div>
         </div>
       </div>
     </aside>
@@ -307,8 +310,8 @@ export default function Reviews({ shop }) {
       <div style={ui.banner} role="note">
         <span style={ui.bannerIcon} aria-hidden="true">i</span>
         <span>
-          Your choices are saved now. The review form and review list on your product pages are being added next, so nothing
-          changes on your store yet.
+          To show reviews on a product page: Online Store → Themes → Customize → open a product page → Add block → Apps →
+          “Product reviews”. These settings apply to every product that has the block.
         </span>
       </div>
 
@@ -469,6 +472,16 @@ export default function Reviews({ shop }) {
               info="Shows a “Helpful” button so shoppers can vote for the reviews that helped them."
               last
               control={<Switch checked={draft.helpfulVotes} onChange={(v) => patch({ helpfulVotes: v })} label="Helpful vote" />}
+            />
+          </Card>
+
+          {/* 8 — moderation */}
+          <Card title="Moderation" subtitle="Decide whether new reviews need your OK before shoppers see them.">
+            <Row
+              title="Approve reviews first"
+              info="New reviews wait in the Manage tab until you approve them. Turn off to publish them straight away."
+              last
+              control={<Switch checked={draft.requireApproval} onChange={(v) => patch({ requireApproval: v })} label="Approve reviews first" />}
             />
           </Card>
 

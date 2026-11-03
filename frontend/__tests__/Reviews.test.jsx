@@ -17,6 +17,7 @@ function settings(over = {}) {
     reviewsPerPage: 10,
     photos: { enabled: true, maxPhotos: 3, maxFileSizeMb: 5, allowedTypes: ['jpeg', 'png', 'webp'] },
     helpfulVotes: true,
+    requireApproval: true,
     ...over,
   };
 }
@@ -80,6 +81,33 @@ describe('every option is on the screen with a one-line description', () => {
     for (const name of ['Show verified owner badge', 'Enable star rating', 'Star rating required', 'Allow photos in reviews', 'Helpful vote']) {
       expect(sw(name)).toBeInTheDocument();
     }
+  });
+});
+
+describe('moderation', () => {
+  it('has an "Approve reviews first" switch that follows the saved value', async () => {
+    await renderScreen(settings({ requireApproval: false }));
+    expect(sw('Approve reviews first')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByText('New reviews appear right away.')).toBeInTheDocument();
+    fireEvent.click(sw('Approve reviews first'));
+    expect(sw('Approve reviews first')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText('New reviews wait for your approval.')).toBeInTheDocument();
+  });
+
+  it('sends the choice when saving', async () => {
+    await renderScreen();
+    fireEvent.click(sw('Approve reviews first'));
+    apiSend.mockResolvedValue({ settings: settings({ requireApproval: false }) });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(apiSend).toHaveBeenCalledTimes(1));
+    expect(apiSend.mock.calls[0][2].settings.requireApproval).toBe(false);
+  });
+
+  it('treats an older response without the field as "approval on"', async () => {
+    const old = settings();
+    delete old.requireApproval;
+    await renderScreen(old);
+    expect(sw('Approve reviews first')).toHaveAttribute('aria-checked', 'true');
   });
 });
 

@@ -29,7 +29,13 @@ function fails(input, field) {
 
 describe('sanitizeReviewSettings — accepts valid input', () => {
   test('returns the normalised settings', () => {
-    expect(sanitizeReviewSettings(valid())).toEqual(valid());
+    expect(sanitizeReviewSettings(valid())).toEqual({ ...valid(), requireApproval: true });
+  });
+
+  test('approval: defaults to on when the client does not send it, otherwise must be on/off', () => {
+    expect(sanitizeReviewSettings(valid()).requireApproval).toBe(true);
+    expect(sanitizeReviewSettings(valid({ requireApproval: false })).requireApproval).toBe(false);
+    expect(() => sanitizeReviewSettings(valid({ requireApproval: 'no' }))).toThrow(/Approve reviews first/);
   });
 
   test.each(['verified', 'logged_in', 'anyone'])('who can review: %s', (who) => {

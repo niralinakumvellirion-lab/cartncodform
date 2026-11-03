@@ -3,7 +3,7 @@ import { Suspense } from 'react';
 import { AppProvider } from '@shopify/polaris';
 import { NavMenu } from '@shopify/app-bridge-react';
 import { useSearchParams } from 'next/navigation';
-import ReviewsScreen from '../screens/Reviews';
+import ReviewsScreen from '../screens/ReviewsHome';
 import '@shopify/polaris/build/esm/styles.css';
 
 function ReviewsContent() {

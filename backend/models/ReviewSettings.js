@@ -24,6 +24,9 @@ const reviewSettingsSchema = new mongoose.Schema({
 
   helpfulVotes: { type: Boolean, default: true },
 
+  // true: new reviews wait in "Pending" until the merchant approves them.
+  requireApproval: { type: Boolean, default: true },
+
   updatedAt: { type: Date, default: Date.now },
 });
 

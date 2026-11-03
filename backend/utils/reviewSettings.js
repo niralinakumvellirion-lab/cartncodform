@@ -26,6 +26,7 @@ const DEFAULT_REVIEW_SETTINGS = Object.freeze({
     allowedTypes: Object.freeze(['jpeg', 'png', 'webp']),
   }),
   helpfulVotes: true,
+  requireApproval: true,
 });
 
 function invalid(message, field) {
@@ -63,6 +64,10 @@ function sanitizeReviewSettings(input) {
   const starRating = requireBoolean(input.starRating, 'starRating', 'Star rating');
   let starRequired = requireBoolean(input.starRequired, 'starRequired', 'Star rating required');
   const helpfulVotes = requireBoolean(input.helpfulVotes, 'helpfulVotes', 'Helpful votes');
+  // Added after the first release: a client that does not send it keeps approval on.
+  const requireApproval = input.requireApproval === undefined
+    ? DEFAULT_REVIEW_SETTINGS.requireApproval
+    : requireBoolean(input.requireApproval, 'requireApproval', 'Approve reviews first');
   const reviewsPerPage = requireIntInRange(input.reviewsPerPage, 'reviewsPerPage', 'Reviews per page', LIMITS.reviewsPerPage);
 
   const p = input.photos;
@@ -96,6 +101,7 @@ function sanitizeReviewSettings(input) {
       allowedTypes: allowedTypes.length ? allowedTypes : [...DEFAULT_REVIEW_SETTINGS.photos.allowedTypes],
     },
     helpfulVotes,
+    requireApproval,
   };
 }
 
@@ -119,6 +125,7 @@ function toPublicSettings(doc) {
         : [...d.photos.allowedTypes],
     },
     helpfulVotes: typeof src.helpfulVotes === 'boolean' ? src.helpfulVotes : d.helpfulVotes,
+    requireApproval: typeof src.requireApproval === 'boolean' ? src.requireApproval : d.requireApproval,
     updatedAt: src.updatedAt || null,
   };
 }

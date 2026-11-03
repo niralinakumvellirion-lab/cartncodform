@@ -22,6 +22,10 @@ const FestivalQueue = require('../models/FestivalQueue');
 const PushSubscription = require('../models/PushSubscription');
 const ShopWeights = require('../models/ShopWeights');
 const ReviewSettings = require('../models/ReviewSettings');
+const Review = require('../models/Review');
+const ReviewVote = require('../models/ReviewVote');
+const PurchaseRecord = require('../models/PurchaseRecord');
+const { hashEmail, purchaseFromOrder } = require('../utils/reviewsCore');
 const Signal = require('../models/Signal');
 const SignalConfig = require('../models/SignalConfig');
 const ComplianceRequest = require('../models/ComplianceRequest');
@@ -42,7 +46,10 @@ const SHOP_REDACT_MODELS = [
   Profile,
   PushClick,
   PushSubscription,
+  PurchaseRecord,
+  Review,
   ReviewSettings,
+  ReviewVote,
   ScheduledJob,
   ShopWeights,
   Signal,
@@ -247,6 +254,19 @@ async function handleOrderWebhook(req, res) {
     console.log(`[webhook:order] Received orders/create from ${shopDomain}, cart_token: ${cartToken || 'none'}`);
 
     const customerId = order.customer?.id ? String(order.customer.id) : null;
+
+    // Remember which products this customer bought, so reviews can be marked "verified".
+    // Never blocks the webhook: a failure here only means a later review is not auto-verified.
+    {
+      const purchase = purchaseFromOrder(order);
+      if (purchase && shopDomain) {
+        await PurchaseRecord.updateOne(
+          { shopDomain, orderId: purchase.orderId },
+          { $set: { customerId: purchase.customerId, emailHash: purchase.emailHash, productIds: purchase.productIds }, $setOnInsert: { createdAt: new Date() } },
+          { upsert: true }
+        ).catch((err) => console.error('[webhook:order] purchase record error:', err.message));
+      }
+    }
 
     // A converted shopper should stop getting reminders — cancel any pending
     // job tied to this cart or customer. (Inlined here after the legacy
@@ -766,6 +786,17 @@ async function runCustomersRedact(cr) {
     const profileResult = profileOr.length
       ? await Profile.deleteMany({ shopDomain, $or: profileOr })
       : { deletedCount: 0 };
+
+    // Product reviews, helpful votes and purchase records of this customer.
+    const emailHash = hashEmail(customerEmail);
+    const reviewOr = [];
+    if (customerId) reviewOr.push({ customerId });
+    if (emailHash) reviewOr.push({ emailHash });
+    if (reviewOr.length) {
+      await Review.deleteMany({ shopDomain, $or: reviewOr });
+      await PurchaseRecord.deleteMany({ shopDomain, $or: reviewOr });
+    }
+    if (customerId) await ReviewVote.deleteMany({ shopDomain, customerId });
 
     await ComplianceRequest.updateOne(
       { _id: cr._id },
