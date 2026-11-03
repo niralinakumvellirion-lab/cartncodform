@@ -73,6 +73,10 @@ async function seed() {
   await ScheduledJob.create(emailJob({ subscriptionToken: 'carol@example.com', signalType: 'email_broadcast', origin: 'manual', payload: { title: 'Old sale' } }));
   // Dave: tracked automated email, never came back
   await ScheduledJob.create(emailJob({ profileId: dave._id, signalType: 'lapsing', payload: { subject: 'We miss you' } }));
+  // A recipient whose profile record no longer exists (merged / erased): rows still carry the profileId
+  const orphanId = new mongoose.Types.ObjectId();
+  await ScheduledJob.create(emailJob({ profileId: orphanId, signalType: 'manual', origin: 'manual', payload: { subject: 'Orphan one' } }));
+  await ScheduledJob.create(emailJob({ profileId: orphanId, signalType: 'cart_abandon', payload: { subject: 'Orphan two' } }));
   // Must be excluded: a push row, another shop's email row, a row outside the window, a failed email
   const pushJob = await ScheduledJob.create({ shopDomain: SHOP, channel: 'push', status: 'sent', runAt: new Date(now - HOUR), sentAt: new Date(now - HOUR), profileId: alice._id, signalType: 'cart_abandon', origin: 'automated', payload: { title: 'push' } });
   await ScheduledJob.create(emailJob({ shopDomain: OTHER_SHOP, profileId: otherShopProfile._id, signalType: 'cart_abandon' }));
@@ -88,7 +92,7 @@ async function seed() {
   await AttributedEvent.create({ shopDomain: SHOP, eventType: 'revisit', jobId: pushJob._id, profileId: alice._id, ts: new Date(now - HOUR) });
   await AttributedEvent.create({ shopDomain: SHOP, eventType: 'revisit', festivalQueueId: pushFestival._id, profileId: dave._id, ts: new Date(now - HOUR) });
 
-  return { alice, bob, carol, dave, otherShopProfile, aliceCart, aliceManual, broadcastId, festival };
+  return { alice, bob, carol, dave, otherShopProfile, orphanId, aliceCart, aliceManual, broadcastId, festival };
 }
 
 beforeAll(async () => {
@@ -116,8 +120,8 @@ describe('GET /users', () => {
   test('lists the people emailed in the window, one row per person, scoped to the shop', async () => {
     const r = await get('/users');
     expect(r.status).toBe(200);
-    expect(r.body.total).toBe(4);
-    expect(r.body.users.map((u) => u.name).sort()).toEqual(['Alice', 'Bob', 'Carol', 'Dave']);
+    expect(r.body.total).toBe(5);
+    expect(r.body.users.map((u) => u.name).sort()).toEqual(['Alice', 'Anonymous visitor', 'Bob', 'Carol', 'Dave']);
   });
 
   test('counts every sent email per person, including broadcast rows that only carry the address', async () => {
@@ -166,7 +170,7 @@ describe('GET /users', () => {
 
   test('origin and type filters apply', async () => {
     const manual = (await get('/users?origin=manual')).body.users.map((u) => u.name).sort();
-    expect(manual).toEqual(['Alice', 'Bob', 'Carol']);
+    expect(manual).toEqual(['Alice', 'Anonymous visitor', 'Bob', 'Carol']);
     const lapsing = (await get('/users?type=lapsing')).body;
     expect(lapsing.users.map((u) => u.name)).toEqual(['Dave']);
   });
@@ -174,7 +178,7 @@ describe('GET /users', () => {
   test('name search and paging', async () => {
     expect((await get('/users?q=bob')).body.users.map((u) => u.name)).toEqual(['Bob']);
     const page = (await get('/users?limit=2&page=1')).body;
-    expect(page.total).toBe(4);
+    expect(page.total).toBe(5);
     expect(page.users).toHaveLength(2);
   });
 
@@ -199,9 +203,32 @@ describe('GET /users/:userKey/count', () => {
     expect((await get('/users/p_notanid/count')).status).toBe(400);
   });
 
-  test('another shop\'s profile is a 404', async () => {
-    expect((await get(`/users/p_${ids.otherShopProfile._id}/count`)).status).toBe(404);
-    expect((await get(`/users/p_${new mongoose.Types.ObjectId()}/count`)).status).toBe(404);
+  test('another shop\'s profile (or an unknown id) finds none of this shop\'s rows', async () => {
+    for (const id of [ids.otherShopProfile._id, new mongoose.Types.ObjectId()]) {
+      const r = await get(`/users/p_${id}/count`);
+      expect(r.status).toBe(200);
+      expect(r.body.total).toBe(0);
+    }
+    const rv = await get(`/users/p_${ids.otherShopProfile._id}/revisit`);
+    expect(rv.status).toBe(200);
+    expect(rv.body.notifications).toEqual([]);
+  });
+
+  test('a person whose profile record is gone still shows count and revisit (rows found by profileId)', async () => {
+    const r = await get(`/users/p_${ids.orphanId}/count`);
+    expect(r.status).toBe(200);
+    expect(r.body.total).toBe(2);
+    const rv = await get(`/users/p_${ids.orphanId}/revisit`);
+    expect(rv.status).toBe(200);
+    expect(rv.body.notifications.map((n) => n.title).sort()).toEqual(['Orphan one', 'Orphan two']);
+  });
+
+  test('such a person is listed as an anonymous visitor with no email', async () => {
+    const { users } = (await get('/users')).body;
+    const orphan = users.find((u) => u.userKey === `p_${ids.orphanId}`);
+    expect(orphan.name).toBe('Anonymous visitor');
+    expect(orphan.email).toBeNull();
+    expect(orphan.sentCount).toBe(2);
   });
 });
 
@@ -273,7 +300,7 @@ describe('GET /users.csv', () => {
     expect(r.headers.get('content-disposition')).toContain('email-users.csv');
     const lines = r.text.split('\r\n');
     expect(lines[0]).toBe('name,email,sent_count,last_sent,revisited,came_back_via');
-    expect(lines).toHaveLength(5);
+    expect(lines).toHaveLength(6);
     expect(r.text).toContain('a***@example.com');
     expect(r.text).not.toMatch(/alice@example\.com/);
   });

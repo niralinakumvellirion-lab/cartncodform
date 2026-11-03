@@ -181,7 +181,9 @@ function Pagination({ page, total, onPage }) {
 
 // ─── Anon subtitle helper ─────────────────────────────────────────────────────
 
-function anonSubtitle(userKey, deviceType) {
+function anonSubtitle(userKey, deviceType, channel) {
+  // Email recipients have no device; their address is unknown (profile removed or never captured).
+  if (channel === 'email') return `Email recipient - ...${userKey.slice(-4)}`;
   const last4 = userKey.slice(-4);
   let type = 'Device';
   if (deviceType) {
@@ -484,7 +486,7 @@ function AccordionUserRow({ user, menuTab, expanded, onToggle, shop, from, to, e
   const noun = CHANNEL_NOUN[channel] || 'notification';
   const isAnon    = !user.email;
   const nameText  = user.name || 'Anonymous visitor';
-  const subtitle  = isAnon ? anonSubtitle(user.userKey, user.deviceType) : user.email;
+  const subtitle  = isAnon ? anonSubtitle(user.userKey, user.deviceType, channel) : user.email;
 
   const panelId = `expand-panel-${user.userKey}`;
 
@@ -645,7 +647,7 @@ function AccordionRevisitedRow({ user, expanded, onToggle, shop, from, to, expan
   const noun = CHANNEL_NOUN[channel] || 'notification';
   const isAnon   = !user.email;
   const nameText = user.name || 'Anonymous visitor';
-  const subtitle = isAnon ? anonSubtitle(user.userKey, user.deviceType) : user.email;
+  const subtitle = isAnon ? anonSubtitle(user.userKey, user.deviceType, channel) : user.email;
 
   const panelId = `revisited-panel-${user.userKey}`;
 

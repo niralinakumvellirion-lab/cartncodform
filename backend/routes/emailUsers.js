@@ -331,16 +331,18 @@ router.get('/users', requireAuth, requireStoreOwner, async (req, res) => {
   }
 });
 
-/** The jobs query for one profile: rows with its profileId, or sent to one of its addresses. */
+/**
+ * The jobs query for one profile: rows with its profileId, or sent to one of its addresses.
+ * The profile record itself is optional (it can be gone after a merge or an erasure request).
+ * Rows are always scoped by shopDomain, so another shop's id simply finds nothing.
+ */
 async function loadUserJobQuery(shop, pid, from, to) {
   const profile = await Profile.findOne({ _id: pid, shopDomain: shop }, '_id ' + PROFILE_EMAIL_FIELDS).lean();
-  if (!profile) return null;
   const emails = emailsOfProfile(profile);
   const oid = new mongoose.Types.ObjectId(pid);
   const or = [{ profileId: oid }];
   if (emails.length) or.push({ subscriptionToken: { $in: emails } });
   return {
-    profile,
     user: { pid: String(pid), emails: emails.map(lower) },
     query: { shopDomain: shop, channel: 'email', status: 'sent', sentAt: { $gte: from, $lte: to }, $or: or },
   };
@@ -357,7 +359,6 @@ router.get('/users/:userKey/count', requireAuth, requireStoreOwner, async (req, 
     const { from, to } = parseDateRange(req);
 
     const ctx = await loadUserJobQuery(shop, pid, from, to);
-    if (!ctx) return res.status(404).json({ error: 'User not found' });
 
     const agg = await ScheduledJob.aggregate([
       { $match: ctx.query },
@@ -385,7 +386,6 @@ router.get('/users/:userKey/revisit', requireAuth, requireStoreOwner, async (req
     const { page, limit } = parsePageLimit(req);
 
     const ctx = await loadUserJobQuery(shop, pid, from, to);
-    if (!ctx) return res.status(404).json({ error: 'User not found' });
 
     const jobs = await ScheduledJob.find(ctx.query)
       .sort({ sentAt: -1 })

@@ -62,6 +62,27 @@ describe('PushUsersPanel with channel="email"', () => {
     expect(callsTo('/channels/push/')).toHaveLength(0);
   });
 
+  it('email recipients with no known address say "Email recipient", never "Device"', async () => {
+    apiGet.mockResolvedValue({
+      total: 1,
+      users: [{ userKey: 'p_999', name: 'Anonymous visitor', email: null, deviceType: null,
+        lastSentAt: '2026-10-20T14:00:00.000Z', sentCount: 1, revisited: false }],
+    });
+    render(<PushUsersPanel shop={SHOP} from={FROM} to={TO} channel="email" />);
+    expect(await screen.findByText('Email recipient - ..._999')).toBeInTheDocument();
+    expect(screen.queryByText(/Device -/)).not.toBeInTheDocument();
+  });
+
+  it('push anonymous visitors still say Device (unchanged)', async () => {
+    apiGet.mockResolvedValue({
+      total: 1,
+      users: [{ userKey: 'a_333', name: 'Anonymous visitor', email: null, deviceType: 'android',
+        lastSentAt: '2026-10-20T14:00:00.000Z', sentCount: 1, revisited: 'not_tracked' }],
+    });
+    render(<PushUsersPanel shop={SHOP} from={FROM} to={TO} />);
+    expect(await screen.findByText(/Mobile - \.\.\.a333|Mobile - \.\.\.\w{4}/)).toBeInTheDocument();
+  });
+
   it('uses email wording in empty states', async () => {
     apiGet.mockResolvedValue({ total: 0, users: [] });
     render(<PushUsersPanel shop={SHOP} from={FROM} to={TO} channel="email" />);
