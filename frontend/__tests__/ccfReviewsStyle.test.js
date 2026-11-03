@@ -47,12 +47,24 @@ describe('reviews stylesheet', () => {
     expect(r).toContain('padding: 22px 24px');
   });
 
-  it('the layout reacts to the block width (container query), so a narrow theme column still works', () => {
-    expect(rule('.ccf-rv')).toContain('container-type: inline-size');
-    expect(css).toContain('@container ccf-rv (max-width: 620px) {');
-    const narrow = css.slice(css.indexOf('@container ccf-rv (max-width: 620px) {'));
-    expect(narrow).toContain('.ccf-rv-sum--bars { grid-template-columns: minmax(0, 1fr); }');
-    expect(narrow).toContain('.ccf-rv-btn { width: 100%; }');
+  it('REGRESSION: the block has NO size containment (it collapsed to ~40px wide in themes whose container is only as wide as its content)', () => {
+    expect(css).not.toContain('container-type');
+    expect(css).not.toContain('@container');
+  });
+
+  it('the block fills flex and grid parents and cannot shrink to nothing', () => {
+    const r = rule('.ccf-rv');
+    expect(r).toContain('align-self: stretch');
+    expect(r).toContain('justify-self: stretch');
+    expect(r).toContain('min-width: min(260px, calc(100vw - 40px))');
+  });
+
+  it('the compact layout is switched by a class set from the block own width, with a phone media query as backup', () => {
+    expect(css).toContain('.ccf-rv--narrow .ccf-rv-sum--bars { grid-template-columns: minmax(0, 1fr); }');
+    expect(css).toContain('.ccf-rv--narrow .ccf-rv-btn { width: 100%; }');
+    const media = css.slice(css.indexOf('@media (max-width: 620px) {'));
+    expect(media).toContain('.ccf-rv .ccf-rv-sum--bars { grid-template-columns: minmax(0, 1fr); }');
+    expect(media).toContain('.ccf-rv .ccf-rv-btn { width: 100%; }');
   });
 
   it('the call-to-action row spans the full width so the button can stretch on narrow blocks', () => {

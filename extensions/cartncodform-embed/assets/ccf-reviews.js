@@ -141,6 +141,36 @@
     var formOpen = false;
 
     clear(root);
+
+    // Narrow layout follows the block's own width (a narrow theme column), not just the screen.
+    function markWidth() { root.classList.toggle('ccf-rv--narrow', root.clientWidth > 0 && root.clientWidth < 620); }
+    markWidth();
+    if (typeof window.ResizeObserver === 'function') {
+      try { new window.ResizeObserver(markWidth).observe(root); } catch (e) { /* the media query still covers phones */ }
+    }
+
+    // Some themes put the block in a container that is only as wide as its content, which leaves the
+    // section narrow and to the left. Where the page has room, ask for the full width; if the container
+    // does not grow (a genuinely narrow column), take the request back.
+    function widen() {
+      root.style.minWidth = '';
+      var par = root.parentElement;
+      if (!par) return;
+      var vw = document.documentElement.clientWidth;
+      var cssMax = parseInt(window.getComputedStyle(root).getPropertyValue('--ccf-rv-max'), 10) || 1100;
+      var want = Math.min(vw - 40, cssMax);
+      if (want < 400 || root.getBoundingClientRect().width >= want - 1) return;
+      root.style.minWidth = want + 'px';
+      var fits = par.getBoundingClientRect().width >= want - 1 && root.getBoundingClientRect().right <= vw + 1;
+      if (!fits) root.style.minWidth = '';
+    }
+
+    var resizeTimer = null;
+    window.addEventListener('resize', function () {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(function () { widen(); markWidth(); }, 150);
+    });
+
     var headEl = el('h2', 'ccf-rv-h', heading);
     var topEl = el('div', 'ccf-rv-top');
     var noteEl = el('div');
@@ -301,6 +331,8 @@
         renderTop();
         renderList();
         renderPager();
+        widen();
+        markWidth();
         if (scroll) root.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }).catch(function () {
         if (!data) { clear(topEl); clear(listEl); setNote('Reviews could not be loaded right now.', 'err'); }

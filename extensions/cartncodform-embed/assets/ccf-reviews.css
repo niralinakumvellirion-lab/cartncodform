@@ -1,7 +1,7 @@
 /* ccf-reviews.css - Product reviews block, ShopiReachBoost AI. All classes prefixed .ccf-rv-*
    Colours use currentColor and translucent greys so it fits light and dark themes.
-   The layout reacts to the width of the block itself (container query), not the screen width. */
-.ccf-rv { box-sizing: border-box; width: 100%; max-width: var(--ccf-rv-max, 1100px); margin: 48px auto; padding: 0 20px; font: inherit; color: inherit; line-height: 1.55; container-type: inline-size; container-name: ccf-rv; }
+   The layout reacts to the width of the block itself (class set by the script), not only the screen width. */
+.ccf-rv { box-sizing: border-box; width: 100%; max-width: var(--ccf-rv-max, 1100px); margin: 48px auto; padding: 0 20px; font: inherit; color: inherit; line-height: 1.55; min-width: min(260px, calc(100vw - 40px)); align-self: stretch; justify-self: stretch; }
 .ccf-rv *, .ccf-rv *::before, .ccf-rv *::after { box-sizing: border-box; }
 
 /* Heading */
@@ -78,13 +78,23 @@ textarea.ccf-rv-in { resize: vertical; min-height: 120px; }
 .ccf-rv-pager { display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: 24px; }
 
 /* Narrow block (phone, or a narrow theme column) */
-@container ccf-rv (max-width: 620px) {
-  .ccf-rv-top { padding: 22px 18px; }
-  .ccf-rv-sum--bars { grid-template-columns: minmax(0, 1fr); }
-  .ccf-rv-form { padding: 20px 16px; }
-  .ccf-rv-item { padding: 18px 16px; }
-  .ccf-rv-who { grid-template-columns: auto minmax(0, 1fr); }
-  .ccf-rv-rd { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-items: start; justify-content: space-between; text-align: left; }
-  .ccf-rv-btn { width: 100%; }
-  .ccf-rv-actions .ccf-rv-btn { flex: 1 1 auto; width: auto; }
+/* Set by ccf-reviews.js when the block itself is under 620px wide (a narrow theme column). */
+.ccf-rv--narrow .ccf-rv-top { padding: 22px 18px; }
+.ccf-rv--narrow .ccf-rv-sum--bars { grid-template-columns: minmax(0, 1fr); }
+.ccf-rv--narrow .ccf-rv-form { padding: 20px 16px; }
+.ccf-rv--narrow .ccf-rv-item { padding: 18px 16px; }
+.ccf-rv--narrow .ccf-rv-who { grid-template-columns: auto minmax(0, 1fr); }
+.ccf-rv--narrow .ccf-rv-rd { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-items: start; justify-content: space-between; text-align: left; }
+.ccf-rv--narrow .ccf-rv-btn { width: 100%; }
+.ccf-rv--narrow .ccf-rv-actions .ccf-rv-btn { flex: 1 1 auto; width: auto; }
+/* Phones, even before the script has measured the block. */
+@media (max-width: 620px) {
+  .ccf-rv .ccf-rv-top { padding: 22px 18px; }
+  .ccf-rv .ccf-rv-sum--bars { grid-template-columns: minmax(0, 1fr); }
+  .ccf-rv .ccf-rv-form { padding: 20px 16px; }
+  .ccf-rv .ccf-rv-item { padding: 18px 16px; }
+  .ccf-rv .ccf-rv-who { grid-template-columns: auto minmax(0, 1fr); }
+  .ccf-rv .ccf-rv-rd { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; justify-items: start; justify-content: space-between; text-align: left; }
+  .ccf-rv .ccf-rv-btn { width: 100%; }
+  .ccf-rv .ccf-rv-actions .ccf-rv-btn { flex: 1 1 auto; width: auto; }
 }
