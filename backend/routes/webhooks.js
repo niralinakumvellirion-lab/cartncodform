@@ -21,6 +21,7 @@ const EmailTemplate = require('../models/EmailTemplate');
 const FestivalQueue = require('../models/FestivalQueue');
 const PushSubscription = require('../models/PushSubscription');
 const ShopWeights = require('../models/ShopWeights');
+const ReviewSettings = require('../models/ReviewSettings');
 const Signal = require('../models/Signal');
 const SignalConfig = require('../models/SignalConfig');
 const ComplianceRequest = require('../models/ComplianceRequest');
@@ -41,6 +42,7 @@ const SHOP_REDACT_MODELS = [
   Profile,
   PushClick,
   PushSubscription,
+  ReviewSettings,
   ScheduledJob,
   ShopWeights,
   Signal,
