@@ -1,4 +1,6 @@
 const Profile = require('../models/Profile');
+const ScheduledJob = require('../models/ScheduledJob');
+const AttributedEvent = require('../models/AttributedEvent');
 const { normalizePhone, getNationalNumber } = require('../utils/phone');
 
 /**
@@ -329,6 +331,23 @@ async function upsertProfile(shopDomain, identifiers = {}, updates = {}, options
 
     await Profile.findOneAndUpdate({ _id: winner._id, shopDomain: shop }, mergeUpdate);
     await Profile.deleteMany({ _id: { $in: losers.map((l) => l._id) } });
+
+    // Keep send history and revisit events attached to the profile that survives;
+    // otherwise they point at a deleted profile and show as "anonymous" in the dashboard.
+    // Pending jobs are left alone (a unique index allows one pending job per profile and signal).
+    try {
+      const loserIds = losers.map((l) => l._id);
+      await ScheduledJob.updateMany(
+        { shopDomain: shop, profileId: { $in: loserIds }, status: { $ne: 'pending' } },
+        { $set: { profileId: winner._id } }
+      );
+      await AttributedEvent.updateMany(
+        { shopDomain: shop, profileId: { $in: loserIds } },
+        { $set: { profileId: winner._id } }
+      );
+    } catch (repointErr) {
+      console.error('[profile] could not move history to merged profile:', repointErr.message);
+    }
     console.log(`[profile] merged ${losers.length} profile(s) into ${winner._id} for ${shop}`);
 
     // Re-apply this call's own identifiers + updates onto the winner.

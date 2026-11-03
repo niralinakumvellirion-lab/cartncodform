@@ -198,3 +198,14 @@ test('i. ScheduledJob logging failure does not fail the send', async () => {
   expect(r.status).toBe(200);
   expect(console.error).toHaveBeenCalled();
 });
+
+test('k. the logged row stores the recipient address (dashboard can still name the person after a merge)', async () => {
+  Profile.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(profileMock('a@e.com')) });
+  mockSend.mockResolvedValue({ data: { id: 'r1' }, error: null });
+
+  await sendJourneyEmail(SHOP, { profileId: 'pid1', subject: 'Subj', body: 'Body' });
+
+  const job = mockScheduledJobCreate.mock.calls[0][0];
+  expect(job.subscriptionToken).toBe('a@e.com');
+  expect(job.profileId).toBeTruthy();
+});

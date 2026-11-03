@@ -590,6 +590,7 @@ async function sendJourneyEmail(shopDomain, { profileId, subject, body, imageUrl
     await ScheduledJob.create({
       shopDomain: shop,
       profileId: profile._id,
+      subscriptionToken: email, // recipient address, so the dashboard can still name the person if the profile is merged later
       signalType: 'manual',
       channel: 'email',
       status: sendOk ? 'sent' : 'failed',

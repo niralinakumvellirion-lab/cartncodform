@@ -378,6 +378,20 @@ describe('GET /:id/preview', () => {
 describe('POST /:id/send', () => {
   const send = handlerFor(emailTemplatesRouter, '/:id/send', 'post');
 
+  test('the logged send row stores the recipient address (dashboard can still name the person after a merge)', async () => {
+    const ScheduledJob = require('../models/ScheduledJob');
+    const createSpy = jest.spyOn(ScheduledJob, 'create').mockResolvedValue({});
+    EmailTemplate.findById.mockResolvedValue(makeTemplate({ subject: 'Offer', body: 'Big sale', ctaUrl: 'https://shop.com' }));
+    Profile.findOne.mockReturnValue({ select: jest.fn().mockResolvedValue(makeProfile()) });
+    mockSend.mockResolvedValue({ data: { id: 'email_abc' }, error: null });
+
+    await send({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { profileId: 'p1' } }, mockRes());
+
+    expect(createSpy).toHaveBeenCalledTimes(1);
+    expect(createSpy.mock.calls[0][0].subscriptionToken).toBe('customer@example.com');
+    createSpy.mockRestore();
+  });
+
   test('sends email: calls renderEmailDocument + Resend with correct args', async () => {
     EmailTemplate.findById.mockResolvedValue(
       makeTemplate({ subject: 'Offer', body: 'Big sale', ctaUrl: 'https://shop.com', ctaLabel: 'Buy' })

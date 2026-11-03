@@ -7,6 +7,9 @@
  * $set / $inc / $addToSet + $each and dot-notation paths).
  */
 
+jest.mock('../models/ScheduledJob', () => ({ updateMany: jest.fn().mockResolvedValue({}) }));
+jest.mock('../models/AttributedEvent', () => ({ updateMany: jest.fn().mockResolvedValue({}) }));
+
 jest.mock('../models/Profile', () => {
   let store = [];
   let idc = 1;
@@ -481,5 +484,47 @@ describe('upsertProfile — merge carries channels.whatsapp (FIX 2)', () => {
     const merged = Profile.__store()[0];
     expect(merged.channels.whatsapp.consentedAt).toBeTruthy();
     expect(merged.channels.whatsapp.optedOutAt).toBeFalsy();
+  });
+});
+
+describe('upsertProfile — merge keeps send history on the surviving profile', () => {
+  const ScheduledJob = require('../models/ScheduledJob');
+  const AttributedEvent = require('../models/AttributedEvent');
+
+  test('h1. history of the deleted profile is moved to the winner (not pending jobs)', async () => {
+    const winner = seedProfile({ _id: 'P_WIN', identifiers: { cartTokens: ['c1'] } });
+    seedProfile({ _id: 'P_LOSE', identifiers: { pushTokens: ['t1'] } });
+
+    await upsertProfile(SHOP, { cartToken: 'c1', pushToken: 't1' }, {});
+
+    expect(Profile.__store()).toHaveLength(1);
+    expect(ScheduledJob.updateMany).toHaveBeenCalledTimes(1);
+    const [filter, update] = ScheduledJob.updateMany.mock.calls[0];
+    expect(filter.shopDomain).toBe(SHOP);
+    expect(filter.profileId.$in).toEqual(['P_LOSE']);
+    expect(filter.status).toEqual({ $ne: 'pending' });
+    expect(update).toEqual({ $set: { profileId: winner._id } });
+
+    expect(AttributedEvent.updateMany).toHaveBeenCalledWith(
+      { shopDomain: SHOP, profileId: { $in: ['P_LOSE'] } },
+      { $set: { profileId: winner._id } }
+    );
+  });
+
+  test('h2. a failure while moving history never breaks the merge', async () => {
+    seedProfile({ _id: 'P_WIN', identifiers: { cartTokens: ['c1'] } });
+    seedProfile({ _id: 'P_LOSE', identifiers: { pushTokens: ['t1'] } });
+    ScheduledJob.updateMany.mockRejectedValueOnce(new Error('db down'));
+
+    const result = await upsertProfile(SHOP, { cartToken: 'c1', pushToken: 't1' }, {});
+
+    expect(result).toBeTruthy();
+    expect(Profile.__store()).toHaveLength(1);
+  });
+
+  test('h3. no merge (single match) moves nothing', async () => {
+    seedProfile({ _id: 'P_ONE', identifiers: { cartTokens: ['c1'] } });
+    await upsertProfile(SHOP, { cartToken: 'c1' }, {});
+    expect(ScheduledJob.updateMany).not.toHaveBeenCalled();
   });
 });

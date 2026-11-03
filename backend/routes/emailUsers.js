@@ -81,7 +81,7 @@ function userGroupStage() {
 }
 
 function emptyGroup(pid) {
-  return { pid, sentCount: 0, lastSentAt: null, jobIds: [], broadcastIds: [], festivalQueueIds: [], trackedJobCount: 0 };
+  return { pid, sentCount: 0, lastSentAt: null, jobIds: [], broadcastIds: [], festivalQueueIds: [], trackedJobCount: 0, tokens: [] };
 }
 
 function mergeGroup(dst, g) {
@@ -91,6 +91,7 @@ function mergeGroup(dst, g) {
   dst.broadcastIds.push(...(g.broadcastIds || []).filter(Boolean));
   dst.festivalQueueIds.push(...(g.festivalQueueIds || []).filter(Boolean));
   dst.trackedJobCount += g.trackedJobCount || 0;
+  dst.tokens.push(...(g.tokens || []));
   return dst;
 }
 
@@ -106,7 +107,8 @@ async function resolveUsers(shop, groups) {
     const pid = g._id.profileId ? String(g._id.profileId) : null;
     const tok = g._id.token || null;
     if (pid) {
-      mergeGroup(byPid[pid] || (byPid[pid] = emptyGroup(pid)), g);
+      const grp = mergeGroup(byPid[pid] || (byPid[pid] = emptyGroup(pid)), g);
+      if (tok) grp.tokens.push(tok);
     } else if (tok) {
       byToken[tok] = mergeGroup(emptyGroup(null), g);
     }
@@ -132,13 +134,39 @@ async function resolveUsers(shop, groups) {
     }
   }
 
-  const pids = Object.keys(byPid);
-  const docs = pids.length
-    ? await Profile.find({ _id: { $in: pids }, shopDomain: shop }, PROFILE_EMAIL_FIELDS).lean()
-    : [];
   const docMap = {};
+  const firstPids = Object.keys(byPid);
+  const docs = firstPids.length
+    ? await Profile.find({ _id: { $in: firstPids }, shopDomain: shop }, PROFILE_EMAIL_FIELDS).lean()
+    : [];
   for (const d of docs) docMap[String(d._id)] = d;
 
+  // A row can point at a profile that was merged away (deleted). If it also carries the
+  // recipient's address, find the profile that holds that address now and use it instead.
+  const orphanPids = firstPids.filter((p) => !docMap[p] && byPid[p].tokens.length);
+  if (orphanPids.length) {
+    const orphanTokens = [...new Set(orphanPids.flatMap((p) => byPid[p].tokens))];
+    const holders = await Profile.find(
+      {
+        shopDomain: shop,
+        $or: [{ 'identifiers.emails': { $in: orphanTokens } }, { 'channels.email.address': { $in: orphanTokens } }],
+      },
+      '_id ' + PROFILE_EMAIL_FIELDS
+    ).lean();
+    const holderOfEmail = {};
+    for (const h of holders) {
+      docMap[String(h._id)] = h;
+      for (const e of emailsOfProfile(h)) holderOfEmail[lower(e)] = String(h._id);
+    }
+    for (const orphan of orphanPids) {
+      const holder = byPid[orphan].tokens.map((t) => holderOfEmail[lower(t)]).find(Boolean);
+      if (!holder) continue;
+      mergeGroup(byPid[holder] || (byPid[holder] = emptyGroup(holder)), byPid[orphan]);
+      delete byPid[orphan];
+    }
+  }
+
+  const pids = Object.keys(byPid);
   return pids.map((pid) => {
     const g = byPid[pid];
     const doc = docMap[pid];

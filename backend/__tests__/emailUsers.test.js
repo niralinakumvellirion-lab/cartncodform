@@ -77,6 +77,9 @@ async function seed() {
   const orphanId = new mongoose.Types.ObjectId();
   await ScheduledJob.create(emailJob({ profileId: orphanId, signalType: 'manual', origin: 'manual', payload: { subject: 'Orphan one' } }));
   await ScheduledJob.create(emailJob({ profileId: orphanId, signalType: 'cart_abandon', payload: { subject: 'Orphan two' } }));
+  // Dave also got a manual email whose profileId points at a profile that was merged away (deleted),
+  // but the row carries his address: it must be counted under Dave, not as a new anonymous person.
+  await ScheduledJob.create(emailJob({ profileId: new mongoose.Types.ObjectId(), subscriptionToken: 'dave@example.com', signalType: 'manual', origin: 'manual', payload: { subject: 'To Dave' } }));
   // Must be excluded: a push row, another shop's email row, a row outside the window, a failed email
   const pushJob = await ScheduledJob.create({ shopDomain: SHOP, channel: 'push', status: 'sent', runAt: new Date(now - HOUR), sentAt: new Date(now - HOUR), profileId: alice._id, signalType: 'cart_abandon', origin: 'automated', payload: { title: 'push' } });
   await ScheduledJob.create(emailJob({ shopDomain: OTHER_SHOP, profileId: otherShopProfile._id, signalType: 'cart_abandon' }));
@@ -170,7 +173,7 @@ describe('GET /users', () => {
 
   test('origin and type filters apply', async () => {
     const manual = (await get('/users?origin=manual')).body.users.map((u) => u.name).sort();
-    expect(manual).toEqual(['Alice', 'Anonymous visitor', 'Bob', 'Carol']);
+    expect(manual).toEqual(['Alice', 'Anonymous visitor', 'Bob', 'Carol', 'Dave']);
     const lapsing = (await get('/users?type=lapsing')).body;
     expect(lapsing.users.map((u) => u.name)).toEqual(['Dave']);
   });
@@ -221,6 +224,18 @@ describe('GET /users/:userKey/count', () => {
     const rv = await get(`/users/p_${ids.orphanId}/revisit`);
     expect(rv.status).toBe(200);
     expect(rv.body.notifications.map((n) => n.title).sort()).toEqual(['Orphan one', 'Orphan two']);
+  });
+
+  test('a row pointing at a merged-away profile but carrying the address is counted under the profile that holds it', async () => {
+    const { users } = (await get('/users')).body;
+    const dave = byName(users, 'Dave');
+    expect(dave.sentCount).toBe(2);                // own automated email + the orphaned manual one
+    expect(dave.email).toBe('d***@example.com');
+    expect(users.filter((u) => u.name === 'Anonymous visitor')).toHaveLength(1); // only the true unknown
+    const c = await get(`/users/${dave.userKey}/count`);
+    expect(c.body.total).toBe(2);                  // found by his address too
+    const types = Object.fromEntries(c.body.byType.map((t) => [t.type, t.count]));
+    expect(types).toEqual({ lapsing: 1, manual: 1 });
   });
 
   test('such a person is listed as an anonymous visitor with no email', async () => {

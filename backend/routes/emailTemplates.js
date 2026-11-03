@@ -545,6 +545,7 @@ router.post('/:id/send', requireAuth, requireNotSuspended, async (req, res) => {
         _id: emailJobId,
         shopDomain: req.shopDomain,
         profileId: profile._id,
+        subscriptionToken: email, // recipient address, so the dashboard can still name the person if the profile is merged later
         signalType: 'manual',
         channel: 'email',
         status: sendOk ? 'sent' : 'failed',
