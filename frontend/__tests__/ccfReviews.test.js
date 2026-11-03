@@ -114,6 +114,53 @@ describe('showing reviews', () => {
   });
 });
 
+describe('centred, card-style layout', () => {
+  it('puts the rating summary and the write button together in one summary card', async () => {
+    const root = mount();
+    await waitFor(() => expect(text(root)).toContain('Soft and well made.'));
+    const card = root.querySelector('.ccf-rv-top');
+    expect(card.querySelector('.ccf-rv-sum')).toBeTruthy();
+    expect(card.querySelector('.ccf-rv-cta button').textContent).toBe('Write a review');
+    expect(text(card)).toContain('Based on 2 reviews');
+    expect(card.querySelector('.ccf-rv-sum').className).toContain('ccf-rv-sum--bars');
+  });
+
+  it('with no ratings the summary is just the count (no bars column)', async () => {
+    handlers[0].reply = () => ({ body: listReply({ summary: { count: 0, rated: 0, average: 0, distribution: {} }, reviews: [] }) });
+    const root = mount();
+    await waitFor(() => expect(text(root)).toContain('No reviews yet'));
+    expect(root.querySelector('.ccf-rv-sum').className).not.toContain('--bars');
+  });
+
+  it('each review is a card with an initial avatar, name, badge, stars and date', async () => {
+    const root = mount();
+    await waitFor(() => expect(text(root)).toContain('Soft and well made.'));
+    const item = root.querySelector('.ccf-rv-item');
+    expect(item.querySelector('.ccf-rv-ava').textContent).toBe('A');
+    expect(item.querySelector('.ccf-rv-ava').getAttribute('aria-hidden')).toBe('true');
+    expect(item.querySelector('.ccf-rv-id .ccf-rv-name').textContent).toBe('Asha');
+    expect(item.querySelector('.ccf-rv-id .ccf-rv-badge')).toBeTruthy();
+    expect(item.querySelector('.ccf-rv-rd .ccf-rv-stars')).toBeTruthy();
+    expect(item.querySelector('.ccf-rv-rd .ccf-rv-date')).toBeTruthy();
+  });
+
+  it('the avatar shows the first letter in capitals, and a ? for an empty name', async () => {
+    handlers[0].reply = () => ({ body: listReply({ reviews: [review({ id: 'x1', name: 'zoya' }), review({ id: 'x2', name: '   ' })] }) });
+    const root = mount();
+    await waitFor(() => expect(root.querySelectorAll('.ccf-rv-ava').length).toBe(2));
+    expect(Array.from(root.querySelectorAll('.ccf-rv-ava')).map((n) => n.textContent)).toEqual(['Z', '?']);
+  });
+
+  it('the form has a heading and keeps the star picker, fields and buttons', async () => {
+    const root = mount();
+    await waitFor(() => expect(byText(root, 'button', 'Write a review')).toBeTruthy());
+    fireEvent.click(byText(root, 'button', 'Write a review'));
+    expect(root.querySelector('form .ccf-rv-fh').textContent).toBe('Share your experience');
+    expect(root.querySelectorAll('[role="radio"]')).toHaveLength(5);
+    expect(root.querySelector('button[type="submit"]')).toBeTruthy();
+  });
+});
+
 describe('who can write', () => {
   it('logged-in only: guests get a login link, not a form button', async () => {
     handlers[0].reply = () => ({ body: listReply({ form: rules({ canReview: false, reason: 'LOGIN_REQUIRED' }) }) });

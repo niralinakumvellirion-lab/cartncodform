@@ -11,7 +11,7 @@
     data-product-id="{{ product.id }}"
     data-product-handle="{{ product.handle | escape }}"
     data-heading="{{ block.settings.heading | escape }}"
-    style="--ccf-rv-accent: {{ block.settings.accent_color | default: '#111827' }}; --ccf-rv-star: {{ block.settings.star_color | default: '#f59e0b' }};"
+    style="--ccf-rv-accent: {{ block.settings.accent_color | default: '#111827' }}; --ccf-rv-star: {{ block.settings.star_color | default: '#f59e0b' }}; --ccf-rv-max: {{ block.settings.max_width | default: 1100 }}px;"
   ></div>
   {{ 'ccf-reviews.css' | asset_url | stylesheet_tag }}
   <script src="{{ 'ccf-reviews.js' | asset_url }}" defer></script>
@@ -27,7 +27,8 @@
   "settings": [
     { "type": "text", "id": "heading", "label": "Heading", "default": "Customer reviews" },
     { "type": "color", "id": "accent_color", "label": "Button color", "default": "#111827" },
-    { "type": "color", "id": "star_color", "label": "Star color", "default": "#f59e0b" }
+    { "type": "color", "id": "star_color", "label": "Star color", "default": "#f59e0b" },
+    { "type": "range", "id": "max_width", "label": "Maximum width", "unit": "px", "min": 600, "max": 1400, "step": 50, "default": 1100 }
   ]
 }
 {% endschema %}

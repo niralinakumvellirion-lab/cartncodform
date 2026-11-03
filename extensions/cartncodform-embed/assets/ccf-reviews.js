@@ -169,12 +169,13 @@
       var sum = el('div', 'ccf-rv-sum');
       var s = data.summary;
       if (f.starRating && s.rated > 0) {
-        var avg = el('div');
+        sum.className = 'ccf-rv-sum ccf-rv-sum--bars';
+        var avg = el('div', 'ccf-rv-sum-main');
         avg.appendChild(el('div', 'ccf-rv-avg', String(s.average)));
         var st = el('div', 'ccf-rv-stars', starText(Math.round(s.average)));
         st.setAttribute('aria-label', s.average + ' out of 5 stars');
         avg.appendChild(st);
-        avg.appendChild(el('div', 'ccf-rv-count', plural(s.count, 'review', 'reviews')));
+        avg.appendChild(el('div', 'ccf-rv-count', 'Based on ' + plural(s.count, 'review', 'reviews')));
         sum.appendChild(avg);
         var bars = el('div', 'ccf-rv-bars');
         for (var star = 5; star >= 1; star--) {
@@ -195,19 +196,20 @@
       }
       topEl.appendChild(sum);
 
+      var cta = el('div', 'ccf-rv-cta');
       if (f.canReview) {
         var btn = el('button', 'ccf-rv-btn', formOpen ? 'Close' : 'Write a review');
         btn.type = 'button';
         btn.addEventListener('click', function () { formOpen ? closeForm() : openForm(); renderTop(); });
-        topEl.appendChild(btn);
+        cta.appendChild(btn);
       } else if (f.reason === 'LOGIN_REQUIRED') {
         var a = el('a', 'ccf-rv-btn', 'Log in to write a review');
         a.href = '/account/login?return_url=' + encodeURIComponent(window.location.pathname);
-        a.style.textDecoration = 'none';
-        topEl.appendChild(a);
+        cta.appendChild(a);
       } else if (REASONS[f.reason]) {
-        topEl.appendChild(el('div', 'ccf-rv-count', REASONS[f.reason]));
+        cta.appendChild(el('div', 'ccf-rv-count', REASONS[f.reason]));
       }
+      if (cta.firstChild) topEl.appendChild(cta);
     }
 
     // ── list ──
@@ -221,14 +223,21 @@
       data.reviews.forEach(function (r) {
         var item = el('article', 'ccf-rv-item');
         var who = el('div', 'ccf-rv-who');
-        who.appendChild(el('span', 'ccf-rv-name', r.name));
-        if (r.verified) who.appendChild(el('span', 'ccf-rv-badge', '✓ Verified owner'));
+        var ava = el('span', 'ccf-rv-ava', String(r.name || '?').trim().charAt(0).toUpperCase() || '?');
+        ava.setAttribute('aria-hidden', 'true');
+        who.appendChild(ava);
+        var idCol = el('div', 'ccf-rv-id');
+        idCol.appendChild(el('span', 'ccf-rv-name', r.name));
+        if (r.verified) idCol.appendChild(el('span', 'ccf-rv-badge', '✓ Verified owner'));
+        who.appendChild(idCol);
+        var rd = el('div', 'ccf-rv-rd');
         if (typeof r.rating === 'number') {
           var st = el('span', 'ccf-rv-stars', starText(r.rating));
           st.setAttribute('aria-label', r.rating + ' out of 5 stars');
-          who.appendChild(st);
+          rd.appendChild(st);
         }
-        who.appendChild(el('span', 'ccf-rv-date', formatDate(r.createdAt)));
+        rd.appendChild(el('span', 'ccf-rv-date', formatDate(r.createdAt)));
+        who.appendChild(rd);
         item.appendChild(who);
         if (r.title) item.appendChild(el('div', 'ccf-rv-title', r.title));
         item.appendChild(el('p', 'ccf-rv-body', r.body));
@@ -309,6 +318,7 @@
       var form = el('form', 'ccf-rv-form');
       form.noValidate = true;
       form.setAttribute('aria-label', 'Write a review');
+      form.appendChild(el('h3', 'ccf-rv-fh', 'Share your experience'));
 
       function field(labelText, hint, control, id) {
         var wrap = el('div', 'ccf-rv-field');
