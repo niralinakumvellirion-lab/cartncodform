@@ -37,7 +37,21 @@ async function gql(shopDomain, token, query, variables) {
     },
     body: JSON.stringify({ query, variables: variables || {} }),
   });
-  return res.json();
+  const json = await res.json();
+  // A refusal for the whole request (bad or expired token, missing access, throttling) carries no data.
+  // Say so plainly instead of letting a later step fail with a misleading message.
+  if (json && json.errors && !json.data) {
+    const detail = typeof json.errors === 'string'
+      ? json.errors
+      : (Array.isArray(json.errors) ? json.errors.map((e) => e && e.message).filter(Boolean).join('; ') : 'unknown error');
+    throw new Error(`Shopify refused the request: ${detail}`);
+  }
+  return json;
+}
+
+// Shopify says this when the discount we saved was removed on its side (e.g. app uninstalled and installed again).
+function isMissingDiscountError(err) {
+  return /does not exist|not found|could not find|couldn't find/i.test(err && err.message ? err.message : '');
 }
 
 // ── Function ID lookup ───────────────────────────────────────────────────────
@@ -238,8 +252,14 @@ async function syncTiers(shopDomain) {
 
   let discountId;
   if (existingId) {
-    await updateDiscount(shopDomain, token, existingId, functionId, configJson);
-    discountId = existingId;
+    try {
+      await updateDiscount(shopDomain, token, existingId, functionId, configJson);
+      discountId = existingId;
+    } catch (err) {
+      if (!isMissingDiscountError(err)) throw err;
+      console.warn('[tierSync] saved discount no longer exists on Shopify - creating a new one');
+      discountId = await createDiscount(shopDomain, token, functionId, configJson);
+    }
   } else {
     discountId = await createDiscount(shopDomain, token, functionId, configJson);
   }

@@ -305,3 +305,71 @@ test('idempotent re-run with same discountId → updates (not creates)', async (
   expect(createCalled).toBe(false);
   expect(updateCalled).toBe(true);
 });
+
+// ── Shopify refuses the whole request (bad / expired token) ──────────────────
+
+test('token refused (errors, no data) -> clear message, not "function not deployed"', async () => {
+  Store.findOne.mockReturnValue(storeResult());
+  DiscountConfig.findOne.mockReturnValue(cfgResult({ discountId: '' }));
+  global.fetch = makeFetch([
+    { errors: '[API] Invalid API key or access token (unrecognized login or wrong password)' }, // shop id (non-fatal)
+    { errors: '[API] Invalid API key or access token (unrecognized login or wrong password)' }, // metafield skipped
+    { errors: '[API] Invalid API key or access token (unrecognized login or wrong password)' }, // function lookup
+  ]);
+  await expect(syncTiers(SHOP)).rejects.toThrow(/Shopify refused the request: \[API\] Invalid API key/);
+});
+
+test('array-style GraphQL errors are joined into the message', async () => {
+  Store.findOne.mockReturnValue(storeResult());
+  DiscountConfig.findOne.mockReturnValue(cfgResult({ discountId: '' }));
+  const errs = { errors: [{ message: 'Access denied for shopifyFunctions field.' }, { message: 'Required access: read_discounts' }] };
+  global.fetch = makeFetch([errs, errs, errs]);
+  await expect(syncTiers(SHOP)).rejects.toThrow('Access denied for shopifyFunctions field.; Required access: read_discounts');
+});
+
+test('partial data with errors is NOT treated as a refusal', async () => {
+  Store.findOne.mockReturnValue(storeResult());
+  DiscountConfig.findOne.mockReturnValue(cfgResult({ discountId: '' }));
+  global.fetch = makeFetch([
+    { data: { shop: { id: 'gid://shopify/Shop/1' } }, errors: [{ message: 'warning' }] },
+    { data: { metafieldsSet: { userErrors: [] } } },
+    { data: { shopifyFunctions: { nodes: [{ id: FN_ID, title: 'Quantity Tier Discount' }] } } },
+    { data: { discountAutomaticAppCreate: { automaticAppDiscount: { discountId: DISCOUNT_GID }, userErrors: [] } } },
+  ]);
+  expect((await syncTiers(SHOP)).synced).toBe(true);
+});
+
+// ── Saved discount was removed on Shopify's side (uninstall / reinstall) ─────
+
+test('saved discount no longer exists -> a new one is created and its id saved', async () => {
+  const NEW_GID = 'gid://shopify/DiscountAutomaticNode/1234';
+  Store.findOne.mockReturnValue(storeResult());
+  DiscountConfig.findOne.mockReturnValue(cfgResult({ discountId: DISCOUNT_GID }));
+  global.fetch = makeFetch([
+    { data: { shop: { id: 'gid://shopify/Shop/1' } } },
+    { data: { metafieldsSet: { userErrors: [] } } },
+    { data: { shopifyFunctions: { nodes: [{ id: FN_ID, title: 'Quantity Tier Discount' }] } } },
+    { data: { discountAutomaticAppUpdate: { automaticAppDiscount: null, userErrors: [{ field: ['id'], message: 'Discount does not exist' }] } } },
+    { data: { discountAutomaticAppCreate: { automaticAppDiscount: { discountId: NEW_GID }, userErrors: [] } } },
+  ]);
+  const r = await syncTiers(SHOP);
+  expect(r).toEqual({ synced: true, discountId: NEW_GID });
+  expect(DiscountConfig.updateOne).toHaveBeenLastCalledWith(
+    { shopDomain: SHOP },
+    expect.objectContaining({ $set: expect.objectContaining({ 'quantityTiers.discountId': NEW_GID }) })
+  );
+});
+
+test('another update error is NOT replaced by creating a second discount', async () => {
+  Store.findOne.mockReturnValue(storeResult());
+  DiscountConfig.findOne.mockReturnValue(cfgResult({ discountId: DISCOUNT_GID }));
+  const fetchMock = makeFetch([
+    { data: { shop: { id: 'gid://shopify/Shop/1' } } },
+    { data: { metafieldsSet: { userErrors: [] } } },
+    { data: { shopifyFunctions: { nodes: [{ id: FN_ID, title: 'Quantity Tier Discount' }] } } },
+    { data: { discountAutomaticAppUpdate: { automaticAppDiscount: null, userErrors: [{ message: 'Metafield value is invalid' }] } } },
+  ]);
+  global.fetch = fetchMock;
+  await expect(syncTiers(SHOP)).rejects.toThrow('Metafield value is invalid');
+  expect(fetchMock).toHaveBeenCalledTimes(4); // no create call
+});

@@ -729,8 +729,15 @@ router.post('/:shopDomain/sync-tiers', requireAuth, requireStoreOwner, async (re
     }
     return res.json({ synced: result.synced, syncError: result.error || null });
   } catch (err) {
+    // Answer 200 with the reason: the admin screen shows "Shopify sync failed: <reason>" and a retry button.
+    // (A bare 500 only showed "failed (500)" and hid what was wrong.)
     console.error('[discounts] sync-tiers error:', err.message);
-    return res.status(500).json({ synced: false, syncError: err.message });
+    const reason = String(err.message || 'Sync failed').slice(0, 300);
+    await DiscountConfig.updateOne(
+      { shopDomain: req.params.shopDomain.trim().toLowerCase() },
+      { $set: { 'quantityTiers.lastSyncError': reason } }
+    ).catch(() => {});
+    return res.json({ synced: false, syncError: reason });
   }
 });
 
