@@ -351,8 +351,11 @@
       '.ccf-bp-teaser{overflow:hidden;border-radius:16px;}}',
 
       // ── FORM CONTAINER ───────────────────────────────────────────────────────
-      '.ccf-bp-form{opacity:0;transition:opacity 0.3s ease;}',
-      '.ccf-bp-form.ccf-bp-visible{opacity:1;}',
+      // Closed: out of the layout entirely (display:none). Only opacity:0 would still reserve the form's
+      // full height and leave a big empty gap under the teaser card.
+      '.ccf-bp-form{display:none;}',
+      '@keyframes ccfFormIn{from{opacity:0}to{opacity:1}}',
+      '.ccf-bp-form.ccf-bp-visible{display:block;animation:ccfFormIn 0.3s ease;}',
 
       // Form stub — top (accent bg, glow + dots)
       '.ccf-bp-stub{background:' + formStubBg + ';padding:22px 18px 26px;',
@@ -507,7 +510,7 @@
       '.ccf-bp-sv-sp1,.ccf-bp-sv-sp2,.ccf-bp-sv-sp3{animation:none;}',
       '.ccf-bp-seal-ring{animation:none;opacity:0.3;}',
       '.ccf-bp-cta-pill::after,.ccf-bp-btn::after{animation:none;}',
-      '.ccf-bp-form{transition:none;}',
+      '.ccf-bp-form.ccf-bp-visible{animation:none;}',
       '.ccf-bp-email,.ccf-bp-select,.ccf-bp-btn,.ccf-bp-skip{transition:none;}}',
     ].join('');
   }
