@@ -41,6 +41,7 @@ const SIGNAL_LABELS = {
   manual: 'Manual send',
   followup: 'Follow-up',
   order: 'Order message',
+  email_broadcast: 'Email campaign',
 };
 function typeLabel(t) {
   return SIGNAL_LABELS[t] || (t ? t.replace(/_/g, ' ') : 'Other');
@@ -871,3 +872,7 @@ router.get('/users.csv', requireAuth, requireStoreOwner, async (req, res) => {
 });
 
 module.exports = router;
+// Shared with routes/emailUsers.js (same drawer, email channel).
+module.exports.helpers = {
+  typeLabel, parseDateRange, parsePageLimit, maskEmail, nameFromEmail, csvRow,
+};

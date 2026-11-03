@@ -39,6 +39,7 @@ const LOG_BATCH_SIZE = 500;
  * @param {Array<{token:string, customerId:?string, cartToken:?string, sessionId:?string, success:boolean, errorCode:?string}>} opts.recipients
  * @param {string|null} [opts.origin] - 'automated' | 'scheduled' | 'manual'
  * @param {string|null} [opts.sentBy] - opaque sender identifier
+ * @param {string|ObjectId|null} [opts.broadcastId] - email broadcasts: id shared by all rows (the ccf_job in the email link)
  */
 async function logBroadcastSend({
   shopDomain,
@@ -51,6 +52,7 @@ async function logBroadcastSend({
   recipients,
   origin = null,
   sentBy = null,
+  broadcastId = null,
 }) {
   if (!recipients || !recipients.length) return;
 
@@ -71,6 +73,7 @@ async function logBroadcastSend({
     sentAt: now,
     origin,
     sentBy,
+    broadcastId,
   }));
 
   try {

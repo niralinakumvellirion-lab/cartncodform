@@ -68,7 +68,9 @@ async function sendEmailBroadcast({
 
     const broadcastJobId = new mongoose.Types.ObjectId();
     const baseDesign = designFromTemplate(template, storeCtx, { placeholder: false });
-    baseDesign.ctaUrl = tagEmailCtaUrl(baseDesign.ctaUrl, broadcastJobId);
+    // Queue (festival) emails carry the FestivalQueue id, like queue pushes, so
+    // a revisit resolves to the queue item; other broadcasts carry broadcastJobId.
+    baseDesign.ctaUrl = tagEmailCtaUrl(baseDesign.ctaUrl, festivalQueueId || broadcastJobId);
     if (subjectOverride) baseDesign.subject = subjectOverride;
     const finalSubject = subjectOverride || template.subject;
 
@@ -119,6 +121,7 @@ async function sendEmailBroadcast({
       imageUrl: template.imageUrl || '',
       recipients: logRecipients,
       origin: logOrigin,
+      broadcastId: broadcastJobId,
     });
 
     return { sent, failed, total: profiles.length };

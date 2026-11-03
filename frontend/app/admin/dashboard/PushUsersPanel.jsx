@@ -6,6 +6,9 @@ const FG = '#4f46e5';
 const BG = '#eef2ff';
 const LIMIT = 20;
 
+// The same drawer serves push and email; only the endpoint and wording differ.
+const CHANNEL_NOUN = { push: 'notification', email: 'email' };
+
 const TYPE_LABELS = {
   cart_abandon:      'Cart reminder',
   browse_abandon:    'Browse reminder',
@@ -17,6 +20,7 @@ const TYPE_LABELS = {
   cod_to_prepaid:    'Prepaid upgrade',
   winback:           'Win back',
   welcome:           'Welcome',
+  email_broadcast:   'Email campaign',
   festival:          'Campaign',
   manual:            'Manual send',
   order_confirm:     'Order confirm',
@@ -312,7 +316,7 @@ function RevisitChip({ revisited }) {
 
 // ─── Count expand panel (inset) ───────────────────────────────────────────────
 
-function CountExpandPanel({ data, loading, error, onRetry }) {
+function CountExpandPanel({ data, loading, error, onRetry, noun = 'notification' }) {
   if (loading) {
     return (
       <div style={{ padding: 12 }}>
@@ -359,7 +363,7 @@ function CountExpandPanel({ data, loading, error, onRetry }) {
           </div>
         ))
       ) : (
-        <div style={{ fontSize: 12, color: '#9ca3af' }}>No notifications in this period</div>
+        <div style={{ fontSize: 12, color: '#9ca3af' }}>{`No ${noun}s in this period`}</div>
       )}
     </div>
   );
@@ -367,7 +371,7 @@ function CountExpandPanel({ data, loading, error, onRetry }) {
 
 // ─── Revisit expand panel (notifications list) ────────────────────────────────
 
-function RevisitExpandPanel({ data, loading, error, page, onPage, onRetry }) {
+function RevisitExpandPanel({ data, loading, error, page, onPage, onRetry, noun = 'notification' }) {
   if (loading) {
     return (
       <div style={{ padding: 12 }}>
@@ -395,7 +399,7 @@ function RevisitExpandPanel({ data, loading, error, page, onPage, onRetry }) {
   const { notifications, total } = data;
 
   if (!notifications || notifications.length === 0) {
-    return <div style={{ padding: 12, fontSize: 12, color: '#9ca3af' }}>No notifications in this period</div>;
+    return <div style={{ padding: 12, fontSize: 12, color: '#9ca3af' }}>{`No ${noun}s in this period`}</div>;
   }
 
   return (
@@ -476,7 +480,8 @@ function RevisitExpandPanel({ data, loading, error, page, onPage, onRetry }) {
 
 // ─── Accordion user row (All users view) ─────────────────────────────────────
 
-function AccordionUserRow({ user, menuTab, expanded, onToggle, shop, from, to, expandCache }) {
+function AccordionUserRow({ user, menuTab, expanded, onToggle, shop, from, to, expandCache, channel = 'push' }) {
+  const noun = CHANNEL_NOUN[channel] || 'notification';
   const isAnon    = !user.email;
   const nameText  = user.name || 'Anonymous visitor';
   const subtitle  = isAnon ? anonSubtitle(user.userKey, user.deviceType) : user.email;
@@ -501,12 +506,12 @@ function AccordionUserRow({ user, menuTab, expanded, onToggle, shop, from, to, e
     const params = new URLSearchParams();
     if (from) params.set('from', from);
     if (to)   params.set('to', to);
-    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/push/users/${encodeURIComponent(user.userKey)}/count?${params}`)
+    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/${channel}/users/${encodeURIComponent(user.userKey)}/count?${params}`)
       .then((d) => { if (!cancelled) { expandCache.current[cKey] = d; setCountData(d); } })
       .catch(() => { if (!cancelled) setCountError(true); })
       .finally(() => { if (!cancelled) setCountLoading(false); });
     return () => { cancelled = true; };
-  }, [expanded, menuTab, user.userKey, from, to, shop]);
+  }, [expanded, menuTab, user.userKey, from, to, shop, channel]);
 
   useEffect(() => {
     if (!expanded || menuTab !== 'revisit') return;
@@ -518,12 +523,12 @@ function AccordionUserRow({ user, menuTab, expanded, onToggle, shop, from, to, e
     const params = new URLSearchParams({ page: String(revisitPage), limit: String(LIMIT) });
     if (from) params.set('from', from);
     if (to)   params.set('to', to);
-    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/push/users/${encodeURIComponent(user.userKey)}/revisit?${params}`)
+    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/${channel}/users/${encodeURIComponent(user.userKey)}/revisit?${params}`)
       .then((d) => { if (!cancelled) { expandCache.current[rKey] = d; setRevisitData(d); } })
       .catch(() => { if (!cancelled) setRevisitError(true); })
       .finally(() => { if (!cancelled) setRevisitLoading(false); });
     return () => { cancelled = true; };
-  }, [expanded, menuTab, user.userKey, from, to, revisitPage, shop]);
+  }, [expanded, menuTab, user.userKey, from, to, revisitPage, shop, channel]);
 
   const handleRetryCount = useCallback(() => {
     const cKey = `count:${user.userKey}:${from}:${to}`;
@@ -532,11 +537,11 @@ function AccordionUserRow({ user, menuTab, expanded, onToggle, shop, from, to, e
     const params = new URLSearchParams();
     if (from) params.set('from', from);
     if (to)   params.set('to', to);
-    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/push/users/${encodeURIComponent(user.userKey)}/count?${params}`)
+    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/${channel}/users/${encodeURIComponent(user.userKey)}/count?${params}`)
       .then((d) => { expandCache.current[cKey] = d; setCountData(d); })
       .catch(() => setCountError(true))
       .finally(() => setCountLoading(false));
-  }, [user.userKey, from, to, shop]);
+  }, [user.userKey, from, to, shop, channel]);
 
   const handleRetryRevisit = useCallback(() => {
     const rKey = `revisit:${user.userKey}:${from}:${to}:${revisitPage}`;
@@ -545,11 +550,11 @@ function AccordionUserRow({ user, menuTab, expanded, onToggle, shop, from, to, e
     const params = new URLSearchParams({ page: String(revisitPage), limit: String(LIMIT) });
     if (from) params.set('from', from);
     if (to)   params.set('to', to);
-    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/push/users/${encodeURIComponent(user.userKey)}/revisit?${params}`)
+    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/${channel}/users/${encodeURIComponent(user.userKey)}/revisit?${params}`)
       .then((d) => { expandCache.current[rKey] = d; setRevisitData(d); })
       .catch(() => setRevisitError(true))
       .finally(() => setRevisitLoading(false));
-  }, [user.userKey, from, to, revisitPage, shop]);
+  }, [user.userKey, from, to, revisitPage, shop, channel]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(user.userKey); }
@@ -621,11 +626,11 @@ function AccordionUserRow({ user, menuTab, expanded, onToggle, shop, from, to, e
           }}
         >
           {menuTab === 'count' ? (
-            <CountExpandPanel data={countData} loading={countLoading} error={countError} onRetry={handleRetryCount} />
+            <CountExpandPanel data={countData} loading={countLoading} error={countError} onRetry={handleRetryCount} noun={noun} />
           ) : (
             <RevisitExpandPanel
               data={revisitData} loading={revisitLoading} error={revisitError}
-              page={revisitPage} onPage={setRevisitPage} onRetry={handleRetryRevisit}
+              page={revisitPage} onPage={setRevisitPage} onRetry={handleRetryRevisit} noun={noun}
             />
           )}
         </div>
@@ -636,7 +641,8 @@ function AccordionUserRow({ user, menuTab, expanded, onToggle, shop, from, to, e
 
 // ─── Accordion revisited user row ─────────────────────────────────────────────
 
-function AccordionRevisitedRow({ user, expanded, onToggle, shop, from, to, expandCache }) {
+function AccordionRevisitedRow({ user, expanded, onToggle, shop, from, to, expandCache, channel = 'push' }) {
+  const noun = CHANNEL_NOUN[channel] || 'notification';
   const isAnon   = !user.email;
   const nameText = user.name || 'Anonymous visitor';
   const subtitle = isAnon ? anonSubtitle(user.userKey, user.deviceType) : user.email;
@@ -658,12 +664,12 @@ function AccordionRevisitedRow({ user, expanded, onToggle, shop, from, to, expan
     const params = new URLSearchParams({ page: String(revisitPage), limit: String(LIMIT) });
     if (from) params.set('from', from);
     if (to)   params.set('to', to);
-    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/push/users/${encodeURIComponent(user.userKey)}/revisit?${params}`)
+    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/${channel}/users/${encodeURIComponent(user.userKey)}/revisit?${params}`)
       .then((d) => { if (!cancelled) { expandCache.current[rKey] = d; setRevisitData(d); } })
       .catch(() => { if (!cancelled) setRevisitError(true); })
       .finally(() => { if (!cancelled) setRevisitLoading(false); });
     return () => { cancelled = true; };
-  }, [expanded, user.userKey, from, to, revisitPage, shop]);
+  }, [expanded, user.userKey, from, to, revisitPage, shop, channel]);
 
   const handleRetry = useCallback(() => {
     const rKey = `revisited:${user.userKey}:${from}:${to}:${revisitPage}`;
@@ -672,11 +678,11 @@ function AccordionRevisitedRow({ user, expanded, onToggle, shop, from, to, expan
     const params = new URLSearchParams({ page: String(revisitPage), limit: String(LIMIT) });
     if (from) params.set('from', from);
     if (to)   params.set('to', to);
-    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/push/users/${encodeURIComponent(user.userKey)}/revisit?${params}`)
+    apiGet(`/api/dashboard/${encodeURIComponent(shop)}/channels/${channel}/users/${encodeURIComponent(user.userKey)}/revisit?${params}`)
       .then((d) => { expandCache.current[rKey] = d; setRevisitData(d); })
       .catch(() => setRevisitError(true))
       .finally(() => setRevisitLoading(false));
-  }, [user.userKey, from, to, revisitPage, shop]);
+  }, [user.userKey, from, to, revisitPage, shop, channel]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(user.userKey); }
@@ -749,7 +755,7 @@ function AccordionRevisitedRow({ user, expanded, onToggle, shop, from, to, expan
         >
           <RevisitExpandPanel
             data={revisitData} loading={revisitLoading} error={revisitError}
-            page={revisitPage} onPage={setRevisitPage} onRetry={handleRetry}
+            page={revisitPage} onPage={setRevisitPage} onRetry={handleRetry} noun={noun}
           />
         </div>
       )}
@@ -759,7 +765,8 @@ function AccordionRevisitedRow({ user, expanded, onToggle, shop, from, to, expan
 
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
-export default function PushUsersPanel({ shop, from, to }) {
+export default function PushUsersPanel({ shop, from, to, channel = 'push' }) {
+  const noun = CHANNEL_NOUN[channel] || 'notification';
   const [viewMode,     setViewMode]     = useState('all');   // 'all' | 'revisited'
   const [menuTab,      setMenuTab]      = useState('count'); // 'count' | 'revisit'
   const [searchInput,  setSearchInput]  = useState('');
@@ -805,8 +812,8 @@ export default function PushUsersPanel({ shop, from, to }) {
     if (viewMode === 'all' && menuTab === 'revisit') params.set('includeVia', '1');
 
     const endpoint = viewMode === 'revisited'
-      ? `/api/dashboard/${encodeURIComponent(shop)}/channels/push/revisited?${params}`
-      : `/api/dashboard/${encodeURIComponent(shop)}/channels/push/users?${params}`;
+      ? `/api/dashboard/${encodeURIComponent(shop)}/channels/${channel}/revisited?${params}`
+      : `/api/dashboard/${encodeURIComponent(shop)}/channels/${channel}/users?${params}`;
 
     apiGet(endpoint)
       .then((d) => { if (!cancelled) { setData(d); setError(false); } })
@@ -814,7 +821,7 @@ export default function PushUsersPanel({ shop, from, to }) {
       .finally(() => { if (!cancelled) setLoading(false); });
 
     return () => { cancelled = true; };
-  }, [shop, viewMode, menuTab, search, typeFilter, originFilter, page, from, to, retryCount]);
+  }, [shop, viewMode, menuTab, search, typeFilter, originFilter, page, from, to, retryCount, channel]);
 
   const handleToggle = useCallback((key) => {
     setExpandedKey((prev) => (prev === key ? null : key));
@@ -827,7 +834,7 @@ export default function PushUsersPanel({ shop, from, to }) {
     if (search)     params.set('q', search);
     if (typeFilter) params.set('type', typeFilter);
     if (originFilter !== 'all') params.set('origin', originFilter);
-    const url = `${BACKEND_URL}/api/dashboard/${encodeURIComponent(shop)}/channels/push/users.csv?${params}`;
+    const url = `${BACKEND_URL}/api/dashboard/${encodeURIComponent(shop)}/channels/${channel}/users.csv?${params}`;
     try {
       const token = await window.shopify.idToken();
       const res   = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
@@ -835,7 +842,7 @@ export default function PushUsersPanel({ shop, from, to }) {
       const blob  = new Blob([text], { type: 'text/csv' });
       const a     = document.createElement('a');
       a.href      = URL.createObjectURL(blob);
-      a.download  = `push-users-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download  = `${channel}-users-${new Date().toISOString().slice(0, 10)}.csv`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -844,7 +851,7 @@ export default function PushUsersPanel({ shop, from, to }) {
       // eslint-disable-next-line no-console
       console.error('CSV export failed', e.message);
     }
-  }, [shop, from, to, search, typeFilter, originFilter]);
+  }, [shop, from, to, search, typeFilter, originFilter, channel]);
 
   const rLabel = rangeStr(from, to);
   const users  = data?.users || [];
@@ -922,7 +929,9 @@ export default function PushUsersPanel({ shop, from, to }) {
             }}
           >
             <option value="">All types</option>
-            {Object.entries(TYPE_LABELS).map(([type, label]) => (
+            {Object.entries(TYPE_LABELS)
+              .filter(([type]) => channel === 'email' || type !== 'email_broadcast')
+              .map(([type, label]) => (
               <option key={type} value={type}>{label}</option>
             ))}
           </select>
@@ -1023,7 +1032,7 @@ export default function PushUsersPanel({ shop, from, to }) {
           {search
             ? 'No users match your search'
             : viewMode === 'revisited'
-              ? 'No revisits yet. A revisit is recorded when a customer opens your store from a notification.'
+              ? `No revisits yet. A revisit is recorded when a customer opens your store from ${channel === 'email' ? 'an email' : 'a notification'}.`
               : 'No users yet in this date range'}
         </div>
       );
@@ -1032,7 +1041,7 @@ export default function PushUsersPanel({ shop, from, to }) {
       return (
         <>
           <div style={{ padding: '10px 20px 6px', fontSize: 13, fontWeight: 600, color: '#374151' }}>
-            {total} user{total !== 1 ? 's' : ''} came back from notifications
+            {total} user{total !== 1 ? 's' : ''} came back from {noun}s
           </div>
           {users.map((user) => (
             <AccordionRevisitedRow
@@ -1044,6 +1053,7 @@ export default function PushUsersPanel({ shop, from, to }) {
               from={from}
               to={to}
               expandCache={expandCache}
+              channel={channel}
             />
           ))}
         </>
@@ -1060,6 +1070,7 @@ export default function PushUsersPanel({ shop, from, to }) {
         from={from}
         to={to}
         expandCache={expandCache}
+        channel={channel}
       />
     ));
   }

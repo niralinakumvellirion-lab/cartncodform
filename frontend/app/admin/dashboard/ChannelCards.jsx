@@ -284,6 +284,9 @@ function DrawerItem({ item, channel, shop, sendWhatsapp }) {
   );
 }
 
+// Channels whose Sent tab shows the per-user panel.
+const HAS_USERS_PANEL = new Set(['push', 'email']);
+
 export function ChannelDrawer({ shop, channel, initialStatus, onClose, isMobileView, from, to }) {
   const [activeTab, setActiveTab] = useState(initialStatus);
   const [originFilter, setOriginFilter] = useState('all');
@@ -391,7 +394,7 @@ export function ChannelDrawer({ shop, channel, initialStatus, onClose, isMobileV
         aria-modal="true"
         style={{
           position: 'fixed', top: 0, right: 0, bottom: 0,
-          width: isMobileView ? '100%' : channel === 'push' ? 560 : 480,
+          width: isMobileView ? '100%' : HAS_USERS_PANEL.has(channel) ? 560 : 480,
           background: '#fff',
           zIndex: 1001,
           boxShadow: '-4px 0 24px rgba(0,0,0,0.12)',
@@ -465,8 +468,8 @@ export function ChannelDrawer({ shop, channel, initialStatus, onClose, isMobileV
           ))}
         </div>
 
-        {/* Origin filter — for sent items, except push which has its own filter bar */}
-        {activeTab === 'sent' && channel !== 'push' && (
+        {/* Origin filter — for sent items, except push and email which have their own filter bar */}
+        {activeTab === 'sent' && !HAS_USERS_PANEL.has(channel) && (
           <div style={{ display: 'flex', gap: 6, padding: '10px 20px', flexShrink: 0,
                         borderBottom: '1px solid #f3f4f6', flexWrap: 'wrap' }}>
             {[
@@ -506,9 +509,9 @@ export function ChannelDrawer({ shop, channel, initialStatus, onClose, isMobileV
           </div>
         )}
 
-        {/* Push Sent tab: dedicated users panel */}
-        {channel === 'push' && activeTab === 'sent' ? (
-          <PushUsersPanel shop={shop} from={from} to={to} />
+        {/* Push and Email Sent tab: dedicated users panel (count / revisit / revisited users) */}
+        {HAS_USERS_PANEL.has(channel) && activeTab === 'sent' ? (
+          <PushUsersPanel shop={shop} from={from} to={to} channel={channel} />
         ) : (
           <>
             {/* Items */}

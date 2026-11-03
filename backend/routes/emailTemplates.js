@@ -658,6 +658,7 @@ router.post('/:id/broadcast', requireAuth, requireNotSuspended, async (req, res)
       recipients: logRecipients,
       origin: 'manual',
       sentBy: 'owner',
+      broadcastId: broadcastJobId,
     });
 
     console.log(`[email-templates] broadcast ${String(template._id)}: sent=${sent} failed=${failed}`);

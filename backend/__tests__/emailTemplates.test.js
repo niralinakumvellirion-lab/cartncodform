@@ -733,6 +733,23 @@ describe('POST /:id/broadcast', () => {
     );
   });
 
+  test('the logged rows share the broadcast id that is in the email link (revisit tracking)', async () => {
+    EmailTemplate.findById.mockResolvedValue(makeTemplate({ subject: 'Hi', body: 'Body', ctaUrl: 'https://shop.example/offer' }));
+    Profile.countDocuments.mockResolvedValue(1);
+    Profile.find.mockReturnValue({
+      select: jest.fn().mockReturnValue({
+        lean: jest.fn().mockResolvedValue([makeProfileLean('log@ex.com')]),
+      }),
+    });
+
+    await broadcast({ shopDomain: SHOP, params: { id: TEMPLATE_ID }, body: { segment: 'everyone' } }, mockRes());
+
+    const logged = mockLogBroadcastSend.mock.calls[0][0];
+    expect(logged.broadcastId).toBeTruthy();
+    const design = mockRenderEmailDocument.mock.calls[0][0];
+    expect(design.ctaUrl).toContain(`ccf_job=${logged.broadcastId}`);
+  });
+
   test('IDOR: 404 when template belongs to another shop', async () => {
     EmailTemplate.findById.mockResolvedValue(makeTemplate({ shopDomain: OTHER_SHOP }));
 

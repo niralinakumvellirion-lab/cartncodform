@@ -177,3 +177,25 @@ test('batches inserts past 500 recipients', async () => {
   const batchSizes = ScheduledJob.insertMany.mock.calls.map(([rows]) => rows.length);
   expect(batchSizes).toEqual([500, 500, 200]);
 });
+
+test('broadcastId is written on every row and defaults to null', async () => {
+  ScheduledJob.insertMany.mockResolvedValue([]);
+  await logBroadcastSend({
+    shopDomain: 'shop.myshopify.com',
+    signalType: 'email_broadcast',
+    channel: 'email',
+    title: 'Sale',
+    body: 'B',
+    broadcastId: 'b1',
+    recipients: [recipient({ token: 'a@x.com' }), recipient({ token: 'b@x.com' })],
+  });
+  const [rows] = ScheduledJob.insertMany.mock.calls[0];
+  expect(rows.map((r) => r.broadcastId)).toEqual(['b1', 'b1']);
+
+  ScheduledJob.insertMany.mockClear();
+  await logBroadcastSend({
+    shopDomain: 'shop.myshopify.com', signalType: 'manual', title: 'T', body: 'B',
+    recipients: [recipient()],
+  });
+  expect(ScheduledJob.insertMany.mock.calls[0][0][0].broadcastId).toBeNull();
+});

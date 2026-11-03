@@ -24,6 +24,11 @@ const scheduledJobSchema = new mongoose.Schema({
   // and for manual "Send Now" broadcasts (routes/push.js /send-store).
   festivalQueueId: { type: mongoose.Schema.Types.ObjectId, ref: 'FestivalQueue', default: null, index: true },
 
+  // Email broadcasts: one id shared by every recipient row. It is the ccf_job
+  // value in the email's link, so a revisit event can be tied back to the
+  // broadcast. null for everything else.
+  broadcastId: { type: mongoose.Schema.Types.ObjectId, default: null },
+
   runAt: { type: Date, required: true, index: true },
   status: {
     type: String,
@@ -104,6 +109,9 @@ scheduledJobSchema.index(
 // Dashboard channel-stats aggregations filter on all four fields — without
 // this index they scan by { shopDomain, status, runAt } then filter channel + sentAt.
 scheduledJobSchema.index({ shopDomain: 1, channel: 1, status: 1, sentAt: 1 });
+
+// Email details drawer: find the rows of one broadcast.
+scheduledJobSchema.index({ shopDomain: 1, channel: 1, broadcastId: 1 });
 
 // Festival click attribution: find a specific subscriber's own send-log row
 // to update its outcome='clicked'. Compound covers the exact-match query
