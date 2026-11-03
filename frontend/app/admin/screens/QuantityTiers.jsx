@@ -182,16 +182,32 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
           <p style={styles.cardSub}>Automatic discounts for customers who buy multiple items of the same product.</p>
           <p style={styles.cardSub}>This is the “Quantity Tier Discount” in your Shopify Discounts list. Switch it on, set your tiers and press Save: the discount is created in Shopify for you.</p>
         </div>
-        <button
-          role="switch"
-          aria-checked={enabled}
-          aria-label="Enable quantity tiers"
-          onClick={() => setEnabled((v) => !v)}
-          style={{ ...styles.toggle, background: enabled ? '#4F46E5' : '#D1D5DB' }}
-        >
-          <span style={{ ...styles.toggleKnob, transform: enabled ? 'translateX(20px)' : 'translateX(0)' }} />
-        </button>
+        <span style={styles.switchWrap}>
+          <span aria-hidden="true" style={{ ...styles.switchText, color: enabled ? '#065F46' : '#B45309' }}>
+            {enabled ? 'On' : 'Off'}
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={enabled}
+            aria-label="Enable quantity tiers"
+            onClick={() => setEnabled((v) => !v)}
+            style={{ ...styles.toggle, background: enabled ? '#4F46E5' : '#9CA3AF' }}
+          >
+            <span style={{ ...styles.toggleKnob, transform: enabled ? 'translateX(20px)' : 'translateX(0)' }} />
+          </button>
+        </span>
       </div>
+
+      {!enabled && (
+        <div style={styles.amberNote} role="status">
+          <span style={styles.amberIcon} aria-hidden="true">!</span>
+          <span>
+            This is switched <strong>Off</strong>, so shoppers do not see the discount cards on your product page.
+            Turn the switch <strong>On</strong> (top right of this box), then press <strong>Save and sync to Shopify</strong>.
+          </span>
+        </div>
+      )}
 
       {/* ── Tiers table ── */}
       <div style={styles.card}>
@@ -378,6 +394,8 @@ const styles = {
   cardTitle: { fontWeight: 600, fontSize: 15, margin: 0 },
   cardSub: { fontSize: 13, color: '#6B7280', margin: '4px 0 0' },
   sectionLabel: { fontWeight: 600, fontSize: 13, color: '#374151', marginBottom: 12 },
+  switchWrap: { display: 'inline-flex', alignItems: 'center', gap: 10, flexShrink: 0 },
+  switchText: { fontSize: 13, fontWeight: 800, minWidth: 24, textAlign: 'right' },
   toggle: {
     position: 'relative', display: 'inline-flex', alignItems: 'center',
     width: 44, height: 24, borderRadius: 12, border: 'none', cursor: 'pointer',
