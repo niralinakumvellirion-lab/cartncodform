@@ -129,8 +129,9 @@
       '.ccf-qt-cards-n2{grid-template-columns:repeat(2,minmax(0,1fr))}',
       '.ccf-qt-cards-n3{grid-template-columns:repeat(3,minmax(0,1fr))}',
       '.ccf-qt-cards-n4{grid-template-columns:repeat(4,minmax(0,1fr))}',
-      // narrow: 3 or 4 cols collapse to 2
-      '@container ccf-qt (max-width:480px){.ccf-qt-cards-n3,.ccf-qt-cards-n4{grid-template-columns:repeat(2,minmax(0,1fr))}}',
+      // narrow: 4 tiers collapse to 2 columns; 3 tiers stay on ONE row until the box is really tiny
+      '@container ccf-qt (max-width:480px){.ccf-qt-cards-n4{grid-template-columns:repeat(2,minmax(0,1fr))}}',
+      '@container ccf-qt (max-width:240px){.ccf-qt-cards-n3{grid-template-columns:repeat(2,minmax(0,1fr))}}',
       // ── Card button (cards layout) ──
       '.ccf-qt-card{position:relative;background:#fff;border:none;box-shadow:inset 0 0 0 1px #C7CBD6;border-radius:12px;padding:20px 8px 14px;display:flex;flex-direction:column;align-items:center;text-align:center;cursor:pointer;color:#171A22;font-family:inherit;gap:6px;appearance:none !important;text-transform:none !important;letter-spacing:normal !important;min-height:0 !important;line-height:1.4}',
       // hover on unselected
@@ -147,6 +148,9 @@
       '.ccf-qt-chip{font-size:13px;font-weight:800;color:' + chipUnselText + ';background:' + tint + ';border-radius:6px;padding:3px 9px;display:inline-block}',
       // chip on selected card — accent bg, readable text
       '.ccf-qt-card--active .ccf-qt-chip{background:' + accentColor + ';color:' + chipSelText + '}',
+      // tighter cards so three fit side by side in a narrow product column
+      '@container ccf-qt (max-width:440px){.ccf-qt-cards{gap:8px}.ccf-qt-card{padding:20px 4px 12px}.ccf-qt-qty{font-size:14px}.ccf-qt-chip{font-size:12px;padding:3px 6px}}',
+      '@container ccf-qt (max-width:330px){.ccf-qt-badge{font-size:10px;padding:3px 5px;letter-spacing:-.01em}}',
       // ── Price ──
       '.ccf-qt-price{font-size:12px;color:#4A5062}',
       // ── List layout ──
