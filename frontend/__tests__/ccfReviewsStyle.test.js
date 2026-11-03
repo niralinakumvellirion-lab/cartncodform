@@ -1,7 +1,7 @@
 /**
- * Storefront reviews stylesheet + block: centred page layout, the pop-up pages and their animations.
- * jsdom cannot lay out CSS, so these guard the rules. The real look was checked in a browser: desktop,
- * a content-sized theme container, a 375px phone, in light and dark.
+ * Storefront reviews stylesheet + block, built to the approved design. jsdom cannot lay out CSS, so these
+ * guard the rules; the look was checked in a real browser (desktop in a content-sized theme container,
+ * a 375px phone, light and dark themes).
  */
 import fs from 'fs';
 import path from 'path';
@@ -38,40 +38,48 @@ describe('page layout', () => {
     expect(r).not.toContain('max-width');
   });
 
-  it('the content is centred at a configurable maximum width inside the block', () => {
-    const r = rule('.ccf-rv-inner');
-    expect(r).toContain('max-width: var(--ccf-rv-max, 1100px)');
-    expect(r).toContain('margin: 0 auto');
+  it('the content is centred at the configurable maximum width', () => {
+    expect(rule('.ccf-rv-inner')).toContain('max-width: var(--ccf-rv-max, 1100px)');
+    expect(rule('.ccf-rv-inner')).toContain('margin: 0 auto');
   });
 
-  it('hero (title, rating, button), button row, cards and pager are centred', () => {
-    expect(rule('.ccf-rv-hero')).toContain('justify-items: center');
-    expect(rule('.ccf-rv-hero')).toContain('text-align: center');
-    expect(rule('.ccf-rv-cta')).toContain('justify-items: center');
-    expect(rule('.ccf-rv-list')).toContain('justify-content: center');
-    expect(rule('.ccf-rv-pager')).toContain('justify-content: center');
+  it('lines and muted text are mixed from the theme text colour (light and dark themes)', () => {
+    expect(rule('.ccf-rv')).toContain('--rv-line: rgba(128,128,128,.28)');
+    expect(css).toContain('--rv-muted: color-mix(in srgb, currentColor 62%, transparent)');
+    expect(rule('.ccf-rv-head')).toContain('border-bottom: 1px solid var(--rv-line)');
   });
 
-  it('the button row spans the full width so the write button can stretch on narrow blocks', () => {
-    expect(rule('.ccf-rv-cta')).toContain('grid-template-columns: minmax(0, 1fr)');
-    expect(rule('.ccf-rv-cta')).toContain('width: 100%');
+  it('header: title left, Write a review right, wrapping on narrow screens', () => {
+    const r = rule('.ccf-rv-head');
+    expect(r).toContain('display: flex');
+    expect(r).toContain('flex-wrap: wrap');
+    expect(r).toContain('justify-content: space-between');
   });
 
-  it('review cards: border, large radius, shadow, entry animation, wrap by themselves', () => {
+  it('summary is a three-part grid that wraps by itself', () => {
+    expect(rule('.ccf-rv-summary')).toContain('grid-template-columns: repeat(auto-fit, minmax(240px, 1fr))');
+    expect(css).toContain('.ccf-rv-summary[hidden], .ccf-rv-toolbar[hidden] { display: none; }');
+  });
+
+  it('stars are vector icons filled with the star colour', () => {
+    expect(css).toContain('.ccf-rv-staricon.on path { fill: var(--ccf-rv-star, #141414); stroke: var(--ccf-rv-star, #141414); }');
+    expect(rule('.ccf-rv-bar-fill')).toContain('background: var(--ccf-rv-star, #141414)');
+  });
+
+  it('review rows: hairline separated, details on the left, review on the right, stacking when narrow', () => {
     const r = rule('.ccf-rv-item');
-    expect(r).toContain('border: 1px solid');
-    expect(r).toContain('border-radius: 20px');
-    expect(r).toContain('box-shadow');
-    expect(r).toContain('animation: ccfRvUp');
-    expect(r).toContain('flex: 1 1 320px');
-    expect(r).toContain('max-width: 540px');
-    expect(rule('.ccf-rv-list')).toContain('flex-wrap: wrap');
+    expect(r).toContain('border-bottom: 1px solid var(--rv-line)');
+    expect(r).toContain('flex-wrap: wrap');
+    expect(rule('.ccf-rv-meta')).toContain('flex: 1 1 200px');
+    expect(rule('.ccf-rv-main')).toContain('flex: 999 1 420px');
   });
 
-  it('uses translucent greys and inherited colours so the page part fits light and dark themes', () => {
-    expect(rule('.ccf-rv-item')).toContain('rgba(128,128,128');
-    expect(rule('.ccf-rv-bars')).toContain('rgba(128,128,128');
-    expect(rule('.ccf-rv-badge')).toContain('color: inherit');
+  it('pressed chip uses the button colour and its text colour', () => {
+    expect(css).toContain('.ccf-rv-chip.on { background: var(--ccf-rv-accent, #141414); border-color: var(--ccf-rv-accent, #141414); color: var(--ccf-rv-accent-fg, #fff); }');
+  });
+
+  it('the button text colour follows the brand colour (set by the script)', () => {
+    expect(rule('.ccf-rv-btn')).toContain('color: var(--ccf-rv-accent-fg, #fff)');
   });
 
   it('long names, titles and text wrap instead of overflowing', () => {
@@ -80,104 +88,107 @@ describe('page layout', () => {
     expect(rule('.ccf-rv-body')).toContain('overflow-wrap: anywhere');
   });
 
-  it('the compact layout is switched by a class set from the block own width, with a phone media query as backup', () => {
-    expect(css).toContain('.ccf-rv--narrow .ccf-rv-btn--write { width: 100%; }');
-    expect(css).toContain('.ccf-rv--narrow .ccf-rv-who { grid-template-columns: auto minmax(0, 1fr); }');
-    const media = css.slice(css.indexOf('@media (max-width: 620px) {'));
-    expect(media).toContain('.ccf-rv .ccf-rv-btn--write { width: 100%; }');
-    expect(media).toContain('.ccf-rv .ccf-rv-who { grid-template-columns: auto minmax(0, 1fr); }');
-  });
-
-  it('the button text colour follows the brand colour (set by the script), white by default', () => {
-    expect(rule('.ccf-rv-btn')).toContain('color: var(--ccf-rv-accent-fg, #fff)');
+  it('narrow block (class from the script) and phones (media query): full-width Write button', () => {
+    expect(css).toContain('.ccf-rv--narrow .ccf-rv-cta, .ccf-rv--narrow .ccf-rv-btn--write { width: 100%; }');
+    const media = css.slice(css.indexOf('@media (max-width: 720px) {'));
+    expect(media).toContain('.ccf-rv .ccf-rv-cta, .ccf-rv .ccf-rv-btn--write { width: 100%; }');
   });
 });
 
 describe('pop-up pages', () => {
-  it('cover the whole screen above the theme, with the page scroll handled by the script', () => {
+  it('cover the whole screen above the theme', () => {
     const r = rule('.ccf-rvm');
     expect(r).toContain('position: fixed');
     expect(r).toContain('inset: 0');
     expect(r).toContain('z-index: 2147483000');
   });
 
-  it('the dialog is a rounded card with a soft shadow, scrolling inside when tall', () => {
+  it('the dialog is a white card, 560px wide, rounded, with a soft shadow', () => {
     const r = rule('.ccf-rvm-dialog');
-    expect(r).toContain('border-radius: 28px');
     expect(r).toContain('max-width: 560px');
-    expect(r).toContain('max-height: min(92vh, 780px)');
-    expect(rule('.ccf-rvm-stage')).toContain('overflow-y: auto');
+    expect(r).toContain('background: #FFFFFF');
+    expect(r).toContain('border-radius: 16px');
+    expect(r).toContain('box-shadow');
   });
 
-  it('has its own light and dark palette, so a theme cannot make it unreadable', () => {
-    expect(rule('.ccf-rvm')).toContain('--m-bg: #ffffff');
-    expect(css).toMatch(/@media \(prefers-color-scheme: dark\) \{\n\s+\.ccf-rvm \{ --m-bg: #0f172a/);
+  it('progress is a row of segments filled with the button colour', () => {
+    expect(rule('.ccf-rvm-segs')).toContain('display: flex');
+    expect(css).toContain('.ccf-rvm-seg.on { background: var(--ccf-rv-accent, #141414); }');
   });
 
-  it('a near-black brand colour gets a light button and progress bar on the dark palette', () => {
-    expect(css).toContain('.ccf-rvm[data-acc="dark"] { --m-acc: #f8fafc; }');
-    expect(css).toContain('.ccf-rvm[data-acc="dark"] .ccf-rv-btn:not(.ccf-rv-btn--ghost) { background: #f8fafc;');
+  it('the rating stars are empty outlines until chosen', () => {
+    expect(css).toContain('.ccf-rvm-star path { fill: none; stroke: #C9C5C0;');
+    expect(css).toContain('.ccf-rvm-star.on path { fill: var(--ccf-rv-star, #141414); stroke: var(--ccf-rv-star, #141414); }');
   });
 
-  it('on phones it becomes a full-width sheet from the bottom', () => {
+  it('photo tiles: 3 per row, a dashed "Add photo" tile', () => {
+    expect(rule('.ccf-rvm-tiles')).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
+    expect(rule('.ccf-rvm-add')).toContain('border: 1.5px dashed #C9C5C0');
+    expect(rule('.ccf-rvm-file')).toContain('opacity: 0');
+  });
+
+  it('on phones it is a full-width sheet from the bottom with a grab handle, and Continue fills the row on the first step', () => {
     const phone = css.slice(css.indexOf('@media (max-width: 640px) {'));
     expect(phone).toContain('.ccf-rvm { align-items: flex-end; padding: 0; }');
-    expect(phone).toContain('border-radius: 26px 26px 0 0');
+    expect(phone).toContain('border-radius: 22px 22px 0 0');
     expect(phone).toContain('animation: ccfRvmSheet');
-    expect(phone).toContain('.ccf-rvm-next { max-width: none; }');
+    expect(phone).toContain('.ccf-rvm-grab { display: block;');
+    expect(phone).toContain('.ccf-rvm-first .ccf-rvm-back { display: none; }');
   });
 
   it('every animation the script relies on exists', () => {
-    ['ccfRvmFade', 'ccfRvmFadeOut', 'ccfRvmPop', 'ccfRvmSheet', 'ccfRvmInNext', 'ccfRvmInBack', 'ccfRvmInFirst',
-      'ccfRvmStarPop', 'ccfRvmShake', 'ccfRvmSpin', 'ccfRvmDraw', 'ccfRvmConf', 'ccfRvUp'].forEach((name) => {
+    ['ccfRvmFade', 'ccfRvmFadeOut', 'ccfRvmPop', 'ccfRvmSheet', 'ccfRvmStep', 'ccfRvmStepBack', 'ccfRvmSpin', 'ccfRvmDraw', 'ccfRvIn'].forEach((name) => {
       expect(css).toContain('@keyframes ' + name);
     });
+    expect(rule('.ccf-rvm-in-next')).toContain('animation: ccfRvmStep ');
+    expect(rule('.ccf-rvm-in-back')).toContain('animation: ccfRvmStepBack ');
   });
 
-  it('pages slide in from the side you are moving towards', () => {
-    expect(rule('.ccf-rvm-in-next')).toContain('animation: ccfRvmInNext');
-    expect(rule('.ccf-rvm-in-back')).toContain('animation: ccfRvmInBack');
-    expect(css).toMatch(/@keyframes ccfRvmInNext \{ from \{ opacity: 0; transform: translateX\(44px\)/);
-    expect(css).toMatch(/@keyframes ccfRvmInBack \{ from \{ opacity: 0; transform: translateX\(-44px\)/);
-  });
-
-  it('respects reduced motion: no animation, ticks drawn at once, no confetti', () => {
-    const rm = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce) {'));
-    expect(rm).toContain('animation: none !important');
-    expect(rm).toContain('stroke-dashoffset: 0 !important');
-    expect(rm).toContain('.ccf-rvm-conf { display: none; }');
-  });
-
-  it('the thank-you check mark and ring are drawn with a stroke animation', () => {
-    expect(rule('.ccf-rvm-okring')).toContain('stroke-dashoffset: 176');
+  it('the thank-you ring and tick are drawn with a stroke animation', () => {
+    expect(rule('.ccf-rvm-okring')).toContain('stroke-dashoffset: 166');
     expect(rule('.ccf-rvm-oktick')).toContain('animation: ccfRvmDraw');
   });
 
-  it('the photo drop area, thumbnails and viewer are styled', () => {
-    expect(rule('.ccf-rvm-drop')).toContain('border: 2px dashed');
-    expect(rule('.ccf-rvm-file')).toContain('opacity: 0');
-    expect(css).toContain('.ccf-rvm-file:focus-visible + .ccf-rvm-drop');
-    expect(rule('.ccf-rvm-bigphoto')).toContain('max-height: 86vh');
+  it('respects reduced motion', () => {
+    const rm = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce) {'));
+    expect(rm).toContain('animation: none !important');
+    expect(rm).toContain('stroke-dashoffset: 0 !important');
+  });
+
+  it('no confetti or decorative effects', () => {
+    expect(css).not.toContain('ccf-rvm-conf');
+    expect(css).not.toContain('linear-gradient');
   });
 });
 
 describe('reviews block (liquid)', () => {
-  it('passes the maximum width to the stylesheet, with a default', () => {
-    expect(liquid).toContain('--ccf-rv-max: {{ block.settings.max_width | default: 1100 }}px');
+  it('passes the product name and picture for the pop-up header', () => {
+    expect(liquid).toContain('data-product-title="{{ product.title | escape }}"');
+    expect(liquid).toContain('data-product-image="{{ product.featured_image | image_url: width: 120 }}"');
   });
 
-  it('offers a Maximum width setting from 600 to 1400px', () => {
+  it('has a small label and a heading, with the approved defaults', () => {
+    expect(liquid).toContain('data-eyebrow="{{ block.settings.eyebrow | escape }}"');
+    expect(liquid).toMatch(/"id": "eyebrow"[^}]*"default": "Customer reviews"/);
+    expect(liquid).toMatch(/"id": "heading"[^}]*"default": "What customers are saying"/);
+  });
+
+  it('defaults to black button and stars (the script swaps them on dark themes)', () => {
+    expect(liquid).toMatch(/"id": "accent_color"[^}]*"default": "#141414"/);
+    expect(liquid).toMatch(/"id": "star_color"[^}]*"default": "#141414"/);
+    expect(liquid).toContain("--ccf-rv-accent: {{ block.settings.accent_color | default: '#141414' }}");
+  });
+
+  it('passes the maximum width, with a default, and offers 600 to 1400px', () => {
+    expect(liquid).toContain('--ccf-rv-max: {{ block.settings.max_width | default: 1100 }}px');
     const i = liquid.indexOf('"id": "max_width"');
-    expect(i).toBeGreaterThan(-1);
     const line = liquid.slice(i, liquid.indexOf('}', i));
     expect(line).toContain('"min": 600');
     expect(line).toContain('"max": 1400');
-    expect(line).toContain('"default": 1100');
   });
 
   it('has no stylesheet tag (Shopify refuses it in app blocks) and links the css file', () => {
     expect(liquid).not.toContain('{% stylesheet');
-    expect(liquid).not.toContain('{%- stylesheet');
     expect(liquid).toContain("{{ 'ccf-reviews.css' | asset_url | stylesheet_tag }}");
   });
 });

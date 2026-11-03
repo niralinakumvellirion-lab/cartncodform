@@ -3,6 +3,7 @@
 /**
  * Product reviews - storefront side, served through the App Proxy:
  *   GET  /apps/cartncodform/reviews?productId=..&page=..   approved reviews + summary + form rules
+ *        optional: rating=1..5|low (3 and below), photos=1, sort=recent|helpful|highest|lowest
  *   POST /apps/cartncodform/reviews                        submit a review
  *   POST /apps/cartncodform/reviews/photo                  upload one photo, returns its URL
  *   POST /apps/cartncodform/reviews/:id/helpful            "helpful" vote
@@ -121,6 +122,14 @@ function formRules(settings, loggedIn) {
   };
 }
 
+// Review list orders the shopper can pick. Ties go to the newest.
+const SORTS = {
+  recent: { createdAt: -1 },
+  helpful: { helpfulCount: -1, createdAt: -1 },
+  highest: { rating: -1, createdAt: -1 },
+  lowest: { rating: 1, createdAt: -1 },
+};
+
 // ---------------------------------------------------------------------------------------
 router.get('/', guard, async (req, res) => {
   try {
@@ -129,14 +138,27 @@ router.get('/', guard, async (req, res) => {
     const settings = await loadSettings(req.shop);
     const page = Math.max(1, Math.min(1000, parseInt(req.query.page, 10) || 1));
     const where = { shopDomain: req.shop, productId, status: 'approved' };
+    const withPhotos = { 'photos.0': { $exists: true } };
 
-    const [rows, total, ratingRows] = await Promise.all([
-      Review.find(where).sort({ createdAt: -1 }).skip((page - 1) * settings.reviewsPerPage).limit(settings.reviewsPerPage).lean(),
+    // The shopper's filter (a star rating, "3 and below", or "with photos") and sort order.
+    const listWhere = { ...where };
+    const rating = String(req.query.rating || '');
+    if (settings.starRating && /^[1-5]$/.test(rating)) listWhere.rating = Number(rating);
+    else if (settings.starRating && rating === 'low') listWhere.rating = { $gte: 1, $lte: 3 };
+    if (req.query.photos === '1') Object.assign(listWhere, withPhotos);
+    const sort = SORTS[String(req.query.sort || '')] || SORTS.recent;
+
+    const [rows, total, filtered, photoCount, galleryRows, ratingRows] = await Promise.all([
+      Review.find(listWhere).sort(sort).skip((page - 1) * settings.reviewsPerPage).limit(settings.reviewsPerPage).lean(),
       Review.countDocuments(where),
+      Review.countDocuments(listWhere),
+      Review.countDocuments({ ...where, ...withPhotos }),
+      Review.find({ ...where, ...withPhotos }).sort({ createdAt: -1 }).limit(8).select('photos').lean(),
       settings.starRating
         ? Review.aggregate([{ $match: { ...where, rating: { $ne: null } } }, { $group: { _id: '$rating', n: { $sum: 1 } } }])
         : Promise.resolve([]),
     ]);
+    const gallery = galleryRows.flatMap((r) => (r.photos || []).map((p) => p.url)).slice(0, 8);
 
     // Can this visitor write one? Only answerable for logged-in customers; guests are checked on submit.
     let canReview = true;
@@ -153,10 +175,11 @@ router.get('/', guard, async (req, res) => {
 
     return res.json({
       ok: true,
-      summary: { count: total, ...summarizeRatings(ratingRows) },
+      summary: { count: total, ...summarizeRatings(ratingRows), photoCount, gallery },
       reviews: rows.map((r) => publicReview(r, settings)),
       page,
-      pages: Math.max(1, Math.ceil(total / settings.reviewsPerPage)),
+      filtered,
+      pages: Math.max(1, Math.ceil(filtered / settings.reviewsPerPage)),
       form: { ...formRules(settings, !!req.loggedInCustomerId), canReview, reason },
     });
   } catch (err) {

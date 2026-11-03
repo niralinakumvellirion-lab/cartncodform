@@ -147,6 +147,87 @@ describe('GET reviews', () => {
   });
 });
 
+describe('GET reviews - filters, sorting and photo summary', () => {
+  const pic = (n) => ({ url: `https://res.cloudinary.com/demo/image/upload/v1/${n}.jpg` });
+  const add = (over) => Review.create({ shopDomain: A, productId: PID, body: 'a review long enough', authorName: 'X', status: 'approved', ...over });
+
+  beforeEach(async () => {
+    await add({ authorName: 'Five-old', rating: 5, helpfulCount: 1, createdAt: new Date('2025-01-01') });
+    await add({ authorName: 'Five-new', rating: 5, helpfulCount: 9, photos: [pic('a'), pic('b')], createdAt: new Date('2025-03-01') });
+    await add({ authorName: 'Four', rating: 4, helpfulCount: 3, createdAt: new Date('2025-02-01') });
+    await add({ authorName: 'Three', rating: 3, helpfulCount: 0, photos: [pic('c')], createdAt: new Date('2025-02-15') });
+    await add({ authorName: 'One', rating: 1, helpfulCount: 5, createdAt: new Date('2025-01-15') });
+    await add({ authorName: 'Pending', rating: 1, status: 'pending', photos: [pic('z')] });
+  });
+
+  const names = (r) => r.body.reviews.map((x) => x.name);
+
+  it('a star filter returns only that rating; counts for the whole product stay in the summary', async () => {
+    const r = await call('GET', '', { query: { productId: PID, rating: '5' } });
+    expect(names(r)).toEqual(['Five-new', 'Five-old']);
+    expect(r.body.filtered).toBe(2);
+    expect(r.body.summary.count).toBe(5);
+    expect(r.body.summary.distribution).toMatchObject({ 5: 2, 4: 1, 3: 1, 1: 1 });
+  });
+
+  it('"low" means 3 stars and below', async () => {
+    const r = await call('GET', '', { query: { productId: PID, rating: 'low' } });
+    expect(names(r)).toEqual(['Three', 'One']);
+  });
+
+  it('photos=1 returns only reviews with photos', async () => {
+    const r = await call('GET', '', { query: { productId: PID, photos: '1' } });
+    expect(names(r)).toEqual(['Five-new', 'Three']);
+    expect(r.body.filtered).toBe(2);
+  });
+
+  it('filters combine', async () => {
+    const r = await call('GET', '', { query: { productId: PID, rating: '5', photos: '1' } });
+    expect(names(r)).toEqual(['Five-new']);
+  });
+
+  it.each([
+    ['recent', ['Five-new', 'Three', 'Four', 'One', 'Five-old']],
+    ['helpful', ['Five-new', 'One', 'Four', 'Five-old', 'Three']],
+    ['highest', ['Five-new', 'Five-old', 'Four', 'Three', 'One']],
+    ['lowest', ['One', 'Three', 'Four', 'Five-new', 'Five-old']],
+  ])('sort=%s', async (sort, expected) => {
+    const r = await call('GET', '', { query: { productId: PID, sort } });
+    expect(names(r)).toEqual(expected);
+  });
+
+  it('an unknown sort or filter value is ignored (newest first, everything)', async () => {
+    const r = await call('GET', '', { query: { productId: PID, sort: '$where', rating: '9', photos: 'yes' } });
+    expect(names(r)).toEqual(['Five-new', 'Three', 'Four', 'One', 'Five-old']);
+  });
+
+  it('summary has the number of reviews with photos and up to 8 recent photos (approved only)', async () => {
+    const r = await call('GET', '', { query: { productId: PID } });
+    expect(r.body.summary.photoCount).toBe(2);
+    expect(r.body.summary.gallery).toEqual([pic('a').url, pic('b').url, pic('c').url]);
+    expect(JSON.stringify(r.body.summary.gallery)).not.toContain('z.jpg');
+  });
+
+  it('the gallery is capped at 8 photos', async () => {
+    for (let i = 0; i < 5; i++) await add({ authorName: 'P' + i, rating: 5, photos: [pic('m' + i), pic('n' + i)] });
+    const r = await call('GET', '', { query: { productId: PID } });
+    expect(r.body.summary.gallery).toHaveLength(8);
+  });
+
+  it('pages follow the filtered count', async () => {
+    await setSettings(A, { reviewsPerPage: 1 });
+    const r = await call('GET', '', { query: { productId: PID, rating: '5' } });
+    expect(r.body.pages).toBe(2);
+    expect((await call('GET', '', { query: { productId: PID, rating: '5', page: '2' } })).body.reviews.map((x) => x.name)).toEqual(['Five-old']);
+  });
+
+  it('star filters are ignored when star rating is switched off', async () => {
+    await setSettings(A, { starRating: false, starRequired: false });
+    const r = await call('GET', '', { query: { productId: PID, rating: '5' } });
+    expect(r.body.filtered).toBe(5);
+  });
+});
+
 describe('POST review - who can review', () => {
   it('verified: a guest whose email matches an order is accepted and marked verified', async () => {
     await buy(A, { email: 'asha@example.com' });

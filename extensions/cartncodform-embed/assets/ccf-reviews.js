@@ -8,50 +8,52 @@
   var TYPE_MIME = { jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
   var MAX_SIDE = 1600;
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-  var RATING_LABELS = ['Poor', 'Fair', 'Good', 'Very good', 'Excellent'];
-  var CONFETTI = ['#f59e0b', '#10b981', '#3b82f6', '#ef4444', '#8b5cf6', '#ec4899'];
+  var RATING_WORDS = ['Select a rating', 'Poor', 'Fair', 'Good', 'Very good', 'Excellent'];
   var REASONS = {
     NOT_VERIFIED_BUYER: 'Only customers who bought this product can write a review.',
     ALREADY_REVIEWED: 'Thank you, you have already reviewed this product.'
   };
   // Which step shows an error the server reported for a field.
   var FIELD_STEP = { rating: 'rating', title: 'story', body: 'story', name: 'you', email: 'you', photos: 'photos' };
+  var STAR_PATH = 'M12 2.5l2.94 5.96 6.58.96-4.76 4.64 1.12 6.55L12 17.52l-5.88 3.09 1.12-6.55L2.48 9.42l6.58-.96z';
 
   // ── icons (built with createElementNS, no HTML strings) ─────────────────────
 
   var SVG_NS = 'http://www.w3.org/2000/svg';
   var ICONS = {
-    star: [['path', { d: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z' }]],
-    edit: [['path', { d: 'M12 20h9' }], ['path', { d: 'M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z' }]],
-    image: [['rect', { x: 3, y: 3, width: 18, height: 18, rx: 2 }], ['circle', { cx: 8.5, cy: 8.5, r: 1.5 }], ['polyline', { points: '21 15 16 10 5 21' }]],
-    user: [['path', { d: 'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2' }], ['circle', { cx: 12, cy: 7, r: 4 }]],
-    check: [['path', { d: 'M20 6L9 17l-5-5' }]],
-    x: [['path', { d: 'M18 6L6 18M6 6l12 12' }]],
-    right: [['path', { d: 'M5 12h14M12 5l7 7-7 7' }]],
+    edit: [['path', { d: 'M12 20h9' }], ['path', { d: 'M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z' }]],
+    x: [['path', { d: 'M18 6 6 18M6 6l12 12' }]],
     left: [['path', { d: 'M19 12H5M12 19l-7-7 7-7' }]],
-    thumb: [['path', { d: 'M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3' }]],
-    shield: [['path', { d: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' }], ['path', { d: 'M9 12l2 2 4-4' }]],
-    upload: [['path', { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }], ['polyline', { points: '17 8 12 3 7 8' }], ['line', { x1: 12, y1: 3, x2: 12, y2: 15 }]]
+    plus: [['path', { d: 'M12 5v14M5 12h14' }]],
+    verified: [['circle', { cx: 12, cy: 12, r: 9 }], ['path', { d: 'M8.5 12.5l2.5 2.5 4.5-5' }]],
+    thumb: [['path', { d: 'M7 10v11' }], ['path', { d: 'M15 5.9 14 10h5.8a2 2 0 0 1 1.9 2.5l-2.3 7A2 2 0 0 1 17.5 21H7V10l4-8a3 3 0 0 1 3 3.9Z' }]]
   };
 
-  function icon(name, size, filled) {
-    var svg = document.createElementNS(SVG_NS, 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('width', String(size || 20));
-    svg.setAttribute('height', String(size || 20));
-    svg.setAttribute('fill', filled ? 'currentColor' : 'none');
-    svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '2');
-    svg.setAttribute('stroke-linecap', 'round');
-    svg.setAttribute('stroke-linejoin', 'round');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.setAttribute('focusable', 'false');
-    (ICONS[name] || []).forEach(function (part) {
-      var n = document.createElementNS(SVG_NS, part[0]);
-      for (var k in part[1]) { if (Object.prototype.hasOwnProperty.call(part[1], k)) n.setAttribute(k, String(part[1][k])); }
-      svg.appendChild(n);
-    });
+  function svgEl(tag, attrs) {
+    var n = document.createElementNS(SVG_NS, tag);
+    for (var k in attrs) { if (Object.prototype.hasOwnProperty.call(attrs, k)) n.setAttribute(k, String(attrs[k])); }
+    return n;
+  }
+
+  function icon(name, size) {
+    var svg = svgEl('svg', { viewBox: '0 0 24 24', width: size || 18, height: size || 18, fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true', focusable: 'false' });
+    (ICONS[name] || []).forEach(function (part) { svg.appendChild(svgEl(part[0], part[1])); });
     return svg;
+  }
+
+  function starIcon(size, on) {
+    var svg = svgEl('svg', { viewBox: '0 0 24 24', width: size, height: size, 'aria-hidden': 'true', focusable: 'false', 'class': 'ccf-rv-staricon' + (on ? ' on' : '') });
+    svg.appendChild(svgEl('path', { d: STAR_PATH, 'stroke-width': 1.6, 'stroke-linejoin': 'round' }));
+    return svg;
+  }
+
+  // A row of five vector stars, read out as "4 out of 5 stars".
+  function starRow(n, size, cls) {
+    var row = el('span', 'ccf-rv-stars' + (cls ? ' ' + cls : ''));
+    row.setAttribute('role', 'img');
+    row.setAttribute('aria-label', n + ' out of 5 stars');
+    for (var i = 1; i <= 5; i++) row.appendChild(starIcon(size, i <= Math.round(n)));
+    return row;
   }
 
   // ── small helpers ──────────────────────────────────────────────────────────
@@ -63,13 +65,13 @@
     return n;
   }
 
-  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
-
-  function starText(n) {
-    var s = '';
-    for (var i = 1; i <= 5; i++) s += i <= n ? '★' : '☆';
-    return s;
+  function button(cls, text) {
+    var b = el('button', cls, text);
+    b.type = 'button';
+    return b;
   }
+
+  function clear(node) { while (node.firstChild) node.removeChild(node.firstChild); }
 
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
 
@@ -79,19 +81,14 @@
     try { return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); } catch (e) { return d.toDateString(); }
   }
 
-  function hueOf(str) {
-    var h = 0;
-    for (var i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360;
-    return h;
+  function initials(name) {
+    var parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return '?';
+    return (parts[0].charAt(0) + (parts.length > 1 ? parts[parts.length - 1].charAt(0) : '')).toUpperCase();
   }
 
-  // Round letter avatar, colour picked from the name so each person keeps the same colour.
   function avatarEl(name, cls) {
-    var n = String(name || '').trim();
-    var a = el('span', cls || 'ccf-rv-ava', n.charAt(0).toUpperCase() || '?');
-    var h = hueOf(n);
-    a.style.background = 'hsl(' + h + ', 70%, 90%)';
-    a.style.color = 'hsl(' + h + ', 55%, 28%)';
+    var a = el('span', cls || 'ccf-rv-ava', initials(name));
     a.setAttribute('aria-hidden', 'true');
     return a;
   }
@@ -135,6 +132,50 @@
     var list = votedIds();
     if (list.indexOf(id) === -1) list.push(id);
     store('ccf_rv_voted', JSON.stringify(list.slice(-200)));
+  }
+
+  // Brightness (0 dark .. 1 light) of a #rgb / #rrggbb / rgb() colour, or null when it cannot be read.
+  function luminance(color) {
+    var c = String(color || '').trim();
+    var r, g, b, m;
+    if ((m = /^#([0-9a-f]{3})$/i.exec(c))) {
+      r = parseInt(m[1].charAt(0) + m[1].charAt(0), 16); g = parseInt(m[1].charAt(1) + m[1].charAt(1), 16); b = parseInt(m[1].charAt(2) + m[1].charAt(2), 16);
+    } else if ((m = /^#([0-9a-f]{6})$/i.exec(c))) {
+      r = parseInt(m[1].slice(0, 2), 16); g = parseInt(m[1].slice(2, 4), 16); b = parseInt(m[1].slice(4, 6), 16);
+    } else if ((m = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(c))) {
+      r = +m[1]; g = +m[2]; b = +m[3];
+    } else {
+      return null;
+    }
+    function lin(v) { v = v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  }
+
+  // Text colour that stays readable on the brand colour.
+  function textOn(accent) {
+    var l = luminance(accent);
+    return l !== null && l > 0.45 ? '#141414' : '#ffffff';
+  }
+
+  // The page part sits on the theme's background. On a dark theme a near-black button or star colour (the
+  // default) would vanish, so there it uses the theme's own text colour. The white pop-up keeps the chosen
+  // colours, remembered here before any change.
+  function adaptToTheme(root) {
+    var cs = window.getComputedStyle(root);
+    var accent = (cs.getPropertyValue('--ccf-rv-accent') || '').trim();
+    var star = (cs.getPropertyValue('--ccf-rv-star') || '').trim();
+    if (accent) root.setAttribute('data-ccf-accent', accent);
+    if (star) root.setAttribute('data-ccf-star', star);
+    var text = cs.color;
+    var textLum = luminance(text);
+    var used = accent;
+    if (textLum !== null && textLum > 0.5) {
+      var accentLum = luminance(accent);
+      var starLum = luminance(star);
+      if (accentLum !== null && accentLum < 0.2) { root.style.setProperty('--ccf-rv-accent', text); used = text; }
+      if (starLum !== null && starLum < 0.2) root.style.setProperty('--ccf-rv-star', text);
+    }
+    root.style.setProperty('--ccf-rv-accent-fg', textOn(used));
   }
 
   // ── photos: read, shrink, check ────────────────────────────────────────────
@@ -182,30 +223,8 @@
   }
 
   function typeList(types) {
-    return types.map(function (t) { return t.toUpperCase(); }).join(', ');
-  }
-
-  // Brightness (0 dark .. 1 light) of a #rgb / #rrggbb / rgb() colour, or null when it cannot be read.
-  function luminance(color) {
-    var c = String(color || '').trim();
-    var r, g, b, m;
-    if ((m = /^#([0-9a-f]{3})$/i.exec(c))) {
-      r = parseInt(m[1].charAt(0) + m[1].charAt(0), 16); g = parseInt(m[1].charAt(1) + m[1].charAt(1), 16); b = parseInt(m[1].charAt(2) + m[1].charAt(2), 16);
-    } else if ((m = /^#([0-9a-f]{6})$/i.exec(c))) {
-      r = parseInt(m[1].slice(0, 2), 16); g = parseInt(m[1].slice(2, 4), 16); b = parseInt(m[1].slice(4, 6), 16);
-    } else if ((m = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(c))) {
-      r = +m[1]; g = +m[2]; b = +m[3];
-    } else {
-      return null;
-    }
-    function lin(v) { v = v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
-    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-  }
-
-  // Text colour that stays readable on the brand colour.
-  function textOn(accent) {
-    var l = luminance(accent);
-    return l !== null && l > 0.45 ? '#0f172a' : '#ffffff';
+    var names = types.map(function (t) { return t.toUpperCase(); });
+    return names.length > 1 ? names.slice(0, -1).join(', ') + ' or ' + names[names.length - 1] : names.join('');
   }
 
   // ── pop-up layers shared by the write-a-review pages and the photo viewer ───
@@ -228,21 +247,19 @@
 
   function focusables(container) {
     return Array.prototype.slice.call(container.querySelectorAll('button, a[href], input, textarea, select, [tabindex]'))
-      .filter(function (n) { return !n.disabled && n.getAttribute('tabindex') !== '-1' && !n.hidden; });
+      .filter(function (n) { return !n.disabled && n.getAttribute('tabindex') !== '-1' && !n.hidden && n.style.visibility !== 'hidden' && n.type !== 'file'; });
   }
 
-  // Creates the overlay, locks page scroll, keeps Tab inside, closes on Escape.
+  // Creates the overlay on <body> (a theme container cannot squeeze it), locks page scroll,
+  // keeps Tab inside and closes on Escape.
   function openLayer(root, label, onClose) {
     var layer = el('div', 'ccf-rvm');
+    // The pop-up is white: use the colours as chosen, not the dark-theme swap made for the page.
     var vars = window.getComputedStyle(root);
-    ['--ccf-rv-accent', '--ccf-rv-star'].forEach(function (name) {
-      var v = vars.getPropertyValue(name);
-      if (v && v.trim()) layer.style.setProperty(name, v.trim());
-    });
-    var accent = (vars.getPropertyValue('--ccf-rv-accent') || '').trim();
-    var lum = luminance(accent);
-    // A near-black brand colour would vanish on the pop-up's dark palette; the style sheet swaps it for a light button.
-    layer.setAttribute('data-acc', lum !== null && lum < 0.18 ? 'dark' : 'other');
+    var accent = root.getAttribute('data-ccf-accent') || (vars.getPropertyValue('--ccf-rv-accent') || '').trim();
+    var star = root.getAttribute('data-ccf-star') || (vars.getPropertyValue('--ccf-rv-star') || '').trim();
+    if (accent) layer.style.setProperty('--ccf-rv-accent', accent);
+    if (star) layer.style.setProperty('--ccf-rv-star', star);
     layer.style.setProperty('--ccf-rv-accent-fg', textOn(accent));
     var backdrop = el('div', 'ccf-rvm-backdrop');
     var dialog = el('div', 'ccf-rvm-dialog');
@@ -284,10 +301,9 @@
   function openLightbox(root, url, alt, opener) {
     var l = openLayer(root, 'Photo', function () { if (opener && opener.focus) opener.focus(); });
     l.layer.className += ' ccf-rvm-lightbox';
-    var x = el('button', 'ccf-rvm-x');
-    x.type = 'button';
+    var x = button('ccf-rvm-x');
     x.setAttribute('aria-label', 'Close photo');
-    x.appendChild(icon('x', 20));
+    x.appendChild(icon('x', 18));
     x.addEventListener('click', l.close);
     var img = el('img', 'ccf-rvm-bigphoto');
     img.src = url;
@@ -302,20 +318,28 @@
   function init(root) {
     if (root.getAttribute('data-ccf-ready')) return;
     root.setAttribute('data-ccf-ready', '1');
-    root.style.setProperty('--ccf-rv-accent-fg', textOn(window.getComputedStyle(root).getPropertyValue('--ccf-rv-accent')));
+    adaptToTheme(root);
 
     var productId = root.getAttribute('data-product-id');
     var handle = root.getAttribute('data-product-handle') || '';
-    var heading = root.getAttribute('data-heading') || 'Customer reviews';
+    var productTitle = root.getAttribute('data-product-title') || '';
+    var productImage = root.getAttribute('data-product-image') || '';
+    var heading = root.getAttribute('data-heading') || 'What customers are saying';
+    var eyebrow = root.getAttribute('data-eyebrow') || 'Customer reviews';
+
     var data = null;
+    var items = [];
     var page = 1;
+    var filter = { rating: '', photos: false };
+    var sort = 'recent';
+    var loading = false;
     // What the customer has typed so far. Kept while the pages are closed and re-opened.
     var draft = { rating: 0, title: '', body: '', name: '', email: '', photos: [] };
 
     clear(root);
 
     // Narrow layout follows the block's own width (a narrow theme column), not just the screen.
-    function markWidth() { root.classList.toggle('ccf-rv--narrow', root.clientWidth > 0 && root.clientWidth < 620); }
+    function markWidth() { root.classList.toggle('ccf-rv--narrow', root.clientWidth > 0 && root.clientWidth < 720); }
     markWidth();
     if (typeof window.ResizeObserver === 'function') {
       try { new window.ResizeObserver(markWidth).observe(root); } catch (e) { /* the media query still covers phones */ }
@@ -345,24 +369,27 @@
       resizeTimer = setTimeout(function () { widen(); markWidth(); }, 150);
     });
 
-    // Page layout: title + write button first, then the rating summary, then the reviews.
-    var heroEl = el('header', 'ccf-rv-hero');
-    var headEl = el('h2', 'ccf-rv-h', heading);
-    var subEl = el('div', 'ccf-rv-sub');
+    // Page layout: header (title + write button), summary, toolbar, list, footer.
+    var inner = el('div', 'ccf-rv-inner');
+    var headEl = el('header', 'ccf-rv-head');
+    var titles = el('div', 'ccf-rv-titles');
+    if (eyebrow.trim().toLowerCase() !== heading.trim().toLowerCase()) titles.appendChild(el('p', 'ccf-rv-eyebrow', eyebrow));
+    titles.appendChild(el('h2', 'ccf-rv-h', heading));
     var ctaEl = el('div', 'ccf-rv-cta');
-    var barsEl = el('div', 'ccf-rv-barswrap');
+    headEl.appendChild(titles);
+    headEl.appendChild(ctaEl);
+    var summaryEl = el('section', 'ccf-rv-summary');
+    summaryEl.setAttribute('aria-label', 'Rating summary');
+    var toolbarEl = el('div', 'ccf-rv-toolbar');
     var noteEl = el('div');
     var listEl = el('div', 'ccf-rv-list');
-    var pagerEl = el('div', 'ccf-rv-pager');
-    heroEl.appendChild(headEl);
-    heroEl.appendChild(subEl);
-    heroEl.appendChild(ctaEl);
-    var inner = el('div', 'ccf-rv-inner');
-    inner.appendChild(heroEl);
-    inner.appendChild(barsEl);
+    var footEl = el('div', 'ccf-rv-foot');
+    inner.appendChild(headEl);
+    inner.appendChild(summaryEl);
+    inner.appendChild(toolbarEl);
     inner.appendChild(noteEl);
     inner.appendChild(listEl);
-    inner.appendChild(pagerEl);
+    inner.appendChild(footEl);
     root.appendChild(inner);
 
     function setNote(text, kind) {
@@ -373,30 +400,19 @@
       noteEl.appendChild(n);
     }
 
-    // ── hero: rating line, write button, star bars ──
-    function renderHero() {
-      clear(subEl);
+    function isActive(rating, photos) { return filter.rating === rating && filter.photos === photos; }
+
+    function setFilter(rating, photos) {
+      filter = { rating: rating, photos: photos };
+      load(true);
+    }
+
+    // ── header: write button ──
+    function renderHead() {
       clear(ctaEl);
-      clear(barsEl);
       var f = data.form;
-      var s = data.summary;
-      var hasRatings = f.starRating && s.rated > 0;
-
-      if (hasRatings) {
-        var score = el('div', 'ccf-rv-score');
-        score.appendChild(el('span', 'ccf-rv-avg', String(s.average)));
-        var st = el('span', 'ccf-rv-stars ccf-rv-stars--big', starText(Math.round(s.average)));
-        st.setAttribute('aria-label', s.average + ' out of 5 stars');
-        score.appendChild(st);
-        score.appendChild(el('span', 'ccf-rv-count', 'Based on ' + plural(s.count, 'review', 'reviews')));
-        subEl.appendChild(score);
-      } else {
-        subEl.appendChild(el('div', 'ccf-rv-count', s.count ? plural(s.count, 'review', 'reviews') : 'No reviews yet'));
-      }
-
       if (f.canReview) {
-        var btn = el('button', 'ccf-rv-btn ccf-rv-btn--write');
-        btn.type = 'button';
+        var btn = button('ccf-rv-btn ccf-rv-btn--write');
         btn.appendChild(icon('edit', 18));
         btn.appendChild(el('span', null, 'Write a review'));
         btn.addEventListener('click', function () { openWizard(btn); });
@@ -407,88 +423,174 @@
         a.appendChild(el('span', null, 'Log in to write a review'));
         ctaEl.appendChild(a);
       } else if (REASONS[f.reason]) {
-        ctaEl.appendChild(el('div', 'ccf-rv-count', REASONS[f.reason]));
+        ctaEl.appendChild(el('p', 'ccf-rv-reason', REASONS[f.reason]));
       }
+    }
 
-      if (hasRatings) {
-        var card = el('div', 'ccf-rv-bars');
+    // ── summary: average, star bars, customer photos ──
+    function renderSummary() {
+      clear(summaryEl);
+      var f = data.form;
+      var s = data.summary;
+      summaryEl.hidden = !s.count;
+      if (!s.count) return;
+
+      var score = el('div', 'ccf-rv-score');
+      if (f.starRating && s.rated > 0) {
+        var big = el('div', 'ccf-rv-scoreline');
+        big.appendChild(el('span', 'ccf-rv-avg', String(s.average)));
+        big.appendChild(el('span', 'ccf-rv-muted', 'out of 5'));
+        score.appendChild(big);
+        score.appendChild(starRow(s.average, 20, 'ccf-rv-sumstars'));
+      }
+      score.appendChild(el('p', 'ccf-rv-muted ccf-rv-based', 'Based on ' + plural(s.count, 'review', 'reviews')));
+      summaryEl.appendChild(score);
+
+      if (f.starRating && s.rated > 0) {
+        var bars = el('div', 'ccf-rv-bars');
         for (var star = 5; star >= 1; star--) {
-          var n = s.distribution[star] || 0;
-          var row = el('div', 'ccf-rv-bar');
-          row.appendChild(el('span', null, star + '★'));
-          var track = el('span', 'ccf-rv-bar-track');
-          var fill = el('span', 'ccf-rv-bar-fill');
-          fill.style.width = (s.rated ? Math.round(n * 100 / s.rated) : 0) + '%';
-          track.appendChild(fill);
-          row.appendChild(track);
-          row.appendChild(el('span', null, String(n)));
-          card.appendChild(row);
+          (function (n) {
+            var count = s.distribution[n] || 0;
+            var on = isActive(String(n), false);
+            var b = button('ccf-rv-bar' + (on ? ' on' : ''));
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+            b.setAttribute('aria-label', plural(n, 'star', 'stars') + ': ' + plural(count, 'review', 'reviews'));
+            b.appendChild(el('span', null, plural(n, 'star', 'stars')));
+            var track = el('span', 'ccf-rv-bar-track');
+            var fill = el('span', 'ccf-rv-bar-fill');
+            fill.style.width = (s.rated ? Math.round(count * 100 / s.rated) : 0) + '%';
+            track.appendChild(fill);
+            b.appendChild(track);
+            b.appendChild(el('span', 'ccf-rv-muted', String(count)));
+            b.addEventListener('click', function () { setFilter(on ? '' : String(n), false); });
+            bars.appendChild(b);
+          })(star);
         }
-        barsEl.appendChild(card);
+        summaryEl.appendChild(bars);
+      }
+
+      var gallery = s.gallery || [];
+      if (gallery.length) {
+        var g = el('div', 'ccf-rv-gallery');
+        g.appendChild(el('p', 'ccf-rv-gtitle', 'Photos from customers'));
+        var grid = el('div', 'ccf-rv-ggrid');
+        var shown = gallery.slice(0, 4);
+        var extra = Math.max(0, gallery.length - 4);
+        shown.forEach(function (url, i) {
+          var t = button('ccf-rv-gtile');
+          var img = el('img');
+          img.src = url; img.alt = ''; img.loading = 'lazy';
+          t.appendChild(img);
+          if (i === 3 && extra > 0) {
+            t.appendChild(el('span', 'ccf-rv-gmore', '+' + extra));
+            t.setAttribute('aria-label', 'Show reviews with photos');
+            t.addEventListener('click', function () { setFilter('', true); });
+          } else {
+            t.setAttribute('aria-label', 'Open customer photo');
+            t.addEventListener('click', function () { openLightbox(root, url, 'Customer photo', t); });
+          }
+          grid.appendChild(t);
+        });
+        g.appendChild(grid);
+        var all = button('ccf-rv-link', 'See all ' + plural(s.photoCount || gallery.length, 'review', 'reviews') + ' with photos');
+        all.addEventListener('click', function () { setFilter('', true); });
+        g.appendChild(all);
+        summaryEl.appendChild(g);
       }
     }
 
-    // ── list of review cards ──
-    function renderList() {
-      clear(listEl);
-      if (!data.reviews.length) {
-        var empty = el('div', 'ccf-rv-empty');
-        empty.appendChild(icon('star', 30));
-        empty.appendChild(el('div', 'ccf-rv-empty-t', 'No reviews yet'));
-        empty.appendChild(el('div', 'ccf-rv-empty-s', 'Be the first to write one.'));
-        listEl.appendChild(empty);
-        return;
+    // ── toolbar: filter chips + sort ──
+    function renderToolbar() {
+      clear(toolbarEl);
+      var f = data.form;
+      var s = data.summary;
+      toolbarEl.hidden = !s.count;
+      if (!s.count) return;
+      var chips = el('div', 'ccf-rv-chips');
+      chips.setAttribute('role', 'group');
+      chips.setAttribute('aria-label', 'Filter reviews');
+      var defs = [{ label: 'All reviews', count: s.count, rating: '', photos: false }];
+      if (s.photoCount > 0) defs.push({ label: 'With photos', count: s.photoCount, rating: '', photos: true });
+      if (f.starRating && s.rated > 0) {
+        var d = s.distribution || {};
+        defs.push({ label: '5 stars', count: d[5] || 0, rating: '5', photos: false });
+        defs.push({ label: '4 stars', count: d[4] || 0, rating: '4', photos: false });
+        defs.push({ label: '3 stars and below', count: (d[3] || 0) + (d[2] || 0) + (d[1] || 0), rating: 'low', photos: false });
       }
-      var voted = votedIds();
-      data.reviews.forEach(function (r, idx) {
-        var item = el('article', 'ccf-rv-item');
-        item.style.animationDelay = Math.min(idx, 8) * 60 + 'ms';
-        var who = el('div', 'ccf-rv-who');
-        who.appendChild(avatarEl(r.name));
-        var idCol = el('div', 'ccf-rv-id');
-        idCol.appendChild(el('span', 'ccf-rv-name', r.name));
-        var meta = el('div', 'ccf-rv-meta');
-        if (r.verified) {
-          var badge = el('span', 'ccf-rv-badge');
-          badge.appendChild(icon('shield', 13));
-          badge.appendChild(document.createTextNode('Verified owner'));
-          meta.appendChild(badge);
-        }
-        meta.appendChild(el('span', 'ccf-rv-date', formatDate(r.createdAt)));
-        idCol.appendChild(meta);
-        who.appendChild(idCol);
-        if (typeof r.rating === 'number') {
-          var st = el('span', 'ccf-rv-stars', starText(r.rating));
-          st.setAttribute('aria-label', r.rating + ' out of 5 stars');
-          who.appendChild(st);
-        }
-        item.appendChild(who);
-        if (r.title) item.appendChild(el('div', 'ccf-rv-title', r.title));
-        item.appendChild(el('p', 'ccf-rv-body', r.body));
-        if (r.photos && r.photos.length) {
-          var ph = el('div', 'ccf-rv-photos');
-          r.photos.forEach(function (url) {
-            var b = el('button', 'ccf-rv-photo');
-            b.type = 'button';
-            b.setAttribute('aria-label', 'View photo from ' + r.name);
-            var img = el('img');
-            img.src = url; img.alt = 'Photo from ' + r.name; img.loading = 'lazy';
-            b.appendChild(img);
-            b.addEventListener('click', function () { openLightbox(root, url, 'Photo from ' + r.name, b); });
-            ph.appendChild(b);
-          });
-          item.appendChild(ph);
-        }
-        if (r.helpful !== null && r.helpful !== undefined) item.appendChild(helpfulButton(r, voted.indexOf(r.id) !== -1));
-        listEl.appendChild(item);
+      defs.forEach(function (c) {
+        if (c.count === 0 && (c.rating || c.photos)) return;
+        var on = isActive(c.rating, c.photos);
+        var b = button('ccf-rv-chip' + (on ? ' on' : ''));
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        b.appendChild(el('span', null, c.label));
+        b.appendChild(el('span', 'ccf-rv-chipcount', String(c.count)));
+        b.addEventListener('click', function () { setFilter(c.rating, c.photos); });
+        chips.appendChild(b);
       });
+      toolbarEl.appendChild(chips);
+
+      var label = el('label', 'ccf-rv-sortlabel', 'Sort by');
+      var sel = el('select', 'ccf-rv-sort');
+      [['recent', 'Most recent'], ['helpful', 'Most helpful'], ['highest', 'Highest rated'], ['lowest', 'Lowest rated']].forEach(function (o) {
+        if (!f.starRating && (o[0] === 'highest' || o[0] === 'lowest')) return;
+        if (!f.helpfulVotes && o[0] === 'helpful') return;
+        var opt = el('option', null, o[1]);
+        opt.value = o[0];
+        sel.appendChild(opt);
+      });
+      sel.value = sort;
+      sel.addEventListener('change', function () { sort = sel.value; load(true); });
+      label.appendChild(sel);
+      toolbarEl.appendChild(label);
     }
 
-    function helpfulButton(r, already) {
-      var b = el('button', 'ccf-rv-help');
-      b.type = 'button';
-      b.appendChild(icon('thumb', 14));
-      var label = el('span', null, 'Helpful (' + r.helpful + ')');
+    // ── review rows ──
+    function reviewRow(r, voted) {
+      var item = el('article', 'ccf-rv-item');
+      var meta = el('div', 'ccf-rv-meta');
+      meta.appendChild(avatarEl(r.name));
+      var who = el('div', 'ccf-rv-who');
+      who.appendChild(el('span', 'ccf-rv-name', r.name));
+      if (r.verified) {
+        var badge = el('span', 'ccf-rv-badge');
+        badge.appendChild(icon('verified', 14));
+        badge.appendChild(document.createTextNode('Verified buyer'));
+        who.appendChild(badge);
+      }
+      meta.appendChild(who);
+      item.appendChild(meta);
+
+      var main = el('div', 'ccf-rv-main');
+      var line = el('div', 'ccf-rv-line');
+      if (typeof r.rating === 'number') line.appendChild(starRow(r.rating, 16));
+      line.appendChild(el('span', 'ccf-rv-date', formatDate(r.createdAt)));
+      main.appendChild(line);
+      if (r.title) main.appendChild(el('h3', 'ccf-rv-title', r.title));
+      main.appendChild(el('p', 'ccf-rv-body', r.body));
+      if (r.photos && r.photos.length) {
+        var ph = el('div', 'ccf-rv-photos');
+        r.photos.forEach(function (url) {
+          var b = button('ccf-rv-photo');
+          b.setAttribute('aria-label', 'View photo from ' + r.name);
+          var img = el('img');
+          img.src = url; img.alt = 'Photo from ' + r.name; img.loading = 'lazy';
+          b.appendChild(img);
+          b.addEventListener('click', function () { openLightbox(root, url, 'Photo from ' + r.name, b); });
+          ph.appendChild(b);
+        });
+        main.appendChild(ph);
+      }
+      if (r.helpful !== null && r.helpful !== undefined) main.appendChild(helpfulRow(r, voted));
+      item.appendChild(main);
+      return item;
+    }
+
+    function helpfulRow(r, already) {
+      var row = el('div', 'ccf-rv-helpful');
+      row.appendChild(el('span', null, 'Was this helpful?'));
+      var b = button('ccf-rv-help' + (already ? ' on' : ''));
+      b.appendChild(icon('thumb', 15));
+      var label = el('span', null, 'Yes (' + r.helpful + ')');
       b.appendChild(label);
       b.setAttribute('aria-pressed', already ? 'true' : 'false');
       if (already) b.disabled = true;
@@ -497,44 +599,88 @@
         request('POST', '/' + encodeURIComponent(r.id) + '/helpful', { visitorId: visitorId() }).then(function (res) {
           if (res.body && res.body.ok) {
             rememberVote(r.id);
-            label.textContent = 'Helpful (' + res.body.helpful + ')';
+            label.textContent = 'Yes (' + res.body.helpful + ')';
             b.setAttribute('aria-pressed', 'true');
+            b.classList.add('on');
           } else {
             b.disabled = false;
           }
         }).catch(function () { b.disabled = false; });
       });
-      return b;
+      row.appendChild(b);
+      return row;
     }
 
-    function renderPager() {
-      clear(pagerEl);
-      if (data.pages <= 1) return;
-      var prev = el('button', 'ccf-rv-btn ccf-rv-btn--ghost', 'Previous');
-      var next = el('button', 'ccf-rv-btn ccf-rv-btn--ghost', 'Next');
-      prev.type = next.type = 'button';
-      prev.disabled = page <= 1;
-      next.disabled = page >= data.pages;
-      prev.addEventListener('click', function () { load(page - 1, true); });
-      next.addEventListener('click', function () { load(page + 1, true); });
-      pagerEl.appendChild(prev);
-      pagerEl.appendChild(el('span', 'ccf-rv-count', 'Page ' + page + ' of ' + data.pages));
-      pagerEl.appendChild(next);
+    function renderList(appended) {
+      var voted = votedIds();
+      if (!appended) clear(listEl);
+      var s = data.summary;
+      if (!s.count) {
+        var empty = el('div', 'ccf-rv-empty');
+        empty.appendChild(el('p', 'ccf-rv-empty-t', 'No reviews yet'));
+        empty.appendChild(el('p', 'ccf-rv-muted', data.form.canReview ? 'Be the first to share your thoughts.' : 'Reviews will appear here.'));
+        listEl.appendChild(empty);
+        return;
+      }
+      if (!items.length) {
+        var none = el('div', 'ccf-rv-none');
+        none.appendChild(el('span', null, 'No reviews match this filter. '));
+        var reset = button('ccf-rv-link', 'Show all reviews');
+        reset.addEventListener('click', function () { setFilter('', false); });
+        none.appendChild(reset);
+        listEl.appendChild(none);
+        return;
+      }
+      (appended || items).forEach(function (r) { listEl.appendChild(reviewRow(r, voted.indexOf(r.id) !== -1)); });
     }
 
-    function load(toPage, scroll) {
-      return request('GET', '?productId=' + encodeURIComponent(productId) + '&page=' + toPage).then(function (res) {
+    function renderFoot() {
+      clear(footEl);
+      if (!data.summary.count || !items.length) return;
+      footEl.appendChild(el('p', 'ccf-rv-muted', 'Showing ' + items.length + ' of ' + plural(data.filtered, 'review', 'reviews')));
+      if (page < data.pages) {
+        var more = button('ccf-rv-btn ccf-rv-btn--ghost ccf-rv-more', 'Load more reviews');
+        more.addEventListener('click', function () { if (!loading) load(false); });
+        footEl.appendChild(more);
+      }
+    }
+
+    function query(toPage) {
+      var q = '?productId=' + encodeURIComponent(productId) + '&page=' + toPage;
+      if (filter.rating) q += '&rating=' + encodeURIComponent(filter.rating);
+      if (filter.photos) q += '&photos=1';
+      if (sort !== 'recent') q += '&sort=' + encodeURIComponent(sort);
+      return q;
+    }
+
+    // reset: first page for the current filter and sort; otherwise the next page is added below.
+    function load(reset) {
+      var toPage = reset ? 1 : page + 1;
+      loading = true;
+      return request('GET', query(toPage)).then(function (res) {
+        loading = false;
         if (!res.body || !res.body.ok) throw new Error('load');
         data = res.body;
+        if (data.filtered === undefined) data.filtered = data.summary.count;
         page = data.page;
-        renderHero();
-        renderList();
-        renderPager();
+        if (reset) {
+          items = data.reviews.slice();
+          setNote('');
+          renderHead();
+          renderSummary();
+          renderToolbar();
+          renderList();
+        } else {
+          items = items.concat(data.reviews);
+          renderList(data.reviews);
+        }
+        renderFoot();
         widen();
         markWidth();
-        if (scroll) root.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }).catch(function () {
-        if (!data) { clear(subEl); clear(ctaEl); clear(listEl); setNote('Reviews could not be loaded right now.', 'err'); }
+        loading = false;
+        if (!data) { clear(ctaEl); setNote('Reviews could not be loaded right now.', 'err'); }
+        else setNote('Could not load more reviews. Please try again.', 'err');
       });
     }
 
@@ -542,11 +688,11 @@
     function openWizard(opener) {
       var f = data.form;
       var steps = [];
-      if (f.starRating) steps.push({ key: 'rating', icon: 'star', title: 'How was your experience?', sub: 'Tap a star to rate this product.' });
-      steps.push({ key: 'story', icon: 'edit', title: 'Tell us more', sub: 'What did you like or not like?' });
-      if (f.photos) steps.push({ key: 'photos', icon: 'image', title: 'Add some photos', sub: 'Optional, but other shoppers love them.' });
-      steps.push({ key: 'you', icon: 'user', title: 'About you', sub: f.emailRequired ? 'Use the email from your order. It is never shown.' : 'Your name is shown next to your review.' });
-      steps.push({ key: 'submit', icon: 'check', title: 'Ready to submit?', sub: 'This is how your review will look.' });
+      if (f.starRating) steps.push({ key: 'rating', name: 'Rating' });
+      steps.push({ key: 'story', name: 'Your review' });
+      if (f.photos) steps.push({ key: 'photos', name: 'Photos' });
+      steps.push({ key: 'you', name: 'About you' });
+      steps.push({ key: 'submit', name: 'Check and submit' });
 
       var index = 0;
       var sending = false;
@@ -560,34 +706,46 @@
       });
       var dialog = layer.dialog;
 
-      var closeBtn = el('button', 'ccf-rvm-x');
-      closeBtn.type = 'button';
+      var top = el('div', 'ccf-rvm-top');
+      top.appendChild(el('span', 'ccf-rvm-grab'));
+      var prod = el('div', 'ccf-rvm-product');
+      var thumb = el('span', 'ccf-rvm-pthumb');
+      thumb.setAttribute('aria-hidden', 'true');
+      if (productImage) { var pimg = el('img'); pimg.src = productImage; pimg.alt = ''; thumb.appendChild(pimg); }
+      prod.appendChild(thumb);
+      var ptext = el('div', 'ccf-rvm-ptext');
+      ptext.appendChild(el('span', 'ccf-rvm-pkicker', 'Write a review'));
+      ptext.appendChild(el('span', 'ccf-rvm-pname', productTitle || 'This product'));
+      prod.appendChild(ptext);
+      var closeBtn = button('ccf-rvm-x');
       closeBtn.setAttribute('aria-label', 'Close');
-      closeBtn.appendChild(icon('x', 20));
+      closeBtn.appendChild(icon('x', 18));
       closeBtn.addEventListener('click', layer.close);
+      prod.appendChild(closeBtn);
+      top.appendChild(prod);
 
-      var meta = el('div', 'ccf-rvm-meta');
-      var stepCount = el('span', 'ccf-rvm-count');
-      var dots = el('div', 'ccf-rvm-dots');
-      var dotEls = steps.map(function () { var d = el('span', 'ccf-rvm-dot'); dots.appendChild(d); return d; });
-      meta.appendChild(stepCount);
-      meta.appendChild(dots);
       var progress = el('div', 'ccf-rvm-progress');
-      var bar = el('div', 'ccf-rvm-bar');
-      progress.appendChild(bar);
+      var segs = el('div', 'ccf-rvm-segs');
+      var segEls = steps.map(function () { var sg = el('span', 'ccf-rvm-seg'); segs.appendChild(sg); return sg; });
+      var stepCount = el('p', 'ccf-rvm-count');
+      progress.appendChild(segs);
+      progress.appendChild(stepCount);
+
       var stage = el('div', 'ccf-rvm-stage');
       var foot = el('div', 'ccf-rvm-foot');
-      var backBtn = el('button', 'ccf-rv-btn ccf-rv-btn--ghost ccf-rvm-back');
-      backBtn.type = 'button';
-      backBtn.appendChild(icon('left', 18));
+      var backBtn = button('ccf-rv-btn ccf-rv-btn--ghost ccf-rvm-back');
+      backBtn.appendChild(icon('left', 16));
       backBtn.appendChild(el('span', null, 'Back'));
-      var nextBtn = el('button', 'ccf-rv-btn ccf-rvm-next');
-      nextBtn.type = 'button';
+      var right = el('div', 'ccf-rvm-right');
+      var skipBtn = button('ccf-rvm-skip', 'Skip');
+      var nextBtn = button('ccf-rv-btn ccf-rvm-next');
+      right.appendChild(skipBtn);
+      right.appendChild(nextBtn);
       foot.appendChild(backBtn);
-      foot.appendChild(nextBtn);
-      dialog.appendChild(closeBtn);
+      foot.appendChild(right);
+
+      dialog.appendChild(top);
       dialog.appendChild(progress);
-      dialog.appendChild(meta);
       dialog.appendChild(stage);
       dialog.appendChild(foot);
 
@@ -595,113 +753,137 @@
         if (!errEl) return;
         clear(errEl);
         if (!text) return;
-        errEl.appendChild(el('div', 'ccf-rvm-errmsg', text));
-        dialog.classList.remove('ccf-rvm-shake');
-        void dialog.offsetWidth;
-        dialog.classList.add('ccf-rvm-shake');
+        errEl.appendChild(el('p', 'ccf-rvm-errmsg', text));
       }
 
-      function field(labelText, hint, control, id) {
+      function heading(title, sub) {
+        var h = el('div', 'ccf-rvm-heading');
+        var t = el('h3', 'ccf-rvm-title', title);
+        t.tabIndex = -1;
+        h.appendChild(t);
+        h.appendChild(el('p', 'ccf-rvm-sub', sub));
+        return h;
+      }
+
+      function field(labelText, optional, control, id) {
+        var label = el('label', 'ccf-rvm-label');
+        label.htmlFor = id;
+        label.appendChild(document.createTextNode(labelText));
+        if (optional) label.appendChild(el('span', 'ccf-rvm-optional', 'Optional'));
         var wrap = el('div', 'ccf-rvm-field');
-        var label = el('label', 'ccf-rvm-label', labelText);
-        if (id) label.htmlFor = id;
-        if (hint) label.appendChild(el('span', 'ccf-rvm-hint', ' ' + hint));
         wrap.appendChild(label);
         wrap.appendChild(control);
         return wrap;
       }
 
+      function input(type, id, value, placeholder, max) {
+        var i = el('input', 'ccf-rvm-in');
+        i.type = type; i.id = id; i.value = value; i.placeholder = placeholder; i.maxLength = max;
+        return i;
+      }
+
       // step: rating
-      function buildRating() {
-        var box = el('div', 'ccf-rvm-rate');
+      function buildRating(box) {
+        box.className += ' ccf-rvm-center';
+        box.appendChild(heading('How would you rate it?', 'Your overall impression of the product.'));
         var row = el('div', 'ccf-rvm-stars');
         row.setAttribute('role', 'radiogroup');
         row.setAttribute('aria-label', 'Your rating');
-        var label = el('div', 'ccf-rvm-ratelabel');
+        var word = el('p', 'ccf-rvm-ratelabel');
         var buttons = [];
         function paint(n) {
           buttons.forEach(function (b, i) {
             b.classList.toggle('on', i < n);
             b.setAttribute('aria-checked', i + 1 === draft.rating ? 'true' : 'false');
           });
-          label.textContent = n ? RATING_LABELS[n - 1] : 'Select a rating';
-          label.classList.toggle('set', !!n);
+          word.textContent = RATING_WORDS[n];
+          word.classList.toggle('set', !!n);
         }
-        function choose(v, b) {
-          draft.rating = v;
-          paint(v);
-          showErr('');
-          if (b) { b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); }
-        }
+        function choose(v) { draft.rating = v; paint(v); showErr(''); }
         for (var i = 1; i <= 5; i++) {
           (function (value) {
-            var b = el('button', 'ccf-rvm-star');
-            b.type = 'button';
+            var b = button('ccf-rvm-star');
             b.setAttribute('role', 'radio');
             b.setAttribute('aria-label', plural(value, 'star', 'stars'));
-            b.appendChild(icon('star', 46, true));
-            b.addEventListener('click', function () { choose(value, b); });
+            b.appendChild(starIcon(44, false));
+            b.addEventListener('click', function () { choose(value); });
             b.addEventListener('mouseenter', function () { paint(value); });
-            b.addEventListener('mouseleave', function () { paint(draft.rating); });
             b.addEventListener('keydown', function (e) {
-              if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); var n = Math.min(5, (draft.rating || 0) + 1); choose(n, buttons[n - 1]); buttons[n - 1].focus(); }
-              if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); var m = Math.max(1, (draft.rating || 2) - 1); choose(m, buttons[m - 1]); buttons[m - 1].focus(); }
+              if (e.key === 'ArrowRight' || e.key === 'ArrowUp') { e.preventDefault(); var n = Math.min(5, (draft.rating || 0) + 1); choose(n); buttons[n - 1].focus(); }
+              if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') { e.preventDefault(); var m = Math.max(1, (draft.rating || 2) - 1); choose(m); buttons[m - 1].focus(); }
             });
             buttons.push(b);
             row.appendChild(b);
           })(i);
         }
+        row.addEventListener('mouseleave', function () { paint(draft.rating); });
         box.appendChild(row);
-        box.appendChild(label);
+        box.appendChild(word);
         paint(draft.rating);
-        return box;
       }
 
-      // step: story
-      function buildStory() {
-        var box = el('div', 'ccf-rvm-fields');
-        var title = el('input', 'ccf-rvm-in');
-        title.type = 'text'; title.id = 'ccf-rv-title'; title.maxLength = 120; title.value = draft.title;
-        title.placeholder = 'Sum it up in a few words';
+      // step: review text
+      function buildStory(box) {
+        box.appendChild(heading('Tell us about it', 'What did you like, and what could be better?'));
+        var title = input('text', 'ccf-rv-title', draft.title, 'Beautiful fabric and a perfect fit', 120);
+        var body = el('textarea', 'ccf-rvm-in ccf-rvm-area');
+        body.id = 'ccf-rv-body'; body.rows = 5; body.maxLength = 2000; body.value = draft.body;
+        body.placeholder = 'Quality, fit, colour, delivery…';
+        var counter = el('p', 'ccf-rvm-counter');
+        function count() { counter.textContent = body.value.length + ' / 2000'; counter.classList.toggle('ok', body.value.trim().length >= 10); }
         title.addEventListener('input', function () { draft.title = title.value; });
         title.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); body.focus(); } });
-        var body = el('textarea', 'ccf-rvm-in ccf-rvm-area');
-        body.id = 'ccf-rv-body'; body.rows = 6; body.maxLength = 2000; body.value = draft.body;
-        body.placeholder = 'Share details about quality, fit and how you use it';
-        var counter = el('div', 'ccf-rvm-counter');
-        function count() { counter.textContent = body.value.length + ' / 2000'; counter.classList.toggle('ok', body.value.trim().length >= 10); }
         body.addEventListener('input', function () { draft.body = body.value; count(); showErr(''); });
         count();
-        box.appendChild(field('Headline', '(optional)', title, 'ccf-rv-title'));
-        box.appendChild(field('Your review', '', body, 'ccf-rv-body'));
+        box.appendChild(field('Headline', true, title, 'ccf-rv-title'));
+        box.appendChild(field('Your review', false, body, 'ccf-rv-body'));
         box.appendChild(counter);
-        return box;
       }
 
       // step: photos
+      var mimes = f.photos ? f.photos.allowedTypes.map(function (t) { return TYPE_MIME[t]; }).filter(Boolean) : [];
+      var fileIn = null;
+
       function renderThumbs() {
         if (!thumbsEl || !document.body.contains(thumbsEl)) return;
         clear(thumbsEl);
+        var limit = f.photos.maxPhotos;
         draft.photos.forEach(function (p) {
-          var box = el('div', 'ccf-rvm-thumb' + (p.busy ? ' busy' : ''));
-          var img = el('img'); img.src = p.preview; img.alt = 'Selected photo';
-          box.appendChild(img);
-          if (p.busy) box.appendChild(el('span', 'ccf-rvm-spin'));
-          var x = el('button', 'ccf-rvm-thumbx'); x.type = 'button'; x.setAttribute('aria-label', 'Remove photo');
+          var t = el('div', 'ccf-rvm-thumb' + (p.busy ? ' busy' : ''));
+          if (p.preview) { var img = el('img'); img.src = p.preview; img.alt = 'Selected photo'; t.appendChild(img); }
+          if (p.busy) t.appendChild(el('span', 'ccf-rvm-spin'));
+          var x = button('ccf-rvm-thumbx');
+          x.setAttribute('aria-label', 'Remove photo');
           x.appendChild(icon('x', 14));
           x.addEventListener('click', function () { draft.photos = draft.photos.filter(function (q) { return q !== p; }); renderThumbs(); });
-          box.appendChild(x);
-          thumbsEl.appendChild(box);
+          t.appendChild(x);
+          thumbsEl.appendChild(t);
         });
+        var tiles = draft.photos.length;
+        if (draft.photos.length < limit) {
+          var add = button('ccf-rvm-add');
+          add.appendChild(icon('plus', 22));
+          add.appendChild(el('span', null, 'Add photo'));
+          add.addEventListener('click', function () { if (fileIn) fileIn.click(); });
+          thumbsEl.appendChild(add);
+          tiles++;
+        }
+        while (tiles < 3 || tiles % 3 !== 0) {
+          var empty = el('span', 'ccf-rvm-empty');
+          empty.setAttribute('aria-hidden', 'true');
+          thumbsEl.appendChild(empty);
+          tiles++;
+        }
       }
 
-      function addPhoto(file, mimes) {
+      function addPhoto(file) {
         var limits = f.photos;
-        if (draft.photos.length >= limits.maxPhotos) { showErr('You can add up to ' + limits.maxPhotos + ' photos.'); return; }
+        if (draft.photos.length >= limits.maxPhotos) { showErr('You can add up to ' + plural(limits.maxPhotos, 'photo', 'photos') + '.'); return; }
         if (mimes.indexOf(file.type) === -1) { showErr('Only ' + typeList(limits.allowedTypes) + ' photos are allowed.'); return; }
         showErr('');
         var entry = { url: '', preview: '', busy: true };
         draft.photos.push(entry);
+        renderThumbs();
         prepareImage(file).then(function (dataUrl) {
           if (dataUrlBytes(dataUrl) > limits.maxFileSizeMb * 1024 * 1024) throw new Error('size');
           entry.preview = dataUrl;
@@ -715,89 +897,78 @@
         }).catch(function (err) {
           draft.photos = draft.photos.filter(function (q) { return q !== entry; });
           renderThumbs();
-          showErr(err.message === 'size' ? 'Each photo must be under ' + limits.maxFileSizeMb + ' MB.' : (err.userMessage || 'That photo could not be added. Please try another.'));
+          showErr(err.message === 'size' ? 'Each photo must be under ' + limits.maxFileSizeMb + ' MB.' : (err.userMessage || 'That photo could not be added. Try another one.'));
         });
       }
 
-      function buildPhotos() {
-        var box = el('div', 'ccf-rvm-fields');
+      function buildPhotos(box) {
         var limits = f.photos;
-        var mimes = limits.allowedTypes.map(function (t) { return TYPE_MIME[t]; }).filter(Boolean);
-        var fileIn = el('input', 'ccf-rvm-file');
+        box.appendChild(heading('Add photos', 'Optional. Shoppers trust reviews with photos more.'));
+        fileIn = el('input', 'ccf-rvm-file');
         fileIn.type = 'file'; fileIn.id = 'ccf-rv-photos'; fileIn.multiple = limits.maxPhotos > 1; fileIn.accept = mimes.join(',');
-        var zone = el('label', 'ccf-rvm-drop');
-        zone.htmlFor = 'ccf-rv-photos';
-        zone.appendChild(icon('upload', 28));
-        zone.appendChild(el('strong', null, 'Click to upload'));
-        zone.appendChild(el('span', null, 'or drag and drop'));
-        zone.appendChild(el('small', null, typeList(limits.allowedTypes) + ' · up to ' + limits.maxPhotos + ' photos · each under ' + limits.maxFileSizeMb + ' MB'));
-        function take(files) {
-          Array.prototype.slice.call(files || []).forEach(function (file) { addPhoto(file, mimes); });
-        }
+        fileIn.tabIndex = -1;
+        fileIn.setAttribute('aria-hidden', 'true');
+        function take(files) { Array.prototype.slice.call(files || []).forEach(addPhoto); }
         fileIn.addEventListener('change', function () { var files = fileIn.files; take(files); fileIn.value = ''; });
-        zone.addEventListener('dragover', function (e) { e.preventDefault(); zone.classList.add('over'); });
-        zone.addEventListener('dragleave', function () { zone.classList.remove('over'); });
-        zone.addEventListener('drop', function (e) { e.preventDefault(); zone.classList.remove('over'); take(e.dataTransfer && e.dataTransfer.files); });
-        thumbsEl = el('div', 'ccf-rvm-thumbs');
+        thumbsEl = el('div', 'ccf-rvm-tiles');
+        thumbsEl.addEventListener('dragover', function (e) { e.preventDefault(); thumbsEl.classList.add('over'); });
+        thumbsEl.addEventListener('dragleave', function () { thumbsEl.classList.remove('over'); });
+        thumbsEl.addEventListener('drop', function (e) { e.preventDefault(); thumbsEl.classList.remove('over'); take(e.dataTransfer && e.dataTransfer.files); });
         box.appendChild(fileIn);
-        box.appendChild(zone);
         box.appendChild(thumbsEl);
-        renderThumbs();
-        return box;
+        box.appendChild(el('p', 'ccf-rvm-hint', typeList(limits.allowedTypes) + ' · up to ' + plural(limits.maxPhotos, 'photo', 'photos') + ' · ' + limits.maxFileSizeMb + ' MB each'));
       }
 
       // step: about you
-      function buildYou() {
-        var box = el('div', 'ccf-rvm-fields');
-        var name = el('input', 'ccf-rvm-in');
-        name.type = 'text'; name.id = 'ccf-rv-name'; name.maxLength = 60; name.autocomplete = 'name'; name.value = draft.name;
-        name.placeholder = 'Your name';
+      function buildYou(box) {
+        box.appendChild(heading('About you', 'Your name is shown with your review.'));
+        var name = input('text', 'ccf-rv-name', draft.name, 'Asha Patel', 60);
+        name.autocomplete = 'name';
         name.addEventListener('input', function () { draft.name = name.value; showErr(''); });
-        box.appendChild(field('Name', '', name, 'ccf-rv-name'));
-        var email = null;
+        name.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); goNext(); } });
+        box.appendChild(field('Name', false, name, 'ccf-rv-name'));
         if (f.needsEmail) {
-          email = el('input', 'ccf-rvm-in');
-          email.type = 'email'; email.id = 'ccf-rv-email'; email.maxLength = 254; email.autocomplete = 'email'; email.value = draft.email;
-          email.placeholder = 'you@example.com';
+          var email = input('email', 'ccf-rv-email', draft.email, 'asha@example.com', 254);
+          email.autocomplete = 'email';
           email.addEventListener('input', function () { draft.email = email.value; showErr(''); });
-          box.appendChild(field('Email', f.emailRequired ? '' : '(optional)', email, 'ccf-rv-email'));
-          box.appendChild(el('p', 'ccf-rvm-fine', f.emailRequired ? 'We use it only to check your order. It is never shown.' : 'Never shown. Use your order email to get the Verified owner badge.'));
+          email.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); goNext(); } });
+          box.appendChild(field('Email', !f.emailRequired, email, 'ccf-rv-email'));
+          box.appendChild(el('p', 'ccf-rvm-hint', f.emailRequired
+            ? 'Use the email from your order. It is never shown.'
+            : 'Never shown. Use the email from your order to get the Verified buyer badge.'));
         }
-        var onEnter = function (e) { if (e.key === 'Enter') { e.preventDefault(); goNext(); } };
-        name.addEventListener('keydown', onEnter);
-        if (email) email.addEventListener('keydown', onEnter);
-        return box;
       }
 
-      // step: preview + submit
-      function buildSubmit() {
-        var box = el('div', 'ccf-rvm-fields');
+      // step: check and submit
+      function buildSubmit(box) {
+        box.appendChild(heading('Check your review', 'This is how it will appear on the product page.'));
         var card = el('div', 'ccf-rvm-preview');
-        var who = el('div', 'ccf-rv-who');
-        who.appendChild(avatarEl(draft.name));
-        var idCol = el('div', 'ccf-rv-id');
-        idCol.appendChild(el('span', 'ccf-rv-name', draft.name.trim() || 'You'));
-        idCol.appendChild(el('div', 'ccf-rv-meta')).appendChild(el('span', 'ccf-rv-date', formatDate(new Date())));
-        who.appendChild(idCol);
-        if (f.starRating && draft.rating) who.appendChild(el('span', 'ccf-rv-stars', starText(draft.rating)));
-        card.appendChild(who);
-        if (draft.title.trim()) card.appendChild(el('div', 'ccf-rv-title', draft.title.trim()));
-        card.appendChild(el('p', 'ccf-rv-body', draft.body.trim()));
-        if (draft.photos.length) {
-          var ph = el('div', 'ccf-rvm-thumbs');
-          draft.photos.forEach(function (p) {
-            var t = el('div', 'ccf-rvm-thumb');
-            var img = el('img'); img.src = p.preview; img.alt = 'Your photo';
-            t.appendChild(img);
-            ph.appendChild(t);
-          });
-          card.appendChild(ph);
+        var row1 = el('div', 'ccf-rvm-prow');
+        var who = el('div', 'ccf-rvm-pwho');
+        who.appendChild(avatarEl(draft.name, 'ccf-rv-ava ccf-rv-ava--sm'));
+        who.appendChild(el('span', 'ccf-rv-name', draft.name.trim() || 'Your name'));
+        row1.appendChild(who);
+        var editYou = button('ccf-rv-link', 'Edit');
+        editYou.setAttribute('aria-label', 'Edit your name');
+        editYou.addEventListener('click', function () { go(stepIndex('you'), -1); });
+        row1.appendChild(editYou);
+        card.appendChild(row1);
+        if (f.starRating) {
+          var row2 = el('div', 'ccf-rvm-prow');
+          row2.appendChild(draft.rating ? starRow(draft.rating, 16) : el('span', 'ccf-rv-muted', 'No rating'));
+          var editRating = button('ccf-rv-link', 'Edit');
+          editRating.setAttribute('aria-label', 'Edit your rating');
+          editRating.addEventListener('click', function () { go(stepIndex('rating'), -1); });
+          row2.appendChild(editRating);
+          card.appendChild(row2);
         }
+        if (draft.title.trim()) card.appendChild(el('p', 'ccf-rvm-ptitle', draft.title.trim()));
+        card.appendChild(el('p', 'ccf-rv-body', draft.body.trim()));
+        if (draft.photos.length) card.appendChild(el('p', 'ccf-rv-muted ccf-rvm-pphotos', plural(draft.photos.length, 'photo', 'photos') + ' attached'));
         box.appendChild(card);
-        box.appendChild(el('p', 'ccf-rvm-fine ccf-rvm-center', f.requireApproval
+        box.appendChild(el('p', 'ccf-rvm-hint', f.requireApproval
           ? 'The store checks every review before it is published.'
           : 'Your review is published right away.'));
-        return box;
       }
 
       var BUILDERS = { rating: buildRating, story: buildStory, photos: buildPhotos, you: buildYou, submit: buildSubmit };
@@ -809,21 +980,20 @@
 
       // Returns an error message for the step, or '' when it is fine.
       function validate(key) {
-        if (key === 'rating' && f.starRating && f.starRequired && !draft.rating) return 'Please choose a star rating.';
-        if (key === 'story' && draft.body.trim().length < 10) return 'Please write at least 10 characters.';
-        if (key === 'photos' && draft.photos.some(function (p) { return p.busy; })) return 'Please wait for your photos to finish uploading.';
+        if (key === 'rating' && f.starRating && f.starRequired && !draft.rating) return 'Choose a star rating to continue.';
+        if (key === 'story' && draft.body.trim().length < 10) return 'Write at least 10 characters.';
+        if (key === 'photos' && draft.photos.some(function (p) { return p.busy; })) return 'Wait for your photos to finish uploading.';
         if (key === 'you') {
-          if (!draft.name.trim()) return 'Please enter your name.';
+          if (!draft.name.trim()) return 'Enter your name.';
           var em = draft.email.trim();
-          if (f.needsEmail && f.emailRequired && !em) return 'Please enter the email you used to order.';
-          if (em && !EMAIL_RE.test(em)) return 'Please enter a valid email address.';
+          if (f.needsEmail && f.emailRequired && !em) return 'Enter the email you used to order.';
+          if (em && !EMAIL_RE.test(em)) return 'Enter a valid email address.';
         }
         return '';
       }
 
       function focusStep() {
-        var first = stage.querySelector('.ccf-rvm-star, input:not([type="file"]), textarea');
-        var target = first || stage.querySelector('.ccf-rvm-title');
+        var target = stage.querySelector('.ccf-rvm-star, input:not([type="file"]), textarea') || stage.querySelector('.ccf-rvm-title');
         if (target && target.focus) target.focus();
       }
 
@@ -831,34 +1001,21 @@
         var st = steps[index];
         clear(stage);
         thumbsEl = null;
-        var wrap = el('div', 'ccf-rvm-step ' + (dir > 0 ? 'ccf-rvm-in-next' : dir < 0 ? 'ccf-rvm-in-back' : 'ccf-rvm-in-first'));
-        var ic = el('div', 'ccf-rvm-ic');
-        ic.appendChild(icon(st.icon, 26));
-        var h = el('h3', 'ccf-rvm-title', st.title);
-        h.tabIndex = -1;
-        wrap.appendChild(ic);
-        wrap.appendChild(h);
-        wrap.appendChild(el('p', 'ccf-rvm-sub', st.sub));
-        wrap.appendChild(BUILDERS[st.key]());
+        var box = el('div', 'ccf-rvm-step ' + (dir > 0 ? 'ccf-rvm-in-next' : dir < 0 ? 'ccf-rvm-in-back' : 'ccf-rvm-in-first'));
+        BUILDERS[st.key](box);
         errEl = el('div', 'ccf-rvm-err');
         errEl.setAttribute('role', 'alert');
-        wrap.appendChild(errEl);
-        stage.appendChild(wrap);
+        box.appendChild(errEl);
+        stage.appendChild(box);
         // Photos already added (coming back to this page) can only be drawn once the page is attached.
         if (thumbsEl) renderThumbs();
 
-        stepCount.textContent = 'Step ' + (index + 1) + ' of ' + steps.length;
-        bar.style.width = Math.round((index + 1) * 100 / steps.length) + '%';
-        dotEls.forEach(function (d, i) { d.classList.toggle('done', i < index); d.classList.toggle('now', i === index); });
+        stepCount.textContent = 'Step ' + (index + 1) + ' of ' + steps.length + ' · ' + st.name;
+        segEls.forEach(function (sg, i) { sg.classList.toggle('on', i <= index); });
         backBtn.style.visibility = index === 0 ? 'hidden' : 'visible';
-        clear(nextBtn);
-        if (st.key === 'submit') {
-          nextBtn.appendChild(el('span', null, 'Submit review'));
-          nextBtn.appendChild(icon('check', 18));
-        } else {
-          nextBtn.appendChild(el('span', null, 'Next'));
-          nextBtn.appendChild(icon('right', 18));
-        }
+        foot.classList.toggle('ccf-rvm-first', index === 0);
+        skipBtn.hidden = st.key !== 'photos';
+        nextBtn.textContent = st.key === 'submit' ? 'Submit review' : 'Continue';
         nextBtn.disabled = false;
         nextBtn.classList.remove('loading');
         focusStep();
@@ -908,8 +1065,8 @@
           if (res.body && res.body.ok) { showDone(res.body.status); return; }
           nextBtn.disabled = false;
           nextBtn.classList.remove('loading');
-          var message = (res.body && res.body.message) || 'Could not send your review. Please try again.';
-          if (res.body && res.body.error === 'LOGIN_REQUIRED') message = 'Please log in to write a review.';
+          var message = (res.body && res.body.message) || 'Your review could not be sent. Try again.';
+          if (res.body && res.body.error === 'LOGIN_REQUIRED') message = 'Log in to write a review.';
           var at = res.body && res.body.field ? stepIndex(FIELD_STEP[res.body.field]) : -1;
           if (at !== -1 && at !== index) go(at, -1);
           showErr(message);
@@ -918,67 +1075,46 @@
           backBtn.disabled = false;
           nextBtn.disabled = false;
           nextBtn.classList.remove('loading');
-          showErr('Could not send your review. Please check your connection and try again.');
+          showErr('Your review could not be sent. Check your connection and try again.');
         });
       }
 
       // The final "thank you" page.
       function showDone(status) {
         finished = true;
+        var first = draft.name.trim().split(/\s+/)[0] || '';
         clear(stage);
         errEl = null;
-        foot.style.display = 'none';
-        meta.style.display = 'none';
-        bar.style.width = '100%';
+        foot.hidden = true;
+        progress.hidden = true;
         var done = el('div', 'ccf-rvm-step ccf-rvm-done ccf-rvm-in-first');
-        var burst = el('div', 'ccf-rvm-burst');
-        for (var i = 0; i < 22; i++) {
-          var c = el('span', 'ccf-rvm-conf');
-          var angle = (i / 22) * Math.PI * 2;
-          var dist = 70 + Math.random() * 90;
-          c.style.setProperty('--x', Math.round(Math.cos(angle) * dist) + 'px');
-          c.style.setProperty('--y', Math.round(Math.sin(angle) * dist - 18) + 'px');
-          c.style.setProperty('--r', Math.round(Math.random() * 540 - 270) + 'deg');
-          c.style.setProperty('--c', CONFETTI[i % CONFETTI.length]);
-          c.style.setProperty('--d', (Math.random() * 0.18).toFixed(2) + 's');
-          burst.appendChild(c);
-        }
-        var badge = document.createElementNS(SVG_NS, 'svg');
-        badge.setAttribute('class', 'ccf-rvm-okmark');
-        badge.setAttribute('viewBox', '0 0 64 64');
-        badge.setAttribute('width', '88');
-        badge.setAttribute('height', '88');
-        badge.setAttribute('aria-hidden', 'true');
-        var ring = document.createElementNS(SVG_NS, 'circle');
-        ring.setAttribute('class', 'ccf-rvm-okring'); ring.setAttribute('cx', '32'); ring.setAttribute('cy', '32'); ring.setAttribute('r', '28');
-        var tick = document.createElementNS(SVG_NS, 'path');
-        tick.setAttribute('class', 'ccf-rvm-oktick'); tick.setAttribute('d', 'M19 33l9 9 17-19');
-        badge.appendChild(ring);
-        badge.appendChild(tick);
-        done.appendChild(burst);
-        done.appendChild(badge);
-        var h = el('h3', 'ccf-rvm-title ccf-rvm-bigtitle', 'Thank you!');
+        var mark = svgEl('svg', { viewBox: '0 0 56 56', width: 72, height: 72, 'aria-hidden': 'true', 'class': 'ccf-rvm-okmark' });
+        mark.appendChild(svgEl('circle', { 'class': 'ccf-rvm-okring', cx: 28, cy: 28, r: 26 }));
+        mark.appendChild(svgEl('path', { 'class': 'ccf-rvm-oktick', d: 'M17 29l7 7 15-16' }));
+        done.appendChild(mark);
+        var h = el('h3', 'ccf-rvm-title', first ? 'Thank you, ' + first : 'Thank you');
         h.tabIndex = -1;
         done.appendChild(h);
         done.appendChild(el('p', 'ccf-rvm-sub', status === 'pending'
-          ? 'Your review was sent. It will appear once the store approves it.'
-          : 'Your review is now live. Thanks for helping other shoppers.'));
-        var again = el('button', 'ccf-rv-btn ccf-rvm-donebtn', 'Done');
-        again.type = 'button';
-        again.addEventListener('click', layer.close);
-        done.appendChild(again);
+          ? 'Your review has been sent. It will appear on the product page once the store approves it.'
+          : 'Your review is now live on the product page.'));
+        var back = button('ccf-rv-btn ccf-rvm-donebtn', 'Back to the product');
+        back.addEventListener('click', layer.close);
+        done.appendChild(back);
         stage.appendChild(done);
-        again.focus();
+        back.focus();
         draft = { rating: 0, title: '', body: '', name: '', email: '', photos: [] };
-        load(1, false);
+        filter = { rating: '', photos: false };
+        load(true);
       }
 
       backBtn.addEventListener('click', goBack);
       nextBtn.addEventListener('click', goNext);
+      skipBtn.addEventListener('click', goNext);
       renderStep(0);
     }
 
-    load(1, false);
+    load(true);
   }
 
   function initAll() {

@@ -112,7 +112,7 @@ describe('asking for room when the theme container is only as wide as the conten
 });
 
 describe('compact layout follows the block own width', () => {
-  it('under 620px wide -> ccf-rv--narrow; wide -> not', async () => {
+  it('under 720px wide -> ccf-rv--narrow; wide -> not', async () => {
     scenario.parent = 'fixed';
     scenario.fixedWidth = 380;
     scenario.contentWidth = 380;
@@ -120,7 +120,7 @@ describe('compact layout follows the block own width', () => {
     expect(root.classList.contains('ccf-rv--narrow')).toBe(true);
 
     scenario.parent = 'grows';
-    scenario.contentWidth = 700;
+    scenario.contentWidth = 800;
     root = await mount();
     expect(root.classList.contains('ccf-rv--narrow')).toBe(false);
   });
