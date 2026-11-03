@@ -28,7 +28,7 @@ function parentWidth(root) {
 
 beforeEach(() => {
   observers = [];
-  scenario = { viewport: 1200, parent: 'grows', fixedWidth: 380, contentWidth: 350 };
+  scenario = { viewport: 1200, parent: 'grows', fixedWidth: 380, contentWidth: 350, left: 20 };
   Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, get: () => scenario.viewport });
   Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
     configurable: true,
@@ -39,7 +39,8 @@ beforeEach(() => {
     let width = 0;
     if (this === root) width = rootWidth(root);
     else if (root && this === root.parentElement) width = parentWidth(root);
-    return { left: 20, top: 0, width, height: 0, right: 20 + width, bottom: 0, x: 20, y: 0 };
+    const left = this === root ? scenario.left : 20;
+    return { left, top: 0, width, height: 0, right: left + width, bottom: 0, x: left, y: 0 };
   };
   window.getComputedStyle = ((orig) => (el, ...rest) => {
     const cs = orig(el, ...rest);
@@ -64,9 +65,15 @@ async function mount() {
 }
 
 describe('asking for room when the theme container is only as wide as the content', () => {
-  it('self-sizing container + room on the page -> asks for the full width (viewport - 40, capped at the maximum)', async () => {
+  it('self-sizing container + room on the page -> asks for the page width (same room on both sides, so it is centred)', async () => {
     const root = await mount();
-    expect(root.style.minWidth).toBe('1100px');
+    expect(root.style.minWidth).toBe('1160px');
+  });
+
+  it('the same room is left on both sides: the page width minus twice the block left offset', async () => {
+    scenario.left = 60;
+    const root = await mount();
+    expect(root.style.minWidth).toBe('1080px');
   });
 
   it('a smaller viewport gets viewport - 40', async () => {
@@ -82,7 +89,7 @@ describe('asking for room when the theme container is only as wide as the conten
   });
 
   it('already wide enough -> nothing is asked for', async () => {
-    scenario.contentWidth = 1100;
+    scenario.contentWidth = 1160;
     const root = await mount();
     expect(root.style.minWidth).toBe('');
   });
