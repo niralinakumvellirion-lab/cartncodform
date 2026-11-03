@@ -7,7 +7,10 @@ const BG = '#eef2ff';
 const LIMIT = 20;
 
 // The same drawer serves push and email; only the endpoint and wording differ.
-const CHANNEL_NOUN = { push: 'notification', email: 'email' };
+const CHANNEL_NOUN = { push: 'notification', email: 'email', whatsapp: 'WhatsApp message' };
+const CHANNEL_REVISIT_SOURCE = { push: 'a notification', email: 'an email', whatsapp: 'a WhatsApp message' };
+// WhatsApp messages are typed by purpose; the other channels by signal type.
+const WA_TYPES = ['followup', 'order'];
 
 const TYPE_LABELS = {
   cart_abandon:      'Cart reminder',
@@ -21,6 +24,8 @@ const TYPE_LABELS = {
   winback:           'Win back',
   welcome:           'Welcome',
   email_broadcast:   'Email campaign',
+  followup:          'Follow-up',
+  order:             'Order message',
   festival:          'Campaign',
   manual:            'Manual send',
   order_confirm:     'Order confirm',
@@ -184,6 +189,7 @@ function Pagination({ page, total, onPage }) {
 function anonSubtitle(userKey, deviceType, channel) {
   // Email recipients have no device; their address is unknown (profile removed or never captured).
   if (channel === 'email') return `Email recipient - ...${userKey.slice(-4)}`;
+  if (channel === 'whatsapp') return `WhatsApp contact - ...${userKey.slice(-4)}`;
   const last4 = userKey.slice(-4);
   let type = 'Device';
   if (deviceType) {
@@ -484,9 +490,10 @@ function RevisitExpandPanel({ data, loading, error, page, onPage, onRetry, noun 
 
 function AccordionUserRow({ user, menuTab, expanded, onToggle, shop, from, to, expandCache, channel = 'push' }) {
   const noun = CHANNEL_NOUN[channel] || 'notification';
-  const isAnon    = !user.email;
+  const contact   = user.email || user.phone || null;
+  const isAnon    = !contact;
   const nameText  = user.name || 'Anonymous visitor';
-  const subtitle  = isAnon ? anonSubtitle(user.userKey, user.deviceType, channel) : user.email;
+  const subtitle  = isAnon ? anonSubtitle(user.userKey, user.deviceType, channel) : contact;
 
   const panelId = `expand-panel-${user.userKey}`;
 
@@ -645,9 +652,10 @@ function AccordionUserRow({ user, menuTab, expanded, onToggle, shop, from, to, e
 
 function AccordionRevisitedRow({ user, expanded, onToggle, shop, from, to, expandCache, channel = 'push' }) {
   const noun = CHANNEL_NOUN[channel] || 'notification';
-  const isAnon   = !user.email;
+  const contact  = user.email || user.phone || null;
+  const isAnon   = !contact;
   const nameText = user.name || 'Anonymous visitor';
-  const subtitle = isAnon ? anonSubtitle(user.userKey, user.deviceType, channel) : user.email;
+  const subtitle = isAnon ? anonSubtitle(user.userKey, user.deviceType, channel) : contact;
 
   const panelId = `revisited-panel-${user.userKey}`;
 
@@ -932,7 +940,9 @@ export default function PushUsersPanel({ shop, from, to, channel = 'push' }) {
           >
             <option value="">All types</option>
             {Object.entries(TYPE_LABELS)
-              .filter(([type]) => channel === 'email' || type !== 'email_broadcast')
+              .filter(([type]) => (channel === 'whatsapp'
+                ? WA_TYPES.includes(type)
+                : !WA_TYPES.includes(type) && (channel === 'email' || type !== 'email_broadcast')))
               .map(([type, label]) => (
               <option key={type} value={type}>{label}</option>
             ))}
@@ -1034,7 +1044,7 @@ export default function PushUsersPanel({ shop, from, to, channel = 'push' }) {
           {search
             ? 'No users match your search'
             : viewMode === 'revisited'
-              ? `No revisits yet. A revisit is recorded when a customer opens your store from ${channel === 'email' ? 'an email' : 'a notification'}.`
+              ? `No revisits yet. A revisit is recorded when a customer opens your store from ${CHANNEL_REVISIT_SOURCE[channel] || 'a notification'}.`
               : 'No users yet in this date range'}
         </div>
       );

@@ -285,7 +285,7 @@ function DrawerItem({ item, channel, shop, sendWhatsapp }) {
 }
 
 // Channels whose Sent tab shows the per-user panel.
-const HAS_USERS_PANEL = new Set(['push', 'email']);
+const HAS_USERS_PANEL = new Set(['push', 'email', 'whatsapp']);
 
 export function ChannelDrawer({ shop, channel, initialStatus, onClose, isMobileView, from, to }) {
   const [activeTab, setActiveTab] = useState(initialStatus);

@@ -145,9 +145,9 @@ describe('ChannelDrawer', () => {
     expect(callsTo('/channels/push/users')).toHaveLength(1);
   });
 
-  it('whatsapp Sent tab still uses the items list', async () => {
+  it('whatsapp Pending tab still uses the items list (it has the Send buttons)', async () => {
     apiGet.mockResolvedValue({ items: [], total: 0 });
-    renderDrawer('whatsapp', 'sent');
+    renderDrawer('whatsapp', 'pending');
     await waitFor(() => expect(callsTo('/channels/whatsapp/items')).toHaveLength(1));
     expect(callsTo('/channels/whatsapp/users')).toHaveLength(0);
   });
