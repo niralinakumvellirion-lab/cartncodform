@@ -29,6 +29,7 @@ const { checkUnopenedThreshold, updateDeliveredRate } = require('./services/push
 const { computeWeights } = require('./services/weightsService');
 const { isQuietNow } = require('./utils/timezone');
 const { hasActivePlan } = require('./utils/planAccess');
+const { fetchProductImage, productRefFromUrl } = require('./utils/productImage');
 const { logBroadcastSend } = require('./services/sendLogService');
 
 const app = express();
@@ -523,12 +524,29 @@ async function processScheduledJobs() {
           const baseUrl = payload.url || `https://${job.shopDomain}`;
           const clickUrl = baseUrl + (baseUrl.includes('?') ? '&' : '?') +
             'ccf_src=push&ccf_job=' + job._id.toString();
+          // Product image: use the stored one, otherwise look it up now from the product in the
+          // link. Signals such as price hesitation, browse and high intent are scheduled without one.
+          let pushImageUrl = payload.imageUrl || null;
+          if (!pushImageUrl) {
+            const productRef = productRefFromUrl(payload.url);
+            if (productRef) {
+              pushImageUrl = await fetchProductImage(
+                job.shopDomain,
+                jobStore && jobStore.accessToken,
+                productRef
+              ).catch(() => null);
+              if (pushImageUrl) {
+                await ScheduledJob.findByIdAndUpdate(job._id, { $set: { 'payload.imageUrl': pushImageUrl } })
+                  .catch(() => {});
+              }
+            }
+          }
           const result = await sendPushToCustomers(
             job.shopDomain,
             payload.title || 'You left something behind!',
             payload.body || 'Come back and check it out.',
             clickUrl,
-            payload.imageUrl || null,
+            pushImageUrl,
             false,
             job.cartToken || null,
             false

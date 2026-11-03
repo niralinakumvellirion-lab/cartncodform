@@ -115,7 +115,7 @@ router.get('/:shopDomain/products', requireAuth, requireStoreOwner, async (req, 
       allProducts = cached.data;
     } else {
       const store = await Store.findOne({ shopDomain })
-        .select('shopDomain accessToken accessTokenExpiresAt onlineAccessToken onlineTokenExpiresAt');
+        .select('shopDomain accessToken accessTokenExpiresAt refreshToken refreshTokenExpiresAt onlineAccessToken onlineTokenExpiresAt');
       if (!store) {
         return res.status(404).json({ error: 'Store not found' });
       }

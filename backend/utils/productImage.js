@@ -2,6 +2,11 @@ const Store = require('../models/Store');
 const ProductImageCache = require('../models/ProductImageCache');
 const { refreshAccessTokenIfNeeded, API_VERSION } = require('./shopify');
 
+// Everything refreshAccessTokenIfNeeded() needs. The refresh pair must be included or an
+// expired expiring token can never be renewed (the lookup then fails an hour after install).
+const TOKEN_FIELDS =
+  'shopDomain accessToken accessTokenExpiresAt refreshToken refreshTokenExpiresAt onlineAccessToken onlineTokenExpiresAt';
+
 /**
  * Turn a scraped/API image URL into an absolute https URL, or null.
  * Protocol-relative "//cdn.shopify.com/..." gets "https:" prepended; anything
@@ -62,22 +67,35 @@ async function fetchProductImage(shop, accessToken, productId) {
     // since that argument may be stale; the passed-in `accessToken` is
     // kept as a last-resort fallback if no Store row is found at all.
     const store = await Store.findOne({ shopDomain: shopKey })
-      .select('shopDomain accessToken accessTokenExpiresAt onlineAccessToken onlineTokenExpiresAt');
+      .select(TOKEN_FIELDS);
     const apiToken = store ? await refreshAccessTokenIfNeeded(store) : accessToken;
     if (!apiToken) return null;
 
     console.log('[webhook] Fetching image for productId:', productId,
       'shop:', shop, 'hasToken:', !!apiToken);
 
-    const gqlQuery = `query ProductImage($id: ID!) {
-      product(id: $id) { featuredImage { url } images(first: 1) { nodes { url } } }
-    }`;
+    // A product reference is either Shopify's numeric product id or a storefront handle
+    // (push links use whichever the signal stored). Handles are restricted to URL-safe
+    // characters before they go into the search string.
+    const isNumericId = /^\d+$/.test(productKey);
+    if (!isNumericId && !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(productKey)) return null;
+
+    const gqlQuery = isNumericId
+      ? `query ProductImage($id: ID!) {
+          product(id: $id) { featuredImage { url } images(first: 1) { nodes { url } } }
+        }`
+      : `query ProductImageByHandle($q: String!) {
+          products(first: 1, query: $q) { nodes { featuredImage { url } images(first: 1) { nodes { url } } } }
+        }`;
+    const variables = isNumericId
+      ? { id: `gid://shopify/Product/${productKey}` }
+      : { q: `handle:${productKey}` };
     const res = await fetch(
       `https://${shop}/admin/api/${API_VERSION}/graphql.json`,
       {
         method: 'POST',
         headers: { 'X-Shopify-Access-Token': apiToken, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: gqlQuery, variables: { id: `gid://shopify/Product/${productId}` } }),
+        body: JSON.stringify({ query: gqlQuery, variables }),
       }
     );
 
@@ -91,7 +109,7 @@ async function fetchProductImage(shop, accessToken, productId) {
       console.warn('[webhook] fetchProductImage GraphQL error:', data.errors[0]?.message);
       return null;
     }
-    const p = data.data?.product;
+    const p = isNumericId ? data.data?.product : data.data?.products?.nodes?.[0];
     const imageUrl = p?.featuredImage?.url ||
                      p?.images?.nodes?.[0]?.url ||
                      null;
@@ -141,4 +159,13 @@ async function fetchProductImageWithTimeout(shop, productId, ms = 3000) {
   }
 }
 
-module.exports = { normalizeImageUrl, fetchProductImage, fetchProductImageWithTimeout };
+/**
+ * The product a push link points at: ".../products/<id or handle>?x=y" -> "<id or handle>", else null.
+ */
+function productRefFromUrl(url) {
+  const after = String(url || '').split('/products/')[1];
+  if (!after) return null;
+  return after.split(/[?#/]/)[0] || null;
+}
+
+module.exports = { normalizeImageUrl, fetchProductImage, fetchProductImageWithTimeout, productRefFromUrl };
