@@ -77,10 +77,10 @@ describe('GET items', () => {
   });
 
   it('does not expose customer ids or email hashes', async () => {
-    await make(A, { customerId: '4242', emailHash: 'deadbeef' });
+    await make(A, { customerId: '987654321012', emailHash: 'zzhashzz-not-in-any-id' });
     const text = JSON.stringify((await call('GET', A, '')).body);
-    expect(text).not.toContain('4242');
-    expect(text).not.toContain('deadbeef');
+    expect(text).not.toContain('987654321012');
+    expect(text).not.toContain('zzhashzz');
   });
 
   it('pages 20 at a time, newest first', async () => {

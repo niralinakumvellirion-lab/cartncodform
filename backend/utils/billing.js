@@ -117,4 +117,26 @@ async function createSubscription(shop, accessToken, returnUrl, isTest) {
   };
 }
 
-module.exports = { getActiveSubscription, createSubscription, isDevelopmentShop, shouldUseTestCharge, PLAN_NAME, PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS };
+// The app's handle in Shopify admin URLs (same value as APP_HANDLE in routes/auth.js).
+const APP_HANDLE = 'cartncod-form';
+
+/**
+ * When the app's pricing is set in the Partner/Dev Dashboard (Shopify "managed" App Pricing), Shopify
+ * refuses appSubscriptionCreate with "Cannot use the Billing API ... when on Shopify App Pricing".
+ */
+function isManagedPricingError(err) {
+  const msg = err && err.message ? String(err.message) : '';
+  return /Shopify App Pricing|managed pricing/i.test(msg);
+}
+
+/** Shopify-hosted plan page for a managed-pricing app (the merchant picks the plan and approves there). */
+function managedPricingUrl(shop) {
+  const store = String(shop || '').replace(/.myshopify.com$/i, '');
+  return `https://admin.shopify.com/store/${store}/charges/${APP_HANDLE}/pricing_plans`;
+}
+
+module.exports = {
+  getActiveSubscription, createSubscription, isDevelopmentShop, shouldUseTestCharge,
+  isManagedPricingError, managedPricingUrl,
+  PLAN_NAME, PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS, APP_HANDLE,
+};

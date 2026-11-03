@@ -7,7 +7,7 @@ const subscriptionEventSchema = new mongoose.Schema(
     fromPlan:       { type: String, enum: ['free', 'pro'] },
     toPlan:         { type: String, enum: ['free', 'pro'] },
     shopifyStatus:  { type: String },
-    source:         { type: String, enum: ['webhook', 'billing_callback', 'oauth_sync', 'baseline'] },
+    source:         { type: String, enum: ['webhook', 'billing_callback', 'oauth_sync', 'baseline', 'managed_pricing'] },
     isTest:         { type: Boolean, default: false },
     priceUsd:       { type: Number },
     currency:       { type: String, default: 'USD' },

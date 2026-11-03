@@ -107,11 +107,11 @@ describe('GET reviews', () => {
   });
 
   it('never exposes customer ids, email hashes or status', async () => {
-    await Review.create({ shopDomain: A, productId: PID, rating: 5, body: 'a good enough review', authorName: 'X', status: 'approved', customerId: '42', emailHash: 'abc' });
+    await Review.create({ shopDomain: A, productId: PID, rating: 5, body: 'a good enough review', authorName: 'X', status: 'approved', customerId: '987654321012', emailHash: 'zzhashzz-not-in-any-id' });
     const r = await call('GET', '', { query: { productId: PID } });
     const text = JSON.stringify(r.body);
-    expect(text).not.toContain('42');
-    expect(text).not.toContain('abc');
+    expect(text).not.toContain('987654321012');
+    expect(text).not.toContain('zzhashzz');
     expect(r.body.reviews[0].status).toBeUndefined();
   });
 

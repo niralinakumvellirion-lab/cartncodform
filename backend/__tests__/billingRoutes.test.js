@@ -10,11 +10,13 @@ jest.mock('../middleware/requireOwner', () => ({
 }));
 
 jest.mock('../utils/billing', () => ({
+  ...jest.requireActual('../utils/billing'),
   createSubscription: jest.fn(),
   shouldUseTestCharge: jest.fn(),
-  PLAN_PRICE: 10,
-  PLAN_CURRENCY: 'USD',
-  TRIAL_DAYS: 30,
+}));
+
+jest.mock('../utils/subscriptionSync', () => ({
+  syncActiveSubscription: jest.fn(),
 }));
 
 jest.mock('../utils/shopify', () => ({
@@ -25,6 +27,8 @@ const http = require('http');
 const express = require('express');
 const { createSubscription, shouldUseTestCharge } = require('../utils/billing');
 const { refreshAccessTokenIfNeeded } = require('../utils/shopify');
+const { syncActiveSubscription } = require('../utils/subscriptionSync');
+const { isManagedPricingError, managedPricingUrl } = require('../utils/billing');
 const billingRouter = require('../routes/billing');
 
 let server;
@@ -55,6 +59,7 @@ beforeEach(() => {
   };
   refreshAccessTokenIfNeeded.mockResolvedValue('fresh-tok');
   shouldUseTestCharge.mockResolvedValue(false);
+  syncActiveSubscription.mockResolvedValue(false);
 });
 
 afterEach(() => jest.restoreAllMocks());
@@ -86,9 +91,37 @@ describe('GET /api/billing/:shop/status', () => {
     expect((await r.json()).hasAccess).toBe(true);
   });
 
-  test('store with an expiring token → no token work on status', async () => {
+  test('store already on a plan → no token work and no call to Shopify on status', async () => {
+    global.__billingTestStore.plan = 'pro';
     await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH });
     expect(refreshAccessTokenIfNeeded).not.toHaveBeenCalled();
+    expect(syncActiveSubscription).not.toHaveBeenCalled();
+  });
+
+  test('internal store → Shopify is not asked either', async () => {
+    global.__billingTestStore.isInternal = true;
+    await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH });
+    expect(syncActiveSubscription).not.toHaveBeenCalled();
+  });
+
+  test('store without a plan but WITH an active Shopify subscription (managed pricing) → hasAccess true', async () => {
+    syncActiveSubscription.mockResolvedValue(true);
+    const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH });
+    const body = await r.json();
+    expect(body).toMatchObject({ hasAccess: true, plan: 'pro' });
+    expect(syncActiveSubscription).toHaveBeenCalledWith(global.__billingTestStore, 'fresh-tok', 'managed_pricing');
+  });
+
+  test('no subscription at Shopify → still no access', async () => {
+    const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH });
+    expect((await r.json())).toMatchObject({ hasAccess: false, plan: 'free' });
+  });
+
+  test('a failing Shopify check never breaks the status answer', async () => {
+    syncActiveSubscription.mockRejectedValue(new Error('shopify down'));
+    const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH });
+    expect(r.status).toBe(200);
+    expect((await r.json()).hasAccess).toBe(false);
   });
 
   test('legacy store (no expiry, no refresh token) → converted using the session token', async () => {
@@ -145,6 +178,22 @@ describe('POST /api/billing/:shop/start', () => {
     expect(r.status).toBe(500);
   });
 
+  test('app on Shopify managed pricing → returns the Shopify plan page instead of an error', async () => {
+    createSubscription.mockRejectedValue(new Error('Billing error: [{"field":null,"message":"Cannot use the Billing API (to create charges) when on Shopify App Pricing."}]'));
+    const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/start`, START());
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({
+      confirmationUrl: 'https://admin.shopify.com/store/bill-shop/charges/cartncod-form/pricing_plans',
+      managedPricing: true,
+    });
+  });
+
+  test('another billing refusal is still an error', async () => {
+    createSubscription.mockRejectedValue(new Error('Billing error: [{"field":null,"message":"Something else"}]'));
+    const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/start`, START());
+    expect(r.status).toBe(500);
+  });
+
   test('Shopify error → 500 with a safe message, full Shopify body only in the log', async () => {
     const err = new Error('Request failed with status code 403');
     err.response = { status: 403, data: { errors: 'secret detail' } };
@@ -155,5 +204,19 @@ describe('POST /api/billing/:shop/start', () => {
     expect(body.error).toMatch(/free trial/i);
     expect(JSON.stringify(body)).not.toMatch(/secret detail/);
     expect(console.error.mock.calls[0].join(' ')).toMatch(/403/);
+  });
+});
+
+describe('managed pricing helpers', () => {
+  test('recognises the Shopify refusal and nothing else', () => {
+    expect(isManagedPricingError(new Error('Cannot use the Billing API (to create charges) when on Shopify App Pricing.'))).toBe(true);
+    expect(isManagedPricingError(new Error('This app is using managed pricing'))).toBe(true);
+    expect(isManagedPricingError(new Error('Request failed with status code 403'))).toBe(false);
+    expect(isManagedPricingError(null)).toBe(false);
+  });
+
+  test('builds the plan page address from the shop domain', () => {
+    expect(managedPricingUrl('My-Store.myshopify.com')).toBe('https://admin.shopify.com/store/My-Store/charges/cartncod-form/pricing_plans');
+    expect(managedPricingUrl('abc.myshopify.com')).toContain('/store/abc/charges/');
   });
 });

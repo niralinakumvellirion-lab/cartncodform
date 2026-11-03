@@ -3,7 +3,8 @@ const {
   requireAuth,
   requireStoreOwnerAnyPlan,
 } = require('../middleware/requireOwner');
-const { createSubscription, shouldUseTestCharge, PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS } = require('../utils/billing');
+const { createSubscription, shouldUseTestCharge, isManagedPricingError, managedPricingUrl, PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS } = require('../utils/billing');
+const { syncActiveSubscription } = require('../utils/subscriptionSync');
 const { hasActivePlan } = require('../utils/planAccess');
 const { refreshAccessTokenIfNeeded } = require('../utils/shopify');
 
@@ -31,6 +32,18 @@ router.get('/:shopDomain/status', requireAuth, requireStoreOwnerAnyPlan, async (
       await refreshAccessTokenIfNeeded(req.store, { sessionToken: sessionTokenOf(req) });
     } catch (err) {
       console.warn('[billing] token conversion skipped:', err.message);
+    }
+  }
+  // Apps on Shopify managed pricing: the merchant approves on Shopify's plan page and returns here
+  // without our billing callback, so ask Shopify whether a subscription (or trial) is active now.
+  if (!hasActivePlan(req.store)) {
+    try {
+      const token = await refreshAccessTokenIfNeeded(req.store, { sessionToken: sessionTokenOf(req) });
+      if (token && await syncActiveSubscription(req.store, token, 'managed_pricing')) {
+        req.store.plan = 'pro';
+      }
+    } catch (err) {
+      console.warn('[billing] subscription check skipped:', err.message);
     }
   }
   return res.json({
@@ -64,6 +77,11 @@ router.post('/:shopDomain/start', requireAuth, requireStoreOwnerAnyPlan, async (
     }
     return res.json({ confirmationUrl });
   } catch (err) {
+    // Pricing is managed by Shopify (set in the Dashboard): send the merchant to Shopify's plan page.
+    if (isManagedPricingError(err)) {
+      console.log('[billing] shop is on Shopify managed pricing - sending to the plan page');
+      return res.json({ confirmationUrl: managedPricingUrl(req.store.shopDomain), managedPricing: true });
+    }
     // Shopify's error body (no PII) explains refusals such as a non-public app.
     const detail = err.response
       ? `${err.response.status} ${JSON.stringify(err.response.data).slice(0, 500)}`
