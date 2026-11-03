@@ -1,6 +1,8 @@
 jest.mock('../models/Store');
+jest.mock('../utils/bootstrapStore');
 
 const Store = require('../models/Store');
+const { bootstrapStore } = require('../utils/bootstrapStore');
 const { requireStoreOwner } = require('../middleware/requireOwner');
 
 function mockRes() {
@@ -129,5 +131,106 @@ describe('requireStoreOwner', () => {
 
     expect(res.status).toHaveBeenCalledWith(403);
     expect(req.store).toBeUndefined();
+  });
+});
+
+describe('requireStoreOwner - shop Shopify installed by itself', () => {
+  const SHOP = 'review-shop.myshopify.com';
+  const req = (header = 'Bearer session-jwt', over = {}) => ({
+    shopDomain: SHOP,
+    params: { shopDomain: SHOP },
+    get: (h) => (h.toLowerCase() === 'authorization' ? header : undefined),
+    ...over,
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => jest.restoreAllMocks());
+
+  test('sets the Store up from the request own session token, then carries on', async () => {
+    Store.findOne.mockResolvedValue(null);
+    const fresh = { shopDomain: SHOP, plan: 'pro' };
+    bootstrapStore.mockResolvedValue(fresh);
+    const r = req();
+    const res = mockRes();
+    const next = jest.fn();
+    await requireStoreOwner(r, res, next);
+    expect(bootstrapStore).toHaveBeenCalledWith(SHOP, 'session-jwt');
+    expect(r.store).toBe(fresh);
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  test('a new store without a plan then gets the normal "start your trial" answer (402)', async () => {
+    Store.findOne.mockResolvedValue(null);
+    bootstrapStore.mockResolvedValue({ shopDomain: SHOP, plan: 'free' });
+    const res = mockRes();
+    const next = jest.fn();
+    await requireStoreOwner(req(), res, next);
+    expect(res.status).toHaveBeenCalledWith(402);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('says so (503) when the set-up fails, instead of "Store not found"', async () => {
+    Store.findOne.mockResolvedValue(null);
+    bootstrapStore.mockResolvedValue(null);
+    const res = mockRes();
+    const next = jest.fn();
+    await requireStoreOwner(req(), res, next);
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ code: 'STORE_SETUP_FAILED' }));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  test('without a bearer token it stays a plain 404 and never calls Shopify', async () => {
+    Store.findOne.mockResolvedValue(null);
+    const res = mockRes();
+    await requireStoreOwner(req(''), res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(bootstrapStore).not.toHaveBeenCalled();
+  });
+
+  test('a header that is not a Bearer token is treated as no token', async () => {
+    Store.findOne.mockResolvedValue(null);
+    const res = mockRes();
+    await requireStoreOwner(req('Basic abc123'), res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(404);
+    expect(bootstrapStore).not.toHaveBeenCalled();
+  });
+
+  test('a known, installed Store never triggers a set-up', async () => {
+    Store.findOne.mockResolvedValue({ shopDomain: SHOP, plan: 'pro', subscriptionStatus: 'ACTIVE' });
+    const next = jest.fn();
+    await requireStoreOwner(req(), mockRes(), next);
+    expect(bootstrapStore).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  test('a Store marked uninstalled is refreshed; the old one is used if that fails', async () => {
+    const old = { shopDomain: SHOP, plan: 'pro', subscriptionStatus: 'uninstalled' };
+    Store.findOne.mockResolvedValue(old);
+    bootstrapStore.mockResolvedValue({ shopDomain: SHOP, plan: 'pro', subscriptionStatus: null });
+    const r1 = req();
+    await requireStoreOwner(r1, mockRes(), jest.fn());
+    expect(r1.store.subscriptionStatus).toBeNull();
+
+    bootstrapStore.mockResolvedValue(null);
+    const r2 = req();
+    const next = jest.fn();
+    await requireStoreOwner(r2, mockRes(), next);
+    expect(r2.store).toBe(old);
+    expect(next).toHaveBeenCalledWith();
+  });
+
+  test('another shop URL is still refused (403) after the token own shop is set up', async () => {
+    Store.findOne.mockResolvedValue(null);
+    bootstrapStore.mockResolvedValue({ shopDomain: SHOP, plan: 'pro' });
+    const res = mockRes();
+    const next = jest.fn();
+    await requireStoreOwner(req('Bearer x', { params: { shopDomain: 'victim.myshopify.com' } }), res, next);
+    expect(bootstrapStore).toHaveBeenCalledWith(SHOP, 'x');
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(next).not.toHaveBeenCalled();
   });
 });

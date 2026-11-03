@@ -7,6 +7,12 @@ handle = "quantity-tier-discount"
 uid = "2e7686c9-cfea-758e-d39f-cae34f26f71ab4af18cb"
 api_version = "2026-10"
 
+# Where Shopify sends the merchant from Discounts > Create discount > Quantity Tier Discount (and when
+# opening it from the discounts list): the app's Discounts screen, which has the tier editor.
+[extensions.ui.paths]
+create = "/admin/discounts"
+details = "/admin/discounts"
+
 [extensions.build]
 command = ""
 path = "dist/function.wasm"

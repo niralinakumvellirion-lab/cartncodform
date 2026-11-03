@@ -27,6 +27,11 @@ const platformCSP = [
 
 const nextConfig = {
   reactStrictMode: true,
+  // application_url ends in /admin. If Shopify joins a discount function's create/details path onto it
+  // instead of replacing the path, the request arrives as /admin/admin/discounts: send it to the real page.
+  async redirects() {
+    return [{ source: '/admin/admin/:path*', destination: '/admin/:path*', permanent: false }];
+  },
   async headers() {
     return [
       // ── Existing: Shopify embedded admin CSP ─────────────────────────────

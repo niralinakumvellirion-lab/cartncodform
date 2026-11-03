@@ -180,6 +180,7 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
         <div>
           <p style={styles.cardTitle}>Buy more, save more</p>
           <p style={styles.cardSub}>Automatic discounts for customers who buy multiple items of the same product.</p>
+          <p style={styles.cardSub}>This is the “Quantity Tier Discount” in your Shopify Discounts list. Switch it on, set your tiers and press Save: the discount is created in Shopify for you.</p>
         </div>
         <button
           role="switch"

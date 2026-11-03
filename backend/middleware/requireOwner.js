@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const Store = require('../models/Store');
 const { hasActivePlan, PLAN_REQUIRED_BODY } = require('../utils/planAccess');
+const { bootstrapStore } = require('../utils/bootstrapStore');
 
 /**
  * Verifies a Shopify App Bridge session token (Authorization: Bearer <token>).
@@ -96,7 +97,24 @@ function requireAuth(req, res, next) {
 function makeStoreOwner(enforcePlan) {
   return async function storeOwner(req, res, next) {
     try {
-      const store = await Store.findOne({ shopDomain: req.shopDomain });
+      let store = await Store.findOne({ shopDomain: req.shopDomain });
+
+      // Installed by Shopify itself (managed install / App Store review) or re-installed after an
+      // uninstall: no usable Store yet. Set it up from this request's own session token.
+      if (!store || store.subscriptionStatus === 'uninstalled') {
+        const header = typeof req.get === 'function' ? req.get('Authorization') || '' : '';
+        if (header.startsWith('Bearer ')) {
+          const fresh = await bootstrapStore(req.shopDomain, header.slice(7));
+          if (fresh) store = fresh;
+          else if (!store) {
+            return res.status(503).json({
+              error: 'We could not finish setting up your store. Please reload the app.',
+              code: 'STORE_SETUP_FAILED',
+            });
+          }
+        }
+      }
+
       if (!store) {
         return res.status(404).json({ error: 'Store not found' });
       }
