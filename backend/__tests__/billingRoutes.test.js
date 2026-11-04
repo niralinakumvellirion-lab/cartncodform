@@ -67,28 +67,30 @@ afterEach(() => jest.restoreAllMocks());
 const AUTH = { Authorization: 'Bearer session-jwt' };
 
 describe('GET /api/billing/:shop/status', () => {
-  test('free store → hasAccess false with price and trial', async () => {
+  test('store without a subscription → Free plan, still full access', async () => {
     const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH });
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({
-      hasAccess: false,
+      hasAccess: true,
       plan: 'free',
+      tier: 'free',
       priceUsd: 10,
       currency: 'USD',
       trialDays: 30,
     });
   });
 
-  test('pro store → hasAccess true', async () => {
+  test('pro store with a tier saved → that tier', async () => {
     global.__billingTestStore.plan = 'pro';
+    global.__billingTestStore.planTier = 'growth';
     const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH });
-    expect((await r.json()).hasAccess).toBe(true);
+    expect(await r.json()).toMatchObject({ hasAccess: true, plan: 'pro', tier: 'growth' });
   });
 
-  test('free internal store → hasAccess true', async () => {
+  test('free internal store → Pro tier', async () => {
     global.__billingTestStore.isInternal = true;
     const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH });
-    expect((await r.json()).hasAccess).toBe(true);
+    expect(await r.json()).toMatchObject({ hasAccess: true, tier: 'pro' });
   });
 
   test('store already on a plan → no token work and no call to Shopify on status', async () => {
@@ -104,24 +106,24 @@ describe('GET /api/billing/:shop/status', () => {
     expect(syncActiveSubscription).not.toHaveBeenCalled();
   });
 
-  test('store without a plan but WITH an active Shopify subscription (managed pricing) → hasAccess true', async () => {
-    syncActiveSubscription.mockResolvedValue(true);
+  test('store without a plan but WITH an active Shopify subscription (managed pricing) → that tier', async () => {
+    syncActiveSubscription.mockResolvedValue('starter');
     const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH });
     const body = await r.json();
-    expect(body).toMatchObject({ hasAccess: true, plan: 'pro' });
+    expect(body).toMatchObject({ hasAccess: true, plan: 'pro', tier: 'starter' });
     expect(syncActiveSubscription).toHaveBeenCalledWith(global.__billingTestStore, 'fresh-tok', 'managed_pricing');
   });
 
-  test('no subscription at Shopify → still no access', async () => {
+  test('no subscription at Shopify → Free plan', async () => {
     const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH });
-    expect((await r.json())).toMatchObject({ hasAccess: false, plan: 'free' });
+    expect((await r.json())).toMatchObject({ hasAccess: true, plan: 'free', tier: 'free' });
   });
 
   test('a failing Shopify check never breaks the status answer', async () => {
     syncActiveSubscription.mockRejectedValue(new Error('shopify down'));
     const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH });
     expect(r.status).toBe(200);
-    expect((await r.json()).hasAccess).toBe(false);
+    expect((await r.json()).tier).toBe('free');
   });
 
   test('legacy store (no expiry, no refresh token) → converted using the session token', async () => {
@@ -139,7 +141,7 @@ describe('GET /api/billing/:shop/status', () => {
     refreshAccessTokenIfNeeded.mockRejectedValue(new Error('shopify down'));
     const r = await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH });
     expect(r.status).toBe(200);
-    expect((await r.json()).hasAccess).toBe(false);
+    expect((await r.json()).tier).toBe('free');
   });
 });
 

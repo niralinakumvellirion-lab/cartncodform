@@ -29,6 +29,7 @@ const { checkUnopenedThreshold, updateDeliveredRate } = require('./services/push
 const { computeWeights } = require('./services/weightsService');
 const { isQuietNow } = require('./utils/timezone');
 const { hasActivePlan } = require('./utils/planAccess');
+const { isAtLimit } = require('./utils/planUsage');
 const { fetchProductImage, productRefFromUrl } = require('./utils/productImage');
 const { logBroadcastSend } = require('./services/sendLogService');
 
@@ -264,7 +265,7 @@ async function processScheduledJobs() {
     try {
       const shopsToCheck = await Store.find(
         {},
-        'shopDomain lastSignalRunAt timezone suspended plan isInternal'
+        'shopDomain lastSignalRunAt timezone suspended plan planTier isInternal subscriptionStatus'
       ).lean();
       for (const s of shopsToCheck) {
         const tz = s.timezone || 'Asia/Kolkata';
@@ -312,7 +313,7 @@ async function processScheduledJobs() {
             continue;
           }
           if (!hasActivePlan(s)) {
-            console.log(`[signals] store ${s.shopDomain} has no active plan — skipping nightly run`);
+            console.log(`[signals] store ${s.shopDomain} is not installed — skipping nightly run`);
             continue;
           }
 
@@ -362,7 +363,7 @@ async function processScheduledJobs() {
       // (quiet hours) or skip it permanently (frequency cap).
       const Store = require('./models/Store');
       const store = await Store.findOne({ shopDomain: job.shopDomain })
-        .select('timezone quietHours suspended plan isInternal').lean();
+        .select('shopDomain timezone quietHours suspended plan planTier isInternal subscriptionStatus').lean();
 
       // Platform suspension: mark this job skipped immediately so it never
       // fires as a burst when the store is unsuspended. Unsuspend cleanup
@@ -377,14 +378,25 @@ async function processScheduledJobs() {
         continue;
       }
 
-      // No active subscription/trial: skip like a suspended store so jobs do
-      // not fire as a burst when the merchant subscribes later.
+      // App uninstalled: skip like a suspended store so jobs do not fire as a
+      // burst if the merchant reinstalls later.
       if (store && !hasActivePlan(store)) {
         await ScheduledJob.findOneAndUpdate(
           { _id: job._id, status: 'pending' },
           { status: 'skipped', error: 'no_active_plan' }
         );
-        console.log(`[automation] Job ${job._id} skipped — no active plan`);
+        console.log(`[automation] Job ${job._id} skipped — app not installed`);
+        continue;
+      }
+
+      // Monthly automated-message limit of the store's plan (utils/plans.js).
+      // Skipped, not deferred: a cart reminder sent days later is no use.
+      if (store && await isAtLimit(store, 'messages')) {
+        await ScheduledJob.findOneAndUpdate(
+          { _id: job._id, status: 'pending' },
+          { status: 'skipped', error: 'plan_limit' }
+        );
+        console.log(`[automation] Job ${job._id} skipped — monthly message limit of the plan reached`);
         continue;
       }
 
@@ -886,7 +898,7 @@ async function processFestivalQueue() {
             shopDomain: { $in: shopDomainsInBatch },
             $or: [
               { suspended: true },
-              { plan: { $ne: 'pro' }, isInternal: { $ne: true } },
+              { subscriptionStatus: 'uninstalled', isInternal: { $ne: true } },
             ],
           },
           'shopDomain'
@@ -899,7 +911,7 @@ async function processFestivalQueue() {
       // Items stay 'approved' so they can be sent once the store is unsuspended
       // (or moved to 'draft' by unsuspendStore's cleanup if past-due at that time).
       if (suspendedSet.has(item.shopDomain)) {
-        console.log(`[festival-queue] item ${item._id} skipped — store ${item.shopDomain} is suspended or has no active plan`);
+        console.log(`[festival-queue] item ${item._id} skipped — store ${item.shopDomain} is suspended or not installed`);
         continue;
       }
 

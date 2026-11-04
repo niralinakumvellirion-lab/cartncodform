@@ -23,6 +23,7 @@ function CodContent() {
         <a href="/admin/discounts" rel="discounts">Discounts</a>
         <a href="/admin/reviews" rel="reviews">Reviews</a>
         <a href="/admin/settings-page" rel="settings-page">Settings</a>
+        <a href="/admin/plans" rel="plans">Plans</a>
         <a href="/admin/email-templates" rel="email-templates">Email templates</a>
       </NavMenu>
       <CodScreen shop={shop} />

@@ -15,6 +15,7 @@ const {
 const { requireAuth } = require('../middleware/requireOwner');
 const { getActiveSubscription, createSubscription, shouldUseTestCharge } = require('../utils/billing');
 const { recordSubscriptionEvent } = require('../utils/subscriptionEvents');
+const { tierFromSubscriptionName } = require('../utils/plans');
 
 const router = express.Router();
 
@@ -190,6 +191,7 @@ router.get('/callback', async (req, res) => {
           { shopDomain },
           {
             plan: 'pro',
+            planTier: tierFromSubscriptionName(activeSub.name),
             subscriptionId: activeSub.id,
             subscriptionStatus: activeSub.status,
             planUpdatedAt: new Date(),
@@ -300,6 +302,7 @@ router.get('/billing/callback', async (req, res) => {
         { shopDomain: shop },
         {
           plan: 'pro',
+          planTier: tierFromSubscriptionName(activeSub.name),
           subscriptionId: activeSub.id,
           subscriptionStatus: activeSub.status,
           planUpdatedAt: new Date(),

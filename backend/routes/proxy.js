@@ -9,6 +9,7 @@ const DiscountConfig = require('../models/DiscountConfig');
 const { sendNewCodOrderEmail } = require('../utils/email');
 const { sendPushToStore } = require('../utils/pushNotification');
 const { verifyProxySignature } = require('../utils/shopify');
+const { isAtLimit, newSubscriberBlocked, SUBSCRIBER_LIMIT_BODY } = require('../utils/planUsage');
 const { generateDiscount, defaultConfig } = require('./discounts');
 const { resolvePostOrderColors } = require('../utils/postOrderColors');
 const { resolveProductBoxColors } = require('../utils/productBoxColors');
@@ -396,6 +397,37 @@ router.post('/birthday', async (req, res) => {
 // App Proxy:  https://{shop}/apps/cartncodform/cod-form?productName=..&price=..
 // Customer-facing HTML, so the App Proxy signature is HARD-enforced here.
 // ---------------------------------------------------------------------------
+const COD_UNAVAILABLE_TEXT = 'Cash on Delivery is not available right now. Please use the normal checkout to place your order.';
+
+// Shown instead of the COD form when the store has used its plan's COD orders for the month.
+function codUnavailablePage() {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Cash on Delivery</title>
+<style>
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#f6f6f7;
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#202223;padding:16px;box-sizing:border-box}
+  .card{background:#fff;border-radius:12px;padding:28px 24px;max-width:420px;width:100%;text-align:center;
+    box-shadow:0 2px 12px rgba(0,0,0,.08)}
+  h1{font-size:20px;margin:0 0 10px}
+  p{color:#6d7175;line-height:1.6;margin:0 0 20px;font-size:15px}
+  a{display:inline-block;background:#202223;color:#fff;text-decoration:none;border-radius:8px;padding:12px 20px;font-weight:600}
+</style>
+</head>
+<body>
+<div class="card" data-ccf-cod-unavailable>
+  <h1>Cash on Delivery is unavailable</h1>
+  <p>${escapeHtml(COD_UNAVAILABLE_TEXT)}</p>
+  <a href="/cart">Go to cart</a>
+</div>
+</body>
+</html>`;
+}
+
 router.get('/cod-form', async (req, res) => {
   if (!verifyProxySignature(req.query)) {
     console.warn('[proxy] Invalid or missing App Proxy signature on /cod-form — rejecting');
@@ -410,6 +442,13 @@ router.get('/cod-form', async (req, res) => {
 
   const priceNum = Number(price);
   const priceLabel = price && !Number.isNaN(priceNum) ? priceNum.toFixed(2) : '—';
+
+  // The store's plan allows a set number of COD orders a month (utils/plans.js).
+  if (await isAtLimit(shop, 'codOrders')) {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    return res.send(codUnavailablePage());
+  }
 
   // Load discount config — birthday flags + quantity tiers. Single query, both features.
   const PO_DEFAULT_CONSENT = "We'll use your birthday only to send you a birthday offer.";
@@ -880,6 +919,10 @@ router.post('/cod-order', async (req, res) => {
         .json({ success: false, error: 'shop, name, phone and address are required' });
     }
 
+    if (await isAtLimit(shop, 'codOrders')) {
+      return res.status(402).json({ success: false, code: 'PLAN_LIMIT', error: COD_UNAVAILABLE_TEXT });
+    }
+
     const cleanEmail = String(email || '').trim();
     const cleanQty = Math.max(1, Number(quantity) || 1);
     const cleanPrice = Number(productPrice) || 0;
@@ -1000,6 +1043,10 @@ router.post('/subscribe-customer', async (req, res) => {
     }
 
     const normalizedCartToken = cartToken ? cartToken.split('?')[0].trim() || undefined : undefined;
+
+    if (await newSubscriberBlocked(String(shop).trim().toLowerCase(), token, oldToken)) {
+      return res.status(402).json(SUBSCRIBER_LIMIT_BODY);
+    }
 
     // Remove old token if rotated
     if (oldToken && oldToken !== token) {

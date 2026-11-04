@@ -162,14 +162,17 @@ describe('requireStoreOwner - shop Shopify installed by itself', () => {
     expect(next).toHaveBeenCalledWith();
   });
 
-  test('a new store without a plan then gets the normal "start your trial" answer (402)', async () => {
+  test('a new store without a subscription carries on as the Free plan', async () => {
     Store.findOne.mockResolvedValue(null);
-    bootstrapStore.mockResolvedValue({ shopDomain: SHOP, plan: 'free' });
+    const fresh = { shopDomain: SHOP, plan: 'free' };
+    bootstrapStore.mockResolvedValue(fresh);
+    const r = req();
     const res = mockRes();
     const next = jest.fn();
-    await requireStoreOwner(req(), res, next);
-    expect(res.status).toHaveBeenCalledWith(402);
-    expect(next).not.toHaveBeenCalled();
+    await requireStoreOwner(r, res, next);
+    expect(res.status).not.toHaveBeenCalled();
+    expect(next).toHaveBeenCalledWith();
+    expect(r.store).toBe(fresh);
   });
 
   test('says so (503) when the set-up fails, instead of "Store not found"', async () => {

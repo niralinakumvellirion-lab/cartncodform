@@ -5,7 +5,8 @@ const {
 } = require('../middleware/requireOwner');
 const { createSubscription, shouldUseTestCharge, isManagedPricingError, managedPricingUrl, PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS } = require('../utils/billing');
 const { syncActiveSubscription } = require('../utils/subscriptionSync');
-const { hasActivePlan } = require('../utils/planAccess');
+const { PLANS, TIER_ORDER, tierOf } = require('../utils/plans');
+const { usageReport } = require('../utils/planUsage');
 const { refreshAccessTokenIfNeeded } = require('../utils/shopify');
 
 const router = express.Router();
@@ -18,11 +19,37 @@ function getBackendUrl(req) {
   return process.env.BACKEND_URL || `${req.protocol}://${req.headers.host}`;
 }
 
+// Plan cards for the admin, in display order.
+function planCards() {
+  return TIER_ORDER.map((id) => {
+    const p = PLANS[id];
+    return { id, name: p.name, price: p.price, limits: { ...p.limits }, aiCopy: p.aiCopy, prioritySupport: p.prioritySupport };
+  });
+}
+
+/**
+ * Apps on Shopify managed pricing: the merchant picks a plan on Shopify's own page and returns without
+ * our billing callback, so ask Shopify which subscription is active. Runs when no paid plan is known yet,
+ * or when the admin asks for a refresh (back from the plan page). Never throws.
+ */
+async function syncPlan(req, force) {
+  if ((req.store.plan === 'pro' || req.store.isInternal) && !force) return;
+  try {
+    const token = await refreshAccessTokenIfNeeded(req.store, { sessionToken: sessionTokenOf(req) });
+    const tier = token ? await syncActiveSubscription(req.store, token, 'managed_pricing') : false;
+    if (tier) {
+      req.store.plan = 'pro';
+      if (typeof tier === 'string') req.store.planTier = tier;
+    }
+  } catch (err) {
+    console.warn('[billing] subscription check skipped:', err.message);
+  }
+}
+
 /**
  * GET /api/billing/:shopDomain/status
- * -> { hasAccess, plan, priceUsd, trialDays }
- * Works without a subscription so the admin can decide whether to show the
- * "Start your free trial" screen.
+ * -> { hasAccess, plan, tier, priceUsd, trialDays }
+ * Every installed store has access (no subscription = Free plan).
  */
 router.get('/:shopDomain/status', requireAuth, requireStoreOwnerAnyPlan, async (req, res) => {
   // First admin visit after the token change: convert a legacy non-expiring
@@ -34,25 +61,31 @@ router.get('/:shopDomain/status', requireAuth, requireStoreOwnerAnyPlan, async (
       console.warn('[billing] token conversion skipped:', err.message);
     }
   }
-  // Apps on Shopify managed pricing: the merchant approves on Shopify's plan page and returns here
-  // without our billing callback, so ask Shopify whether a subscription (or trial) is active now.
-  if (!hasActivePlan(req.store)) {
-    try {
-      const token = await refreshAccessTokenIfNeeded(req.store, { sessionToken: sessionTokenOf(req) });
-      if (token && await syncActiveSubscription(req.store, token, 'managed_pricing')) {
-        req.store.plan = 'pro';
-      }
-    } catch (err) {
-      console.warn('[billing] subscription check skipped:', err.message);
-    }
-  }
+  await syncPlan(req, false);
   return res.json({
-    hasAccess: hasActivePlan(req.store),
+    hasAccess: true,
     plan: req.store.plan || 'free',
+    tier: tierOf(req.store),
     priceUsd: PLAN_PRICE,
     currency: PLAN_CURRENCY,
     trialDays: TRIAL_DAYS,
   });
+});
+
+/**
+ * GET /api/billing/:shopDomain/usage[?refresh=1]
+ * -> { tier, plan, usage: { codOrders|subscribers|messages: { used, limit } }, reached, resetsAt, plans, upgradeUrl }
+ * limit null = unlimited. refresh=1 re-reads the active subscription from Shopify first.
+ */
+router.get('/:shopDomain/usage', requireAuth, requireStoreOwnerAnyPlan, async (req, res) => {
+  try {
+    await syncPlan(req, req.query.refresh === '1');
+    const report = await usageReport(req.store);
+    return res.json({ ...report, plans: planCards(), upgradeUrl: managedPricingUrl(req.store.shopDomain) });
+  } catch (err) {
+    console.error('[billing] usage error:', err.message);
+    return res.status(500).json({ error: 'Could not load your plan usage' });
+  }
 });
 
 /**

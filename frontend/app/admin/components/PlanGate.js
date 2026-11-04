@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { apiGet, apiSend } from '../../../lib/api';
+import { useState, useEffect } from 'react';
+import { apiGet } from '../../../lib/api';
 
 function currentShop() {
   if (typeof window === 'undefined') return '';
@@ -10,155 +10,71 @@ function currentShop() {
   return (window.shopify && window.shopify.config && window.shopify.config.shop) || '';
 }
 
-// Shows a "Start your free trial" screen instead of the app until the store
-// has an active Shopify subscription (the trial counts as active). Fails open
-// on any status-check error: the backend enforces the plan on every route, so
-// this screen is only the friendly side of that rule.
+const PAUSED = {
+  codOrders: 'the COD form is paused',
+  subscribers: 'new push sign-ups are paused',
+  messages: 'automated messages are paused',
+};
+
+export function limitMessage(planName, reached) {
+  const parts = reached.map((k) => PAUSED[k]).filter(Boolean);
+  if (!parts.length) return '';
+  const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+  return `You have reached a limit of the ${planName || 'current'} plan: ${list}.`;
+}
+
+// Every installed store can use the app (no subscription = Free plan with limits), so this never
+// blocks. It shows a banner above every admin page while a plan limit is reached, linking to the
+// Plans page. Fails quietly: on any error the app shows without a banner.
 export default function PlanGate({ children }) {
-  const [blocked, setBlocked] = useState(false);
-  const [price, setPrice] = useState(10);
-  const [trialDays, setTrialDays] = useState(30);
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState('');
-  const headingRef = useRef(null);
+  const [notice, setNotice] = useState('');
+  const [plansHref, setPlansHref] = useState('/admin/plans');
 
   useEffect(() => {
-    function onRequired() {
-      setBlocked(true);
-    }
-    window.addEventListener('ccf:plan-required', onRequired);
-
     let cancelled = false;
     const shop = currentShop();
+    if (typeof window !== 'undefined') {
+      setPlansHref(`/admin/plans${window.location.search || ''}`);
+      if (window.location.pathname.startsWith('/admin/plans')) return undefined; // the page says it itself
+    }
     if (shop) {
-      apiGet(`/api/billing/${encodeURIComponent(shop)}/status`)
-        .then((s) => {
-          if (cancelled || !s) return;
-          if (Number.isFinite(s.priceUsd)) setPrice(s.priceUsd);
-          if (Number.isFinite(s.trialDays)) setTrialDays(s.trialDays);
-          if (s.hasAccess === false) setBlocked(true);
+      apiGet(`/api/billing/${encodeURIComponent(shop)}/usage`)
+        .then((u) => {
+          if (cancelled || !u || !Array.isArray(u.reached)) return;
+          setNotice(limitMessage(u.plan && u.plan.name, u.reached));
         })
         .catch(() => {});
     }
-    return () => {
-      cancelled = true;
-      window.removeEventListener('ccf:plan-required', onRequired);
-    };
+    return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    if (blocked && headingRef.current) headingRef.current.focus();
-  }, [blocked]);
-
-  async function startTrial() {
-    const shop = currentShop();
-    if (!shop) {
-      setError('Could not find your store. Please reopen the app from Shopify admin.');
-      return;
-    }
-    setStarting(true);
-    setError('');
-    try {
-      const data = await apiSend(`/api/billing/${encodeURIComponent(shop)}/start`, 'POST', {});
-      if (!data || !data.confirmationUrl) throw new Error('No approval link was returned.');
-      // Shopify's approval page must open in the top window, not the app iframe.
-      window.open(data.confirmationUrl, '_top');
-    } catch (err) {
-      setError(err.message || 'Could not start your free trial. Please try again.');
-      setStarting(false);
-    }
-  }
-
-  if (!blocked) return <>{children}</>;
-
   return (
-    <div style={{
-      minHeight: '100dvh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: '#F1F0EF',
-      padding: '1rem',
-      fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-    }}>
-      <div style={{
-        backgroundColor: '#ffffff',
-        borderRadius: '12px',
-        padding: '2.5rem 2rem',
-        maxWidth: '460px',
-        width: '100%',
-        textAlign: 'center',
-        boxShadow: '0 2px 16px rgba(0,0,0,0.08)',
-      }}>
-        <div role="status">
-          <h1
-            ref={headingRef}
-            tabIndex={-1}
-            style={{
-              fontSize: '1.375rem',
-              fontWeight: '700',
-              color: '#202223',
-              margin: '0 0 0.875rem',
-              outline: 'none',
-            }}
-          >
-            Start your {trialDays}-day free trial
-          </h1>
+    <>
+      {notice ? (
+        <div
+          role="status"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            flexWrap: 'wrap',
+            background: '#FFF5EA',
+            borderBottom: '1px solid #FFD79D',
+            color: '#4A2C00',
+            padding: '10px 20px',
+            fontSize: '14px',
+            lineHeight: 1.5,
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          }}
+        >
+          <span>{notice}</span>
+          <a href={plansHref} style={{ color: '#4F46E5', fontWeight: 700, textDecoration: 'none' }}>
+            See plans
+          </a>
         </div>
-
-        <p style={{ color: '#6D7175', fontSize: '0.9375rem', lineHeight: '1.6', margin: '0 0 0.625rem' }}>
-          ShopiReachBoost AI includes every feature: web push, cart emails, the
-          Cash on Delivery form, birthday gifts and quantity discounts.
-        </p>
-        <p style={{ color: '#202223', fontSize: '0.9375rem', fontWeight: '600', lineHeight: '1.6', margin: '0 0 1.75rem' }}>
-          Free for {trialDays} days, then ${price}/month. Cancel any time.
-        </p>
-
-        {error ? (
-          <p role="alert" style={{ color: '#D72C0D', fontSize: '0.875rem', margin: '0 0 1rem' }}>
-            {error}
-          </p>
-        ) : null}
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          <button
-            type="button"
-            onClick={startTrial}
-            disabled={starting}
-            style={{
-              backgroundColor: '#4F46E5',
-              color: '#ffffff',
-              border: 'none',
-              padding: '0.8125rem 1.5rem',
-              borderRadius: '8px',
-              cursor: starting ? 'default' : 'pointer',
-              opacity: starting ? 0.7 : 1,
-              fontWeight: '600',
-              fontSize: '0.9375rem',
-              fontFamily: 'inherit',
-            }}
-          >
-            {starting ? 'Opening Shopify…' : 'Start free trial'}
-          </button>
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            style={{
-              backgroundColor: 'transparent',
-              border: '1px solid #C9CCCF',
-              color: '#6D7175',
-              padding: '0.8125rem 1.5rem',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: '600',
-              fontSize: '0.9375rem',
-              fontFamily: 'inherit',
-            }}
-          >
-            Check again
-          </button>
-        </div>
-      </div>
-    </div>
+      ) : null}
+      {children}
+    </>
   );
 }

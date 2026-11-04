@@ -26,6 +26,8 @@ const storeSchema = new mongoose.Schema({
     enum: ['free', 'pro'],
     default: 'free',
   },
+  // Paid tier from the subscription's plan name (utils/plans.js). Only read while plan === 'pro'.
+  planTier: { type: String, enum: ['free', 'starter', 'growth', 'pro', null], default: null },
   subscriptionId: { type: String },
   subscriptionStatus: { type: String },
   planUpdatedAt: { type: Date },

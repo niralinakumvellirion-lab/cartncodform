@@ -1,5 +1,6 @@
 /**
- * Poller skips stores without an active plan (same treatment as suspended stores).
+ * Poller plan rules: uninstalled stores are skipped (same treatment as suspended stores); stores without a
+ * subscription run on the Free plan; a store over its monthly message limit has its jobs skipped.
  */
 
 jest.useFakeTimers();
@@ -45,6 +46,7 @@ jest.mock('../utils/email', () => ({
   sendMarketingEmail: jest.fn().mockResolvedValue({ success: true }),
 }));
 jest.mock('../services/aiService', () => ({ generateCopy: jest.fn(), generateEmailCopy: jest.fn() }));
+jest.mock('../utils/planUsage', () => ({ isAtLimit: jest.fn() }));
 jest.mock('../services/pushHygiene', () => ({
   checkUnopenedThreshold: jest.fn().mockResolvedValue(undefined),
   updateDeliveredRate:    jest.fn().mockResolvedValue(undefined),
@@ -66,6 +68,7 @@ const ScheduledJob = require('../models/ScheduledJob');
 const FestivalQueue = require('../models/FestivalQueue');
 const Store = require('../models/Store');
 const { sendPushToCustomers } = require('../utils/pushNotification');
+const { isAtLimit } = require('../utils/planUsage');
 const { _processScheduledJobs, _processFestivalQueue } = require('../server');
 
 const SHOP = 'plan-poller.myshopify.com';
@@ -96,17 +99,44 @@ beforeEach(() => {
   ScheduledJob.countDocuments.mockResolvedValue(0);
   ScheduledJob.findOneAndUpdate.mockResolvedValue({ _id: JOB_ID });
   ScheduledJob.find.mockReturnValue({ limit: () => Promise.resolve([pendingJob()]) });
+  isAtLimit.mockResolvedValue(false);
 });
 
 afterEach(() => jest.restoreAllMocks());
 
 describe('processScheduledJobs — plan gate', () => {
-  test('free store → job marked skipped no_active_plan, nothing sent', async () => {
-    Store.findOne.mockReturnValue(storeWith({ plan: 'free' }));
+  test('uninstalled store → job marked skipped no_active_plan, nothing sent', async () => {
+    Store.findOne.mockReturnValue(storeWith({ plan: 'free', subscriptionStatus: 'uninstalled' }));
     await _processScheduledJobs();
     expect(ScheduledJob.findOneAndUpdate).toHaveBeenCalledWith(
       { _id: JOB_ID, status: 'pending' },
       { status: 'skipped', error: 'no_active_plan' }
+    );
+    expect(sendPushToCustomers).not.toHaveBeenCalled();
+  });
+
+  test('free store (no subscription) → NOT skipped for plan reasons; the limit is checked on the store', async () => {
+    Store.findOne.mockReturnValue(storeWith({ plan: 'free' }));
+    await _processScheduledJobs();
+    const planSkips = ScheduledJob.findOneAndUpdate.mock.calls.filter(
+      ([, upd]) => upd && (upd.error === 'no_active_plan' || upd.error === 'plan_limit')
+    );
+    expect(planSkips).toHaveLength(0);
+    expect(isAtLimit).toHaveBeenCalledWith(expect.objectContaining({ plan: 'free' }), 'messages');
+  });
+
+  test('monthly message limit reached → job skipped plan_limit, nothing sent', async () => {
+    Store.findOne.mockReturnValue(storeWith({ plan: 'free' }));
+    isAtLimit.mockResolvedValue(true);
+    await _processScheduledJobs();
+    expect(ScheduledJob.findOneAndUpdate).toHaveBeenCalledWith(
+      { _id: JOB_ID, status: 'pending' },
+      { status: 'skipped', error: 'plan_limit' }
+    );
+    expect(ScheduledJob.findOneAndUpdate).not.toHaveBeenCalledWith(
+      { _id: JOB_ID, status: 'pending' },
+      expect.objectContaining({ status: 'sent' }),
+      expect.anything()
     );
     expect(sendPushToCustomers).not.toHaveBeenCalled();
   });
@@ -141,7 +171,7 @@ describe('processFestivalQueue — plan gate', () => {
     expect(sendPushToCustomers).not.toHaveBeenCalled();
   });
 
-  test('the blocked-store query covers suspended OR (not pro AND not internal)', async () => {
+  test('the blocked-store query covers suspended OR (uninstalled AND not internal)', async () => {
     FestivalQueue.find.mockReturnValue({ limit: () => Promise.resolve([item]) });
     Store.find.mockReturnValue({ lean: () => Promise.resolve([]) });
     FestivalQueue.findOneAndUpdate.mockResolvedValue(null);
@@ -150,7 +180,7 @@ describe('processFestivalQueue — plan gate', () => {
     expect(filter.shopDomain).toEqual({ $in: [SHOP] });
     expect(filter.$or).toEqual([
       { suspended: true },
-      { plan: { $ne: 'pro' }, isInternal: { $ne: true } },
+      { subscriptionStatus: 'uninstalled', isInternal: { $ne: true } },
     ]);
   });
 });

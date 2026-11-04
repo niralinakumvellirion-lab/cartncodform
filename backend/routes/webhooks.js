@@ -13,6 +13,7 @@ const { computeSignalsForProfile } = require('../services/signalEngine');
 const Profile = require('../models/Profile');
 const ScheduledJob = require('../models/ScheduledJob');
 const { recordSubscriptionEvent } = require('../utils/subscriptionEvents');
+const { tierFromSubscriptionName } = require('../utils/plans');
 const AttributedEvent = require('../models/AttributedEvent');
 const AutomationConfig = require('../models/AutomationConfig');
 const CodOrder = require('../models/CodOrder');
@@ -441,15 +442,25 @@ async function handleAppSubscriptionUpdate(req, res) {
 
     // Read current plan before update so we can record fromPlan accurately.
     let fromPlan = null;
+    let currentSubId = null;
     try {
-      const current = await Store.findOne({ shopDomain }, { plan: 1 }).lean();
+      const current = await Store.findOne({ shopDomain }, { plan: 1, subscriptionId: 1 }).lean();
       fromPlan = current?.plan ?? null;
+      currentSubId = current?.subscriptionId || null;
     } catch { /* non-fatal */ }
+
+    // Changing plan (e.g. Starter -> Growth) activates the new subscription and cancels the old one, and
+    // the two webhooks can arrive in either order. The old one ending must not undo the new one.
+    if (!isActive && subId && currentSubId && currentSubId !== subId) {
+      console.log(`[billing] ${shopDomain}: an older subscription ended - current plan kept`);
+      return res.status(200).json({ received: true });
+    }
 
     await Store.findOneAndUpdate(
       { shopDomain },
       {
         plan: isActive ? 'pro' : 'free',
+        planTier: isActive ? tierFromSubscriptionName(subscription.name) : null,
         subscriptionId: subId,
         subscriptionStatus: status || null,
         planUpdatedAt: new Date(),

@@ -1,7 +1,7 @@
 jest.mock('../models/Store');
 
 const Store = require('../models/Store');
-const { hasActivePlan, PLAN_REQUIRED_BODY } = require('../utils/planAccess');
+const { hasActivePlan } = require('../utils/planAccess');
 const {
   requireStoreOwner,
   requireStoreOwnerAnyPlan,
@@ -23,24 +23,28 @@ function ownerReq() {
 
 beforeEach(() => jest.clearAllMocks());
 
+// Free plan: every installed store may use the app (limits live in utils/plans.js).
 describe('hasActivePlan', () => {
   test('pro plan → true', () => expect(hasActivePlan({ plan: 'pro' })).toBe(true));
-  test('free plan → false', () => expect(hasActivePlan({ plan: 'free' })).toBe(false));
-  test('no plan field → false', () => expect(hasActivePlan({})).toBe(false));
-  test('free but internal → true', () => expect(hasActivePlan({ plan: 'free', isInternal: true })).toBe(true));
+  test('free plan (no subscription) → true', () => expect(hasActivePlan({ plan: 'free' })).toBe(true));
+  test('no plan field → true', () => expect(hasActivePlan({})).toBe(true));
+  test('cancelled subscription → true (back on Free)', () => expect(hasActivePlan({ plan: 'free', subscriptionStatus: 'CANCELLED' })).toBe(true));
+  test('uninstalled → false', () => expect(hasActivePlan({ plan: 'free', subscriptionStatus: 'uninstalled' })).toBe(false));
+  test('uninstalled but internal → true', () => expect(hasActivePlan({ subscriptionStatus: 'uninstalled', isInternal: true })).toBe(true));
   test('null store → false', () => expect(hasActivePlan(null)).toBe(false));
 });
 
 describe('requireStoreOwner — plan gate', () => {
-  test('free store → 402 PLAN_REQUIRED, next not called', async () => {
-    Store.findOne.mockResolvedValue({ shopDomain: SHOP, plan: 'free' });
+  test('free store (no subscription) → next(): the Free plan is never blocked', async () => {
+    const store = { shopDomain: SHOP, plan: 'free' };
+    Store.findOne.mockResolvedValue(store);
+    const req = ownerReq();
     const res = mockRes();
     const next = jest.fn();
-    await requireStoreOwner(ownerReq(), res, next);
-    expect(res.status).toHaveBeenCalledWith(402);
-    expect(res.json).toHaveBeenCalledWith(PLAN_REQUIRED_BODY);
-    expect(PLAN_REQUIRED_BODY.code).toBe('PLAN_REQUIRED');
-    expect(next).not.toHaveBeenCalled();
+    await requireStoreOwner(req, res, next);
+    expect(next).toHaveBeenCalledWith();
+    expect(res.status).not.toHaveBeenCalled();
+    expect(req.store).toBe(store);
   });
 
   test('pro store → next()', async () => {
@@ -108,12 +112,21 @@ describe('requireNotSuspended — plan gate', () => {
     return { lean: () => Promise.resolve(doc) };
   }
 
-  test('free store → 402 PLAN_REQUIRED', async () => {
+  test('free store → next()', async () => {
     Store.findOne.mockReturnValue(leanOf({ shopDomain: SHOP, plan: 'free' }));
     const res = mockRes();
     const next = jest.fn();
     await requireNotSuspended({ shopDomain: SHOP }, res, next);
-    expect(res.status).toHaveBeenCalledWith(402);
+    expect(next).toHaveBeenCalledWith();
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  test('suspended store → 403 STORE_SUSPENDED', async () => {
+    Store.findOne.mockReturnValue(leanOf({ shopDomain: SHOP, plan: 'pro', suspended: true }));
+    const res = mockRes();
+    const next = jest.fn();
+    await requireNotSuspended({ shopDomain: SHOP }, res, next);
+    expect(res.status).toHaveBeenCalledWith(403);
     expect(next).not.toHaveBeenCalled();
   });
 

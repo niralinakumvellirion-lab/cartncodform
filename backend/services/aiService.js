@@ -1,6 +1,8 @@
 const crypto = require('crypto');
 const CopyCache = require('../models/CopyCache');
 const { buildCacheKey } = CopyCache;
+// AI-written copy is a Growth/Pro feature (utils/plans.js). Other plans get the built-in templates.
+const { aiCopyAllowed } = require('../utils/planUsage');
 
 /**
  * Layer 4 — AI. Narrow, cached use of the Anthropic API for:
@@ -84,6 +86,11 @@ async function generateCopy(store, signalType, product, channel) {
   const shopDomain = (store && store.shopDomain) || '';
   const voice = (store && store.voice) || {};
   const productId = product && product.productId ? String(product.productId) : null;
+
+  // 0. plan without AI copy -> built-in template (cached AI copy is not reused either)
+  if (!(await aiCopyAllowed(shopDomain))) {
+    return { title: fallback.title || '', body: fallback.body || '', subject: fallback.subject || '' };
+  }
 
   const voiceHash = crypto.createHash('md5').update(JSON.stringify(voice)).digest('hex');
   const cacheKey = buildCacheKey(shopDomain, signalType, productId, channel, voiceHash);
@@ -239,6 +246,7 @@ async function generateEmailCopy(shopDomain, signal, voice, profileData) {
   const template = SIGNAL_EMAIL_TEMPLATES[signalType] || SIGNAL_EMAIL_TEMPLATES.lapsing;
 
   const shop = shopDomain || '';
+  if (!(await aiCopyAllowed(shop))) return template;
   const voiceHash = crypto.createHash('md5').update(JSON.stringify(voice || {})).digest('hex');
   const cacheKey = buildCacheKey(shop, signalType, null, 'email-marketing', voiceHash);
 
@@ -314,7 +322,7 @@ function ruleBasedNarrative(stats) {
 }
 
 async function generateWeeklyNarrative(shopDomain, stats) {
-  if (!hasKey()) return ruleBasedNarrative(stats);
+  if (!hasKey() || !(await aiCopyAllowed(shopDomain))) return ruleBasedNarrative(stats);
 
   try {
     const prompt =
@@ -338,7 +346,7 @@ async function generateInsights(shopDomain, rawInsights) {
   const list = Array.isArray(rawInsights) ? rawInsights : [];
   const fallback = list.map((i) => i.evidence);
 
-  if (!hasKey() || list.length === 0) return fallback;
+  if (!hasKey() || list.length === 0 || !(await aiCopyAllowed(shopDomain))) return fallback;
 
   try {
     const prompt =
@@ -394,6 +402,10 @@ async function generateTemplateCopy(shopDomain, shopName, type, productTitle, vo
   function fallbackOfferText() {
     if (type === 'festival' && productTitle) return `${String(productTitle).trim()} Special`;
     return fb.offerText || null;
+  }
+
+  if (!(await aiCopyAllowed(shopDomain))) {
+    return { ...fb, offerText: fallbackOfferText(), fallback: true };
   }
 
   // 1. cache — title field reused to store offerText

@@ -1,6 +1,5 @@
 const jwt = require('jsonwebtoken');
 const Store = require('../models/Store');
-const { hasActivePlan, PLAN_REQUIRED_BODY } = require('../utils/planAccess');
 const { bootstrapStore } = require('../utils/bootstrapStore');
 
 /**
@@ -94,7 +93,9 @@ function requireAuth(req, res, next) {
  * store to req.store for downstream handlers to reuse.
  * Also blocks suspended stores — merchants see a 403 with code STORE_SUSPENDED.
  */
-function makeStoreOwner(enforcePlan) {
+// No plan check here: every installed store has at least the Free plan, whose limits are enforced where
+// the usage happens (utils/planUsage.js). A valid session token means the app is installed.
+function makeStoreOwner() {
   return async function storeOwner(req, res, next) {
     try {
       let store = await Store.findOne({ shopDomain: req.shopDomain });
@@ -130,10 +131,6 @@ function makeStoreOwner(enforcePlan) {
         });
       }
 
-      if (enforcePlan && !hasActivePlan(store)) {
-        return res.status(402).json(PLAN_REQUIRED_BODY);
-      }
-
       req.store = store;
       next();
     } catch (err) {
@@ -143,11 +140,9 @@ function makeStoreOwner(enforcePlan) {
   };
 }
 
-// Default: owner check + active subscription/trial required.
-const requireStoreOwner = makeStoreOwner(true);
-// Same checks but no plan requirement. Only for billing status/start and
-// account deletion, which must work before a merchant has subscribed.
-const requireStoreOwnerAnyPlan = makeStoreOwner(false);
+const requireStoreOwner = makeStoreOwner();
+// Kept as a separate name for the billing and account-deletion routes; identical since the Free plan.
+const requireStoreOwnerAnyPlan = requireStoreOwner;
 
 /**
  * For routes that use requireAuth only (no requireStoreOwner / no :shopDomain
@@ -158,16 +153,13 @@ async function requireNotSuspended(req, res, next) {
   try {
     const store = await Store.findOne(
       { shopDomain: req.shopDomain },
-      'suspended plan isInternal'
+      'suspended'
     ).lean();
     if (store && store.suspended) {
       return res.status(403).json({
         error: 'Your account is paused. Contact support.',
         code: 'STORE_SUSPENDED',
       });
-    }
-    if (store && !hasActivePlan(store)) {
-      return res.status(402).json(PLAN_REQUIRED_BODY);
     }
     next();
   } catch (err) {

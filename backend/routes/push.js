@@ -8,6 +8,7 @@ const { logBroadcastSend } = require('../services/sendLogService');
 const { fetchProductImage } = require('./webhooks');
 const { requireAuth, requireNotSuspended } = require('../middleware/requireOwner');
 const { upsertProfile } = require('../services/profileService');
+const { newSubscriberBlocked, SUBSCRIBER_LIMIT_BODY } = require('../utils/planUsage');
 const { Resend } = require('resend');
 const { uploadToCloudinary } = require('../utils/cloudinary');
 const FestivalQueue = require('../models/FestivalQueue');
@@ -106,6 +107,10 @@ router.post('/subscribe-customer', async (req, res) => {
     }
 
     const shop = shopDomain.trim().toLowerCase();
+
+    if (await newSubscriberBlocked(shop, token, oldToken)) {
+      return res.status(402).json(SUBSCRIBER_LIMIT_BODY);
+    }
 
     // Remove old token if different from new token
     if (oldToken && oldToken !== token) {
