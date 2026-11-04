@@ -38,6 +38,8 @@ describe('syncActiveSubscription', () => {
       { shopDomain: 'sync-shop.myshopify.com' },
       expect.objectContaining({ plan: 'pro', planTier: 'starter', subscriptionId: 'gid://sub/2' })
     );
+    // The finance dashboard prices the event by this tier.
+    expect(recordSubscriptionEvent).toHaveBeenCalledWith(expect.objectContaining({ planTier: 'starter' }));
   });
 
   test('no active subscription → nothing is changed, returns false', async () => {

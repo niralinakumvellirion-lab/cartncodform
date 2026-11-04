@@ -34,8 +34,9 @@ const KIND_CHIP = {
   trial:  'bg-[#E7E5FF] text-[#3730A3]',
   paying: 'bg-[#D1FAE5] text-[#065F46]',
   lost:   'bg-[#FDECEA] text-[#B3261E]',
+  changed: 'bg-[#FEF3C7] text-[#92400E]',
 };
-const KIND_LABEL = { trial: 'Trial started', paying: 'Became paying', lost: 'Cancelled / left' };
+const KIND_LABEL = { trial: 'Trial started', paying: 'Became paying', lost: 'Cancelled / left', changed: 'Changed plan' };
 
 // ── Section skeleton ─────────────────────────────────────────────────────────
 
@@ -128,8 +129,8 @@ function PlanSplit({ counts }) {
         {pFree   > 0 && <div className="bg-[#E1E4EA]" style={{ width: pFree   + '%' }} title={`Free: ${counts.free}`} />}
       </div>
       <div className="flex flex-wrap gap-4 text-xs text-[#5A6070]">
-        <span><span className="inline-block w-2 h-2 rounded-full bg-[#4F46E5] mr-1" />Pro paying: {counts.paying}</span>
-        <span><span className="inline-block w-2 h-2 rounded-full bg-[#A5B4FC] mr-1" />Pro in trial: {counts.trial}</span>
+        <span><span className="inline-block w-2 h-2 rounded-full bg-[#4F46E5] mr-1" />Paying: {counts.paying}</span>
+        <span><span className="inline-block w-2 h-2 rounded-full bg-[#A5B4FC] mr-1" />In trial: {counts.trial}</span>
         <span><span className="inline-block w-2 h-2 rounded-full bg-[#E1E4EA] mr-1" />Free: {counts.free}</span>
       </div>
       {counts.excluded > 0 && (
@@ -277,8 +278,8 @@ export default function FinanceScreen() {
           <span className="rounded-full bg-[#FEF3C7] px-2 py-0.5 text-[10px] font-bold tracking-widest text-[#92400E] uppercase">Owner only</span>
         </div>
         <p className="text-sm text-[#5A6070]">
-          Who is on which plan, and what that is worth each month. Stores are counted once, at the Pro price
-          of {summary ? fmtMoney(summary.priceUsd) : '$10.00'} every 30 days.
+          Who is on which plan, and what that is worth each month. Each store is counted once, at its own
+          plan&#39;s monthly price.
         </p>
       </div>
 
@@ -300,7 +301,7 @@ export default function FinanceScreen() {
         <KpiCard
           label="Paying stores"
           value={summary ? summary.counts.paying : '—'}
-          hint="Pro and billed past the trial."
+          hint="On a paid plan and billed past the trial."
           loading={summaryLoading}
         />
         <KpiCard
@@ -309,7 +310,7 @@ export default function FinanceScreen() {
           hint={
             summary
               ? summary.counts.trial > 0
-                ? `Would add ${fmtMoney(summary.counts.trial * (summary.priceUsd || 10))} a month if they stay.`
+                ? `Would add ${fmtMoney(summary.trialPipelineUsd ?? summary.counts.trial * (summary.priceUsd || 10))} a month if they stay.`
                 : 'No trials running.'
               : ''
           }

@@ -25,6 +25,7 @@ function store(overrides = {}) {
     shopDomain:         overrides.shopDomain   ?? 'test.myshopify.com',
     shopName:           overrides.shopName     ?? 'Test Shop',
     plan:               overrides.plan         ?? 'free',
+    planTier:           overrides.planTier     ?? null,
     subscriptionStatus: overrides.status       ?? null,
     planUpdatedAt:      overrides.planUpdatedAt ?? null,
     isTest:             overrides.isTest        ?? false,
@@ -43,6 +44,7 @@ function event(overrides = {}) {
     occurredAt:    overrides.occurredAt  ?? new Date(NOW.getTime() - 30 * MS),
     trialEndsAt:   overrides.trialEndsAt  ?? null,
     approxSince:   overrides.approxSince  ?? null,
+    planTier:      overrides.planTier     ?? null,
   };
   return base;
 }
@@ -555,5 +557,193 @@ describe('computeStoresGroup', () => {
     const r = computeStoresGroup({ stores, events, group: 'lapsed', now: NOW, page: 0, limit: 2 });
     expect(r.total).toBe(5);
     expect(r.rows).toHaveLength(2);
+  });
+});
+
+// ── Plan tiers: each store priced at its own plan ─────────────────────────────
+
+describe('plan tiers — pricing helpers', () => {
+  const { eventPriceUsd, storePriceUsd } = require('../utils/financeStats');
+
+  test('eventPriceUsd: tier price, or PLAN_PRICE for a pre-tiers event', () => {
+    expect(eventPriceUsd(event({ planTier: 'starter' }))).toBe(9.99);
+    expect(eventPriceUsd(event({ planTier: 'growth' }))).toBe(24.99);
+    expect(eventPriceUsd(event({ planTier: 'pro' }))).toBe(49);
+    expect(eventPriceUsd(event({ planTier: 'free' }))).toBe(0);
+    expect(eventPriceUsd(event())).toBe(PLAN_PRICE);
+    expect(eventPriceUsd(null)).toBe(PLAN_PRICE);
+  });
+
+  test('storePriceUsd: tierOf price, or PLAN_PRICE when no tier is saved yet', () => {
+    expect(storePriceUsd(store({ plan: 'pro', planTier: 'growth' }))).toBe(24.99);
+    expect(storePriceUsd(store({ plan: 'pro', planTier: 'pro' }))).toBe(49);
+    expect(storePriceUsd(store({ plan: 'pro' }))).toBe(PLAN_PRICE);
+  });
+});
+
+describe('plan tiers — summary', () => {
+  const past = new Date(NOW.getTime() - 1 * MS);
+  const future = new Date(NOW.getTime() + 3 * MS);
+
+  test('estimatedMrrUsd sums each paying store at its plan price; trials go to trialPipelineUsd', () => {
+    const stores = [
+      store({ shopDomain: 's.myshopify.com', plan: 'pro', planTier: 'starter' }),
+      store({ shopDomain: 'g.myshopify.com', plan: 'pro', planTier: 'growth' }),
+      store({ shopDomain: 'p.myshopify.com', plan: 'pro', planTier: 'pro' }),
+      store({ shopDomain: 'old.myshopify.com', plan: 'pro' }),                   // pre-tiers: $10
+      store({ shopDomain: 't.myshopify.com', plan: 'pro', planTier: 'growth' }), // in trial
+      store({ shopDomain: 'f.myshopify.com', plan: 'free' }),
+    ];
+    const events = [
+      event({ shopDomain: 's.myshopify.com', planTier: 'starter', trialEndsAt: past }),
+      event({ shopDomain: 'g.myshopify.com', planTier: 'growth', trialEndsAt: past }),
+      event({ shopDomain: 'p.myshopify.com', planTier: 'pro', trialEndsAt: past }),
+      event({ shopDomain: 'old.myshopify.com', trialEndsAt: past }),
+      event({ shopDomain: 't.myshopify.com', planTier: 'growth', trialEndsAt: future }),
+    ];
+    const r = computeSummary({ stores, events, now: NOW });
+    expect(r.counts.paying).toBe(4);
+    expect(r.counts.trial).toBe(1);
+    expect(r.estimatedMrrUsd).toBe(93.98); // 9.99 + 24.99 + 49 + 10
+    expect(r.trialPipelineUsd).toBe(24.99);
+    expect(r.priceUsd).toBe(PLAN_PRICE);
+  });
+
+  test('estimatedMrrUsd is rounded to cents', () => {
+    const stores = [1, 2, 3].map(i => store({ shopDomain: 's' + i + '.myshopify.com', plan: 'pro', planTier: 'starter' }));
+    const events = [1, 2, 3].map(i => event({ shopDomain: 's' + i + '.myshopify.com', planTier: 'starter', trialEndsAt: past }));
+    expect(computeSummary({ stores, events, now: NOW }).estimatedMrrUsd).toBe(29.97);
+  });
+
+  test('current MRR uses the store tier even when the event has none', () => {
+    const s = store({ plan: 'pro', planTier: 'growth' });
+    const r = computeSummary({ stores: [s], events: [event({ trialEndsAt: past })], now: NOW });
+    expect(r.estimatedMrrUsd).toBe(24.99);
+  });
+});
+
+describe('plan tiers — monthly MRR', () => {
+  test('each month is priced by the event tier in force at month end', () => {
+    // Starter from March (trial over in March), Growth from May 10. Pre-tiers store paying since March.
+    const stores = [
+      store({ shopDomain: 'up.myshopify.com', plan: 'pro', planTier: 'growth' }),
+      store({ shopDomain: 'old.myshopify.com', plan: 'pro' }),
+    ];
+    const events = [
+      event({ shopDomain: 'up.myshopify.com', planTier: 'starter',
+        occurredAt: new Date('2024-03-01T00:00:00Z'), trialEndsAt: new Date('2024-03-08T00:00:00Z') }),
+      event({ shopDomain: 'up.myshopify.com', planTier: 'growth', fromPlan: 'pro',
+        occurredAt: new Date('2024-05-10T00:00:00Z'), trialEndsAt: new Date('2024-03-08T00:00:00Z') }),
+      event({ shopDomain: 'old.myshopify.com',
+        occurredAt: new Date('2024-03-01T00:00:00Z'), trialEndsAt: new Date('2024-03-08T00:00:00Z') }),
+    ];
+    const r = computeSummary({ stores, events, now: NOW });
+    const m = Object.fromEntries(r.months.map(x => [x.month, x.mrrUsd]));
+    expect(m['2024-02']).toBeNull();
+    expect(m['2024-03']).toBe(19.99);
+    expect(m['2024-04']).toBe(19.99);
+    expect(m['2024-05']).toBe(34.99);
+    expect(m['2024-06']).toBe(34.99);
+  });
+
+  test('dedupeTransitions keeps a tier switch with the same plan and status', () => {
+    const a = event({ planTier: 'starter', occurredAt: new Date(NOW.getTime() - 10 * MS) });
+    const b = event({ planTier: 'growth', occurredAt: new Date(NOW.getTime() - 5 * MS) });
+    const c = event({ planTier: 'growth', occurredAt: new Date(NOW.getTime() - 2 * MS) });
+    expect(dedupeTransitions([a, b, c])).toEqual([a, b]);
+  });
+
+  test('shopStateAt returns the price of the plan in force', () => {
+    const a = event({ planTier: 'pro', occurredAt: new Date(NOW.getTime() - 10 * MS) });
+    const ended = event({ eventType: 'ended', toPlan: 'free', shopifyStatus: 'CANCELLED',
+      occurredAt: new Date(NOW.getTime() - 5 * MS) });
+    expect(shopStateAt([a, ended], new Date(NOW.getTime() - 7 * MS)).priceUsd).toBe(49);
+    expect(shopStateAt([a, ended], NOW).priceUsd).toBe(0);
+  });
+});
+
+describe('plan tiers — activity ledger', () => {
+  test('trial converted is priced at the activated event tier', () => {
+    const s = store({ plan: 'pro', planTier: 'growth' });
+    const ev = event({ planTier: 'growth', occurredAt: new Date(NOW.getTime() - 9 * MS),
+      trialEndsAt: new Date(NOW.getTime() - 2 * MS) });
+    const r = computeActivity({ stores: [s], events: [ev], range: 'week', now: NOW });
+    expect(r.events.find(e => e.kind === 'paying').amountUsd).toBe(24.99);
+    expect(r.netMrrUsd).toBe(24.99);
+  });
+
+  test('lost while paying is priced at the tier in force before it', () => {
+    const s = store({ plan: 'free' });
+    const activated = event({ planTier: 'pro', occurredAt: new Date(NOW.getTime() - 20 * MS),
+      trialEndsAt: new Date(NOW.getTime() - 14 * MS) });
+    const ended = event({ eventType: 'ended', toPlan: 'free', shopifyStatus: 'CANCELLED',
+      occurredAt: new Date(NOW.getTime() - 3 * MS) });
+    const r = computeActivity({ stores: [s], events: [activated, ended], range: 'week', now: NOW });
+    expect(r.events.find(e => e.kind === 'lost').amountUsd).toBe(-49);
+    expect(r.netMrrUsd).toBe(-49);
+  });
+
+  test('upgrade while paying: "changed" entry with the price difference', () => {
+    const s = store({ plan: 'pro', planTier: 'growth' });
+    const trialEnd = new Date(NOW.getTime() - 20 * MS);
+    const starter = event({ planTier: 'starter', occurredAt: new Date(NOW.getTime() - 27 * MS), trialEndsAt: trialEnd });
+    const growth = event({ planTier: 'growth', fromPlan: 'pro', occurredAt: new Date(NOW.getTime() - 2 * MS), trialEndsAt: trialEnd });
+    const r = computeActivity({ stores: [s], events: [starter, growth], range: 'week', now: NOW });
+    expect(r.events).toHaveLength(1);
+    expect(r.events[0]).toMatchObject({ kind: 'changed', label: 'Upgraded', amountUsd: 15 });
+    expect(r.counts).toEqual({ trials: 0, paying: 0, lost: 0 });
+    expect(r.netMrrUsd).toBe(15);
+  });
+
+  test('downgrade while paying: negative difference', () => {
+    const s = store({ plan: 'pro', planTier: 'starter' });
+    const trialEnd = new Date(NOW.getTime() - 20 * MS);
+    const pro = event({ planTier: 'pro', occurredAt: new Date(NOW.getTime() - 27 * MS), trialEndsAt: trialEnd });
+    const starter = event({ planTier: 'starter', occurredAt: new Date(NOW.getTime() - 2 * MS), trialEndsAt: trialEnd });
+    const r = computeActivity({ stores: [s], events: [pro, starter], range: 'week', now: NOW });
+    expect(r.events[0]).toMatchObject({ kind: 'changed', label: 'Downgraded', amountUsd: -39.01 });
+  });
+
+  test('plan switch during the trial: no MRR change, single conversion at the new tier', () => {
+    const s = store({ plan: 'pro', planTier: 'growth' });
+    const trialEnd = new Date(NOW.getTime() - 1 * MS);
+    const starter = event({ planTier: 'starter', occurredAt: new Date(NOW.getTime() - 6 * MS), trialEndsAt: trialEnd });
+    const growth = event({ planTier: 'growth', occurredAt: new Date(NOW.getTime() - 4 * MS), trialEndsAt: trialEnd });
+    const r = computeActivity({ stores: [s], events: [starter, growth], range: 'week', now: NOW });
+    const kinds = r.events.map(e => e.kind).sort();
+    expect(kinds).toEqual(['changed', 'paying', 'trial']);
+    expect(r.events.find(e => e.kind === 'changed').amountUsd).toBe(0);
+    expect(r.events.find(e => e.kind === 'paying').amountUsd).toBe(24.99);
+    expect(r.netMrrUsd).toBe(24.99);
+  });
+
+  test('re-subscribe after a cancel: the new trial still converts', () => {
+    const s = store({ plan: 'pro', planTier: 'starter' });
+    const first = event({ planTier: 'pro', occurredAt: new Date(NOW.getTime() - 60 * MS),
+      trialEndsAt: new Date(NOW.getTime() - 53 * MS) });
+    const ended = event({ eventType: 'ended', toPlan: 'free', shopifyStatus: 'CANCELLED',
+      occurredAt: new Date(NOW.getTime() - 40 * MS) });
+    const again = event({ planTier: 'starter', occurredAt: new Date(NOW.getTime() - 10 * MS),
+      trialEndsAt: new Date(NOW.getTime() - 3 * MS) });
+    const r = computeActivity({ stores: [s], events: [first, ended, again], range: 'week', now: NOW });
+    expect(r.events.find(e => e.kind === 'paying').amountUsd).toBe(9.99);
+  });
+});
+
+describe('plan tiers — stores group', () => {
+  test('paying rows carry each store plan price and tier', () => {
+    const past = new Date(NOW.getTime() - 1 * MS);
+    const stores = [
+      store({ shopDomain: 'g.myshopify.com', plan: 'pro', planTier: 'growth' }),
+      store({ shopDomain: 'old.myshopify.com', plan: 'pro' }),
+    ];
+    const events = [
+      event({ shopDomain: 'g.myshopify.com', planTier: 'growth', trialEndsAt: past }),
+      event({ shopDomain: 'old.myshopify.com', trialEndsAt: past }),
+    ];
+    const r = computeStoresGroup({ stores, events, group: 'paying', now: NOW });
+    const byShop = Object.fromEntries(r.rows.map(x => [x.shopDomain, x]));
+    expect(byShop['g.myshopify.com']).toMatchObject({ valueUsd: 24.99, tier: 'growth' });
+    expect(byShop['old.myshopify.com']).toMatchObject({ valueUsd: PLAN_PRICE, tier: null });
   });
 });

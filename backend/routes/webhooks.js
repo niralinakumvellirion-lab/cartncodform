@@ -456,11 +456,12 @@ async function handleAppSubscriptionUpdate(req, res) {
       return res.status(200).json({ received: true });
     }
 
+    const planTier = isActive ? tierFromSubscriptionName(subscription.name) : null;
     await Store.findOneAndUpdate(
       { shopDomain },
       {
         plan: isActive ? 'pro' : 'free',
-        planTier: isActive ? tierFromSubscriptionName(subscription.name) : null,
+        planTier,
         subscriptionId: subId,
         subscriptionStatus: status || null,
         planUpdatedAt: new Date(),
@@ -475,6 +476,7 @@ async function handleAppSubscriptionUpdate(req, res) {
       fromPlan,
       toPlan:        isActive ? 'pro' : 'free',
       shopifyStatus: status || null,
+      planTier,
       source:        'webhook',
     });
 

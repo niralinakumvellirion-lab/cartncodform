@@ -128,6 +128,27 @@ describe('GET /finance/summary', () => {
     expect(body).toHaveProperty('months');
     expect(Array.isArray(body.months)).toBe(true);
     expect(body.months).toHaveLength(6);
+    expect(body).toHaveProperty('trialPipelineUsd');
+  });
+
+  test('owner: prices each paying store at its plan tier', async () => {
+    mockStaff('owner');
+    const past = new Date(Date.now() - 2 * 86400000);
+    Store.find.mockReturnValue({ lean: () => Promise.resolve([
+      { shopDomain: 'g.myshopify.com', plan: 'pro', planTier: 'growth' },
+      { shopDomain: 'p.myshopify.com', plan: 'pro', planTier: 'pro' },
+    ]) });
+    SubscriptionEvent.find.mockReturnValue({ lean: () => Promise.resolve([
+      { shopDomain: 'g.myshopify.com', eventType: 'activated', toPlan: 'pro', shopifyStatus: 'ACTIVE',
+        planTier: 'growth', occurredAt: new Date(Date.now() - 40 * 86400000), trialEndsAt: past },
+      { shopDomain: 'p.myshopify.com', eventType: 'activated', toPlan: 'pro', shopifyStatus: 'ACTIVE',
+        planTier: 'pro', occurredAt: new Date(Date.now() - 40 * 86400000), trialEndsAt: past },
+    ]) });
+    const { status, body } = await get('/api/platform/finance/summary', authHeader('owner'));
+    expect(status).toBe(200);
+    expect(body.estimatedMrrUsd).toBe(73.99);
+    // The tier must be read from the Store, so it has to be in the projection.
+    expect(Store.find.mock.calls[0][1]).toMatch(/\bplanTier\b/);
   });
 
   test('admin: 403', async () => {
