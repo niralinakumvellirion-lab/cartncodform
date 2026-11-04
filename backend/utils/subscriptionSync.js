@@ -32,6 +32,7 @@ async function syncActiveSubscription(store, accessToken, source) {
     fromPlan: store.plan ?? null,
     toPlan: 'pro',
     shopifyStatus: sub.status,
+    planTier,
     source,
     isTest: !!sub.test,
   });

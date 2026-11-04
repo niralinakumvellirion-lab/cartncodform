@@ -257,6 +257,112 @@ describe('recordSubscriptionEvent', () => {
     const [doc] = SubscriptionEvent.create.mock.calls[0];
     expect(doc.shopifyStatus).toBeNull();
   });
+
+  // ── plan tiers ────────────────────────────────────────────────────────────
+
+  test('tier: activated event stores planTier and is priced at the tier price', async () => {
+    mockNoLatest();
+    SubscriptionEvent.create.mockResolvedValue({});
+
+    await recordSubscriptionEvent({
+      shopDomain: 'growth.myshopify.com', eventType: 'activated', toPlan: 'pro',
+      shopifyStatus: 'ACTIVE', planTier: 'growth', source: 'webhook',
+    });
+
+    const [doc] = SubscriptionEvent.create.mock.calls[0];
+    expect(doc.planTier).toBe('growth');
+    expect(doc.priceUsd).toBe(24.99);
+    expect(doc.trialDays).toBe(TRIAL_DAYS);
+  });
+
+  test('tier: unknown planTier is stored as null and priced at PLAN_PRICE', async () => {
+    mockNoLatest();
+    SubscriptionEvent.create.mockResolvedValue({});
+
+    await recordSubscriptionEvent({
+      shopDomain: 'odd.myshopify.com', eventType: 'activated', toPlan: 'pro',
+      shopifyStatus: 'ACTIVE', planTier: 'platinum', source: 'webhook',
+    });
+
+    const [doc] = SubscriptionEvent.create.mock.calls[0];
+    expect(doc.planTier).toBeNull();
+    expect(doc.priceUsd).toBe(PLAN_PRICE);
+  });
+
+  test('tier dedupe: same state and same tier => skipped', async () => {
+    mockLatest({ eventType: 'activated', toPlan: 'pro', shopifyStatus: 'ACTIVE', planTier: 'starter' });
+
+    const result = await recordSubscriptionEvent({
+      shopDomain: 'same.myshopify.com', eventType: 'activated', toPlan: 'pro',
+      shopifyStatus: 'ACTIVE', planTier: 'starter', source: 'webhook',
+    });
+
+    expect(result).toBeNull();
+    expect(SubscriptionEvent.create).not.toHaveBeenCalled();
+  });
+
+  test('tier switch (Starter -> Growth): recorded, keeps the trial end already in force', async () => {
+    const trialEndsAt = new Date(Date.now() + 3 * 86400000);
+    mockLatest({
+      eventType: 'activated', toPlan: 'pro', shopifyStatus: 'ACTIVE', planTier: 'starter',
+      trialDays: TRIAL_DAYS, trialEndsAt,
+    });
+    SubscriptionEvent.create.mockResolvedValue({});
+
+    await recordSubscriptionEvent({
+      shopDomain: 'switch.myshopify.com', eventType: 'activated', fromPlan: 'pro', toPlan: 'pro',
+      shopifyStatus: 'ACTIVE', planTier: 'growth', source: 'webhook',
+    });
+
+    const [doc] = SubscriptionEvent.create.mock.calls[0];
+    expect(doc.planTier).toBe('growth');
+    expect(doc.priceUsd).toBe(24.99);
+    expect(doc.trialEndsAt).toBe(trialEndsAt);
+    expect(doc.trialDays).toBe(TRIAL_DAYS);
+  });
+
+  test('tier switch after the trial: trialEndsAt stays in the past (no new trial)', async () => {
+    const trialEndsAt = new Date(Date.now() - 20 * 86400000);
+    mockLatest({ eventType: 'activated', toPlan: 'pro', shopifyStatus: 'ACTIVE', planTier: 'growth', trialEndsAt });
+    SubscriptionEvent.create.mockResolvedValue({});
+
+    await recordSubscriptionEvent({
+      shopDomain: 'down.myshopify.com', eventType: 'activated', toPlan: 'pro',
+      shopifyStatus: 'ACTIVE', planTier: 'starter', source: 'webhook',
+    });
+
+    const [doc] = SubscriptionEvent.create.mock.calls[0];
+    expect(doc.priceUsd).toBe(9.99);
+    expect(doc.trialEndsAt).toBe(trialEndsAt);
+  });
+
+  test('tier switch from a baseline with no approxSince: no trial', async () => {
+    mockLatest({ eventType: 'baseline', toPlan: 'pro', shopifyStatus: 'ACTIVE', approxSince: null });
+    SubscriptionEvent.create.mockResolvedValue({});
+
+    await recordSubscriptionEvent({
+      shopDomain: 'base.myshopify.com', eventType: 'activated', toPlan: 'pro',
+      shopifyStatus: 'ACTIVE', planTier: 'pro', source: 'oauth_sync',
+    });
+
+    const [doc] = SubscriptionEvent.create.mock.calls[0];
+    expect(doc.trialEndsAt).toBeNull();
+    expect(doc.trialDays).toBe(0);
+  });
+
+  test('re-subscribe after ended: starts a fresh trial', async () => {
+    mockLatest({ eventType: 'ended', toPlan: 'free', shopifyStatus: 'CANCELLED', planTier: null });
+    SubscriptionEvent.create.mockResolvedValue({});
+
+    await recordSubscriptionEvent({
+      shopDomain: 'back.myshopify.com', eventType: 'activated', toPlan: 'pro',
+      shopifyStatus: 'ACTIVE', planTier: 'starter', source: 'webhook',
+    });
+
+    const [doc] = SubscriptionEvent.create.mock.calls[0];
+    expect(doc.trialDays).toBe(TRIAL_DAYS);
+    expect(doc.trialEndsAt.getTime()).toBeGreaterThan(Date.now());
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -354,8 +460,9 @@ describe('webhooks: app_subscriptions/update → ACTIVE', () => {
   });
 
   test('same ACTIVE payload twice: dedupe prevents second event', async () => {
+    // No plan name in the payload -> tier 'pro', same as the latest event.
     SubscriptionEvent.findOne.mockReturnValue({
-      lean: () => Promise.resolve({ eventType: 'activated', toPlan: 'pro', shopifyStatus: 'ACTIVE' }),
+      lean: () => Promise.resolve({ eventType: 'activated', toPlan: 'pro', shopifyStatus: 'ACTIVE', planTier: 'pro' }),
     });
 
     await postWebhook('app-subscription', 'app_subscriptions/update', {
@@ -363,6 +470,26 @@ describe('webhooks: app_subscriptions/update → ACTIVE', () => {
     });
     expect(SubscriptionEvent.create).not.toHaveBeenCalled();
     expect(Store.findOneAndUpdate).toHaveBeenCalled();
+  });
+
+  test('records the plan tier from the subscription name', async () => {
+    await postWebhook('app-subscription', 'app_subscriptions/update', {
+      app_subscription: { admin_graphql_api_id: 'gid://shopify/AppSubscription/1', status: 'ACTIVE', name: 'Growth' },
+    });
+    const [doc] = SubscriptionEvent.create.mock.calls[0];
+    expect(doc.planTier).toBe('growth');
+    expect(doc.priceUsd).toBe(24.99);
+  });
+
+  test('plan switch (Starter -> Growth, both ACTIVE) is recorded, not deduped', async () => {
+    SubscriptionEvent.findOne.mockReturnValue({
+      lean: () => Promise.resolve({ eventType: 'activated', toPlan: 'pro', shopifyStatus: 'ACTIVE', planTier: 'starter' }),
+    });
+    await postWebhook('app-subscription', 'app_subscriptions/update', {
+      app_subscription: { admin_graphql_api_id: 'gid://shopify/AppSubscription/2', status: 'ACTIVE', name: 'Growth' },
+    });
+    expect(SubscriptionEvent.create).toHaveBeenCalledTimes(1);
+    expect(SubscriptionEvent.create.mock.calls[0][0].planTier).toBe('growth');
   });
 });
 
@@ -551,5 +678,26 @@ describe('auth billing/callback: isTest written from activeSub.test', () => {
     const updateCall = Store2.findOneAndUpdate.mock.calls.find(([, update]) => 'isTest' in update);
     expect(updateCall).toBeDefined();
     expect(updateCall[1].isTest).toBe(false);
+  });
+
+  test('records the plan tier from the approved subscription name', async () => {
+    const billing = require('../utils/billing');
+    const Store2  = require('../models/Store');
+    const SubEv   = require('../models/SubscriptionEvent');
+
+    billing.getActiveSubscription.mockResolvedValue({
+      id: 'gid://shopify/AppSubscription/3', name: 'Starter', status: 'ACTIVE', test: false,
+    });
+    Store2.findOne.mockResolvedValue({ shopDomain: SHOP, accessToken: 'tok', plan: 'free' });
+    Store2.findOneAndUpdate.mockResolvedValue({});
+    SubEv.findOne.mockReturnValue({ lean: () => Promise.resolve(null) });
+    SubEv.create.mockResolvedValue({});
+
+    await fetch(`${authBase}/api/auth/billing/callback?shop=${SHOP}`);
+
+    const [doc] = SubEv.create.mock.calls[0];
+    expect(doc.source).toBe('billing_callback');
+    expect(doc.planTier).toBe('starter');
+    expect(doc.priceUsd).toBe(9.99);
   });
 });

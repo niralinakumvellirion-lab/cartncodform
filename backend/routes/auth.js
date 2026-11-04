@@ -204,6 +204,7 @@ router.get('/callback', async (req, res) => {
           fromPlan:      prevPlan,
           toPlan:        'pro',
           shopifyStatus: activeSub.status,
+          planTier:      tierFromSubscriptionName(activeSub.name),
           source:        'oauth_sync',
           isTest:        !!activeSub.test,
         });
@@ -315,6 +316,7 @@ router.get('/billing/callback', async (req, res) => {
         fromPlan:      prevPlan,
         toPlan:        'pro',
         shopifyStatus: activeSub.status,
+        planTier:      tierFromSubscriptionName(activeSub.name),
         source:        'billing_callback',
         isTest:        !!activeSub.test,
       });

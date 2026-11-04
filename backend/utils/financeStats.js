@@ -11,14 +11,41 @@
  * corresponding Store document, exclusion falls back to event.isTest only.
  * event.isInternal does not exist, so deleted stores are never excluded for
  * being internal — even if they were previously marked internal.
+ *
+ * PRICING: each store is priced by its plan tier (utils/plans.js). Current MRR
+ * uses the Store's tier; history and the activity ledger use the tier on the
+ * activated/baseline event in force. Stores and events from before the tiers
+ * have no tier and are priced at PLAN_PRICE ($10), the original single plan.
  */
 
 const { PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS } = require('./billing');
+const { PLANS, tierOf } = require('./plans');
 
 const MS_PER_DAY = 86400000;
 const TRIAL_MS   = TRIAL_DAYS * MS_PER_DAY;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Monthly price of the tier recorded on an event; no tier (pre-tiers event) = PLAN_PRICE. */
+function eventPriceUsd(ev) {
+  return ev && PLANS[ev.planTier] ? PLANS[ev.planTier].price : PLAN_PRICE;
+}
+
+/** Monthly price of a store's current plan; a paid store with no tier saved yet = PLAN_PRICE. */
+function storePriceUsd(store) {
+  if (!store || !PLANS[store.planTier]) return PLAN_PRICE;
+  return PLANS[tierOf(store)].price;
+}
+
+/** Tier label for a row: the saved tier, or null for a pre-tiers store. */
+function storeTier(store) {
+  return store && PLANS[store.planTier] ? tierOf(store) : null;
+}
+
+// Cents precision: tier prices like 9.99 do not add up exactly in floating point.
+function _roundUsd(n) {
+  return Math.round(n * 100) / 100;
+}
 
 function groupEventsByShop(events) {
   const map = new Map();
@@ -32,12 +59,12 @@ function groupEventsByShop(events) {
   return map;
 }
 
-// Deduplicate a sorted event list: skip events that do not change (toPlan, shopifyStatus).
+// Deduplicate a sorted event list: skip events that do not change (toPlan, shopifyStatus, planTier).
 function dedupeTransitions(sortedEvents) {
   const out = [];
   let lastKey = null;
   for (const ev of sortedEvents) {
-    const key = `${ev.toPlan ?? ''}|${(ev.shopifyStatus ?? '').toUpperCase()}`;
+    const key = `${ev.toPlan ?? ''}|${(ev.shopifyStatus ?? '').toUpperCase()}|${ev.planTier ?? ''}`;
     if (key !== lastKey) {
       out.push(ev);
       lastKey = key;
@@ -93,7 +120,9 @@ function shopStateAt(dedupedEvents, T) {
     }
   }
 
-  return { plan, trialEndsAt, approx, shopifyStatus, latestActivated, latestEnded };
+  // priceUsd: monthly price of the plan in force at T (0 when not on a paid plan).
+  const priceUsd = plan === 'pro' ? eventPriceUsd(latestActivated) : 0;
+  return { plan, trialEndsAt, approx, shopifyStatus, latestActivated, latestEnded, priceUsd };
 }
 
 function isExcluded(store) {
@@ -111,9 +140,13 @@ function isExcluded(store) {
  * tzOffsetMinutes: default 330 (IST)
  *
  * Returns:
- *   { priceUsd, currency, estimatedMrrUsd,
+ *   { priceUsd, currency, estimatedMrrUsd, trialPipelineUsd,
  *     counts:{paying,trial,lapsed30,free,excluded},
  *     recordingSince, months }
+ *
+ * priceUsd: the original single-plan price, kept for older clients.
+ * estimatedMrrUsd: sum of each paying store's plan price.
+ * trialPipelineUsd: sum of each trial store's plan price (MRR if they all stay).
  *
  * recordingSince: date of earliest SubscriptionEvent, or null if no events exist.
  *
@@ -124,6 +157,7 @@ function isExcluded(store) {
 function computeSummary({ stores, events, now = new Date(), tzOffsetMinutes = 330 }) {
   const eventsByShop = groupEventsByShop(events);
   let paying = 0, trial = 0, lapsed30 = 0, free = 0, excluded = 0;
+  let estimatedMrrUsd = 0, trialPipelineUsd = 0;
 
   let recordingSince = null;
   for (const ev of events) {
@@ -165,7 +199,8 @@ function computeSummary({ stores, events, now = new Date(), tzOffsetMinutes = 33
         inTrial = (since.getTime() + TRIAL_MS) > now.getTime();
       }
 
-      if (inTrial) trial++; else paying++;
+      const price = storePriceUsd(store);
+      if (inTrial) { trial++; trialPipelineUsd += price; } else { paying++; estimatedMrrUsd += price; }
     } else {
       // Free — check lapsed
       const nonBaseline = shopEvents.filter(e => e.eventType !== 'baseline');
@@ -183,7 +218,8 @@ function computeSummary({ stores, events, now = new Date(), tzOffsetMinutes = 33
   return {
     priceUsd: PLAN_PRICE,
     currency: PLAN_CURRENCY,
-    estimatedMrrUsd: paying * PLAN_PRICE,
+    estimatedMrrUsd: _roundUsd(estimatedMrrUsd),
+    trialPipelineUsd: _roundUsd(trialPipelineUsd),
     counts: { paying, trial, lapsed30, free, excluded },
     recordingSince,
     months,
@@ -232,7 +268,7 @@ function _computeMonthlyMrr({ stores, events, eventsByShop, now }) {
       ? now
       : new Date(Date.UTC(year, month + 1, 0, 23, 59, 59, 999)); // last ms of month
 
-    let payingCount = 0;
+    let mrrUsd = 0;
 
     // All shops that have events
     for (const [shopDomain, shopEvents] of eventsByShop) {
@@ -250,11 +286,11 @@ function _computeMonthlyMrr({ stores, events, eventsByShop, now }) {
 
       if (state.plan === 'pro') {
         const inTrial = state.trialEndsAt && state.trialEndsAt > T;
-        if (!inTrial) payingCount++;
+        if (!inTrial) mrrUsd += state.priceUsd;
       }
     }
 
-    return { month: monthKey, mrrUsd: payingCount * PLAN_PRICE, current: isCurrent };
+    return { month: monthKey, mrrUsd: _roundUsd(mrrUsd), current: isCurrent };
   });
 }
 
@@ -268,6 +304,7 @@ function _computeMonthlyMrr({ stores, events, eventsByShop, now }) {
  *   { range, counts:{trials,paying,lost}, netMrrUsd,
  *     events:[{at, shopDomain, shopName, kind, label, amountUsd}] }
  *   events newest-first, max 200.
+ *   kind: 'trial' | 'paying' | 'lost' | 'changed' (plan switch; amountUsd = price difference).
  */
 function computeActivity({ stores, events, range = 'week', now = new Date(), tzOffsetMinutes = 330 }) {
   const eventsByShop = groupEventsByShop(events);
@@ -309,28 +346,41 @@ function computeActivity({ stores, events, range = 'week', now = new Date(), tzO
               label: 'Trial started',
               amountUsd: 0,
             });
+          } else {
+            // ── plan switch (e.g. Starter -> Growth) ────────────────────────
+            // MRR moves by the price difference once the store is past its trial.
+            const newPrice = eventPriceUsd(ev);
+            if (newPrice !== prevState.priceUsd) {
+              const wasPaying = prevState.trialEndsAt ? prevState.trialEndsAt <= evAt : true;
+              activityEvents.push({
+                at: evAt,
+                shopDomain,
+                shopName,
+                kind: 'changed',
+                label: newPrice > prevState.priceUsd ? 'Upgraded' : 'Downgraded',
+                amountUsd: wasPaying ? _roundUsd(newPrice - prevState.priceUsd) : 0,
+              });
+            }
           }
         }
 
         // ── paying conversion (derived, no stored event) ──────────────────
-        // trialEndsAt falls in range, store still Pro at trialEndsAt, no
-        // 'ended' event before trialEndsAt.
+        // trialEndsAt falls in range and this event is still the one in force
+        // at trialEndsAt: no 'ended' and no later plan switch before it (a plan
+        // switch carries the same trialEndsAt, so it must not count twice).
+        // Priced at this event's tier.
         if (ev.trialEndsAt) {
           const trialEnd = new Date(ev.trialEndsAt);
           if (trialEnd >= rangeStart && trialEnd <= now) {
-            // Check no ended/uninstalled event before trialEnd
-            const endedBefore = deduped.find(e =>
-              (e.eventType === 'ended' || e.eventType === 'uninstalled') &&
-              new Date(e.occurredAt) <= trialEnd
-            );
-            if (!endedBefore) {
+            const atEnd = shopStateAt(deduped, trialEnd);
+            if (atEnd.latestActivated === ev) {
               activityEvents.push({
                 at: trialEnd,
                 shopDomain,
                 shopName,
                 kind: 'paying',
                 label: 'Trial converted',
-                amountUsd: PLAN_PRICE,
+                amountUsd: eventPriceUsd(ev),
               });
             }
           }
@@ -352,7 +402,7 @@ function computeActivity({ stores, events, range = 'week', now = new Date(), tzO
               shopName,
               kind: 'lost',
               label: ev.eventType === 'uninstalled' ? 'Uninstalled' : 'Cancelled',
-              amountUsd: wasPaying ? -PLAN_PRICE : 0,
+              amountUsd: wasPaying ? -prevState.priceUsd : 0,
             });
           }
         }
@@ -374,7 +424,7 @@ function computeActivity({ stores, events, range = 'week', now = new Date(), tzO
     netMrrUsd += e.amountUsd;
   }
 
-  return { range, counts, netMrrUsd, events: capped };
+  return { range, counts, netMrrUsd: _roundUsd(netMrrUsd), events: capped };
 }
 
 function _rangeStart(range, now, tzOffsetMinutes) {
@@ -475,7 +525,8 @@ function computeStoresGroup({ stores, events, group, now = new Date(), page = 0,
           shopName:   store.shopName || store.shopDomain,
           status:     statusLabel,
           date:       activeSince,
-          valueUsd:   PLAN_PRICE,
+          valueUsd:   storePriceUsd(store),
+          tier:       storeTier(store),
           isTest:     !!store.isTest,
           isInternal: !!store.isInternal,
           approx:     approxFlag,
@@ -487,6 +538,7 @@ function computeStoresGroup({ stores, events, group, now = new Date(), page = 0,
           status:     statusLabel,
           date:       trialEndsAt,
           valueUsd:   0,
+          tier:       storeTier(store),
           isTest:     !!store.isTest,
           isInternal: !!store.isInternal,
           approx:     approxFlag,
@@ -548,4 +600,6 @@ module.exports = {
   _storeStatusLabel,
   dedupeTransitions,
   shopStateAt,
+  eventPriceUsd,
+  storePriceUsd,
 };

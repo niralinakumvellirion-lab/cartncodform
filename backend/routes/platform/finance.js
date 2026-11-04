@@ -39,7 +39,7 @@ router.get('/summary', ...OWNER_ONLY, async (req, res) => {
     const tz = Number.isFinite(tzOffset) ? tzOffset : 330;
 
     const [stores, events] = await Promise.all([
-      Store.find({}, 'shopDomain shopName plan subscriptionStatus planUpdatedAt isTest isInternal').lean(),
+      Store.find({}, 'shopDomain shopName plan planTier subscriptionStatus planUpdatedAt isTest isInternal').lean(),
       SubscriptionEvent.find({}).lean(),
     ]);
 
@@ -62,7 +62,7 @@ router.get('/activity', ...OWNER_ONLY, async (req, res) => {
     const tz = Number.isFinite(tzOffset) ? tzOffset : 330;
 
     const [stores, events] = await Promise.all([
-      Store.find({}, 'shopDomain shopName plan subscriptionStatus isTest isInternal').lean(),
+      Store.find({}, 'shopDomain shopName plan planTier subscriptionStatus isTest isInternal').lean(),
       SubscriptionEvent.find({}).lean(),
     ]);
 
@@ -90,7 +90,7 @@ router.get('/stores', ...OWNER_ONLY, async (req, res) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 25));
 
     const [stores, events] = await Promise.all([
-      Store.find({}, 'shopDomain shopName plan subscriptionStatus planUpdatedAt isTest isInternal').lean(),
+      Store.find({}, 'shopDomain shopName plan planTier subscriptionStatus planUpdatedAt isTest isInternal').lean(),
       SubscriptionEvent.find({}).lean(),
     ]);
 
