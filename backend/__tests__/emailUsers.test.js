@@ -113,7 +113,7 @@ afterAll(async () => {
   await new Promise((r) => server.close(r));
   await mongoose.disconnect();
   await mongod.stop();
-});
+}, 60000); // starting the in-memory database can be slow when every suite runs at once
 
 function byName(users, name) {
   return users.find((u) => u.name === name);

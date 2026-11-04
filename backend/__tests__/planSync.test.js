@@ -43,7 +43,7 @@ beforeAll(async () => {
   mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri());
   await Store.init();
-});
+}, 60000); // starting the in-memory database can be slow when every suite runs at once
 afterAll(async () => {
   await mongoose.disconnect();
   await mongod.stop();
@@ -144,6 +144,7 @@ describe('refreshPlan (Partner API)', () => {
     const saved = await Store.findOne({ shopDomain: SHOP }).lean();
     expect(saved).toMatchObject({ plan: 'pro', planTier: 'growth', shopGid: SHOP_GID, subscriptionStatus: 'ACTIVE' });
     expect(saved.planCheckedAt).toBeInstanceOf(Date);
+    expect(saved.planChosenAt).toBeInstanceOf(Date);
     expect(store.planTier).toBe('growth');
     const ev = await events();
     expect(ev).toHaveLength(1);

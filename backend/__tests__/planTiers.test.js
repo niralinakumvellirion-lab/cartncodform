@@ -41,7 +41,7 @@ const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const ScheduledJob = require('../models/ScheduledJob');
 const CopyCache = require('../models/CopyCache');
 const { refreshPlan } = require('../utils/subscriptionSync');
-const { PLANS, tierOf, tierFromSubscriptionName, monthStart, nextMonthStart } = require('../utils/plans');
+const { PLANS, tierOf, tierFromSubscriptionName, monthStart, nextMonthStart, needsPlanChoice } = require('../utils/plans');
 const { isAtLimit, usageReport, aiCopyAllowed, newSubscriberBlocked } = require('../utils/planUsage');
 const { generateCopy, generateTemplateCopy, generateEmailCopy } = require('../services/aiService');
 
@@ -79,7 +79,7 @@ beforeAll(async () => {
   app.use('/api/webhooks', require('../routes/webhooks'));
   await new Promise((resolve) => { server = app.listen(0, resolve); });
   base = `http://127.0.0.1:${server.address().port}`;
-});
+}, 60000); // starting the in-memory database can be slow when every suite runs at once
 
 afterAll(async () => {
   await new Promise((resolve) => server.close(resolve));
@@ -275,6 +275,41 @@ describe('push sign-ups', () => {
     await subs(SHOP, 500);
     await CustomerPushSubscription.create({ shopDomain: 'other.myshopify.com', token: 'foreign-old' });
     expect(await newSubscriberBlocked(SHOP, 'new-one', 'foreign-old')).toBe(true);
+  });
+});
+
+describe('choosing a plan after an install', () => {
+  const day = 86400000;
+
+  it('needsPlanChoice: new install, reinstall after the last choice → yes; chosen, paid or internal → no', () => {
+    const installedAt = new Date();
+    expect(needsPlanChoice({ plan: 'free', installedAt })).toBe(true);
+    expect(needsPlanChoice({ plan: 'free', installedAt, planChosenAt: new Date(installedAt.getTime() - day) })).toBe(true);
+    expect(needsPlanChoice({ plan: 'free', installedAt, planChosenAt: new Date(installedAt.getTime() + 1000) })).toBe(false);
+    expect(needsPlanChoice({ plan: 'free', planChosenAt: new Date() })).toBe(false);
+    expect(needsPlanChoice({ plan: 'pro', planTier: 'starter', installedAt })).toBe(false);
+    expect(needsPlanChoice({ plan: 'free', isInternal: true, installedAt })).toBe(false);
+    expect(needsPlanChoice(null)).toBe(false);
+  });
+
+  it('a new install is asked to choose, with the trial length; "Continue with Free" is saved and ends it', async () => {
+    await makeStore(SHOP, { installedAt: new Date(), planCheckedAt: new Date() });
+    let body = await (await fetch(`${base}/api/billing/${SHOP}/usage`)).json();
+    expect(body).toMatchObject({ needsPlanChoice: true, trialDays: 30, tier: 'free' });
+
+    const r = await fetch(`${base}/api/billing/${SHOP}/choose-free`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ ok: true, needsPlanChoice: false });
+    expect((await Store.findOne({ shopDomain: SHOP }).lean()).planChosenAt).toBeInstanceOf(Date);
+
+    body = await (await fetch(`${base}/api/billing/${SHOP}/usage`)).json();
+    expect(body.needsPlanChoice).toBe(false);
+  });
+
+  it('a store that picked a paid plan on Shopify is not asked', async () => {
+    await makeStore(SHOP, { installedAt: new Date(), plan: 'pro', planTier: 'growth', planCheckedAt: new Date() });
+    const body = await (await fetch(`${base}/api/billing/${SHOP}/usage`)).json();
+    expect(body.needsPlanChoice).toBe(false);
   });
 });
 

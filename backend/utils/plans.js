@@ -74,6 +74,17 @@ function tierOf(store) {
   return PLANS[store.planTier] ? store.planTier : 'pro';
 }
 
+/**
+ * True when the merchant must pick a plan before using the app: right after an install or reinstall, until
+ * they choose Free or a paid plan. Internal stores and stores on a paid plan never need to.
+ */
+function needsPlanChoice(store) {
+  if (!store || store.isInternal === true) return false;
+  if (tierOf(store) !== 'free') return false;
+  if (!store.planChosenAt) return true;
+  return !!store.installedAt && new Date(store.planChosenAt) < new Date(store.installedAt);
+}
+
 function planOf(store) {
   return PLANS[tierOf(store)];
 }
@@ -88,5 +99,5 @@ function nextMonthStart(now = new Date()) {
 
 module.exports = {
   PLANS, TIER_ORDER, LIMIT_KEYS,
-  tierFromSubscriptionName, tierFromSubscription, tierOf, planOf, monthStart, nextMonthStart,
+  tierFromSubscriptionName, tierFromSubscription, tierOf, needsPlanChoice, planOf, monthStart, nextMonthStart,
 };

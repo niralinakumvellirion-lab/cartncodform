@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { apiGet } from '../../../lib/api';
+import PlanChooser from './PlanChooser';
 
 function currentShop() {
   if (typeof window === 'undefined') return '';
@@ -23,30 +24,47 @@ export function limitMessage(planName, reached) {
   return `You have reached a limit of the ${planName || 'current'} plan: ${list}.`;
 }
 
-// Every installed store can use the app (no subscription = Free plan with limits), so this never
-// blocks. It shows a banner above every admin page while a plan limit is reached, linking to the
-// Plans page. Fails quietly: on any error the app shows without a banner.
+// Right after an install or reinstall the merchant first chooses a plan ("Choose your plan": Free, or a
+// paid plan with its free trial on Shopify's plan page). After that the app is never blocked: no
+// subscription = Free plan with limits, and a banner shows while a limit is reached. Fails open: on any
+// error the app shows. While the check runs (at most CHECK_TIMEOUT_MS) the page loads but stays hidden, so
+// a new install never flashes the dashboard before "Choose your plan".
+export const CHECK_TIMEOUT_MS = 3000;
+
 export default function PlanGate({ children }) {
+  const [checking, setChecking] = useState(true);
   const [notice, setNotice] = useState('');
+  const [chooser, setChooser] = useState(null);
   const [plansHref, setPlansHref] = useState('/admin/plans');
 
   useEffect(() => {
     let cancelled = false;
+    const done = () => { if (!cancelled) setChecking(false); };
     const shop = currentShop();
     if (typeof window !== 'undefined') {
       setPlansHref(`/admin/plans${window.location.search || ''}`);
-      if (window.location.pathname.startsWith('/admin/plans')) return undefined; // the page says it itself
+      // The Plans page is where a plan is chosen (and where Shopify sends the merchant back).
+      if (window.location.pathname.startsWith('/admin/plans')) { done(); return undefined; }
     }
-    if (shop) {
-      apiGet(`/api/billing/${encodeURIComponent(shop)}/usage`)
-        .then((u) => {
-          if (cancelled || !u || !Array.isArray(u.reached)) return;
-          setNotice(limitMessage(u.plan && u.plan.name, u.reached));
-        })
-        .catch(() => {});
-    }
-    return () => { cancelled = true; };
+    if (!shop) { done(); return undefined; }
+    const timer = setTimeout(done, CHECK_TIMEOUT_MS);
+    apiGet(`/api/billing/${encodeURIComponent(shop)}/usage`)
+      .then((u) => {
+        if (cancelled || !u) return;
+        if (u.needsPlanChoice === true && Array.isArray(u.plans) && u.plans.length) {
+          setChooser({ shop, plans: u.plans, trialDays: u.trialDays, upgradeUrl: u.upgradeUrl });
+          return;
+        }
+        if (Array.isArray(u.reached)) setNotice(limitMessage(u.plan && u.plan.name, u.reached));
+      })
+      .catch(() => {})
+      .finally(() => { clearTimeout(timer); done(); });
+    return () => { cancelled = true; clearTimeout(timer); };
   }, []);
+
+  if (chooser) {
+    return <PlanChooser {...chooser} onChosen={() => setChooser(null)} />;
+  }
 
   return (
     <>
@@ -74,7 +92,9 @@ export default function PlanGate({ children }) {
           </a>
         </div>
       ) : null}
-      {children}
+      <div aria-busy={checking || undefined} style={checking ? { visibility: 'hidden' } : undefined}>
+        {children}
+      </div>
     </>
   );
 }

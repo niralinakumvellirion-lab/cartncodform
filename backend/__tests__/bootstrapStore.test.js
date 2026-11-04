@@ -32,7 +32,7 @@ beforeAll(async () => {
   mongod = await MongoMemoryServer.create();
   await mongoose.connect(mongod.getUri());
   await Store.init();
-});
+}, 60000); // starting the in-memory database can be slow when every suite runs at once
 
 afterAll(async () => {
   await mongoose.disconnect();
@@ -145,6 +145,15 @@ describe('a shop that uninstalled and installed again', () => {
     expect(store).toMatchObject({ accessToken: 'shpat_new', refreshToken: 'shprt_new', needsReauth: false, timezone: 'Asia/Dubai', ownerEmail: 'kept@example.com' });
     expect(store.subscriptionStatus == null).toBe(true);
     expect(await Store.countDocuments()).toBe(1);
+  });
+
+  it('a paid plan from before the uninstall is not kept (Shopify ends it): Free, re-checked, plan asked again', async () => {
+    const chosen = new Date(Date.now() - 86400000);
+    await Store.updateOne({ shopDomain: SHOP }, { plan: 'pro', planTier: 'growth', planCheckedAt: chosen, planChosenAt: chosen });
+    const store = await bootstrapStore(SHOP, 't');
+    expect(store).toMatchObject({ plan: 'free', planTier: null, planCheckedAt: null });
+    expect(store.installedAt.getTime()).toBeGreaterThan(chosen.getTime());
+    expect(require('../utils/plans').needsPlanChoice(store)).toBe(true);
   });
 
   it('does not overwrite owner, timezone or brand from Shopify', async () => {

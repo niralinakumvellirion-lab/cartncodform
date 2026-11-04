@@ -3,9 +3,10 @@ const {
   requireAuth,
   requireStoreOwnerAnyPlan,
 } = require('../middleware/requireOwner');
+const Store = require('../models/Store');
 const { createSubscription, shouldUseTestCharge, isManagedPricingError, managedPricingUrl, PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS } = require('../utils/billing');
 const { refreshPlan, planCheckIsStale } = require('../utils/subscriptionSync');
-const { PLANS, TIER_ORDER, tierOf } = require('../utils/plans');
+const { PLANS, TIER_ORDER, tierOf, needsPlanChoice } = require('../utils/plans');
 const { usageReport } = require('../utils/planUsage');
 const { refreshAccessTokenIfNeeded } = require('../utils/shopify');
 
@@ -84,10 +85,28 @@ router.get('/:shopDomain/usage', requireAuth, requireStoreOwnerAnyPlan, async (r
       plans: planCards(),
       upgradeUrl: managedPricingUrl(req.store.shopDomain),
       planCheckedAt: req.store.planCheckedAt || null,
+      needsPlanChoice: needsPlanChoice(req.store),
+      trialDays: TRIAL_DAYS,
     });
   } catch (err) {
     console.error('[billing] usage error:', err.message);
     return res.status(500).json({ error: 'Could not load your plan usage' });
+  }
+});
+
+/**
+ * POST /api/billing/:shopDomain/choose-free
+ * The merchant chose the Free plan on the "Choose your plan" screen. -> { ok, needsPlanChoice }
+ */
+router.post('/:shopDomain/choose-free', requireAuth, requireStoreOwnerAnyPlan, async (req, res) => {
+  try {
+    const now = new Date();
+    await Store.updateOne({ shopDomain: req.store.shopDomain }, { planChosenAt: now });
+    req.store.planChosenAt = now;
+    return res.json({ ok: true, needsPlanChoice: needsPlanChoice(req.store) });
+  } catch (err) {
+    console.error('[billing] choose-free error:', err.message);
+    return res.status(500).json({ error: 'Could not save your plan choice' });
   }
 });
 

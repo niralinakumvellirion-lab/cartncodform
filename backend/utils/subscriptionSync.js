@@ -65,7 +65,7 @@ async function refreshPlan(store, accessToken) {
   if (paidTier) {
     if (!wasPaid || store.planTier !== paidTier) {
       changed = true;
-      Object.assign(update, { plan: 'pro', planTier: paidTier, subscriptionStatus: found.status, planUpdatedAt: now });
+      Object.assign(update, { plan: 'pro', planTier: paidTier, subscriptionStatus: found.status, planUpdatedAt: now, planChosenAt: now });
       if (found.id) Object.assign(update, { subscriptionId: found.id, isTest: found.test });
       await recordSubscriptionEvent({
         shopDomain: store.shopDomain,

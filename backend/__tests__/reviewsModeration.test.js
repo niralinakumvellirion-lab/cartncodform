@@ -51,7 +51,7 @@ beforeAll(async () => {
   app.use('/api/reviews', router);
   await new Promise((resolve) => { server = app.listen(0, resolve); });
   base = `http://127.0.0.1:${server.address().port}`;
-});
+}, 60000); // starting the in-memory database can be slow when every suite runs at once
 
 afterAll(async () => {
   await new Promise((resolve) => server.close(resolve));

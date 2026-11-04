@@ -200,6 +200,9 @@ export default function Plans({ shop }) {
               <div style={ui.planPrice}>
                 {priceLabel(p.price)}<span style={ui.per}>/month</span>
               </div>
+              {p.price && data.tier === 'free' && Number(data.trialDays) > 0 ? (
+                <div style={ui.trial}>{data.trialDays}-day free trial</div>
+              ) : null}
               <ul style={ui.list}>
                 {planFeatures(p).map((f) => (
                   <li key={f} style={ui.li}><span aria-hidden="true" style={ui.tick}>✓</span>{f}</li>
@@ -257,6 +260,7 @@ const ui = {
   planName: { fontSize: 16, fontWeight: 800, margin: 0 },
   planPrice: { fontSize: 28, fontWeight: 800, margin: '6px 0 12px' },
   per: { fontSize: 13, fontWeight: 600, color: '#6B7280', marginLeft: 2 },
+  trial: { fontSize: 13, fontWeight: 700, color: '#008060', margin: '-6px 0 12px' },
   list: { listStyle: 'none', padding: 0, margin: '0 0 16px', flex: 1 },
   li: { display: 'flex', gap: 8, fontSize: 13.5, color: '#374151', padding: '4px 0' },
   tick: { color: '#008060', fontWeight: 800 },

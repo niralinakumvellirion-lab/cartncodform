@@ -30,6 +30,8 @@ const storeSchema = new mongoose.Schema({
   planTier: { type: String, enum: ['free', 'starter', 'growth', 'pro', null], default: null },
   // Last time the plan was confirmed with Shopify (utils/subscriptionSync.refreshPlan).
   planCheckedAt: { type: Date, default: null },
+  // When the merchant chose a plan (Free or paid) after the latest install; see utils/plans.needsPlanChoice.
+  planChosenAt: { type: Date, default: null },
   // Shop GraphQL id (gid://shopify/Shop/123), needed by the Partner API subscription query.
   shopGid: { type: String, default: null },
   subscriptionId: { type: String },

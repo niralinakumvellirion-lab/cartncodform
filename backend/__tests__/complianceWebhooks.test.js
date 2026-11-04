@@ -40,7 +40,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await mongoose.disconnect();
   await mongod.stop();
-});
+}, 60000); // starting the in-memory database can be slow when every suite runs at once
 
 afterEach(async () => {
   const cols = mongoose.connection.collections;

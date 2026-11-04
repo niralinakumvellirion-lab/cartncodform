@@ -57,8 +57,12 @@ async function doBootstrap(shop, sessionToken) {
   };
 
   if (existing) {
-    // Re-install: new tokens only. Plan stays as it was; the trial screen handles the rest.
+    // Re-install: new tokens. Shopify ends the subscription on uninstall, so the plan is confirmed again
+    // with Shopify, and the merchant is asked to choose a plan (installedAt is newer than planChosenAt).
     set.subscriptionStatus = null;
+    set.plan = 'free';
+    set.planTier = null;
+    set.planCheckedAt = null;
     return Store.findOneAndUpdate({ shopDomain: shop }, { $set: set }, { new: true });
   }
 

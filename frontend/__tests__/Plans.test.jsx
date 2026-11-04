@@ -95,6 +95,19 @@ describe('Plans screen', () => {
   });
 });
 
+describe('free trial on the plan cards', () => {
+  it('on Free, paid cards show the trial; on a paid plan they do not', async () => {
+    apiGet.mockResolvedValueOnce(reply({ trialDays: 30 }));
+    const { unmount } = render(<Plans shop={SHOP} />);
+    expect(await screen.findAllByText('30-day free trial')).toHaveLength(3);
+    unmount();
+    apiGet.mockResolvedValueOnce(reply({ tier: 'starter', plan: PLANS[1], trialDays: 30 }));
+    render(<Plans shop={SHOP} />);
+    await screen.findByRole('region', { name: 'Starter plan' });
+    expect(screen.queryByText('30-day free trial')).not.toBeInTheDocument();
+  });
+});
+
 describe('back from Shopify plan page (plan_handle in the link)', () => {
   it('the chosen plan is confirmed → "Your Growth plan is active"', async () => {
     window.history.pushState({}, '', `/admin/plans?shop=${SHOP}&plan_handle=growth`);
