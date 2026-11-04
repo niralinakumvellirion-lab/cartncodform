@@ -30,6 +30,8 @@ const { computeWeights } = require('./services/weightsService');
 const { isQuietNow } = require('./utils/timezone');
 const { hasActivePlan } = require('./utils/planAccess');
 const { isAtLimit } = require('./utils/planUsage');
+const { recheckPaidPlans } = require('./utils/subscriptionSync');
+const { isPartnerApiConfigured } = require('./utils/partnerApi');
 const { fetchProductImage, productRefFromUrl } = require('./utils/productImage');
 const { logBroadcastSend } = require('./services/sendLogService');
 
@@ -1249,6 +1251,11 @@ async function runPollerTick() {
   } catch (err) {
     console.error('[gdpr-retry] compliance retry error (poller tick):', err.message);
   }
+  try {
+    await recheckPaidPlans();
+  } catch (err) {
+    console.error('[billing] daily plan check error (poller tick):', err.message);
+  }
 }
 setInterval(runPollerTick, 30 * 1000);
 console.log('[automation] Scheduled job poller started (30s interval; nightly signals gated inside; festival queue sender runs after each tick)');
@@ -1256,6 +1263,10 @@ console.log('[automation] Scheduled job poller started (30s interval; nightly si
 // --- Boot ---------------------------------------------------------------
 async function start() {
   await connectDB();
+  if (process.env.NODE_ENV === 'production' && !isPartnerApiConfigured()) {
+    console.warn('[billing] Partner API is not set up (SHOPIFY_PARTNER_ID, SHOPIFY_PARTNER_API_TOKEN, SHOPIFY_PARTNER_APP_ID): '
+      + 'plan changes on Shopify App Pricing cannot be confirmed and cancellations are not noticed.');
+  }
   app.listen(PORT, () => {
     console.log(`[server] ShopiReachBoost AI API listening on port ${PORT}`);
     console.log(`[server] CORS allowed origins: ${allowedOrigins.join(', ')}`);

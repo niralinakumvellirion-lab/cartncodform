@@ -26,7 +26,10 @@ jest.mock('../middleware/requireOwner', () => {
     requireNotSuspended: (_req, _res, next) => next(),
   };
 });
-jest.mock('../utils/subscriptionSync', () => ({ syncActiveSubscription: jest.fn(async () => false) }));
+jest.mock('../utils/subscriptionSync', () => ({
+  refreshPlan: jest.fn(async (store) => ({ tier: store.plan === 'pro' ? store.planTier : 'free', changed: false })),
+  planCheckIsStale: (store) => !store.planCheckedAt,
+}));
 jest.mock('../services/profileService', () => ({ upsertProfile: jest.fn(async () => null) }));
 
 const express = require('express');
@@ -37,7 +40,7 @@ const CodOrder = require('../models/CodOrder');
 const CustomerPushSubscription = require('../models/CustomerPushSubscription');
 const ScheduledJob = require('../models/ScheduledJob');
 const CopyCache = require('../models/CopyCache');
-const { syncActiveSubscription } = require('../utils/subscriptionSync');
+const { refreshPlan } = require('../utils/subscriptionSync');
 const { PLANS, tierOf, tierFromSubscriptionName, monthStart, nextMonthStart } = require('../utils/plans');
 const { isAtLimit, usageReport, aiCopyAllowed, newSubscriberBlocked } = require('../utils/planUsage');
 const { generateCopy, generateTemplateCopy, generateEmailCopy } = require('../services/aiService');
@@ -277,7 +280,7 @@ describe('push sign-ups', () => {
 
 describe('GET /api/billing/:shop/usage', () => {
   it('plan, usage, all four plan cards and the Shopify plan page link', async () => {
-    await makeStore(SHOP, { plan: 'pro', planTier: 'starter' });
+    await makeStore(SHOP, { plan: 'pro', planTier: 'starter', planCheckedAt: new Date() });
     await orders(SHOP, 12);
     const r = await fetch(`${base}/api/billing/${SHOP}/usage`);
     const body = await r.json();
@@ -286,14 +289,18 @@ describe('GET /api/billing/:shop/usage', () => {
     expect(body.usage.codOrders).toEqual({ used: 12, limit: 500 });
     expect(body.plans.map((p) => [p.id, p.price])).toEqual([['free', 0], ['starter', 9.99], ['growth', 24.99], ['pro', 49]]);
     expect(body.upgradeUrl).toBe('https://admin.shopify.com/store/tier-shop/charges/cartncod-form/pricing_plans');
-    expect(syncActiveSubscription).not.toHaveBeenCalled();
+    expect(refreshPlan).not.toHaveBeenCalled();
+    expect(body.planCheckedAt).toBeTruthy();
   });
 
   it('refresh=1 asks Shopify again even when a plan is known (back from the plan page)', async () => {
-    await makeStore(SHOP, { plan: 'pro', planTier: 'starter' });
-    syncActiveSubscription.mockResolvedValueOnce('growth');
+    await makeStore(SHOP, { plan: 'pro', planTier: 'starter', planCheckedAt: new Date() });
+    refreshPlan.mockImplementationOnce(async (store) => {
+      store.planTier = 'growth';
+      return { tier: 'growth', changed: true };
+    });
     const body = await (await fetch(`${base}/api/billing/${SHOP}/usage?refresh=1`)).json();
-    expect(syncActiveSubscription).toHaveBeenCalledTimes(1);
+    expect(refreshPlan).toHaveBeenCalledTimes(1);
     expect(body.tier).toBe('growth');
     expect(body.usage.codOrders.limit).toBeNull();
   });

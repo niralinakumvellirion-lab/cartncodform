@@ -4,7 +4,7 @@ const {
   requireStoreOwnerAnyPlan,
 } = require('../middleware/requireOwner');
 const { createSubscription, shouldUseTestCharge, isManagedPricingError, managedPricingUrl, PLAN_PRICE, PLAN_CURRENCY, TRIAL_DAYS } = require('../utils/billing');
-const { syncActiveSubscription } = require('../utils/subscriptionSync');
+const { refreshPlan, planCheckIsStale } = require('../utils/subscriptionSync');
 const { PLANS, TIER_ORDER, tierOf } = require('../utils/plans');
 const { usageReport } = require('../utils/planUsage');
 const { refreshAccessTokenIfNeeded } = require('../utils/shopify');
@@ -28,21 +28,19 @@ function planCards() {
 }
 
 /**
- * Apps on Shopify managed pricing: the merchant picks a plan on Shopify's own page and returns without
- * our billing callback, so ask Shopify which subscription is active. Runs when no paid plan is known yet,
- * or when the admin asks for a refresh (back from the plan page). Never throws.
+ * Shopify App Pricing sends no plan-change webhooks, so confirm the plan with Shopify: always when the
+ * admin asks (Plans page, incl. the return from Shopify's plan page), otherwise when the last check is
+ * older than 6 hours. Never throws; on failure the saved plan is kept.
  */
 async function syncPlan(req, force) {
-  if ((req.store.plan === 'pro' || req.store.isInternal) && !force) return;
+  const store = req.store;
+  if (store.isInternal === true) return;
+  if (!force && !planCheckIsStale(store)) return;
   try {
-    const token = await refreshAccessTokenIfNeeded(req.store, { sessionToken: sessionTokenOf(req) });
-    const tier = token ? await syncActiveSubscription(req.store, token, 'managed_pricing') : false;
-    if (tier) {
-      req.store.plan = 'pro';
-      if (typeof tier === 'string') req.store.planTier = tier;
-    }
+    const token = await refreshAccessTokenIfNeeded(store, { sessionToken: sessionTokenOf(req) });
+    if (token) await refreshPlan(store, token);
   } catch (err) {
-    console.warn('[billing] subscription check skipped:', err.message);
+    console.warn('[billing] plan check skipped:', err.message);
   }
 }
 
@@ -81,7 +79,12 @@ router.get('/:shopDomain/usage', requireAuth, requireStoreOwnerAnyPlan, async (r
   try {
     await syncPlan(req, req.query.refresh === '1');
     const report = await usageReport(req.store);
-    return res.json({ ...report, plans: planCards(), upgradeUrl: managedPricingUrl(req.store.shopDomain) });
+    return res.json({
+      ...report,
+      plans: planCards(),
+      upgradeUrl: managedPricingUrl(req.store.shopDomain),
+      planCheckedAt: req.store.planCheckedAt || null,
+    });
   } catch (err) {
     console.error('[billing] usage error:', err.message);
     return res.status(500).json({ error: 'Could not load your plan usage' });

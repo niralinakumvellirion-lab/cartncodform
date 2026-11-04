@@ -35,12 +35,34 @@ const LIMIT_KEYS = Object.freeze(['codOrders', 'subscribers', 'messages']);
  * Tier for a Shopify subscription, from its plan name ("Starter", "ShopiReachBoost Growth", ...).
  * A paid subscription whose name names no tier (the original single plan) keeps full access: 'pro'.
  */
-function tierFromSubscriptionName(name) {
+function keywordTier(name) {
   const n = String(name || '').toLowerCase();
   if (/\bgrowth\b/.test(n)) return 'growth';
   if (/\bstarter\b/.test(n)) return 'starter';
   if (/\bpro\b/.test(n)) return 'pro';
   if (/\bfree\b/.test(n)) return 'free';
+  return null;
+}
+
+function tierFromSubscriptionName(name) {
+  return keywordTier(name) || 'pro';
+}
+
+/**
+ * Tier for a Shopify App Pricing subscription: from the plan handle / description first, then from the
+ * monthly price when the names say nothing ($0 = Free, an exact plan price = that plan). Anything else
+ * (the original $10 plan) keeps full access: 'pro'.
+ */
+function tierFromSubscription({ names = [], price = null } = {}) {
+  for (const name of names) {
+    const t = keywordTier(name);
+    if (t) return t;
+  }
+  const p = Number(price);
+  if (price !== null && price !== undefined && price !== '' && Number.isFinite(p)) {
+    const match = TIER_ORDER.find((id) => Math.abs(PLANS[id].price - p) < 0.005);
+    if (match) return match;
+  }
   return 'pro';
 }
 
@@ -66,5 +88,5 @@ function nextMonthStart(now = new Date()) {
 
 module.exports = {
   PLANS, TIER_ORDER, LIMIT_KEYS,
-  tierFromSubscriptionName, tierOf, planOf, monthStart, nextMonthStart,
+  tierFromSubscriptionName, tierFromSubscription, tierOf, planOf, monthStart, nextMonthStart,
 };

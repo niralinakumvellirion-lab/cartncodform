@@ -33,6 +33,20 @@ export function planFeatures(plan) {
   return out;
 }
 
+/** Tier named by Shopify's plan_handle (welcome link back from the plan page), or null. */
+export function tierFromHandle(handle) {
+  const h = String(handle || '').toLowerCase();
+  for (const t of ['growth', 'starter', 'pro', 'free']) {
+    if (new RegExp(`(^|[^a-z])${t}([^a-z]|$)`).test(h)) return t;
+  }
+  return null;
+}
+
+function returnedHandle() {
+  if (typeof window === 'undefined') return '';
+  return new URLSearchParams(window.location.search).get('plan_handle') || '';
+}
+
 function resetDate(iso) {
   try {
     return new Date(iso).toLocaleDateString('en-US', { month: 'long', day: 'numeric', timeZone: 'UTC' });
@@ -75,6 +89,8 @@ function UsageRow({ id, used, limit }) {
 export default function Plans({ shop }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+  // Set when Shopify sent the merchant back here after choosing a plan.
+  const [handle] = useState(returnedHandle);
 
   const load = useCallback(() => {
     if (!shop) {
@@ -124,6 +140,21 @@ export default function Plans({ shop }) {
     <div style={ui.page}>
       <h1 style={ui.title}>Plans and usage</h1>
       <p style={ui.subtitle}>Every plan includes web push, cart emails, the COD form, birthday gifts, quantity discounts and reviews.</p>
+
+      {handle ? (() => {
+        const expected = tierFromHandle(handle);
+        const confirmed = expected ? expected === data.tier : data.tier !== 'free';
+        return confirmed ? (
+          <div role="status" style={ui.ok}>
+            <strong>Your {current.name} plan is active.</strong> Thanks! The new limits apply now.
+          </div>
+        ) : (
+          <div role="status" style={ui.info}>
+            Shopify has not confirmed your new plan yet. This can take a minute.{' '}
+            <button type="button" onClick={load} style={ui.linkBtn}>Check again</button>
+          </div>
+        );
+      })() : null}
 
       {reached.length ? (
         <div role="alert" style={ui.warn}>
@@ -202,6 +233,8 @@ const ui = {
   subtitle: { margin: '4px 0 18px', fontSize: 13.5, color: '#6B7280' },
   error: { background: '#FFF4F4', border: '1px solid #FED3D1', color: '#8E1F0B', borderRadius: 10, padding: '12px 14px', fontSize: 14, marginTop: 16 },
   linkBtn: { background: 'none', border: 'none', color: ACCENT, fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 14 },
+  ok: { background: '#F1F8F5', border: '1px solid #B4E1CC', color: '#0C5132', borderRadius: 10, padding: '12px 14px', fontSize: 14, lineHeight: 1.5, marginBottom: 16 },
+  info: { background: '#F2F7FE', border: '1px solid #C6DCF8', color: '#13315C', borderRadius: 10, padding: '12px 14px', fontSize: 14, lineHeight: 1.5, marginBottom: 16 },
   warn: { background: '#FFF5EA', border: '1px solid #FFD79D', color: '#4A2C00', borderRadius: 10, padding: '12px 14px', fontSize: 14, lineHeight: 1.5, marginBottom: 16 },
   card: { background: '#fff', border: '1px solid #E5E7EB', borderRadius: 14, padding: '18px 20px', marginBottom: 20 },
   currentHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 6 },

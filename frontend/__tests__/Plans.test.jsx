@@ -5,7 +5,7 @@
 import React from 'react';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { apiGet } from '../../../lib/api';
-import Plans, { planFeatures, priceLabel } from '../app/admin/screens/Plans';
+import Plans, { planFeatures, priceLabel, tierFromHandle } from '../app/admin/screens/Plans';
 
 const SHOP = 'plans.myshopify.com';
 const UPGRADE = 'https://admin.shopify.com/store/plans/charges/cartncod-form/pricing_plans';
@@ -33,6 +33,7 @@ function reply(over = {}) {
 beforeEach(() => {
   jest.clearAllMocks();
   window.open = jest.fn();
+  window.history.pushState({}, '', `/admin/plans?shop=${SHOP}`);
 });
 
 describe('Plans screen', () => {
@@ -91,6 +92,38 @@ describe('Plans screen', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load your plan usage');
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByText('12 of 50')).toBeInTheDocument();
+  });
+});
+
+describe('back from Shopify plan page (plan_handle in the link)', () => {
+  it('the chosen plan is confirmed → "Your Growth plan is active"', async () => {
+    window.history.pushState({}, '', `/admin/plans?shop=${SHOP}&plan_handle=growth`);
+    apiGet.mockResolvedValue(reply({ tier: 'growth', plan: PLANS[2] }));
+    render(<Plans shop={SHOP} />);
+    expect(await screen.findByText('Your Growth plan is active.')).toBeInTheDocument();
+  });
+
+  it('not confirmed yet → says so, and Check again asks Shopify again', async () => {
+    window.history.pushState({}, '', `/admin/plans?shop=${SHOP}&plan_handle=growth`);
+    apiGet.mockResolvedValueOnce(reply()).mockResolvedValueOnce(reply({ tier: 'growth', plan: PLANS[2] }));
+    render(<Plans shop={SHOP} />);
+    expect(await screen.findByText(/Shopify has not confirmed your new plan yet/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    expect(await screen.findByText('Your Growth plan is active.')).toBeInTheDocument();
+    expect(apiGet).toHaveBeenCalledTimes(2);
+    expect(apiGet).toHaveBeenLastCalledWith(`/api/billing/${SHOP}/usage?refresh=1`);
+  });
+
+  it('no plan_handle → no message', async () => {
+    apiGet.mockResolvedValue(reply());
+    render(<Plans shop={SHOP} />);
+    await screen.findByText('12 of 50');
+    expect(screen.queryByText(/plan is active|not confirmed/)).not.toBeInTheDocument();
+  });
+
+  it('reads the plan word from a handle', () => {
+    expect(['growth', 'shopireach-starter', 'PRO', 'free', 'production', 'basic'].map(tierFromHandle))
+      .toEqual(['growth', 'starter', 'pro', 'free', null, null]);
   });
 });
 
