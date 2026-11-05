@@ -56,32 +56,66 @@ function resetDate(iso) {
   }
 }
 
+// Poppins from Google Fonts, added once to the page (the same way the platform pages load their fonts).
+export const POPPINS_HREF = 'https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap';
+function usePoppins() {
+  useEffect(() => {
+    if (typeof document === 'undefined' || document.querySelector('link[data-ccf-poppins]')) return;
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = POPPINS_HREF;
+    link.setAttribute('data-ccf-poppins', '');
+    document.head.appendChild(link);
+  }, []);
+}
+
+export const TAGLINES = {
+  free: 'Try the app on a new store',
+  starter: 'For stores getting their first orders',
+  growth: 'For brands growing every month',
+  pro: 'For high-volume stores',
+};
+
+const Check = () => (
+  <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true" style={{ flex: '0 0 auto', marginTop: 1 }}>
+    <circle cx="10" cy="10" r="10" fill="#E8F5EE" />
+    <path d="M6 10.4l2.6 2.6L14 7.6" fill="none" stroke="#0E8A4F" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+const Shield = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flex: '0 0 auto' }}>
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" />
+  </svg>
+);
+
 function UsageRow({ id, used, limit }) {
   const unlimited = limit === null || limit === undefined;
   const pct = unlimited ? 0 : Math.min(100, Math.round(((used || 0) / Math.max(1, limit)) * 100));
   const reached = !unlimited && used >= limit;
   const color = reached ? '#D72C0D' : pct >= 80 ? '#B98900' : ACCENT;
   return (
-    <div style={ui.usageRow} data-usage={id}>
-      <div style={ui.usageTop}>
-        <span style={ui.usageLabel}>{LIMIT_LABELS[id]}</span>
-        <span style={ui.usageNum}>
-          {unlimited ? `${fmt(used || 0)} · Unlimited` : `${fmt(used || 0)} of ${fmt(limit)}`}
-        </span>
+    <div style={ui.usageTile} data-usage={id}>
+      <div style={ui.usageLabel}>{LIMIT_LABELS[id]}</div>
+      <div style={ui.usageNum}>
+        {unlimited ? `${fmt(used || 0)} · Unlimited` : `${fmt(used || 0)} of ${fmt(limit)}`}
       </div>
-      {unlimited ? null : (
-        <div
-          style={ui.track}
-          role="progressbar"
-          aria-label={LIMIT_LABELS[id]}
-          aria-valuemin={0}
-          aria-valuemax={limit}
-          aria-valuenow={Math.min(used || 0, limit)}
-        >
-          <div style={{ ...ui.fill, width: `${pct}%`, background: color }} />
-        </div>
+      {unlimited ? (
+        <div style={ui.usageFoot}>No limit on your plan</div>
+      ) : (
+        <>
+          <div
+            style={ui.track}
+            role="progressbar"
+            aria-label={LIMIT_LABELS[id]}
+            aria-valuemin={0}
+            aria-valuemax={limit}
+            aria-valuenow={Math.min(used || 0, limit)}
+          >
+            <div style={{ ...ui.fill, width: `${pct}%`, background: color }} />
+          </div>
+          <div style={{ ...ui.usageFoot, ...(reached ? ui.reached : null) }}>{reached ? 'Limit reached' : `${pct}% used`}</div>
+        </>
       )}
-      {reached ? <div style={ui.reached}>Limit reached</div> : null}
     </div>
   );
 }
@@ -92,6 +126,7 @@ export default function Plans({ shop }) {
   const [error, setError] = useState('');
   // Set when Shopify sent the merchant back here after choosing a plan.
   const [handle] = useState(returnedHandle);
+  usePoppins();
 
   const load = useCallback(() => {
     if (!shop) {
@@ -111,10 +146,22 @@ export default function Plans({ shop }) {
     if (data && data.upgradeUrl) window.open(data.upgradeUrl, '_top');
   }
 
+  const header = (
+    <div style={ui.header}>
+      <div>
+        <h1 style={ui.title}>Plans and usage</h1>
+        <p style={ui.subtitle}>
+          Every plan includes web push, cart emails, the COD form, birthday gifts, quantity discounts and reviews.
+        </p>
+      </div>
+      <span style={ui.chip}><Shield />Billed securely by Shopify</span>
+    </div>
+  );
+
   if (error) {
     return (
       <div style={ui.page}>
-        <h1 style={ui.title}>Plans and usage</h1>
+        {header}
         <div role="alert" style={ui.error}>
           {error}{' '}
           <button type="button" onClick={load} style={ui.linkBtn}>Try again</button>
@@ -126,8 +173,8 @@ export default function Plans({ shop }) {
   if (!data) {
     return (
       <div style={ui.page}>
-        <h1 style={ui.title}>Plans and usage</h1>
-        <p style={ui.subtitle} role="status">Loading your plan…</p>
+        {header}
+        <p style={ui.loading} role="status">Loading your plan…</p>
       </div>
     );
   }
@@ -136,11 +183,11 @@ export default function Plans({ shop }) {
   const current = plans.find((p) => p.id === data.tier) || data.plan || { name: 'Free' };
   const currentIndex = plans.findIndex((p) => p.id === data.tier);
   const reached = data.reached || [];
+  const onFree = data.tier === 'free';
 
   return (
     <div style={ui.page}>
-      <h1 style={ui.title}>Plans and usage</h1>
-      <p style={ui.subtitle}>Every plan includes web push, cart emails, the COD form, birthday gifts, quantity discounts and reviews.</p>
+      {header}
 
       {handle ? (() => {
         const expected = tierFromHandle(handle);
@@ -167,7 +214,7 @@ export default function Plans({ shop }) {
         </div>
       ) : null}
 
-      <section style={ui.card} aria-labelledby="ccf-current-plan">
+      <section style={ui.current} aria-labelledby="ccf-current-plan">
         <div style={ui.currentHead}>
           <div>
             <div style={ui.eyebrow}>Current plan</div>
@@ -175,19 +222,26 @@ export default function Plans({ shop }) {
               {current.name}
               <span style={ui.currentPrice}>{priceLabel(current.price)}/month</span>
             </h2>
+            <div style={ui.resets}>Monthly usage resets on {resetDate(data.resetsAt)}</div>
           </div>
-          <div style={ui.resets}>Monthly usage resets on {resetDate(data.resetsAt)}</div>
+          <button type="button" onClick={openPlans} style={ui.changeBtn}>Change plan</button>
         </div>
-        {['codOrders', 'subscribers', 'messages'].map((k) => (
-          <UsageRow key={k} id={k} used={data.usage?.[k]?.used} limit={data.usage?.[k]?.limit} />
-        ))}
+        <div style={ui.usageGrid}>
+          {['codOrders', 'subscribers', 'messages'].map((k) => (
+            <UsageRow key={k} id={k} used={data.usage?.[k]?.used} limit={data.usage?.[k]?.limit} />
+          ))}
+        </div>
       </section>
 
+      <h2 style={ui.sectionTitle}>Choose the plan that fits your store</h2>
       <div style={ui.grid}>
         {plans.map((p, i) => {
           const isCurrent = p.id === data.tier;
           const popular = p.id === 'growth';
           const label = isCurrent ? 'Current plan' : i > currentIndex ? `Upgrade to ${p.name}` : `Switch to ${p.name}`;
+          let btnStyle = ui.btnSecondary;
+          if (isCurrent) btnStyle = ui.btnCurrent;
+          else if (i > currentIndex) btnStyle = popular ? null : ui.btnDark;
           return (
             <section
               key={p.id}
@@ -198,75 +252,86 @@ export default function Plans({ shop }) {
               {popular && !isCurrent ? <div style={ui.badge}>Most popular</div> : null}
               {isCurrent ? <div style={{ ...ui.badge, background: '#111827' }}>Your plan</div> : null}
               <h3 style={ui.planName}>{p.name}</h3>
+              <p style={ui.tagline}>{TAGLINES[p.id] || ''}</p>
               <div style={ui.planPrice}>
                 {priceLabel(p.price)}<span style={ui.per}>/month</span>
               </div>
-              {p.price && data.tier === 'free' && Number(data.trialDays) > 0 ? (
-                <div style={ui.trial}>{data.trialDays}-day free trial</div>
-              ) : null}
-              <ul style={ui.list}>
-                {planFeatures(p).map((f) => (
-                  <li key={f} style={ui.li}><span aria-hidden="true" style={ui.tick}>✓</span>{f}</li>
-                ))}
-              </ul>
-              <button
-                type="button"
-                disabled={isCurrent}
-                onClick={openPlans}
-                style={{ ...ui.btn, ...(isCurrent ? ui.btnCurrent : i > currentIndex ? null : ui.btnSecondary) }}
-              >
+              <div style={ui.trialRow}>
+                {p.price && onFree && Number(data.trialDays) > 0 ? (
+                  <span style={ui.trial}>{data.trialDays}-day free trial</span>
+                ) : null}
+              </div>
+              <button type="button" disabled={isCurrent} onClick={openPlans} style={{ ...ui.btn, ...btnStyle }}>
                 {label}
               </button>
+              <div style={ui.divider} />
+              <ul style={ui.list}>
+                {planFeatures(p).map((f) => (
+                  <li key={f} style={ui.li}><Check />{f}</li>
+                ))}
+              </ul>
             </section>
           );
         })}
       </div>
 
       <p style={ui.note}>
-        Plans are billed by Shopify and appear on your Shopify bill. You choose or change your plan on
-        Shopify&apos;s plan page; this page updates when you come back.
+        <Shield />
+        <span>
+          Plans are billed by Shopify and appear on your Shopify bill. You choose or change your plan on
+          Shopify&apos;s plan page; this page updates when you come back.
+        </span>
       </p>
     </div>
   );
 }
 
-const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+const FONT = "'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 const ui = {
-  page: { maxWidth: 1080, margin: '0 auto', padding: '20px 20px 64px', fontFamily: FONT, color: '#111827' },
-  title: { fontSize: 24, fontWeight: 800, margin: 0, color: '#111827' },
-  subtitle: { margin: '4px 0 18px', fontSize: 13.5, color: '#6B7280' },
-  error: { background: '#FFF4F4', border: '1px solid #FED3D1', color: '#8E1F0B', borderRadius: 10, padding: '12px 14px', fontSize: 14, marginTop: 16 },
-  linkBtn: { background: 'none', border: 'none', color: ACCENT, fontWeight: 700, cursor: 'pointer', padding: 0, fontSize: 14 },
-  ok: { background: '#F1F8F5', border: '1px solid #B4E1CC', color: '#0C5132', borderRadius: 10, padding: '12px 14px', fontSize: 14, lineHeight: 1.5, marginBottom: 16 },
-  info: { background: '#F2F7FE', border: '1px solid #C6DCF8', color: '#13315C', borderRadius: 10, padding: '12px 14px', fontSize: 14, lineHeight: 1.5, marginBottom: 16 },
-  warn: { background: '#FFF5EA', border: '1px solid #FFD79D', color: '#4A2C00', borderRadius: 10, padding: '12px 14px', fontSize: 14, lineHeight: 1.5, marginBottom: 16 },
-  card: { background: '#fff', border: '1px solid #E5E7EB', borderRadius: 14, padding: '18px 20px', marginBottom: 20 },
-  currentHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap', marginBottom: 6 },
-  eyebrow: { fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#6B7280' },
-  currentName: { fontSize: 22, fontWeight: 800, margin: '2px 0 0', display: 'flex', alignItems: 'baseline', gap: 10 },
-  currentPrice: { fontSize: 14, fontWeight: 600, color: '#6B7280' },
+  page: { maxWidth: 1120, margin: '0 auto', padding: '24px 20px 64px', fontFamily: FONT, color: '#111827' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginBottom: 20 },
+  title: { fontSize: 26, fontWeight: 600, margin: 0, letterSpacing: '-0.01em', color: '#111827' },
+  subtitle: { margin: '6px 0 0', fontSize: 14, color: '#6B7280', maxWidth: 640, lineHeight: 1.6 },
+  chip: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 500, color: '#0C5132', background: '#E8F5EE', borderRadius: 999, padding: '6px 12px', whiteSpace: 'nowrap' },
+  loading: { fontSize: 14, color: '#6B7280' },
+  error: { background: '#FFF4F4', border: '1px solid #FED3D1', color: '#8E1F0B', borderRadius: 12, padding: '12px 16px', fontSize: 14 },
+  linkBtn: { background: 'none', border: 'none', color: ACCENT, fontWeight: 600, cursor: 'pointer', padding: 0, fontSize: 14, fontFamily: 'inherit' },
+  ok: { background: '#F1F8F5', border: '1px solid #B4E1CC', color: '#0C5132', borderRadius: 12, padding: '12px 16px', fontSize: 14, lineHeight: 1.5, marginBottom: 16 },
+  info: { background: '#F2F7FE', border: '1px solid #C6DCF8', color: '#13315C', borderRadius: 12, padding: '12px 16px', fontSize: 14, lineHeight: 1.5, marginBottom: 16 },
+  warn: { background: '#FFF5EA', border: '1px solid #FFD79D', color: '#4A2C00', borderRadius: 12, padding: '12px 16px', fontSize: 14, lineHeight: 1.5, marginBottom: 16 },
+  current: { background: '#fff', border: '1px solid #E5E7EB', borderRadius: 16, padding: 22, marginBottom: 32, boxShadow: '0 1px 2px rgba(17,24,39,.04)' },
+  currentHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', marginBottom: 18 },
+  eyebrow: { fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: ACCENT },
+  currentName: { fontSize: 24, fontWeight: 600, margin: '4px 0 2px', display: 'flex', alignItems: 'baseline', gap: 10 },
+  currentPrice: { fontSize: 15, fontWeight: 500, color: '#6B7280' },
   resets: { fontSize: 13, color: '#6B7280' },
-  usageRow: { padding: '12px 0', borderTop: '1px solid #F3F4F6' },
-  usageTop: { display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14, marginBottom: 8 },
-  usageLabel: { fontWeight: 600 },
-  usageNum: { color: '#374151', fontVariantNumeric: 'tabular-nums' },
-  track: { height: 8, background: '#F3F4F6', borderRadius: 99, overflow: 'hidden' },
+  changeBtn: { height: 40, padding: '0 18px', borderRadius: 10, border: '1px solid #D1D5DB', background: '#fff', color: '#111827', fontWeight: 600, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' },
+  usageGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 },
+  usageTile: { background: '#F9FAFB', border: '1px solid #F3F4F6', borderRadius: 12, padding: '14px 16px' },
+  usageLabel: { fontSize: 13, color: '#6B7280', fontWeight: 500 },
+  usageNum: { fontSize: 18, fontWeight: 600, margin: '4px 0 10px', fontVariantNumeric: 'tabular-nums' },
+  usageFoot: { fontSize: 12, color: '#6B7280', marginTop: 6 },
+  track: { height: 6, background: '#E5E7EB', borderRadius: 99, overflow: 'hidden' },
   fill: { height: '100%', borderRadius: 99, transition: 'width .3s ease' },
-  reached: { marginTop: 6, fontSize: 12.5, fontWeight: 700, color: '#D72C0D' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 },
-  plan: { position: 'relative', background: '#fff', border: '1px solid #E5E7EB', borderRadius: 14, padding: '22px 18px 18px', display: 'flex', flexDirection: 'column' },
+  reached: { fontWeight: 600, color: '#D72C0D' },
+  sectionTitle: { fontSize: 18, fontWeight: 600, margin: '0 0 22px' },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 16, alignItems: 'stretch' },
+  plan: { position: 'relative', background: '#fff', border: '1px solid #E5E7EB', borderRadius: 16, padding: '24px 20px 20px', display: 'flex', flexDirection: 'column', boxShadow: '0 1px 2px rgba(17,24,39,.04)' },
   planCurrent: { border: '2px solid #111827' },
-  planPopular: { border: `2px solid ${ACCENT}` },
-  badge: { position: 'absolute', top: -11, left: 16, background: ACCENT, color: '#fff', fontSize: 11.5, fontWeight: 700, borderRadius: 99, padding: '3px 10px' },
-  planName: { fontSize: 16, fontWeight: 800, margin: 0 },
-  planPrice: { fontSize: 28, fontWeight: 800, margin: '6px 0 12px' },
-  per: { fontSize: 13, fontWeight: 600, color: '#6B7280', marginLeft: 2 },
-  trial: { fontSize: 13, fontWeight: 700, color: '#008060', margin: '-6px 0 12px' },
-  list: { listStyle: 'none', padding: 0, margin: '0 0 16px', flex: 1 },
-  li: { display: 'flex', gap: 8, fontSize: 13.5, color: '#374151', padding: '4px 0' },
-  tick: { color: '#008060', fontWeight: 800 },
-  btn: { height: 40, borderRadius: 10, border: 'none', background: ACCENT, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' },
+  planPopular: { border: `2px solid ${ACCENT}`, boxShadow: '0 12px 32px rgba(79,70,229,.14)' },
+  badge: { position: 'absolute', top: -12, left: 20, background: ACCENT, color: '#fff', fontSize: 11.5, fontWeight: 600, borderRadius: 99, padding: '4px 12px', letterSpacing: '0.02em' },
+  planName: { fontSize: 18, fontWeight: 600, margin: 0 },
+  tagline: { fontSize: 13, color: '#6B7280', margin: '4px 0 16px', minHeight: 40, lineHeight: 1.5 },
+  planPrice: { fontSize: 34, fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1 },
+  per: { fontSize: 14, fontWeight: 500, color: '#6B7280', marginLeft: 4, letterSpacing: 0 },
+  trialRow: { minHeight: 26, margin: '10px 0 16px' },
+  trial: { display: 'inline-block', fontSize: 12, fontWeight: 600, color: '#0C5132', background: '#E8F5EE', borderRadius: 99, padding: '4px 10px' },
+  btn: { height: 42, borderRadius: 10, border: 'none', background: ACCENT, color: '#fff', fontWeight: 600, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' },
+  btnDark: { background: '#111827' },
   btnSecondary: { background: '#fff', color: '#111827', border: '1px solid #D1D5DB' },
   btnCurrent: { background: '#F3F4F6', color: '#6B7280', cursor: 'default' },
-  note: { marginTop: 18, fontSize: 13, color: '#6B7280', lineHeight: 1.6 },
+  divider: { height: 1, background: '#F3F4F6', margin: '18px 0 14px' },
+  list: { listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 10 },
+  li: { display: 'flex', gap: 10, fontSize: 13.5, color: '#374151', lineHeight: 1.45 },
+  note: { display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 24, fontSize: 13, color: '#6B7280', lineHeight: 1.6 },
 };

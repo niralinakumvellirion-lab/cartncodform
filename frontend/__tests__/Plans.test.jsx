@@ -5,7 +5,7 @@
 import React from 'react';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { apiGet } from '../../../lib/api';
-import Plans, { planFeatures, priceLabel, tierFromHandle } from '../app/admin/screens/Plans';
+import Plans, { planFeatures, priceLabel, tierFromHandle, POPPINS_HREF } from '../app/admin/screens/Plans';
 
 const SHOP = 'plans.myshopify.com';
 const UPGRADE = 'https://admin.shopify.com/store/plans/charges/cartncod-form/pricing_plans';
@@ -92,6 +92,31 @@ describe('Plans screen', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load your plan usage');
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByText('12 of 50')).toBeInTheDocument();
+  });
+});
+
+describe('design', () => {
+  it('uses Poppins: the font is loaded once and set on the page', async () => {
+    apiGet.mockResolvedValue(reply());
+    const { unmount } = render(<Plans shop={SHOP} />);
+    const heading = await screen.findByRole('heading', { name: 'Plans and usage' });
+    expect(heading.closest('div[style*="font-family"]')).toHaveStyle({ fontFamily: "'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" });
+    unmount();
+    render(<Plans shop={SHOP} />);
+    await screen.findByRole('heading', { name: 'Plans and usage' });
+    const links = document.querySelectorAll('link[data-ccf-poppins]');
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAttribute('href', POPPINS_HREF);
+  });
+
+  it('Change plan opens Shopify plan page; cards show who each plan is for; usage shows % used', async () => {
+    apiGet.mockResolvedValue(reply());
+    render(<Plans shop={SHOP} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Change plan' }));
+    expect(window.open).toHaveBeenCalledWith(UPGRADE, '_top');
+    expect(within(screen.getByRole('region', { name: 'Growth plan' })).getByText('For brands growing every month')).toBeInTheDocument();
+    expect(screen.getByText('24% used')).toBeInTheDocument();
+    expect(screen.getByText('Billed securely by Shopify')).toBeInTheDocument();
   });
 });
 
