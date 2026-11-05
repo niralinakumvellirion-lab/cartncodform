@@ -225,12 +225,7 @@ export default function PrepaidOffer({ shop, initialData = null }) {
 
   // Free plan: what the offer does, a locked preview and the way to unlock it.
   if (!data.allowed) {
-    return (
-      <PrepaidLocked
-        data={data}
-        preview={<Preview s={{ ...form, discountType: 'percent', value: 5, maxDiscount: 100, minOrder: 0 }} price={SAMPLE_PRICE} color={ACCENT} />}
-      />
-    );
+    return <PrepaidLocked data={data} />;
   }
 
   const locked = !data.allowed;
