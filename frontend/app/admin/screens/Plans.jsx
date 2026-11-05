@@ -28,6 +28,7 @@ export function planFeatures(plan) {
     line(l.messages, 'automated messages / month', 'automated messages'),
     'Product reviews',
   ];
+  if (plan.prepaidOffer) out.push('Prepaid offer on the COD form');
   if (plan.aiCopy) out.push('AI-written messages');
   if (plan.prioritySupport) out.push('Priority support');
   return out;

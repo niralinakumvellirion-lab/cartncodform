@@ -32,6 +32,7 @@ const { hasActivePlan } = require('./utils/planAccess');
 const { isAtLimit } = require('./utils/planUsage');
 const { recheckPaidPlans } = require('./utils/subscriptionSync');
 const { isPartnerApiConfigured } = require('./utils/partnerApi');
+const { cleanupExpiredPrepaidCodes } = require('./utils/prepaidOffer');
 const { fetchProductImage, productRefFromUrl } = require('./utils/productImage');
 const { logBroadcastSend } = require('./services/sendLogService');
 
@@ -155,6 +156,7 @@ app.use('/api/attribution', attributionLimiter, attributionRouter);
 const profilesRouter = require('./routes/profiles');
 app.use('/api/profiles', profilesRouter);
 app.use('/api/discounts', discountRouter);
+app.use('/api/prepaid-offer', require('./routes/prepaidOffer'));
 // requireAuth-protected admin endpoint (Phase 2 attribution activity) — no
 // rate limiter, matching /api/profiles and /api/discounts above: those
 // limiters are reserved for the public, unauthenticated storefront routes.
@@ -1255,6 +1257,11 @@ async function runPollerTick() {
     await recheckPaidPlans();
   } catch (err) {
     console.error('[billing] daily plan check error (poller tick):', err.message);
+  }
+  try {
+    await cleanupExpiredPrepaidCodes();
+  } catch (err) {
+    console.error('[prepaid] code clean-up error (poller tick):', err.message);
   }
 }
 setInterval(runPollerTick, 30 * 1000);

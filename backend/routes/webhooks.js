@@ -14,6 +14,9 @@ const Profile = require('../models/Profile');
 const ScheduledJob = require('../models/ScheduledJob');
 const { recordSubscriptionEvent } = require('../utils/subscriptionEvents');
 const { tierFromSubscriptionName } = require('../utils/plans');
+const { recordPrepaidUse } = require('../utils/prepaidOffer');
+const PrepaidCode = require('../models/PrepaidCode');
+const PrepaidOffer = require('../models/PrepaidOffer');
 const AttributedEvent = require('../models/AttributedEvent');
 const AutomationConfig = require('../models/AutomationConfig');
 const CodOrder = require('../models/CodOrder');
@@ -47,6 +50,8 @@ const SHOP_REDACT_MODELS = [
   Profile,
   PushClick,
   PushSubscription,
+  PrepaidCode,
+  PrepaidOffer,
   PurchaseRecord,
   Review,
   ReviewSettings,
@@ -268,6 +273,9 @@ async function handleOrderWebhook(req, res) {
         ).catch((err) => console.error('[webhook:order] purchase record error:', err.message));
       }
     }
+
+    // "Pay online and save" codes from the COD form: count the order as prepaid (or as used with COD).
+    await recordPrepaidUse(shopDomain, order);
 
     // A converted shopper should stop getting reminders — cancel any pending
     // job tied to this cart or customer. (Inlined here after the legacy

@@ -3,28 +3,28 @@
 /**
  * Pricing tiers. Prices must match the plans created in the Partner Dashboard (Shopify managed pricing).
  * A limit of null means unlimited. codOrders and messages are per calendar month (UTC); subscribers is a
- * running total of push sign-ups.
+ * running total of push sign-ups. prepaidOffer = the "Pay online and save" offer on the COD form.
  */
 const PLANS = Object.freeze({
   free: Object.freeze({
     id: 'free', name: 'Free', price: 0,
     limits: Object.freeze({ codOrders: 50, subscribers: 500, messages: 500 }),
-    aiCopy: false, prioritySupport: false,
+    aiCopy: false, prepaidOffer: false, prioritySupport: false,
   }),
   starter: Object.freeze({
     id: 'starter', name: 'Starter', price: 9.99,
     limits: Object.freeze({ codOrders: 500, subscribers: 5000, messages: 5000 }),
-    aiCopy: false, prioritySupport: false,
+    aiCopy: false, prepaidOffer: true, prioritySupport: false,
   }),
   growth: Object.freeze({
     id: 'growth', name: 'Growth', price: 24.99,
     limits: Object.freeze({ codOrders: null, subscribers: 25000, messages: 25000 }),
-    aiCopy: true, prioritySupport: false,
+    aiCopy: true, prepaidOffer: true, prioritySupport: false,
   }),
   pro: Object.freeze({
     id: 'pro', name: 'Pro', price: 49,
     limits: Object.freeze({ codOrders: null, subscribers: null, messages: null }),
-    aiCopy: true, prioritySupport: true,
+    aiCopy: true, prepaidOffer: true, prioritySupport: true,
   }),
 });
 

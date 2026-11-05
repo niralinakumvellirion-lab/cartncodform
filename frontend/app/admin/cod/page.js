@@ -3,7 +3,7 @@ import { Suspense } from 'react';
 import { AppProvider } from '@shopify/polaris';
 import { NavMenu } from '@shopify/app-bridge-react';
 import { useSearchParams } from 'next/navigation';
-import CodScreen from '../screens/CodOrders';
+import CodScreen from '../screens/CodHome';
 import '@shopify/polaris/build/esm/styles.css';
 
 function CodContent() {

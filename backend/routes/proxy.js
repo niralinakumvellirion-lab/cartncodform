@@ -10,6 +10,15 @@ const { sendNewCodOrderEmail } = require('../utils/email');
 const { sendPushToStore } = require('../utils/pushNotification');
 const { verifyProxySignature } = require('../utils/shopify');
 const { isAtLimit, newSubscriberBlocked, SUBSCRIBER_LIMIT_BODY } = require('../utils/planUsage');
+const { getSettings: getPrepaidSettings, offerAllowed: prepaidAllowed, createPrepaidCheckout } = require('../utils/prepaidOffer');
+
+// Readable text on the prepaid button: dark text on a light colour, white otherwise.
+function textOn(hex) {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ''));
+  if (!m) return '#ffffff';
+  const [r, g, b] = [m[1], m[2], m[3]].map((h) => parseInt(h, 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6 ? '#111827' : '#ffffff';
+}
 const { generateDiscount, defaultConfig } = require('./discounts');
 const { resolvePostOrderColors } = require('../utils/postOrderColors');
 const { resolveProductBoxColors } = require('../utils/productBoxColors');
@@ -439,6 +448,8 @@ router.get('/cod-form', async (req, res) => {
   const price = String(req.query.price || '');
   const productId = String(req.query.productId || '');
   const quantityParam = Math.max(1, parseInt(req.query.quantity || '1', 10) || 1);
+  // Optional: the exact product option, so "Pay online" can go straight to checkout.
+  const variantParam = /^\d{1,20}$/.test(String(req.query.variantId || '')) ? String(req.query.variantId) : '';
 
   const priceNum = Number(price);
   const priceLabel = price && !Number.isNaN(priceNum) ? priceNum.toFixed(2) : '—';
@@ -502,6 +513,21 @@ router.get('/cod-form', async (req, res) => {
     }
   } catch (_) { /* keep defaults */ }
 
+  // "Pay online and save" offer (Starter plan and above, when the merchant turned it on).
+  let prepaidBoot = null;
+  try {
+    const ppStore = await Store.findOne({ shopDomain: shop }).select('plan planTier isInternal').lean();
+    if (ppStore && prepaidAllowed(ppStore)) {
+      const ps = await getPrepaidSettings(shop);
+      if (ps.enabled) {
+        prepaidBoot = {
+          heading: ps.heading, buttonText: ps.buttonText, accentColor: ps.accentColor,
+          discountType: ps.discountType, value: ps.value, maxDiscount: ps.maxDiscount, minOrder: ps.minOrder,
+        };
+      }
+    }
+  } catch (_) { /* no offer */ }
+
   // Resolve post-order colours (null = use existing CSS unchanged).
   const poColors = resolvePostOrderColors({
     accentColor:    postOrderAccent,
@@ -514,7 +540,9 @@ router.get('/cod-form', async (req, res) => {
   // neutralised so the payload can never break out of the <script> element.
   const bootJson = JSON.stringify({
     shop, productName, price, productId,
+    variantId: variantParam,
     quantity: quantityParam,
+    prepaid: prepaidBoot,
     postOrderEnabled, birthdayPct, consentText,
     postOrderCopy,
     quantityTiers: qtBoot,
@@ -602,6 +630,17 @@ ${poColors ? `  /* post-order colour overrides */
   .bday-btn { background:${poColors.accent}; color:${poColors.btnFg}; }
   .bday-skip { color:${poColors.skip}; }
   .bday-row select { color:${poColors.text}; }` : ''}
+  /* "Pay online and save" offer */
+  .ccf-pp { border: 2px solid ${prepaidBoot ? prepaidBoot.accentColor : '#4F46E5'}; border-radius: 12px; padding: 14px; margin: 0 0 6px; background: #fafafa; }
+  .ccf-pp[hidden], .ccf-pp-or[hidden], .ccf-pp-err[hidden] { display: none; }
+  .ccf-pp-head { display: block; font-size: 15px; font-weight: 700; color: #18181b; }
+  .ccf-pp-sub { display: block; font-size: 13px; color: #52525b; margin: 4px 0 12px; line-height: 1.5; }
+  .ccf-pp-btn { width: 100%; min-height: 46px; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer;
+    background: ${prepaidBoot ? prepaidBoot.accentColor : '#4F46E5'}; color: ${textOn(prepaidBoot && prepaidBoot.accentColor)}; }
+  .ccf-pp-btn:disabled { opacity: .7; cursor: default; }
+  .ccf-pp-err { font-size: 12px; color: #dc2626; margin-top: 8px; }
+  .ccf-pp-or { display: flex; align-items: center; gap: 10px; color: #71717a; font-size: 12px; margin: 14px 0 4px; }
+  .ccf-pp-or::before, .ccf-pp-or::after { content: ""; flex: 1; height: 1px; background: #e4e4e7; }
 </style>
 </head>
 <body>
@@ -614,6 +653,14 @@ ${poColors ? `  /* post-order colour overrides */
       <div class="p-name">${escapeHtml(productName || 'Product')}</div>
       <div class="p-price" id="ccf-price-line">Price: <strong>${escapeHtml(priceLabel)}</strong></div>
     </div>
+
+    <div class="ccf-pp" id="ccf-pp" hidden>
+      <strong class="ccf-pp-head" id="ccf-pp-head"></strong>
+      <span class="ccf-pp-sub" id="ccf-pp-sub"></span>
+      <button type="button" class="ccf-pp-btn" id="ccf-pp-btn"></button>
+      <div class="ccf-pp-err" id="ccf-pp-err" role="alert" hidden></div>
+    </div>
+    <div class="ccf-pp-or" id="ccf-pp-or" hidden>or pay with Cash on Delivery</div>
 
     <form id="cod-form" novalidate>
       <label>Full Name <span class="req">*</span></label>
@@ -712,13 +759,80 @@ ${poColors ? `  /* post-order colour overrides */
     }
   }
 
+  // ── "Pay online and save" (must match backend/utils/prepaidOffer.computeDiscount) ──────
+  var PP = BOOT.prepaid;
+  var ppBox = document.getElementById('ccf-pp');
+  var ppOr = document.getElementById('ccf-pp-or');
+  var ppBtn = document.getElementById('ccf-pp-btn');
+  var ppErr = document.getElementById('ccf-pp-err');
+  var PP_UNAVAILABLE = 'Paying online is not available right now. Please use Cash on Delivery.';
+  function ppMoney(n) { return '\\u20b9' + (Math.round(n) === n ? String(n) : n.toFixed(2)); }
+  function ppQty() {
+    var el = form.querySelector('input[name="quantity"]');
+    return Math.max(1, Math.floor(el ? (Number(el.value) || 1) : 1));
+  }
+  function ppSubtotal(qty) {
+    var price = Number(BOOT.price) || 0;
+    var tier = QT.enabled ? qtPickTier(QT.tiers, qty) : null;
+    var unit = tier ? qtDiscountedUnit(price, tier.percent) : price;
+    return Math.round(unit * qty * 100) / 100;
+  }
+  function ppAmount(sub) {
+    if (!(sub > 0) || sub < Number(PP.minOrder || 0)) return 0;
+    var a = PP.discountType === 'fixed' ? Number(PP.value) : sub * Number(PP.value) / 100;
+    if (PP.discountType === 'percent' && Number(PP.maxDiscount) > 0) a = Math.min(a, Number(PP.maxDiscount));
+    a = Math.floor(a * 100 + 1e-6) / 100;
+    return a >= 1 && a < sub ? a : 0;
+  }
+  function updatePrepaid() {
+    if (!PP || !ppBox) return;
+    var sub = ppSubtotal(ppQty());
+    var amount = ppAmount(sub);
+    ppBox.hidden = !amount;
+    ppOr.hidden = !amount;
+    if (!amount) return;
+    document.getElementById('ccf-pp-head').textContent = PP.heading;
+    document.getElementById('ccf-pp-sub').textContent =
+      'Pay now by UPI, card or wallet and get ' + ppMoney(amount) + ' off this order.';
+    if (!ppBtn.disabled) {
+      ppBtn.textContent = PP.buttonText + ' \\u2013 ' + ppMoney(Math.round((sub - amount) * 100) / 100);
+    }
+  }
+  if (PP && ppBtn) {
+    ppBtn.addEventListener('click', function () {
+      ppErr.hidden = true;
+      ppBtn.disabled = true;
+      ppBtn.textContent = 'Opening secure checkout\\u2026';
+      fetch('/apps/cartncodform/prepaid-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productId: BOOT.productId, variantId: BOOT.variantId || null, quantity: ppQty() })
+      })
+        .then(function (r) { return r.json().catch(function () { return {}; }); })
+        .then(function (body) {
+          var url = body && body.ok && typeof body.url === 'string' ? body.url : '';
+          if (url.charAt(0) === '/' && url.charAt(1) !== '/') { window.location.href = url; return; }
+          throw new Error((body && body.error) || PP_UNAVAILABLE);
+        })
+        .catch(function (err) {
+          ppErr.textContent = (err && err.message) || PP_UNAVAILABLE;
+          ppErr.hidden = false;
+          ppBtn.disabled = false;
+          updatePrepaid();
+        });
+    });
+  }
+
   // Update summary on quantity change
   var qtyInputEl = form.querySelector('input[name="quantity"]');
   if (qtyInputEl) {
     qtyInputEl.addEventListener('input', updateSummary);
     qtyInputEl.addEventListener('change', updateSummary);
+    qtyInputEl.addEventListener('input', updatePrepaid);
+    qtyInputEl.addEventListener('change', updatePrepaid);
   }
   updateSummary();
+  updatePrepaid();
 
   form.addEventListener('submit', function (e) {
     e.preventDefault();
@@ -772,7 +886,7 @@ ${poColors ? `  /* post-order colour overrides */
         var h2 = document.createElement('h2');
         h2.textContent = 'Order placed!';
         var p = document.createElement('p');
-        p.textContent = 'We'll confirm via WhatsApp/call soon.';
+        p.textContent = 'We’ll confirm via WhatsApp/call soon.';
         ok.appendChild(tick);
         ok.appendChild(h2);
         ok.appendChild(p);
@@ -893,6 +1007,32 @@ ${poColors ? `  /* post-order colour overrides */
 // Public storefront route: no requireAuth, protected only by the App Proxy
 // signature (hard-enforced).
 // ---------------------------------------------------------------------------
+/**
+ * POST /apps/cartncodform/prepaid-checkout  body: { productId, variantId?, quantity }
+ * "Pay online and save" on the COD form: one-time discount code + where to send the customer.
+ * The shop comes from the signed App Proxy query only.
+ */
+router.post('/prepaid-checkout', async (req, res) => {
+  if (!verifyProxySignature(req.query)) {
+    return res.status(403).json({ ok: false, error: 'Invalid signature' });
+  }
+  try {
+    const body = req.body || {};
+    const visitor = String(req.get('x-forwarded-for') || req.ip || '').split(',')[0].trim();
+    const r = await createPrepaidCheckout({
+      shop: req.query.shop,
+      productId: body.productId,
+      variantId: body.variantId,
+      quantity: body.quantity,
+      visitor,
+    });
+    return res.status(r.status).json(r.body);
+  } catch (err) {
+    console.error('[prepaid] checkout error:', err.message);
+    return res.status(500).json({ ok: false, error: 'Paying online is not available right now. Please use Cash on Delivery.' });
+  }
+});
+
 router.post('/cod-order', async (req, res) => {
   if (!verifyProxySignature(req.query)) {
     console.warn('[proxy] Invalid or missing App Proxy signature on /cod-order — rejecting');

@@ -24,7 +24,7 @@ function getBackendUrl(req) {
 function planCards() {
   return TIER_ORDER.map((id) => {
     const p = PLANS[id];
-    return { id, name: p.name, price: p.price, limits: { ...p.limits }, aiCopy: p.aiCopy, prioritySupport: p.prioritySupport };
+    return { id, name: p.name, price: p.price, limits: { ...p.limits }, aiCopy: p.aiCopy, prepaidOffer: p.prepaidOffer, prioritySupport: p.prioritySupport };
   });
 }
 
