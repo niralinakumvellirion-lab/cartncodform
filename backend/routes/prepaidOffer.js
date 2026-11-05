@@ -1,7 +1,14 @@
 const express = require('express');
 const { requireAuth, requireStoreOwner } = require('../middleware/requireOwner');
-const { PLANS, tierOf } = require('../utils/plans');
-const { managedPricingUrl } = require('../utils/billing');
+const { PLANS, TIER_ORDER, tierOf } = require('../utils/plans');
+const { managedPricingUrl, TRIAL_DAYS } = require('../utils/billing');
+
+// The cheapest plan that includes the offer, for the upgrade popup on the Free plan.
+function upgradePlan() {
+  const id = TIER_ORDER.find((t) => PLANS[t].prepaidOffer);
+  const p = PLANS[id];
+  return { id, name: p.name, price: p.price, limits: { ...p.limits }, aiCopy: p.aiCopy, prepaidOffer: p.prepaidOffer, prioritySupport: p.prioritySupport };
+}
 const { getSettings, saveSettings, sanitizeSettings, offerAllowed, prepaidStats } = require('../utils/prepaidOffer');
 
 const router = express.Router();
@@ -13,6 +20,8 @@ async function payload(store) {
     stats,
     allowed: offerAllowed(store),
     planName: PLANS[tierOf(store)].name,
+    upgradePlan: upgradePlan(),
+    trialDays: TRIAL_DAYS,
     upgradeUrl: managedPricingUrl(store.shopDomain),
   };
 }

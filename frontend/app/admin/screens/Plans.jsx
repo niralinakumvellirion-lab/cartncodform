@@ -58,7 +58,7 @@ function resetDate(iso) {
 
 // Poppins from Google Fonts, added once to the page (the same way the platform pages load their fonts).
 export const POPPINS_HREF = 'https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap';
-function usePoppins() {
+export function usePoppins() {
   useEffect(() => {
     if (typeof document === 'undefined' || document.querySelector('link[data-ccf-poppins]')) return;
     const link = document.createElement('link');

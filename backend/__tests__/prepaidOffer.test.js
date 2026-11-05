@@ -457,6 +457,9 @@ describe('admin: /api/prepaid-offer/:shop', () => {
     const body = await (await fetch(`${base}/api/prepaid-offer/${SHOP}`)).json();
     expect(body.settings).toEqual({ ...pp.DEFAULTS });
     expect(body).toMatchObject({ allowed: true, planName: 'Starter' });
+    // For the upgrade popup on the Free plan: the cheapest plan with the offer, and the trial length.
+    expect(body.upgradePlan).toMatchObject({ id: 'starter', name: 'Starter', price: 9.99, prepaidOffer: true });
+    expect(body.trialDays).toBe(30);
     expect(body.stats).toEqual({ offersTaken: 3, prepaidOrders: 1, usedWithCod: 1, discountGiven: 90, prepaidRevenue: 949 });
   });
 

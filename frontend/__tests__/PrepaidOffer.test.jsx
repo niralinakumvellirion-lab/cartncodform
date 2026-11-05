@@ -3,7 +3,7 @@
  * Mocks: __mocks__/api.js (apiGet, apiSend).
  */
 import React from 'react';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { apiGet, apiSend } from '../../../lib/api';
 import PrepaidOffer, { previewAmount, money, explainSaving, hasChanges } from '../app/admin/screens/PrepaidOffer';
 import CodHome from '../app/admin/screens/CodHome';
@@ -18,8 +18,11 @@ const reply = (over = {}) => ({
   allowed: true,
   planName: 'Starter',
   upgradeUrl: 'https://admin.shopify.com/store/pp/charges/cartncod-form/pricing_plans',
+  upgradePlan: { id: 'starter', name: 'Starter', price: 9.99, limits: { codOrders: 500, subscribers: 5000, messages: 5000 }, aiCopy: false, prepaidOffer: true, prioritySupport: false },
+  trialDays: 30,
   ...over,
 });
+const FREE = { allowed: false, planName: 'Free' };
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -105,18 +108,90 @@ describe('Prepaid offer screen', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('1 to 50%');
   });
 
-  it('Free plan: switch locked, with a link to Plans', async () => {
-    apiGet.mockResolvedValue(reply({ allowed: false, planName: 'Free' }));
-    render(<PrepaidOffer shop={SHOP} />);
-    expect(await screen.findByText(/included in the Starter plan and above/)).toBeInTheDocument();
-    expect(screen.getByRole('switch')).toBeDisabled();
-    expect(screen.getByRole('link', { name: 'See plans' })).toHaveAttribute('href', `/admin/plans?shop=${SHOP}&host=h`);
-  });
 
   it('a load error is shown', async () => {
     apiGet.mockRejectedValue(new Error('Could not load the prepaid offer'));
     render(<PrepaidOffer shop={SHOP} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the prepaid offer');
+  });
+});
+
+describe('Free plan: locked view and upgrade popup', () => {
+  beforeEach(() => { window.open = jest.fn(); });
+  const dialog = () => screen.queryByRole('dialog', { name: 'Unlock the Prepaid offer' });
+
+  it('the upgrade popup opens straight away, with the plan that includes the offer and its free trial', async () => {
+    apiGet.mockResolvedValue(reply(FREE));
+    render(<PrepaidOffer shop={SHOP} />);
+    const d = await screen.findByRole('dialog', { name: 'Unlock the Prepaid offer' });
+    expect(d).toHaveAttribute('aria-modal', 'true');
+    expect(d).toHaveTextContent('You are on the Free plan.');
+    expect(within(d).getByText('$9.99')).toBeInTheDocument();
+    expect(within(d).getByText('Prepaid offer on the COD form')).toBeInTheDocument();
+    expect(within(d).getByText('500 COD orders / month')).toBeInTheDocument();
+    expect(within(d).getByRole('button', { name: 'Start 30-day free trial' })).toHaveFocus();
+  });
+
+  it('the popup button opens Shopify plan page in the top window', async () => {
+    apiGet.mockResolvedValue(reply(FREE));
+    render(<PrepaidOffer shop={SHOP} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Start 30-day free trial' }));
+    expect(window.open).toHaveBeenCalledWith(reply().upgradeUrl, '_top');
+  });
+
+  it('closes with Maybe later, the × button, Escape and a click outside; "See what is included" opens it again', async () => {
+    apiGet.mockResolvedValue(reply(FREE));
+    render(<PrepaidOffer shop={SHOP} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Maybe later' }));
+    expect(dialog()).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'See what is included' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(dialog()).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'See what is included' }));
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(dialog()).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'See what is included' }));
+    fireEvent.mouseDown(dialog().parentElement);
+    expect(dialog()).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'See what is included' }));
+    fireEvent.mouseDown(dialog());
+    expect(dialog()).toBeInTheDocument();
+  });
+
+  it('the page explains the offer, shows a locked preview, and has no settings to change', async () => {
+    apiGet.mockResolvedValue(reply(FREE));
+    render(<PrepaidOffer shop={SHOP} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Maybe later' }));
+    expect(screen.getByRole('heading', { name: 'Turn COD orders into prepaid orders' })).toBeInTheDocument();
+    const locked = screen.getByRole('img', { name: 'Locked preview' });
+    expect(locked).toHaveTextContent('Unlock with Starter');
+    expect(locked).toHaveTextContent('Pay online and save');
+    expect(screen.getByRole('heading', { name: 'How it works' })).toBeInTheDocument();
+    expect(screen.getByText('30-day free trial on paid plans · Cancel anytime · Billed by Shopify')).toBeInTheDocument();
+    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Upgrade to unlock' }));
+    expect(window.open).toHaveBeenCalledWith(reply().upgradeUrl, '_top');
+    expect(screen.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', `/admin/plans?shop=${SHOP}&host=h`);
+  });
+
+  it('without a trial the button says Upgrade now', async () => {
+    apiGet.mockResolvedValue(reply({ ...FREE, trialDays: 0 }));
+    render(<PrepaidOffer shop={SHOP} />);
+    expect(await screen.findByRole('button', { name: 'Upgrade now' })).toBeInTheDocument();
+  });
+
+  it('on a paid plan there is no popup and no lock', async () => {
+    apiGet.mockResolvedValue(reply());
+    render(<PrepaidOffer shop={SHOP} />);
+    await screen.findByText('Prepaid orders');
+    expect(dialog()).not.toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Locked preview' })).not.toBeInTheDocument();
   });
 });
 
@@ -183,6 +258,25 @@ describe('every change shows in the preview before saving', () => {
     expect(explainSaving(fixed, 999)).toBe('₹50 off every order.');
     expect(explainSaving({ ...fixed, minOrder: 500 }, 999)).toBe('₹50 off every order of ₹500 or more.');
     expect(explainSaving({ ...fixed, value: 2000 }, 999)).toMatch(/would cover this whole ₹999 order/);
+  });
+});
+
+describe('Cash on delivery page tabs: lock badge', () => {
+  it('Free plan: the Prepaid offer tab carries a lock badge naming the plan; the data is loaded once', async () => {
+    apiGet.mockResolvedValue(reply(FREE));
+    render(<CodHome shop={SHOP} />);
+    expect(await screen.findByLabelText('Locked: Starter plan')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: /Prepaid offer/ }));
+    expect(await screen.findByRole('dialog', { name: 'Unlock the Prepaid offer' })).toBeInTheDocument();
+    expect(apiGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('paid plan: no badge', async () => {
+    apiGet.mockResolvedValue(reply());
+    render(<CodHome shop={SHOP} />);
+    await screen.findByText('ORDERS LIST');
+    await waitFor(() => expect(apiGet).toHaveBeenCalled());
+    expect(screen.queryByLabelText(/Locked:/)).not.toBeInTheDocument();
   });
 });
 

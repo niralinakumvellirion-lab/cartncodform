@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
+import PrepaidLocked from './PrepaidLocked';
 
 const ACCENT = '#4F46E5';
 const SAMPLE_PRICE = 999;
@@ -154,7 +155,7 @@ function AffixInput({ label, prefix, suffix, ...props }) {
 }
 
 /** Settings for the "Pay online and save" offer on the COD form. */
-export default function PrepaidOffer({ shop }) {
+export default function PrepaidOffer({ shop, initialData = null }) {
   const [data, setData] = useState(null);
   const [form, setForm] = useState(null);
   const [error, setError] = useState('');
@@ -164,11 +165,18 @@ export default function PrepaidOffer({ shop }) {
   const [shownColor, setShownColor] = useState(ACCENT);
 
   useEffect(() => {
+    function apply(d) {
+      setData(d);
+      setForm(d.settings);
+      if (HEX.test(d.settings.accentColor)) setShownColor(d.settings.accentColor);
+    }
+    // The COD page may already have loaded it (for the lock badge on the tab).
+    if (initialData) { apply(initialData); return; }
     if (!shop) return;
     apiGet(`/api/prepaid-offer/${encodeURIComponent(shop)}`)
-      .then((d) => { setData(d); setForm(d.settings); if (HEX.test(d.settings.accentColor)) setShownColor(d.settings.accentColor); })
+      .then(apply)
       .catch((err) => setError(err.message || 'Could not load the prepaid offer.'));
-  }, [shop]);
+  }, [shop, initialData]);
 
   function set(key, value) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -212,6 +220,16 @@ export default function PrepaidOffer({ shop }) {
         <h1 style={ui.title}>Prepaid offer</h1>
         {error ? <p role="alert" style={ui.error}>{error}</p> : <p style={ui.sub} role="status">Loading…</p>}
       </div>
+    );
+  }
+
+  // Free plan: what the offer does, a locked preview and the way to unlock it.
+  if (!data.allowed) {
+    return (
+      <PrepaidLocked
+        data={data}
+        preview={<Preview s={{ ...form, discountType: 'percent', value: 5, maxDiscount: 100, minOrder: 0 }} price={SAMPLE_PRICE} color={ACCENT} />}
+      />
     );
   }
 
