@@ -76,9 +76,8 @@ export default function PrepaidLocked({ data }) {
   // The animated tour opens first; "See what is included" re-opens it on the plan step.
   const [tour, setTour] = useState({ open: true, start: 0 });
   const plan = data.upgradePlan || null;
-  const trial = Number(data.trialDays) > 0 ? Number(data.trialDays) : 0;
   const planName = plan ? plan.name : 'a paid plan';
-  const ctaLabel = trial ? `Start ${trial}-day free trial` : 'Upgrade to unlock';
+  const ctaLabel = plan ? `Upgrade to ${plan.name}` : 'Upgrade to unlock';
 
   function upgrade() {
     if (data.upgradeUrl) window.open(data.upgradeUrl, '_top');
@@ -99,7 +98,6 @@ export default function PrepaidLocked({ data }) {
           <strong style={ui.bannerTitle}>Available on {plan ? `${plan.name} and above` : 'paid plans'}</strong>
           <span>
             You are on the {data.planName} plan. Upgrade to show &quot;Pay online and save&quot; on your COD form.
-            {trial ? ` Every paid plan starts with a ${trial}-day free trial.` : ''}
           </span>
           <div style={{ marginTop: 6 }}>
             <button type="button" className="ccf-link" onClick={() => setTour({ open: true, start: 6 })} style={ui.bannerLink}>See what is included</button>

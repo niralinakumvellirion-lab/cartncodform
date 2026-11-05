@@ -260,24 +260,17 @@ describe('Free plan: animated tour first, then the locked page', () => {
     expect(locked).toHaveTextContent('Pay online and save');
     expect(screen.getByRole('heading', { name: 'How it works' })).toBeInTheDocument();
     expect(screen.getByRole('status')).toHaveTextContent('Available on Starter and above');
-    expect(screen.getByRole('status')).toHaveTextContent('Every paid plan starts with a 30-day free trial.');
+    // The page asks to upgrade; it does not mention a free trial.
+    expect(screen.getByRole('status')).not.toHaveTextContent(/free trial/i);
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
 
+    expect(screen.queryByText(/free trial/i)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Upgrade plan' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Start 30-day free trial' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Upgrade to Starter' }));
     expect(window.open).toHaveBeenCalledTimes(2);
     expect(window.open).toHaveBeenLastCalledWith(reply().upgradeUrl, '_top');
     expect(screen.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', `/admin/plans?shop=${SHOP}&host=h`);
-  });
-
-  it('without a trial: the card says Upgrade to unlock; the popup button still says Upgrade to Starter', async () => {
-    apiGet.mockResolvedValue(reply({ ...FREE, trialDays: 0 }));
-    render(<PrepaidOffer shop={SHOP} />);
-    expect(await screen.findByRole('button', { name: 'Upgrade to unlock' })).toBeInTheDocument();
-    expect(screen.getByRole('status')).not.toHaveTextContent('free trial');
-    fireEvent.click(screen.getByRole('button', { name: 'See what is included' }));
-    expect(within(tour()).getByRole('button', { name: 'Upgrade to Starter' })).toBeInTheDocument();
   });
 
   it('reduced motion: nothing plays by itself; numbers show their final values', async () => {
@@ -307,6 +300,8 @@ describe('Free plan: animated tour first, then the locked page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'See what is included' }));
     expect(within(tour()).getByRole('button', { name: 'Upgrade plan' })).toBeInTheDocument();
     expect(tour()).toHaveTextContent('Upgrade to a paid plan to turn the offer on');
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.getByRole('button', { name: 'Upgrade to unlock' })).toBeInTheDocument();
   });
 
   it('on a paid plan there is no tour and no lock', async () => {
