@@ -21,6 +21,32 @@ export function money(n) {
   return `₹${Math.round(v) === v ? v.toLocaleString('en-IN') : v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+const HEX = /^#[0-9a-fA-F]{6}$/;
+
+/** One plain sentence saying how the saving in the preview was worked out. */
+export function explainSaving(s, price) {
+  const p = Number(price);
+  const min = Number(s.minOrder) || 0;
+  if (p < min) return `A ${money(p)} order is below your minimum of ${money(min)}, so no offer is shown.`;
+  const amount = previewAmount(s, p);
+  if (s.discountType === 'fixed') {
+    if (!amount) return `A ${money(Number(s.value) || 0)} discount would cover this whole ${money(p)} order, so no offer is shown.`;
+    return min > 0 ? `${money(amount)} off every order of ${money(min)} or more.` : `${money(amount)} off every order.`;
+  }
+  const raw = Math.floor((p * Number(s.value || 0)) + 1e-6) / 100;
+  const max = Number(s.maxDiscount) || 0;
+  if (!amount) return 'With these settings no offer is shown for this order.';
+  if (max > 0 && raw > max) return `${s.value}% of ${money(p)} is ${money(raw)}, limited to your maximum of ${money(max)}.`;
+  return `${s.value}% of ${money(p)} = ${money(amount)} off.`;
+}
+
+const NUMERIC = ['value', 'maxDiscount', 'minOrder'];
+/** True when the form differs from the saved settings (numbers typed as text count as equal). */
+export function hasChanges(form, saved) {
+  if (!form || !saved) return false;
+  return Object.keys(saved).some((k) => (NUMERIC.includes(k) ? Number(form[k]) !== Number(saved[k]) : form[k] !== saved[k]));
+}
+
 function plansHref() {
   if (typeof window === 'undefined') return '/admin/plans';
   return `/admin/plans${window.location.search || ''}`;
@@ -51,15 +77,14 @@ const LockIcon = () => (
 );
 
 /** The offer exactly as customers see it above the COD form (same layout as the storefront page). */
-function Preview({ s }) {
-  const amount = previewAmount(s, SAMPLE_PRICE);
-  const color = /^#[0-9a-fA-F]{6}$/.test(s.accentColor) ? s.accentColor : ACCENT;
+function Preview({ s, price, color }) {
+  const amount = previewAmount(s, price);
   return (
     <div style={ui.device} aria-label="Preview of the COD form">
       <div style={ui.pvTitle}>Cash on Delivery Order</div>
       <div style={ui.pvSummary}>
         <div style={{ fontWeight: 600 }}>Cotton Kurta</div>
-        <div style={{ color: '#52525B' }}>Price: <strong>{money(SAMPLE_PRICE)}</strong></div>
+        <div style={{ color: '#52525B' }}>Price: <strong>{money(price)}</strong></div>
       </div>
       {amount ? (
         <>
@@ -75,19 +100,15 @@ function Preview({ s }) {
               </div>
             </div>
             <div style={{ ...ui.pvBtn, background: color, color: textOn(color) }}>
-              <span>{s.buttonText || ' '} · {money(Math.round((SAMPLE_PRICE - amount) * 100) / 100)}</span>
-              <s style={ui.pvWas}>{money(SAMPLE_PRICE)}</s>
+              <span>{s.buttonText || ' '} · {money(Math.round((price - amount) * 100) / 100)}</span>
+              <s style={ui.pvWas}>{money(price)}</s>
             </div>
             <div style={ui.pvSecure}><LockIcon />Secure checkout by Shopify</div>
           </div>
           <div style={ui.pvOr}><span style={ui.pvLine} />or pay with Cash on Delivery<span style={ui.pvLine} /></div>
         </>
       ) : (
-        <div style={ui.pvNone}>
-          {Number(s.minOrder) > SAMPLE_PRICE
-            ? `A ${money(SAMPLE_PRICE)} order is below your minimum of ${money(s.minOrder)}, so no offer is shown.`
-            : 'With these settings no offer is shown for this order.'}
-        </div>
+        <div style={ui.pvNone}>No offer is shown for this order.</div>
       )}
       <div style={ui.pvLabel}>Full Name <span style={{ color: '#DC2626' }}>*</span></div>
       <div style={ui.pvField} />
@@ -139,16 +160,20 @@ export default function PrepaidOffer({ shop }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [sample, setSample] = useState(String(SAMPLE_PRICE));
+  const [shownColor, setShownColor] = useState(ACCENT);
 
   useEffect(() => {
     if (!shop) return;
     apiGet(`/api/prepaid-offer/${encodeURIComponent(shop)}`)
-      .then((d) => { setData(d); setForm(d.settings); })
+      .then((d) => { setData(d); setForm(d.settings); if (HEX.test(d.settings.accentColor)) setShownColor(d.settings.accentColor); })
       .catch((err) => setError(err.message || 'Could not load the prepaid offer.'));
   }, [shop]);
 
   function set(key, value) {
     setForm((f) => ({ ...f, [key]: value }));
+    // An unfinished colour code keeps the last complete colour in the preview.
+    if (key === 'accentColor' && HEX.test(value)) setShownColor(value);
     setSaved(false);
   }
 
@@ -193,7 +218,11 @@ export default function PrepaidOffer({ shop }) {
   const locked = !data.allowed;
   const pct = form.discountType === 'percent';
   const st = data.stats || {};
-  const color = /^#[0-9a-fA-F]{6}$/.test(form.accentColor) ? form.accentColor : ACCENT;
+  const color = shownColor;
+  const colorOk = HEX.test(String(form.accentColor || ''));
+  const price = Number(sample) > 0 ? Math.round(Number(sample) * 100) / 100 : SAMPLE_PRICE;
+  const dirty = hasChanges(form, data.settings);
+  const liveNow = !!data.settings.enabled && !locked;
 
   return (
     <div style={ui.page}>
@@ -205,8 +234,8 @@ export default function PrepaidOffer({ shop }) {
             the door, and you are paid sooner.
           </p>
         </div>
-        <span style={{ ...ui.pill, ...(form.enabled && !locked ? ui.pillOn : null) }}>
-          {form.enabled && !locked ? 'Live on COD form' : 'Off'}
+        <span style={{ ...ui.pill, ...(liveNow ? ui.pillOn : null) }}>
+          {liveNow ? 'Live on COD form' : 'Off'}
         </span>
       </div>
 
@@ -283,8 +312,9 @@ export default function PrepaidOffer({ shop }) {
                 <span style={ui.label}>Button colour</span>
                 <span style={ui.colorRow}>
                   <input type="color" aria-label="Pick the button colour" value={color} onChange={(e) => set('accentColor', e.target.value)} style={ui.colorSwatch} />
-                  <input style={ui.input} type="text" aria-label="Button colour code" maxLength={7} value={form.accentColor} onChange={(e) => set('accentColor', e.target.value)} />
+                  <input style={{ ...ui.input, ...(colorOk ? null : ui.inputBad) }} type="text" aria-label="Button colour code" aria-invalid={!colorOk} maxLength={7} value={form.accentColor} onChange={(e) => set('accentColor', e.target.value)} />
                 </span>
+                {colorOk ? null : <span style={ui.hintBad}>Type a full colour code, like #4F46E5.</span>}
               </label>
             </div>
           </Section>
@@ -293,6 +323,9 @@ export default function PrepaidOffer({ shop }) {
             <div style={{ minHeight: 20 }}>
               {error ? <p role="alert" style={ui.error}>{error}</p> : null}
               {saved ? <p role="status" style={ui.ok}>Saved.</p> : null}
+              {!error && !saved && dirty ? (
+                <p style={ui.unsaved}>Unsaved changes. The preview shows them; your COD form changes after you save.</p>
+              ) : null}
             </div>
             <button type="button" onClick={save} disabled={saving} style={ui.save}>
               {saving ? 'Saving…' : 'Save'}
@@ -320,8 +353,18 @@ export default function PrepaidOffer({ shop }) {
         {/* The column runs the full height of the settings; only the preview inside it sticks. */}
         <aside style={ui.side} aria-label="Preview">
           <div style={ui.sticky} data-testid="preview-sticky">
-            <div style={ui.sideHead}>Preview · {money(SAMPLE_PRICE)} order</div>
-            <Preview s={form} />
+            <div style={ui.sideRow}>
+              <span style={ui.sideHead}>Preview</span>
+              <label style={ui.sampleLabel}>
+                Order amount
+                <span style={ui.sampleBox}>
+                  <span style={ui.affixSign}>₹</span>
+                  <input aria-label="Sample order amount" type="number" min="1" value={sample} onChange={(e) => setSample(e.target.value)} style={ui.sampleInput} />
+                </span>
+              </label>
+            </div>
+            <Preview s={form} price={price} color={color} />
+            <p style={ui.explain} data-testid="preview-explain">{explainSaving(form, price)}</p>
           </div>
         </aside>
       </div>
@@ -375,7 +418,15 @@ const ui = {
   save: { height: 38, padding: '0 22px', borderRadius: 10, border: 'none', background: ACCENT, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit', flex: '0 0 auto' },
   side: { flex: '0 1 360px', minWidth: 280, alignSelf: 'stretch' },
   sticky: { position: 'sticky', top: 16 },
-  sideHead: { fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#6B7280', marginBottom: 8 },
+  sideHead: { fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#6B7280' },
+  sideRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 },
+  sampleLabel: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6B7280', fontWeight: 600 },
+  sampleBox: { display: 'flex', alignItems: 'center', height: 30, border: '1px solid #D1D5DB', borderRadius: 8, overflow: 'hidden', background: '#fff' },
+  sampleInput: { width: 80, height: '100%', border: 'none', outline: 'none', padding: '0 8px', fontSize: 13, fontFamily: 'inherit' },
+  explain: { fontSize: 12.5, color: '#4B5563', margin: '10px 2px 0', lineHeight: 1.5 },
+  unsaved: { color: '#8A6116', fontSize: 13, fontWeight: 600, margin: 0 },
+  inputBad: { borderColor: '#D72C0D' },
+  hintBad: { fontSize: 12, color: '#D72C0D' },
   device: { background: '#fff', border: '1px solid #E5E7EB', borderRadius: 16, padding: 16, boxShadow: '0 8px 24px rgba(17,24,39,.06)', fontSize: 13 },
   pvTitle: { fontSize: 16, fontWeight: 800, marginBottom: 10 },
   pvSummary: { background: '#F4F4F5', borderRadius: 10, padding: '10px 12px', marginBottom: 12, fontSize: 13, lineHeight: 1.5 },

@@ -5,7 +5,7 @@
 import React from 'react';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import { apiGet, apiSend } from '../../../lib/api';
-import PrepaidOffer, { previewAmount, money } from '../app/admin/screens/PrepaidOffer';
+import PrepaidOffer, { previewAmount, money, explainSaving, hasChanges } from '../app/admin/screens/PrepaidOffer';
 import CodHome from '../app/admin/screens/CodHome';
 
 jest.mock('../app/admin/screens/CodOrders', () => () => <div>ORDERS LIST</div>);
@@ -117,6 +117,72 @@ describe('Prepaid offer screen', () => {
     apiGet.mockRejectedValue(new Error('Could not load the prepaid offer'));
     render(<PrepaidOffer shop={SHOP} />);
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not load the prepaid offer');
+  });
+});
+
+describe('every change shows in the preview before saving', () => {
+  it('a bigger sample order makes the maximum visible, and changing the maximum changes the preview', async () => {
+    apiGet.mockResolvedValue(reply());
+    render(<PrepaidOffer shop={SHOP} />);
+    expect(await screen.findByTestId('preview-explain')).toHaveTextContent('5% of ₹999 = ₹49.95 off.');
+    fireEvent.change(screen.getByLabelText('Sample order amount'), { target: { value: '3000' } });
+    expect(screen.getByTestId('preview-offer')).toHaveTextContent('Save ₹100');
+    expect(screen.getByTestId('preview-explain')).toHaveTextContent('5% of ₹3,000 is ₹150, limited to your maximum of ₹100.');
+    fireEvent.change(screen.getByLabelText(/Maximum discount/), { target: { value: '60' } });
+    expect(screen.getByTestId('preview-offer')).toHaveTextContent('Save ₹60');
+    expect(screen.getByTestId('preview-offer')).toHaveTextContent('Pay online · ₹2,940');
+    expect(apiSend).not.toHaveBeenCalled();
+  });
+
+  it('a minimum order above the sample amount says so; lowering it brings the offer back', async () => {
+    apiGet.mockResolvedValue(reply());
+    render(<PrepaidOffer shop={SHOP} />);
+    fireEvent.change(await screen.findByLabelText(/Minimum order/), { target: { value: '500' } });
+    fireEvent.change(screen.getByLabelText('Sample order amount'), { target: { value: '400' } });
+    expect(screen.queryByTestId('preview-offer')).not.toBeInTheDocument();
+    expect(screen.getByTestId('preview-explain')).toHaveTextContent('A ₹400 order is below your minimum of ₹500');
+    fireEvent.change(screen.getByLabelText(/Minimum order/), { target: { value: '300' } });
+    expect(screen.getByTestId('preview-offer')).toHaveTextContent('Save ₹20');
+  });
+
+  it('an unfinished colour code keeps the last colour and says what to type; a full one shows at once', async () => {
+    apiGet.mockResolvedValue(reply());
+    render(<PrepaidOffer shop={SHOP} />);
+    const code = await screen.findByLabelText('Button colour code');
+    const button = () => screen.getByTestId('preview-offer').querySelector('s').parentElement;
+    fireEvent.change(code, { target: { value: '#12' } });
+    expect(code).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByText('Type a full colour code, like #4F46E5.')).toBeInTheDocument();
+    expect(button()).toHaveStyle({ background: '#4F46E5' });
+    fireEvent.change(code, { target: { value: '#16A34A' } });
+    expect(code).toHaveAttribute('aria-invalid', 'false');
+    expect(screen.queryByText(/Type a full colour code/)).not.toBeInTheDocument();
+    expect(button()).toHaveStyle({ background: '#16A34A' });
+  });
+
+  it('"Unsaved changes" shows after an edit and goes after saving; the status follows what is saved', async () => {
+    apiGet.mockResolvedValue(reply());
+    apiSend.mockResolvedValue(reply({ settings: { ...SETTINGS, enabled: true } }));
+    render(<PrepaidOffer shop={SHOP} />);
+    expect(await screen.findByText('Off')).toBeInTheDocument();
+    expect(screen.queryByText(/Unsaved changes/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('switch'));
+    expect(screen.getByText(/Unsaved changes/)).toBeInTheDocument();
+    expect(screen.getByText('Off')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByText('Saved.')).toBeInTheDocument();
+    expect(screen.queryByText(/Unsaved changes/)).not.toBeInTheDocument();
+    expect(screen.getByText('Live on COD form')).toBeInTheDocument();
+  });
+
+  it('helpers: changes compare numbers typed as text; the saving explained for each case', () => {
+    expect(hasChanges({ ...SETTINGS, value: '5' }, SETTINGS)).toBe(false);
+    expect(hasChanges({ ...SETTINGS, value: '6' }, SETTINGS)).toBe(true);
+    expect(hasChanges({ ...SETTINGS, heading: 'x' }, SETTINGS)).toBe(true);
+    const fixed = { ...SETTINGS, discountType: 'fixed', value: 50 };
+    expect(explainSaving(fixed, 999)).toBe('₹50 off every order.');
+    expect(explainSaving({ ...fixed, minOrder: 500 }, 999)).toBe('₹50 off every order of ₹500 or more.');
+    expect(explainSaving({ ...fixed, value: 2000 }, 999)).toMatch(/would cover this whole ₹999 order/);
   });
 });
 
