@@ -344,6 +344,17 @@ describe('COD form page', () => {
     expect(html).toContain('color: #111827; }');
   });
 
+  it('the offer box: save badge, secure line, tint from the chosen colour, no extra space above the button', async () => {
+    await starter();
+    await offer({ accentColor: '#16A34A' });
+    const html = await formPage({ variantId: VID });
+    expect(html).toContain('id="ccf-pp-badge"');
+    expect(html).toContain('Secure checkout by Shopify');
+    expect(html).toContain('background: rgba(22, 163, 74, 0.05)');
+    // The form's general "button { margin-top: 18px }" must not add a gap above the offer button.
+    expect(html).toMatch(/\.ccf-pp \.ccf-pp-btn \{[^}]*margin-top: 12px/);
+  });
+
   it('Free plan or offer off → no offer', async () => {
     await Store.create({ shopDomain: SHOP, accessToken: 't' });
     await offer();

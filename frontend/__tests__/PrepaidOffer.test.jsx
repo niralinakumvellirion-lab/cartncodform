@@ -27,29 +27,42 @@ beforeEach(() => {
 });
 
 describe('Prepaid offer screen', () => {
-  it('loads the settings and this month numbers', async () => {
+  it('loads the settings and this month numbers (money in whole rupees on the cards)', async () => {
     apiGet.mockResolvedValue(reply());
     render(<PrepaidOffer shop={SHOP} />);
     expect(await screen.findByText('Prepaid orders')).toBeInTheDocument();
     expect(apiGet).toHaveBeenCalledWith(`/api/prepaid-offer/${SHOP}`);
     expect(screen.getByText('7')).toBeInTheDocument();
-    expect(screen.getByText('₹6,643.50')).toBeInTheDocument();
+    expect(screen.getByText('₹6,644')).toBeInTheDocument();
     expect(screen.getByText('₹350')).toBeInTheDocument();
+    expect(screen.getByText('Off')).toBeInTheDocument();
   });
 
-  it('the preview follows the form: 5% of ₹999 → ₹49.95 off, button shows ₹949.05', async () => {
+  it('the status pill says when the offer is live', async () => {
+    apiGet.mockResolvedValue(reply({ settings: { ...SETTINGS, enabled: true } }));
+    render(<PrepaidOffer shop={SHOP} />);
+    expect(await screen.findByText('Live on COD form')).toBeInTheDocument();
+  });
+
+  it('the preview matches the COD form: 5% of ₹999 → "Save ₹49.95", button ₹949.05 with ₹999 struck out', async () => {
     apiGet.mockResolvedValue(reply());
     render(<PrepaidOffer shop={SHOP} />);
     const offer = await screen.findByTestId('preview-offer');
-    expect(offer).toHaveTextContent('get ₹49.95 off this order');
-    expect(offer).toHaveTextContent('Pay online – ₹949.05');
+    expect(offer).toHaveTextContent('Save ₹49.95');
+    expect(offer).toHaveTextContent('Pay online · ₹949.05');
+    expect(within(offer).getByText('₹999', { selector: 's' })).toBeInTheDocument();
+    expect(offer).toHaveTextContent('Secure checkout by Shopify');
 
     fireEvent.click(screen.getByLabelText(/Fixed amount/));
-    fireEvent.change(screen.getByLabelText('Discount (₹)'), { target: { value: '50' } });
+    expect(screen.getByLabelText('Discount (₹)')).toHaveValue(50);
+    fireEvent.change(screen.getByLabelText('Discount (₹)'), { target: { value: '75' } });
     fireEvent.change(screen.getByLabelText('Heading'), { target: { value: 'Save with UPI' } });
     expect(screen.getByTestId('preview-offer')).toHaveTextContent('Save with UPI');
-    expect(screen.getByTestId('preview-offer')).toHaveTextContent('get ₹50 off');
+    expect(screen.getByTestId('preview-offer')).toHaveTextContent('Save ₹75');
     expect(screen.queryByLabelText(/Maximum discount/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Percentage'));
+    expect(screen.getByLabelText('Discount (%)')).toHaveValue(5);
   });
 
   it('a minimum above the sample order hides the offer in the preview and says why', async () => {
@@ -64,7 +77,7 @@ describe('Prepaid offer screen', () => {
     apiGet.mockResolvedValue(reply());
     apiSend.mockResolvedValue(reply({ settings: { ...SETTINGS, enabled: true, value: 8 } }));
     render(<PrepaidOffer shop={SHOP} />);
-    fireEvent.click(await screen.findByRole('checkbox'));
+    fireEvent.click(await screen.findByRole('switch'));
     fireEvent.change(screen.getByLabelText('Discount (%)'), { target: { value: '8' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(await screen.findByText('Saved.')).toBeInTheDocument();
@@ -83,7 +96,7 @@ describe('Prepaid offer screen', () => {
     apiGet.mockResolvedValue(reply({ allowed: false, planName: 'Free' }));
     render(<PrepaidOffer shop={SHOP} />);
     expect(await screen.findByText(/included in the Starter plan and above/)).toBeInTheDocument();
-    expect(screen.getByRole('checkbox')).toBeDisabled();
+    expect(screen.getByRole('switch')).toBeDisabled();
     expect(screen.getByRole('link', { name: 'See plans' })).toHaveAttribute('href', `/admin/plans?shop=${SHOP}&host=h`);
   });
 
@@ -100,7 +113,8 @@ describe('Cash on delivery page tabs', () => {
     render(<CodHome shop={SHOP} />);
     expect(screen.getByText('ORDERS LIST')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: 'Prepaid offer' }));
-    expect(await screen.findByRole('heading', { name: 'Prepaid offer' })).toBeInTheDocument();
+    expect(await screen.findByText('Prepaid orders')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Prepaid offer' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Prepaid offer' })).toHaveAttribute('aria-selected', 'true');
   });
 });

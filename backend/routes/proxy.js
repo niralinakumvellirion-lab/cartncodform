@@ -19,6 +19,13 @@ function textOn(hex) {
   const [r, g, b] = [m[1], m[2], m[3]].map((h) => parseInt(h, 16) / 255);
   return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6 ? '#111827' : '#ffffff';
 }
+
+// The accent colour at a given opacity, for the offer box tint and border.
+function tint(hex, alpha) {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex || ''));
+  const [r, g, b] = m ? [m[1], m[2], m[3]].map((h) => parseInt(h, 16)) : [79, 70, 229];
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
 const { generateDiscount, defaultConfig } = require('./discounts');
 const { resolvePostOrderColors } = require('../utils/postOrderColors');
 const { resolveProductBoxColors } = require('../utils/productBoxColors');
@@ -631,16 +638,29 @@ ${poColors ? `  /* post-order colour overrides */
   .bday-skip { color:${poColors.skip}; }
   .bday-row select { color:${poColors.text}; }` : ''}
   /* "Pay online and save" offer */
-  .ccf-pp { border: 2px solid ${prepaidBoot ? prepaidBoot.accentColor : '#4F46E5'}; border-radius: 12px; padding: 14px; margin: 0 0 6px; background: #fafafa; }
+  .ccf-pp { border: 1px solid ${tint(prepaidBoot && prepaidBoot.accentColor, 0.35)}; background: ${tint(prepaidBoot && prepaidBoot.accentColor, 0.05)};
+    border-radius: 12px; padding: 14px; margin: 0; }
   .ccf-pp[hidden], .ccf-pp-or[hidden], .ccf-pp-err[hidden] { display: none; }
-  .ccf-pp-head { display: block; font-size: 15px; font-weight: 700; color: #18181b; }
-  .ccf-pp-sub { display: block; font-size: 13px; color: #52525b; margin: 4px 0 12px; line-height: 1.5; }
-  .ccf-pp-btn { width: 100%; min-height: 46px; border: none; border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer;
+  .ccf-pp-top { display: flex; align-items: flex-start; gap: 10px; }
+  .ccf-pp-icon { flex: 0 0 auto; width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
+    background: ${tint(prepaidBoot && prepaidBoot.accentColor, 0.12)}; color: ${prepaidBoot ? prepaidBoot.accentColor : '#4F46E5'}; }
+  .ccf-pp-copy { flex: 1 1 auto; min-width: 0; }
+  .ccf-pp-title { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 8px; }
+  .ccf-pp-head { font-size: 15px; font-weight: 700; color: #18181b; line-height: 1.3; }
+  .ccf-pp-sub { display: block; font-size: 12.5px; color: #52525b; margin-top: 2px; line-height: 1.45; }
+  .ccf-pp-badge { flex: 0 0 auto; background: #dcfce7; color: #166534; font-size: 12px; font-weight: 700; border-radius: 999px;
+    padding: 4px 9px; white-space: nowrap; line-height: 1.3; }
+  .ccf-pp .ccf-pp-btn { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 12px; min-height: 46px; padding: 0 14px;
+    border-radius: 10px; font-size: 15px; font-weight: 700; cursor: pointer; transition: filter .15s ease;
     background: ${prepaidBoot ? prepaidBoot.accentColor : '#4F46E5'}; color: ${textOn(prepaidBoot && prepaidBoot.accentColor)}; }
-  .ccf-pp-btn:disabled { opacity: .7; cursor: default; }
-  .ccf-pp-err { font-size: 12px; color: #dc2626; margin-top: 8px; }
-  .ccf-pp-or { display: flex; align-items: center; gap: 10px; color: #71717a; font-size: 12px; margin: 14px 0 4px; }
+  .ccf-pp .ccf-pp-btn:hover:not(:disabled) { filter: brightness(1.06); }
+  .ccf-pp .ccf-pp-btn:disabled { opacity: .75; cursor: default; }
+  .ccf-pp-was { font-weight: 500; font-size: 13px; opacity: .75; }
+  .ccf-pp-secure { display: flex; align-items: center; justify-content: center; gap: 5px; margin-top: 8px; font-size: 11.5px; color: #71717a; }
+  .ccf-pp-err { font-size: 12.5px; color: #dc2626; margin-top: 8px; text-align: center; }
+  .ccf-pp-or { display: flex; align-items: center; gap: 10px; color: #71717a; font-size: 12px; margin: 16px 0 0; }
   .ccf-pp-or::before, .ccf-pp-or::after { content: ""; flex: 1; height: 1px; background: #e4e4e7; }
+  .ccf-pp-or + form label:first-child { margin-top: 10px; }
 </style>
 </head>
 <body>
@@ -655,9 +675,15 @@ ${poColors ? `  /* post-order colour overrides */
     </div>
 
     <div class="ccf-pp" id="ccf-pp" hidden>
-      <strong class="ccf-pp-head" id="ccf-pp-head"></strong>
-      <span class="ccf-pp-sub" id="ccf-pp-sub"></span>
+      <div class="ccf-pp-top">
+        <span class="ccf-pp-icon" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/></svg></span>
+        <div class="ccf-pp-copy">
+          <div class="ccf-pp-title"><strong class="ccf-pp-head" id="ccf-pp-head"></strong><span class="ccf-pp-badge" id="ccf-pp-badge"></span></div>
+          <span class="ccf-pp-sub">Pay now by UPI, card or wallet. No cash needed at delivery.</span>
+        </div>
+      </div>
       <button type="button" class="ccf-pp-btn" id="ccf-pp-btn"></button>
+      <div class="ccf-pp-secure"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>Secure checkout by Shopify</div>
       <div class="ccf-pp-err" id="ccf-pp-err" role="alert" hidden></div>
     </div>
     <div class="ccf-pp-or" id="ccf-pp-or" hidden>or pay with Cash on Delivery</div>
@@ -792,11 +818,18 @@ ${poColors ? `  /* post-order colour overrides */
     ppOr.hidden = !amount;
     if (!amount) return;
     document.getElementById('ccf-pp-head').textContent = PP.heading;
-    document.getElementById('ccf-pp-sub').textContent =
-      'Pay now by UPI, card or wallet and get ' + ppMoney(amount) + ' off this order.';
-    if (!ppBtn.disabled) {
-      ppBtn.textContent = PP.buttonText + ' \\u2013 ' + ppMoney(Math.round((sub - amount) * 100) / 100);
-    }
+    document.getElementById('ccf-pp-badge').textContent = 'Save ' + ppMoney(amount);
+    if (!ppBtn.disabled) ppButtonPrice(sub, amount);
+  }
+  function ppButtonPrice(sub, amount) {
+    while (ppBtn.firstChild) ppBtn.removeChild(ppBtn.firstChild);
+    var main = document.createElement('span');
+    main.textContent = PP.buttonText + ' \\u00b7 ' + ppMoney(Math.round((sub - amount) * 100) / 100);
+    var was = document.createElement('s');
+    was.className = 'ccf-pp-was';
+    was.textContent = ppMoney(sub);
+    ppBtn.appendChild(main);
+    ppBtn.appendChild(was);
   }
   if (PP && ppBtn) {
     ppBtn.addEventListener('click', function () {
