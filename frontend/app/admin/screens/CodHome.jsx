@@ -60,7 +60,7 @@ export default function CodHome({ shop }) {
 const ui = {
   barWrap: { maxWidth: 1080, margin: '0 auto', padding: '16px 20px 0', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' },
   bar: { display: 'flex', gap: 4, borderBottom: '1px solid #E5E7EB' },
-  tab: { display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, padding: '0 16px', background: 'transparent', border: 'none', borderBottom: '3px solid transparent', marginBottom: -1, fontSize: 14, fontWeight: 700, color: '#6B7280', cursor: 'pointer' },
-  lockTag: { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: '#fff', background: 'linear-gradient(135deg, #4F46E5, #7C3AED)', borderRadius: 999, padding: '2px 8px' },
-  tabOn: { color: ACCENT, borderBottomColor: ACCENT },
+  tab: { display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, padding: '0 16px', background: 'transparent', border: 'none', borderBottom: '3px solid transparent', marginBottom: -1, fontSize: 14, fontWeight: 500, color: '#6B7280', cursor: 'pointer', fontFamily: "'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
+  lockTag: { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: '#fff', background: 'linear-gradient(135deg, #4F46E5, #7C3AED)', borderRadius: 999, padding: '2px 8px' },
+  tabOn: { color: ACCENT, borderBottomColor: ACCENT, fontWeight: 600 },
 };
