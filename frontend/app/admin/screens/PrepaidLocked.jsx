@@ -169,7 +169,6 @@ export default function PrepaidLocked({ data }) {
         <PrepaidTour
           key={tour.start}
           plan={plan}
-          trialDays={data.trialDays}
           startAt={tour.start}
           onUpgrade={upgrade}
           onClose={() => setTour({ open: false, start: 0 })}

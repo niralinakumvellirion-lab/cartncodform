@@ -107,7 +107,6 @@ const CSS = `
 .ccft-plan .nm { font-size: 15px; font-weight: 650; }
 .ccft-plan .pr { font-size: 22px; font-weight: 700; }
 .ccft-plan .per { color: #616161; }
-.ccft-plan .tr { display: inline-block; margin: 6px 0 10px; font-size: 11.5px; font-weight: 600; color: #0C5132; background: #CDFEE1; border-radius: 6px; padding: 1px 7px; }
 .ccft-plan ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
 .ccft-plan li { display: flex; gap: 7px; }
 .ccft-lockbig { position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; border-radius: 10px; background: #303030; color: #fff; display: flex; align-items: center; justify-content: center; }
@@ -204,7 +203,7 @@ function CountUp({ to, money, still }) {
   return <b>{fmt(v)}</b>;
 }
 
-function StepBody({ index, plan, trial, still }) {
+function StepBody({ index, plan, still }) {
   switch (index) {
     case 0:
       return (
@@ -323,14 +322,14 @@ function StepBody({ index, plan, trial, still }) {
               <span className="ccft-lockbig ccft-pop" style={d(2)}><Lock /></span>
               <div className="nm">{plan ? plan.name : 'Paid plan'}</div>
               {plan ? <div><span className="pr">{priceLabel(plan.price)}</span> <span className="per">/month</span></div> : null}
-              {trial ? <span className="tr ccft-pop" style={d(3)}>{trial}-day free trial</span> : <div style={{ height: 10 }} />}
+              <div style={{ height: 10 }} />
               <ul>
                 {features.map((f, k) => <li key={f} className="ccft-in" style={d(4 + k)}><Tick size={16} />{f}</li>)}
               </ul>
             </div>
           </div>
           <Text n={7} title={`Unlock it with ${plan ? plan.name : 'a paid plan'}`}
-            lead={`You are on the Free plan. ${trial ? 'Start the free trial' : 'Upgrade'} to turn the offer on; you can set it up in a minute.`}
+            lead={`You are on the Free plan. Upgrade to ${plan ? plan.name : 'a paid plan'} to turn the offer on; you can set it up in a minute.`}
             points={['Billed securely by Shopify', 'Cancel anytime']} />
         </>
       );
@@ -338,7 +337,7 @@ function StepBody({ index, plan, trial, still }) {
   }
 }
 
-export default function PrepaidTour({ plan, trialDays, startAt = 0, onUpgrade, onClose }) {
+export default function PrepaidTour({ plan, startAt = 0, onUpgrade, onClose }) {
   const [step, setStep] = useState(Math.min(TOTAL - 1, Math.max(0, startAt)));
   const [paused, setPaused] = useState(false);
   const [still] = useState(prefersReducedMotion);
@@ -346,7 +345,6 @@ export default function PrepaidTour({ plan, trialDays, startAt = 0, onUpgrade, o
   const timer = useRef(null);
   const stepStart = useRef(0);
   const remaining = useRef(STEP_MS);
-  const trial = Number(trialDays) > 0 ? Number(trialDays) : 0;
   const last = step === TOTAL - 1;
 
   // Moves relative to the latest step, so quick repeated clicks each count.
@@ -412,7 +410,7 @@ export default function PrepaidTour({ plan, trialDays, startAt = 0, onUpgrade, o
 
         <div className="ccft-body" aria-live="polite">
           <section key={step} className="ccft-step" data-testid="tour-step" data-step={step + 1}>
-            <StepBody index={step} plan={plan} trial={trial} still={still} />
+            <StepBody index={step} plan={plan} still={still} />
           </section>
         </div>
 
@@ -427,7 +425,7 @@ export default function PrepaidTour({ plan, trialDays, startAt = 0, onUpgrade, o
             className="ccft-btn p"
             onClick={() => (last ? onUpgrade() : move(1))}
           >
-            {last ? (trial ? `Start ${trial}-day free trial` : 'Upgrade now') : 'Next'}
+            {last ? (plan ? `Upgrade to ${plan.name}` : 'Upgrade plan') : 'Next'}
           </button>
         </div>
       </div>
