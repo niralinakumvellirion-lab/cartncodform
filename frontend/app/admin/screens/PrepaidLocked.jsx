@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
-import { planFeatures, priceLabel } from './Plans';
+import React, { useState } from 'react';
+import { priceLabel } from './Plans';
+import PrepaidTour from './PrepaidTour';
 
 /*
  * Free plan: the Prepaid offer in the Shopify admin's own visual language (approved design "Option A"):
- * system font, black primary buttons, white cards with a hairline edge, a blue info banner and a
- * Shopify-style dialog. Motion is kept small: the dialog fades in and the locked preview has a soft shine.
+ * system font, black primary buttons, white cards with a hairline edge, a blue info banner and an
+ * animated tour (PrepaidTour.jsx) that opens first. The page itself keeps motion small: a soft shine on the
+ * locked preview.
  */
 
 const INK = '#303030';
@@ -24,17 +26,12 @@ const inr = (n) => `₹${Number(n).toLocaleString('en-IN', { minimumFractionDigi
 
 const MOTION = `
 @keyframes ccfShine { 0% { transform: translateX(-160%) skewX(-20deg); } 60%, 100% { transform: translateX(320%) skewX(-20deg); } }
-@keyframes ccfFade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes ccfPop { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
 .ccf-shine { animation: ccfShine 4s ease-in-out 1s infinite; }
-.ccf-fade { animation: ccfFade .16s ease-out both; }
-.ccf-pop { animation: ccfPop .22s cubic-bezier(.2,.8,.2,1) both; }
 .ccf-btn-primary:hover { background: #1A1A1A !important; }
 .ccf-btn-plain:hover { background: #F7F7F7 !important; }
-.ccf-btn-primary:focus-visible, .ccf-btn-plain:focus-visible, .ccf-link:focus-visible, .ccf-x:focus-visible { outline: 2px solid #005BD3; outline-offset: 2px; }
-.ccf-x:hover { background: #E3E3E3 !important; }
+.ccf-btn-primary:focus-visible, .ccf-btn-plain:focus-visible, .ccf-link:focus-visible { outline: 2px solid #005BD3; outline-offset: 2px; }
 .ccf-link:hover { text-decoration: underline; }
-@media (prefers-reduced-motion: reduce) { .ccf-shine, .ccf-fade, .ccf-pop { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .ccf-shine { animation: none !important; } }
 `;
 
 const LockIcon = ({ size = 14 }) => (
@@ -74,59 +71,10 @@ function Button({ primary, children, ...rest }) {
   );
 }
 
-/** Shopify-style dialog. Closes with Maybe later, ×, Escape or a click outside. */
-function UpgradeModal({ plan, trialDays, planName, onUpgrade, onClose }) {
-  const primary = useRef(null);
-  useEffect(() => {
-    if (primary.current) primary.current.focus();
-    function onKey(e) { if (e.key === 'Escape') onClose(); }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  const features = plan ? planFeatures(plan) : [];
-  const trial = Number(trialDays) > 0 ? Number(trialDays) : 0;
-  return (
-    <div className="ccf-fade" style={ui.backdrop} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="ccf-pop" role="dialog" aria-modal="true" aria-labelledby="ccf-up-title" aria-describedby="ccf-up-text" style={ui.modal}>
-        <div style={ui.mHead}>
-          <h2 id="ccf-up-title" style={ui.mTitle}>Unlock the Prepaid offer</h2>
-          <button type="button" className="ccf-x" aria-label="Close" onClick={onClose} style={ui.mClose}>
-            <svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
-          </button>
-        </div>
-        <div style={ui.mBody}>
-          <p id="ccf-up-text" style={ui.mText}>
-            You are on the {planName} plan. Upgrade to show &quot;Pay online and save&quot; on your COD form and turn
-            more COD orders into prepaid orders.
-          </p>
-          {plan ? (
-            <div style={ui.mPlan}>
-              <div style={ui.mPlanHead}>
-                <span style={ui.mPlanName}>{plan.name}</span>
-                <span><strong style={ui.mPlanPrice}>{priceLabel(plan.price)}</strong><span style={ui.mPer}> /month</span></span>
-              </div>
-              <ul style={ui.mList}>
-                {features.map((f) => <li key={f} style={ui.mLi}><Check />{f}</li>)}
-              </ul>
-            </div>
-          ) : null}
-          <p style={ui.mFine}>Billed securely by Shopify. Cancel anytime.{trial ? ' A free trial is offered once per store.' : ''}</p>
-        </div>
-        <div style={ui.mFoot}>
-          <Button onClick={onClose}>Maybe later</Button>
-          <button ref={primary} type="button" className="ccf-btn-primary" onClick={onUpgrade} style={ui.btnPrimary}>
-            {trial ? `Start ${trial}-day free trial` : 'Upgrade now'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 /** The Prepaid offer on the Free plan: what it does, a locked preview of it, and the way to unlock it. */
 export default function PrepaidLocked({ data }) {
-  const [open, setOpen] = useState(true);
+  // The animated tour opens first; "See what is included" re-opens it on the plan step.
+  const [tour, setTour] = useState({ open: true, start: 0 });
   const plan = data.upgradePlan || null;
   const trial = Number(data.trialDays) > 0 ? Number(data.trialDays) : 0;
   const planName = plan ? plan.name : 'a paid plan';
@@ -154,7 +102,7 @@ export default function PrepaidLocked({ data }) {
             {trial ? ` Every paid plan starts with a ${trial}-day free trial.` : ''}
           </span>
           <div style={{ marginTop: 6 }}>
-            <button type="button" className="ccf-link" onClick={() => setOpen(true)} style={ui.bannerLink}>See what is included</button>
+            <button type="button" className="ccf-link" onClick={() => setTour({ open: true, start: 6 })} style={ui.bannerLink}>See what is included</button>
           </div>
         </div>
       </div>
@@ -217,8 +165,15 @@ export default function PrepaidLocked({ data }) {
         </ol>
       </section>
 
-      {open ? (
-        <UpgradeModal plan={plan} trialDays={data.trialDays} planName={data.planName} onUpgrade={upgrade} onClose={() => setOpen(false)} />
+      {tour.open ? (
+        <PrepaidTour
+          key={tour.start}
+          plan={plan}
+          trialDays={data.trialDays}
+          startAt={tour.start}
+          onUpgrade={upgrade}
+          onClose={() => setTour({ open: false, start: 0 })}
+        />
       ) : null}
     </div>
   );
@@ -270,21 +225,4 @@ const ui = {
   stepTitle: { fontWeight: 600, color: INK },
   stepText: { color: SUB },
 
-  // Dialog: high in the frame (Shopify's assistant bar covers the bottom), never taller than the frame.
-  backdrop: { position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '32px 16px 88px', overflowY: 'auto', fontFamily: FONT, fontSize: 13, lineHeight: 1.5, color: INK },
-  modal: { width: '100%', maxWidth: 480, maxHeight: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column', margin: 'auto 0', background: '#fff', borderRadius: 14, overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,.2), 0 0 0 1px rgba(0,0,0,.06)' },
-  mHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, padding: '12px 12px 12px 16px', background: '#F3F3F3', borderBottom: `1px solid ${EDGE}` },
-  mTitle: { fontSize: 14, fontWeight: 650, margin: 0, color: INK },
-  mClose: { width: 28, height: 28, borderRadius: 8, border: 'none', background: 'transparent', color: SUB, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  mBody: { padding: 16, overflowY: 'auto' },
-  mText: { color: SUB, margin: '0 0 14px' },
-  mPlan: { borderRadius: 10, boxShadow: `inset 0 0 0 1px ${EDGE}`, padding: 14 },
-  mPlanHead: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 },
-  mPlanName: { fontWeight: 650, fontSize: 14 },
-  mPlanPrice: { fontSize: 18, fontWeight: 650 },
-  mPer: { color: SUB },
-  mList: { listStyle: 'none', padding: 0, margin: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '8px 14px' },
-  mLi: { display: 'flex', gap: 8, alignItems: 'flex-start' },
-  mFine: { fontSize: 12, color: SUB, margin: '12px 0 0' },
-  mFoot: { display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '12px 16px', borderTop: `1px solid ${EDGE}` },
 };

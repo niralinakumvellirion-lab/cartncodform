@@ -3,10 +3,11 @@
  * Mocks: __mocks__/api.js (apiGet, apiSend).
  */
 import React from 'react';
-import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor, act } from '@testing-library/react';
 import { apiGet, apiSend } from '../../../lib/api';
 import PrepaidOffer, { previewAmount, money, explainSaving, hasChanges } from '../app/admin/screens/PrepaidOffer';
 import CodHome from '../app/admin/screens/CodHome';
+import { STEP_MS } from '../app/admin/screens/PrepaidTour';
 
 jest.mock('../app/admin/screens/CodOrders', () => () => <div>ORDERS LIST</div>);
 
@@ -116,57 +117,141 @@ describe('Prepaid offer screen', () => {
   });
 });
 
-describe('Free plan: locked view and upgrade popup', () => {
+describe('Free plan: animated tour first, then the locked page', () => {
   beforeEach(() => { window.open = jest.fn(); });
-  const dialog = () => screen.queryByRole('dialog', { name: 'Unlock the Prepaid offer' });
+  afterEach(() => { jest.useRealTimers(); });
+  const tour = () => screen.queryByRole('dialog', { name: /Prepaid offer/ });
+  const stepNo = () => Number(screen.getByTestId('tour-step').getAttribute('data-step'));
 
-  it('the upgrade popup opens straight away, with the plan that includes the offer and its free trial', async () => {
+  it('opens straight away on step 1 of 7, explaining the offer, with Next focused', async () => {
     apiGet.mockResolvedValue(reply(FREE));
     render(<PrepaidOffer shop={SHOP} />);
-    const d = await screen.findByRole('dialog', { name: 'Unlock the Prepaid offer' });
+    const d = await screen.findByRole('dialog', { name: 'How the Prepaid offer works' });
     expect(d).toHaveAttribute('aria-modal', 'true');
-    expect(d).toHaveTextContent('You are on the Free plan.');
-    expect(within(d).getByText('$9.99')).toBeInTheDocument();
-    expect(within(d).getByText('Prepaid offer on the COD form')).toBeInTheDocument();
-    expect(within(d).getByText('500 COD orders / month')).toBeInTheDocument();
-    expect(within(d).getByRole('button', { name: 'Start 30-day free trial' })).toHaveFocus();
+    expect(stepNo()).toBe(1);
+    expect(d).toHaveTextContent('Step 1 of 7');
+    expect(d).toHaveTextContent('Turn COD orders into prepaid orders');
+    expect(d).toHaveTextContent('1 / 7');
+    expect(within(d).getByRole('button', { name: 'Next' })).toHaveFocus();
+    expect(within(d).queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
   });
 
-  it('the popup button opens Shopify plan page in the top window', async () => {
+  it('walks every part of the offer with Next and Back', async () => {
     apiGet.mockResolvedValue(reply(FREE));
     render(<PrepaidOffer shop={SHOP} />);
-    const d = await screen.findByRole('dialog', { name: 'Unlock the Prepaid offer' });
+    await screen.findByRole('dialog');
+    const titles = ['Turn COD orders into prepaid orders', 'Choose the discount', 'Set a maximum and a minimum',
+      'The customer pays online', 'Safe one-time codes', 'See the results', 'Unlock it with Starter'];
+    titles.forEach((t, i) => {
+      expect(stepNo()).toBe(i + 1);
+      expect(within(tour()).getByRole('heading', { name: t })).toBeInTheDocument();
+      if (i < titles.length - 1) fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(stepNo()).toBe(6);
+    // Quick repeated clicks each count.
+    const back = screen.getByRole('button', { name: 'Back' });
+    act(() => { back.click(); back.click(); back.click(); });
+    expect(stepNo()).toBe(3);
+  });
+
+  it('plays by itself every 6 seconds, pauses under the pointer, and stops on the last step', async () => {
+    jest.useFakeTimers();
+    apiGet.mockResolvedValue(reply(FREE));
+    render(<PrepaidOffer shop={SHOP} />);
+    await screen.findByRole('dialog');
+    act(() => { jest.advanceTimersByTime(STEP_MS); });
+    expect(stepNo()).toBe(2);
+
+    fireEvent.mouseEnter(tour());
+    act(() => { jest.advanceTimersByTime(STEP_MS * 3); });
+    expect(stepNo()).toBe(2);
+    fireEvent.mouseLeave(tour());
+    act(() => { jest.advanceTimersByTime(STEP_MS); });
+    expect(stepNo()).toBe(3);
+
+    for (let i = 0; i < 6; i++) act(() => { jest.advanceTimersByTime(STEP_MS); });
+    expect(stepNo()).toBe(7);
+    act(() => { jest.advanceTimersByTime(STEP_MS * 2); });
+    expect(stepNo()).toBe(7);
+  });
+
+  it('the last step shows the real plan from the server and its button opens Shopify plan page', async () => {
+    apiGet.mockResolvedValue(reply(FREE));
+    render(<PrepaidOffer shop={SHOP} />);
+    await screen.findByRole('dialog');
+    for (let i = 0; i < 6; i++) fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    const d = screen.getByRole('dialog', { name: 'Unlock the Prepaid offer' });
+    expect(d).toHaveTextContent('$9.99');
+    expect(d).toHaveTextContent('30-day free trial');
+    expect(d).toHaveTextContent('500 COD orders / month');
+    expect(d).toHaveTextContent('Prepaid offer on the COD form');
     fireEvent.click(within(d).getByRole('button', { name: 'Start 30-day free trial' }));
     expect(window.open).toHaveBeenCalledWith(reply().upgradeUrl, '_top');
   });
 
-  it('closes with Maybe later, the × button, Escape and a click outside; "See what is included" opens it again', async () => {
+  it('arrow keys move between steps; Escape, ×, Skip tour, Maybe later and a click outside close it', async () => {
     apiGet.mockResolvedValue(reply(FREE));
     render(<PrepaidOffer shop={SHOP} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Maybe later' }));
-    expect(dialog()).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'See what is included' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-    expect(dialog()).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'See what is included' }));
+    await screen.findByRole('dialog');
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(stepNo()).toBe(3);
+    fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    expect(stepNo()).toBe(2);
+    for (let i = 0; i < 9; i++) fireEvent.keyDown(window, { key: 'ArrowRight' });
+    expect(stepNo()).toBe(7);
+    for (let i = 0; i < 9; i++) fireEvent.keyDown(window, { key: 'ArrowLeft' });
+    expect(stepNo()).toBe(1);
+    fireEvent.keyDown(window, { key: 'ArrowRight' });
     fireEvent.keyDown(window, { key: 'Escape' });
-    expect(dialog()).not.toBeInTheDocument();
+    expect(tour()).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'See what is included' }));
-    fireEvent.mouseDown(dialog().parentElement);
-    expect(dialog()).not.toBeInTheDocument();
+    const reopen = () => fireEvent.click(screen.getByRole('button', { name: 'See what is included' }));
+    reopen();
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(tour()).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'See what is included' }));
-    fireEvent.mouseDown(dialog());
-    expect(dialog()).toBeInTheDocument();
+    reopen();
+    fireEvent.click(screen.getByRole('button', { name: 'Maybe later' }));
+    expect(tour()).not.toBeInTheDocument();
+
+    reopen();
+    fireEvent.mouseDown(tour().parentElement);
+    expect(tour()).not.toBeInTheDocument();
+
+    reopen();
+    fireEvent.mouseDown(tour());
+    expect(tour()).toBeInTheDocument();
   });
 
-  it('the page explains the offer, shows a locked preview, and has no settings to change', async () => {
+  it('"See what is included" opens the tour on the plan step; Skip tour on step 1 closes it', async () => {
     apiGet.mockResolvedValue(reply(FREE));
     render(<PrepaidOffer shop={SHOP} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Maybe later' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Skip tour' }));
+    expect(tour()).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'See what is included' }));
+    expect(stepNo()).toBe(7);
+    expect(screen.getByRole('button', { name: 'Maybe later' })).toBeInTheDocument();
+  });
+
+  it('step 2 switches between percentage and fixed amount on its own', async () => {
+    jest.useFakeTimers();
+    apiGet.mockResolvedValue(reply(FREE));
+    render(<PrepaidOffer shop={SHOP} />);
+    await screen.findByRole('dialog');
+    fireEvent.mouseEnter(tour());
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    const sw = screen.getByTestId('tour-discount');
+    expect(sw).toHaveAttribute('data-mode', 'pct');
+    act(() => { jest.advanceTimersByTime(1800); });
+    expect(sw).toHaveAttribute('data-mode', 'fix');
+  });
+
+  it('after the tour, the page explains the offer, shows a locked preview, and has no settings to change', async () => {
+    apiGet.mockResolvedValue(reply(FREE));
+    render(<PrepaidOffer shop={SHOP} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Skip tour' }));
     expect(screen.getByRole('heading', { name: 'Turn COD orders into prepaid orders' })).toBeInTheDocument();
     const locked = screen.getByRole('img', { name: 'Locked preview' });
     expect(locked).toHaveTextContent('Unlocks on Starter ($9.99/month)');
@@ -177,7 +262,6 @@ describe('Free plan: locked view and upgrade popup', () => {
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
 
-    // Both page buttons open Shopify's plan page: "Upgrade plan" (title bar) and the card's trial button.
     fireEvent.click(screen.getByRole('button', { name: 'Upgrade plan' }));
     fireEvent.click(screen.getByRole('button', { name: 'Start 30-day free trial' }));
     expect(window.open).toHaveBeenCalledTimes(2);
@@ -185,19 +269,40 @@ describe('Free plan: locked view and upgrade popup', () => {
     expect(screen.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', `/admin/plans?shop=${SHOP}&host=h`);
   });
 
-  it('without a trial: the popup says Upgrade now and the card says Upgrade to unlock', async () => {
+  it('without a trial: the last step says Upgrade now and the card says Upgrade to unlock', async () => {
     apiGet.mockResolvedValue(reply({ ...FREE, trialDays: 0 }));
     render(<PrepaidOffer shop={SHOP} />);
     expect(await screen.findByRole('button', { name: 'Upgrade to unlock' })).toBeInTheDocument();
     expect(screen.getByRole('status')).not.toHaveTextContent('free trial');
-    expect(await screen.findByRole('button', { name: 'Upgrade now' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'See what is included' }));
+    expect(screen.getByRole('button', { name: 'Upgrade now' })).toBeInTheDocument();
   });
 
-  it('on a paid plan there is no popup and no lock', async () => {
+  it('reduced motion: nothing plays by itself; numbers show their final values', async () => {
+    const mm = window.matchMedia;
+    window.matchMedia = (q) => ({ matches: q.includes('reduce'), media: q, addEventListener() {}, removeEventListener() {} });
+    try {
+      jest.useFakeTimers();
+      apiGet.mockResolvedValue(reply(FREE));
+      render(<PrepaidOffer shop={SHOP} />);
+      await screen.findByRole('dialog');
+      act(() => { jest.advanceTimersByTime(STEP_MS * 3); });
+      expect(stepNo()).toBe(1);
+      for (let i = 0; i < 5; i++) fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+      expect(screen.getByText('₹28,741')).toBeInTheDocument();
+      // and they stay there (no count-up from zero)
+      act(() => { jest.advanceTimersByTime(700); });
+      expect(screen.getByText('₹28,741')).toBeInTheDocument();
+    } finally {
+      window.matchMedia = mm;
+    }
+  });
+
+  it('on a paid plan there is no tour and no lock', async () => {
     apiGet.mockResolvedValue(reply());
     render(<PrepaidOffer shop={SHOP} />);
     await screen.findByText('Prepaid orders');
-    expect(dialog()).not.toBeInTheDocument();
+    expect(tour()).not.toBeInTheDocument();
     expect(screen.queryByRole('img', { name: 'Locked preview' })).not.toBeInTheDocument();
   });
 });
@@ -274,7 +379,7 @@ describe('Cash on delivery page tabs: lock badge', () => {
     render(<CodHome shop={SHOP} />);
     expect(await screen.findByLabelText('Locked: Starter plan')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('tab', { name: /Prepaid offer/ }));
-    expect(await screen.findByRole('dialog', { name: 'Unlock the Prepaid offer' })).toBeInTheDocument();
+    expect(await screen.findByRole('dialog', { name: 'How the Prepaid offer works' })).toBeInTheDocument();
     expect(apiGet).toHaveBeenCalledTimes(1);
   });
 
