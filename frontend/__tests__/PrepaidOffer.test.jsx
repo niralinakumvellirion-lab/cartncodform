@@ -65,6 +65,19 @@ describe('Prepaid offer screen', () => {
     expect(screen.getByLabelText('Discount (%)')).toHaveValue(5);
   });
 
+  it('only the preview sticks while the page scrolls; the column runs the full height; tips sit under the settings', async () => {
+    apiGet.mockResolvedValue(reply());
+    render(<PrepaidOffer shop={SHOP} />);
+    const sticky = await screen.findByTestId('preview-sticky');
+    expect(sticky).toHaveStyle({ position: 'sticky', top: '16px' });
+    expect(within(sticky).getByTestId('preview-offer')).toBeInTheDocument();
+    const column = screen.getByRole('complementary', { name: 'Preview' });
+    expect(column).toHaveStyle({ alignSelf: 'stretch' });
+    expect(column).not.toHaveStyle({ position: 'sticky' });
+    expect(within(column).queryByText('How the code works')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Good to know')).toHaveTextContent('How the code works');
+  });
+
   it('a minimum above the sample order hides the offer in the preview and says why', async () => {
     apiGet.mockResolvedValue(reply());
     render(<PrepaidOffer shop={SHOP} />);

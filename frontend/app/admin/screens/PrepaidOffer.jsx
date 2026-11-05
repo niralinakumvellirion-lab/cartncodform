@@ -227,6 +227,7 @@ export default function PrepaidOffer({ shop }) {
       </div>
 
       <div style={ui.cols}>
+        <div style={ui.main}>
         <div style={ui.card} aria-label="Offer settings">
           <Section title="Offer" hint="Show the offer above the fields on your COD form.">
             <label style={{ ...ui.switchRow, ...(locked ? { opacity: 0.55 } : null) }}>
@@ -299,10 +300,8 @@ export default function PrepaidOffer({ shop }) {
           </div>
         </div>
 
-        <aside style={ui.side} aria-label="Preview">
-          <div style={ui.sideHead}>Preview · {money(SAMPLE_PRICE)} order</div>
-          <Preview s={form} />
-          <div style={ui.tips}>
+        {/* Below the settings, so the sticky preview column stays short enough to stay on screen. */}
+          <div style={ui.tips} aria-label="Good to know">
             <div style={ui.tip}>
               <strong style={ui.tipTitle}>Send customers straight to checkout</strong>
               Add <code style={ui.code}>&amp;variantId={'{{ product.selected_or_first_available_variant.id }}'}</code> to
@@ -315,6 +314,14 @@ export default function PrepaidOffer({ shop }) {
               checkout also offers Cash on Delivery, a customer could still pick it there; those orders show as
               &quot;Used code but paid COD&quot;.
             </div>
+          </div>
+        </div>
+
+        {/* The column runs the full height of the settings; only the preview inside it sticks. */}
+        <aside style={ui.side} aria-label="Preview">
+          <div style={ui.sticky} data-testid="preview-sticky">
+            <div style={ui.sideHead}>Preview · {money(SAMPLE_PRICE)} order</div>
+            <Preview s={form} />
           </div>
         </aside>
       </div>
@@ -338,7 +345,8 @@ const ui = {
   statValue: { fontSize: 18, fontWeight: 800, fontVariantNumeric: 'tabular-nums', lineHeight: 1.25 },
   statLabel: { fontSize: 12.5, color: '#6B7280', marginTop: 2 },
   cols: { display: 'flex', gap: 20, alignItems: 'flex-start', flexWrap: 'wrap' },
-  card: { flex: '1 1 460px', minWidth: 0, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 14, overflow: 'hidden' },
+  main: { flex: '1 1 460px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 },
+  card: { background: '#fff', border: '1px solid #E5E7EB', borderRadius: 14, overflow: 'hidden' },
   section: { padding: '16px 20px', borderBottom: '1px solid #F3F4F6' },
   sectionHead: { marginBottom: 12 },
   sectionTitle: { fontSize: 15, fontWeight: 700, margin: 0 },
@@ -365,7 +373,8 @@ const ui = {
   error: { background: '#FFF4F4', border: '1px solid #FED3D1', color: '#8E1F0B', borderRadius: 8, padding: '8px 12px', fontSize: 13.5, margin: 0 },
   ok: { color: '#0C5132', fontSize: 14, fontWeight: 600, margin: 0 },
   save: { height: 38, padding: '0 22px', borderRadius: 10, border: 'none', background: ACCENT, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit', flex: '0 0 auto' },
-  side: { flex: '0 1 360px', minWidth: 280, position: 'sticky', top: 16 },
+  side: { flex: '0 1 360px', minWidth: 280, alignSelf: 'stretch' },
+  sticky: { position: 'sticky', top: 16 },
   sideHead: { fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#6B7280', marginBottom: 8 },
   device: { background: '#fff', border: '1px solid #E5E7EB', borderRadius: 16, padding: 16, boxShadow: '0 8px 24px rgba(17,24,39,.06)', fontSize: 13 },
   pvTitle: { fontSize: 16, fontWeight: 800, marginBottom: 10 },
@@ -385,7 +394,7 @@ const ui = {
   pvNone: { fontSize: 12.5, color: '#6B7280', background: '#F9FAFB', border: '1px dashed #E5E7EB', borderRadius: 10, padding: 12 },
   pvLabel: { fontSize: 12, fontWeight: 600, margin: '10px 0 4px' },
   pvField: { height: 32, border: '1px solid #E4E4E7', borderRadius: 8 },
-  tips: { display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 },
+  tips: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 },
   tip: { fontSize: 12.5, color: '#4B5563', lineHeight: 1.6, background: '#F9FAFB', border: '1px solid #F3F4F6', borderRadius: 10, padding: '10px 12px' },
   tipTitle: { display: 'block', color: '#111827', fontSize: 13, marginBottom: 2 },
   code: { background: '#EEF2FF', color: '#3730A3', borderRadius: 4, padding: '1px 4px', fontSize: 11.5, wordBreak: 'break-all' },
