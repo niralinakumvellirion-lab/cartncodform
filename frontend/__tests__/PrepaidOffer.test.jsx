@@ -135,7 +135,8 @@ describe('Free plan: locked view and upgrade popup', () => {
   it('the popup button opens Shopify plan page in the top window', async () => {
     apiGet.mockResolvedValue(reply(FREE));
     render(<PrepaidOffer shop={SHOP} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Start 30-day free trial' }));
+    const d = await screen.findByRole('dialog', { name: 'Unlock the Prepaid offer' });
+    fireEvent.click(within(d).getByRole('button', { name: 'Start 30-day free trial' }));
     expect(window.open).toHaveBeenCalledWith(reply().upgradeUrl, '_top');
   });
 
@@ -168,21 +169,27 @@ describe('Free plan: locked view and upgrade popup', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Maybe later' }));
     expect(screen.getByRole('heading', { name: 'Turn COD orders into prepaid orders' })).toBeInTheDocument();
     const locked = screen.getByRole('img', { name: 'Locked preview' });
-    expect(locked).toHaveTextContent('Unlock with Starter');
+    expect(locked).toHaveTextContent('Unlocks on Starter ($9.99/month)');
     expect(locked).toHaveTextContent('Pay online and save');
     expect(screen.getByRole('heading', { name: 'How it works' })).toBeInTheDocument();
-    expect(screen.getByText('30-day free trial on paid plans · Cancel anytime · Billed by Shopify')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Available on Starter and above');
+    expect(screen.getByRole('status')).toHaveTextContent('Every paid plan starts with a 30-day free trial.');
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Upgrade to unlock' }));
-    expect(window.open).toHaveBeenCalledWith(reply().upgradeUrl, '_top');
+    // Both page buttons open Shopify's plan page: "Upgrade plan" (title bar) and the card's trial button.
+    fireEvent.click(screen.getByRole('button', { name: 'Upgrade plan' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start 30-day free trial' }));
+    expect(window.open).toHaveBeenCalledTimes(2);
+    expect(window.open).toHaveBeenLastCalledWith(reply().upgradeUrl, '_top');
     expect(screen.getByRole('link', { name: 'Compare plans' })).toHaveAttribute('href', `/admin/plans?shop=${SHOP}&host=h`);
   });
 
-  it('without a trial the button says Upgrade now', async () => {
+  it('without a trial: the popup says Upgrade now and the card says Upgrade to unlock', async () => {
     apiGet.mockResolvedValue(reply({ ...FREE, trialDays: 0 }));
     render(<PrepaidOffer shop={SHOP} />);
+    expect(await screen.findByRole('button', { name: 'Upgrade to unlock' })).toBeInTheDocument();
+    expect(screen.getByRole('status')).not.toHaveTextContent('free trial');
     expect(await screen.findByRole('button', { name: 'Upgrade now' })).toBeInTheDocument();
   });
 

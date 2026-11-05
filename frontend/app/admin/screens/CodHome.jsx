@@ -5,7 +5,6 @@ import { apiGet } from '../../../lib/api';
 import CodOrders from './CodOrders';
 import PrepaidOffer from './PrepaidOffer';
 
-const ACCENT = '#4F46E5';
 
 const SECTIONS = [
   { key: 'orders', label: 'COD orders' },
@@ -58,9 +57,9 @@ export default function CodHome({ shop }) {
 }
 
 const ui = {
-  barWrap: { maxWidth: 1080, margin: '0 auto', padding: '16px 20px 0', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' },
-  bar: { display: 'flex', gap: 4, borderBottom: '1px solid #E5E7EB' },
-  tab: { display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, padding: '0 16px', background: 'transparent', border: 'none', borderBottom: '3px solid transparent', marginBottom: -1, fontSize: 14, fontWeight: 500, color: '#6B7280', cursor: 'pointer', fontFamily: "'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" },
-  lockTag: { display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: '#fff', background: 'linear-gradient(135deg, #4F46E5, #7C3AED)', borderRadius: 999, padding: '2px 8px' },
-  tabOn: { color: ACCENT, borderBottomColor: ACCENT, fontWeight: 600 },
+  barWrap: { maxWidth: 1080, margin: '0 auto', padding: '16px 20px 0', fontFamily: "-apple-system, BlinkMacSystemFont, 'San Francisco', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif" },
+  bar: { display: 'flex', gap: 2, borderBottom: '1px solid #E3E3E3' },
+  tab: { display: 'inline-flex', alignItems: 'center', gap: 6, height: 38, padding: '0 12px', background: 'transparent', border: 'none', borderBottom: '2px solid transparent', marginBottom: -1, fontSize: 13, fontWeight: 500, color: '#616161', cursor: 'pointer', fontFamily: 'inherit' },
+  lockTag: { display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 11, fontWeight: 600, color: '#4A4A4A', background: '#EBEBEB', borderRadius: 8, padding: '1px 7px' },
+  tabOn: { color: '#303030', borderBottomColor: '#303030', fontWeight: 600 },
 };
