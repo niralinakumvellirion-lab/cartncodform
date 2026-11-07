@@ -44,6 +44,13 @@ describe('PlanGate', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
+  it.each(['plan_handle=starter', 'charge_id=123'])('back from Shopify\'s plan page (%s) → the plan is re-checked with Shopify (refresh=1)', async (param) => {
+    window.history.pushState({}, '', `/admin?shop=${SHOP}&host=abc&${param}`);
+    apiGet.mockResolvedValue({ plan: { name: 'Starter' }, reached: [] });
+    renderGate();
+    await waitFor(() => expect(apiGet).toHaveBeenCalledWith(`/api/billing/${SHOP}/usage?refresh=1`));
+  });
+
   it('while the check runs the page loads but stays hidden (no dashboard flash before "Choose your plan")', async () => {
     let answer;
     apiGet.mockReturnValue(new Promise((r) => { answer = r; }));

@@ -106,6 +106,25 @@ describe('GET /api/billing/:shop/status', () => {
     expect(refreshPlan).not.toHaveBeenCalled();
   });
 
+  test('a FREE store checked a minute ago is asked again (it may have just subscribed on Shopify) — review 1.2.2', async () => {
+    global.__billingTestStore.planCheckedAt = new Date(Date.now() - 60 * 1000);
+    refreshPlan.mockImplementationOnce(async (store) => {
+      Object.assign(store, { plan: 'pro', planTier: 'starter', planCheckedAt: new Date() });
+      return { tier: 'starter', changed: true, source: 'managed_pricing' };
+    });
+    const body = await (await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH })).json();
+    expect(refreshPlan).toHaveBeenCalledWith(global.__billingTestStore, 'fresh-tok');
+    expect(body).toMatchObject({ tier: 'starter' });
+  });
+
+  test('a PAID plan checked within 6 hours is not asked again on status', async () => {
+    global.__billingTestStore.plan = 'pro';
+    global.__billingTestStore.planTier = 'growth';
+    global.__billingTestStore.planCheckedAt = new Date(Date.now() - 60 * 1000);
+    await fetch(`${base}/api/billing/bill-shop.myshopify.com/status`, { headers: AUTH });
+    expect(refreshPlan).not.toHaveBeenCalled();
+  });
+
   test('a PAID plan whose last check is over 6 hours old is confirmed again (catches a cancellation)', async () => {
     global.__billingTestStore.plan = 'pro';
     global.__billingTestStore.planTier = 'growth';

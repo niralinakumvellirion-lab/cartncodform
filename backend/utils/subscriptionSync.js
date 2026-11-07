@@ -29,22 +29,40 @@ async function ensureShopGid(store, accessToken) {
 }
 
 /**
- * What Shopify says the shop is subscribed to. Partner API when configured (the documented source for
- * Shopify App Pricing); otherwise the Admin API, which may not see App Pricing plans, so its "nothing
- * found" is not trusted to end a paid plan (authoritative: false).
+ * What Shopify says the shop is subscribed to.
+ * 1. The Admin API (currentAppInstallation.activeSubscriptions): the app's own installation. The plan the
+ *    merchant just approved shows here at once (Shopify's subscription webhook carries this same
+ *    subscription id), test charges on development stores included. An ACTIVE subscription here wins.
+ * 2. Only when the Admin API finds none: the Partner API. In App Review it answered "no subscription"
+ *    seconds after the merchant subscribed, which moved a paying store back to Free - so its "none" alone
+ *    never ends a paid plan.
+ * A paid plan ends (authoritative "none") only when the Admin API answered with no subscription AND the
+ * Partner API agrees; without the Partner API, "none" is not trusted (authoritative: false).
+ * Throws when neither can be asked (the caller keeps the plan as it is).
  */
 async function readActivePlan(store, accessToken) {
-  if (isPartnerApiConfigured()) {
-    const gid = await ensureShopGid(store, accessToken);
-    const sub = await getPartnerActiveSubscription(gid);
-    return sub
-      ? { active: true, tier: sub.tier, status: 'ACTIVE', source: 'partner_api', authoritative: true }
-      : { active: false, source: 'partner_api', authoritative: true };
+  let adminSub = null;
+  let adminError = null;
+  try {
+    adminSub = await getActiveSubscription(store.shopDomain, accessToken);
+  } catch (err) {
+    adminError = err;
   }
-  const sub = await getActiveSubscription(store.shopDomain, accessToken);
+  if (adminSub) {
+    return {
+      active: true, tier: tierFromSubscriptionName(adminSub.name), status: adminSub.status, id: adminSub.id,
+      test: !!adminSub.test, source: 'managed_pricing', authoritative: true,
+    };
+  }
+  if (!isPartnerApiConfigured()) {
+    if (adminError) throw adminError;
+    return { active: false, source: 'managed_pricing', authoritative: false };
+  }
+  const gid = await ensureShopGid(store, accessToken);
+  const sub = await getPartnerActiveSubscription(gid);
   return sub
-    ? { active: true, tier: tierFromSubscriptionName(sub.name), status: sub.status, id: sub.id, test: !!sub.test, source: 'managed_pricing', authoritative: false }
-    : { active: false, source: 'managed_pricing', authoritative: false };
+    ? { active: true, tier: sub.tier, status: 'ACTIVE', source: 'partner_api', authoritative: true }
+    : { active: false, source: 'partner_api', authoritative: !adminError };
 }
 
 /**

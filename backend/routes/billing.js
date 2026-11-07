@@ -36,7 +36,9 @@ function planCards() {
 async function syncPlan(req, force) {
   const store = req.store;
   if (store.isInternal === true) return;
-  if (!force && !planCheckIsStale(store)) return;
+  // A store without a paid plan is asked about every time: it may have just subscribed on Shopify's plan
+  // page and come back. Paid stores are re-confirmed every few hours (and daily by the poller).
+  if (!force && store.plan === 'pro' && !planCheckIsStale(store)) return;
   try {
     const token = await refreshAccessTokenIfNeeded(store, { sessionToken: sessionTokenOf(req) });
     if (token) await refreshPlan(store, token);

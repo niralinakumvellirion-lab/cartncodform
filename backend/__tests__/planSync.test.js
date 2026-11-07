@@ -157,7 +157,9 @@ describe('refreshPlan (Partner API)', () => {
     const r = await refreshPlan(store, 'tok');
     expect(r.changed).toBe(false);
     expect(await events()).toHaveLength(0);
-    expect(shopifyGraphQL).not.toHaveBeenCalled();
+    // Only the Admin API subscription check; the saved shop id is not read again.
+    expect(shopifyGraphQL).toHaveBeenCalledTimes(1);
+    expect(shopifyGraphQL.mock.calls[0][2]).toContain('currentAppInstallation');
     expect((await Store.findOne({ shopDomain: SHOP }).lean()).planCheckedAt).toBeInstanceOf(Date);
   });
 
@@ -203,6 +205,69 @@ describe('refreshPlan (Partner API)', () => {
     const store = await makeStore({ isInternal: true });
     expect(await refreshPlan(store, 'tok')).toEqual({ tier: 'pro', changed: false, source: 'internal' });
     expect(axios.post).not.toHaveBeenCalled();
+  });
+});
+
+describe('refreshPlan: Admin API first, Partner API only when it finds none (review 1.2.2)', () => {
+  const adminSubs = (...subs) => shopifyGraphQL.mockImplementation(async (_s, _t, query) => {
+    if (query.includes('shop { id }')) return { shop: { id: SHOP_GID } };
+    return { currentAppInstallation: { activeSubscriptions: subs } };
+  });
+  const starter = { id: 'gid://shopify/AppSubscription/42', name: 'Starter', status: 'ACTIVE', test: true };
+
+  it('review store: webhook made it paid, Partner API says none, Admin API shows the plan → stays paid', async () => {
+    // What the logs showed: app_subscriptions/update ACTIVE, then refresh=1 moved the store back to Free.
+    const store = await makeStore({ plan: 'pro', planTier: 'starter', subscriptionId: starter.id, shopGid: SHOP_GID });
+    adminSubs(starter); // the Partner API is not asked: no reply queued
+    const r = await refreshPlan(store, 'tok');
+    expect(r).toMatchObject({ tier: 'starter', changed: false, source: 'managed_pricing' });
+    expect((await Store.findOne({ shopDomain: SHOP }).lean())).toMatchObject({ plan: 'pro', planTier: 'starter' });
+    expect(axios.post).not.toHaveBeenCalled();
+    expect(await events()).toHaveLength(0);
+  });
+
+  it('Free store that just subscribed: the Admin API plan is saved even while the Partner API says none', async () => {
+    const store = await makeStore();
+    adminSubs(starter); // the Partner API is not asked: no reply queued
+    expect((await refreshPlan(store, 'tok')).tier).toBe('starter');
+    expect(await Store.findOne({ shopDomain: SHOP }).lean()).toMatchObject({ plan: 'pro', planTier: 'starter', subscriptionId: starter.id, isTest: true });
+    expect((await events())[0]).toMatchObject({ eventType: 'activated', planTier: 'starter', source: 'managed_pricing' });
+  });
+
+  it('switch Starter → Growth is read from the Admin API', async () => {
+    const store = await makeStore({ plan: 'pro', planTier: 'starter', shopGid: SHOP_GID });
+    adminSubs({ ...starter, id: 'gid://shopify/AppSubscription/43', name: 'Growth' });
+    expect((await refreshPlan(store, 'tok')).tier).toBe('growth');
+  });
+
+  it('a $0 Free subscription in the Admin API ends a paid plan', async () => {
+    const store = await makeStore({ plan: 'pro', planTier: 'growth', shopGid: SHOP_GID });
+    adminSubs({ ...starter, name: 'Free' });
+    expect((await refreshPlan(store, 'tok')).tier).toBe('free');
+    expect((await Store.findOne({ shopDomain: SHOP }).lean()).plan).toBe('free');
+  });
+
+  it('Admin API down + Partner API says none → paid plan kept (one "none" is not enough)', async () => {
+    const store = await makeStore({ plan: 'pro', planTier: 'growth', shopGid: SHOP_GID });
+    shopifyGraphQL.mockRejectedValue(new Error('admin down'));
+    partnerReplies(noSub);
+    expect(await refreshPlan(store, 'tok')).toMatchObject({ tier: 'growth', changed: false });
+    expect((await Store.findOne({ shopDomain: SHOP }).lean()).plan).toBe('pro');
+  });
+
+  it('Admin API down + Partner API shows a plan → that plan', async () => {
+    const store = await makeStore({ shopGid: SHOP_GID });
+    shopifyGraphQL.mockRejectedValue(new Error('admin down'));
+    partnerReplies(sub('pro', 49));
+    expect((await refreshPlan(store, 'tok')).tier).toBe('pro');
+  });
+
+  it('both down → throws, plan left as it was', async () => {
+    const store = await makeStore({ plan: 'pro', planTier: 'growth', shopGid: SHOP_GID });
+    shopifyGraphQL.mockRejectedValue(new Error('admin down'));
+    axios.post.mockRejectedValueOnce(Object.assign(new Error('x'), { response: { status: 503 } }));
+    await expect(refreshPlan(store, 'tok')).rejects.toThrow('Partner API request failed (503)');
+    expect((await Store.findOne({ shopDomain: SHOP }).lean())).toMatchObject({ plan: 'pro', planCheckedAt: null });
   });
 });
 

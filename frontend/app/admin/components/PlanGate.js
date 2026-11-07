@@ -48,7 +48,10 @@ export default function PlanGate({ children }) {
     }
     if (!shop) { done(); return undefined; }
     const timer = setTimeout(done, CHECK_TIMEOUT_MS);
-    apiGet(`/api/billing/${encodeURIComponent(shop)}/usage`)
+    // Back from Shopify's plan page (welcome link): confirm the new plan with Shopify right away.
+    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    const back = !!params && (params.has('plan_handle') || params.has('charge_id'));
+    apiGet(`/api/billing/${encodeURIComponent(shop)}/usage${back ? '?refresh=1' : ''}`)
       .then((u) => {
         if (cancelled || !u) return;
         if (u.needsPlanChoice === true && Array.isArray(u.plans) && u.plans.length) {

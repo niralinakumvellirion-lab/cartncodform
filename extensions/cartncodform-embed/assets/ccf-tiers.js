@@ -5,6 +5,19 @@
 
   // ── Config resolution ──────────────────────────────────────────────────────
 
+  // Shown only in the theme editor when the merchant has not turned tiers on yet.
+  var SAMPLE_CONFIG = {
+    enabled: true,
+    heading: 'Buy more, save more',
+    accentColor: '#4F46E5',
+    layout: 'cards',
+    tiers: [
+      { minQty: 2, percent: 5, badge: '' },
+      { minQty: 3, percent: 10, badge: 'Most popular' },
+      { minQty: 5, percent: 15, badge: '' },
+    ],
+  };
+
   function getInlineConfig() {
     var el = document.getElementById('ccf-qt-config');
     if (!el) return null;
@@ -164,8 +177,8 @@
       '.ccf-qt-badge-inline{display:inline-flex;align-items:center;background:' + accentColor + ';color:' + badgeText + ';font-size:11px;font-weight:700;border-radius:999px;padding:2px 8px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}',
       // ── Savings ──
       '.ccf-qt-savings{font-size:13px;font-weight:700;color:#0F766E;background:#E0F5F1;border-radius:8px;padding:8px 12px;margin-top:8px;display:none}',
-      // ── Placeholder ──
-      '.ccf-qt-placeholder{border:2px dashed #d4d4d8;border-radius:12px;padding:24px;text-align:center;color:#71717a;font-size:13px;font-family:inherit}',
+      // ── Theme editor sample caption ──
+      '.ccf-qt-sample-note{font-size:11px;color:#6B7280;margin-top:8px;text-align:center}',
       // ── Reduced motion ──
       '@media (prefers-reduced-motion:no-preference){.ccf-qt-card{transition:box-shadow .15s,background .15s}}',
     ].join('');
@@ -178,24 +191,19 @@
     var wrap = document.getElementById('ccf-qt-root');
     if (!wrap) return;
 
-    // Design mode: replace with placeholder
-    if (window.Shopify && window.Shopify.designMode) {
-      injectStyles('#4F46E5');
-      var ph = document.createElement('div');
-      ph.className = 'ccf-qt-placeholder';
-      var strong = document.createElement('strong');
-      strong.textContent = 'Quantity Tiers — CartnCodForm';
-      var span = document.createElement('span');
-      span.textContent = ' (configure in the admin app)';
-      ph.appendChild(strong);
-      ph.appendChild(span);
-      wrap.parentNode && wrap.parentNode.replaceChild(ph, wrap);
-      return;
-    }
+    // Theme editor: always draw the real cards - the merchant's tiers when they are on, otherwise sample
+    // tiers (marked "Sample preview"). The live store only shows tiers the merchant turned on.
+    var designMode = !!(window.Shopify && window.Shopify.designMode) || wrap.getAttribute('data-design-mode') === 'true';
+    var configured = !!(config && config.enabled && Array.isArray(config.tiers) && config.tiers.length > 0);
+    var isSample = false;
 
-    if (!config || !config.enabled || !Array.isArray(config.tiers) || config.tiers.length === 0) {
-      wrap.parentNode && wrap.parentNode.removeChild(wrap);
-      return;
+    if (!configured) {
+      if (!designMode) {
+        wrap.parentNode && wrap.parentNode.removeChild(wrap);
+        return;
+      }
+      config = SAMPLE_CONFIG;
+      isSample = true;
     }
 
     var tiers = config.tiers;
@@ -364,6 +372,13 @@
       savingsEl.className = 'ccf-qt-savings';
       wrap.appendChild(savingsEl);
       updateSavings();
+
+      if (isSample) {
+        var sampleNote = document.createElement('div');
+        sampleNote.className = 'ccf-qt-sample-note';
+        sampleNote.textContent = 'Sample preview — shown only in the theme editor';
+        wrap.appendChild(sampleNote);
+      }
     }
 
     function updateSavings() {
@@ -476,9 +491,18 @@
     fetchConfig(shopDomain).then(init);
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootstrap);
-  } else {
+  // Once per block element (the theme editor re-renders sections without a page load).
+  function start() {
+    var wrap = document.getElementById('ccf-qt-root');
+    if (!wrap || wrap.getAttribute('data-ccf-ready')) return;
+    wrap.setAttribute('data-ccf-ready', '1');
     bootstrap();
   }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+  document.addEventListener('shopify:section:load', start);
 })();

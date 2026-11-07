@@ -1,24 +1,20 @@
-{%- if request.design_mode -%}
-  <div style="border:2px dashed #d4d4d8;border-radius:12px;padding:24px;text-align:center;color:#71717a;font-size:13px;font-family:sans-serif;line-height:1.5;">
-    <strong style="display:block;margin-bottom:4px;color:#18181b;">Quantity Tiers</strong>
-    CartnCodForm &mdash; configure in the admin app to show tier discount cards here
-  </div>
-{%- else -%}
-  {% comment %}
-    Config is fetched at runtime by ccf-tiers.js via the App Proxy
-    (/apps/cartncodform/discount-config). No inline config is server-rendered
-    here because no officially documented Liquid syntax was found for reading
-    an app-reserved ($app namespace) shop-level metafield inside a theme app
-    extension block. See audits/tiers-phase4c-after.txt for details.
-  {% endcomment %}
-  <div
-    id="ccf-qt-root"
-    data-shop="{{ shop.permanent_domain | escape }}"
-    data-handle="{{ product.handle | escape }}"
-    data-variant-id="{{ product.selected_or_first_available_variant.id | escape }}"
-  ></div>
-  <script src="{{ 'ccf-tiers.js' | asset_url }}" defer></script>
-{%- endif -%}
+{% comment %}
+  Config is fetched at runtime by ccf-tiers.js via the App Proxy
+  (/apps/cartncodform/discount-config). No inline config is server-rendered
+  here because no officially documented Liquid syntax was found for reading
+  an app-reserved ($app namespace) shop-level metafield inside a theme app
+  extension block. See audits/tiers-phase4c-after.txt for details.
+  In the theme editor the real cards are drawn: the merchant's tiers when
+  they are turned on, otherwise sample tiers marked "Sample preview".
+{% endcomment %}
+<div
+  id="ccf-qt-root"
+  data-shop="{{ shop.permanent_domain | escape }}"
+  data-handle="{{ product.handle | escape }}"
+  data-variant-id="{{ product.selected_or_first_available_variant.id | escape }}"
+  data-design-mode="{{ request.design_mode }}"
+></div>
+<script src="{{ 'ccf-tiers.js' | asset_url }}" defer></script>
 
 {% schema %}
 {

@@ -88,6 +88,8 @@ afterAll(async () => {
 });
 
 beforeEach(async () => {
+  // Free stores now ask Shopify on every admin load, so calls must not carry over between tests.
+  refreshPlan.mockClear();
   jest.spyOn(console, 'log').mockImplementation(() => {});
   jest.spyOn(console, 'warn').mockImplementation(() => {});
   jest.spyOn(console, 'error').mockImplementation(() => {});

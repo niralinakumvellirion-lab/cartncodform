@@ -574,6 +574,9 @@
     return email.slice(0, 1) + '***' + email.slice(at);
   }
 
+  // ── Theme editor default box (used only when the merchant has not turned the box on) ──
+  var SAMPLE_PRODUCT_PAGE = { enabled: true, pct: 15, colors: {}, copy: {} };
+
   // ── Unique id counter ───────────────────────────────────────────────────────
   var _instanceCount = 0;
 
@@ -595,27 +598,18 @@
 
       var shadow = this.attachShadow({ mode: 'open' });
 
-      if (isDesignMode) {
-        var styleEl = document.createElement('style');
-        styleEl.textContent = ':host{all:initial;display:block;}' +
-          '.ccf-bp-design-placeholder{border:2px dashed #D4D4D8;border-radius:12px;' +
-          'padding:16px;text-align:center;font-size:13px;color:#9ca3af;margin:16px 0;}';
-        var ph = document.createElement('div');
-        ph.className = 'ccf-bp-design-placeholder';
-        ph.textContent = 'Birthday box — configure in the CartnCodForm admin';
-        shadow.appendChild(styleEl);
-        shadow.appendChild(ph);
-        return;
-      }
+      // Theme editor: always draw the real gift box - the merchant's settings when the box is on,
+      // otherwise the default box. Nothing is saved or sent from the editor.
+      if (!shop && !isDesignMode) return;
+      if (!isDesignMode && (isAlreadySaved(shop) || isSkippedRecently(shop))) return;
 
-      if (!shop) return;
-      if (isAlreadySaved(shop)) return;
-      if (isSkippedRecently(shop)) return;
-
-      fetchConfig(shop).then(function (data) {
-        if (!data) return;
-        var pp = data.birthdayCapture && data.birthdayCapture.productPage;
-        if (!pp || !pp.enabled) return;
+      var configPromise = shop ? fetchConfig(shop) : Promise.resolve(null);
+      configPromise.then(function (data) {
+        var pp = data && data.birthdayCapture && data.birthdayCapture.productPage;
+        if (!pp || !pp.enabled) {
+          if (!isDesignMode) return;
+          pp = SAMPLE_PRODUCT_PAGE;
+        }
 
         var colors = pp.colors || {};
         var pct    = (pp.pct != null) ? String(pp.pct) : '15';
@@ -906,7 +900,7 @@
           skip.className = 'ccf-bp-skip';
           skip.textContent = copy.skip;
           skip.addEventListener('click', function () {
-            markSkipped(shop);
+            if (!isDesignMode) markSkipped(shop);
             shadow.innerHTML = '';
           });
           body.appendChild(skip);
@@ -976,17 +970,21 @@
           var params = new URLSearchParams();
           params.set('shop', shop);
 
-          fetch('/apps/cartncodform/birthday?' + params.toString(), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              month: monthVal, day: dayVal,
-              email: emailVal, consent: true,
-              sessionId: sessionId, source: 'product_page',
-            }),
-          }).then(function (r) { return r.json(); }).then(function (res) {
+          // In the theme editor the form only shows its thank-you card; nothing is sent or remembered.
+          var sent = isDesignMode
+            ? Promise.resolve({ ok: true, preview: true })
+            : fetch('/apps/cartncodform/birthday?' + params.toString(), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                month: monthVal, day: dayVal,
+                email: emailVal, consent: true,
+                sessionId: sessionId, source: 'product_page',
+              }),
+            }).then(function (r) { return r.json(); });
+          sent.then(function (res) {
             if (res && res.ok) {
-              markSaved(shop);
+              if (!res.preview) markSaved(shop);
               // ── STEP 3: replace card with success card (no stub) ──────────
               if (card.parentNode) { card.parentNode.removeChild(card); }
               var sc = document.createElement('div');

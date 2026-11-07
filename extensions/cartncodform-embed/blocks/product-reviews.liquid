@@ -1,24 +1,18 @@
-{%- if request.design_mode -%}
-  <div style="border:2px dashed #d4d4d8;border-radius:12px;padding:24px;text-align:center;color:#71717a;font-size:13px;font-family:sans-serif;line-height:1.5;">
-    <strong style="display:block;margin-bottom:4px;color:#18181b;">Product reviews</strong>
-    ShopiReachBoost AI &mdash; customer reviews, the star summary and the review form appear here on the live product page.
-  </div>
-{%- else -%}
-  <div
-    class="ccf-rv"
-    id="ccf-rv-{{ block.id }}"
-    data-ccf-reviews
-    data-product-id="{{ product.id }}"
-    data-product-handle="{{ product.handle | escape }}"
-    data-product-title="{{ product.title | escape }}"
-    {%- if product.featured_image %} data-product-image="{{ product.featured_image | image_url: width: 120 }}"{% endif %}
-    data-eyebrow="{{ block.settings.eyebrow | escape }}"
-    data-heading="{{ block.settings.heading | escape }}"
-    style="--ccf-rv-accent: {{ block.settings.accent_color | default: '#141414' }}; --ccf-rv-star: {{ block.settings.star_color | default: '#141414' }}; --ccf-rv-max: {{ block.settings.max_width | default: 1100 }}px;"
-  ></div>
-  {{ 'ccf-reviews.css' | asset_url | stylesheet_tag }}
-  <script src="{{ 'ccf-reviews.js' | asset_url }}" defer></script>
-{%- endif -%}
+{% comment %} The real widget is drawn in the theme editor too (it re-initialises on shopify:section:load). {% endcomment %}
+<div
+  class="ccf-rv"
+  id="ccf-rv-{{ block.id }}"
+  data-ccf-reviews
+  data-product-id="{{ product.id }}"
+  data-product-handle="{{ product.handle | escape }}"
+  data-product-title="{{ product.title | escape }}"
+  {%- if product.featured_image %} data-product-image="{{ product.featured_image | image_url: width: 120 }}"{% endif %}
+  data-eyebrow="{{ block.settings.eyebrow | escape }}"
+  data-heading="{{ block.settings.heading | escape }}"
+  style="--ccf-rv-accent: {{ block.settings.accent_color | default: '#141414' }}; --ccf-rv-star: {{ block.settings.star_color | default: '#141414' }}; --ccf-rv-max: {{ block.settings.max_width | default: 1100 }}px;"
+></div>
+{{ 'ccf-reviews.css' | asset_url | stylesheet_tag }}
+<script src="{{ 'ccf-reviews.js' | asset_url }}" defer></script>
 
 {% schema %}
 {
