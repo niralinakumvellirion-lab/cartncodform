@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { getItem, setItem } from '../../../lib/safeStorage';
+import { saveOnboardingStep, completeOnboarding } from '../lib/onboardingApi';
 import { activateEmbedUrl } from '../../../lib/themeEditor';
 
 const DS = {
@@ -104,11 +104,11 @@ function PageHeader({ title, subtitle, action }) {
   );
 }
 
-// Storefront onboarding checklist. Per-step "done" and the overall
-// "ccf_onboarded" flag use lib/safeStorage (falls back to memory when the
-// admin iframe blocks browser storage, e.g. Chrome incognito).
+// Setup checklist on the merchant's first open. Ticks and "finished" are kept per store on the server
+// (backend/utils/onboarding.js), so a reinstall, another browser or another staff member sees the same state.
+// initialSteps: { embed, voice, signals, storefront } from GET /api/onboarding/:shop.
 
-export default function Onboarding({ shop, onNavigate, onDone }) {
+export default function Onboarding({ shop, onNavigate, onDone, initialSteps = {} }) {
   const STEPS = [
     {
       id: 'embed',
@@ -123,10 +123,10 @@ export default function Onboarding({ shop, onNavigate, onDone }) {
       id: 'voice',
       title: 'Set your voice',
       description:
-        'Tone, emoji, language. Every message gets written in it. Currently: warm, emoji on, en.',
+        'Tone, emoji and language. Every message is written in it.',
       actionLabel: 'Set up',
       actionType: 'nav',
-      actionTarget: 'settings',
+      actionTarget: 'settings-page',
     },
     {
       id: 'signals',
@@ -134,54 +134,52 @@ export default function Onboarding({ shop, onNavigate, onDone }) {
       description: "Ten signals are on by default. Turn off any you don't want.",
       actionLabel: 'Set up',
       actionType: 'nav',
-      actionTarget: 'settings',
+      actionTarget: 'signals',
     },
     {
-      id: 'push',
-      title: 'Send yourself a test',
+      id: 'storefront',
+      title: 'See it on your store',
       description:
-        'A push to this browser so you can see what customers will see.',
-      actionLabel: 'Send test',
-      actionType: 'nav',
-      actionTarget: 'customers',
+        'Open your store in a new tab to see the notification prompt shoppers get.',
+      actionLabel: 'Open my store',
+      actionType: 'url',
+      actionTarget: shop ? `https://${shop}` : '',
     },
   ];
 
   const [steps, setSteps] = useState(() =>
-    STEPS.map((step) => ({
-      id: step.id,
-      done:
-        typeof window !== 'undefined' &&
-        getItem(`ccf_step_${step.id}_done`) === 'true',
-    }))
+    STEPS.map((step) => ({ id: step.id, done: initialSteps[step.id] === true }))
   );
 
   const doneCount = steps.filter((s) => s.done).length;
 
+  // Shown at once; saved for the store in the background (a failed save is undone on screen).
+  function setStepDone(id, done) {
+    setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, done } : s)));
+    Promise.resolve(saveOnboardingStep(shop, id, done)).catch(() => {
+      setSteps((prev) => prev.map((s) => (s.id === id ? { ...s, done: !done } : s)));
+    });
+  }
+
   function toggleStep(id) {
-    setSteps((prev) =>
-      prev.map((s) => {
-        if (s.id !== id) return s;
-        const newDone = !s.done;
-        setItem(`ccf_step_${id}_done`, String(newDone));
-        return { ...s, done: newDone };
-      })
-    );
+    const current = steps.find((s) => s.id === id);
+    setStepDone(id, !(current && current.done));
   }
 
   function handleAction(step) {
     if (step.actionType === 'url') {
-      window.open(step.actionTarget, '_blank');
-      toggleStep(step.id);
+      if (step.actionTarget) window.open(step.actionTarget, '_blank');
+      setStepDone(step.id, true);
     } else if (step.actionType === 'nav') {
+      setStepDone(step.id, true);
       onNavigate(step.actionTarget);
-      toggleStep(step.id);
     }
   }
 
+  // Finished or skipped: saved for the store, then on to the dashboard (a failed save only means the
+  // checklist shows again next time).
   function finish() {
-    setItem('ccf_onboarded', 'true');
-    onDone();
+    Promise.resolve(completeOnboarding(shop)).catch(() => {}).finally(() => onDone());
   }
 
   function handleSkip() {

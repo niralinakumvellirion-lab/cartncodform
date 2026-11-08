@@ -6,42 +6,52 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import '@shopify/polaris/build/esm/styles.css';
 
 import OnboardingScreen from './screens/Onboarding';
-import { getItem, setItem } from '../../lib/safeStorage';
+import { getOnboarding } from './lib/onboardingApi';
 
+/**
+ * /admin is the landing gate: a store that has not finished (or skipped) the setup checklist since this
+ * install sees it; everyone else goes to the Dashboard. The state is kept per store on the server, so a
+ * reinstall shows the checklist again in any browser.
+ */
 function AdminHomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const shop = searchParams.get('shop') || '';
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [onboardingChecked, setOnboardingChecked] = useState(false);
+  const [steps, setSteps] = useState(null); // null = still checking
+
+  // Keep shop/host (and any other params) when moving inside the admin.
+  const go = (route) => {
+    const qs = typeof window !== 'undefined' && window.location.search
+      ? window.location.search
+      : `?shop=${encodeURIComponent(shop)}`;
+    router.replace(`/admin/${route}${qs}`);
+  };
 
   useEffect(() => {
-    if (onboardingChecked) return;
-    setOnboardingChecked(true);
-    const hasOnboarded = getItem('ccf_onboarded') === 'true';
-    if (hasOnboarded) {
-      // /admin is just a landing gate — send onboarded merchants to the real
-      // Dashboard route so the URL matches (and highlights) the Dashboard nav
-      // item, instead of rendering DashboardScreen here under the /admin URL.
-      router.replace(`/admin/dashboard?shop=${encodeURIComponent(shop)}`);
-    } else {
-      setShowOnboarding(true);
-    }
+    let cancelled = false;
+    if (!shop) { go('dashboard'); return undefined; }
+    getOnboarding(shop)
+      .then((s) => {
+        if (cancelled) return;
+        if (!s || s.completed) go('dashboard');
+        else setSteps(s.steps || {});
+      })
+      // The checklist never blocks the app: if it cannot be loaded, open the Dashboard (its setup guide
+      // still shows the storefront step).
+      .catch(() => { if (!cancelled) go('dashboard'); });
+    return () => { cancelled = true; };
   }, []);
 
-  // Blank while we check onboarding status (first render) and while the
-  // onboarded redirect above is in flight — never flashes another screen.
-  if (!onboardingChecked || !showOnboarding) return null;
+  // Blank while checking and while redirecting: never flashes another screen.
+  if (!steps) return null;
 
   return (
     <AppProvider i18n={{}}>
       <OnboardingScreen
         shop={shop}
-        onNavigate={() => {}}
-        onDone={() => {
-          setItem('ccf_onboarded', 'true');
-          router.replace(`/admin/dashboard?shop=${encodeURIComponent(shop)}`);
-        }}
+        initialSteps={steps}
+        onNavigate={(route) => go(route)}
+        onDone={() => go('dashboard')}
       />
     </AppProvider>
   );

@@ -144,6 +144,7 @@ const attributionLimiter = rateLimit({
 
 app.use('/api/auth', authRoutes);
 app.use('/api/billing', require('./routes/billing'));
+app.use('/api/onboarding', require('./routes/onboarding'));
 app.use('/api/reviews', require('./routes/reviews'));
 app.use('/api/webhooks', webhookRoutes);
 app.use('/api/stores', storeRoutes);

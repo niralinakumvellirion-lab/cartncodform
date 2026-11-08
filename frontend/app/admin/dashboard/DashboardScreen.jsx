@@ -10,6 +10,7 @@ import { ProductPicker } from '../components/ProductPicker';
 import MultiDateScheduler from '../components/MultiDateScheduler';
 import DateRangeFilter, { DATE_FILTERS, getDateRange } from '../components/DateRangeFilter';
 import { ChannelCard, ChannelDrawer } from './ChannelCards';
+import SetupGuideCard from '../components/SetupGuideCard';
 
 const DS = {
   page: {
@@ -1289,6 +1290,9 @@ export default function DashboardScreen({ shop }) {
           {refreshButton}
         </div>
       </div>
+
+      {/* Setup guide: until the storefront block (app embed) is on */}
+      <SetupGuideCard shop={shop} />
 
       {/* Success toast */}
       {successMsg && (

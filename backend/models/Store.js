@@ -56,8 +56,11 @@ const storeSchema = new mongoose.Schema({
     start: { type: Number, default: 22 }, // hour 0-23
     end: { type: Number, default: 8 },
   },
+  // Setup checklist on first open (utils/onboarding.js). Ticks and completedAt older than installedAt
+  // belong to an earlier install and do not count, so a reinstall starts the checklist again.
   onboarding: {
     steps: [{ id: String, done: Boolean, doneAt: Date }],
+    completedAt: { type: Date, default: null },
   },
   // NOTE: `timezone` already exists above (default 'Asia/Kolkata') — not re-added.
 

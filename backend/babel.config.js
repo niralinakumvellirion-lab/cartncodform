@@ -11,5 +11,10 @@ module.exports = {
       test: /frontend[\\/]app[\\/]admin[\\/]lib[\\/].+\.js$/,
       plugins: ['@babel/plugin-transform-modules-commonjs'],
     },
+    {
+      // Shared admin helpers imported by Discounts.jsx (e.g. frontend/lib/themeEditor.js).
+      test: /frontend[\\/]lib[\\/].+\.js$/,
+      plugins: ['@babel/plugin-transform-modules-commonjs'],
+    },
   ],
 };

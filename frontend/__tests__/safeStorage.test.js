@@ -48,13 +48,14 @@ describe('safeStorage when storage is blocked (throws)', () => {
   });
 });
 
-describe('admin entry files do not use localStorage directly', () => {
+describe('admin entry files keep the setup checklist on the server, not in browser storage', () => {
   const files = ['../app/admin/page.js', '../app/admin/screens/Onboarding.jsx'];
   for (const rel of files) {
-    it(`${rel} goes through safeStorage`, () => {
+    it(`${rel} uses no browser storage for the checklist`, () => {
       const src = fs.readFileSync(path.join(__dirname, rel), 'utf8');
       expect(src).not.toMatch(/localStorage\.(get|set)Item/);
-      expect(src).toContain('safeStorage');
+      expect(src).not.toMatch(/ccf_onboarded|ccf_step_/);
+      expect(src).toContain('onboardingApi');
     });
   }
 });
