@@ -11,7 +11,8 @@ import { waitFor } from '@testing-library/react';
 const EXT = path.join(__dirname, '../../extensions/cartncodform-embed');
 const TIERS = path.join(EXT, 'assets/ccf-tiers.js');
 const BDAY = path.join(EXT, 'assets/ccf-bday-product.js');
-const read = (p) => fs.readFileSync(path.join(EXT, p), 'utf8');
+// Line endings depend on the checkout (Windows CRLF / LF); compare with LF only.
+const read = (p) => fs.readFileSync(path.join(EXT, p), 'utf8').replace(/\r\n/g, '\n');
 
 let calls;
 function fakeFetch(config) {

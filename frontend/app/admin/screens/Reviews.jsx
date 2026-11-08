@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
+import ThemeBlockSetup from '../components/ThemeBlockSetup';
 
 // ── Options shown on this screen (the backend validates the same limits) ─────────────────
 const WHO_OPTIONS = [
@@ -307,13 +308,13 @@ export default function Reviews({ shop }) {
         </div>
       </div>
 
-      <div style={ui.banner} role="note">
-        <span style={ui.bannerIcon} aria-hidden="true">i</span>
-        <span>
-          To show reviews on a product page: Online Store → Themes → Customize → open a product page → Add block → Apps →
-          “Product reviews”. These settings apply to every product that has the block.
-        </span>
-      </div>
+      <ThemeBlockSetup
+        shop={shop}
+        handle="product-reviews"
+        blockName="Product reviews"
+        place="below the product details"
+        whenLive="These settings apply to every product that has the block."
+      />
 
       <div style={{ ...ui.layout, gridTemplateColumns: wide ? 'minmax(0, 1fr) 340px' : 'minmax(0, 1fr)' }}>
         <div style={ui.column}>
@@ -516,8 +517,6 @@ const ui = {
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12 },
   title: { fontSize: 24, fontWeight: 800, margin: 0, color: '#111827' },
   subtitle: { margin: '4px 0 0', fontSize: 13.5, color: '#6B7280' },
-  banner: { display: 'flex', gap: 10, alignItems: 'flex-start', background: '#EEF2FF', border: '1px solid #C7D2FE', color: '#3730A3', borderRadius: 10, padding: '10px 14px', fontSize: 13, lineHeight: 1.5, margin: '12px 0 18px' },
-  bannerIcon: { flexShrink: 0, width: 18, height: 18, borderRadius: 999, background: ACCENT, color: '#fff', fontSize: 12, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   layout: { display: 'grid', gap: 20, alignItems: 'start' },
   column: { display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 },
   previewCol: { alignSelf: 'stretch', minWidth: 0 },

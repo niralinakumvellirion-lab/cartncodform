@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { getItem, setItem } from '../../../lib/safeStorage';
+import { activateEmbedUrl } from '../../../lib/themeEditor';
 
 const DS = {
   page: {
@@ -113,10 +114,10 @@ export default function Onboarding({ shop, onNavigate, onDone }) {
       id: 'embed',
       title: 'Turn on the storefront block',
       description:
-        'Adds tracking and the notification prompt to your theme. One click in the theme editor.',
-      actionLabel: 'Open theme editor',
+        'Adds tracking and the notification prompt to your theme. The theme editor opens with the app embed switched on: click Save.',
+      actionLabel: 'Turn on in theme editor',
       actionType: 'url',
-      actionTarget: `https://${shop}/admin/themes/current/editor?context=apps`,
+      actionTarget: activateEmbedUrl(shop),
     },
     {
       id: 'voice',

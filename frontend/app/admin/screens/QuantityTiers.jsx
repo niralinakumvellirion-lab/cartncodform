@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react';
 import { apiSend } from '../../../lib/api';
 import { TierPreview } from './QuantityTiersPreview';
+import ThemeBlockSetup from '../components/ThemeBlockSetup';
 
 // ── Defaults matching board 2 of the "Birthday and Tier Offers" canvas ──────
 const DEFAULT_TIERS = [
@@ -339,11 +340,14 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
         </label>
       </div>
 
-      {/* ── Amber note ── */}
-      <div style={styles.amberNote} role="note">
-        <span style={styles.amberIcon}>⚠</span>
-        Add the <strong>Quantity tiers</strong> block in your theme editor under the price and size picker to show the discount table to shoppers.
-      </div>
+      {/* ── Theme setup: add the block to the product page ── */}
+      <ThemeBlockSetup
+        shop={shopDomain}
+        handle="quantity-tiers"
+        blockName="Quantity Tiers"
+        place="under the price and size picker"
+        whenLive="Shoppers see the tier cards once tiers are turned on here and saved."
+      />
 
       {/* ── Live preview ── */}
       <div style={styles.card}>

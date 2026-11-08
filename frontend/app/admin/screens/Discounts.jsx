@@ -5,6 +5,7 @@ import { apiGet, apiSend } from '../../../lib/api';
 import QuantityTiers from './QuantityTiers';
 import { resolvePostOrderColors } from '../lib/postOrderColors';
 import { resolveProductBoxColors } from '../lib/productBoxColors';
+import { addProductBlockUrl } from '../../../lib/themeEditor';
 
 // ── Module-scope helpers shared by Method 3 and Method 4 panels ──────────────
 
@@ -1686,13 +1687,7 @@ export default function Discounts({ shop }) {
                 const anyCopySetPp     = ['heading','sub','emailPlaceholder','consent','button','skip','saved','error','emailError','unlockTitle','openButton'].some((k) => (ppCopy[k] || '').trim().length > 0);
 
                 // "Add to product page" deep-link
-                const apiKey = typeof document !== 'undefined'
-                  ? (document.querySelector('meta[name="shopify-api-key"]')?.getAttribute('content') || '')
-                  : '';
-                const shopDomain = config._shop || '';
-                const themeEditorUrl = shopDomain && apiKey
-                  ? ('https://' + shopDomain + '/admin/themes/current/editor?template=product&addAppBlockId=' + encodeURIComponent(apiKey + '/birthday-product') + '&target=mainSection')
-                  : (shopDomain ? 'https://' + shopDomain + '/admin/themes/current/editor?template=product' : '');
+                const themeEditorUrl = addProductBlockUrl(config._shop || '', 'birthday-product');
 
                 const PP_PREVIEW_TABS = ['Closed', 'Ask', 'Email error', 'Date error', 'After saving'];
                 const PP_PREVIEW_TAB_STATES = [-1, 0, 1, 2, 3];
