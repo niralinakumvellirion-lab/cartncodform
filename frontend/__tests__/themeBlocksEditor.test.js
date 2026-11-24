@@ -15,12 +15,12 @@ const BDAY = path.join(EXT, 'assets/ccf-bday-product.js');
 const read = (p) => fs.readFileSync(path.join(EXT, p), 'utf8').replace(/\r\n/g, '\n');
 
 let calls;
-function fakeFetch(config) {
+function fakeFetch(config, variantPrice = 100000) {
   calls = [];
   global.fetch = jest.fn((url, opts = {}) => {
     calls.push({ url, method: opts.method || 'GET' });
     if (String(url).includes('/discount-config')) return Promise.resolve({ json: () => Promise.resolve(config) });
-    if (String(url).includes('/products/')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ variants: [{ id: 1, price: 100000 }] }) });
+    if (String(url).includes('/products/')) return Promise.resolve({ ok: true, json: () => Promise.resolve({ variants: [{ id: 1, price: variantPrice }] }) });
     return Promise.resolve({ json: () => Promise.resolve({ ok: true }) });
   });
 }
@@ -48,6 +48,17 @@ describe('no editor placeholders are left in the blocks', () => {
   it('the Tiers and Birthday blocks tell their script when they are in the theme editor', () => {
     expect(read('blocks/quantity-tiers.liquid')).toMatch(/id="ccf-qt-root"[^>]*data-design-mode="\{\{ request\.design_mode \}\}"/);
     expect(read('blocks/birthday-product.liquid')).toMatch(/<ccf-birthday-box[^>]*data-design-mode="\{\{ request\.design_mode \}\}"/);
+  });
+});
+
+describe('Quantity Tiers card price (App Review 2.1.4: card 18.71 vs cart 18.72)', () => {
+  it("the reviewer's case: USD 20.79, buy 4 at 10% off -> the card says 18.71 each, the same as the cart", async () => {
+    window.Shopify = { currency: { active: 'USD' } };
+    fakeFetch({ quantityTiers: { enabled: true, heading: 'Buy more', accentColor: '#111111', layout: 'cards', tiers: [{ minQty: 4, percent: 10, badge: '' }] } }, 2079);
+    document.body.innerHTML = '<div id="ccf-qt-root" data-shop="s.myshopify.com" data-handle="tee" data-variant-id="1" data-design-mode="false"></div>';
+    jest.isolateModules(() => { require(TIERS); });
+    await waitFor(() => expect(document.querySelector('.ccf-qt-price').textContent).toMatch(/18\.71 each/));
+    expect(document.querySelector('.ccf-qt-price').textContent).not.toMatch(/18\.72/);
   });
 });
 

@@ -48,6 +48,7 @@ function makeCart(qty, pricePaise, productId) {
         {
           id: lineId,
           quantity: qty,
+          cost: { amountPerQuantity: { amount: (pricePaise / 100).toFixed(2) } },
           merchandise: {
             __typename: 'ProductVariant',
             id: vid,
@@ -198,16 +199,15 @@ describe('parity: Function run() vs COD helper', () => {
       } else {
         // Both pick the same tier
         expect(fnDiscount).toBeDefined();
-        const fnPercent = parseFloat(fnDiscount.value.percentage.value);
-        expect(fnPercent).toBe(c.expectedPercent);
+        expect(fnDiscount.message).toMatch(new RegExp(`save ${c.expectedPercent}%$`));
         expect(cod.percent).toBe(c.expectedPercent);
 
-        // Discounted unit price agrees
-        // Function applies percent to pricePaise; COD applies to major-unit price
-        const fnDiscPaise = c.pricePaise * (1 - c.expectedPercent / 100);
+        // Discounted unit price agrees EXACTLY: the Function sends price - discounted price as a fixed
+        // amount per item, so the cart's unit price is the COD form's unit price to the paisa.
+        expect(fnDiscount.value.fixedAmount.appliesToEachItem).toBe(true);
+        const fnUnitPaise = c.pricePaise - Math.round(Number(fnDiscount.value.fixedAmount.amount) * 100);
         const codDiscUnit = discountedUnitPrice(unitPriceMajor, c.expectedPercent);
-        // Convert Function result to major units for comparison
-        expect(codDiscUnit).toBeCloseTo(Math.round(fnDiscPaise) / 100, 2);
+        expect(fnUnitPaise).toBe(Math.round(codDiscUnit * 100));
       }
     });
   });

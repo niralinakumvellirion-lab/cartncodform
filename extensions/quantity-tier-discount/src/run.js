@@ -13,6 +13,29 @@ function pickTier(tiers, qty) {
   return best;
 }
 
+/**
+ * The one price rule shared by the storefront cards (ccf-tiers.js), the COD form and prepaid offer
+ * (backend/utils/quantityTiers.js) and this function: the discounted unit price in cents is
+ * priceCents x (100 - percent) / 100, rounded half-up. The product is an exact integer, so a half cent
+ * is exactly .5 and always rounds up the same way.
+ */
+function discountedUnitCents(priceCents, percent) {
+  return Math.round((priceCents * (100 - percent)) / 100);
+}
+
+/**
+ * Amount off ONE item, as a Decimal string in the cart's currency: price - discounted price. Sent as a
+ * fixed amount per item so Shopify does no rounding of its own: the cart's per-item price is then exactly
+ * the price the product page showed (App Review 2.1.4: card 18.71 vs cart 18.72 with a percentage).
+ * null when the price cannot be read.
+ */
+function perItemDiscount(amountPerQuantity, percent) {
+  const priceCents = Math.round(Number(amountPerQuantity) * 100);
+  if (!Number.isFinite(priceCents) || priceCents <= 0) return null;
+  const off = priceCents - discountedUnitCents(priceCents, percent);
+  return (off / 100).toFixed(2);
+}
+
 function noDiscount() {
   return { operations: [] };
 }
@@ -55,18 +78,25 @@ function run(input) {
     linesByProduct[pid].push(line);
   }
 
-  // ── Build candidates — one per qualifying product ─────────────────────────
+  // ── Build candidates — one per qualifying cart line ───────────────────────
+  // The tier is chosen from the product's total quantity (all its variants together); the amount off is
+  // worked out per line from that line's own unit price (variants can have different prices).
   const candidates = [];
   for (const pid of Object.keys(productQty)) {
     const tier = pickTier(config.tiers, productQty[pid]);
     if (!tier) continue;
-    candidates.push({
-      targets: linesByProduct[pid].map((l) => ({
-        cartLine: { id: l.id },
-      })),
-      value: { percentage: { value: String(tier.percent) } },
-      message: `Buy ${tier.minQty}+, save ${tier.percent}%`,
-    });
+    for (const line of linesByProduct[pid]) {
+      const amount = perItemDiscount(
+        line.cost && line.cost.amountPerQuantity && line.cost.amountPerQuantity.amount,
+        tier.percent
+      );
+      if (amount === null || Number(amount) <= 0) continue;
+      candidates.push({
+        targets: [{ cartLine: { id: line.id } }],
+        value: { fixedAmount: { amount, appliesToEachItem: true } },
+        message: `Buy ${tier.minQty}+, save ${tier.percent}%`,
+      });
+    }
   }
 
   if (candidates.length === 0) return noDiscount();
@@ -75,11 +105,12 @@ function run(input) {
     operations: [{
       productDiscountsAdd: {
         candidates,
-        selectionStrategy: 'FIRST',
+        // One candidate per cart line, never overlapping: apply them all (FIRST applied only one line).
+        selectionStrategy: 'ALL',
       },
     }],
   };
 }
 
 // Export both names: 'run' for Jest tests, 'cartLinesDiscountsGenerateRun' for CLI entry
-module.exports = { run, cartLinesDiscountsGenerateRun: run };
+module.exports = { run, cartLinesDiscountsGenerateRun: run, discountedUnitCents, perItemDiscount };

@@ -62,9 +62,12 @@
     return best;
   }
 
+  // The one price rule shared with the cart (extensions/quantity-tier-discount/src/run.js sends
+  // price - this as a fixed amount per item) and the COD form (backend discountedUnitPrice): whole cents,
+  // priceCents x (100 - percent) / 100 rounded half-up. So the card's "each" price is the cart's per-item
+  // price exactly (App Review 2.1.4).
   function discountedUnitPricePaise(pricePaise, percent) {
-    var raw = pricePaise * (1 - percent / 100);
-    return Math.round((raw + Number.EPSILON) * 100) / 100;
+    return Math.round((Math.round(pricePaise) * (100 - percent)) / 100);
   }
 
   // ── Colour accessibility ───────────────────────────────────────────────────

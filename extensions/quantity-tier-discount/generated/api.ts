@@ -3506,4 +3506,4 @@ export enum WeightUnit {
 export type CartInputQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type CartInputQuery = { __typename?: 'Input', cart: { __typename?: 'Cart', lines: Array<{ __typename?: 'CartLine', id: string, quantity: number, merchandise: { __typename: 'CustomProduct' } | { __typename: 'ProductVariant', id: string, product: { __typename?: 'Product', id: string } } }> }, discount: { __typename?: 'Discount', metafield?: { __typename?: 'Metafield', jsonValue: unknown } | null } };
+export type CartInputQuery = { __typename?: 'Input', cart: { __typename?: 'Cart', lines: Array<{ __typename?: 'CartLine', id: string, quantity: number, cost: { __typename?: 'CartLineCost', amountPerQuantity: { __typename?: 'MoneyV2', amount: string } }, merchandise: { __typename: 'CustomProduct' } | { __typename: 'ProductVariant', id: string, product: { __typename?: 'Product', id: string } } }> }, discount: { __typename?: 'Discount', metafield?: { __typename?: 'Metafield', jsonValue: unknown } | null } };

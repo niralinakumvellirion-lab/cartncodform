@@ -1,6 +1,7 @@
 'use strict';
 
-const { run } = require('../../extensions/quantity-tier-discount/src/run');
+const { run, discountedUnitCents, perItemDiscount } = require('../../extensions/quantity-tier-discount/src/run');
+const { discountedUnitPrice } = require('../utils/quantityTiers');
 
 const TIERS = [
   { minQty: 2, percent: 10, badge: '' },
@@ -18,10 +19,12 @@ function makeInput(lines, enabled = true, tiers = TIERS) {
   };
 }
 
-function variantLine(productId, variantId, quantity) {
+// price = the line's unit price in the cart's currency (cost.amountPerQuantity.amount, a Decimal string).
+function variantLine(productId, variantId, quantity, price = '100.00') {
   return {
     id: `line-${variantId}`,
     quantity,
+    cost: { amountPerQuantity: { amount: price } },
     merchandise: {
       __typename: 'ProductVariant',
       id: `gid://shopify/ProductVariant/${variantId}`,
@@ -36,6 +39,13 @@ function getCandidates(result) {
   const op = ops.find((o) => o.productDiscountsAdd);
   return op ? op.productDiscountsAdd.candidates : [];
 }
+
+// Amount off each item sent to Shopify (fixed amount per item, no percentage).
+const offEach = (c) => {
+  expect(c.value.percentage).toBeUndefined();
+  expect(c.value.fixedAmount.appliesToEachItem).toBe(true);
+  return c.value.fixedAmount.amount;
+};
 
 // ─── no-discount paths ───────────────────────────────────────────────────────
 
@@ -77,49 +87,49 @@ describe('run() — no discount cases', () => {
 // ─── single product tiers ────────────────────────────────────────────────────
 
 describe('run() — single product tiers', () => {
-  test('qty 2 → 10% tier', () => {
+  test('qty 2 → 10% tier: 10.00 off each item of a 100.00 product', () => {
     const result = run(makeInput([variantLine('P1', 'V1', 2)]));
     expect(getCandidates(result)).toHaveLength(1);
-    expect(getCandidates(result)[0].value.percentage.value).toBe('10');
-    expect(getCandidates(result)[0].message).toMatch(/Buy 2/);
+    expect(offEach(getCandidates(result)[0])).toBe('10.00');
+    expect(getCandidates(result)[0].message).toBe('Buy 2+, save 10%');
   });
 
   test('qty 3 → 15% tier (highest qualifying)', () => {
     const result = run(makeInput([variantLine('P1', 'V1', 3)]));
-    expect(getCandidates(result)[0].value.percentage.value).toBe('15');
+    expect(offEach(getCandidates(result)[0])).toBe('15.00');
   });
 
   test('qty 4 → 25% tier', () => {
     const result = run(makeInput([variantLine('P1', 'V1', 4)]));
-    expect(getCandidates(result)[0].value.percentage.value).toBe('25');
+    expect(offEach(getCandidates(result)[0])).toBe('25.00');
   });
 
   test('qty 10 → 25% tier (above highest — capped at last tier)', () => {
     const result = run(makeInput([variantLine('P1', 'V1', 10)]));
-    expect(getCandidates(result)[0].value.percentage.value).toBe('25');
+    expect(offEach(getCandidates(result)[0])).toBe('25.00');
   });
 });
 
 // ─── multiple variants summed by product ─────────────────────────────────────
 
 describe('run() — multiple variants of same product', () => {
-  test('variant A qty 1 + variant B qty 2 = total 3 → 15% applied to both', () => {
+  test('variant A qty 1 + variant B qty 2 = total 3 → 15% tier on both, each from its own price', () => {
     const lines = [
-      variantLine('P1', 'VA', 1),
-      variantLine('P1', 'VB', 2),
+      variantLine('P1', 'VA', 1, '100.00'),
+      variantLine('P1', 'VB', 2, '40.00'),
     ];
     const result = run(makeInput(lines));
-    expect(getCandidates(result)).toHaveLength(1);
-    expect(getCandidates(result)[0].value.percentage.value).toBe('15');
-    expect(getCandidates(result)[0].targets).toHaveLength(2);
+    const c = getCandidates(result);
+    expect(c).toHaveLength(2);
+    expect(c.map((x) => [x.targets[0].cartLine.id, offEach(x)])).toEqual([['line-VA', '15.00'], ['line-VB', '6.00']]);
+    expect(c.every((x) => x.message === 'Buy 3+, save 15%')).toBe(true);
   });
 
-  test('each target maps to the correct cart line id', () => {
+  test('each candidate targets exactly one cart line, with the correct id', () => {
     const lines = [variantLine('P1', 'VA', 1), variantLine('P1', 'VB', 3)];
     const result = run(makeInput(lines));
-    const ids = getCandidates(result)[0].targets.map((t) => t.cartLine.id);
-    expect(ids).toContain('line-VA');
-    expect(ids).toContain('line-VB');
+    const ids = getCandidates(result).map((c) => c.targets.map((t) => t.cartLine.id));
+    expect(ids).toEqual([['line-VA'], ['line-VB']]);
   });
 });
 
@@ -137,15 +147,14 @@ describe('run() — multiple products', () => {
     const lines = [variantLine('P1', 'V1', 2), variantLine('P2', 'V2', 4)];
     const result = run(makeInput(lines));
     expect(getCandidates(result)).toHaveLength(2);
-    const pcts = getCandidates(result).map((c) => c.value.percentage.value).sort();
-    expect(pcts).toEqual(['10', '25']);
+    expect(getCandidates(result).map(offEach).sort()).toEqual(['10.00', '25.00']);
   });
 
-  test('operations array contains one productDiscountsAdd when discounts present', () => {
+  test('ALL candidates apply (FIRST discounted only one line when a cart had two tier products)', () => {
     const result = run(makeInput([variantLine('P1', 'V1', 3)]));
     expect(result.operations).toHaveLength(1);
     expect(result.operations[0].productDiscountsAdd).toBeDefined();
-    expect(result.operations[0].productDiscountsAdd.selectionStrategy).toBe('FIRST');
+    expect(result.operations[0].productDiscountsAdd.selectionStrategy).toBe('ALL');
   });
 });
 
@@ -164,5 +173,78 @@ describe('run() — non-ProductVariant lines ignored', () => {
       },
     });
     expect(result.operations).toEqual([]);
+  });
+});
+
+// ─── cart price == product page price (App Review 2.1.4) ─────────────────────
+
+describe('exact per-item amounts: the cart shows the same unit price as the product page', () => {
+  test("the reviewer's case: 18.71 on the card is 18.71 in the cart (no Shopify rounding left)", () => {
+    // 20.79 with 10% off: 18.711 -> 18.71. A "10%" percentage let Shopify round to 18.72 per item.
+    const tiers = [{ minQty: 4, percent: 10, badge: '' }];
+    const result = run(makeInput([variantLine('P1', 'V1', 4, '20.79')], true, tiers));
+    const amount = offEach(getCandidates(result)[0]);
+    expect(amount).toBe('2.08');
+    expect((2079 - Math.round(Number(amount) * 100)) / 100).toBe(18.71);
+  });
+
+  test('half a cent always rounds up the same way (exact integer maths, no float drift)', () => {
+    expect(discountedUnitCents(1999, 50)).toBe(1000); // 999.5 -> 1000
+    expect(discountedUnitCents(1001, 50)).toBe(501); // 500.5 -> 501
+    expect(discountedUnitCents(2079, 10)).toBe(1871); // 1871.1
+    expect(discountedUnitCents(1, 80)).toBe(0); // 0.2
+  });
+
+  test('for prices 0.01-60.00 and every allowed percent, function == backend (COD form / prepaid)', () => {
+    let checked = 0;
+    for (let cents = 1; cents <= 6000; cents += 7) {
+      for (let p = 1; p <= 80; p += 1) {
+        const price = cents / 100;
+        const off = Number(perItemDiscount(price.toFixed(2), p));
+        const cartUnit = Math.round((price - off) * 100);
+        const backendUnit = Math.round(discountedUnitPrice(price, p) * 100);
+        if (cartUnit !== backendUnit) throw new Error(`price ${price} at ${p}%: cart ${cartUnit} vs backend ${backendUnit}`);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(60000);
+  });
+
+  test('a line without a readable price, or nothing to take off, gets no candidate', () => {
+    const lines = [variantLine('P1', 'V1', 4, 'abc'), variantLine('P2', 'V2', 4, '0.00'), variantLine('P3', 'V3', 4, '0.01')];
+    const tiers = [{ minQty: 2, percent: 10, badge: '' }];
+    expect(run(makeInput(lines, true, tiers)).operations).toEqual([]);
+    expect(perItemDiscount(undefined, 10)).toBeNull();
+  });
+});
+
+// ─── product page (ccf-tiers.js) == cart (this function) ─────────────────────
+
+describe('storefront cards use the same price rule as the cart', () => {
+  // ccf-tiers.js is a browser script: take its price function out of the source and run it here.
+  const src = require('fs').readFileSync(require('path').join(__dirname, '../../extensions/cartncodform-embed/assets/ccf-tiers.js'), 'utf8');
+  const fnSrc = src.match(/function discountedUnitPricePaise\(pricePaise, percent\) \{[\s\S]*?\n  \}/);
+  // eslint-disable-next-line no-new-func
+  const cardUnit = new Function(`${fnSrc[0]}; return discountedUnitPricePaise;`)();
+
+  test('card "each" price == cart per-item price for prices 0.01-60.00 at every allowed percent', () => {
+    let checked = 0;
+    for (let cents = 1; cents <= 6000; cents += 3) {
+      for (let p = 1; p <= 80; p += 1) {
+        const off = Math.round(Number(perItemDiscount((cents / 100).toFixed(2), p)) * 100);
+        const card = Math.round(cardUnit(cents, p));
+        if (card !== cents - off) throw new Error(`${cents} at ${p}%: card ${card} vs cart ${cents - off}`);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(150000);
+    expect(cardUnit(2079, 10)).toBe(1871); // the reviewer's 18.71
+  });
+});
+
+describe('input query', () => {
+  test('asks Shopify for each line\'s unit price (without it every line would get no discount)', () => {
+    const q = require('fs').readFileSync(require('path').join(__dirname, '../../extensions/quantity-tier-discount/src/cart_lines_discounts_generate_run.graphql'), 'utf8');
+    expect(q.replace(/\s+/g, ' ')).toMatch(/lines \{ id quantity cost \{ amountPerQuantity \{ amount \} \}/);
   });
 });

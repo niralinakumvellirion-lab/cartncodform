@@ -51,12 +51,15 @@ function pickTier(tiers, qty) {
 }
 
 /**
- * Discounted unit price: price * (1 - percent/100), rounded half-up to 2 dp.
- * Uses the same rounding rule everywhere so COD and function stay in sync.
+ * Discounted unit price, rounded half-up to the cent. The one rule shared with the storefront cards
+ * (ccf-tiers.js) and the discount function (extensions/quantity-tier-discount/src/run.js, which sends
+ * price - this as a fixed amount per item), so the product page, the COD form and the cart always show
+ * the same unit price (App Review 2.1.4). Worked in whole cents: priceCents x (100 - percent) is an exact
+ * integer, so a half cent is exactly .5 (float maths made 3.30 at 25% = 2.475 come out as 2.47).
  */
 function discountedUnitPrice(price, percent) {
-  const raw = price * (1 - percent / 100);
-  return Math.round((raw + Number.EPSILON) * 100) / 100;
+  const priceCents = Math.round(Number(price) * 100);
+  return Math.round((priceCents * (100 - percent)) / 100) / 100;
 }
 
 /**

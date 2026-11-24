@@ -35,6 +35,19 @@ const SHOP = 'demo.myshopify.com';
 let server;
 let base;
 
+// The dates below are fixed (Oct-Dec 2026) and the single-date route refuses a time in the past, so once
+// 8 Nov 2026 went by these tests started failing. Pin "now" before all of them; only Date is faked
+// (timers, the HTTP server and fetch run normally).
+const FIXED_NOW = new Date('2026-09-01T00:00:00Z');
+beforeAll(() => {
+  jest.useFakeTimers({
+    now: FIXED_NOW,
+    doNotFake: ['nextTick', 'setImmediate', 'clearImmediate', 'setTimeout', 'clearTimeout', 'setInterval',
+      'clearInterval', 'queueMicrotask', 'hrtime', 'performance'],
+  });
+});
+afterAll(() => { jest.useRealTimers(); });
+
 beforeAll((done) => {
   const app = express();
   app.use(express.json());
