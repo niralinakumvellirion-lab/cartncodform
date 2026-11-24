@@ -15,6 +15,29 @@ describe('next.config redirects', () => {
 
   it('does not redirect normal admin pages', async () => {
     const rules = await config.redirects();
-    expect(rules.every((r) => r.source.startsWith('/admin/admin'))).toBe(true);
+    expect(rules.filter((r) => r.source.startsWith('/admin/')).map((r) => r.source)).toEqual(['/admin/admin/:path*']);
+  });
+
+  // Review 2.1.1: a plan's Redirect URL "/plans" opens on the app's origin, which answered 404.
+  it('sends /plans (and every other admin page opened on the root) to /admin/..., query kept by Next.js', async () => {
+    const rules = await config.redirects();
+    const plans = rules.find((r) => r.source === '/plans/:path*');
+    expect(plans).toMatchObject({ destination: '/admin/plans/:path*', permanent: false });
+    expect(plans.missing).toEqual([{ type: 'host', value: 'admin.shopireachboost.com' }]);
+    for (const page of ['dashboard', 'settings-page', 'signals', 'reviews', 'cod', 'discounts']) {
+      expect(rules.find((r) => r.source === `/${page}/:path*`)).toMatchObject({ destination: `/admin/${page}/:path*` });
+    }
+  });
+
+  it('every redirected name is a real admin page, and none hides a public page', async () => {
+    const fs = require('fs');
+    const path = require('path');
+    const rules = (await config.redirects()).filter((r) => !r.source.startsWith('/admin/'));
+    const appDir = path.join(__dirname, '../app');
+    for (const r of rules) {
+      const page = r.source.split('/')[1];
+      expect(fs.existsSync(path.join(appDir, 'admin', page, 'page.js'))).toBe(true);
+      expect(fs.existsSync(path.join(appDir, page))).toBe(false);
+    }
   });
 });

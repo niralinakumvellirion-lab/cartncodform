@@ -151,6 +151,78 @@ describe('Choose your plan (after an install or reinstall)', () => {
   });
 });
 
+describe('coming back to "Choose your plan" after Shopify\'s plan page (review 2.1.1)', () => {
+  const paid = (over = {}) => ({ plan: PLANS[1], tier: 'starter', reached: [], needsPlanChoice: false, plans: PLANS, upgradeUrl: UPGRADE, ...over });
+
+  it('the buttons work again when the page is shown again (they were all stuck on "Opening Shopify…")', async () => {
+    apiGet.mockResolvedValue(choosing());
+    renderGate();
+    fireEvent.click((await screen.findAllByRole('button', { name: 'Start free trial' }))[0]);
+    expect(screen.getByRole('button', { name: 'Continue with Free' })).toBeDisabled();
+    await act(async () => { window.dispatchEvent(new Event('pageshow')); });
+    expect(screen.getByRole('button', { name: 'Continue with Free' })).toBeEnabled();
+    expect(screen.getAllByRole('button', { name: 'Start free trial' })[0]).toBeEnabled();
+  });
+
+  it('page shown again with a paid plan at Shopify → chooser closes and the plan is confirmed', async () => {
+    apiGet.mockResolvedValueOnce(choosing());
+    renderGate();
+    await screen.findByRole('heading', { name: 'Choose your plan' });
+    apiGet.mockResolvedValueOnce(paid());
+    await act(async () => { window.dispatchEvent(new Event('focus')); });
+    expect(apiGet).toHaveBeenLastCalledWith(`/api/billing/${SHOP}/usage?refresh=1`);
+    expect(await screen.findByText('APP CONTENT')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Your Starter plan is active.');
+    expect(screen.queryByRole('heading', { name: 'Choose your plan' })).not.toBeInTheDocument();
+  });
+
+  it('"Check again": nothing paid yet → says so and stays; paid → closes with the confirmation', async () => {
+    apiGet.mockResolvedValueOnce(choosing());
+    renderGate();
+    await screen.findByRole('heading', { name: 'Choose your plan' });
+    apiGet.mockResolvedValueOnce(choosing());
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    expect(await screen.findByText(/No paid plan found yet/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Choose your plan' })).toBeInTheDocument();
+    apiGet.mockResolvedValueOnce(paid({ plan: PLANS[2], tier: 'growth' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    expect(await screen.findByText('APP CONTENT')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Your Growth plan is active.');
+  });
+
+  it('a failed check keeps the chooser usable', async () => {
+    apiGet.mockResolvedValueOnce(choosing());
+    renderGate();
+    await screen.findByRole('heading', { name: 'Choose your plan' });
+    apiGet.mockRejectedValueOnce(new Error('down'));
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    expect(await screen.findByText(/No paid plan found yet/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue with Free' })).toBeEnabled();
+  });
+
+  it('back from Shopify on any admin page with a paid plan → "Your … plan is active." (dismissable)', async () => {
+    window.history.pushState({}, '', `/admin/dashboard?shop=${SHOP}&host=abc&charge_id=9`);
+    apiGet.mockResolvedValue(paid());
+    renderGate();
+    expect(await screen.findByRole('status')).toHaveTextContent('Your Starter plan is active.');
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByText(/plan is active/)).not.toBeInTheDocument();
+  });
+
+  it('no confirmation on a normal visit, nor when back on Free', async () => {
+    apiGet.mockResolvedValue(paid());
+    const { unmount } = renderGate();
+    await waitFor(() => expect(appBox()).not.toHaveStyle({ visibility: 'hidden' }));
+    expect(screen.queryByText(/plan is active/)).not.toBeInTheDocument();
+    unmount();
+    window.history.pushState({}, '', `/admin/dashboard?shop=${SHOP}&host=abc&plan_handle=free`);
+    apiGet.mockResolvedValue(paid({ plan: PLANS[0], tier: 'free' }));
+    renderGate();
+    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/plan is active/)).not.toBeInTheDocument();
+  });
+});
+
 describe('limitMessage', () => {
   it('lists every paused feature in plain words', () => {
     expect(limitMessage('Starter', ['codOrders', 'subscribers', 'messages'])).toBe(

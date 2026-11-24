@@ -25,12 +25,31 @@ const platformCSP = [
   `img-src 'self' data: https:`,
 ].join('; ');
 
+// Merchant admin pages (folders in app/admin). Shopify opens app paths such as a plan's Redirect URL
+// ("/plans", the welcome link after approving a plan) on the app's ORIGIN, not under application_url's
+// /admin: https://app.shopireachboost.com/plans answered 404 in App Review. Those land on the real page.
+const ADMIN_PAGES = [
+  'activity', 'automation', 'cod', 'customers', 'dashboard', 'discounts', 'email-templates', 'insights',
+  'journey', 'messages', 'plans', 'queue', 'reviews', 'settings-page', 'signals',
+];
+// The platform host rewrites every path to /platform (lib/hostRouting.js): leave it alone.
+const NOT_PLATFORM_HOST = [{ type: 'host', value: 'admin.shopireachboost.com' }];
+
 const nextConfig = {
   reactStrictMode: true,
   // application_url ends in /admin. If Shopify joins a discount function's create/details path onto it
   // instead of replacing the path, the request arrives as /admin/admin/discounts: send it to the real page.
+  // Next.js keeps the query string (shop, host, plan_handle, charge_id ...) on every redirect.
   async redirects() {
-    return [{ source: '/admin/admin/:path*', destination: '/admin/:path*', permanent: false }];
+    return [
+      { source: '/admin/admin/:path*', destination: '/admin/:path*', permanent: false },
+      ...ADMIN_PAGES.map((page) => ({
+        source: `/${page}/:path*`,
+        destination: `/admin/${page}/:path*`,
+        permanent: false,
+        missing: NOT_PLATFORM_HOST,
+      })),
+    ];
   },
   async headers() {
     return [

@@ -10,12 +10,39 @@ const ACCENT = '#4F46E5';
  * "Choose your plan": shown right after an install or reinstall, before the app. Paid plans show the free
  * trial and open Shopify's plan page (Shopify takes the payment); "Continue with Free" goes straight on.
  */
-export default function PlanChooser({ shop, plans, trialDays, upgradeUrl, onChosen }) {
+export default function PlanChooser({ shop, plans, trialDays, upgradeUrl, onChosen, onCheckAgain }) {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [checking, setChecking] = useState(false);
+  const [checkNote, setCheckNote] = useState('');
   const headingRef = useRef(null);
 
   useEffect(() => { if (headingRef.current) headingRef.current.focus(); }, []);
+
+  // Back on this screen after Shopify's plan page (back button, restored page): the buttons work again.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const reset = () => { if (document.visibilityState !== 'hidden') setBusy((b) => (b === 'free' ? b : '')); };
+    window.addEventListener('pageshow', reset);
+    document.addEventListener('visibilitychange', reset);
+    return () => {
+      window.removeEventListener('pageshow', reset);
+      document.removeEventListener('visibilitychange', reset);
+    };
+  }, []);
+
+  // "Already chose a plan?": ask Shopify again; PlanGate closes this screen when a paid plan is found.
+  async function checkAgain() {
+    if (!onCheckAgain) return;
+    setChecking(true);
+    setCheckNote('');
+    setBusy((b) => (b === 'free' ? b : ''));
+    const closed = await Promise.resolve(onCheckAgain()).catch(() => false);
+    if (!closed) {
+      setChecking(false);
+      setCheckNote('No paid plan found yet. If you just approved one, wait a few seconds and check again.');
+    }
+  }
 
   function startTrial(planId) {
     if (!upgradeUrl) return;
@@ -80,6 +107,15 @@ export default function PlanChooser({ shop, plans, trialDays, upgradeUrl, onChos
         <p style={ui.note}>
           Paid plans are billed by Shopify and appear on your Shopify bill. A free trial is offered once per store.
         </p>
+        {onCheckAgain ? (
+          <p style={ui.note}>
+            Already chose a plan on Shopify?{' '}
+            <button type="button" onClick={checkAgain} disabled={checking} style={ui.linkBtn}>
+              {checking ? 'Checking…' : 'Check again'}
+            </button>
+            {checkNote ? <span role="status" style={ui.checkNote}>{checkNote}</span> : null}
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -106,4 +142,6 @@ const ui = {
   btn: { height: 42, borderRadius: 10, border: 'none', background: ACCENT, color: '#fff', fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' },
   btnSecondary: { background: '#fff', color: '#111827', border: '1px solid #D1D5DB' },
   note: { marginTop: 20, textAlign: 'center', fontSize: 13, color: '#6B7280', lineHeight: 1.6 },
+  linkBtn: { background: 'none', border: 'none', padding: 0, color: ACCENT, fontWeight: 700, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit', textDecoration: 'underline' },
+  checkNote: { display: 'block', marginTop: 6, color: '#4B5563' },
 };
