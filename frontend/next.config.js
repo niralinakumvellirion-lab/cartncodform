@@ -51,6 +51,15 @@ const nextConfig = {
       })),
     ];
   },
+  // Local testing only (`next dev`): forward /api/* to the backend on this computer, so one HTTPS
+  // tunnel (ngrok → port 3030) serves both the admin and the API. Chrome blocks an https page
+  // (admin.shopify.com) from framing or calling http://localhost directly. Production is unchanged.
+  async rewrites() {
+    if (isProd) return [];
+    const devBackend = process.env.DEV_BACKEND_ORIGIN || 'http://localhost:4000';
+    return [{ source: '/api/:path*', destination: `${devBackend}/api/:path*` }];
+  },
+
   async headers() {
     return [
       // ── Existing: Shopify embedded admin CSP ─────────────────────────────

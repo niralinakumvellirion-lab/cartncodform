@@ -4,8 +4,9 @@
 
 client_id = "c73b3a9c2cc96f5211c08390e0442f3d"
 name = "ShopiReachBoost AI Dev"
-# Admin (Next.js, `npm run dev` in frontend/) running on this computer.
-application_url = "http://localhost:3030/admin"
+# Admin (Next.js, `npm run dev` in frontend/) on this computer, reached through the ngrok tunnel
+# `ngrok http --url=subsonic-regain-bounce.ngrok-free.dev 3030`. Chrome blocks http://localhost inside Shopify.
+application_url = "https://subsonic-regain-bounce.ngrok-free.dev/admin"
 embedded = true
 
 [access_scopes]
@@ -13,10 +14,10 @@ embedded = true
 scopes = "read_orders,read_products,write_discounts"
 
 [auth]
-# Backend (Express, `npm run dev` in backend/) running on this computer.
+# Backend (Express, `npm run dev:local` in backend/); the admin forwards /api/* to it in dev.
 redirect_urls = [
-  "http://localhost:4000/api/auth/callback",
-  "http://localhost:4000/api/auth/billing/callback"
+  "https://subsonic-regain-bounce.ngrok-free.dev/api/auth/callback",
+  "https://subsonic-regain-bounce.ngrok-free.dev/api/auth/billing/callback"
 ]
 
 [webhooks]
@@ -24,6 +25,5 @@ redirect_urls = [
 api_version = "2026-10"
 
 [build]
-include_config_on_deploy = true
-# Keep the localhost URLs above; the project has no shopify.web.toml for the CLI to tunnel.
+# Keep the ngrok URLs above; the project has no shopify.web.toml for the CLI to tunnel.
 automatically_update_urls_on_dev = false
