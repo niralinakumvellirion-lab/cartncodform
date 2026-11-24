@@ -1,0 +1,29 @@
+# DEV app only — "ShopiReachBoost AI Dev". Install on the dev store (cartncod-form) for testing.
+# The live app under review is shopify.app.toml; never run `shopify app deploy --config shopify.app.toml` while testing.
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "c73b3a9c2cc96f5211c08390e0442f3d"
+name = "ShopiReachBoost AI Dev"
+# Admin (Next.js, `npm run dev` in frontend/) running on this computer.
+application_url = "http://localhost:3030/admin"
+embedded = true
+
+[access_scopes]
+# Same scopes as the live app.
+scopes = "read_orders,read_products,write_discounts"
+
+[auth]
+# Backend (Express, `npm run dev` in backend/) running on this computer.
+redirect_urls = [
+  "http://localhost:4000/api/auth/callback",
+  "http://localhost:4000/api/auth/billing/callback"
+]
+
+[webhooks]
+# Same API version as the live app. No webhook subscriptions: Shopify cannot reach localhost.
+api_version = "2026-10"
+
+[build]
+include_config_on_deploy = true
+# Keep the localhost URLs above; the project has no shopify.web.toml for the CLI to tunnel.
+automatically_update_urls_on_dev = false

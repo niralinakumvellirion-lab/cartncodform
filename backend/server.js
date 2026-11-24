@@ -1,4 +1,16 @@
-require('dotenv').config();
+// `npm run dev:local` (flag --dev-env) loads ONLY backend/.env.dev — the "ShopiReachBoost AI Dev" app
+// and a test database. Nothing falls back to the live .env. Every other start loads .env as before.
+if (process.argv.includes('--dev-env')) {
+  const devEnvPath = require('path').join(__dirname, '.env.dev');
+  if (!require('fs').existsSync(devEnvPath)) {
+    console.error('[env] backend/.env.dev not found. Create it before running npm run dev:local.');
+    process.exit(1);
+  }
+  require('dotenv').config({ path: devEnvPath });
+  console.log('[env] Using backend/.env.dev (dev app)');
+} else {
+  require('dotenv').config();
+}
 
 const path = require('path');
 const express = require('express');
