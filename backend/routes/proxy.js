@@ -28,6 +28,7 @@ function tint(hex, alpha) {
 }
 const { generateDiscount, defaultConfig } = require('./discounts');
 const { resolvePostOrderColors } = require('../utils/postOrderColors');
+const { publicTierDisplay, publicTiers } = require('../utils/quantityTiers');
 const { resolveProductBoxColors } = require('../utils/productBoxColors');
 
 /**
@@ -214,10 +215,8 @@ router.get('/discount-config', async (req, res) => {
           enabled: !!qt.enabled,
           heading: String(qt.heading || 'Buy more, save more').slice(0, 60),
           accentColor: /^#[0-9A-Fa-f]{6}$/.test(String(qt.accentColor || '')) ? qt.accentColor : '#4F46E5',
-          layout: qt.layout === 'list' ? 'list' : 'cards',
-          tiers: Array.isArray(qt.tiers)
-            ? qt.tiers.map((t) => ({ minQty: t.minQty, percent: t.percent, badge: String(t.badge || '') }))
-            : [],
+          ...publicTierDisplay(qt),
+          tiers: publicTiers(qt.tiers),
         };
       }()),
       popupCopy: (function () {
@@ -249,7 +248,7 @@ router.get('/discount-config', async (req, res) => {
         postOrder: { enabled: false },
       },
       birthdayDiscount: { enabled: false, percentage: 15, offerText: '', consentText: "We'll use your birthday only to send you a birthday offer." },
-      quantityTiers: { enabled: false, tiers: [], heading: 'Buy more, save more', accentColor: '#4F46E5', layout: 'cards' },
+      quantityTiers: { enabled: false, tiers: [], heading: 'Buy more, save more', accentColor: '#4F46E5', ...publicTierDisplay({}) },
       popupCopy: { emailPlaceholder: '', captureButton: '', subscribedTitle: '', subscribedSub: '', unlockedTitle: '', unlockedSub: '', bdSub: '', bdButton: '', bdSkip: '', bdOkTitle: '', bdOkSub: '' },
     });
   }
@@ -511,10 +510,10 @@ router.get('/cod-form', async (req, res) => {
       if (qt && qt.enabled && Array.isArray(qt.tiers) && qt.tiers.length > 0) {
         qtBoot = {
           enabled: true,
-          tiers: qt.tiers.map((t) => ({ minQty: t.minQty, percent: t.percent, badge: String(t.badge || '') })),
+          tiers: publicTiers(qt.tiers),
           heading: String(qt.heading || 'Buy more, save more').slice(0, 60),
           accentColor: qt.accentColor || '#4F46E5',
-          layout: qt.layout || 'cards',
+          ...publicTierDisplay(qt),
         };
       }
     }

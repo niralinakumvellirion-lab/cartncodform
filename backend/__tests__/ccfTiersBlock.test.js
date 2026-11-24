@@ -421,3 +421,112 @@ describe('ccf-tiers.js storefront block', () => {
     });
   });
 });
+
+// ── Rows layout (Phase 1) ─────────────────────────────────────────────────────
+
+describe('ccf-tiers.js rows layout', () => {
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  beforeEach(async () => {
+    var styleEl = document.getElementById('ccf-qt-styles');
+    if (styleEl) styleEl.remove();
+    // Product price ₹999 (99900 paise) for variant 123
+    global.fetch = jest.fn().mockResolvedValue({
+      json: () => Promise.resolve({ variants: [{ id: 123, price: 99900 }] }),
+    });
+    setupDOM(makeConfig({
+      layout: 'rows',
+      topLabel: 'Limited time offer',
+      footerNote: 'Free delivery',
+      showSingle: true,
+      showCompareAt: true,
+      showTotal: true,
+      tiers: [
+        { minQty: 2, percent: 10, badge: '', subtitle: 'Good deal' },
+        { minQty: 3, percent: 20, badge: 'Most popular', subtitle: '' },
+      ],
+    }));
+    await flush(); await flush();
+  });
+
+  test('draws one row per tier plus the "1 item" row', () => {
+    const rows = getButtons();
+    expect(rows).toHaveLength(3);
+    expect(rows[0].textContent).toMatch(/^1 item/);
+    expect(rows[0].textContent).toMatch(/Standard price/);
+    expect(rows[1].textContent).toMatch(/2 items/);
+  });
+
+  test('container uses the rows class and every row has a radio dot', () => {
+    expect(document.querySelector('.ccf-qt-layout-rows')).not.toBeNull();
+    getButtons().forEach((b) => expect(b.querySelector('.ccf-qt-radio')).not.toBeNull());
+  });
+
+  test('"% OFF" pill, subtitle and badge ribbon', () => {
+    const rows = getButtons();
+    expect(rows[0].querySelector('.ccf-qt-pill')).toBeNull();
+    expect(rows[1].querySelector('.ccf-qt-pill').textContent).toBe('10% OFF');
+    expect(rows[1].querySelector('.ccf-qt-row-sub').textContent).toBe('Good deal');
+    expect(rows[2].querySelector('.ccf-qt-ribbon').textContent).toBe('Most popular');
+  });
+
+  test('2-item row: discounted total, struck full total, per-item price', () => {
+    const r = getButtons()[1];
+    expect(r.querySelector('.ccf-qt-row-total').textContent).toMatch(/1,798/);
+    expect(r.querySelector('s.ccf-qt-row-compare').textContent).toMatch(/1,998/);
+    expect(r.querySelector('.ccf-qt-row-each').textContent).toMatch(/899.*\/ each/);
+  });
+
+  test('top label and footer note are shown', () => {
+    expect(document.querySelector('.ccf-qt-toplabel').textContent).toBe('Limited time offer');
+    expect(document.querySelector('.ccf-qt-footer-note').textContent).toBe('Free delivery');
+  });
+
+  test('starts on "1 item"; clicking a row selects it, sets the quantity and updates the total', () => {
+    expect(getButtons()[0].getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelector('.ccf-qt-footer-total').textContent).toMatch(/999/);
+    getButtons()[2].click();
+    expect(document.querySelector('input[name="quantity"]').value).toBe('3');
+    const rows = getButtons();
+    expect(rows[2].getAttribute('aria-pressed')).toBe('true');
+    expect(rows[0].getAttribute('aria-pressed')).toBe('false');
+    // 3 x ₹799.20 = ₹2,397.6
+    expect(document.querySelector('.ccf-qt-footer-total').textContent).toMatch(/2,397/);
+  });
+
+  test('clicking the selected row keeps it selected (radio, not toggle)', () => {
+    getButtons()[1].click();
+    getButtons()[1].click();
+    expect(getButtons()[1].getAttribute('aria-pressed')).toBe('true');
+    expect(document.querySelector('input[name="quantity"]').value).toBe('2');
+  });
+
+  test('typing a quantity moves the selection', () => {
+    const input = document.querySelector('input[name="quantity"]');
+    input.value = '5';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(getButtons()[2].getAttribute('aria-pressed')).toBe('true');
+  });
+
+  test('no separate savings line in rows layout', () => {
+    expect(document.querySelector('.ccf-qt-savings')).toBeNull();
+  });
+});
+
+describe('ccf-tiers.js rows layout, options off', () => {
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  test('no "1 item" row, no struck price, no footer when all off', async () => {
+    var styleEl = document.getElementById('ccf-qt-styles');
+    if (styleEl) styleEl.remove();
+    global.fetch = jest.fn().mockResolvedValue({
+      json: () => Promise.resolve({ variants: [{ id: 123, price: 99900 }] }),
+    });
+    setupDOM(makeConfig({ layout: 'rows', showSingle: false, showCompareAt: false, showTotal: false }));
+    await flush(); await flush();
+    expect(getButtons()).toHaveLength(3);
+    expect(document.querySelector('.ccf-qt-row-compare')).toBeNull();
+    expect(document.querySelector('.ccf-qt-footer')).toBeNull();
+    expect(document.querySelector('.ccf-qt-toplabel')).toBeNull();
+  });
+});

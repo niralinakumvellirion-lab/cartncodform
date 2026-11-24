@@ -19,6 +19,7 @@ function sanitizeTiers(raw) {
     const minQty = Number(t.minQty);
     const percent = Number(t.percent);
     const badge = String(t.badge == null ? '' : t.badge);
+    const subtitle = String(t.subtitle == null ? '' : t.subtitle).trim();
 
     if (!Number.isInteger(minQty) || minQty < 2 || minQty > 99)
       throw new Error(`tiers[${i}].minQty must be an integer between 2 and 99`);
@@ -31,7 +32,7 @@ function sanitizeTiers(raw) {
         throw new Error('tiers[].percent must be strictly ascending');
     }
 
-    out.push({ minQty, percent, badge: badge.slice(0, 20) });
+    out.push({ minQty, percent, badge: badge.slice(0, 20), subtitle: subtitle.slice(0, 40) });
   }
   return out;
 }
@@ -66,4 +67,57 @@ function sanitizeAccentColor(val) {
   return COLOR_RE.test(String(val || '')) ? String(val) : DEFAULT_ACCENT;
 }
 
-module.exports = { sanitizeTiers, pickTier, discountedUnitPrice, sanitizeAccentColor, DEFAULT_ACCENT };
+const LAYOUTS = ['cards', 'list', 'rows'];
+
+function normalizeLayout(val) {
+  return LAYOUTS.includes(val) ? val : 'cards';
+}
+
+/**
+ * Display-only extras for the storefront widget. Picks only known keys that are present,
+ * so a PATCH can send any subset. Text is trimmed and capped at 40 chars; flags must be booleans.
+ * Returns { key: value } using the plain field names (topLabel, footerNote, showCompareAt, ...).
+ */
+function sanitizeTierDisplay(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const k of ['topLabel', 'footerNote']) {
+    if (typeof raw[k] === 'string') out[k] = raw[k].trim().slice(0, 40);
+  }
+  for (const k of ['showCompareAt', 'showTotal', 'showSingle']) {
+    if (typeof raw[k] === 'boolean') out[k] = raw[k];
+  }
+  return out;
+}
+
+/**
+ * Storefront-safe copy of the tier display settings (used by the app proxy).
+ * Missing fields fall back to the model defaults.
+ */
+function publicTierDisplay(qt) {
+  const q = qt || {};
+  return {
+    layout: normalizeLayout(q.layout),
+    topLabel: String(q.topLabel || '').slice(0, 40),
+    footerNote: String(q.footerNote || '').slice(0, 40),
+    showCompareAt: q.showCompareAt !== false,
+    showTotal: q.showTotal !== false,
+    showSingle: q.showSingle === true,
+  };
+}
+
+function publicTiers(tiers) {
+  return Array.isArray(tiers)
+    ? tiers.map((t) => ({
+      minQty: t.minQty,
+      percent: t.percent,
+      badge: String(t.badge || ''),
+      subtitle: String(t.subtitle || '').slice(0, 40),
+    }))
+    : [];
+}
+
+module.exports = {
+  sanitizeTiers, pickTier, discountedUnitPrice, sanitizeAccentColor, DEFAULT_ACCENT,
+  LAYOUTS, normalizeLayout, sanitizeTierDisplay, publicTierDisplay, publicTiers,
+};

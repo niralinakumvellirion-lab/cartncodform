@@ -69,6 +69,113 @@ function defaultSelectedIdx(tiers) {
   return best >= 0 ? best : mid;
 }
 
+// ── Rows preview (mirrors the storefront "rows" layout in ccf-tiers.js) ───────
+
+/**
+ * Builds the rows shown by the rows layout: one per tier, plus an optional
+ * "1 item, standard price" row when showSingle is on and the first tier starts above 1.
+ * Exported for tests.
+ */
+export function buildRowOptions(tiers, showSingle) {
+  const rows = tiers.map((t) => ({
+    qty: Number(t.minQty),
+    percent: Number(t.percent),
+    badge: t.badge || '',
+    subtitle: t.subtitle || '',
+  }));
+  if (showSingle && rows.length && rows[0].qty > 1) {
+    rows.unshift({ qty: 1, percent: 0, badge: '', subtitle: 'Standard price' });
+  }
+  return rows;
+}
+
+function money(sym, n) {
+  const v = Math.round(n * 100) / 100;
+  const digits = Number.isInteger(v) ? 0 : 2;
+  return sym + v.toLocaleString('en-IN', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+function RowsPreview({ qt, tiers, accent, price, currencySymbol }) {
+  const showSingle = qt.showSingle === true;
+  const showCompareAt = qt.showCompareAt !== false;
+  const showTotal = qt.showTotal !== false;
+  const topLabel = String(qt.topLabel || '').trim();
+  const footerNote = String(qt.footerNote || '').trim();
+  const rows = buildRowOptions(tiers, showSingle);
+  const [sel, setSel] = useState(() => Math.min(showSingle ? 1 : 0, rows.length - 1));
+  const active = rows[Math.min(sel, rows.length - 1)] || rows[0];
+  const badgeText = pickReadableText(accent);
+  const unit = (pct) => (pct > 0 ? discountedUnitPrice(price, pct) : price);
+
+  return (
+    <div>
+      {topLabel ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, fontWeight: 700, color: chipTextOnTint(accent), textTransform: 'uppercase', letterSpacing: '.06em', margin: '0 0 12px' }}>
+          <span style={{ flex: 1, height: 1, background: '#E1E4EA' }} />
+          {topLabel}
+          <span style={{ flex: 1, height: 1, background: '#E1E4EA' }} />
+        </div>
+      ) : null}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {rows.map((r, i) => {
+          const on = r === active;
+          const each = unit(r.percent);
+          return (
+            <button
+              key={i}
+              type="button"
+              aria-pressed={on}
+              onClick={() => setSel(i)}
+              style={{
+                position: 'relative', display: 'flex', alignItems: 'center', gap: 12,
+                width: '100%', boxSizing: 'border-box', textAlign: 'left', fontFamily: 'inherit',
+                background: on ? accent + '1A' : '#fff',
+                border: `${on ? 2 : 1}px solid ${on ? accent : '#C7CBD6'}`,
+                borderRadius: 12, padding: 14, cursor: 'pointer',
+              }}
+            >
+              {r.badge ? (
+                <span style={{ position: 'absolute', top: 0, right: 14, transform: 'translateY(-50%)', background: accent, color: badgeText, fontSize: 11, fontWeight: 700, borderRadius: 999, padding: '2px 10px', whiteSpace: 'nowrap' }}>
+                  {String(r.badge).slice(0, 20)}
+                </span>
+              ) : null}
+              <span aria-hidden="true" style={{ width: 18, height: 18, borderRadius: '50%', border: `2px solid ${on ? accent : '#C7CBD6'}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, boxSizing: 'border-box' }}>
+                {on ? <span style={{ width: 10, height: 10, borderRadius: '50%', background: accent }} /> : null}
+              </span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 800, color: '#171A22', flexWrap: 'wrap' }}>
+                  {r.qty === 1 ? '1 item' : `${r.qty} items`}
+                  {r.percent > 0 ? (
+                    <span style={{ fontSize: 11, fontWeight: 800, background: accent, color: badgeText, borderRadius: 4, padding: '2px 6px' }}>
+                      {r.percent}% OFF
+                    </span>
+                  ) : null}
+                </span>
+                {r.subtitle ? <span style={{ display: 'block', fontSize: 12, color: '#4A5062' }}>{String(r.subtitle).slice(0, 40)}</span> : null}
+              </span>
+              <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 }}>
+                <span style={{ fontSize: 15, fontWeight: 800, color: '#171A22' }}>{money(currencySymbol, each * r.qty)}</span>
+                {showCompareAt && r.percent > 0 ? (
+                  <s style={{ fontSize: 12, color: '#6B7280' }}>{money(currencySymbol, price * r.qty)}</s>
+                ) : null}
+                {r.qty > 1 ? <span style={{ fontSize: 11, color: '#4A5062' }}>{money(currencySymbol, each)} / each</span> : null}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {(footerNote || showTotal) ? (
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 12, fontSize: 13, color: '#171A22' }}>
+          {footerNote ? <span style={{ fontWeight: 700, color: '#0F766E' }}>{footerNote}</span> : <span />}
+          {showTotal && active ? (
+            <span style={{ fontWeight: 800 }}>Total: {money(currencySymbol, unit(active.percent) * active.qty)}</span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ── TierPreview ───────────────────────────────────────────────────────────────
 
 /**
@@ -93,7 +200,7 @@ export function TierPreview({ config, price = 999, currencySymbol = '₹' }) {
   const accent = ACCENT_RE.test(qt.accentColor)
     ? qt.accentColor
     : FALLBACK_ACCENT;
-  const layout = qt.layout === 'list' ? 'list' : 'cards';
+  const layout = qt.layout === 'list' || qt.layout === 'rows' ? qt.layout : 'cards';
 
   const [sel, setSel] = useState(() => defaultSelectedIdx(tiers));
 
@@ -196,7 +303,9 @@ export function TierPreview({ config, price = 999, currencySymbol = '₹' }) {
           {heading}
         </p>
 
-        {layout === 'cards' ? (
+        {layout === 'rows' ? (
+          <RowsPreview qt={qt} tiers={tiers} accent={accent} price={price} currencySymbol={currencySymbol} />
+        ) : layout === 'cards' ? (
           <div
             style={{
               display: 'grid',

@@ -15,10 +15,23 @@ const DEFAULT_HEADING = 'Buy more, save more';
 const DEFAULT_ACCENT = '#4F46E5';
 const ACCENT_RE = /^#[0-9A-Fa-f]{6}$/;
 const EXAMPLE_PRICE = 999;
+const LAYOUTS = [
+  { value: 'rows', label: 'Rows' },
+  { value: 'cards', label: 'Cards' },
+  { value: 'list', label: 'List' },
+];
+
+// One-click looks. They change only the style fields, never the tier numbers or badges.
+export const STYLE_PRESETS = [
+  { id: 'classic', name: 'Classic rows', values: { layout: 'rows', accentColor: '#111827', topLabel: 'Limited time offer', showSingle: true, showCompareAt: true, showTotal: true } },
+  { id: 'bold', name: 'Bold rows', values: { layout: 'rows', accentColor: '#DC2626', topLabel: 'Bundle and save', showSingle: true, showCompareAt: true, showTotal: true } },
+  { id: 'cards', name: 'Soft cards', values: { layout: 'cards', accentColor: '#4F46E5' } },
+  { id: 'list', name: 'Simple list', values: { layout: 'list', accentColor: '#0F766E' } },
+];
 
 function initTiers(raw) {
-  if (Array.isArray(raw) && raw.length) return raw.map((t) => ({ ...t }));
-  return DEFAULT_TIERS.map((t) => ({ ...t }));
+  if (Array.isArray(raw) && raw.length) return raw.map((t) => ({ subtitle: '', ...t }));
+  return DEFAULT_TIERS.map((t) => ({ subtitle: '', ...t }));
 }
 
 /**
@@ -33,8 +46,24 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
   const [accentColor, setAccentColor] = useState(
     ACCENT_RE.test(qt.accentColor || '') ? qt.accentColor : DEFAULT_ACCENT
   );
-  const [layout, setLayout] = useState(qt.layout === 'list' ? 'list' : 'cards');
+  const [layout, setLayout] = useState(LAYOUTS.some((l) => l.value === qt.layout) ? qt.layout : 'cards');
+  const [topLabel, setTopLabel] = useState(qt.topLabel || '');
+  const [footerNote, setFooterNote] = useState(qt.footerNote || '');
+  const [showCompareAt, setShowCompareAt] = useState(qt.showCompareAt !== false);
+  const [showTotal, setShowTotal] = useState(qt.showTotal !== false);
+  const [showSingle, setShowSingle] = useState(qt.showSingle === true);
   const [tiers, setTiers] = useState(() => initTiers(qt.tiers));
+
+  function applyPreset(preset) {
+    const v = preset.values;
+    if (v.layout) setLayout(v.layout);
+    if (v.accentColor) setAccentColor(v.accentColor);
+    if (typeof v.topLabel === 'string') setTopLabel(v.topLabel);
+    if (typeof v.showSingle === 'boolean') setShowSingle(v.showSingle);
+    if (typeof v.showCompareAt === 'boolean') setShowCompareAt(v.showCompareAt);
+    if (typeof v.showTotal === 'boolean') setShowTotal(v.showTotal);
+    setErrors((er) => ({ ...er, accentColor: undefined }));
+  }
   const [saving, setSaving] = useState(false);
   const [syncStatus, setSyncStatus] = useState(null); // null | 'synced' | 'failed'
   const [syncError, setSyncError] = useState('');
@@ -56,7 +85,7 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
       if (prev.length >= 4) return prev;
       const lastQty = prev.length ? prev[prev.length - 1].minQty : 1;
       const lastPct = prev.length ? prev[prev.length - 1].percent : 0;
-      return [...prev, { minQty: lastQty + 1, percent: lastPct + 5, badge: '' }];
+      return [...prev, { minQty: lastQty + 1, percent: lastPct + 5, badge: '', subtitle: '' }];
     });
   }, []);
 
@@ -84,6 +113,8 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
           errs.tiers = `Row ${i + 1}: discount must be an integer between 1 and 80`;
         if (String(tiers[i].badge || '').length > 20)
           errs.tiers = `Row ${i + 1}: badge must be 20 characters or fewer`;
+        if (String(tiers[i].subtitle || '').length > 40)
+          errs.tiers = `Row ${i + 1}: subtitle must be 40 characters or fewer`;
         if (i > 0) {
           if (qty <= Number(tiers[i - 1].minQty)) errs.tiers = 'Minimum quantities must strictly increase row by row';
           if (pct <= Number(tiers[i - 1].percent)) errs.tiers = 'Discounts must strictly increase row by row';
@@ -109,10 +140,16 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
         heading: heading.trim().slice(0, 60),
         accentColor: ACCENT_RE.test(accentColor) ? accentColor : DEFAULT_ACCENT,
         layout,
+        topLabel: topLabel.trim().slice(0, 40),
+        footerNote: footerNote.trim().slice(0, 40),
+        showCompareAt,
+        showTotal,
+        showSingle,
         tiers: tiers.map((t) => ({
           minQty: Number(t.minQty),
           percent: Number(t.percent),
           badge: String(t.badge || '').slice(0, 20),
+          subtitle: String(t.subtitle || '').trim().slice(0, 40),
         })),
       },
     };
@@ -170,6 +207,11 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
       heading,
       accentColor: accent,
       layout,
+      topLabel,
+      footerNote,
+      showCompareAt,
+      showTotal,
+      showSingle,
       enabled: true,
     },
   };
@@ -216,7 +258,7 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
         <table style={styles.table} aria-label="Discount tiers">
           <thead>
             <tr>
-              {['Buy at least', 'Discount (%)', 'Badge', ''].map((h) => (
+              {['Buy at least', 'Discount (%)', 'Badge', 'Subtitle', ''].map((h) => (
                 <th key={h} style={styles.th}>{h}</th>
               ))}
             </tr>
@@ -258,6 +300,17 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
                   />
                 </td>
                 <td style={styles.td}>
+                  <input
+                    type="text"
+                    maxLength={40}
+                    value={tier.subtitle || ''}
+                    onChange={(e) => updateTier(i, 'subtitle', e.target.value)}
+                    placeholder="e.g. You save the most"
+                    style={styles.textInput}
+                    aria-label={`Tier ${i + 1} subtitle`}
+                  />
+                </td>
+                <td style={styles.td}>
                   <button
                     onClick={() => removeTier(i)}
                     style={styles.removeBtn}
@@ -276,6 +329,25 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
       </div>
 
       {/* ── Look and wording ── */}
+      <div style={styles.card}>
+        <p style={styles.sectionLabel}>Quick styles</p>
+        <p style={styles.hint}>Pick a look to start from. It changes the style only, not your tiers.</p>
+        <div style={styles.presetRow}>
+          {STYLE_PRESETS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => applyPreset(p)}
+              style={{ ...styles.presetBtn, borderColor: p.values.accentColor }}
+              aria-label={`Apply style ${p.name}`}
+            >
+              <span style={{ ...styles.presetSwatch, background: p.values.accentColor }} aria-hidden="true" />
+              {p.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div style={styles.card}>
         <p style={styles.sectionLabel}>Look and wording</p>
         <label style={styles.fieldLabel}>Heading
@@ -311,19 +383,59 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
         </label>
         <fieldset style={styles.fieldset}>
           <legend style={styles.fieldLabel}>Layout</legend>
-          {['cards', 'list'].map((opt) => (
-            <label key={opt} style={styles.radioLabel}>
+          {LAYOUTS.map((opt) => (
+            <label key={opt.value} style={styles.radioLabel}>
               <input
                 type="radio"
                 name="qt-layout"
-                value={opt}
-                checked={layout === opt}
-                onChange={() => setLayout(opt)}
+                value={opt.value}
+                checked={layout === opt.value}
+                onChange={() => setLayout(opt.value)}
               />
-              {opt.charAt(0).toUpperCase() + opt.slice(1)}
+              {opt.label}
             </label>
           ))}
         </fieldset>
+
+        {layout === 'rows' && (
+          <div aria-label="Rows options">
+            <label style={styles.fieldLabel}>Label above the rows (optional)
+              <input
+                type="text"
+                maxLength={40}
+                value={topLabel}
+                onChange={(e) => setTopLabel(e.target.value)}
+                placeholder="e.g. Limited time offer"
+                style={styles.textInput}
+                aria-label="Label above the rows"
+              />
+            </label>
+            <label style={styles.fieldLabel}>Note under the rows (optional)
+              <input
+                type="text"
+                maxLength={40}
+                value={footerNote}
+                onChange={(e) => setFooterNote(e.target.value)}
+                placeholder="e.g. Free delivery"
+                style={styles.textInput}
+                aria-label="Note under the rows"
+              />
+              <span style={styles.hint}>Only write what is true for your store.</span>
+            </label>
+            <label style={styles.radioLabel}>
+              <input type="checkbox" checked={showSingle} onChange={(e) => setShowSingle(e.target.checked)} />
+              Show a “1 item, standard price” row first
+            </label>
+            <label style={styles.radioLabel}>
+              <input type="checkbox" checked={showCompareAt} onChange={(e) => setShowCompareAt(e.target.checked)} />
+              Show the original price crossed out
+            </label>
+            <label style={styles.radioLabel}>
+              <input type="checkbox" checked={showTotal} onChange={(e) => setShowTotal(e.target.checked)} />
+              Show the total under the rows
+            </label>
+          </div>
+        )}
       </div>
 
       {/* ── Where it applies ── */}
@@ -439,4 +551,12 @@ const styles = {
     padding: '2px 8px', fontSize: 12, cursor: 'pointer', marginLeft: 4,
   },
   errorMsg: { fontSize: 12, color: '#DC2626', margin: '4px 0 0', display: 'block' },
+  hint: { fontSize: 12, color: '#6B7280', margin: '0 0 10px', fontWeight: 400 },
+  presetRow: { display: 'flex', flexWrap: 'wrap', gap: 8 },
+  presetBtn: {
+    display: 'inline-flex', alignItems: 'center', gap: 8, background: '#fff',
+    border: '1px solid', borderRadius: 8, padding: '8px 12px', fontSize: 13,
+    fontWeight: 600, color: '#171A22', cursor: 'pointer',
+  },
+  presetSwatch: { width: 14, height: 14, borderRadius: 4, flexShrink: 0 },
 };

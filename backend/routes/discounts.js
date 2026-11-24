@@ -8,7 +8,10 @@ const { verifyProxySignature, API_VERSION, refreshAccessTokenIfNeeded } = requir
 
 const TOKEN_FIELDS =
   'shopDomain accessToken accessTokenExpiresAt refreshToken refreshTokenExpiresAt onlineAccessToken onlineTokenExpiresAt';
-const { sanitizeTiers, sanitizeAccentColor, DEFAULT_ACCENT } = require('../utils/quantityTiers');
+const {
+  sanitizeTiers, sanitizeAccentColor, DEFAULT_ACCENT,
+  LAYOUTS: TIER_LAYOUTS, sanitizeTierDisplay,
+} = require('../utils/quantityTiers');
 const tierSync = require('../services/tierSync');
 
 // The four storefront actions that can earn a discount code, and the
@@ -72,10 +75,15 @@ function defaultConfig(shop) {
       accentColor: DEFAULT_ACCENT,
       layout: 'cards',
       scope: 'all',
+      topLabel: '',
+      footerNote: '',
+      showCompareAt: true,
+      showTotal: true,
+      showSingle: false,
       tiers: [
-        { minQty: 2, percent: 10, badge: '' },
-        { minQty: 3, percent: 15, badge: 'Most popular' },
-        { minQty: 4, percent: 25, badge: 'Best value' },
+        { minQty: 2, percent: 10, badge: '', subtitle: '' },
+        { minQty: 3, percent: 15, badge: 'Most popular', subtitle: '' },
+        { minQty: 4, percent: 25, badge: 'Best value', subtitle: '' },
       ],
       discountId: '',
       lastSyncAt: null,
@@ -658,10 +666,12 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
         set['quantityTiers.accentColor'] = sanitizeAccentColor(qt.accentColor);
       }
       if (qt.layout !== undefined) {
-        if (qt.layout !== 'cards' && qt.layout !== 'list')
-          return res.status(400).json({ error: 'quantityTiers.layout must be "cards" or "list"' });
+        if (!TIER_LAYOUTS.includes(qt.layout))
+          return res.status(400).json({ error: 'quantityTiers.layout must be "cards", "list" or "rows"' });
         set['quantityTiers.layout'] = qt.layout;
       }
+      const display = sanitizeTierDisplay(qt);
+      for (const k of Object.keys(display)) set[`quantityTiers.${k}`] = display[k];
       if (qt.tiers !== undefined) {
         let validated;
         try {

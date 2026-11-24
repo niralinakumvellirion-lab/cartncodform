@@ -13,7 +13,7 @@ const {
 describe('sanitizeTiers', () => {
   test('valid single tier', () => {
     const out = sanitizeTiers([{ minQty: 2, percent: 10, badge: '' }]);
-    expect(out).toEqual([{ minQty: 2, percent: 10, badge: '' }]);
+    expect(out).toEqual([{ minQty: 2, percent: 10, badge: '', subtitle: '' }]);
   });
 
   test('valid 4-tier set with badges', () => {

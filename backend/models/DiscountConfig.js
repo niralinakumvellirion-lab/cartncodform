@@ -128,13 +128,20 @@ const discountConfigSchema = new mongoose.Schema({
     enabled:     { type: Boolean, default: false },
     heading:     { type: String,  default: 'Buy more, save more' },
     accentColor: { type: String,  default: '#4F46E5' },
-    layout:      { type: String,  default: 'cards', enum: ['cards', 'list'] },
+    layout:      { type: String,  default: 'cards', enum: ['cards', 'list', 'rows'] },
     scope:       { type: String,  default: 'all' },
+    // Rows-style extras (shown by the storefront widget; checkout discount ignores them).
+    topLabel:      { type: String,  default: '' },    // max 40, e.g. "Limited time offer"
+    footerNote:    { type: String,  default: '' },    // max 40, e.g. "Free delivery"
+    showCompareAt: { type: Boolean, default: true },  // strike-through original total
+    showTotal:     { type: Boolean, default: true },  // "Total: ₹X" line under the rows
+    showSingle:    { type: Boolean, default: false }, // extra "1 item, standard price" row
     tiers: {
       type: [{
-        minQty:  { type: Number, required: true },
-        percent: { type: Number, required: true },
-        badge:   { type: String, default: '' },
+        minQty:   { type: Number, required: true },
+        percent:  { type: Number, required: true },
+        badge:    { type: String, default: '' },
+        subtitle: { type: String, default: '' },     // max 40
         _id: false,
       }],
       default: [

@@ -38,12 +38,14 @@
     if (window.Shopify && typeof window.Shopify.formatMoney === 'function') {
       return window.Shopify.formatMoney(minorUnits);
     }
+    // Whole amounts without decimals (₹999); otherwise always two (₹1,798.20, never ₹1,798.2).
+    var fraction = Math.round(minorUnits) % 100 === 0 ? 0 : 2;
     try {
       return new Intl.NumberFormat('en-IN', {
         style: 'currency',
         currency: currency,
-        minimumFractionDigits: 0,
-        maximumFractionDigits: 2,
+        minimumFractionDigits: fraction,
+        maximumFractionDigits: fraction,
       }).format(minorUnits / 100);
     } catch (e) {
       return currency + ' ' + (minorUnits / 100).toFixed(2);
@@ -175,6 +177,27 @@
       '.ccf-qt-list-qty{font-size:14px;font-weight:800;color:#171A22;display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
       '.ccf-qt-list-price{font-size:12px;color:#4A5062}',
       '.ccf-qt-badge-inline{display:inline-flex;align-items:center;background:' + accentColor + ';color:' + badgeText + ';font-size:11px;font-weight:700;border-radius:999px;padding:2px 8px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle}',
+      // ── Rows layout (radio rows: qty + % pill, subtitle, total + struck price) ──
+      '.ccf-qt-layout-rows{display:flex;flex-direction:column;gap:12px;padding-top:8px}',
+      '.ccf-qt-layout-rows .ccf-qt-card{flex-direction:row;align-items:center;justify-content:flex-start;text-align:left;border-radius:12px;padding:14px;gap:12px}',
+      '.ccf-qt-radio{position:relative;width:18px;height:18px;border-radius:50%;box-shadow:inset 0 0 0 2px #C7CBD6;flex-shrink:0}',
+      '.ccf-qt-card--active .ccf-qt-radio{box-shadow:inset 0 0 0 2px ' + accentColor + '}',
+      '.ccf-qt-card--active .ccf-qt-radio::after{content:"";position:absolute;top:4px;left:4px;width:10px;height:10px;border-radius:50%;background:' + accentColor + '}',
+      '.ccf-qt-row-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}',
+      '.ccf-qt-row-title{font-size:15px;font-weight:800;color:#171A22;display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
+      '.ccf-qt-pill{font-size:11px;font-weight:800;background:' + accentColor + ';color:' + badgeText + ';border-radius:4px;padding:2px 6px;letter-spacing:.02em;white-space:nowrap}',
+      '.ccf-qt-row-sub{font-size:12px;color:#4A5062}',
+      '.ccf-qt-row-price{display:flex;flex-direction:column;align-items:flex-end;gap:1px;flex-shrink:0;text-align:right}',
+      '.ccf-qt-row-total{font-size:15px;font-weight:800;color:#171A22}',
+      '.ccf-qt-row-compare{font-size:12px;color:#6B7280;text-decoration:line-through}',
+      '.ccf-qt-row-each{font-size:11px;color:#4A5062}',
+      '.ccf-qt-ribbon{position:absolute;top:0;right:14px;transform:translateY(-50%);background:' + accentColor + ';color:' + badgeText + ';font-size:11px;font-weight:700;border-radius:999px;padding:2px 10px;white-space:nowrap;max-width:60%;overflow:hidden;text-overflow:ellipsis;pointer-events:none}',
+      '.ccf-qt-toplabel{display:flex;align-items:center;gap:10px;font-size:12px;font-weight:700;color:' + chipUnselText + ';text-transform:uppercase;letter-spacing:.06em;margin:0 0 4px}',
+      '.ccf-qt-toplabel::before,.ccf-qt-toplabel::after{content:"";flex:1;height:1px;background:#E1E4EA}',
+      '.ccf-qt-footer{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px;font-size:13px;color:#171A22}',
+      '.ccf-qt-footer-note{font-weight:700;color:#0F766E}',
+      '.ccf-qt-footer-total{font-weight:800;margin-left:auto}',
+      '@container ccf-qt (max-width:330px){.ccf-qt-layout-rows .ccf-qt-card{padding:12px 10px;gap:8px}.ccf-qt-row-title,.ccf-qt-row-total{font-size:14px}}',
       // ── Savings ──
       '.ccf-qt-savings{font-size:13px;font-weight:700;color:#0F766E;background:#E0F5F1;border-radius:8px;padding:8px 12px;margin-top:8px;display:none}',
       // ── Theme editor sample caption ──
@@ -209,7 +232,13 @@
     var tiers = config.tiers;
     var accentColor = ACCENT_RE.test(config.accentColor || '') ? config.accentColor : '#4F46E5';
     var heading = String(config.heading || 'Buy more, save more');
-    var layout = config.layout === 'list' ? 'list' : 'cards';
+    var layout = (config.layout === 'list' || config.layout === 'rows') ? config.layout : 'cards';
+    // Rows-only extras
+    var topLabel = String(config.topLabel || '').slice(0, 40);
+    var footerNote = String(config.footerNote || '').slice(0, 40);
+    var showCompareAt = config.showCompareAt !== false;
+    var showTotal = config.showTotal !== false;
+    var showSingle = config.showSingle === true && tiers.length > 0 && tiers[0].minQty > 1;
     var handle = String(wrap.getAttribute('data-handle') || '');
     var initialVariantId = String(wrap.getAttribute('data-variant-id') || '');
 
@@ -265,6 +294,11 @@
       headingRow.appendChild(note);
 
       wrap.appendChild(headingRow);
+
+      if (layout === 'rows') {
+        renderRows();
+        return;
+      }
 
       // Cards / list container
       var container = document.createElement('div');
@@ -381,6 +415,158 @@
       }
     }
 
+    // ── Rows layout ─────────────────────────────────────────────────────────
+    // One radio row per tier (plus an optional "1 item" row at full price).
+    // Prices: discounted total for the row's quantity, the full total struck through,
+    // and the per-item price. Same rounding as the cards and the checkout discount.
+
+    function setQty(newQty) {
+      currentQty = newQty;
+      var qtyInput = findQtyInput();
+      if (qtyInput) {
+        qtyInput.value = newQty;
+        try { qtyInput.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
+        try { qtyInput.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
+      }
+      syncCodLinks(newQty);
+    }
+
+    function unitPaise(percent) {
+      return percent > 0 ? Math.round(discountedUnitPricePaise(variantPricePaise, percent)) : variantPricePaise;
+    }
+
+    function renderRows() {
+      if (topLabel) {
+        var tl = document.createElement('div');
+        tl.className = 'ccf-qt-toplabel';
+        tl.textContent = topLabel;
+        wrap.appendChild(tl);
+      }
+
+      var container = document.createElement('div');
+      container.className = 'ccf-qt-cards ccf-qt-layout-rows';
+      wrap.appendChild(container);
+
+      var options = tiers.map(function (t) {
+        return { qty: t.minQty, percent: t.percent, badge: t.badge, subtitle: t.subtitle, tier: t };
+      });
+      if (showSingle) {
+        options.unshift({ qty: 1, percent: 0, badge: '', subtitle: 'Standard price', tier: null });
+      }
+
+      var activeTier = pickTier(tiers, currentQty);
+
+      options.forEach(function (opt) {
+        var isActive = opt.tier ? activeTier === opt.tier : !activeTier;
+
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'ccf-qt-card' + (isActive ? ' ccf-qt-card--active' : '');
+        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        btn.setAttribute('data-min-qty', String(opt.qty));
+        btn.setAttribute('data-percent', String(opt.percent));
+        cardEls.push(btn);
+
+        if (opt.badge) {
+          var ribbon = document.createElement('span');
+          ribbon.className = 'ccf-qt-ribbon';
+          ribbon.textContent = String(opt.badge).slice(0, 20);
+          btn.appendChild(ribbon);
+        }
+
+        var radio = document.createElement('span');
+        radio.className = 'ccf-qt-radio';
+        radio.setAttribute('aria-hidden', 'true');
+        btn.appendChild(radio);
+
+        var main = document.createElement('div');
+        main.className = 'ccf-qt-row-main';
+        var title = document.createElement('div');
+        title.className = 'ccf-qt-row-title';
+        title.appendChild(document.createTextNode(opt.qty === 1 ? '1 item' : opt.qty + ' items'));
+        if (opt.percent > 0) {
+          var pill = document.createElement('span');
+          pill.className = 'ccf-qt-pill';
+          pill.textContent = opt.percent + '% OFF';
+          title.appendChild(pill);
+        }
+        main.appendChild(title);
+        if (opt.subtitle) {
+          var sub = document.createElement('div');
+          sub.className = 'ccf-qt-row-sub';
+          sub.textContent = String(opt.subtitle).slice(0, 40);
+          main.appendChild(sub);
+        }
+        btn.appendChild(main);
+
+        if (variantPricePaise !== null) {
+          var each = unitPaise(opt.percent);
+          var priceBox = document.createElement('div');
+          priceBox.className = 'ccf-qt-row-price';
+          var total = document.createElement('div');
+          total.className = 'ccf-qt-row-total';
+          total.textContent = formatMoney(each * opt.qty);
+          priceBox.appendChild(total);
+          if (showCompareAt && opt.percent > 0) {
+            var compare = document.createElement('s');
+            compare.className = 'ccf-qt-row-compare';
+            compare.textContent = formatMoney(variantPricePaise * opt.qty);
+            priceBox.appendChild(compare);
+          }
+          if (opt.qty > 1) {
+            var eachEl = document.createElement('div');
+            eachEl.className = 'ccf-qt-row-each';
+            eachEl.textContent = formatMoney(each) + ' / each';
+            priceBox.appendChild(eachEl);
+          }
+          btn.appendChild(priceBox);
+        }
+
+        // Radio behaviour: clicking a row always selects it (never toggles back to 1).
+        btn.addEventListener('click', function () {
+          if (btn.getAttribute('aria-pressed') === 'true') return;
+          setQty(opt.qty);
+          render();
+        });
+
+        container.appendChild(btn);
+      });
+
+      var note = footerNote;
+      var totalText = '';
+      if (showTotal && variantPricePaise !== null) {
+        var unit = activeTier ? unitPaise(activeTier.percent) : variantPricePaise;
+        totalText = 'Total: ' + formatMoney(unit * currentQty);
+      }
+      if (note || totalText) {
+        var footer = document.createElement('div');
+        footer.className = 'ccf-qt-footer';
+        if (note) {
+          var noteEl = document.createElement('span');
+          noteEl.className = 'ccf-qt-footer-note';
+          noteEl.textContent = note;
+          footer.appendChild(noteEl);
+        }
+        if (totalText) {
+          var totalEl = document.createElement('span');
+          totalEl.className = 'ccf-qt-footer-total';
+          totalEl.textContent = totalText;
+          footer.appendChild(totalEl);
+        }
+        wrap.appendChild(footer);
+      }
+
+      // The struck price + total already show the saving, so no separate savings line here.
+      savingsEl = null;
+
+      if (isSample) {
+        var sampleNote = document.createElement('div');
+        sampleNote.className = 'ccf-qt-sample-note';
+        sampleNote.textContent = 'Sample preview — shown only in the theme editor';
+        wrap.appendChild(sampleNote);
+      }
+    }
+
     function updateSavings() {
       if (!savingsEl) return;
       var activeTier = pickTier(tiers, currentQty);
@@ -403,6 +589,11 @@
       if (typeof newQty !== 'number' || !isFinite(newQty) || newQty < 1) return;
       currentQty = Math.floor(newQty);
       syncCodLinks(currentQty);
+      if (layout === 'rows') {
+        // Rows show the total for the chosen quantity, so redraw instead of only moving the highlight.
+        render();
+        return;
+      }
       var activeTier = pickTier(tiers, currentQty);
       cardEls.forEach(function (btn) {
         var isActive = activeTier && parseInt(btn.getAttribute('data-min-qty'), 10) === activeTier.minQty;
