@@ -170,3 +170,18 @@ describe('preview design', () => {
     expect(container.querySelector('.sfp-panel')).toBeNull();
   });
 });
+
+describe('pinned preview', () => {
+  const { stickyTop } = require('../app/admin/screens/SizeFinder');
+  it('short preview sticks 16px from the top; tall one sticks by its bottom', () => {
+    expect(stickyTop(500, 900)).toBe(16);
+    expect(stickyTop(1200, 800)).toBe(800 - 1200 - 16);
+  });
+  it('the preview column has no scroll bar of its own', async () => {
+    const { container } = render(<SizeFinderScreen shop={SHOP} />);
+    await screen.findByRole('switch', { name: 'Turn on Find my size' });
+    const css = Array.from(container.querySelectorAll('style')).map((s) => s.textContent).join('');
+    expect(css).toMatch(/\.sf-side\{position:sticky;top:16px;min-width:0\}/);
+    expect(css).not.toMatch(/\.sf-side\{[^}]*overflow/);
+  });
+});

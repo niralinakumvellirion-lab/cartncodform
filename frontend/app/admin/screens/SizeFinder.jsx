@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { apiGet, apiSend } from '../../../lib/api';
 import ThemeBlockSetup from '../components/ThemeBlockSetup';
 import SizeFinderPreview from './SizeFinderPreview';
@@ -27,6 +27,16 @@ export function fromUnit(value, unit) {
 }
 
 /**
+ * Where the pinned preview sticks. If it fits on screen: 16px from the top. If it is taller than the
+ * screen: so its BOTTOM sits 16px above the screen's bottom — it scrolls with the page until its end
+ * is visible, then stays put. One page scroll bar, nothing hidden.
+ */
+export function stickyTop(previewHeight, viewportHeight) {
+  const gap = 16;
+  return previewHeight + gap * 2 > viewportHeight ? viewportHeight - previewHeight - gap : gap;
+}
+
+/**
  * "Find my size" settings: on/off, which products, button text and colour, unit, and the
  * Women / Men size charts (body measurements, stored in cm).
  */
@@ -37,6 +47,24 @@ export default function SizeFinderScreen({ shop }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const sideRef = useRef(null);
+  const [sideTop, setSideTop] = useState(16);
+  const loaded = settings !== null;
+
+  // Keep the preview pinned without a scroll bar of its own (see stickyTop).
+  useEffect(() => {
+    const el = sideRef.current;
+    if (!el || typeof window === 'undefined') return undefined;
+    const update = () => setSideTop(stickyTop(el.offsetHeight, window.innerHeight));
+    update();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
+    if (ro) ro.observe(el);
+    window.addEventListener('resize', update);
+    return () => {
+      if (ro) ro.disconnect();
+      window.removeEventListener('resize', update);
+    };
+  }, [loaded]);
 
   useEffect(() => {
     if (!shop) return;
@@ -226,7 +254,7 @@ export default function SizeFinderScreen({ shop }) {
         {error && <span style={ui.error} role="alert">{error}</span>}
       </div>
       </div>
-      <aside className="sf-side">
+      <aside className="sf-side" ref={sideRef} style={{ top: sideTop }}>
         <SizeFinderPreview shop={shop} settings={settings} />
       </aside>
       </div>
@@ -238,7 +266,7 @@ export default function SizeFinderScreen({ shop }) {
 const LAYOUT_CSS = `
 .sf-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:20px;align-items:start}
 .sf-main{display:flex;flex-direction:column;gap:16px;min-width:0}
-.sf-side{position:sticky;top:16px;min-width:0;max-height:calc(100vh - 32px);overflow-y:auto;border-radius:12px}
+.sf-side{position:sticky;top:16px;min-width:0}
 @media (max-width:1100px){.sf-layout{grid-template-columns:minmax(0,1fr)}.sf-side{position:static}}
 `;
 
