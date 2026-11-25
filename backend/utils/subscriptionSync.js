@@ -80,6 +80,12 @@ async function refreshPlan(store, accessToken) {
   const update = { planCheckedAt: now };
   let changed = false;
 
+  // Any plan Shopify shows as active is the merchant's plan choice for this install, the $0 Free plan
+  // included (App Review 1.2.2: Free approved on Shopify's plan page left the app on "Choose your plan").
+  const choiceRecorded = !!store.planChosenAt
+    && (!store.installedAt || new Date(store.planChosenAt) >= new Date(store.installedAt));
+  if (found.active && !choiceRecorded) update.planChosenAt = now;
+
   if (paidTier) {
     if (!wasPaid || store.planTier !== paidTier) {
       changed = true;

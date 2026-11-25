@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { apiGet } from '../../../lib/api';
+import { apiGet, apiSend } from '../../../lib/api';
 
 const ACCENT = '#4F46E5';
 
@@ -136,9 +136,18 @@ export default function Plans({ shop }) {
     setError('');
     // refresh=1: the merchant may have just picked a plan on Shopify's page.
     apiGet(`/api/billing/${encodeURIComponent(shop)}/usage?refresh=1`)
-      .then((d) => setData(d))
+      .then((d) => {
+        // Back from Shopify with its $0 Free plan, which Shopify may not list as a subscription: record
+        // Free as the plan choice so the app does not ask "Choose your plan" again (unlocks nothing).
+        if (d && d.needsPlanChoice === true && tierFromHandle(handle) === 'free') {
+          return apiSend(`/api/billing/${encodeURIComponent(shop)}/choose-free`, 'POST', {})
+            .then(() => setData({ ...d, needsPlanChoice: false }))
+            .catch(() => setData(d));
+        }
+        return setData(d);
+      })
       .catch((err) => setError(err.message || 'Could not load your plan.'));
-  }, [shop]);
+  }, [shop, handle]);
 
   useEffect(() => { load(); }, [load]);
 

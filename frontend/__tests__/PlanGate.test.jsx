@@ -182,7 +182,7 @@ describe('coming back to "Choose your plan" after Shopify\'s plan page (review 2
     await screen.findByRole('heading', { name: 'Choose your plan' });
     apiGet.mockResolvedValueOnce(choosing());
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
-    expect(await screen.findByText(/No paid plan found yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/No plan found yet/)).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Choose your plan' })).toBeInTheDocument();
     apiGet.mockResolvedValueOnce(paid({ plan: PLANS[2], tier: 'growth' }));
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
@@ -196,7 +196,7 @@ describe('coming back to "Choose your plan" after Shopify\'s plan page (review 2
     await screen.findByRole('heading', { name: 'Choose your plan' });
     apiGet.mockRejectedValueOnce(new Error('down'));
     fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
-    expect(await screen.findByText(/No paid plan found yet/)).toBeInTheDocument();
+    expect(await screen.findByText(/No plan found yet/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue with Free' })).toBeEnabled();
   });
 
@@ -209,17 +209,62 @@ describe('coming back to "Choose your plan" after Shopify\'s plan page (review 2
     expect(screen.queryByText(/plan is active/)).not.toBeInTheDocument();
   });
 
-  it('no confirmation on a normal visit, nor when back on Free', async () => {
+  it('no confirmation on a normal visit', async () => {
     apiGet.mockResolvedValue(paid());
-    const { unmount } = renderGate();
+    renderGate();
     await waitFor(() => expect(appBox()).not.toHaveStyle({ visibility: 'hidden' }));
     expect(screen.queryByText(/plan is active/)).not.toBeInTheDocument();
-    unmount();
-    window.history.pushState({}, '', `/admin/dashboard?shop=${SHOP}&host=abc&plan_handle=free`);
-    apiGet.mockResolvedValue(paid({ plan: PLANS[0], tier: 'free' }));
+  });
+});
+
+// App Review 1.2.2 / 2.1.1: the reviewer approved the $0 Free plan on Shopify's plan page after a
+// reinstall; the app stayed on "Choose your plan" and "Check again" said "No paid plan found yet".
+describe('Free plan chosen on Shopify\'s plan page', () => {
+  const free = (over = {}) => ({ plan: PLANS[0], tier: 'free', reached: [], needsPlanChoice: false, plans: PLANS, upgradeUrl: UPGRADE, ...over });
+
+  it('back with plan_handle=free while the app still asks → Free is recorded, the app opens, Free is confirmed', async () => {
+    window.history.pushState({}, '', `/admin/cod?shop=${SHOP}&host=abc&plan_handle=free`);
+    apiGet.mockResolvedValue(choosing());
+    apiSend.mockResolvedValue({ ok: true, needsPlanChoice: false });
     renderGate();
-    await waitFor(() => expect(apiGet).toHaveBeenCalledTimes(2));
-    expect(screen.queryByText(/plan is active/)).not.toBeInTheDocument();
+    expect(await screen.findByRole('status')).toHaveTextContent('Your Free plan is active. It includes 50 COD orders a month.');
+    expect(apiSend).toHaveBeenCalledWith(`/api/billing/${SHOP}/choose-free`, 'POST', {});
+    expect(screen.getByText('APP CONTENT')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Choose your plan' })).not.toBeInTheDocument();
+  });
+
+  it('recording Free fails → the chooser still shows (nothing is hidden behind an error)', async () => {
+    window.history.pushState({}, '', `/admin/cod?shop=${SHOP}&host=abc&plan_handle=free`);
+    apiGet.mockResolvedValue(choosing());
+    apiSend.mockRejectedValue(new Error('down'));
+    renderGate();
+    expect(await screen.findByRole('heading', { name: 'Choose your plan' })).toBeInTheDocument();
+  });
+
+  it('a paid plan_handle never records Free', async () => {
+    window.history.pushState({}, '', `/admin/cod?shop=${SHOP}&host=abc&plan_handle=starter`);
+    apiGet.mockResolvedValue(choosing());
+    renderGate();
+    await screen.findByRole('heading', { name: 'Choose your plan' });
+    expect(apiSend).not.toHaveBeenCalled();
+  });
+
+  it('"Check again" after Shopify confirms Free → chooser closes with "Your Free plan is active."', async () => {
+    apiGet.mockResolvedValueOnce(choosing());
+    renderGate();
+    await screen.findByRole('heading', { name: 'Choose your plan' });
+    apiGet.mockResolvedValueOnce(free());
+    fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+    expect(await screen.findByText('APP CONTENT')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Your Free plan is active. It includes 50 COD orders a month.');
+  });
+
+  it('back on Free with the choice already recorded → Free is confirmed', async () => {
+    window.history.pushState({}, '', `/admin/dashboard?shop=${SHOP}&host=abc&plan_handle=free`);
+    apiGet.mockResolvedValue(free());
+    renderGate();
+    expect(await screen.findByRole('status')).toHaveTextContent('Your Free plan is active.');
+    expect(apiSend).not.toHaveBeenCalled();
   });
 });
 

@@ -31,7 +31,7 @@ export default function PlanChooser({ shop, plans, trialDays, upgradeUrl, onChos
     };
   }, []);
 
-  // "Already chose a plan?": ask Shopify again; PlanGate closes this screen when a paid plan is found.
+  // "Already chose a plan?": ask Shopify again; PlanGate closes this screen when any plan is found.
   async function checkAgain() {
     if (!onCheckAgain) return;
     setChecking(true);
@@ -40,7 +40,7 @@ export default function PlanChooser({ shop, plans, trialDays, upgradeUrl, onChos
     const closed = await Promise.resolve(onCheckAgain()).catch(() => false);
     if (!closed) {
       setChecking(false);
-      setCheckNote('No paid plan found yet. If you just approved one, wait a few seconds and check again.');
+      setCheckNote('No plan found yet. If you just chose one on Shopify, wait a few seconds and check again.');
     }
   }
 

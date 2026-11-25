@@ -193,6 +193,46 @@ describe('refreshPlan (Partner API)', () => {
     expect(await events()).toHaveLength(0);
   });
 
+  // App Review 1.2.2 / 2.1.1: Free approved on Shopify's plan page after a reinstall.
+  it('Free approved on Shopify after a reinstall → the plan choice is recorded (no more "Choose your plan")', async () => {
+    const { needsPlanChoice } = require('../utils/plans');
+    const installedAt = new Date(Date.now() - 60000);
+    const store = await makeStore({ shopGid: SHOP_GID, installedAt, planChosenAt: new Date(installedAt - 86400000) });
+    expect(needsPlanChoice(store)).toBe(true);
+    partnerReplies(sub('free', 0));
+    await refreshPlan(store, 'tok');
+    const saved = await Store.findOne({ shopDomain: SHOP }).lean();
+    expect(saved.plan).toBe('free');
+    expect(saved.planChosenAt.getTime()).toBeGreaterThanOrEqual(installedAt.getTime());
+    expect(needsPlanChoice(saved)).toBe(false);
+    expect(await events()).toHaveLength(0);
+  });
+
+  it('Free subscription seen by the Admin API counts the same way', async () => {
+    const { needsPlanChoice } = require('../utils/plans');
+    shopifyGraphQL.mockImplementation(async (_s, _t, q) => (q.includes('shop { id }')
+      ? { shop: { id: SHOP_GID } }
+      : { currentAppInstallation: { activeSubscriptions: [{ id: 'gid://shopify/AppSubscription/7', name: 'Free', status: 'ACTIVE', test: true }] } }));
+    const store = await makeStore({ installedAt: new Date() });
+    await refreshPlan(store, 'tok');
+    expect(needsPlanChoice(await Store.findOne({ shopDomain: SHOP }).lean())).toBe(false);
+    expect(axios.post).not.toHaveBeenCalled();
+  });
+
+  it('a choice already made for this install is kept; no subscription at all records nothing', async () => {
+    const chosen = new Date(Date.now() - 1000);
+    const store = await makeStore({ shopGid: SHOP_GID, installedAt: new Date(Date.now() - 5000), planChosenAt: chosen });
+    partnerReplies(sub('free', 0));
+    await refreshPlan(store, 'tok');
+    expect((await Store.findOne({ shopDomain: SHOP }).lean()).planChosenAt.getTime()).toBe(chosen.getTime());
+
+    await Store.deleteMany({});
+    const fresh = await makeStore({ shopGid: SHOP_GID, installedAt: new Date() });
+    partnerReplies(noSub);
+    await refreshPlan(fresh, 'tok');
+    expect((await Store.findOne({ shopDomain: SHOP }).lean()).planChosenAt).toBeNull();
+  });
+
   it('Shopify cannot be asked → throws and the plan is left exactly as it was', async () => {
     const store = await makeStore({ plan: 'pro', planTier: 'growth', shopGid: SHOP_GID });
     axios.post.mockRejectedValueOnce(Object.assign(new Error('x'), { response: { status: 500 } }));

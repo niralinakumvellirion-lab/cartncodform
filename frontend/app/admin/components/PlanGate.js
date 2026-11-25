@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { apiGet } from '../../../lib/api';
+import { apiGet, apiSend } from '../../../lib/api';
 import PlanChooser from './PlanChooser';
+import { tierFromHandle } from '../screens/Plans';
 
 function currentShop() {
   if (typeof window === 'undefined') return '';
@@ -32,19 +33,33 @@ export function limitMessage(planName, reached) {
 export const CHECK_TIMEOUT_MS = 3000;
 
 const usageUrl = (shop, refresh) => `/api/billing/${encodeURIComponent(shop)}/usage${refresh ? '?refresh=1' : ''}`;
-const paidName = (u) => (u && u.tier && u.tier !== 'free' ? (u.plan && u.plan.name) || 'paid' : '');
+// "Your <plan> plan is active." for the plan Shopify confirmed (the $0 Free plan included), or null.
+function confirmation(u) {
+  if (!u || !u.tier) return null;
+  const plan = u.plan || {};
+  const name = plan.name || (u.tier === 'free' ? 'Free' : 'paid');
+  if (u.tier !== 'free') return { name, detail: 'Thanks! The new limits apply now.' };
+  const cod = plan.limits && plan.limits.codOrders;
+  return { name, detail: cod ? `It includes ${cod} COD orders a month.` : 'You can upgrade at any time from Plans.' };
+}
+
+// plan_handle in the URL when Shopify sends the merchant back from its plan page, or ''.
+function returnedHandle() {
+  if (typeof window === 'undefined') return '';
+  return new URLSearchParams(window.location.search).get('plan_handle') || '';
+}
 
 export default function PlanGate({ children }) {
   const [checking, setChecking] = useState(true);
   const [notice, setNotice] = useState('');
   const [chooser, setChooser] = useState(null);
   const [plansHref, setPlansHref] = useState('/admin/plans');
-  // Name of the paid plan just confirmed with Shopify ("Your Starter plan is active."), or ''.
-  const [activated, setActivated] = useState('');
+  // The plan just confirmed with Shopify ({ name, detail }: "Your Starter plan is active."), or null.
+  const [activated, setActivated] = useState(null);
   const recheckRef = useRef(null);
 
   // While "Choose your plan" shows: ask Shopify again (the merchant may have approved a plan on Shopify's
-  // page and come back to this screen). A paid plan closes the chooser and confirms it.
+  // page and come back to this screen). Any plan Shopify confirms (Free included) closes the chooser.
   // -> true when the chooser was closed.
   const recheck = useCallback(() => {
     const shop = currentShop();
@@ -54,7 +69,7 @@ export default function PlanGate({ children }) {
       .then((u) => {
         if (!u || u.needsPlanChoice !== false) return false;
         setChooser(null);
-        setActivated(paidName(u));
+        setActivated(confirmation(u));
         return true;
       })
       .catch(() => false)
@@ -92,14 +107,22 @@ export default function PlanGate({ children }) {
     const back = !!params && (params.has('plan_handle') || params.has('charge_id'));
     apiGet(usageUrl(shop, back))
       .then((u) => {
-        if (cancelled || !u) return;
+        if (cancelled || !u) return undefined;
         if (u.needsPlanChoice === true && Array.isArray(u.plans) && u.plans.length) {
+          // Back from Shopify after approving its $0 Free plan, which Shopify may not list as a
+          // subscription: record Free as the choice (unlocks nothing) instead of asking again.
+          if (tierFromHandle(returnedHandle()) === 'free') {
+            return apiSend(`/api/billing/${encodeURIComponent(shop)}/choose-free`, 'POST', {})
+              .then(() => { if (!cancelled) setActivated(confirmation({ ...u, tier: 'free' })); })
+              .catch(() => { if (!cancelled) setChooser({ shop, plans: u.plans, trialDays: u.trialDays, upgradeUrl: u.upgradeUrl }); });
+          }
           setChooser({ shop, plans: u.plans, trialDays: u.trialDays, upgradeUrl: u.upgradeUrl });
-          return;
+          return undefined;
         }
-        // Back from Shopify's plan page with a paid plan: confirm it.
-        if (back) setActivated(paidName(u));
+        // Back from Shopify's plan page: confirm the plan it shows.
+        if (back) setActivated(confirmation(u));
         if (Array.isArray(u.reached)) setNotice(limitMessage(u.plan && u.plan.name, u.reached));
+        return undefined;
       })
       .catch(() => {})
       .finally(() => { clearTimeout(timer); done(); });
@@ -114,8 +137,8 @@ export default function PlanGate({ children }) {
     <>
       {activated ? (
         <div role="status" style={ui.ok}>
-          <span><strong>Your {activated} plan is active.</strong> Thanks! The new limits apply now.</span>
-          <button type="button" onClick={() => setActivated('')} aria-label="Dismiss" style={ui.close}>×</button>
+          <span><strong>Your {activated.name} plan is active.</strong> {activated.detail}</span>
+          <button type="button" onClick={() => setActivated(null)} aria-label="Dismiss" style={ui.close}>×</button>
         </div>
       ) : null}
       {notice ? (

@@ -4,7 +4,7 @@
  */
 import React from 'react';
 import { render, screen, fireEvent, within } from '@testing-library/react';
-import { apiGet } from '../../../lib/api';
+import { apiGet, apiSend } from '../../../lib/api';
 import Plans, { planFeatures, priceLabel, tierFromHandle, POPPINS_HREF } from '../app/admin/screens/Plans';
 
 const SHOP = 'plans.myshopify.com';
@@ -150,6 +150,23 @@ describe('back from Shopify plan page (plan_handle in the link)', () => {
     expect(await screen.findByText('Your Growth plan is active.')).toBeInTheDocument();
     expect(apiGet).toHaveBeenCalledTimes(2);
     expect(apiGet).toHaveBeenLastCalledWith(`/api/billing/${SHOP}/usage?refresh=1`);
+  });
+
+  it('back with Free while the app still asks for a choice → Free is recorded (no "Choose your plan" later)', async () => {
+    window.history.pushState({}, '', `/admin/plans?shop=${SHOP}&plan_handle=free`);
+    apiGet.mockResolvedValue(reply({ needsPlanChoice: true }));
+    apiSend.mockResolvedValue({ ok: true, needsPlanChoice: false });
+    render(<Plans shop={SHOP} />);
+    expect(await screen.findByText('Your Free plan is active.')).toBeInTheDocument();
+    expect(apiSend).toHaveBeenCalledWith(`/api/billing/${SHOP}/choose-free`, 'POST', {});
+  });
+
+  it('back with a paid plan never records Free', async () => {
+    window.history.pushState({}, '', `/admin/plans?shop=${SHOP}&plan_handle=growth`);
+    apiGet.mockResolvedValue(reply({ needsPlanChoice: true }));
+    render(<Plans shop={SHOP} />);
+    await screen.findByText(/Shopify has not confirmed your new plan yet/);
+    expect(apiSend).not.toHaveBeenCalled();
   });
 
   it('no plan_handle → no message', async () => {
