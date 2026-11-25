@@ -27,13 +27,14 @@ export function fromUnit(value, unit) {
 }
 
 /**
- * Where the pinned preview sticks. If it fits on screen: 16px from the top. If it is taller than the
- * screen: so its BOTTOM sits 16px above the screen's bottom — it scrolls with the page until its end
- * is visible, then stays put. One page scroll bar, nothing hidden.
+ * Zoom for the pinned preview so ALL of it fits on screen (16px gap top and bottom): 1 when it
+ * already fits, smaller when it is taller than the screen, never below 0.5. The preview then stays
+ * fixed while the settings scroll — no scrolling of its own.
  */
-export function stickyTop(previewHeight, viewportHeight) {
-  const gap = 16;
-  return previewHeight + gap * 2 > viewportHeight ? viewportHeight - previewHeight - gap : gap;
+export function fitScale(previewHeight, viewportHeight) {
+  const avail = viewportHeight - 32;
+  if (!(previewHeight > 0) || previewHeight <= avail) return 1;
+  return Math.max(0.5, Math.round((avail / previewHeight) * 1000) / 1000);
 }
 
 /**
@@ -47,15 +48,27 @@ export default function SizeFinderScreen({ shop }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const sideRef = useRef(null);
-  const [sideTop, setSideTop] = useState(16);
+  const fitRef = useRef(null);
+  const layoutRef = useRef(null);
+  const [fit, setFit] = useState({ scale: 1, height: 0 });
   const loaded = settings !== null;
 
-  // Keep the preview pinned without a scroll bar of its own (see stickyTop).
+  // Keep the whole preview on screen and still (see fitScale). offsetHeight ignores the CSS zoom,
+  // so it is the preview's natural height even while scaled.
   useEffect(() => {
-    const el = sideRef.current;
+    const el = fitRef.current;
     if (!el || typeof window === 'undefined') return undefined;
-    const update = () => setSideTop(stickyTop(el.offsetHeight, window.innerHeight));
+    const update = () => {
+      const height = el.offsetHeight;
+      // Space the page has below our layout (Shopify reserves room for its Sidekick bar). The pinned
+      // preview cannot go lower than the layout's end, so it must also fit above that space.
+      const layout = layoutRef.current;
+      const below = layout
+        ? Math.max(0, document.documentElement.scrollHeight - (layout.getBoundingClientRect().bottom + window.scrollY))
+        : 0;
+      const scale = fitScale(height, window.innerHeight - below);
+      setFit((f) => (f.scale === scale && f.height === height ? f : { scale, height }));
+    };
     update();
     const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(update) : null;
     if (ro) ro.observe(el);
@@ -108,6 +121,9 @@ export default function SizeFinderScreen({ shop }) {
 
   return (
     <div style={ui.page}>
+      <style>{LAYOUT_CSS}</style>
+      <div className="sf-layout" ref={layoutRef}>
+      <div className="sf-main">
       <div style={ui.head}>
         <div>
           <h1 style={ui.h1}>Find my size</h1>
@@ -129,10 +145,6 @@ export default function SizeFinderScreen({ shop }) {
           </button>
         </span>
       </div>
-
-      <style>{LAYOUT_CSS}</style>
-      <div className="sf-layout">
-      <div className="sf-main">
       <section style={ui.card}>
         <p style={ui.label}>Where it shows</p>
         <p style={ui.muted}>On products that have a Size option.</p>
@@ -254,8 +266,14 @@ export default function SizeFinderScreen({ shop }) {
         {error && <span style={ui.error} role="alert">{error}</span>}
       </div>
       </div>
-      <aside className="sf-side" ref={sideRef} style={{ top: sideTop }}>
-        <SizeFinderPreview shop={shop} settings={settings} />
+      <aside className="sf-side" style={fit.height ? { height: Math.ceil(fit.height * fit.scale) } : undefined}>
+        <div
+          ref={fitRef}
+          className="sf-fit"
+          style={{ transform: `scale(${fit.scale})`, width: `${100 / fit.scale}%` }}
+        >
+          <SizeFinderPreview shop={shop} settings={settings} />
+        </div>
       </aside>
       </div>
     </div>
@@ -265,13 +283,15 @@ export default function SizeFinderScreen({ shop }) {
 // Settings on the left, live preview pinned on the right; stacked on narrow screens.
 const LAYOUT_CSS = `
 .sf-layout{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:20px;align-items:start}
-.sf-main{display:flex;flex-direction:column;gap:16px;min-width:0}
-.sf-side{position:sticky;top:16px;min-width:0}
-@media (max-width:1100px){.sf-layout{grid-template-columns:minmax(0,1fr)}.sf-side{position:static}}
+.sf-layout{min-height:100vh}
+.sf-main{display:flex;flex-direction:column;gap:16px;min-width:0;padding-bottom:40px}
+.sf-side{position:sticky;top:16px;min-width:0;overflow:visible}
+.sf-fit{transform-origin:top left}
+@media (max-width:1100px){.sf-layout{grid-template-columns:minmax(0,1fr)}.sf-side{position:static;height:auto!important}.sf-fit{transform:none!important;width:100%!important}}
 `;
 
 const ui = {
-  page: { maxWidth: 1280, margin: '0 auto', padding: '20px 16px 40px', display: 'flex', flexDirection: 'column', gap: 16 },
+  page: { maxWidth: 1280, margin: '0 auto', padding: '16px 16px 0', display: 'flex', flexDirection: 'column', gap: 16 },
   head: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16 },
   h1: { fontSize: 20, fontWeight: 700, margin: '0 0 4px' },
   card: { background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: 20 },

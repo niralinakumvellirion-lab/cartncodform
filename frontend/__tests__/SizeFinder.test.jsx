@@ -172,16 +172,19 @@ describe('preview design', () => {
 });
 
 describe('pinned preview', () => {
-  const { stickyTop } = require('../app/admin/screens/SizeFinder');
-  it('short preview sticks 16px from the top; tall one sticks by its bottom', () => {
-    expect(stickyTop(500, 900)).toBe(16);
-    expect(stickyTop(1200, 800)).toBe(800 - 1200 - 16);
+  const { fitScale } = require('../app/admin/screens/SizeFinder');
+  it('fits: full size when it fits, zoomed out to the screen height when taller, never below 50%', () => {
+    expect(fitScale(500, 900)).toBe(1);
+    expect(fitScale(1068, 600)).toBe(0.532); // (600 - 32) / 1068
+    expect(fitScale(3000, 600)).toBe(0.5);
+    expect(fitScale(0, 600)).toBe(1);
   });
   it('the preview column has no scroll bar of its own', async () => {
     const { container } = render(<SizeFinderScreen shop={SHOP} />);
     await screen.findByRole('switch', { name: 'Turn on Find my size' });
     const css = Array.from(container.querySelectorAll('style')).map((s) => s.textContent).join('');
-    expect(css).toMatch(/\.sf-side\{position:sticky;top:16px;min-width:0\}/);
-    expect(css).not.toMatch(/\.sf-side\{[^}]*overflow/);
+    expect(css).toMatch(/\.sf-side\{position:sticky;top:16px/);
+    expect(css).not.toMatch(/\.sf-side\{[^}]*overflow(-y)?:(auto|scroll)/);
+    expect(container.querySelector('.sf-fit')).not.toBeNull();
   });
 });
