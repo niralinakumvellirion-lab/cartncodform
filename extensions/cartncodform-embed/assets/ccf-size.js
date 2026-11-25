@@ -53,7 +53,8 @@
       '.ccf-sf-seg button{flex:1;border:0;background:transparent;border-radius:8px;padding:8px;font-size:14px;font-weight:600;color:#4B5563;cursor:pointer}',
       '.ccf-sf-seg button[aria-pressed="true"]{background:#fff;color:#111827;box-shadow:0 1px 3px rgba(17,24,39,.12)}',
       // measure fields
-      '.ccf-sf-field{margin:0 0 18px}',
+      '.ccf-sf-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}',
+      '.ccf-sf-field{margin:0 0 16px;min-width:0}',
       '.ccf-sf-label{display:flex;justify-content:space-between;align-items:center;margin:0 0 8px}',
       '.ccf-sf-label > span:first-child{font-size:13px;font-weight:600;color:#374151}',
       '.ccf-sf-unit{display:inline-flex;background:#F3F4F6;border-radius:8px;padding:2px}',
@@ -83,11 +84,13 @@
       '.ccf-sf-btn-main{flex:2;background:' + accent + ';border-color:' + accent + ';color:#fff}',
       '.ccf-sf-btn-main[disabled]{opacity:.7;cursor:wait}',
       // result
-      '.ccf-sf-result{text-align:center}',
+      '.ccf-sf-result{text-align:left}',
+      '.ccf-sf-result-top{display:flex;align-items:center;gap:16px;margin:0 0 8px}',
+      '.ccf-sf-summary{flex:1;min-width:0}',
       '.ccf-sf-kicker{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6B7280;margin:0}',
-      '.ccf-sf-size{width:92px;height:92px;margin:10px auto 8px;border-radius:50%;border:4px solid ' + accent + ';background:' + tint + ';display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:700;color:#111827}',
-      '.ccf-sf-verdict{font-size:15px;font-weight:600;margin:0 0 14px}',
-      '.ccf-sf-meter{margin:0 0 16px;text-align:left}',
+      '.ccf-sf-size{width:76px;height:76px;margin:0;flex-shrink:0;border-radius:50%;border:4px solid ' + accent + ';background:' + tint + ';display:flex;align-items:center;justify-content:center;font-size:32px;font-weight:700;color:#111827}',
+      '.ccf-sf-verdict{font-size:16px;font-weight:700;margin:2px 0 10px}',
+      '.ccf-sf-meter{margin:0;text-align:left}',
       '.ccf-sf-meter-bar{position:relative;height:6px;border-radius:6px;background:linear-gradient(90deg,#FDE68A,#A7F3D0 35%,#A7F3D0 65%,#FDE68A)}',
       '.ccf-sf-meter-dot{position:absolute;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:#fff;border:3px solid ' + accent + '}',
       '.ccf-sf-meter-labels{display:flex;justify-content:space-between;font-size:11px;color:#6B7280;margin-top:6px}',
@@ -105,6 +108,7 @@
       '.ccf-sf-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden}',
       '.ccf-sf-table th{background:#F9FAFB;font-weight:600;color:#374151}',
       '.ccf-sf-table th,.ccf-sf-table td{border-bottom:1px solid #F3F4F6;padding:7px 6px;text-align:center}',
+      '@media (max-width:340px){.ccf-sf-fields{grid-template-columns:minmax(0,1fr)}}',
       '@media (max-width:420px){.ccf-sf-head,.ccf-sf-progress{padding-left:16px;padding-right:16px}.ccf-sf-body{padding:16px}.ccf-sf-value{font-size:24px}}',
     ].join('');
     document.head.appendChild(s);
@@ -410,10 +414,12 @@
             state.gender, function (v) { state.gender = v; }, 'Women or men'
           ));
         }
-        body.appendChild(slider('Height', 140, 200, state.heightCm, function (v) { state.heightCm = v; }, heightText,
+        var fields = el('div', 'ccf-sf-fields');
+        body.appendChild(fields);
+        fields.appendChild(slider('Height', 140, 200, state.heightCm, function (v) { state.heightCm = v; }, heightText,
           unitToggle(['cm', 'ft'], state.hUnit, function (u) { state.hUnit = u; }, 'Height unit'),
           state.hUnit === 'cm' ? ['140 cm', '200 cm'] : ['4′ 7″', '6′ 7″']));
-        body.appendChild(slider('Weight', 40, 130, state.weightKg, function (v) { state.weightKg = v; }, weightText,
+        fields.appendChild(slider('Weight', 40, 130, state.weightKg, function (v) { state.weightKg = v; }, weightText,
           unitToggle(['kg', 'lb'], state.wUnit, function (u) { state.wUnit = u; }, 'Weight unit'),
           state.wUnit === 'kg' ? ['40 kg', '130 kg'] : ['88 lb', '287 lb']));
         body.appendChild(actions(null, 'Continue', function () { state.step = 2; draw(); }));
@@ -446,9 +452,13 @@
       } else {
         var r = state.result || {};
         var box = el('div', 'ccf-sf-result');
-        box.appendChild(el('p', 'ccf-sf-kicker', 'We recommend'));
-        box.appendChild(el('div', 'ccf-sf-size', r.size || '?'));
-        box.appendChild(el('p', 'ccf-sf-verdict', r.outOfRange ? 'Our largest size — it may feel tight' : 'Best fit for you'));
+        var top = el('div', 'ccf-sf-result-top');
+        top.appendChild(el('div', 'ccf-sf-size', r.size || '?'));
+        var summary = el('div', 'ccf-sf-summary');
+        summary.appendChild(el('p', 'ccf-sf-kicker', 'We recommend'));
+        summary.appendChild(el('p', 'ccf-sf-verdict', r.outOfRange ? 'Our largest size — it may feel tight' : 'Best fit for you'));
+        top.appendChild(summary);
+        box.appendChild(top);
 
         var meter = el('div', 'ccf-sf-meter');
         meter.setAttribute('aria-hidden', 'true');
@@ -460,7 +470,7 @@
         var ml = el('div', 'ccf-sf-meter-labels');
         ['Snug', 'Perfect', 'Roomy'].forEach(function (t) { ml.appendChild(el('span', null, t)); });
         meter.appendChild(ml);
-        box.appendChild(meter);
+        summary.appendChild(meter);
 
         (r.reasons || []).forEach(function (x) {
           var row = el('div', 'ccf-sf-reason');

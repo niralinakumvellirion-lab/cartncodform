@@ -173,10 +173,10 @@ describe('preview design', () => {
 
 describe('pinned preview', () => {
   const { fitScale } = require('../app/admin/screens/SizeFinder');
-  it('fits: full size when it fits, zoomed out to the screen height when taller, never below 50%', () => {
+  it('fits: full size when it fits, zoomed out to the screen height when taller, never below 85%', () => {
     expect(fitScale(500, 900)).toBe(1);
-    expect(fitScale(1068, 600)).toBe(0.532); // (600 - 32) / 1068
-    expect(fitScale(3000, 600)).toBe(0.5);
+    expect(fitScale(620, 600)).toBe(0.916); // (600 - 32) / 620
+    expect(fitScale(3000, 600)).toBe(0.85);
     expect(fitScale(0, 600)).toBe(1);
   });
   it('the preview column has no scroll bar of its own', async () => {

@@ -97,10 +97,7 @@ export default function SizeFinderPreview({ shop, settings }) {
     <section className="sfp" style={{ '--sfp-accent': accent, '--sfp-tint': `${accent}14` }} aria-label="Live preview">
       <style>{CSS}</style>
       <div className="sfp-top">
-        <div>
-          <p className="sfp-label">Live preview</p>
-          <p className="sfp-muted">Updates as you edit. Not saved until you press Save.</p>
-        </div>
+        <p className="sfp-label">Live preview <span className="sfp-muted">· updates as you edit, before you save</span></p>
         <div className="sfp-dev" role="group" aria-label="Preview size">
           {[['desktop', 'Desktop'], ['mobile', 'Mobile']].map(([v, l]) => (
             <button key={v} type="button" aria-pressed={device === v} onClick={() => setDevice(v)}>{l}</button>
@@ -111,18 +108,19 @@ export default function SizeFinderPreview({ shop, settings }) {
       <div className={`sfp-frame ${device === 'mobile' ? 'is-mobile' : ''}`}>
         <div className="sfp-bar" aria-hidden="true"><i /><i /><i /><span>yourstore.com/products/cotton-kurta</span></div>
         <div className="sfp-page">
-          <div className="sfp-photo" aria-hidden="true">
-            <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 6a2 2 0 1 1 2-2" /><path d="M12 6v1.5L3 14a1.5 1.5 0 0 0 .9 2.7h16.2A1.5 1.5 0 0 0 21 14l-9-6.5" /></svg>
-          </div>
-          <div className="sfp-info">
-            <p className="sfp-brand">Your brand</p>
-            <p className="sfp-name">Cotton Kurta</p>
-            <p className="sfp-stars" aria-hidden="true">★★★★★ <span>128 reviews</span></p>
-            <p className="sfp-price">₹1,299</p>
-            <p className="sfp-opt">Size{picked ? `: ${picked}` : ''}</p>
+          <div className="sfp-product">
+            <div className="sfp-photo" aria-hidden="true">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 6a2 2 0 1 1 2-2" /><path d="M12 6v1.5L3 14a1.5 1.5 0 0 0 .9 2.7h16.2A1.5 1.5 0 0 0 21 14l-9-6.5" /></svg>
+            </div>
+            <div className="sfp-title-block">
+              <p className="sfp-name">Cotton Kurta</p>
+              <p className="sfp-price">₹1,299 <span className="sfp-stars" aria-hidden="true">★★★★★</span></p>
+            </div>
             <div className="sfp-sizes" aria-label="Example sizes">
               {sizes.map((s) => <span key={s} className={picked === s ? 'on' : ''}>{s}</span>)}
             </div>
+          </div>
+          <div className="sfp-info">
 
             {!genders.length ? (
               <p className="sfp-warn">Both size charts are empty, so shoppers won&apos;t see the button.</p>
@@ -155,6 +153,7 @@ export default function SizeFinderPreview({ shop, settings }) {
                               ))}
                             </div>
                           )}
+                          <div className="sfp-fields">
                           <div className="sfp-field">
                             <div className="sfp-flabel">
                               <span>Height</span>
@@ -176,6 +175,7 @@ export default function SizeFinderPreview({ shop, settings }) {
                             <div className="sfp-value">{weightLabel(weightKg, wUnit)}</div>
                             <input type="range" min={40} max={130} step={1} value={weightKg} onChange={(e) => setWeightKg(Number(e.target.value))} aria-label="Preview weight" />
                             <div className="sfp-scale"><span>{wUnit === 'kg' ? '40 kg' : '88 lb'}</span><span>{wUnit === 'kg' ? '130 kg' : '287 lb'}</span></div>
+                          </div>
                           </div>
                           <div className="sfp-actions"><button type="button" className="sfp-main" onClick={() => setStep(2)}>Continue</button></div>
                         </>
@@ -208,12 +208,16 @@ export default function SizeFinderPreview({ shop, settings }) {
 
                       {step === 3 && result && (
                         <div className="sfp-result">
-                          <p className="sfp-kicker">We recommend</p>
-                          <div className="sfp-size" aria-label="Recommended size">{result.size}</div>
-                          <p className="sfp-verdict">{result.outOfRange ? 'Our largest size — it may feel tight' : 'Best fit for you'}</p>
-                          <div className="sfp-meter" aria-hidden="true">
-                            <div className="sfp-meter-bar"><span style={{ left: `${meterPosition(result.reasons)}%` }} /></div>
-                            <div className="sfp-meter-labels"><span>Snug</span><span>Perfect</span><span>Roomy</span></div>
+                          <div className="sfp-result-top">
+                            <div className="sfp-size" aria-label="Recommended size">{result.size}</div>
+                            <div className="sfp-summary">
+                              <p className="sfp-kicker">We recommend</p>
+                              <p className="sfp-verdict">{result.outOfRange ? 'Our largest size — it may feel tight' : 'Best fit for you'}</p>
+                              <div className="sfp-meter" aria-hidden="true">
+                                <div className="sfp-meter-bar"><span style={{ left: `${meterPosition(result.reasons)}%` }} /></div>
+                                <div className="sfp-meter-labels"><span>Snug</span><span>Perfect</span><span>Roomy</span></div>
+                              </div>
+                            </div>
                           </div>
                           {(result.reasons || []).map((x) => (
                             <div key={x.area} className="sfp-reason">
@@ -251,7 +255,6 @@ export default function SizeFinderPreview({ shop, settings }) {
                 )}
               </>
             )}
-            <div className="sfp-cta" aria-hidden="true">Add to cart</div>
           </div>
         </div>
       </div>
@@ -260,10 +263,10 @@ export default function SizeFinderPreview({ shop, settings }) {
 }
 
 const CSS = `
-.sfp{background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:18px;color:#111827}
+.sfp{background:#fff;border:1px solid #E5E7EB;border-radius:12px;padding:16px;color:#111827}
 .sfp *{box-sizing:border-box}
 .sfp button{font-family:inherit}
-.sfp-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px}
+.sfp-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:10px}
 .sfp-label{font-weight:600;font-size:14px;margin:0}
 .sfp-muted{font-size:12px;color:#6B7280;margin:2px 0 0}
 .sfp-dev{display:inline-flex;background:#F3F4F6;border-radius:8px;padding:3px;flex-shrink:0}
@@ -274,24 +277,24 @@ const CSS = `
 .sfp-bar{display:flex;align-items:center;gap:6px;background:#F3F4F6;padding:8px 12px;border-bottom:1px solid #E5E7EB}
 .sfp-bar i{width:9px;height:9px;border-radius:50%;background:#D1D5DB;display:inline-block}
 .sfp-bar span{margin-left:8px;font-size:11px;color:#6B7280;background:#fff;border-radius:6px;padding:3px 10px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.sfp-page{display:grid;grid-template-columns:minmax(0,0.62fr) minmax(0,1.38fr);gap:18px;padding:18px}
-.sfp-frame.is-mobile .sfp-page{grid-template-columns:minmax(0,1fr);gap:14px;padding:14px}
-.sfp-photo{background:#F3F4F6;border-radius:10px;aspect-ratio:4/5;display:flex;align-items:center;justify-content:center}
-.sfp-frame.is-mobile .sfp-photo{aspect-ratio:4/3}
+.sfp-page{padding:16px 18px 18px}
+.sfp-frame.is-mobile .sfp-page{padding:14px}
+.sfp-product{display:flex;align-items:center;flex-wrap:wrap;gap:10px 12px;padding-bottom:12px;margin-bottom:10px;border-bottom:1px solid #F3F4F6}
+.sfp-title-block{min-width:0}
+.sfp-photo{background:#F3F4F6;border-radius:10px;width:48px;height:48px;flex-shrink:0;display:flex;align-items:center;justify-content:center}
 .sfp-brand{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#6B7280;margin:0}
-.sfp-name{font-size:22px;font-weight:700;margin:2px 0 4px}
-.sfp-stars{font-size:13px;color:#F59E0B;margin:0 0 8px}
-.sfp-stars span{color:#6B7280;margin-left:4px}
-.sfp-price{font-size:18px;font-weight:600;margin:0 0 14px}
+.sfp-name{font-size:16px;font-weight:700;margin:0 0 2px}
+.sfp-stars{font-size:12px;color:#F59E0B;margin-left:6px;font-weight:400}
+.sfp-price{font-size:14px;font-weight:600;margin:0}
 .sfp-opt{font-size:13px;color:#374151;margin:0 0 8px}
-.sfp-sizes{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
-.sfp-sizes span{min-width:42px;text-align:center;border:1px solid #D1D5DB;border-radius:8px;padding:7px 10px;font-size:13px}
-.sfp-sizes span.on{border:2px solid #111827;padding:6px 9px;font-weight:600}
+.sfp-sizes{display:flex;flex-wrap:wrap;gap:6px;margin-left:auto}
+.sfp-sizes span{min-width:40px;text-align:center;border:1px solid #D1D5DB;border-radius:8px;padding:5px 9px;font-size:13px}
+.sfp-sizes span.on{border:2px solid #111827;padding:4px 8px;font-weight:600}
 .sfp-trigger{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .sfp-open{display:inline-flex;align-items:center;gap:8px;background:none;border:0;padding:4px 0;color:var(--sfp-accent);font-size:14px;font-weight:600;cursor:pointer;text-decoration:underline;text-underline-offset:4px}
 .sfp-hint{font-size:12px;color:#6B7280}
 .sfp-warn{font-size:13px;color:#B45309;background:#FFFBEB;border-radius:8px;padding:8px 10px;margin:0}
-.sfp-panel{margin-top:12px;border:1px solid #E5E7EB;border-radius:16px;background:#fff;box-shadow:0 10px 30px rgba(17,24,39,.08);overflow:hidden}
+.sfp-panel{margin-top:10px;border:1px solid #E5E7EB;border-radius:16px;background:#fff;box-shadow:0 10px 30px rgba(17,24,39,.08);overflow:hidden}
 .sfp-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:16px 18px 0}
 .sfp-step{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6B7280;margin:0 0 4px}
 .sfp-title{font-size:17px;font-weight:700;margin:0}
@@ -299,55 +302,57 @@ const CSS = `
 .sfp-progress{display:flex;gap:6px;padding:12px 18px 0}
 .sfp-progress span{flex:1;height:4px;border-radius:4px;background:#E5E7EB}
 .sfp-progress span.on{background:var(--sfp-accent)}
-.sfp-body{padding:16px 18px 18px}
-.sfp-seg{display:flex;background:#F3F4F6;border-radius:10px;padding:4px;gap:4px;margin:0 0 16px}
+.sfp-body{padding:14px 18px 16px}
+.sfp-seg{display:flex;background:#F3F4F6;border-radius:10px;padding:4px;gap:4px;margin:0 0 12px}
 .sfp-seg button{flex:1;border:0;background:transparent;border-radius:8px;padding:8px;font-size:14px;font-weight:600;color:#4B5563;cursor:pointer}
 .sfp-seg button[aria-pressed="true"]{background:#fff;color:#111827;box-shadow:0 1px 3px rgba(17,24,39,.12)}
-.sfp-field{margin:0 0 16px}
+.sfp-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.sfp-field{margin:0 0 12px;min-width:0}
 .sfp-flabel{display:flex;justify-content:space-between;align-items:center;margin:0 0 6px}
 .sfp-flabel > span:first-child{font-size:13px;font-weight:600;color:#374151}
 .sfp-unit{display:inline-flex;background:#F3F4F6;border-radius:8px;padding:2px}
 .sfp-unit button{border:0;background:transparent;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:600;color:#6B7280;cursor:pointer}
 .sfp-unit button[aria-pressed="true"]{background:#fff;color:#111827;box-shadow:0 1px 2px rgba(17,24,39,.12)}
-.sfp-value{font-size:26px;font-weight:700;letter-spacing:-.01em;margin:0 0 4px}
+.sfp-value{font-size:22px;font-weight:700;letter-spacing:-.01em;margin:0 0 2px}
 .sfp-field input[type=range]{width:100%;accent-color:var(--sfp-accent);margin:0}
 .sfp-scale{display:flex;justify-content:space-between;font-size:11px;color:#9CA3AF;margin-top:2px}
-.sfp-q{font-size:13px;font-weight:600;color:#374151;margin:0 0 8px}
-.sfp-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 16px}
-.sfp-cards button{border:1.5px solid #E5E7EB;background:#fff;border-radius:12px;padding:10px 6px;cursor:pointer;display:flex;flex-direction:column;gap:2px;align-items:center}
+.sfp-q{font-size:13px;font-weight:600;color:#374151;margin:0 0 6px}
+.sfp-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 12px}
+.sfp-cards button{border:1.5px solid #E5E7EB;background:#fff;border-radius:12px;padding:8px 6px;cursor:pointer;display:flex;flex-direction:column;gap:2px;align-items:center}
 .sfp-cards b{font-size:14px;font-weight:600;color:#111827}
 .sfp-cards small{font-size:11px;color:#6B7280}
 .sfp-cards button[aria-pressed="true"]{border-color:var(--sfp-accent);background:var(--sfp-tint)}
-.sfp-check{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#F9FAFB;border-radius:12px;padding:12px 14px;cursor:pointer}
+.sfp-check{display:flex;align-items:center;justify-content:space-between;gap:12px;background:#F9FAFB;border-radius:12px;padding:9px 12px;cursor:pointer}
 .sfp-check b{display:block;font-size:13px}
 .sfp-check small{font-size:12px;color:#6B7280}
 .sfp-check input{appearance:none;-webkit-appearance:none;width:40px;height:22px;border-radius:999px;background:#D1D5DB;position:relative;cursor:pointer;flex-shrink:0;margin:0}
 .sfp-check input::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.2);transition:left .15s}
 .sfp-check input:checked{background:var(--sfp-accent)}
 .sfp-check input:checked::after{left:20px}
-.sfp-actions{display:flex;gap:10px;margin-top:16px}
-.sfp-main{flex:2;background:var(--sfp-accent);border:1px solid var(--sfp-accent);color:#fff;border-radius:10px;padding:11px;font-size:14px;font-weight:600;cursor:pointer}
+.sfp-actions{display:flex;gap:10px;margin-top:14px}
+.sfp-main{flex:2;background:var(--sfp-accent);border:1px solid var(--sfp-accent);color:#fff;border-radius:10px;padding:10px;font-size:14px;font-weight:600;cursor:pointer}
 .sfp-main[disabled]{opacity:.7}
-.sfp-ghost{flex:1;background:#fff;border:1px solid #D1D5DB;color:#111827;border-radius:10px;padding:11px;font-size:14px;font-weight:600;cursor:pointer}
-.sfp-result{text-align:center}
+.sfp-ghost{flex:1;background:#fff;border:1px solid #D1D5DB;color:#111827;border-radius:10px;padding:10px;font-size:14px;font-weight:600;cursor:pointer}
+.sfp-result{text-align:left}
+.sfp-result-top{display:flex;align-items:center;gap:16px;margin:0 0 8px}
+.sfp-summary{flex:1;min-width:0}
 .sfp-kicker{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6B7280;margin:0}
-.sfp-size{width:88px;height:88px;margin:10px auto 8px;border-radius:50%;border:4px solid var(--sfp-accent);background:var(--sfp-tint);display:flex;align-items:center;justify-content:center;font-size:30px;font-weight:700}
-.sfp-verdict{font-size:15px;font-weight:600;margin:0 0 14px}
-.sfp-meter{margin:0 0 14px;text-align:left}
+.sfp-size{width:68px;height:68px;margin:0;flex-shrink:0;border-radius:50%;border:4px solid var(--sfp-accent);background:var(--sfp-tint);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:700}
+.sfp-verdict{font-size:16px;font-weight:700;margin:2px 0 8px}
+.sfp-meter{margin:0;text-align:left}
 .sfp-meter-bar{position:relative;height:6px;border-radius:6px;background:linear-gradient(90deg,#FDE68A,#A7F3D0 35%,#A7F3D0 65%,#FDE68A)}
 .sfp-meter-bar span{position:absolute;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:#fff;border:3px solid var(--sfp-accent)}
 .sfp-meter-labels{display:flex;justify-content:space-between;font-size:11px;color:#6B7280;margin-top:6px}
-.sfp-reason{display:flex;justify-content:space-between;align-items:center;font-size:13px;border-top:1px solid #F3F4F6;padding:10px 2px;text-align:left}
+.sfp-reason{display:flex;justify-content:space-between;align-items:center;font-size:13px;border-top:1px solid #F3F4F6;padding:8px 2px;text-align:left}
 .sfp-reason > span:first-child{font-weight:600;color:#374151}
 .sfp-ok,.sfp-bad{display:inline-flex;align-items:center;gap:6px;font-weight:600}
 .sfp-ok{color:#047857}.sfp-bad{color:#B45309}
 .sfp-ok::before{content:"✓";width:16px;height:16px;border-radius:50%;background:#D1FAE5;font-size:10px;line-height:16px;text-align:center}
 .sfp-bad::before{content:"!";width:16px;height:16px;border-radius:50%;background:#FEF3C7;font-size:10px;line-height:16px;text-align:center}
-.sfp-link{background:none;border:0;padding:0;margin-top:10px;color:var(--sfp-accent);text-decoration:underline;text-underline-offset:3px;font-size:13px;font-weight:600;cursor:pointer}
+.sfp-link{background:none;border:0;padding:0;margin-top:6px;color:var(--sfp-accent);text-decoration:underline;text-underline-offset:3px;font-size:13px;font-weight:600;cursor:pointer}
 .sfp-table{width:100%;border-collapse:collapse;margin-top:10px;font-size:12px;border:1px solid #E5E7EB}
 .sfp-table th{background:#F9FAFB;font-weight:600}
 .sfp-table th,.sfp-table td{border-bottom:1px solid #F3F4F6;padding:6px;text-align:center}
 .sfp-note{font-size:12px;color:#6B7280;margin:10px 0 0}
 .sfp-err{font-size:13px;color:#B42318;font-weight:600;margin:12px 0 0;background:#FEF2F2;border-radius:8px;padding:8px 10px}
-.sfp-cta{margin-top:16px;background:#111827;color:#fff;border-radius:8px;padding:12px;text-align:center;font-size:14px;font-weight:600;opacity:.9}
 `;

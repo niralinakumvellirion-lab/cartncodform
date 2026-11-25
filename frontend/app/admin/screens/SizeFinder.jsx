@@ -28,13 +28,13 @@ export function fromUnit(value, unit) {
 
 /**
  * Zoom for the pinned preview so ALL of it fits on screen (16px gap top and bottom): 1 when it
- * already fits, smaller when it is taller than the screen, never below 0.5. The preview then stays
+ * already fits, smaller when it is taller than the screen, never below 0.85 (text stays readable). The preview then stays
  * fixed while the settings scroll — no scrolling of its own.
  */
 export function fitScale(previewHeight, viewportHeight) {
   const avail = viewportHeight - 32;
   if (!(previewHeight > 0) || previewHeight <= avail) return 1;
-  return Math.max(0.5, Math.round((avail / previewHeight) * 1000) / 1000);
+  return Math.max(0.85, Math.round((avail / previewHeight) * 1000) / 1000);
 }
 
 /**
