@@ -1,0 +1,273 @@
+'use strict';
+
+/**
+ * Phase 3 — "Find my size": size maths, validation, admin routes, storefront (App Proxy) routes.
+ */
+
+jest.mock('../models/SizeFinderConfig', () => ({ findOne: jest.fn(), findOneAndUpdate: jest.fn() }));
+jest.mock('../middleware/requireOwner', () => ({
+  requireAuth: (req, _res, next) => next(),
+  requireStoreOwner: (req, _res, next) => { req.store = { shopDomain: 'demo.myshopify.com' }; next(); },
+}));
+jest.mock('../utils/shopify', () => ({ verifyProxySignature: jest.fn(() => true) }));
+jest.mock('../services/profileService', () => ({ upsertProfile: jest.fn().mockResolvedValue({ _id: 'p1' }) }));
+
+const S = require('../utils/sizeFinder');
+const SizeFinderConfig = require('../models/SizeFinderConfig');
+const { verifyProxySignature } = require('../utils/shopify');
+const { upsertProfile } = require('../services/profileService');
+const adminRouter = require('../routes/sizeFinder');
+const proxyRouter = require('../routes/sizeFinderProxy');
+
+function handler(router, path, method) {
+  const layer = router.stack.find((l) => l.route && l.route.path === path && l.route.methods[method]);
+  return layer.route.stack.map((s) => s.handle);
+}
+async function run(router, path, method, req) {
+  const res = { statusCode: 200, body: null, headers: {} };
+  res.status = (c) => { res.statusCode = c; return res; };
+  res.json = (b) => { res.body = b; return res; };
+  res.setHeader = (k, v) => { res.headers[k] = v; };
+  const chain = handler(router, path, method);
+  let i = 0;
+  const next = async () => { const h = chain[i++]; if (h) await h(req, res, next); };
+  await next();
+  return res;
+}
+const lean = (v) => ({ lean: () => Promise.resolve(v) });
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  jest.spyOn(console, 'error').mockImplementation(() => {});
+  jest.spyOn(console, 'warn').mockImplementation(() => {});
+  verifyProxySignature.mockReturnValue(true);
+  proxyRouter._limiter.reset();
+});
+afterEach(() => jest.restoreAllMocks());
+
+// ── Size maths ───────────────────────────────────────────────────────────────
+
+describe('size maths', () => {
+  const size = (g, h, w, shape = 'average', fit = 'regular') => {
+    const a = S.sanitizeAnswers({ gender: g, heightCm: h, weightKg: w, shape, fit });
+    return S.recommendSize(S.DEFAULT_CHARTS[g], S.estimateBody(a), fit);
+  };
+
+  test('typical shoppers land on sensible sizes', () => {
+    expect(size('women', 162, 58).size).toBe('M');
+    expect(size('women', 155, 48).size).toBe('S');
+    expect(size('men', 175, 72).size).toBe('M');
+    expect(size('men', 168, 60).size).toBe('S');
+  });
+
+  test('relaxed fit and broad shape never pick a smaller size', () => {
+    const order = S.DEFAULT_CHARTS.women.map((r) => r.size);
+    const base = order.indexOf(size('women', 162, 58).size);
+    expect(order.indexOf(size('women', 162, 58, 'average', 'relaxed').size)).toBeGreaterThanOrEqual(base);
+    expect(order.indexOf(size('women', 162, 58, 'broad').size)).toBeGreaterThanOrEqual(base);
+    expect(order.indexOf(size('women', 162, 58, 'slim', 'snug').size)).toBeLessThanOrEqual(base);
+  });
+
+  test('bigger than the chart → largest size, flagged', () => {
+    const r = size('women', 170, 120);
+    expect(r.size).toBe('XXL');
+    expect(r.outOfRange).toBe(true);
+  });
+
+  test('reasons: chest + waist status, length as info', () => {
+    const r = size('men', 175, 72);
+    expect(r.reasons.map((x) => x.area)).toEqual(['chest', 'waist', 'length']);
+    expect(r.reasons[2]).toEqual({ area: 'length', status: 'info', value: 73 });
+    expect(['right', 'snug', 'roomy']).toContain(r.reasons[0].status);
+  });
+
+  test('answers out of range are rejected', () => {
+    expect(S.sanitizeAnswers({ gender: 'women', heightCm: 90, weightKg: 50 })).toBeNull();
+    expect(S.sanitizeAnswers({ gender: 'women', heightCm: 160, weightKg: 300 })).toBeNull();
+    expect(S.sanitizeAnswers({ gender: 'kids', heightCm: 160, weightKg: 50 })).toBeNull();
+    expect(S.sanitizeAnswers({ gender: 'men', heightCm: 170, weightKg: 70, shape: 'x', fit: 'y' }))
+      .toEqual({ gender: 'men', heightCm: 170, weightKg: 70, shape: 'average', fit: 'regular' });
+  });
+});
+
+// ── Validation ───────────────────────────────────────────────────────────────
+
+describe('sanitizeSettings / sanitizeChart', () => {
+  const ok = { enabled: true, charts: { women: S.DEFAULT_CHARTS.women, men: [] } };
+
+  test('valid settings, defaults filled', () => {
+    const s = S.sanitizeSettings(ok);
+    expect(s.enabled).toBe(true);
+    expect(s.buttonText).toBe('Find my size');
+    expect(s.unit).toBe('cm');
+    expect(s.charts.women).toHaveLength(6);
+    expect(s.charts.men).toEqual([]);
+  });
+
+  test('chest must go up row by row', () => {
+    expect(() => S.sanitizeChart([{ size: 'S', chest: 90, waist: 70 }, { size: 'M', chest: 90, waist: 74 }], 'women'))
+      .toThrow(/chest must be bigger/);
+  });
+
+  test('duplicate sizes, missing names and wild numbers are rejected', () => {
+    expect(() => S.sanitizeChart([{ size: 'M', chest: 90, waist: 70 }, { size: 'm', chest: 95, waist: 74 }], 'women')).toThrow(/twice/);
+    expect(() => S.sanitizeChart([{ size: '', chest: 90, waist: 70 }], 'women')).toThrow(/size name/);
+    expect(() => S.sanitizeChart([{ size: 'M', chest: 900, waist: 70 }], 'women')).toThrow(/chest/);
+    expect(() => S.sanitizeChart(new Array(13).fill({ size: 'M', chest: 90, waist: 70 }), 'women')).toThrow(/at most 12/);
+  });
+
+  test('both charts empty → error; bad colour → default', () => {
+    expect(() => S.sanitizeSettings({ charts: { women: [], men: [] } })).toThrow(/at least one size chart/);
+    expect(S.sanitizeSettings({ ...ok, accentColor: 'red' }).accentColor).toBe('#111827');
+  });
+
+  test('never-saved shop gets the starter charts; public settings list genders with a chart', () => {
+    const d = S.withDefaults(null);
+    expect(d.enabled).toBe(false);
+    expect(d.charts.men).toHaveLength(5);
+    expect(S.publicSettings({ charts: { women: S.DEFAULT_CHARTS.women, men: [] } }).genders).toEqual(['women']);
+  });
+});
+
+// ── Admin routes ─────────────────────────────────────────────────────────────
+
+describe('admin routes', () => {
+  test('GET returns defaults for a new shop', async () => {
+    SizeFinderConfig.findOne.mockReturnValue(lean(null));
+    const res = await run(adminRouter, '/:shopDomain/config', 'get', { params: { shopDomain: 'demo.myshopify.com' } });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.settings.charts.women).toHaveLength(6);
+    expect(SizeFinderConfig.findOne).toHaveBeenCalledWith({ shopDomain: 'demo.myshopify.com' });
+  });
+
+  test('PUT saves clean settings for the verified shop', async () => {
+    SizeFinderConfig.findOneAndUpdate.mockReturnValue(lean({ enabled: true, charts: { women: S.DEFAULT_CHARTS.women, men: [] } }));
+    const res = await run(adminRouter, '/:shopDomain/config', 'put', {
+      params: { shopDomain: 'other.myshopify.com' },
+      body: { settings: { enabled: true, productTag: ' size-finder ', charts: { women: S.DEFAULT_CHARTS.women, men: [] } } },
+    });
+    expect(res.statusCode).toBe(200);
+    const [filter, update] = SizeFinderConfig.findOneAndUpdate.mock.calls[0];
+    expect(filter).toEqual({ shopDomain: 'demo.myshopify.com' });
+    expect(update.$set.productTag).toBe('size-finder');
+    expect(update.$set.enabled).toBe(true);
+  });
+
+  test('PUT with a bad chart → 400 with the reason', async () => {
+    const res = await run(adminRouter, '/:shopDomain/config', 'put', {
+      params: {}, body: { settings: { charts: { women: [{ size: 'M', chest: 'x', waist: 70 }] } } },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/chest/);
+    expect(SizeFinderConfig.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+});
+
+// ── Storefront routes ────────────────────────────────────────────────────────
+
+describe('storefront routes', () => {
+  const ON = { enabled: true, charts: { women: S.DEFAULT_CHARTS.women, men: S.DEFAULT_CHARTS.men } };
+  const req = (body, extraQuery = {}) => ({
+    query: { shop: 'demo.myshopify.com', signature: 'x', ...extraQuery }, body, ip: '1.2.3.4',
+  });
+
+  test('bad signature → 403', async () => {
+    verifyProxySignature.mockReturnValue(false);
+    const res = await run(proxyRouter, '/config', 'get', req());
+    expect(res.statusCode).toBe(403);
+  });
+
+  test('config is public settings', async () => {
+    SizeFinderConfig.findOne.mockReturnValue(lean(ON));
+    const res = await run(proxyRouter, '/config', 'get', req());
+    expect(res.body.settings.enabled).toBe(true);
+    expect(res.body.settings.genders).toEqual(['women', 'men']);
+  });
+
+  test('recommend returns a size and does not save without "remember"', async () => {
+    SizeFinderConfig.findOne.mockReturnValue(lean(ON));
+    const res = await run(proxyRouter, '/recommend', 'post', req({ gender: 'women', heightCm: 162, weightKg: 58 }));
+    expect(res.statusCode).toBe(200);
+    expect(res.body.size).toBe('M');
+    expect(res.body.saved).toBe(false);
+    expect(upsertProfile).not.toHaveBeenCalled();
+  });
+
+  test('remember → only size, gender and fit go on the profile (never height or weight)', async () => {
+    SizeFinderConfig.findOne.mockReturnValue(lean(ON));
+    const res = await run(proxyRouter, '/recommend', 'post', req(
+      { gender: 'men', heightCm: 175, weightKg: 72, fit: 'relaxed', remember: true, sessionId: 'abc12345-session' },
+      { logged_in_customer_id: '777' },
+    ));
+    expect(res.body.saved).toBe(true);
+    const [shop, ids, updates] = upsertProfile.mock.calls[0];
+    expect(shop).toBe('demo.myshopify.com');
+    expect(ids).toEqual({ customerId: '777', sessionId: 'abc12345-session' });
+    expect(Object.keys(updates).sort()).toEqual(['sizeProfile.fit', 'sizeProfile.gender', 'sizeProfile.size', 'sizeProfile.updatedAt']);
+    // Height (175) and weight (72) must not be stored. Leave the timestamp out of the check: its
+    // milliseconds can contain "175" or "72" by chance.
+    const { 'sizeProfile.updatedAt': when, ...stored } = updates;
+    expect(when).toBeInstanceOf(Date);
+    expect(stored).toEqual({ 'sizeProfile.size': res.body.size, 'sizeProfile.gender': 'men', 'sizeProfile.fit': 'relaxed' });
+  });
+
+  test('remember without any id → nothing saved', async () => {
+    SizeFinderConfig.findOne.mockReturnValue(lean(ON));
+    const res = await run(proxyRouter, '/recommend', 'post', req({ gender: 'women', heightCm: 162, weightKg: 58, remember: true, sessionId: 'bad id!' }));
+    expect(res.body.saved).toBe(false);
+    expect(upsertProfile).not.toHaveBeenCalled();
+  });
+
+  test('turned off → 404; bad answers → 400; no chart for that choice → 400', async () => {
+    SizeFinderConfig.findOne.mockReturnValue(lean({ ...ON, enabled: false }));
+    expect((await run(proxyRouter, '/recommend', 'post', req({ gender: 'women', heightCm: 162, weightKg: 58 }))).statusCode).toBe(404);
+    expect((await run(proxyRouter, '/recommend', 'post', req({ gender: 'women', heightCm: 50, weightKg: 58 }))).statusCode).toBe(400);
+    SizeFinderConfig.findOne.mockReturnValue(lean({ enabled: true, charts: { women: S.DEFAULT_CHARTS.women, men: [] } }));
+    expect((await run(proxyRouter, '/recommend', 'post', req({ gender: 'men', heightCm: 175, weightKg: 72 }))).statusCode).toBe(400);
+  });
+
+  test('more than 30 tries a minute → 429', async () => {
+    SizeFinderConfig.findOne.mockReturnValue(lean(ON));
+    let last;
+    for (let i = 0; i < 31; i++) last = await run(proxyRouter, '/recommend', 'post', req({ gender: 'women', heightCm: 162, weightKg: 58 }));
+    expect(last.statusCode).toBe(429);
+  });
+
+  test('height and weight never reach the logs', async () => {
+    SizeFinderConfig.findOne.mockReturnValue({ lean: () => Promise.reject(new Error('db down')) });
+    await run(proxyRouter, '/recommend', 'post', req({ gender: 'women', heightCm: 163, weightKg: 57 }));
+    const logged = JSON.stringify(console.error.mock.calls) + JSON.stringify(console.warn.mock.calls);
+    expect(logged).not.toMatch(/163|57/);
+  });
+});
+
+describe('admin preview', () => {
+  test('uses the unsaved chart sent by the admin', async () => {
+    const res = await run(adminRouter, '/:shopDomain/preview', 'post', {
+      params: {},
+      body: {
+        answers: { gender: 'women', heightCm: 162, weightKg: 58 },
+        chart: [{ size: 'Small', chest: 95, waist: 80, length: 100 }, { size: 'Big', chest: 110, waist: 95, length: 104 }],
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.size).toBe('Small');
+    expect(SizeFinderConfig.findOneAndUpdate).not.toHaveBeenCalled();
+  });
+
+  test('bad chart or answers → 400 with the reason', async () => {
+    const bad = await run(adminRouter, '/:shopDomain/preview', 'post', {
+      params: {}, body: { answers: { gender: 'women', heightCm: 162, weightKg: 58 }, chart: [{ size: 'M', chest: 'x', waist: 70 }] },
+    });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.body.error).toMatch(/chest/);
+    const empty = await run(adminRouter, '/:shopDomain/preview', 'post', {
+      params: {}, body: { answers: { gender: 'men', heightCm: 175, weightKg: 72 }, chart: [] },
+    });
+    expect(empty.statusCode).toBe(400);
+    const out = await run(adminRouter, '/:shopDomain/preview', 'post', {
+      params: {}, body: { answers: { gender: 'men', heightCm: 90, weightKg: 72 }, chart: [] },
+    });
+    expect(out.statusCode).toBe(400);
+  });
+});

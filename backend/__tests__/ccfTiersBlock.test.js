@@ -862,3 +862,32 @@ describe('ccf-tiers.js theme without a quantity box', () => {
     expect(hidden.value).toBe('2');
   });
 });
+
+describe('ccf-tiers.js follows "Find my size"', () => {
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  test('picked size updates every item, keeping each colour', async () => {
+    var styleEl = document.getElementById('ccf-qt-styles');
+    if (styleEl) styleEl.remove();
+    const PRODUCT = {
+      options: [{ name: 'Color', values: ['Red', 'Blue'] }, { name: 'Size', values: ['M', 'L'] }],
+      variants: [
+        { id: 123, price: 99900, available: true, options: ['Red', 'M'] },
+        { id: 124, price: 99900, available: true, options: ['Red', 'L'] },
+        { id: 125, price: 99900, available: true, options: ['Blue', 'M'] },
+        { id: 126, price: 99900, available: true, options: ['Blue', 'L'] },
+      ],
+    };
+    global.fetch = jest.fn(() => Promise.resolve({ json: () => Promise.resolve(PRODUCT) }));
+    setupDOM(makeConfig({ layout: 'rows', variantPicker: true }));
+    await flush(); await flush();
+    getButtons()[0].click(); // Buy 2
+    const item2Color = document.querySelector('.ccf-qt-picker select[aria-label="Item 2 Color"]');
+    item2Color.value = 'Blue';
+    item2Color.dispatchEvent(new Event('change', { bubbles: true }));
+
+    document.dispatchEvent(new CustomEvent('ccf:size-selected', { detail: { option: 'Size', value: 'L' } }));
+
+    const vals = Array.from(document.querySelectorAll('.ccf-qt-picker select')).map((s) => s.value);
+    expect(vals).toEqual(['Red', 'L', 'Blue', 'L']);
+  });
+});

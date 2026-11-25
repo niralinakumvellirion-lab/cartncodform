@@ -33,6 +33,7 @@ const { hashEmail, purchaseFromOrder } = require('../utils/reviewsCore');
 const Signal = require('../models/Signal');
 const SignalConfig = require('../models/SignalConfig');
 const ComplianceRequest = require('../models/ComplianceRequest');
+const SizeFinderConfig = require('../models/SizeFinderConfig');
 
 // All models that hold shopDomain-scoped data and must be wiped on shop/redact.
 // ALLOWLIST (intentionally excluded): SubscriptionEvent (billing analytics, no shopper PII),
@@ -60,6 +61,7 @@ const SHOP_REDACT_MODELS = [
   ShopWeights,
   Signal,
   SignalConfig,
+  SizeFinderConfig,
   Store,
   StorefrontEvent,
 ];

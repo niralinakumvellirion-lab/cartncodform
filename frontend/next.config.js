@@ -30,13 +30,16 @@ const platformCSP = [
 // /admin: https://app.shopireachboost.com/plans answered 404 in App Review. Those land on the real page.
 const ADMIN_PAGES = [
   'activity', 'automation', 'cod', 'customers', 'dashboard', 'discounts', 'email-templates', 'insights',
-  'journey', 'messages', 'plans', 'queue', 'reviews', 'settings-page', 'signals',
+  'journey', 'messages', 'plans', 'queue', 'reviews', 'settings-page', 'signals', 'size-finder',
 ];
 // The platform host rewrites every path to /platform (lib/hostRouting.js): leave it alone.
 const NOT_PLATFORM_HOST = [{ type: 'host', value: 'admin.shopireachboost.com' }];
 
 const nextConfig = {
   reactStrictMode: true,
+  // `next dev` writes to .next-dev, `next build` to .next: running a build (e.g. to check the code)
+  // while the dev server is up no longer wipes the dev server's files (blank admin pages, 404 chunks).
+  distDir: isProd ? '.next' : '.next-dev',
   // application_url ends in /admin. If Shopify joins a discount function's create/details path onto it
   // instead of replacing the path, the request arrives as /admin/admin/discounts: send it to the real page.
   // Next.js keeps the query string (shop, host, plan_handle, charge_id ...) on every redirect.

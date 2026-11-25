@@ -1,0 +1,38 @@
+{% comment %}
+  "Find my size" — shown on products that have a Size option (any option whose name contains
+  "size"). Settings and size charts come from the app at runtime (ccf-size.js, App Proxy
+  /apps/cartncodform/size-finder). Tag filtering is done in ccf-size.js.
+{% endcomment %}
+{%- liquid
+  assign size_name = ''
+  assign size_values = ''
+  for opt in product.options_with_values
+    assign opt_name = opt.name | downcase
+    if opt_name contains 'size'
+      assign size_name = opt.name
+      assign size_values = opt.values | join: '|'
+    endif
+  endfor
+-%}
+{%- if size_name != '' or request.design_mode -%}
+<div
+  id="ccf-sf-root"
+  data-shop="{{ shop.permanent_domain | escape }}"
+  data-tags="{{ product.tags | join: '|' | escape }}"
+  data-size-option="{{ size_name | escape }}"
+  data-size-values="{{ size_values | escape }}"
+  data-design-mode="{{ request.design_mode }}"
+></div>
+<script src="{{ 'ccf-size.js' | asset_url }}" defer></script>
+{%- endif -%}
+
+{% schema %}
+{
+  "name": "Find My Size",
+  "target": "section",
+  "enabled_on": {
+    "templates": ["product"]
+  },
+  "settings": []
+}
+{% endschema %}

@@ -45,6 +45,15 @@ const profileSchema = new Schema({
 
   interests: { type: Map, of: Number, default: {} }, // productId -> score 0-1
 
+  // "Find my size" result, saved only when the shopper ticks "Remember my size".
+  // Height and weight are never stored.
+  sizeProfile: {
+    size:      { type: String, default: null },
+    gender:    { type: String, default: null },   // 'women' | 'men'
+    fit:       { type: String, default: null },   // 'snug' | 'regular' | 'relaxed'
+    updatedAt: { type: Date, default: null },
+  },
+
   activeHours: { type: [Number], default: [] }, // hours 0-23 when active
 
   orders: {

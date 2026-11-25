@@ -975,6 +975,30 @@
       }
     });
 
+    // "Find my size" picked a size: every item in the per-item picker switches to that size
+    // (keeping its colour), when such a variant exists.
+    document.addEventListener('ccf:size-selected', function (e) {
+      var d = e.detail || {};
+      if (!pickerOn || !product || !Array.isArray(product.options) || d.value == null) return;
+      var want = String(d.option || 'size').toLowerCase();
+      var idx = -1;
+      product.options.forEach(function (opt, i) {
+        var n = String(typeof opt === 'string' ? opt : (opt && opt.name) || '').toLowerCase();
+        if (idx === -1 && (n === want || n.indexOf('size') !== -1)) idx = i;
+      });
+      if (idx === -1) return;
+      syncPicks();
+      picks = picks.map(function (id) {
+        var v = variantById(id);
+        if (!v) return id;
+        var values = (v.options || []).slice();
+        values[idx] = d.value;
+        var match = variantByOptions(values);
+        return match ? String(match.id) : id;
+      });
+      if (pickerVisible()) render();
+    });
+
     document.addEventListener('variant:change', function (e) {
       var v = e.detail && e.detail.variant;
       if (v && v.id) updateVariant(String(v.id));

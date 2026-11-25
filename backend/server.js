@@ -196,7 +196,9 @@ app.use('/api/dashboard/:shopDomain/channels/push', pushUsersRouter);
 app.use('/api/dashboard/:shopDomain/channels/email', require('./routes/emailUsers'));
 app.use('/api/dashboard/:shopDomain/channels/whatsapp', require('./routes/whatsappUsers'));
 app.use('/apps/cartncodform/reviews', require('./routes/reviewsProxy'));
+app.use('/apps/cartncodform/size-finder', require('./routes/sizeFinderProxy'));
 app.use('/apps/cartncodform', proxyRouter);
+app.use('/api/size-finder', require('./routes/sizeFinder'));
 // Public unsubscribe endpoint — no requireAuth, has its own rate limiter.
 const unsubscribeRouter = require('./routes/unsubscribe');
 app.use('/api/unsubscribe', unsubscribeRouter);
