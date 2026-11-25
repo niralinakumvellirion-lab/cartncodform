@@ -129,11 +129,11 @@ function formatCDDate(dateStr) {
 const SUGGESTIONS = {
   cart_abandon: {
     title: (product) => (product ? `Your ${product} is waiting` : 'Your cart is waiting'),
-    body: () => 'Complete your order before it sells out.',
+    body: () => "Complete your order whenever you're ready.",
   },
   high_intent: {
     title: (product) => (product ? `Still thinking about ${product}?` : 'Still interested?'),
-    body: () => 'We saved it for you. Come back and take a look.',
+    body: () => 'Come back and take another look.',
   },
   price_hesitation: {
     title: () => 'Worth every rupee',
@@ -141,11 +141,11 @@ const SUGGESTIONS = {
   },
   lapsing: {
     title: () => 'We miss you!',
-    body: () => 'New arrivals are waiting. Come back and explore.',
+    body: () => 'Come back and browse the store any time.',
   },
   winback: {
     title: () => "It's been a while...",
-    body: () => 'New collection just dropped. Come check it out.',
+    body: () => "We'd love to see you again. Take a look around the store.",
   },
 };
 
@@ -159,7 +159,7 @@ const NOTIFICATION_SUGGESTIONS = [
       {
         label: 'Cart reminder',
         title: 'Your cart is waiting!',
-        body: 'You left something behind. Complete your order before it sells out.',
+        body: "You left something behind. Complete your order whenever you're ready.",
       },
       {
         label: 'Checkout nudge',
@@ -205,7 +205,7 @@ const NOTIFICATION_SUGGESTIONS = [
       {
         label: 'Back in stock',
         title: "It's back! 🎉",
-        body: "The item you were eyeing is back in stock. Grab it before it's gone.",
+        body: 'The item you were eyeing is back in stock.',
       },
       {
         label: 'Price drop',
@@ -271,12 +271,12 @@ const EMAIL_SUGGESTIONS = [
       {
         label: 'Cart reminder',
         subject: 'You left something behind',
-        body: 'Hi there,\n\nYou left items in your cart! Complete your purchase before they sell out.\n\nWarm regards,\nThe Team',
+        body: "Hi there,\n\nYou left items in your cart. Complete your purchase whenever you're ready.\n\nWarm regards,\nThe Team",
       },
       {
-        label: 'Urgency nudge',
-        subject: 'Almost gone — complete your order',
-        body: 'Hi there,\n\nThe items in your cart are selling fast. Complete your order now before stock runs out!\n\nWarm regards,\nThe Team',
+        label: 'Friendly reminder',
+        subject: 'A quick reminder about your cart',
+        body: "Hi there,\n\nJust a reminder that you left items in your cart. Complete your order whenever you're ready.\n\nWarm regards,\nThe Team",
       },
     ],
   },
@@ -305,7 +305,7 @@ const EMAIL_SUGGESTIONS = [
       {
         label: 'We miss you',
         subject: "We miss you! Here's something special",
-        body: "Hi there,\n\nIt's been a while! We've added exciting new products we think you'll love. Come back and explore.\n\nWarm regards,\nThe Team",
+        body: "Hi there,\n\nIt's been a while! We'd love to see you again. Come back and explore the store.\n\nWarm regards,\nThe Team",
       },
       {
         label: 'New arrivals',
@@ -347,7 +347,7 @@ const WA_SUGGESTION_TYPES = [
       const cart = c?.profile?.identifiers?.cartTokens;
       return cart?.length ? 'Has an abandoned cart' : 'Cart detected';
     },
-    preview: () => "You left something in your cart — complete your order before it sells out.",
+    preview: () => "You left something in your cart — complete your order whenever you're ready.",
     eligible: (c, wa) => !!(wa?.canFollowup && c?.profile?.identifiers?.cartTokens?.length > 0),
   },
   {
@@ -405,7 +405,7 @@ const WA_SUGGESTION_TYPES = [
       const p = c?.topProducts?.[0]?.title;
       return p && !/^\d+$/.test(p) ? `Viewed ${p}` : 'Viewed products, no purchase';
     },
-    preview: () => "Still thinking about what you saw? We saved it for you.",
+    preview: () => 'Still thinking about what you saw? Take another look.',
     eligible: (c, wa) =>
       !!(wa?.canFollowup && c?.topProducts?.length > 0 && (c?.profile?.orders?.count || 0) === 0),
   },
@@ -475,7 +475,7 @@ function resolveWaFirstName(customer) {
 const WA_TEMPLATE_BODY = {
   cart_reminder: (n, s) =>
     `Hi ${n}! 🛒 You left something in your cart at ${s}.\n\n` +
-    `Complete your order before it sells out.\n\n` +
+    `Complete your order whenever you're ready.\n\n` +
     `Reply STOP to opt out.`,
   welcome_offer: (n, s) =>
     `Hi ${n}! Welcome to ${s}. 🎉\n\n` +
@@ -495,7 +495,7 @@ const WA_TEMPLATE_BODY = {
     `Reply STOP to opt out.`,
   product_followup: (n, s) =>
     `Hi ${n}! Still thinking about what you saw at ${s}?\n\n` +
-    `We saved it for you. Take another look.\n\n` +
+    `Take another look whenever you're ready.\n\n` +
     `Reply STOP to opt out.`,
   say_hello: (n, s) =>
     `Hi ${n}! This is ${s}.\n\n` +
@@ -855,7 +855,7 @@ function WaComposer({
     if (fn) return fn(firstName, storeName);
     return selected?.purpose === 'order'
       ? `Hi ${firstName}! This is ${storeName}.\n\nWe wanted to reach out about your order.\n\nReply STOP to opt out.`
-      : `Hi ${firstName}! You left something in your cart at ${storeName}.\n\nComplete your order before it sells out.\n\nReply STOP to opt out.`;
+      : `Hi ${firstName}! You left something in your cart at ${storeName}.\n\nComplete your order whenever you're ready.\n\nReply STOP to opt out.`;
   }
 
   // Refill textarea whenever the selected suggestion changes.
@@ -1629,7 +1629,7 @@ function EmailComposer({
     const suggestions = {
       cart_abandon: {
         subject: 'You left something behind',
-        body: `Hi there,\n\nWe noticed you added ${product || 'some items'} to your cart but didn't complete your purchase.\n\nYour cart is saved and waiting for you. Come back and complete your order before it sells out!\n\nShop now and get free shipping on orders above ₹999.\n\nWarm regards,\nThe Team`,
+        body: `Hi there,\n\nWe noticed you added ${product || 'some items'} to your cart but didn't complete your purchase.\n\nCome back and complete your order whenever you're ready.\n\nWarm regards,\nThe Team`,
       },
       high_intent: {
         subject: `Still thinking about ${product || 'your saved item'}?`,
@@ -1637,7 +1637,7 @@ function EmailComposer({
       },
       lapsing: {
         subject: "We miss you! Here's something special",
-        body: `Hi there,\n\nIt's been a while since your last visit and we miss you!\n\nWe've added exciting new products to our collection that we think you'll love.\n\nCome back and explore — we'd love to see you again.\n\nWarm regards,\nThe Team`,
+        body: `Hi there,\n\nIt's been a while since your last visit and we miss you!\n\nCome back and explore the store — we'd love to see you again.\n\nWarm regards,\nThe Team`,
       },
     };
     const s = suggestions[signal] || {

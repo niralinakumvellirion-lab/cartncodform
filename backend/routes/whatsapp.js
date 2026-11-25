@@ -55,7 +55,7 @@ const WA_TEMPLATES = {
     purpose: 'followup',
     build: (firstName, storeName, ctaUrl) =>
       `Hi ${firstName}! 🛒 You left something in your cart at ${storeName}.\n\n` +
-      `Complete your order before it sells out: ${ctaUrl}\n\n` +
+      `Complete your order whenever you're ready: ${ctaUrl}\n\n` +
       `Reply STOP to opt out.`,
   },
   welcome_offer: {
@@ -84,14 +84,14 @@ const WA_TEMPLATES = {
     purpose: 'followup',
     build: (firstName, storeName, ctaUrl) =>
       `Hi ${firstName}! It's been a while — we miss you at ${storeName}. 💛\n\n` +
-      `Come check out what's new: ${ctaUrl}\n\n` +
+      `Come back and browse the store: ${ctaUrl}\n\n` +
       `Reply STOP to opt out.`,
   },
   product_followup: {
     purpose: 'followup',
     build: (firstName, storeName, ctaUrl) =>
       `Hi ${firstName}! Still thinking about what you saw at ${storeName}?\n\n` +
-      `We saved it for you. Take another look: ${ctaUrl}\n\n` +
+      `Take another look whenever you're ready: ${ctaUrl}\n\n` +
       `Reply STOP to opt out.`,
   },
 };

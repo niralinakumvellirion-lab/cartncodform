@@ -928,7 +928,9 @@ test('send template cart_reminder: uses followup purpose and cart_reminder copy'
   expect(res.body.purpose).toBe('followup');
   const decoded = decodeURIComponent(res.body.url);
   expect(decoded).toContain('left something in your cart');
-  expect(decoded).toContain('sells out');
+  expect(decoded).toContain("whenever you're ready");
+  // App Review 1.1.4: no invented scarcity in the reminder.
+  expect(decoded).not.toMatch(/sells? out|before it'?s gone|saved it for you/i);
 });
 
 test('send template cod_confirmation: uses order purpose and cod copy', async () => {

@@ -81,7 +81,7 @@ test('3. returns fallback copy when LLM_API_KEY is not set', async () => {
 test('4. returns fallback copy when the API call throws', async () => {
   global.fetch.mockRejectedValue(new Error('network down'));
   const r = await generateCopy(STORE, 'cart_abandon', PRODUCT, 'email');
-  expect(r.subject).toBe('We saved your cart');
+  expect(r.subject).toBe('You left items in your cart');
   expect(r.body).toMatch(/left items in your cart/);
 });
 

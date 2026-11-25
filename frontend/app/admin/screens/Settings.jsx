@@ -2400,28 +2400,34 @@ export default function Settings({ shop }) {
     return () => clearTimeout(t);
   }, [previewStep, previewMintsCode]);
 
+  // Example messages for the voice preview (App Review 1.1.4: only factual information). They make no claim
+  // the app cannot back with store data: no stock counts, deadlines, "new arrivals", "saved/reserved for
+  // you" or made-up product details. [product name] is filled in from the merchant's own store.
+  const PRODUCT = '[product name]';
   const previews = [
     {
       signal: 'Keeps coming back',
-      msg: `Still thinking about the Banarasi Silk Saree? Only 6 left${
+      msg: `Still thinking about ${PRODUCT}? Take another look whenever you're ready${
         voice.emoji ? ' ✨' : ''
       }.`,
     },
     {
       signal: 'Cart left behind',
-      msg: `Your Banarasi Silk Saree is waiting${
+      msg: `You left ${PRODUCT} in your cart${
         voice.emoji ? ' 🧡' : ''
-      }. We saved it for you.`,
+      }. Complete your order when you're ready.`,
     },
     {
       signal: 'Stopped at the price',
-      msg: "The Banarasi Silk Saree is handwoven over weeks — here's what goes into the price.",
+      msg: `Have a question about ${PRODUCT}? See the details and reviews before you decide.`,
     },
     {
       signal: 'Going quiet',
-      msg: `We've missed you. New silks just arrived.`,
+      msg: `It's been a while. Come back and browse the store any time.`,
     },
   ];
+  // The merchant's own store (not an invented one) under each example.
+  const previewFrom = voice.signOff || shop || 'your store';
 
   const channels = [
     {
@@ -2605,7 +2611,7 @@ export default function Settings({ shop }) {
                 onChange={(e) =>
                   setVoice((v) => ({ ...v, signOff: e.target.value }))
                 }
-                placeholder="e.g. Team Silk House"
+                placeholder="e.g. The team at your store"
                 style={{
                   flex: 1,
                   padding: '8px 12px',
@@ -3402,6 +3408,10 @@ export default function Settings({ shop }) {
               Preview
             </div>
 
+            <p style={{ fontSize: '11px', color: '#6b7280', lineHeight: '1.5', margin: '-8px 0 12px' }}>
+              Examples. {PRODUCT} is filled in from your store. Messages never mention stock levels,
+              deadlines or new arrivals your store has not shown.
+            </p>
             {previews.map((preview, i) => (
               <div key={i} style={{ marginBottom: '12px' }}>
                 <div
@@ -3449,7 +3459,7 @@ export default function Settings({ shop }) {
                         marginTop: '2px',
                       }}
                     >
-                      {voice.signOff || 'shreesarees.in'} · now
+                      {previewFrom} · now
                     </div>
                   </div>
                 </div>

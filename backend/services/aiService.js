@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { isFactual } = require('../utils/factualCopy');
 const CopyCache = require('../models/CopyCache');
 const { buildCacheKey } = CopyCache;
 // AI-written copy is a Growth/Pro feature (utils/plans.js). Other plans get the built-in templates.
@@ -22,14 +23,17 @@ const SYSTEM_PROMPT =
   "You are a retention copywriter for an Indian D2C Shopify store. " +
   "Write in the store's voice. Be concise, warm, and direct. " +
   'Never mention competitor brands. Never make up discounts or ' +
-  "promises the store hasn't offered. Output only valid JSON.";
+  "promises the store hasn't offered. Use only facts given in the input: never claim stock levels or " +
+  'scarcity (e.g. "only 3 left", "selling fast"), deadlines, new arrivals or collections, that an item ' +
+  'is saved or reserved, how many people viewed or bought something, or product details you were not ' +
+  'given. Output only valid JSON.';
 
 const FALLBACK_PUSH = {
   title: 'You left something behind',
   body: 'Come back and complete your order.',
 };
 const FALLBACK_EMAIL = {
-  subject: 'We saved your cart',
+  subject: 'You left items in your cart',
   body: 'Hi,\n\nYou left items in your cart. Come back anytime.\n\nThanks',
 };
 const BIRTHDAY_FALLBACK_PUSH = {
@@ -43,6 +47,14 @@ const BIRTHDAY_FALLBACK_EMAIL = {
 
 function hasKey() {
   return Boolean(process.env.LLM_API_KEY);
+}
+
+// An automatic message must not carry a claim the app cannot back with store data (App Review 1.1.4).
+// AI copy (fresh or cached) with such a claim is replaced by the factual built-in template.
+function factualOr(copy, fallback, signalType) {
+  if (isFactual([copy.title, copy.body, copy.subject], { signalType })) return copy;
+  console.warn(`[ai] copy for ${signalType} made an unbacked claim; using the built-in template`);
+  return fallback;
 }
 
 async function anthropic(userPrompt, { maxTokens = 500, system = null, signal = null } = {}) {
@@ -100,7 +112,11 @@ async function generateCopy(store, signalType, product, channel) {
     const hit = await CopyCache.findOne({ cacheKey });
     if (hit) {
       console.log(`[ai] cache hit for ${cacheKey.slice(0, 8)}`);
-      return { title: hit.title || '', body: hit.body || '', subject: hit.subject || '' };
+      return factualOr(
+        { title: hit.title || '', body: hit.body || '', subject: hit.subject || '' },
+        { title: fallback.title || '', body: fallback.body || '', subject: fallback.subject || '' },
+        signalType
+      );
     }
   } catch (err) {
     console.warn('[ai] cache lookup failed:', err.message);
@@ -146,11 +162,15 @@ async function generateCopy(store, signalType, product, channel) {
     return { title: fallback.title || '', body: fallback.body || '', subject: fallback.subject || '' };
   }
 
-  const result = {
-    title: parsed.title || fallback.title || '',
-    body: parsed.body || fallback.body || '',
-    subject: parsed.subject || fallback.subject || '',
-  };
+  const result = factualOr(
+    {
+      title: parsed.title || fallback.title || '',
+      body: parsed.body || fallback.body || '',
+      subject: parsed.subject || fallback.subject || '',
+    },
+    { title: fallback.title || '', body: fallback.body || '', subject: fallback.subject || '' },
+    signalType
+  );
 
   // 4. cache it
   try {
@@ -183,13 +203,14 @@ async function generateCopy(store, signalType, product, channel) {
 // neither is currently in server.js's EMAIL_SIGNAL_TYPES gate, so that
 // fallback is not reachable today, but is kept for forward-compatibility.
 const SIGNAL_EMAIL_TEMPLATES = {
+  // Factual only (App Review 1.1.4): no stock, deadline, "new arrivals" or "saved for you" claims.
   cart_abandon: {
-    subject: 'Your cart is waiting for you',
-    body: 'You left something behind. Come back and complete your order before it sells out.',
+    subject: 'You left something in your cart',
+    body: "You left something behind. Come back and complete your order whenever you're ready.",
   },
   checkout_abandon: {
     subject: 'Almost there — complete your order',
-    body: 'You were so close! Your order is saved. Complete checkout now.',
+    body: "You were so close! Come back and complete checkout whenever you're ready.",
   },
   high_intent: {
     subject: 'We noticed your interest',
@@ -197,15 +218,15 @@ const SIGNAL_EMAIL_TEMPLATES = {
   },
   price_hesitation: {
     subject: 'Still thinking about it?',
-    body: "Great products are worth it. Here's why our customers love what you've been looking at.",
+    body: 'Take another look at the details of what you were viewing before you decide.',
   },
   lapsing: {
     subject: 'We miss you!',
-    body: "It's been a while. Come back and see what's new — we've added exciting products.",
+    body: "It's been a while. Come back and browse the store whenever you like.",
   },
   winback: {
     subject: 'A special message for you',
-    body: "We'd love to have you back. New collection just dropped with styles we think you'll love.",
+    body: "We'd love to have you back. Take a look around the store whenever you're ready.",
   },
   post_purchase_d3: {
     subject: 'How are you enjoying your purchase?',
@@ -213,7 +234,7 @@ const SIGNAL_EMAIL_TEMPLATES = {
   },
   back_in_stock: {
     subject: "It's back in stock!",
-    body: "Great news — a product you were interested in is back in stock. Grab it before it's gone.",
+    body: 'Great news — a product you were interested in is back in stock.',
   },
   price_drop: {
     subject: 'Price just dropped on your saved item',
@@ -255,7 +276,11 @@ async function generateEmailCopy(shopDomain, signal, voice, profileData) {
     const hit = await CopyCache.findOne({ cacheKey });
     if (hit) {
       console.log(`[ai] email copy cache hit for ${cacheKey.slice(0, 8)}`);
-      return { subject: hit.subject || template.subject, body: hit.body || template.body };
+      return factualOr(
+        { subject: hit.subject || template.subject, body: hit.body || template.body },
+        template,
+        signalType
+      );
     }
   } catch (err) {
     console.warn('[ai] email copy cache lookup failed:', err.message);
@@ -282,10 +307,14 @@ async function generateEmailCopy(shopDomain, signal, voice, profileData) {
 
     const out = await anthropic(userPrompt, { maxTokens: 500, system: SYSTEM_PROMPT });
     const parsed = parseJsonBlock(out.text);
-    const result = {
-      subject: parsed.subject || template.subject,
-      body: parsed.body || template.body,
-    };
+    const result = factualOr(
+      {
+        subject: parsed.subject || template.subject,
+        body: parsed.body || template.body,
+      },
+      template,
+      signalType
+    );
 
     // 4. cache it
     try {
@@ -386,7 +415,7 @@ const FALLBACK_TEMPLATE = {
   },
   normal: {
     subject: 'An update from our store',
-    body: "We wanted to share a quick update with you.\n\nThere are a few new things in the store worth checking out.\n\nThank you for your continued support.",
+    body: "We wanted to share a quick update with you.\n\nTake a look at the store when you get a chance.\n\nThank you for your continued support.",
     offerText: null,
   },
 };
@@ -499,4 +528,8 @@ async function generateTemplateCopy(shopDomain, shopName, type, productTitle, vo
   return result;
 }
 
-module.exports = { generateCopy, generateEmailCopy, generateWeeklyNarrative, generateInsights, generateTemplateCopy };
+module.exports = {
+  generateCopy, generateEmailCopy, generateWeeklyNarrative, generateInsights, generateTemplateCopy,
+  // Built-in copy, exported for the factual-copy tests (App Review 1.1.4).
+  _builtInCopy: { SIGNAL_EMAIL_TEMPLATES, FALLBACK_PUSH, FALLBACK_EMAIL, FALLBACK_TEMPLATE, SYSTEM_PROMPT },
+};
