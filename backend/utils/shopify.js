@@ -4,7 +4,12 @@ const Store = require('../models/Store');
 
 const SHOPIFY_API_KEY = process.env.SHOPIFY_API_KEY;
 const SHOPIFY_API_SECRET = process.env.SHOPIFY_API_SECRET;
-const SCOPES = 'read_orders,read_products,write_discounts';
+// Must match [access_scopes] in the app's toml. The dev app (shopify.app.dev.toml) also needs
+// write_app_proxy, so backend/.env.dev sets SHOPIFY_SCOPES; the live app keeps the default.
+const DEFAULT_SCOPES = 'read_orders,read_products,write_discounts';
+const SCOPES = /^[a-z_,]+$/.test(process.env.SHOPIFY_SCOPES || '')
+  ? process.env.SHOPIFY_SCOPES
+  : DEFAULT_SCOPES;
 const API_VERSION = '2026-10';
 
 /**

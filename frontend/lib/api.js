@@ -114,7 +114,8 @@ async function fetchWithTimeout(url, options, method) {
 export function buildShopifyAdminAppUrl(shop, path) {
   if (!shop || !shop.endsWith('.myshopify.com')) return path;
   const storeHandle = shop.replace(/\.myshopify\.com$/, '');
-  const appHandle = 'cartncod-form';
+  // Live app: 'cartncod-form'. The dev app sets NEXT_PUBLIC_SHOPIFY_APP_HANDLE in .env.development.local.
+  const appHandle = process.env.NEXT_PUBLIC_SHOPIFY_APP_HANDLE || 'cartncod-form';
   return `https://admin.shopify.com/store/${storeHandle}/apps/${appHandle}${path}`;
 }
 

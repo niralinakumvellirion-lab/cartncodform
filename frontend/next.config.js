@@ -57,7 +57,11 @@ const nextConfig = {
   async rewrites() {
     if (isProd) return [];
     const devBackend = process.env.DEV_BACKEND_ORIGIN || 'http://localhost:4000';
-    return [{ source: '/api/:path*', destination: `${devBackend}/api/:path*` }];
+    return [
+      { source: '/api/:path*', destination: `${devBackend}/api/:path*` },
+      // Storefront app proxy (shop.com/apps/cartncodform/* → tunnel → here → backend).
+      { source: '/apps/:path*', destination: `${devBackend}/apps/:path*` },
+    ];
   },
 
   async headers() {

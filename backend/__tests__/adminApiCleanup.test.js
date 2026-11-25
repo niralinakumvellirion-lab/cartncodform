@@ -313,7 +313,8 @@ describe('Guard: SCOPES in shopify.js matches shopify.app.toml', () => {
     const jsText   = fs.readFileSync(shopifyJsPath, 'utf8');
     const tomlText = fs.readFileSync(tomlPath, 'utf8');
 
-    const jsMatch   = jsText.match(/const SCOPES\s*=\s*'([^']+)'/);
+    // The live default (SHOPIFY_SCOPES in .env.dev only overrides it for the dev app).
+    const jsMatch   = jsText.match(/const DEFAULT_SCOPES\s*=\s*'([^']+)'/);
     const tomlMatch = tomlText.match(/scopes\s*=\s*"([^"]+)"/);
 
     expect(jsMatch).not.toBeNull();

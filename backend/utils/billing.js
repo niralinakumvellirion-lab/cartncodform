@@ -117,8 +117,8 @@ async function createSubscription(shop, accessToken, returnUrl, isTest) {
   };
 }
 
-// The app's handle in Shopify admin URLs (same value as APP_HANDLE in routes/auth.js).
-const APP_HANDLE = 'cartncod-form';
+// The app's handle in Shopify admin URLs ('cartncod-form' live; dev app overrides via env).
+const { APP_HANDLE } = require('./appHandle');
 
 /**
  * When the app's pricing is set in the Partner/Dev Dashboard (Shopify "managed" App Pricing), Shopify

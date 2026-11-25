@@ -1,4 +1,5 @@
-# DEV app only — "ShopiReachBoost AI Dev". Install on the dev store (cartncod-form) for testing.
+# DEV app only — "ShopiReachBoost AI Dev". Test store: srb-dev-test.myshopify.com. Use a store that does NOT have
+# the live app (both apps use the /apps/cartncodform storefront path).
 # The live app under review is shopify.app.toml; never run `shopify app deploy --config shopify.app.toml` while testing.
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
@@ -10,8 +11,8 @@ application_url = "https://subsonic-regain-bounce.ngrok-free.dev/admin"
 embedded = true
 
 [access_scopes]
-# Same scopes as the live app.
-scopes = "read_orders,read_products,write_discounts"
+# Live scopes + write_app_proxy (Shopify requires it for an app proxy). backend/.env.dev SHOPIFY_SCOPES matches.
+scopes = "read_orders,read_products,write_discounts,write_app_proxy"
 
 [auth]
 # Backend (Express, `npm run dev:local` in backend/); the admin forwards /api/* to it in dev.
@@ -19,6 +20,14 @@ redirect_urls = [
   "https://subsonic-regain-bounce.ngrok-free.dev/api/auth/callback",
   "https://subsonic-regain-bounce.ngrok-free.dev/api/auth/billing/callback"
 ]
+
+[app_proxy]
+# Storefront widgets call shop.com/apps/cartncodform/... — for the dev app that reaches the backend
+# on this computer (tunnel → admin → backend). Only use the dev app on a store WITHOUT the live app:
+# two apps cannot share the same proxy path on one store.
+url = "https://subsonic-regain-bounce.ngrok-free.dev/apps/cartncodform"
+subpath = "cartncodform"
+prefix = "apps"
 
 [webhooks]
 # Same API version as the live app. No webhook subscriptions: Shopify cannot reach localhost.

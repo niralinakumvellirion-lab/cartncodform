@@ -19,8 +19,9 @@ const { tierFromSubscriptionName } = require('../utils/plans');
 
 const router = express.Router();
 
-// Embedded-app URL handle in Shopify admin (same value as frontend/lib/api.js).
-const APP_HANDLE = 'cartncod-form';
+// Embedded-app URL handle in Shopify admin. Live: 'cartncod-form'. The dev app sets
+// SHOPIFY_APP_HANDLE in backend/.env.dev (see utils/appHandle.js).
+const { APP_HANDLE } = require('../utils/appHandle');
 
 // Build the public base URL of THIS backend. In production BACKEND_URL must be
 // set (e.g. https://api.shopireachboost.com) so the OAuth redirect_uri
