@@ -54,6 +54,9 @@ const codOrderSchema = new mongoose.Schema({
   tierDiscount: {
     percent: { type: Number, default: 0 },
     amount:  { type: Number, default: 0 },
+    // Perks of the reached tier — the merchant fulfils these on the COD order by hand.
+    freeShipping: { type: Boolean, default: false },
+    freeGift:     { type: String, default: '' },   // gift title
   },
   createdAt: {
     type: Date,

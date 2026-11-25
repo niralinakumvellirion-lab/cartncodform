@@ -145,7 +145,9 @@ describe('run() — multiple products', () => {
     const result = run(makeInput([variantLine('P1', 'V1', 3)]));
     expect(result.operations).toHaveLength(1);
     expect(result.operations[0].productDiscountsAdd).toBeDefined();
-    expect(result.operations[0].productDiscountsAdd.selectionStrategy).toBe('FIRST');
+    // ALL: each candidate targets different lines (one product each, or the free gift line), so
+    // every product that reaches a tier is discounted. FIRST applied only the first product.
+    expect(result.operations[0].productDiscountsAdd.selectionStrategy).toBe('ALL');
   });
 });
 

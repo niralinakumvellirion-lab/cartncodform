@@ -1,8 +1,17 @@
 query CartInput {
+  presentmentCurrencyRate
   cart {
+    cost {
+      subtotalAmount {
+        currencyCode
+      }
+    }
     lines {
       id
       quantity
+      giftAttribute: attribute(key: "_ccf_gift") {
+        value
+      }
       merchandise {
         __typename
         ... on ProductVariant {

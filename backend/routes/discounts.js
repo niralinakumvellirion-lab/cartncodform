@@ -10,7 +10,7 @@ const TOKEN_FIELDS =
   'shopDomain accessToken accessTokenExpiresAt refreshToken refreshTokenExpiresAt onlineAccessToken onlineTokenExpiresAt';
 const {
   sanitizeTiers, sanitizeAccentColor, DEFAULT_ACCENT,
-  LAYOUTS: TIER_LAYOUTS, sanitizeTierDisplay,
+  LAYOUTS: TIER_LAYOUTS, sanitizeTierDisplay, DISCOUNT_TYPES: TIER_DISCOUNT_TYPES,
 } = require('../utils/quantityTiers');
 const tierSync = require('../services/tierSync');
 
@@ -75,11 +75,13 @@ function defaultConfig(shop) {
       accentColor: DEFAULT_ACCENT,
       layout: 'cards',
       scope: 'all',
+      discountType: 'percent',
       topLabel: '',
       footerNote: '',
       showCompareAt: true,
       showTotal: true,
       showSingle: false,
+      variantPicker: false,
       tiers: [
         { minQty: 2, percent: 10, badge: '', subtitle: '' },
         { minQty: 3, percent: 15, badge: 'Most popular', subtitle: '' },
@@ -672,14 +674,24 @@ router.patch('/:shopDomain/config', requireAuth, requireStoreOwner, async (req, 
       }
       const display = sanitizeTierDisplay(qt);
       for (const k of Object.keys(display)) set[`quantityTiers.${k}`] = display[k];
+      // The discount type and the tier values belong together (percent vs amount per tier), so a
+      // type change must come with its tiers. Tiers sent alone are percent tiers (older clients).
+      if (qt.discountType !== undefined) {
+        if (!TIER_DISCOUNT_TYPES.includes(qt.discountType))
+          return res.status(400).json({ error: 'quantityTiers.discountType must be "percent" or "amount"' });
+        if (qt.tiers === undefined)
+          return res.status(400).json({ error: 'quantityTiers.discountType must be sent together with tiers' });
+      }
       if (qt.tiers !== undefined) {
+        const discountType = qt.discountType || 'percent';
         let validated;
         try {
-          validated = sanitizeTiers(qt.tiers);
+          validated = sanitizeTiers(qt.tiers, discountType);
         } catch (e) {
           return res.status(400).json({ error: `quantityTiers.tiers: ${e.message}` });
         }
         set['quantityTiers.tiers'] = validated;
+        set['quantityTiers.discountType'] = discountType;
         doTierSync = true;
       }
     }

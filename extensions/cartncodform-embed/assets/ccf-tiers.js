@@ -101,6 +101,8 @@
   // ── Variant price fetch ────────────────────────────────────────────────────
 
   var priceCache = Object.create(null);
+  // Full product JSON per handle (options + variants) for the per-item colour/size picker.
+  var productCache = Object.create(null);
 
   function getVariantPrice(handle, variantId) {
     var key = handle + ':' + variantId;
@@ -109,6 +111,7 @@
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!d || !Array.isArray(d.variants)) return null;
+        productCache[handle] = d;
         d.variants.forEach(function (v) {
           priceCache[handle + ':' + v.id] = v.price; // Shopify price is in minor units (paise)
         });
@@ -198,6 +201,17 @@
       '.ccf-qt-footer-note{font-weight:700;color:#0F766E}',
       '.ccf-qt-footer-total{font-weight:800;margin-left:auto}',
       '@container ccf-qt (max-width:330px){.ccf-qt-layout-rows .ccf-qt-card{padding:12px 10px;gap:8px}.ccf-qt-row-title,.ccf-qt-row-total{font-size:14px}}',
+      // ── Per-item colour / size picker ──
+      '.ccf-qt-picker{margin:4px 0 0;padding:12px;border-radius:10px;background:#F6F7F9;display:flex;flex-direction:column;gap:8px}',
+      '.ccf-qt-picker-title{font-size:13px;font-weight:800;color:#171A22}',
+      '.ccf-qt-pick-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}',
+      '.ccf-qt-pick-label{font-size:12px;font-weight:700;color:#4A5062;min-width:48px}',
+      '.ccf-qt-pick-row select{flex:1 1 110px;min-width:0;font:inherit;font-size:13px;padding:6px 8px;border:1px solid #C7CBD6;border-radius:8px;background:#fff;color:#171A22}',
+      '.ccf-qt-pick-err{flex-basis:100%;font-size:12px;font-weight:700;color:#B42318}',
+      '.ccf-qt-picker-msg{font-size:12px;font-weight:700;color:#B42318}',
+      // ── Tier perks (free shipping / free gift) ──
+      '.ccf-qt-perks{font-size:12px;font-weight:700;color:#0F766E;line-height:1.35}',
+      '.ccf-qt-card .ccf-qt-perks{font-size:11px}',
       // ── Savings ──
       '.ccf-qt-savings{font-size:13px;font-weight:700;color:#0F766E;background:#E0F5F1;border-radius:8px;padding:8px 12px;margin-top:8px;display:none}',
       // ── Theme editor sample caption ──
@@ -239,6 +253,60 @@
     var showCompareAt = config.showCompareAt !== false;
     var showTotal = config.showTotal !== false;
     var showSingle = config.showSingle === true && tiers.length > 0 && tiers[0].minQty > 1;
+    // 'percent' off each item, or a flat 'amount' off the whole bundle (tier.amount, shop currency).
+    var isAmount = config.discountType === 'amount';
+
+    // Flat amount in the shopper's currency, in minor units (paise / cents).
+    function amountMinor(tier) {
+      var rate = Number(window.Shopify && window.Shopify.currency && window.Shopify.currency.rate) || 1;
+      return Math.round((Number(tier.amount) || 0) * rate * 100);
+    }
+
+    // Price of qty items under tier (minor units). Same rule as backend/utils/quantityTiers.tierTotal.
+    function totalMinor(qty, tier) {
+      var full = variantPricePaise * qty;
+      if (!tier) return full;
+      if (isAmount) return Math.max(0, full - amountMinor(tier));
+      return Math.round(discountedUnitPricePaise(variantPricePaise, tier.percent)) * qty;
+    }
+
+    // "10% off" / "10% OFF", or "Save ₹200" / "SAVE ₹200" for flat tiers.
+    function offText(tier, upper) {
+      if (isAmount) return (upper ? 'SAVE ' : 'Save ') + formatMoney(amountMinor(tier));
+      return tier.percent + (upper ? '% OFF' : '% off');
+    }
+
+    // Rewards for buying qty — they carry upward (a gift on "Buy 3+" also applies at 4+).
+    // Same rule as backend/utils/quantityTiers.perksFor and the checkout function.
+    function perksFor(qty) {
+      var out = { freeShipping: false, gift: null };
+      for (var i = 0; i < tiers.length; i++) {
+        var t = tiers[i];
+        if (!(t.minQty <= qty)) continue;
+        if (t.freeShipping) out.freeShipping = true;
+        if (t.gift && t.gift.variantId) out.gift = t.gift;
+      }
+      return out;
+    }
+
+    // "+ Free shipping · Free gift: Wax" for a tier (including rewards from lower tiers), '' if none.
+    function perksText(tier) {
+      if (!tier) return '';
+      var p = perksFor(tier.minQty);
+      var parts = [];
+      if (p.freeShipping) parts.push('Free shipping');
+      if (p.gift) parts.push('Free gift: ' + String(p.gift.title || 'gift').slice(0, 60));
+      return parts.length ? '+ ' + parts.join(' · ') : '';
+    }
+
+    function appendPerks(parent, tier) {
+      var text = perksText(tier);
+      if (!text) return;
+      var el = document.createElement('div');
+      el.className = 'ccf-qt-perks';
+      el.textContent = text;
+      parent.appendChild(el);
+    }
     var handle = String(wrap.getAttribute('data-handle') || '');
     var initialVariantId = String(wrap.getAttribute('data-variant-id') || '');
 
@@ -246,6 +314,14 @@
 
     var variantPricePaise = null;
     var currentQty = 1;
+
+    // ── Per-item colour / size picker state ──
+    var pickerOn = config.variantPicker === true && !isSample;
+    var MAX_PICK_ITEMS = 10;
+    var product = null;              // /products/<handle>.js once loaded
+    var pageVariantId = initialVariantId;
+    var picks = [];                  // variant id (string) chosen for item 1..n
+    var pickerMsgEl = null;
     var savingsEl = null;
     var cardEls = [];
 
@@ -253,6 +329,22 @@
 
     function findQtyInput() {
       return document.querySelector('form[action*="/cart/add"] input[name="quantity"]');
+    }
+
+    // Themes without a quantity box would add just 1 after the shopper picks "Buy 3": give the
+    // product form a hidden quantity field so its own Add to cart sends the chosen quantity.
+    function ensureQtyInput() {
+      var input = findQtyInput();
+      if (input) return input;
+      var form = document.querySelector('form[action*="/cart/add"]');
+      if (!form) return null;
+      input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = 'quantity';
+      input.value = '1';
+      input.setAttribute('data-ccf-qty', '1');
+      form.appendChild(input);
+      return input;
     }
 
     // ── COD link sync ────────────────────────────────────────────────────────
@@ -339,16 +431,16 @@
 
           var chip = document.createElement('div');
           chip.className = 'ccf-qt-chip';
-          chip.textContent = tier.percent + '% off';
+          chip.textContent = offText(tier, false);
           btn.appendChild(chip);
 
           if (variantPricePaise !== null) {
-            var discPaise = discountedUnitPricePaise(variantPricePaise, tier.percent);
             var priceEl = document.createElement('div');
             priceEl.className = 'ccf-qt-price';
-            priceEl.textContent = formatMoney(Math.round(discPaise)) + ' each';
+            priceEl.textContent = formatMoney(Math.round(totalMinor(tier.minQty, tier) / tier.minQty)) + ' each';
             btn.appendChild(priceEl);
           }
+          appendPerks(btn, tier);
         } else {
           // List layout: left side
           var left = document.createElement('div');
@@ -367,18 +459,18 @@
           left.appendChild(qtyRow);
 
           if (variantPricePaise !== null) {
-            var discPaiseL = discountedUnitPricePaise(variantPricePaise, tier.percent);
             var priceElL = document.createElement('div');
             priceElL.className = 'ccf-qt-list-price';
-            priceElL.textContent = formatMoney(Math.round(discPaiseL)) + ' each';
+            priceElL.textContent = formatMoney(Math.round(totalMinor(tier.minQty, tier) / tier.minQty)) + ' each';
             left.appendChild(priceElL);
           }
+          appendPerks(left, tier);
           btn.appendChild(left);
 
           // Right side: chip
           var chipL = document.createElement('div');
           chipL.className = 'ccf-qt-chip';
-          chipL.textContent = tier.percent + '% off';
+          chipL.textContent = offText(tier, false);
           btn.appendChild(chipL);
         }
 
@@ -388,7 +480,7 @@
             newQty = 1; // clicking active card → reset to 1
           }
           currentQty = newQty;
-          var qtyInput = findQtyInput();
+          var qtyInput = ensureQtyInput();
           if (qtyInput) {
             qtyInput.value = newQty;
             try { qtyInput.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
@@ -401,6 +493,8 @@
 
         container.appendChild(btn);
       });
+
+      renderPicker(wrap);
 
       savingsEl = document.createElement('div');
       savingsEl.className = 'ccf-qt-savings';
@@ -422,17 +516,13 @@
 
     function setQty(newQty) {
       currentQty = newQty;
-      var qtyInput = findQtyInput();
+      var qtyInput = ensureQtyInput();
       if (qtyInput) {
         qtyInput.value = newQty;
         try { qtyInput.dispatchEvent(new Event('input', { bubbles: true })); } catch (e) {}
         try { qtyInput.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) {}
       }
       syncCodLinks(newQty);
-    }
-
-    function unitPaise(percent) {
-      return percent > 0 ? Math.round(discountedUnitPricePaise(variantPricePaise, percent)) : variantPricePaise;
     }
 
     function renderRows() {
@@ -484,10 +574,10 @@
         var title = document.createElement('div');
         title.className = 'ccf-qt-row-title';
         title.appendChild(document.createTextNode(opt.qty === 1 ? '1 item' : opt.qty + ' items'));
-        if (opt.percent > 0) {
+        if (opt.tier) {
           var pill = document.createElement('span');
           pill.className = 'ccf-qt-pill';
-          pill.textContent = opt.percent + '% OFF';
+          pill.textContent = offText(opt.tier, true);
           title.appendChild(pill);
         }
         main.appendChild(title);
@@ -497,17 +587,19 @@
           sub.textContent = String(opt.subtitle).slice(0, 40);
           main.appendChild(sub);
         }
+        appendPerks(main, opt.tier);
         btn.appendChild(main);
 
         if (variantPricePaise !== null) {
-          var each = unitPaise(opt.percent);
+          var rowTotal = totalMinor(opt.qty, opt.tier);
+          var each = Math.round(rowTotal / opt.qty);
           var priceBox = document.createElement('div');
           priceBox.className = 'ccf-qt-row-price';
           var total = document.createElement('div');
           total.className = 'ccf-qt-row-total';
-          total.textContent = formatMoney(each * opt.qty);
+          total.textContent = formatMoney(rowTotal);
           priceBox.appendChild(total);
-          if (showCompareAt && opt.percent > 0) {
+          if (showCompareAt && opt.tier && rowTotal < variantPricePaise * opt.qty) {
             var compare = document.createElement('s');
             compare.className = 'ccf-qt-row-compare';
             compare.textContent = formatMoney(variantPricePaise * opt.qty);
@@ -530,13 +622,13 @@
         });
 
         container.appendChild(btn);
+        if (isActive) renderPicker(container);
       });
 
       var note = footerNote;
       var totalText = '';
       if (showTotal && variantPricePaise !== null) {
-        var unit = activeTier ? unitPaise(activeTier.percent) : variantPricePaise;
-        totalText = 'Total: ' + formatMoney(unit * currentQty);
+        totalText = 'Total: ' + formatMoney(totalMinor(currentQty, activeTier));
       }
       if (note || totalText) {
         var footer = document.createElement('div');
@@ -571,9 +663,7 @@
       if (!savingsEl) return;
       var activeTier = pickTier(tiers, currentQty);
       if (activeTier && variantPricePaise !== null) {
-        var discPaise = Math.round(discountedUnitPricePaise(variantPricePaise, activeTier.percent));
-        var savingPerUnit = variantPricePaise - discPaise;
-        var totalSaving = savingPerUnit * currentQty;
+        var totalSaving = variantPricePaise * currentQty - totalMinor(currentQty, activeTier);
         if (totalSaving > 0) {
           savingsEl.textContent = 'You save ' + formatMoney(totalSaving);
           savingsEl.style.display = '';
@@ -583,14 +673,202 @@
       savingsEl.style.display = 'none';
     }
 
+    // ── Per-item colour / size picker ────────────────────────────────────────
+    // One row per item with a <select> per product option (Color, Size...). Each item's variant is
+    // kept in picks[]; at add-to-cart the items are grouped by variant (see submitPicks).
+
+    function hasChoices() {
+      return !!(product && Array.isArray(product.variants) && product.variants.length > 1 &&
+        Array.isArray(product.options) && product.options.length > 0);
+    }
+
+    function pickerVisible() {
+      return pickerOn && hasChoices() && currentQty >= 2 && currentQty <= MAX_PICK_ITEMS;
+    }
+
+    function variantById(id) {
+      if (!product) return null;
+      for (var i = 0; i < product.variants.length; i++) {
+        if (String(product.variants[i].id) === String(id)) return product.variants[i];
+      }
+      return null;
+    }
+
+    function variantByOptions(values) {
+      if (!product) return null;
+      for (var i = 0; i < product.variants.length; i++) {
+        var v = product.variants[i];
+        var opts = v.options || [];
+        var ok = true;
+        for (var j = 0; j < values.length; j++) {
+          if (String(opts[j]) !== String(values[j])) { ok = false; break; }
+        }
+        if (ok) return v;
+      }
+      return null;
+    }
+
+    function defaultPickId() {
+      var v = variantById(pageVariantId) || (product && product.variants[0]);
+      return v ? String(v.id) : '';
+    }
+
+    // picks[] gets exactly currentQty entries; new items start on the page's variant.
+    function syncPicks() {
+      var n = currentQty;
+      if (picks.length > n) picks = picks.slice(0, n);
+      while (picks.length < n) picks.push(defaultPickId());
+    }
+
+    // '' when the item's variant can be added, otherwise the reason.
+    function pickProblem(id) {
+      var v = variantById(id);
+      if (!v) return 'This combination is not available';
+      if (v.available === false) return 'Sold out \u2014 choose another option';
+      return '';
+    }
+
+    function optionValues(opt, index) {
+      if (opt && Array.isArray(opt.values) && opt.values.length) return opt.values;
+      var seen = [];
+      product.variants.forEach(function (v) {
+        var val = v.options && v.options[index];
+        if (val != null && seen.indexOf(val) === -1) seen.push(val);
+      });
+      return seen;
+    }
+
+    function renderPicker(parent) {
+      if (!pickerVisible()) return;
+      syncPicks();
+      var panel = document.createElement('div');
+      panel.className = 'ccf-qt-picker';
+      var title = document.createElement('div');
+      title.className = 'ccf-qt-picker-title';
+      title.textContent = 'Choose for each item';
+      panel.appendChild(title);
+
+      picks.forEach(function (id, i) {
+        var row = document.createElement('div');
+        row.className = 'ccf-qt-pick-row';
+        var label = document.createElement('span');
+        label.className = 'ccf-qt-pick-label';
+        label.textContent = 'Item ' + (i + 1);
+        row.appendChild(label);
+
+        var current = variantById(id) || variantById(defaultPickId());
+        var selects = [];
+        var err = document.createElement('span');
+        err.className = 'ccf-qt-pick-err';
+
+        product.options.forEach(function (opt, oi) {
+          var name = typeof opt === 'string' ? opt : (opt && opt.name) || ('Option ' + (oi + 1));
+          var sel = document.createElement('select');
+          sel.setAttribute('aria-label', 'Item ' + (i + 1) + ' ' + name);
+          optionValues(opt, oi).forEach(function (val) {
+            var o = document.createElement('option');
+            o.value = String(val);
+            o.textContent = String(val);
+            if (current && current.options && String(current.options[oi]) === String(val)) o.selected = true;
+            sel.appendChild(o);
+          });
+          sel.addEventListener('change', function () {
+            var values = selects.map(function (x) { return x.value; });
+            var v = variantByOptions(values);
+            picks[i] = v ? String(v.id) : '';
+            err.textContent = pickProblem(picks[i]);
+          });
+          selects.push(sel);
+          row.appendChild(sel);
+        });
+
+        err.textContent = pickProblem(id);
+        row.appendChild(err);
+        panel.appendChild(row);
+      });
+
+      var msg = document.createElement('div');
+      msg.className = 'ccf-qt-picker-msg';
+      msg.setAttribute('role', 'alert');
+      panel.appendChild(msg);
+      pickerMsgEl = msg;
+      parent.appendChild(panel);
+    }
+
+    function formVariantId(form) {
+      var idEl = form && form.querySelector('[name="id"]');
+      return idEl ? String(idEl.value || '') : pageVariantId;
+    }
+
+    // Our own add only when an item differs from the form's variant; otherwise the theme adds as usual.
+    function shouldTakeOver(form, qty) {
+      if (!pickerOn || !hasChoices() || qty < 2 || qty > MAX_PICK_ITEMS || qty !== currentQty) return false;
+      syncPicks();
+      var fid = formVariantId(form);
+      return picks.some(function (id) { return id !== fid; });
+    }
+
+    function submitPicks(qty) {
+      syncPicks();
+      for (var i = 0; i < picks.length; i++) {
+        var problem = pickProblem(picks[i]);
+        if (problem) {
+          if (pickerMsgEl) pickerMsgEl.textContent = 'Item ' + (i + 1) + ': ' + problem;
+          return;
+        }
+      }
+      if (pickerMsgEl) pickerMsgEl.textContent = '';
+      var counts = {};
+      var order = [];
+      picks.forEach(function (id) {
+        if (!counts[id]) { counts[id] = 0; order.push(id); }
+        counts[id] += 1;
+      });
+      var items = order.map(function (id) { return { id: Number(id), quantity: counts[id] }; });
+      var gift = perksFor(qty).gift;
+      var giftId = gift && /^\d+$/.test(String(gift.variantId || '')) ? Number(gift.variantId) : null;
+
+      fetch('/cart.js', { headers: { Accept: 'application/json' } })
+        .then(function (r) { return r.json(); })
+        .catch(function () { return null; })
+        .then(function (cart) {
+          var inCart = giftId && cart && (cart.items || []).some(function (it) {
+            return it.variant_id === giftId && it.properties && it.properties._ccf_gift;
+          });
+          if (giftId && !inCart) items.push({ id: giftId, quantity: 1, properties: { _ccf_gift: '1' } });
+          return fetch('/cart/add.js', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ items: items }),
+          });
+        })
+        .then(function (r) {
+          if (r && r.ok) {
+            goToCart();
+          } else if (pickerMsgEl) {
+            pickerMsgEl.textContent = 'Could not add to cart. Please try again.';
+          }
+        })
+        .catch(function () {
+          if (pickerMsgEl) pickerMsgEl.textContent = 'Could not add to cart. Please try again.';
+        });
+    }
+
+    // Separate so tests can replace it (jsdom cannot navigate).
+    function goToCart() {
+      if (typeof window.__ccfQtGoToCart === 'function') { window.__ccfQtGoToCart(); return; }
+      window.location.href = '/cart';
+    }
+
     // ── Quantity tracking ─────────────────────────────────────────────────────
 
     function onQtyInput(newQty) {
       if (typeof newQty !== 'number' || !isFinite(newQty) || newQty < 1) return;
       currentQty = Math.floor(newQty);
       syncCodLinks(currentQty);
-      if (layout === 'rows') {
-        // Rows show the total for the chosen quantity, so redraw instead of only moving the highlight.
+      if (layout === 'rows' || pickerVisible()) {
+        // Rows show the total for the chosen quantity, and the picker needs one row per item,
+        // so redraw instead of only moving the highlight.
         render();
         return;
       }
@@ -607,12 +885,76 @@
 
     function updateVariant(variantId) {
       if (!handle) return;
+      // Items still on the old page variant follow the shopper's new choice on the page.
+      var old = pageVariantId;
+      pageVariantId = String(variantId || '');
+      picks = picks.map(function (id) { return id === old ? pageVariantId : id; });
       getVariantPrice(handle, variantId).then(function (price) {
         if (price !== null) {
           variantPricePaise = price;
           render();
         }
       });
+    }
+
+    // ── Free gift: add it to the cart when a gift tier is added ─────────────────
+    // The gift goes in as its own line with the hidden property _ccf_gift=1; the checkout function
+    // makes one unit of it free while the tier is reached (and never counts it toward a tier).
+    // "Buy it now" skips the cart, so it gets no gift.
+
+    function addGiftIfNeeded(qty) {
+      var gift = perksFor(qty).gift;
+      if (!gift || !/^\d+$/.test(String(gift.variantId || '')) || window.__ccfQtGiftAdding || isSample) return;
+      window.__ccfQtGiftAdding = true;
+      var giftId = Number(gift.variantId);
+      // Let the theme's own add-to-cart finish first, then check the cart.
+      setTimeout(function () {
+        fetch('/cart.js', { headers: { Accept: 'application/json' } })
+          .then(function (r) { return r.json(); })
+          .then(function (cart) {
+            var items = (cart && cart.items) || [];
+            var already = items.some(function (it) {
+              return it.variant_id === giftId && it.properties && it.properties._ccf_gift;
+            });
+            if (already) return null;
+            return fetch('/cart/add.js', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify({ items: [{ id: giftId, quantity: 1, properties: { _ccf_gift: '1' } }] }),
+            }).then(function (r) {
+              if (r && r.ok) {
+                try { document.dispatchEvent(new CustomEvent('ccf:gift-added', { detail: { variantId: giftId } })); } catch (e) {}
+              }
+            });
+          })
+          .catch(function () {})
+          .then(function () { window.__ccfQtGiftAdding = false; });
+      }, 1200);
+    }
+
+    // One page-wide submit listener, always calling the newest widget (the theme editor re-runs
+    // the block without a page load; extra listeners would add the gift more than once).
+    window.__ccfQtOnCartSubmit = function (form, e) {
+      var qtyEl = form.querySelector('input[name="quantity"]');
+      var qty = qtyEl ? parseInt(qtyEl.value, 10) : currentQty;
+      qty = isFinite(qty) && qty > 0 ? qty : currentQty;
+      if (shouldTakeOver(form, qty)) {
+        // Items with different colours/sizes: stop the theme's single-variant add and add each
+        // variant ourselves (plus the free gift), then open the cart.
+        if (e) { e.preventDefault(); e.stopImmediatePropagation(); }
+        submitPicks(qty);
+        return;
+      }
+      addGiftIfNeeded(qty);
+    };
+    if (!window.__ccfQtSubmitBound) {
+      window.__ccfQtSubmitBound = true;
+      document.addEventListener('submit', function (e) {
+        var form = e.target;
+        if (!form || !form.getAttribute) return;
+        if (String(form.getAttribute('action') || '').indexOf('/cart/add') === -1) return;
+        if (typeof window.__ccfQtOnCartSubmit === 'function') window.__ccfQtOnCartSubmit(form, e);
+      }, true);
     }
 
     // ── Event listeners ───────────────────────────────────────────────────────
@@ -657,8 +999,15 @@
 
     if (handle) {
       getVariantPrice(handle, initialVariantId).then(function (price) {
+        var hadProduct = !!product;
+        product = productCache[handle] || null;
+        if (!pageVariantId && product && product.variants && product.variants[0]) {
+          pageVariantId = String(product.variants[0].id);
+        }
         if (price !== null && price !== variantPricePaise) {
           variantPricePaise = price;
+          render();
+        } else if (!hadProduct && pickerVisible()) {
           render();
         }
       });

@@ -1,0 +1,28 @@
+query DeliveryInput {
+  cart {
+    deliveryGroups {
+      id
+    }
+    lines {
+      id
+      quantity
+      giftAttribute: attribute(key: "_ccf_gift") {
+        value
+      }
+      merchandise {
+        __typename
+        ... on ProductVariant {
+          id
+          product {
+            id
+          }
+        }
+      }
+    }
+  }
+  discount {
+    metafield(namespace: "cartncodform", key: "function-configuration") {
+      jsonValue
+    }
+  }
+}

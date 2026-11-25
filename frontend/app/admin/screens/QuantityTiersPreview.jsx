@@ -79,14 +79,58 @@ function defaultSelectedIdx(tiers) {
 export function buildRowOptions(tiers, showSingle) {
   const rows = tiers.map((t) => ({
     qty: Number(t.minQty),
-    percent: Number(t.percent),
+    percent: Number(t.percent) || 0,
+    amount: Number(t.amount) || 0,
+    discounted: true,
     badge: t.badge || '',
     subtitle: t.subtitle || '',
+    ...(t.freeShipping ? { freeShipping: true } : {}),
+    ...(t.gift && t.gift.variantId ? { gift: t.gift } : {}),
   }));
   if (showSingle && rows.length && rows[0].qty > 1) {
-    rows.unshift({ qty: 1, percent: 0, badge: '', subtitle: 'Standard price' });
+    rows.unshift({ qty: 1, percent: 0, amount: 0, discounted: false, badge: '', subtitle: 'Standard price' });
   }
   return rows;
+}
+
+/**
+ * Price of `qty` items under a tier — same rule as backend/utils/quantityTiers.tierTotal:
+ * flat 'amount' off the bundle (never below 0), or % off each item rounded per item.
+ * `tier` is any object with percent / amount; null = full price.
+ */
+export function bundleTotal(price, qty, tier, discountType) {
+  const full = Math.round(price * qty * 100) / 100;
+  if (!tier || tier.discounted === false) return full;
+  if (discountType === 'amount') return Math.max(0, Math.round((full - (Number(tier.amount) || 0)) * 100) / 100);
+  return Math.round(discountedUnitPrice(price, Number(tier.percent) || 0) * qty * 100) / 100;
+}
+
+/**
+ * "+ Free shipping · Free gift: Wax" (same text as the storefront widget), '' when no perks.
+ * Rewards carry upward: pass all tiers and a tier's rewards include those of lower tiers.
+ */
+export function perksText(tier, allTiers) {
+  if (!tier) return '';
+  const minQty = Number(tier.minQty != null ? tier.minQty : tier.qty);
+  let ship = false;
+  let gift = null;
+  for (const t of allTiers || [tier]) {
+    if (!(Number(t.minQty != null ? t.minQty : t.qty) <= minQty)) continue;
+    if (t.freeShipping) ship = true;
+    if (t.gift && t.gift.variantId) gift = t.gift;
+  }
+  const parts = [];
+  if (ship) parts.push('Free shipping');
+  if (gift) parts.push(`Free gift: ${String(gift.title || 'gift').slice(0, 60)}`);
+  return parts.length ? `+ ${parts.join(' · ')}` : '';
+}
+
+const PERK_STYLE = { display: 'block', fontSize: 12, fontWeight: 700, color: '#0F766E', marginTop: 2 };
+
+/** "10% off" / "10% OFF", or "Save ₹200" / "SAVE ₹200" for flat-amount tiers. */
+export function offLabel(tier, discountType, currencySymbol, upper) {
+  if (discountType === 'amount') return (upper ? 'SAVE ' : 'Save ') + money(currencySymbol, Number(tier.amount) || 0);
+  return `${tier.percent}${upper ? '% OFF' : '% off'}`;
 }
 
 function money(sym, n) {
@@ -105,7 +149,7 @@ function RowsPreview({ qt, tiers, accent, price, currencySymbol }) {
   const [sel, setSel] = useState(() => Math.min(showSingle ? 1 : 0, rows.length - 1));
   const active = rows[Math.min(sel, rows.length - 1)] || rows[0];
   const badgeText = pickReadableText(accent);
-  const unit = (pct) => (pct > 0 ? discountedUnitPrice(price, pct) : price);
+  const discountType = qt.discountType === 'amount' ? 'amount' : 'percent';
 
   return (
     <div>
@@ -119,7 +163,8 @@ function RowsPreview({ qt, tiers, accent, price, currencySymbol }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {rows.map((r, i) => {
           const on = r === active;
-          const each = unit(r.percent);
+          const rowTotal = bundleTotal(price, r.qty, r, discountType);
+          const each = rowTotal / r.qty;
           return (
             <button
               key={i}
@@ -145,17 +190,18 @@ function RowsPreview({ qt, tiers, accent, price, currencySymbol }) {
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 800, color: '#171A22', flexWrap: 'wrap' }}>
                   {r.qty === 1 ? '1 item' : `${r.qty} items`}
-                  {r.percent > 0 ? (
+                  {r.discounted ? (
                     <span style={{ fontSize: 11, fontWeight: 800, background: accent, color: badgeText, borderRadius: 4, padding: '2px 6px' }}>
-                      {r.percent}% OFF
+                      {offLabel(r, discountType, currencySymbol, true)}
                     </span>
                   ) : null}
                 </span>
                 {r.subtitle ? <span style={{ display: 'block', fontSize: 12, color: '#4A5062' }}>{String(r.subtitle).slice(0, 40)}</span> : null}
+                {r.discounted && perksText(r, rows) ? <span style={PERK_STYLE}>{perksText(r, rows)}</span> : null}
               </span>
               <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 }}>
-                <span style={{ fontSize: 15, fontWeight: 800, color: '#171A22' }}>{money(currencySymbol, each * r.qty)}</span>
-                {showCompareAt && r.percent > 0 ? (
+                <span style={{ fontSize: 15, fontWeight: 800, color: '#171A22' }}>{money(currencySymbol, rowTotal)}</span>
+                {showCompareAt && r.discounted && rowTotal < price * r.qty ? (
                   <s style={{ fontSize: 12, color: '#6B7280' }}>{money(currencySymbol, price * r.qty)}</s>
                 ) : null}
                 {r.qty > 1 ? <span style={{ fontSize: 11, color: '#4A5062' }}>{money(currencySymbol, each)} / each</span> : null}
@@ -168,7 +214,7 @@ function RowsPreview({ qt, tiers, accent, price, currencySymbol }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 12, fontSize: 13, color: '#171A22' }}>
           {footerNote ? <span style={{ fontWeight: 700, color: '#0F766E' }}>{footerNote}</span> : <span />}
           {showTotal && active ? (
-            <span style={{ fontWeight: 800 }}>Total: {money(currencySymbol, unit(active.percent) * active.qty)}</span>
+            <span style={{ fontWeight: 800 }}>Total: {money(currencySymbol, bundleTotal(price, active.qty, active, discountType))}</span>
           ) : null}
         </div>
       ) : null}
@@ -201,6 +247,7 @@ export function TierPreview({ config, price = 999, currencySymbol = '₹' }) {
     ? qt.accentColor
     : FALLBACK_ACCENT;
   const layout = qt.layout === 'list' || qt.layout === 'rows' ? qt.layout : 'cards';
+  const discountType = qt.discountType === 'amount' ? 'amount' : 'percent';
 
   const [sel, setSel] = useState(() => defaultSelectedIdx(tiers));
 
@@ -316,7 +363,7 @@ export function TierPreview({ config, price = 999, currencySymbol = '₹' }) {
             }}
           >
             {tiers.map((t, i) => {
-              const unitPrice = discountedUnitPrice(price, Number(t.percent));
+              const unitPrice = bundleTotal(price, Number(t.minQty), t, discountType) / Number(t.minQty);
               return (
                 <button
                   key={i}
@@ -341,10 +388,11 @@ export function TierPreview({ config, price = 999, currencySymbol = '₹' }) {
                   >
                     Buy {t.minQty}
                   </span>
-                  <span style={chipStyle(i === sel)}>{t.percent}% off</span>
+                  <span style={chipStyle(i === sel)}>{offLabel(t, discountType, currencySymbol, false)}</span>
                   <span style={{ fontSize: 12, color: '#4A5062', display: 'block' }}>
-                    {currencySymbol}{unitPrice.toLocaleString('en-IN')} each
+                    {money(currencySymbol, unitPrice)} each
                   </span>
+                  {perksText(t, tiers) ? <span style={PERK_STYLE}>{perksText(t, tiers)}</span> : null}
                 </button>
               );
             })}
@@ -352,7 +400,7 @@ export function TierPreview({ config, price = 999, currencySymbol = '₹' }) {
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {tiers.map((t, i) => {
-              const unitPrice = discountedUnitPrice(price, Number(t.percent));
+              const unitPrice = bundleTotal(price, Number(t.minQty), t, discountType) / Number(t.minQty);
               return (
                 <button
                   key={i}
@@ -404,8 +452,9 @@ export function TierPreview({ config, price = 999, currencySymbol = '₹' }) {
                         marginTop: 2,
                       }}
                     >
-                      {currencySymbol}{unitPrice.toLocaleString('en-IN')} each
+                      {money(currencySymbol, unitPrice)} each
                     </span>
+                    {perksText(t, tiers) ? <span style={PERK_STYLE}>{perksText(t, tiers)}</span> : null}
                   </div>
                   <span
                     style={{
@@ -415,7 +464,7 @@ export function TierPreview({ config, price = 999, currencySymbol = '₹' }) {
                       marginLeft: 12,
                     }}
                   >
-                    {t.percent}% off
+                    {offLabel(t, discountType, currencySymbol, false)}
                   </span>
                 </button>
               );

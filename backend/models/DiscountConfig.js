@@ -130,16 +130,30 @@ const discountConfigSchema = new mongoose.Schema({
     accentColor: { type: String,  default: '#4F46E5' },
     layout:      { type: String,  default: 'cards', enum: ['cards', 'list', 'rows'] },
     scope:       { type: String,  default: 'all' },
+    // 'percent' off each item (original) or a flat 'amount' off the whole bundle (tier.amount).
+    discountType: { type: String, default: 'percent', enum: ['percent', 'amount'] },
     // Rows-style extras (shown by the storefront widget; checkout discount ignores them).
     topLabel:      { type: String,  default: '' },    // max 40, e.g. "Limited time offer"
     footerNote:    { type: String,  default: '' },    // max 40, e.g. "Free delivery"
     showCompareAt: { type: Boolean, default: true },  // strike-through original total
     showTotal:     { type: Boolean, default: true },  // "Total: ₹X" line under the rows
     showSingle:    { type: Boolean, default: false }, // extra "1 item, standard price" row
+    variantPicker: { type: Boolean, default: false }, // colour/size per item when buying 2+
     tiers: {
       type: [{
         minQty:   { type: Number, required: true },
-        percent:  { type: Number, required: true },
+        percent:  { type: Number, required: true },   // 0 when discountType is 'amount'
+        amount:   { type: Number, default: 0 },       // flat off the bundle, shop currency
+        // Perks when this tier is reached: free shipping, and/or one free unit of a gift variant.
+        freeShipping: { type: Boolean, default: false },
+        gift: {
+          type: new mongoose.Schema({
+            variantId: { type: String, required: true },   // gid://shopify/ProductVariant/<n>
+            title:     { type: String, default: '' },      // max 60
+            image:     { type: String, default: '' },      // https URL, optional
+          }, { _id: false }),
+          default: null,
+        },
         badge:    { type: String, default: '' },
         subtitle: { type: String, default: '' },     // max 40
         _id: false,

@@ -530,3 +530,335 @@ describe('ccf-tiers.js rows layout, options off', () => {
     expect(document.querySelector('.ccf-qt-toplabel')).toBeNull();
   });
 });
+
+// ── Flat amount off (Phase 2a) ────────────────────────────────────────────────
+
+describe('ccf-tiers.js flat amount tiers', () => {
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  const AMOUNT = [
+    { minQty: 2, percent: 0, amount: 200, badge: '' },
+    { minQty: 3, percent: 0, amount: 400, badge: 'Most popular' },
+  ];
+
+  async function load(overrides) {
+    var styleEl = document.getElementById('ccf-qt-styles');
+    if (styleEl) styleEl.remove();
+    global.fetch = jest.fn().mockResolvedValue({
+      json: () => Promise.resolve({ variants: [{ id: 123, price: 99900 }] }),
+    });
+    setupDOM(makeConfig(Object.assign({ discountType: 'amount', tiers: AMOUNT }, overrides)));
+    await flush(); await flush();
+  }
+
+  test('rows: "SAVE ₹200" pill, bundle total, struck full price, per-item price', async () => {
+    await load({ layout: 'rows', showSingle: true, showCompareAt: true, showTotal: true });
+    const r = getButtons()[1];
+    expect(r.querySelector('.ccf-qt-pill').textContent).toMatch(/^SAVE ₹200/);
+    expect(r.querySelector('.ccf-qt-row-total').textContent).toMatch(/1,798/);
+    expect(r.querySelector('.ccf-qt-row-compare').textContent).toMatch(/1,998/);
+    expect(r.querySelector('.ccf-qt-row-each').textContent).toMatch(/899.*\/ each/);
+  });
+
+  test('rows: total under the rows follows the flat amount', async () => {
+    await load({ layout: 'rows', showSingle: true, showTotal: true });
+    getButtons()[2].click();
+    // 3 × ₹999 − ₹400 = ₹2,597
+    expect(document.querySelector('.ccf-qt-footer-total').textContent).toMatch(/2,597/);
+  });
+
+  test('cards: chip says "Save ₹200" and "each" is the bundle price split', async () => {
+    await load({ layout: 'cards' });
+    const card = getButtons()[0];
+    expect(card.querySelector('.ccf-qt-chip').textContent).toMatch(/^Save ₹200/);
+    expect(card.querySelector('.ccf-qt-price').textContent).toMatch(/899 each/);
+  });
+
+  test('cards: savings line shows the flat amount', async () => {
+    await load({ layout: 'cards' });
+    getButtons()[0].click();
+    expect(document.querySelector('.ccf-qt-savings').textContent).toMatch(/You save ₹200/);
+  });
+});
+
+// ── Tier perks (Phase 2b) ─────────────────────────────────────────────────────
+
+describe('ccf-tiers.js perks and free gift', () => {
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  const PERK_TIERS = [
+    { minQty: 2, percent: 10, badge: '' },
+    { minQty: 3, percent: 15, badge: '', freeShipping: true, gift: { variantId: '555', title: 'Ski Wax', image: '' } },
+  ];
+
+  let cartItems;
+  let addCalls;
+
+  async function load(overrides) {
+    var styleEl = document.getElementById('ccf-qt-styles');
+    if (styleEl) styleEl.remove();
+    cartItems = [];
+    addCalls = [];
+    global.fetch = jest.fn((url, opts) => {
+      if (String(url).indexOf('/products/') === 0) {
+        return Promise.resolve({ json: () => Promise.resolve({ variants: [{ id: 123, price: 99900 }] }) });
+      }
+      if (url === '/cart.js') return Promise.resolve({ json: () => Promise.resolve({ items: cartItems }) });
+      if (url === '/cart/add.js') {
+        addCalls.push(JSON.parse(opts.body));
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      }
+      return Promise.resolve({ json: () => Promise.resolve(null) });
+    });
+    setupDOM(makeConfig(Object.assign({ tiers: PERK_TIERS }, overrides)));
+    await flush(); await flush();
+  }
+
+  function submitWithQty(qty) {
+    var form = document.querySelector('form[action="/cart/add"]');
+    form.querySelector('input[name="quantity"]').value = String(qty);
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+  }
+
+  afterEach(() => jest.useRealTimers());
+
+  test('rows show the perks under the tier', async () => {
+    await load({ layout: 'rows', showSingle: true });
+    const rows = getButtons();
+    expect(rows[1].querySelector('.ccf-qt-perks')).toBeNull();
+    expect(rows[2].querySelector('.ccf-qt-perks').textContent).toBe('+ Free shipping · Free gift: Ski Wax');
+  });
+
+  test('cards and list show the perks too', async () => {
+    await load({ layout: 'cards' });
+    expect(getButtons()[1].querySelector('.ccf-qt-perks').textContent).toMatch(/Free gift: Ski Wax/);
+    await load({ layout: 'list' });
+    expect(getButtons()[1].querySelector('.ccf-qt-perks').textContent).toMatch(/Free shipping/);
+  });
+
+  test('adding 3 to the cart adds the gift once, marked as a gift', async () => {
+    await load({ layout: 'rows' });
+    jest.useFakeTimers();
+    submitWithQty(3);
+    jest.advanceTimersByTime(1300);
+    jest.useRealTimers();
+    await flush(); await flush(); await flush();
+    expect(addCalls).toEqual([{ items: [{ id: 555, quantity: 1, properties: { _ccf_gift: '1' } }] }]);
+  });
+
+  test('no gift when the reached tier has none (qty 2)', async () => {
+    await load({ layout: 'rows' });
+    jest.useFakeTimers();
+    submitWithQty(2);
+    jest.advanceTimersByTime(1300);
+    jest.useRealTimers();
+    await flush(); await flush(); await flush();
+    expect(addCalls).toEqual([]);
+  });
+
+  test('gift already in the cart → not added again', async () => {
+    await load({ layout: 'rows' });
+    cartItems = [{ variant_id: 555, properties: { _ccf_gift: '1' } }];
+    jest.useFakeTimers();
+    submitWithQty(4);
+    jest.advanceTimersByTime(1300);
+    jest.useRealTimers();
+    await flush(); await flush(); await flush();
+    expect(addCalls).toEqual([]);
+  });
+});
+
+describe('ccf-tiers.js rewards carry upward', () => {
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  test('Buy 4 row shows the Buy 3 rewards, and adding 4 adds the gift', async () => {
+    var styleEl = document.getElementById('ccf-qt-styles');
+    if (styleEl) styleEl.remove();
+    const adds = [];
+    global.fetch = jest.fn((url, opts) => {
+      if (String(url).indexOf('/products/') === 0) return Promise.resolve({ json: () => Promise.resolve({ variants: [{ id: 123, price: 99900 }] }) });
+      if (url === '/cart.js') return Promise.resolve({ json: () => Promise.resolve({ items: [] }) });
+      if (url === '/cart/add.js') { adds.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true }); }
+      return Promise.resolve({ json: () => Promise.resolve(null) });
+    });
+    setupDOM(makeConfig({
+      layout: 'rows',
+      tiers: [
+        { minQty: 2, percent: 10, badge: '' },
+        { minQty: 3, percent: 15, badge: '', freeShipping: true, gift: { variantId: '555', title: 'Ski Wax' } },
+        { minQty: 4, percent: 25, badge: '' },
+      ],
+    }));
+    await flush(); await flush();
+    const rows = getButtons();
+    expect(rows[2].querySelector('.ccf-qt-perks').textContent).toBe('+ Free shipping · Free gift: Ski Wax');
+    expect(rows[0].querySelector('.ccf-qt-perks')).toBeNull();
+
+    jest.useFakeTimers();
+    var form = document.querySelector('form[action="/cart/add"]');
+    form.querySelector('input[name="quantity"]').value = '4';
+    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    jest.advanceTimersByTime(1300);
+    jest.useRealTimers();
+    await flush(); await flush(); await flush();
+    expect(adds).toEqual([{ items: [{ id: 555, quantity: 1, properties: { _ccf_gift: '1' } }] }]);
+  });
+});
+
+// ── Per-item colour / size picker (Phase 2c) ──────────────────────────────────
+
+describe('ccf-tiers.js per-item colour / size picker', () => {
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  const PRODUCT = {
+    options: [{ name: 'Color', values: ['Red', 'Blue'] }, { name: 'Size', values: ['M', 'L'] }],
+    variants: [
+      { id: 123, price: 99900, available: true, options: ['Red', 'M'] },
+      { id: 124, price: 99900, available: true, options: ['Red', 'L'] },
+      { id: 125, price: 99900, available: true, options: ['Blue', 'M'] },
+      { id: 126, price: 99900, available: false, options: ['Blue', 'L'] },
+    ],
+  };
+  let addBodies;
+  let wentToCart;
+
+  async function load(overrides, product) {
+    var styleEl = document.getElementById('ccf-qt-styles');
+    if (styleEl) styleEl.remove();
+    addBodies = [];
+    wentToCart = false;
+    window.__ccfQtGoToCart = () => { wentToCart = true; };
+    global.fetch = jest.fn((url, opts) => {
+      if (String(url).indexOf('/products/') === 0) return Promise.resolve({ json: () => Promise.resolve(product || PRODUCT) });
+      if (url === '/cart.js') return Promise.resolve({ json: () => Promise.resolve({ items: [] }) });
+      if (url === '/cart/add.js') { addBodies.push(JSON.parse(opts.body)); return Promise.resolve({ ok: true }); }
+      return Promise.resolve({ json: () => Promise.resolve(null) });
+    });
+    setupDOM(makeConfig(Object.assign({ layout: 'rows', variantPicker: true }, overrides)));
+    // Product form also carries the variant id, like real themes
+    var idInput = document.createElement('input');
+    idInput.name = 'id';
+    idInput.value = '123';
+    document.querySelector('form[action="/cart/add"]').appendChild(idInput);
+    await flush(); await flush();
+  }
+
+  function selects() { return Array.from(document.querySelectorAll('.ccf-qt-picker select')); }
+  function choose(label, value) {
+    const sel = document.querySelector('.ccf-qt-picker select[aria-label="' + label + '"]');
+    sel.value = value;
+    sel.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function submit() {
+    var form = document.querySelector('form[action="/cart/add"]');
+    var ev = new Event('submit', { bubbles: true, cancelable: true });
+    form.dispatchEvent(ev);
+    return ev;
+  }
+
+  afterEach(() => { delete window.__ccfQtGoToCart; });
+
+  test('hidden at 1 item; shown with one row per item at 2', async () => {
+    await load();
+    expect(document.querySelector('.ccf-qt-picker')).toBeNull();
+    getButtons()[0].click(); // Buy 2
+    expect(document.querySelectorAll('.ccf-qt-pick-row')).toHaveLength(2);
+    expect(selects().map((s) => s.getAttribute('aria-label'))).toEqual([
+      'Item 1 Color', 'Item 1 Size', 'Item 2 Color', 'Item 2 Size',
+    ]);
+    // Defaults to the page's variant (Red / M)
+    expect(selects().map((s) => s.value)).toEqual(['Red', 'M', 'Red', 'M']);
+  });
+
+  test('off by default, and not shown for products with one variant', async () => {
+    await load({ variantPicker: false });
+    getButtons()[0].click();
+    expect(document.querySelector('.ccf-qt-picker')).toBeNull();
+    await load({}, { options: [{ name: 'Title', values: ['Default Title'] }], variants: [{ id: 123, price: 99900, available: true, options: ['Default Title'] }] });
+    getButtons()[0].click();
+    expect(document.querySelector('.ccf-qt-picker')).toBeNull();
+  });
+
+  test('sold-out choice shows a message on that row', async () => {
+    await load();
+    getButtons()[0].click();
+    choose('Item 2 Color', 'Blue');
+    choose('Item 2 Size', 'L');
+    const errs = Array.from(document.querySelectorAll('.ccf-qt-pick-err')).map((e) => e.textContent);
+    expect(errs[0]).toBe('');
+    expect(errs[1]).toMatch(/Sold out/);
+  });
+
+  test('different choices: theme add is stopped, variants are added grouped, then the cart opens', async () => {
+    await load({ tiers: [{ minQty: 2, percent: 10, badge: '' }, { minQty: 3, percent: 15, badge: '' }] });
+    getButtons()[1].click(); // Buy 3
+    choose('Item 2 Color', 'Blue');           // Blue / M (125)
+    choose('Item 3 Size', 'L');               // Red / L (124)
+    const ev = submit();
+    expect(ev.defaultPrevented).toBe(true);
+    await flush(); await flush(); await flush();
+    expect(addBodies).toEqual([{ items: [
+      { id: 123, quantity: 1 }, { id: 125, quantity: 1 }, { id: 124, quantity: 1 },
+    ] }]);
+    expect(wentToCart).toBe(true);
+  });
+
+  test('same choice twice is grouped into one line', async () => {
+    await load();
+    getButtons()[0].click(); // Buy 2
+    choose('Item 1 Color', 'Blue');
+    choose('Item 2 Color', 'Blue');
+    submit();
+    await flush(); await flush(); await flush();
+    expect(addBodies).toEqual([{ items: [{ id: 125, quantity: 2 }] }]);
+  });
+
+  test('all items on the page variant → the theme adds as usual', async () => {
+    await load();
+    getButtons()[0].click();
+    const ev = submit();
+    expect(ev.defaultPrevented).toBe(false);
+    await flush();
+    expect(addBodies).toEqual([]);
+  });
+
+  test('sold-out pick blocks the add with a message', async () => {
+    await load();
+    getButtons()[0].click();
+    choose('Item 2 Color', 'Blue');
+    choose('Item 2 Size', 'L');
+    const ev = submit();
+    expect(ev.defaultPrevented).toBe(true);
+    await flush();
+    expect(addBodies).toEqual([]);
+    expect(document.querySelector('.ccf-qt-picker-msg').textContent).toMatch(/^Item 2: Sold out/);
+  });
+
+  test('free gift of the reached tier goes in the same add', async () => {
+    await load({ tiers: [{ minQty: 2, percent: 10, badge: '', gift: { variantId: '555', title: 'Wax' } }] });
+    getButtons()[0].click();
+    choose('Item 2 Color', 'Blue');
+    submit();
+    await flush(); await flush(); await flush();
+    expect(addBodies[0].items).toEqual([
+      { id: 123, quantity: 1 }, { id: 125, quantity: 1 }, { id: 555, quantity: 1, properties: { _ccf_gift: '1' } },
+    ]);
+  });
+});
+
+describe('ccf-tiers.js theme without a quantity box', () => {
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  test('choosing a tier adds a hidden quantity field to the product form', async () => {
+    var styleEl = document.getElementById('ccf-qt-styles');
+    if (styleEl) styleEl.remove();
+    global.fetch = jest.fn().mockResolvedValue({ json: () => Promise.resolve({ variants: [{ id: 123, price: 99900 }] }) });
+    setupDOM(makeConfig({ layout: 'rows' }));
+    // Remove the theme's quantity box
+    document.querySelector('form[action="/cart/add"] input[name="quantity"]').remove();
+    await flush(); await flush();
+    getButtons()[1].click(); // Buy 3
+    const hidden = document.querySelector('form[action="/cart/add"] input[name="quantity"]');
+    expect(hidden).not.toBeNull();
+    expect(hidden.type).toBe('hidden');
+    expect(hidden.value).toBe('3');
+    getButtons()[0].click(); // Buy 2 — reuses the same field
+    expect(document.querySelectorAll('form[action="/cart/add"] input[name="quantity"]')).toHaveLength(1);
+    expect(hidden.value).toBe('2');
+  });
+});

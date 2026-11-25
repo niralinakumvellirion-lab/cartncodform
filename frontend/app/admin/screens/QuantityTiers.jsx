@@ -30,9 +30,38 @@ export const STYLE_PRESETS = [
 ];
 
 function initTiers(raw) {
-  if (Array.isArray(raw) && raw.length) return raw.map((t) => ({ subtitle: '', ...t }));
-  return DEFAULT_TIERS.map((t) => ({ subtitle: '', ...t }));
+  if (Array.isArray(raw) && raw.length) return raw.map((t) => ({ subtitle: '', amount: 0, ...t }));
+  return DEFAULT_TIERS.map((t) => ({ subtitle: '', amount: 0, ...t }));
 }
+
+/**
+ * Gift perk from a Shopify resource-picker result (product with its variants):
+ * { variantId (gid), title, image }. The first selected variant is the gift; its title is added
+ * when the product has real variants ("Wax – Large"). null when nothing was picked.
+ */
+export function giftFromPick(picked) {
+  const product = Array.isArray(picked) ? picked[0] : null;
+  if (!product) return null;
+  const variant = Array.isArray(product.variants) && product.variants[0];
+  const variantId = (variant && variant.id) || '';
+  if (!/^gid:\/\/shopify\/ProductVariant\/\d+$/.test(variantId)) return null;
+  // Add the variant name only when it says something new ("Tee – Large"); skip Shopify's
+  // "Default Title" and variants named like the product itself.
+  const pTitle = String(product.title || '').trim();
+  const vName = String(variant.title || '').trim();
+  const vTitle = vName && vName !== 'Default Title' && vName.toLowerCase() !== pTitle.toLowerCase() ? ` – ${vName}` : '';
+  const title = `${pTitle || 'Free gift'}${vTitle}`.slice(0, 60);
+  const img = (variant.image && (variant.image.originalSrc || variant.image.url))
+    || (Array.isArray(product.images) && product.images[0] && (product.images[0].originalSrc || product.images[0].url))
+    || '';
+  return { variantId, title, image: /^https:\/\//.test(img) ? img : '' };
+}
+
+// How each tier discounts the bundle. 'amount' = a flat amount off the whole bundle.
+export const DISCOUNT_TYPES = [
+  { value: 'percent', label: '% off each item' },
+  { value: 'amount', label: 'Flat amount off the bundle' },
+];
 
 /**
  * QuantityTiers — "Buy more, save more" section inside the Discounts screen.
@@ -52,7 +81,21 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
   const [showCompareAt, setShowCompareAt] = useState(qt.showCompareAt !== false);
   const [showTotal, setShowTotal] = useState(qt.showTotal !== false);
   const [showSingle, setShowSingle] = useState(qt.showSingle === true);
+  const [variantPicker, setVariantPicker] = useState(qt.variantPicker === true);
   const [tiers, setTiers] = useState(() => initTiers(qt.tiers));
+  const [discountType, setDiscountType] = useState(qt.discountType === 'amount' ? 'amount' : 'percent');
+
+  // Switching to flat amounts: give empty tiers a starting amount (100, 200, ...) so the
+  // preview shows something sensible; the merchant then types their own.
+  function changeDiscountType(next) {
+    setDiscountType(next);
+    if (next === 'amount') {
+      setTiers((prev) => prev.map((t, i) => (Number(t.amount) > 0 ? t : { ...t, amount: (i + 1) * 100 })));
+    } else {
+      setTiers((prev) => prev.map((t, i) => (Number(t.percent) > 0 ? t : { ...t, percent: (i + 1) * 5 })));
+    }
+    setErrors((e) => ({ ...e, tiers: undefined }));
+  }
 
   function applyPreset(preset) {
     const v = preset.values;
@@ -68,6 +111,7 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
   const [syncStatus, setSyncStatus] = useState(null); // null | 'synced' | 'failed'
   const [syncError, setSyncError] = useState('');
   const [errors, setErrors] = useState({});
+  const [giftError, setGiftError] = useState('');
 
   // ── Tier helpers ────────────────────────────────────────────────────────────
 
@@ -84,10 +128,25 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
     setTiers((prev) => {
       if (prev.length >= 4) return prev;
       const lastQty = prev.length ? prev[prev.length - 1].minQty : 1;
-      const lastPct = prev.length ? prev[prev.length - 1].percent : 0;
-      return [...prev, { minQty: lastQty + 1, percent: lastPct + 5, badge: '', subtitle: '' }];
+      const lastPct = prev.length ? Number(prev[prev.length - 1].percent) || 0 : 0;
+      const lastAmt = prev.length ? Number(prev[prev.length - 1].amount) || 0 : 0;
+      return [...prev, { minQty: lastQty + 1, percent: lastPct + 5, amount: lastAmt + 100, badge: '', subtitle: '' }];
     });
   }, []);
+
+  // Shopify's own product picker (App Bridge). The first variant of the chosen product is the gift.
+  async function chooseGift(i) {
+    setGiftError('');
+    try {
+      const picker = typeof window !== 'undefined' && window.shopify && window.shopify.resourcePicker;
+      if (!picker) { setGiftError('The product picker opens inside Shopify admin only.'); return; }
+      const picked = await window.shopify.resourcePicker({ type: 'product', action: 'select', multiple: false, filter: { variants: true } });
+      const gift = giftFromPick(picked);
+      if (gift) updateTier(i, 'gift', gift);
+    } catch (e) {
+      setGiftError('Could not open the product picker. Please try again.');
+    }
+  }
 
   const removeTier = useCallback((i) => {
     setTiers((prev) => prev.filter((_, idx) => idx !== i));
@@ -107,17 +166,21 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
       for (let i = 0; i < tiers.length; i++) {
         const qty = Number(tiers[i].minQty);
         const pct = Number(tiers[i].percent);
+        const amt = Number(tiers[i].amount);
         if (!Number.isInteger(qty) || qty < 2 || qty > 99)
           errs.tiers = `Row ${i + 1}: minimum quantity must be an integer between 2 and 99`;
-        if (!Number.isInteger(pct) || pct < 1 || pct > 80)
+        if (discountType === 'percent' && (!Number.isInteger(pct) || pct < 1 || pct > 80))
           errs.tiers = `Row ${i + 1}: discount must be an integer between 1 and 80`;
+        if (discountType === 'amount' && (!Number.isFinite(amt) || amt < 1 || amt > 1000000))
+          errs.tiers = `Row ${i + 1}: amount off must be between 1 and 1,000,000`;
         if (String(tiers[i].badge || '').length > 20)
           errs.tiers = `Row ${i + 1}: badge must be 20 characters or fewer`;
         if (String(tiers[i].subtitle || '').length > 40)
           errs.tiers = `Row ${i + 1}: subtitle must be 40 characters or fewer`;
         if (i > 0) {
           if (qty <= Number(tiers[i - 1].minQty)) errs.tiers = 'Minimum quantities must strictly increase row by row';
-          if (pct <= Number(tiers[i - 1].percent)) errs.tiers = 'Discounts must strictly increase row by row';
+          if (discountType === 'percent' && pct <= Number(tiers[i - 1].percent)) errs.tiers = 'Discounts must strictly increase row by row';
+          if (discountType === 'amount' && amt <= Number(tiers[i - 1].amount)) errs.tiers = 'Amounts off must strictly increase row by row';
         }
       }
     }
@@ -145,11 +208,17 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
         showCompareAt,
         showTotal,
         showSingle,
+        variantPicker,
+        discountType,
         tiers: tiers.map((t) => ({
           minQty: Number(t.minQty),
-          percent: Number(t.percent),
+          ...(discountType === 'amount'
+            ? { amount: Math.round(Number(t.amount) * 100) / 100 }
+            : { percent: Number(t.percent) }),
           badge: String(t.badge || '').slice(0, 20),
           subtitle: String(t.subtitle || '').trim().slice(0, 40),
+          ...(t.freeShipping ? { freeShipping: true } : {}),
+          ...(t.gift && t.gift.variantId ? { gift: t.gift } : {}),
         })),
       },
     };
@@ -212,6 +281,7 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
       showCompareAt,
       showTotal,
       showSingle,
+      discountType,
       enabled: true,
     },
   };
@@ -255,10 +325,30 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
       {/* ── Tiers table ── */}
       <div style={styles.card}>
         <p style={styles.sectionLabel}>Tiers</p>
+        <fieldset style={styles.fieldset}>
+          <legend style={styles.fieldLabel}>Discount type</legend>
+          {DISCOUNT_TYPES.map((opt) => (
+            <label key={opt.value} style={styles.radioLabel}>
+              <input
+                type="radio"
+                name="qt-discount-type"
+                value={opt.value}
+                checked={discountType === opt.value}
+                onChange={() => changeDiscountType(opt.value)}
+              />
+              {opt.label}
+            </label>
+          ))}
+          {discountType === 'amount' && (
+            <span style={styles.hint}>
+              Example: Buy 2, save 200 off the two items together. Amounts are in your store&apos;s currency.
+            </span>
+          )}
+        </fieldset>
         <table style={styles.table} aria-label="Discount tiers">
           <thead>
             <tr>
-              {['Buy at least', 'Discount (%)', 'Badge', 'Subtitle', ''].map((h) => (
+              {['Buy at least', discountType === 'amount' ? 'Amount off' : 'Discount (%)', 'Badge', 'Subtitle', ''].map((h) => (
                 <th key={h} style={styles.th}>{h}</th>
               ))}
             </tr>
@@ -278,15 +368,27 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
                   />
                 </td>
                 <td style={styles.td}>
-                  <input
-                    type="number"
-                    min={1}
-                    max={80}
-                    value={tier.percent}
-                    onChange={(e) => updateTier(i, 'percent', Number(e.target.value))}
-                    style={styles.numInput}
-                    aria-label={`Tier ${i + 1} discount percent`}
-                  />
+                  {discountType === 'amount' ? (
+                    <input
+                      type="number"
+                      min={1}
+                      step="0.01"
+                      value={tier.amount}
+                      onChange={(e) => updateTier(i, 'amount', Number(e.target.value))}
+                      style={{ ...styles.numInput, width: 100 }}
+                      aria-label={`Tier ${i + 1} amount off`}
+                    />
+                  ) : (
+                    <input
+                      type="number"
+                      min={1}
+                      max={80}
+                      value={tier.percent}
+                      onChange={(e) => updateTier(i, 'percent', Number(e.target.value))}
+                      style={styles.numInput}
+                      aria-label={`Tier ${i + 1} discount percent`}
+                    />
+                  )}
                 </td>
                 <td style={styles.td}>
                   <input
@@ -326,6 +428,46 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
         {tiers.length < 4 && (
           <button onClick={addTier} style={styles.addBtn}>+ Add a tier</button>
         )}
+      </div>
+
+      {/* ── Extra rewards per tier ── */}
+      <div style={styles.card} aria-label="Extra rewards">
+        <p style={styles.sectionLabel}>Extra rewards (optional)</p>
+        <p style={styles.hint}>
+          Give free shipping or a free gift when a shopper reaches a tier. The gift is added to the cart
+          automatically and one unit of it is free at checkout.
+        </p>
+        {tiers.map((tier, i) => (
+          <div key={i} style={styles.perkRow}>
+            <span style={styles.perkQty}>Buy {tier.minQty}+</span>
+            <label style={styles.perkCheck}>
+              <input
+                type="checkbox"
+                checked={!!tier.freeShipping}
+                onChange={(e) => updateTier(i, 'freeShipping', e.target.checked)}
+                aria-label={`Tier ${i + 1} free shipping`}
+              />
+              Free shipping
+            </label>
+            {tier.gift && tier.gift.variantId ? (
+              <span style={styles.giftChip}>
+                Free gift: <strong>{tier.gift.title}</strong>
+                <button type="button" onClick={() => chooseGift(i)} style={styles.linkBtn}>Change</button>
+                <button
+                  type="button"
+                  onClick={() => updateTier(i, 'gift', null)}
+                  style={styles.linkBtn}
+                  aria-label={`Remove tier ${i + 1} gift`}
+                >Remove</button>
+              </span>
+            ) : (
+              <button type="button" onClick={() => chooseGift(i)} style={styles.addBtn} aria-label={`Tier ${i + 1} add free gift`}>
+                + Add a free gift
+              </button>
+            )}
+          </div>
+        ))}
+        {giftError && <p style={styles.errorMsg}>{giftError}</p>}
       </div>
 
       {/* ── Look and wording ── */}
@@ -436,6 +578,24 @@ export default function QuantityTiers({ config, shopDomain, onSaveComplete }) {
             </label>
           </div>
         )}
+      </div>
+
+      {/* ── Colour / size per item ── */}
+      <div style={styles.card}>
+        <p style={styles.sectionLabel}>Colour and size for each item</p>
+        <label style={styles.radioLabel}>
+          <input
+            type="checkbox"
+            checked={variantPicker}
+            onChange={(e) => setVariantPicker(e.target.checked)}
+            aria-label="Let shoppers choose colour and size for each item"
+          />
+          Let shoppers choose the colour / size for each item when they buy 2 or more
+        </label>
+        <p style={styles.hint}>
+          Example: Buy 2 → item 1 Red / M, item 2 Blue / L. Shown only on products with options
+          (up to 10 items). Each choice goes into the cart as its own line; the tier discount still counts them together.
+        </p>
       </div>
 
       {/* ── Where it applies ── */}
@@ -559,4 +719,9 @@ const styles = {
     fontWeight: 600, color: '#171A22', cursor: 'pointer',
   },
   presetSwatch: { width: 14, height: 14, borderRadius: 4, flexShrink: 0 },
+  perkRow: { display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', padding: '8px 0', borderTop: '1px solid #F3F4F6' },
+  perkQty: { fontSize: 13, fontWeight: 700, color: '#171A22', minWidth: 64 },
+  perkCheck: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#374151', cursor: 'pointer' },
+  giftChip: { display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#065F46', background: '#ECFDF5', borderRadius: 6, padding: '4px 8px' },
+  linkBtn: { background: 'none', border: 'none', color: '#4F46E5', cursor: 'pointer', fontSize: 12, padding: 0, textDecoration: 'underline' },
 };

@@ -751,6 +751,14 @@ ${poColors ? `  /* post-order colour overrides */
     return Math.round((raw + 1e-10) * 100) / 100;
   }
   function qtFmtRs(n) { return '\\u20b9' + n.toFixed(2); }
+  // Bundle price, same rule as backend/utils/quantityTiers.tierTotal:
+  // flat 'amount' off the bundle, or % off each item (rounded per item).
+  function qtTotal(price, qty, tier) {
+    var full = Math.round(price * qty * 100) / 100;
+    if (!tier) return full;
+    if (QT.discountType === 'amount') return Math.max(0, Math.round((full - (Number(tier.amount) || 0)) * 100) / 100);
+    return Math.round(qtDiscountedUnit(price, tier.percent) * qty * 100) / 100;
+  }
 
   function updateSummary() {
     if (!priceLine) return;
@@ -759,20 +767,38 @@ ${poColors ? `  /* post-order colour overrides */
     var price = Number(BOOT.price) || 0;
     var tier = QT.enabled ? qtPickTier(QT.tiers, qty) : null;
     if (tier) {
-      var discUnit = qtDiscountedUnit(price, tier.percent);
-      var total = Math.round(discUnit * qty * 100) / 100;
+      var total = qtTotal(price, qty, tier);
       var orig = Math.round(price * qty * 100) / 100;
       var saving = Math.round((orig - total) * 100) / 100;
       priceLine.innerHTML = '';
-      var t = document.createTextNode(
-        qty + ' × ' + qtFmtRs(discUnit) + ' = ' + qtFmtRs(total) +
-        ' — ' + tier.percent + '% off'
+      var t = document.createTextNode(QT.discountType === 'amount'
+        ? qty + ' × ' + qtFmtRs(price) + ' = ' + qtFmtRs(total) + ' — ' + qtFmtRs(Number(tier.amount) || 0) + ' off'
+        : qty + ' × ' + qtFmtRs(qtDiscountedUnit(price, tier.percent)) + ' = ' + qtFmtRs(total) +
+          ' — ' + tier.percent + '% off'
       );
       priceLine.appendChild(t);
       var s = document.createElement('span');
       s.style.cssText = 'display:block;font-size:12px;color:#16a34a;margin-top:2px;';
       s.textContent = 'You save ' + qtFmtRs(saving);
       priceLine.appendChild(s);
+      // Tier perks (free shipping / free gift) — carry upward from lower tiers, same rule as
+      // backend/utils/quantityTiers.perksFor. The merchant adds them to the COD order.
+      var perks = [];
+      var pShip = false, pGift = null;
+      for (var pi = 0; pi < QT.tiers.length; pi++) {
+        var pt = QT.tiers[pi];
+        if (!(pt.minQty <= qty)) continue;
+        if (pt.freeShipping) pShip = true;
+        if (pt.gift && pt.gift.variantId) pGift = pt.gift;
+      }
+      if (pShip) perks.push('Free shipping');
+      if (pGift && pGift.title) perks.push('Free gift: ' + pGift.title);
+      if (perks.length) {
+        var pk = document.createElement('span');
+        pk.style.cssText = 'display:block;font-size:12px;color:#16a34a;margin-top:2px;';
+        pk.textContent = '+ ' + perks.join(' · ');
+        priceLine.appendChild(pk);
+      }
     } else {
       priceLine.innerHTML = '';
       var label = document.createElement('span');
@@ -799,8 +825,7 @@ ${poColors ? `  /* post-order colour overrides */
   function ppSubtotal(qty) {
     var price = Number(BOOT.price) || 0;
     var tier = QT.enabled ? qtPickTier(QT.tiers, qty) : null;
-    var unit = tier ? qtDiscountedUnit(price, tier.percent) : price;
-    return Math.round(unit * qty * 100) / 100;
+    return qtTotal(price, qty, tier);
   }
   function ppAmount(sub) {
     if (!(sub > 0) || sub < Number(PP.minOrder || 0)) return 0;
@@ -1102,15 +1127,20 @@ router.post('/cod-order', async (req, res) => {
     // Compute tier discount server-side from saved config — never trust client values.
     let tierDiscount = { percent: 0, amount: 0 };
     try {
-      const { pickTier, discountedUnitPrice } = require('../utils/quantityTiers');
+      const { pickTier, tierSaving, perksFor } = require('../utils/quantityTiers');
       const cfg = await DiscountConfig.findOne({ shopDomain: shop }).lean();
       const qt = cfg && cfg.quantityTiers;
       if (qt && qt.enabled && Array.isArray(qt.tiers) && qt.tiers.length > 0) {
         const tier = pickTier(qt.tiers, cleanQty);
         if (tier) {
-          const discUnit = discountedUnitPrice(cleanPrice, tier.percent);
-          const saving = Math.round((cleanPrice - discUnit) * cleanQty * 100) / 100;
-          tierDiscount = { percent: tier.percent, amount: saving };
+          // percent: % tier (0 for a flat-amount tier); amount: money saved on this order.
+          const perks = perksFor(qt.tiers, cleanQty);
+          tierDiscount = {
+            percent: Number(tier.percent) || 0,
+            amount: tierSaving(cleanPrice, cleanQty, tier, qt.discountType),
+            freeShipping: perks.freeShipping,
+            freeGift: perks.gift ? String(perks.gift.title || 'Free gift').slice(0, 60) : '',
+          };
         }
       }
     } catch (_) {}

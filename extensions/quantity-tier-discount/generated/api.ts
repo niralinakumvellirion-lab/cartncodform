@@ -3503,7 +3503,12 @@ export enum WeightUnit {
   Pounds = 'POUNDS'
 }
 
+export type DeliveryInputQueryVariables = Exact<{ [key: string]: never; }>;
+
+
+export type DeliveryInputQuery = { __typename?: 'Input', cart: { __typename?: 'Cart', deliveryGroups: Array<{ __typename?: 'CartDeliveryGroup', id: string }>, lines: Array<{ __typename?: 'CartLine', id: string, quantity: number, giftAttribute?: { __typename?: 'Attribute', value?: string | null } | null, merchandise: { __typename: 'CustomProduct' } | { __typename: 'ProductVariant', id: string, product: { __typename?: 'Product', id: string } } }> }, discount: { __typename?: 'Discount', metafield?: { __typename?: 'Metafield', jsonValue: unknown } | null } };
+
 export type CartInputQueryVariables = Exact<{ [key: string]: never; }>;
 
 
-export type CartInputQuery = { __typename?: 'Input', cart: { __typename?: 'Cart', lines: Array<{ __typename?: 'CartLine', id: string, quantity: number, merchandise: { __typename: 'CustomProduct' } | { __typename: 'ProductVariant', id: string, product: { __typename?: 'Product', id: string } } }> }, discount: { __typename?: 'Discount', metafield?: { __typename?: 'Metafield', jsonValue: unknown } | null } };
+export type CartInputQuery = { __typename?: 'Input', presentmentCurrencyRate: string, cart: { __typename?: 'Cart', cost: { __typename?: 'CartCost', subtotalAmount: { __typename?: 'MoneyV2', currencyCode: CurrencyCode } }, lines: Array<{ __typename?: 'CartLine', id: string, quantity: number, giftAttribute?: { __typename?: 'Attribute', value?: string | null } | null, merchandise: { __typename: 'CustomProduct' } | { __typename: 'ProductVariant', id: string, product: { __typename?: 'Product', id: string } } }> }, discount: { __typename?: 'Discount', metafield?: { __typename?: 'Metafield', jsonValue: unknown } | null } };

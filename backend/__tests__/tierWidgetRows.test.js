@@ -99,7 +99,7 @@ describe('sanitizeTierDisplay', () => {
 describe('publicTierDisplay / normalizeLayout / publicTiers', () => {
   test('defaults for an old doc without the new fields', () => {
     expect(publicTierDisplay({ layout: 'list' })).toEqual({
-      layout: 'list', topLabel: '', footerNote: '', showCompareAt: true, showTotal: true, showSingle: false,
+      layout: 'list', discountType: 'percent', topLabel: '', footerNote: '', showCompareAt: true, showTotal: true, showSingle: false, variantPicker: false,
     });
   });
 
@@ -181,5 +181,57 @@ describe('GET /discount-config sends rows fields', () => {
     expect(qt.showTotal).toBe(false);
     expect(qt.showSingle).toBe(true);
     expect(qt.tiers[0]).toEqual({ minQty: 2, percent: 10, badge: 'Most popular', subtitle: 'Good deal' });
+  });
+});
+
+// ── Phase 2a: discountType on PATCH ──────────────────────────────────────────
+
+describe('PATCH quantityTiers discountType', () => {
+  test('amount tiers are validated and saved with the type', async () => {
+    const { res, set } = await runPatch({
+      discountType: 'amount',
+      tiers: [{ minQty: 2, amount: 200, badge: '' }, { minQty: 3, amount: 400, badge: 'Hot' }],
+    });
+    expect(res.statusCode).toBe(200);
+    expect(set['quantityTiers.discountType']).toBe('amount');
+    expect(set['quantityTiers.tiers']).toEqual([
+      { minQty: 2, percent: 0, amount: 200, badge: '', subtitle: '' },
+      { minQty: 3, percent: 0, amount: 400, badge: 'Hot', subtitle: '' },
+    ]);
+  });
+
+  test('tiers sent without a type are percent tiers', async () => {
+    const { set } = await runPatch({ tiers: [{ minQty: 2, percent: 10, badge: '' }] });
+    expect(set['quantityTiers.discountType']).toBe('percent');
+  });
+
+  test('type without tiers -> 400', async () => {
+    const { res } = await runPatch({ discountType: 'amount' });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/together with tiers/);
+  });
+
+  test('unknown type -> 400', async () => {
+    const { res } = await runPatch({ discountType: 'bogo', tiers: [{ minQty: 2, percent: 10 }] });
+    expect(res.statusCode).toBe(400);
+  });
+
+  test('bad amount -> 400 with the reason', async () => {
+    const { res } = await runPatch({ discountType: 'amount', tiers: [{ minQty: 2, amount: 0 }] });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/amount must be between/);
+  });
+});
+
+describe('variantPicker setting (Phase 2c)', () => {
+  test('PATCH saves it; storefront gets it (default off)', async () => {
+    const { set } = await runPatch({ variantPicker: true });
+    expect(set['quantityTiers.variantPicker']).toBe(true);
+    expect(publicTierDisplay({ variantPicker: true }).variantPicker).toBe(true);
+    expect(publicTierDisplay({}).variantPicker).toBe(false);
+  });
+  test('non-boolean is ignored', async () => {
+    const { set } = await runPatch({ variantPicker: 'yes' });
+    expect(set).not.toHaveProperty('quantityTiers.variantPicker');
   });
 });

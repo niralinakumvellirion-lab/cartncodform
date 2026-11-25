@@ -12,7 +12,7 @@ const PrepaidOffer = require('../models/PrepaidOffer');
 const PrepaidCode = require('../models/PrepaidCode');
 const DiscountConfig = require('../models/DiscountConfig');
 const { PLANS, tierOf, monthStart } = require('./plans');
-const { pickTier, discountedUnitPrice } = require('./quantityTiers');
+const { pickTier, tierTotal } = require('./quantityTiers');
 const { shopifyGraphQL } = require('./shopifyGraphQL');
 
 const DEFAULTS = Object.freeze({
@@ -145,7 +145,7 @@ function subtotalFor(price, quantity, quantityTiers) {
   const qt = quantityTiers;
   if (qt && qt.enabled && Array.isArray(qt.tiers) && qt.tiers.length) {
     const tier = pickTier(qt.tiers, q);
-    if (tier) return Math.round(discountedUnitPrice(p, tier.percent) * q * 100) / 100;
+    if (tier) return tierTotal(p, q, tier, qt.discountType);
   }
   return Math.round(p * q * 100) / 100;
 }
