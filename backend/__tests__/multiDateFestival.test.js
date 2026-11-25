@@ -5,6 +5,9 @@
  * dedupe, array-shaped scheduledAt creation, bulk edit propagation
  * (content-only, 'sent' documents skipped), group delete, and that a
  * single-date POST is byte-for-byte unchanged from before this task.
+ *
+ * Dates are in 2030 on purpose: the routes reject dates before today, so
+ * fixed 2026 dates started failing once those days had passed.
  */
 
 jest.mock('../middleware/requireOwner', () => ({
@@ -77,20 +80,20 @@ describe('single-date POST — unchanged behaviour', () => {
     FestivalQueue.findOneAndUpdate.mockResolvedValue(null);
     FestivalQueue.create.mockImplementation((fields) => Promise.resolve({ _id: 'fq1', ...fields }));
 
-    const res = await post({ title: 'Diwali Sale', scheduledAt: '2026-11-08T09:00', festival: 'Diwali', status: 'approved' });
+    const res = await post({ title: 'Diwali Sale', scheduledAt: '2030-11-08T09:00', festival: 'Diwali', status: 'approved' });
     const data = await res.json();
 
     expect(res.status).toBe(200);
     expect(data).toEqual({ success: true, id: 'fq1' });
     const [createArg] = FestivalQueue.create.mock.calls[0];
-    expect(createArg.scheduledAt.toISOString()).toBe('2026-11-08T03:30:00.000Z');
+    expect(createArg.scheduledAt.toISOString()).toBe('2030-11-08T03:30:00.000Z');
     expect(createArg.groupId).toBeUndefined();
   });
 
   test('a repeat submission for the SAME festival and SAME date updates in place (idempotent)', async () => {
     FestivalQueue.findOneAndUpdate.mockResolvedValue({ _id: 'fq1' });
 
-    const res = await post({ title: 'Diwali Sale', scheduledAt: '2026-11-08T09:00', festival: 'Diwali', status: 'approved' });
+    const res = await post({ title: 'Diwali Sale', scheduledAt: '2030-11-08T09:00', festival: 'Diwali', status: 'approved' });
 
     expect(res.status).toBe(200);
     expect(FestivalQueue.create).not.toHaveBeenCalled();
@@ -100,7 +103,7 @@ describe('single-date POST — unchanged behaviour', () => {
       festival: 'Diwali',
       status: { $in: ['draft', 'approved'] },
     });
-    expect(matchArg.scheduledAt.toISOString()).toBe('2026-11-08T03:30:00.000Z');
+    expect(matchArg.scheduledAt.toISOString()).toBe('2030-11-08T03:30:00.000Z');
   });
 });
 
@@ -108,23 +111,23 @@ describe('the exact bug the audit found — two dates for one festival', () => {
   test('two Approve submissions for different dates create TWO documents, not one overwritten', async () => {
     // First date: no existing draft/approved doc for (festival, THAT date) -> create.
     FestivalQueue.findOneAndUpdate.mockResolvedValueOnce(null);
-    FestivalQueue.create.mockResolvedValueOnce({ _id: 'fq1', scheduledAt: new Date('2026-11-08T03:30:00.000Z') });
-    const res1 = await post({ title: 'Diwali Sale', scheduledAt: '2026-11-08T09:00', festival: 'Diwali', status: 'approved' });
+    FestivalQueue.create.mockResolvedValueOnce({ _id: 'fq1', scheduledAt: new Date('2030-11-08T03:30:00.000Z') });
+    const res1 = await post({ title: 'Diwali Sale', scheduledAt: '2030-11-08T09:00', festival: 'Diwali', status: 'approved' });
     expect(res1.status).toBe(200);
 
     // Second date: the match is scoped to THIS date too, so the (different)
     // first document is never found or touched — the old bug matched on
     // shopDomain+festival+status alone and would have overwritten fq1 here.
     FestivalQueue.findOneAndUpdate.mockResolvedValueOnce(null);
-    FestivalQueue.create.mockResolvedValueOnce({ _id: 'fq2', scheduledAt: new Date('2026-11-10T03:30:00.000Z') });
-    const res2 = await post({ title: 'Diwali Sale', scheduledAt: '2026-11-10T09:00', festival: 'Diwali', status: 'approved' });
+    FestivalQueue.create.mockResolvedValueOnce({ _id: 'fq2', scheduledAt: new Date('2030-11-10T03:30:00.000Z') });
+    const res2 = await post({ title: 'Diwali Sale', scheduledAt: '2030-11-10T09:00', festival: 'Diwali', status: 'approved' });
     expect(res2.status).toBe(200);
 
     expect(FestivalQueue.create).toHaveBeenCalledTimes(2);
     const [match1] = FestivalQueue.findOneAndUpdate.mock.calls[0];
     const [match2] = FestivalQueue.findOneAndUpdate.mock.calls[1];
-    expect(match1.scheduledAt.toISOString()).toBe('2026-11-08T03:30:00.000Z');
-    expect(match2.scheduledAt.toISOString()).toBe('2026-11-10T03:30:00.000Z');
+    expect(match1.scheduledAt.toISOString()).toBe('2030-11-08T03:30:00.000Z');
+    expect(match2.scheduledAt.toISOString()).toBe('2030-11-10T03:30:00.000Z');
     expect(match1.scheduledAt.getTime()).not.toBe(match2.scheduledAt.getTime());
   });
 });
@@ -137,7 +140,7 @@ describe('array scheduledAt — multi-date creation', () => {
 
     const res = await post({
       title: 'Festival Sale',
-      scheduledAt: ['2026-10-02T09:00', '2026-10-05T09:00', '2026-10-08T09:00'],
+      scheduledAt: ['2030-10-02T09:00', '2030-10-05T09:00', '2030-10-08T09:00'],
       festival: 'Navratri',
       status: 'approved',
     });
@@ -153,9 +156,9 @@ describe('array scheduledAt — multi-date creation', () => {
     const ids = new Set(docs.map((d) => String(d.groupId)));
     expect(ids.size).toBe(1); // every doc shares the same groupId
     expect(docs.map((d) => d.scheduledAt.toISOString())).toEqual([
-      '2026-10-02T03:30:00.000Z',
-      '2026-10-05T03:30:00.000Z',
-      '2026-10-08T03:30:00.000Z',
+      '2030-10-02T03:30:00.000Z',
+      '2030-10-05T03:30:00.000Z',
+      '2030-10-08T03:30:00.000Z',
     ]);
     expect(FestivalQueue.findOneAndUpdate).not.toHaveBeenCalled(); // array path never dedupes
   });
@@ -169,7 +172,7 @@ describe('array scheduledAt — multi-date creation', () => {
   test('rejects the whole request with 400 if any one entry is malformed (no partial creation)', async () => {
     const res = await post({
       title: 'T',
-      scheduledAt: ['2026-10-02T09:00', 'not-a-date'],
+      scheduledAt: ['2030-10-02T09:00', 'not-a-date'],
       festival: 'X',
     });
     expect(res.status).toBe(400);
@@ -184,7 +187,7 @@ describe('array scheduledAt — multi-date creation', () => {
 
     const res = await post({
       title: 'Festival Sale',
-      scheduledAt: ['2026-10-12T09:00'],
+      scheduledAt: ['2030-10-12T09:00'],
       festival: 'Navratri',
       joinGroupId: existingGroupId,
     });
@@ -205,7 +208,7 @@ describe('array scheduledAt — multi-date creation', () => {
 
     const res = await post({
       title: 'Festival Sale',
-      scheduledAt: ['2026-10-12T09:00'],
+      scheduledAt: ['2030-10-12T09:00'],
       festival: 'Navratri',
       joinItemId: 'existing-item-1',
     });
@@ -239,7 +242,7 @@ describe('bulk edit — applyToGroup', () => {
     });
 
     const res = await patch('fq1', {
-      title: 'New title', scheduledAt: '2026-12-02T09:00', applyToGroup: true,
+      title: 'New title', scheduledAt: '2030-12-02T09:00', applyToGroup: true,
     });
     const data = await res.json();
 
