@@ -8,7 +8,9 @@
 #    visit" page, so Shopify's app proxy (storefront widgets) gets real JSON.
 # 3. Writes that address into backend/.env.dev, frontend/.env.development.local and a generated
 #    shopify.app.devlocal.toml (copy of shopify.app.dev.toml, git-ignored), then deploys the DEV app.
-# 4. Opens windows: Backend (.env.dev), Admin (next dev), Tunnel, Shopify dev (theme blocks + function).
+# 4. Opens windows: Backend (.env.dev), Admin (next dev), Tunnel. The deploy above already ships the
+#    theme blocks and checkout function, so no `shopify app dev` is run; an old dev preview is
+#    cleaned up instead (it would point the app at a dead tunnel address).
 # Close those windows (or run this again) to stop.
 
 $ErrorActionPreference = 'Stop'
@@ -170,12 +172,14 @@ if ($installCode -eq '302') {
   Write-Host "  !!  Install link answered $installCode (expected 302) - look at the '1 Backend (dev)' window." -ForegroundColor Red
 }
 
-Write-Host 'Starting Shopify dev (theme blocks + checkout discount)...' -ForegroundColor Cyan
-Open-Window '4 Shopify dev' $root "shopify app dev --config devlocal --store $store"
+Write-Host 'Removing any old dev preview (the released dev version is used instead)...' -ForegroundColor Cyan
+$prevEap = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+Push-Location $root
+try { $null = cmd /c "shopify app dev clean --config devlocal --store $store 2>&1" } finally { Pop-Location; $ErrorActionPreference = $prevEap }
 
 Write-Host ''
-Write-Host 'Ready. Keep the 4 windows open while you test (closing them stops the tunnel).' -ForegroundColor Green
+Write-Host 'Ready. Keep the 3 windows open while you test (closing them stops the tunnel).' -ForegroundColor Green
 Write-Host "  Install: $tunnelUrl/api/auth/install?shop=$store   (only if the Dev app is not installed)"
 Write-Host "  App:     https://admin.shopify.com/store/$($store -replace '\.myshopify\.com$','')/apps/shopireachboost-ai-dev"
 Write-Host "  Product: https://$store/products/the-multi-location-snowboard"
-Write-Host "  (Window '4 Shopify dev' may ask for the store password once.)"
